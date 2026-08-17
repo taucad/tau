@@ -206,7 +206,7 @@ describe('useProjectManager', () => {
 
       await act(async () => {
         await result.current.createProject({
-          kernel: 'openscad',
+          kernel: 'openrscad',
           initialMessage: { content: '', imageUrls: [imageUrl] },
           backend: 'opfs',
         });
@@ -229,7 +229,7 @@ describe('useProjectManager', () => {
       await expect(
         act(async () =>
           result.current.createProject({
-            kernel: 'openscad',
+            kernel: 'openrscad',
             initialMessage: { content: 'Build the object in this image' },
             backend: 'opfs',
           }),
@@ -249,7 +249,7 @@ describe('useProjectManager', () => {
 
       await act(async () =>
         result.current.createProject({
-          kernel: 'openscad',
+          kernel: 'openrscad',
           initialMessage: { content: 'Make a cube' },
           backend: 'opfs',
         }),
@@ -526,7 +526,7 @@ describe('useProjectManager', () => {
 
       await act(async () => {
         await result.current.createProject({
-          kernel: 'openscad',
+          kernel: 'openrscad',
           projectName: 'Seeded',
           initialMessage: { content: 'hello' },
         });
@@ -536,7 +536,7 @@ describe('useProjectManager', () => {
         | { chat: { activeModel?: string; activeKernel?: string } }
         | undefined;
       expect(callArgs?.chat.activeModel).toBeUndefined();
-      expect(callArgs?.chat.activeKernel).toBe('openscad');
+      expect(callArgs?.chat.activeKernel).toBe('openrscad');
     });
 
     it('should leave activeModel undefined when no initialMessage and no explicit override', async () => {
@@ -544,7 +544,7 @@ describe('useProjectManager', () => {
 
       await act(async () => {
         await result.current.createProject({
-          kernel: 'openscad',
+          kernel: 'openrscad',
         });
       });
 
@@ -552,7 +552,7 @@ describe('useProjectManager', () => {
         | { chat: { activeModel?: string; activeKernel?: string } }
         | undefined;
       expect(callArgs?.chat.activeModel).toBeUndefined();
-      expect(callArgs?.chat.activeKernel).toBe('openscad');
+      expect(callArgs?.chat.activeKernel).toBe('openrscad');
     });
 
     it('should honor explicit activeModel/activeKernel overrides over derived defaults', async () => {
@@ -560,7 +560,7 @@ describe('useProjectManager', () => {
 
       await act(async () => {
         await result.current.createProject({
-          kernel: 'openscad',
+          kernel: 'openrscad',
           activeModel: 'override-model',
           activeKernel: 'manifold',
           initialMessage: { content: 'hello' },
@@ -587,7 +587,7 @@ describe('useProjectManager', () => {
 
       await act(async () => {
         await result.current.createProject({
-          kernel: 'openscad',
+          kernel: 'openrscad',
           initialMessage: { content: 'first turn' },
         });
       });

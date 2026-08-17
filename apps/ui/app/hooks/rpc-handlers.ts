@@ -326,7 +326,7 @@ async function ensureGeometryUnit(
 /**
  * Heuristic check: does a kernelIssue message look like a "file not found"
  * diagnostic for the file the agent asked about? Kept permissive on purpose —
- * different kernels word the failure differently (Node `ENOENT`, OpenSCAD
+ * different kernels word the failure differently (Node `ENOENT`, OpenRSCAD
  * `does not exist`, generic `not found`). Falls back to UNKNOWN if no signal.
  */
 function isFileNotFoundMessage(message: string, targetFile: string): boolean {

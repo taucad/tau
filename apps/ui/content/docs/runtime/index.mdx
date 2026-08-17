@@ -56,15 +56,15 @@ const client = createRuntimeClient({
 
 ## Supported Kernels
 
-| Kernel          | Language      | Strengths                                                                                                                                      |
-| --------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Replicad**    | TypeScript/JS | Parametric BRep modeling via OpenCASCADE. STEP export.                                                                                         |
-| **OpenCASCADE** | TypeScript/JS | Direct OpenCASCADE API access. Full BRep control.                                                                                              |
-| **Manifold**    | TypeScript/JS | Robust mesh booleans with `manifold-3d`. Fast WASM workflows.                                                                                  |
-| **OpenSCAD**    | OpenSCAD      | CSG modeling for 3D printing. Familiar `.scad` syntax. Ships in the standalone [`@taucad/openscad`](./api/kernels) package (GPL-2.0-or-later). |
-| **JSCAD**       | TypeScript/JS | Parametric CSG with `@jscad/modeling`.                                                                                                         |
-| **Zoo (KCL)**   | KCL           | Cloud-native CAD with AI integration via Zoo API.                                                                                              |
-| **Tau**         | Any           | Catch-all converter for STEP, STL, 3MF, and other file imports.                                                                                |
+| Kernel          | Language      | Strengths                                                                                                                         |
+| --------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Replicad**    | TypeScript/JS | Parametric BRep modeling via OpenCASCADE. STEP export.                                                                            |
+| **OpenCASCADE** | TypeScript/JS | Direct OpenCASCADE API access. Full BRep control.                                                                                 |
+| **Manifold**    | TypeScript/JS | Robust mesh booleans with `manifold-3d`. Fast WASM workflows.                                                                     |
+| **OpenRSCAD**   | OpenSCAD      | Rust/Wasm implementation of the OpenSCAD language for browser workers, Node, and the CLI in [`@taucad/openrscad`](./api/kernels). |
+| **JSCAD**       | TypeScript/JS | Parametric CSG with `@jscad/modeling`.                                                                                            |
+| **Zoo (KCL)**   | KCL           | Cloud-native CAD with AI integration via Zoo API.                                                                                 |
+| **Tau**         | Any           | Catch-all converter for STEP, STL, 3MF, and other file imports.                                                                   |
 
 ## Key Capabilities
 

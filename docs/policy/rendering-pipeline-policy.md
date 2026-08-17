@@ -15,7 +15,7 @@ Internal reference for the CAD rendering pipeline across all conversion paths an
 
 ## Rationale
 
-Consistent PBR defaults and material handling across OCCT, Replicad, JSCAD, and OpenSCAD pipelines ensure predictable visual output. Unified tone mapping and environment strategy avoid per-pipeline drift. Performance patterns (geometry key threading, scratch objects, GLTF parse/material split) keep the viewer responsive on complex models.
+Consistent PBR defaults and material handling across OCCT, Replicad, JSCAD, and OpenRSCAD pipelines ensure predictable visual output. Unified tone mapping and environment strategy avoid per-pipeline drift. Performance patterns (geometry key threading, scratch objects, GLTF parse/material split) keep the viewer responsive on complex models.
 
 ## Unified PBR Defaults
 
@@ -32,13 +32,14 @@ These values are defined in `packages/types/src/constants/material.constants.ts`
 
 ### Pipelines Covered
 
-| Pipeline              | Source                  | File                                                                |
-| --------------------- | ----------------------- | ------------------------------------------------------------------- |
-| OCCT (STEP/IGES/BREP) | `packages/converter`    | `packages/converter/src/loaders/occt.loader.ts`                     |
-| Replicad Kernel       | `packages/runtime`      | `packages/runtime/src/kernels/replicad/utils/replicad-to-gltf.ts`   |
-| JSCAD Kernel          | `packages/runtime`      | `packages/runtime/src/kernels/jscad/jscad-to-gltf.ts`               |
-| OpenSCAD/shared mesh  | `packages/runtime`      | `packages/runtime/src/utils/export-glb.ts`                          |
-| Fallback edge overlay | Runtime glTF middleware | `packages/runtime/src/middleware/gltf-edge-detection.middleware.ts` |
+| Pipeline              | Source                       | File                                                                |
+| --------------------- | ---------------------------- | ------------------------------------------------------------------- |
+| OCCT (STEP/IGES/BREP) | `libs/converter`             | `libs/converter/src/loaders/occt.loader.ts`                         |
+| Replicad Kernel       | `packages/runtime`           | `packages/runtime/src/kernels/replicad/utils/replicad-to-gltf.ts`   |
+| JSCAD Kernel          | `packages/runtime`           | `packages/runtime/src/kernels/jscad/jscad-to-gltf.ts`               |
+| OpenRSCAD Kernel      | `packages/kernels/openrscad` | Native `openrscad-engine` GLB writer                                |
+| Shared OFF mesh       | `packages/runtime`           | `packages/runtime/src/utils/export-glb.ts`                          |
+| Fallback edge overlay | Runtime glTF middleware      | `packages/runtime/src/middleware/gltf-edge-detection.middleware.ts` |
 
 Tau-generated auxiliary edge overlays use `cadEdgeOverlayMaterialDefaults`: linear `baseColorFactor: [0, 0, 0, 1]`, `metallicFactor: 0`, `roughnessFactor: 1`, `doubleSided: true`, `alphaMode: "OPAQUE"`, and explicit `KHR_materials_unlit`. Direct writers list the extension in `extensionsUsed` only when line primitives exist and do not add it to `extensionsRequired`.
 
@@ -151,7 +152,7 @@ Current defaults per kernel:
 | Replicad          | 0.02mm           | 20deg             | Locked by `occt-tessellation-defaults.test.ts` |
 | Replicad (export) | 0.01mm           | 20deg             | Higher quality for file export                 |
 | JSCAD             | N/A              | N/A               | Fan triangulation of CSG output polygons       |
-| OpenSCAD          | N/A              | N/A               | Manifold backend defaults                      |
+| OpenRSCAD         | Engine defaults  | Engine defaults   | Native tessellation options                    |
 | OCCT (converter)  | OCCT defaults    | OCCT defaults     | `undefined` passed to `ReadStepFile`           |
 
 **Known limitation**: The OCCT converter does not expose tessellation quality parameters. This means curved surfaces may appear faceted on high-detail models. Future work: expose `linearDeflection` and `angularDeflection` options.

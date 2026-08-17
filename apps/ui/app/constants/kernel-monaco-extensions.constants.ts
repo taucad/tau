@@ -12,7 +12,7 @@ import type { DefaultKernelId } from '#constants/kernel-worker.constants.js';
 type KernelId = DefaultKernelId;
 
 export const kernelSourceExtensionsById = {
-  openscad: ['scad'],
+  openrscad: ['scad'],
   zoo: ['kcl'],
   replicad: ['ts', 'js'],
   opencascade: ['ts', 'js'],

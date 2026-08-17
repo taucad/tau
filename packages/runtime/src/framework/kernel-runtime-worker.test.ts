@@ -759,10 +759,10 @@ describe('KernelRuntimeWorker kernel selection', () => {
 
   describe('extension fast path', () => {
     it('should select a kernel by extension when no detectImport is needed', async () => {
-      const scadDefinition = createMockKernelDefinition('openscad');
+      const scadDefinition = createMockKernelDefinition('openrscad');
 
       const worker = await createMultiKernelWorker([
-        { id: 'openscad', extensions: ['scad'], definition: scadDefinition },
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
       ]);
 
       const result = await worker.createGeometry({
@@ -928,11 +928,11 @@ describe('KernelRuntimeWorker kernel selection', () => {
 
   describe('multi-kernel priority', () => {
     it('should select extension-matched kernel over catch-all', async () => {
-      const scadDefinition = createMockKernelDefinition('openscad');
+      const scadDefinition = createMockKernelDefinition('openrscad');
       const catchAllDefinition = createMockKernelDefinition('tau');
 
       const worker = await createMultiKernelWorker([
-        { id: 'openscad', extensions: ['scad'], definition: scadDefinition },
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
         { id: 'tau', extensions: ['*'], definition: catchAllDefinition },
       ]);
 
@@ -948,10 +948,10 @@ describe('KernelRuntimeWorker kernel selection', () => {
 
   describe('selection cache', () => {
     it('should reuse cached kernel selection on repeated calls for the same file', async () => {
-      const scadDefinition = createMockKernelDefinition('openscad');
+      const scadDefinition = createMockKernelDefinition('openrscad');
 
       const worker = await createMultiKernelWorker([
-        { id: 'openscad', extensions: ['scad'], definition: scadDefinition },
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
       ]);
 
       await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
@@ -963,10 +963,10 @@ describe('KernelRuntimeWorker kernel selection', () => {
 
   describe('file change invalidation', () => {
     it('should clear selection cache after notifyFileChanged', async () => {
-      const scadDefinition = createMockKernelDefinition('openscad');
+      const scadDefinition = createMockKernelDefinition('openrscad');
 
       const worker = await createMultiKernelWorker([
-        { id: 'openscad', extensions: ['scad'], definition: scadDefinition },
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
       ]);
 
       await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
@@ -978,10 +978,10 @@ describe('KernelRuntimeWorker kernel selection', () => {
     });
 
     it('should clear selection cache when a watch event fires (not just notifyFileChanged)', async () => {
-      const scadDefinition = createMockKernelDefinition('openscad');
+      const scadDefinition = createMockKernelDefinition('openrscad');
 
       const worker = await createMultiKernelWorker([
-        { id: 'openscad', extensions: ['scad'], definition: scadDefinition },
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
       ]);
 
       await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
@@ -1020,10 +1020,10 @@ describe('KernelRuntimeWorker kernel selection', () => {
 
   describe('no kernel matches', () => {
     it('should fail when no kernel matches an unrecognized extension', async () => {
-      const scadDefinition = createMockKernelDefinition('openscad');
+      const scadDefinition = createMockKernelDefinition('openrscad');
 
       const worker = await createMultiKernelWorker([
-        { id: 'openscad', extensions: ['scad'], definition: scadDefinition },
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
       ]);
 
       const result = await worker.createGeometry({
@@ -1051,13 +1051,13 @@ describe('lazy capabilities manifest', () => {
   });
 
   it('should rebuild capabilities manifest after loading a kernel module', async () => {
-    const definition = createMockKernelDefinition('openscad', {
+    const definition = createMockKernelDefinition('openrscad', {
       exportFormats: {
         stl: { optionsSchema: z.object({ binary: z.boolean().default(true) }) },
       },
     });
 
-    const worker = await createMultiKernelWorker([{ id: 'openscad', extensions: ['scad'], definition }]);
+    const worker = await createMultiKernelWorker([{ id: 'openrscad', extensions: ['scad'], definition }]);
 
     // Trigger lazy kernel load by rendering a file
     await worker.createGeometry({
@@ -1071,11 +1071,11 @@ describe('lazy capabilities manifest', () => {
 
   it('should include kernel export schemas in manifest after lazy load', async () => {
     const stlSchema = z.object({ binary: z.boolean().default(true) });
-    const definition = createMockKernelDefinition('openscad', {
+    const definition = createMockKernelDefinition('openrscad', {
       exportFormats: { stl: { optionsSchema: stlSchema } },
     });
 
-    const worker = await createMultiKernelWorker([{ id: 'openscad', extensions: ['scad'], definition }]);
+    const worker = await createMultiKernelWorker([{ id: 'openrscad', extensions: ['scad'], definition }]);
 
     // Trigger lazy kernel load
     await worker.createGeometry({
@@ -1085,7 +1085,7 @@ describe('lazy capabilities manifest', () => {
 
     const manifest = worker.capabilitiesManifest;
     const stlExport = manifest.routes.find(
-      (route) => route.kernelId === 'openscad' && route.targetFormat === 'stl' && !route.transcoderId,
+      (route) => route.kernelId === 'openrscad' && route.targetFormat === 'stl' && !route.transcoderId,
     );
     expect(stlExport).toBeDefined();
     expect(stlExport!.exportOptions.schema).toHaveProperty('properties');
@@ -1099,11 +1099,11 @@ describe('lazy capabilities manifest', () => {
     const renderSchema = z.object({
       quality: z.enum(['low', 'high']).default('high'),
     });
-    const definition = createMockKernelDefinition('openscad', {
+    const definition = createMockKernelDefinition('openrscad', {
       render: { optionsSchema: renderSchema },
     });
 
-    const worker = await createMultiKernelWorker([{ id: 'openscad', extensions: ['scad'], definition }]);
+    const worker = await createMultiKernelWorker([{ id: 'openrscad', extensions: ['scad'], definition }]);
 
     // Trigger lazy kernel load
     await worker.createGeometry({
@@ -1112,21 +1112,21 @@ describe('lazy capabilities manifest', () => {
     });
 
     const manifest = worker.capabilitiesManifest;
-    const renderOption = manifest.renderCapabilities['openscad'];
+    const renderOption = manifest.renderCapabilities['openrscad'];
     expect(renderOption).toBeDefined();
     expect(renderOption!.renderOptions.schema).toHaveProperty('properties');
     expect(renderOption!.renderOptions.defaults).toEqual({ quality: 'high' });
   });
 
   it('should push capabilitiesUpdated when kernel module loads', async () => {
-    const definition = createMockKernelDefinition('openscad', {
+    const definition = createMockKernelDefinition('openrscad', {
       exportFormats: {
         stl: { optionsSchema: z.object({ binary: z.boolean().default(true) }) },
       },
     });
 
     const runtime = defineRuntime({
-      kernels: [attachRuntimePluginDefinition({ id: 'openscad', extensions: ['scad'] }, () => definition)],
+      kernels: [attachRuntimePluginDefinition({ id: 'openrscad', extensions: ['scad'] }, () => definition)],
     });
     const worker = new KernelRuntimeWorker({ runtime });
     const callback = vi.fn();
@@ -1141,18 +1141,18 @@ describe('lazy capabilities manifest', () => {
 
     expect(callback).toHaveBeenCalled();
     const lastCall = callback.mock.calls.at(-1)![0]! as CapabilitiesManifest;
-    expect(lastCall.routes.some((route) => route.kernelId === 'openscad' && !route.transcoderId)).toBe(true);
+    expect(lastCall.routes.some((route) => route.kernelId === 'openrscad' && !route.transcoderId)).toBe(true);
   });
 
   it('should expose renderCapabilities indexed by kernelId after lazy load', async () => {
     const renderSchema = z.object({
       quality: z.enum(['low', 'high']).default('high'),
     });
-    const definition = createMockKernelDefinition('openscad', {
+    const definition = createMockKernelDefinition('openrscad', {
       render: { optionsSchema: renderSchema },
     });
 
-    const worker = await createMultiKernelWorker([{ id: 'openscad', extensions: ['scad'], definition }]);
+    const worker = await createMultiKernelWorker([{ id: 'openrscad', extensions: ['scad'], definition }]);
 
     await worker.createGeometry({
       file: createGeometryFile('model.scad'),
@@ -1161,7 +1161,7 @@ describe('lazy capabilities manifest', () => {
 
     const manifest = worker.capabilitiesManifest;
     /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- expect.objectContaining/expect.anything matchers return any */
-    expect(manifest.renderCapabilities['openscad']).toEqual(
+    expect(manifest.renderCapabilities['openrscad']).toEqual(
       expect.objectContaining({
         renderOptions: expect.objectContaining({
           schema: expect.objectContaining({

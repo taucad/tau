@@ -7,7 +7,7 @@ import type { KernelConfiguration } from '@taucad/types/constants';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 
 const manifoldKernel = kernelConfigurations.find((k) => k.id === 'manifold')!;
-const openscadKernel = kernelConfigurations.find((k) => k.id === 'openscad')!;
+const openscadKernel = kernelConfigurations.find((k) => k.id === 'openrscad')!;
 const mockKernelByConsumer: { current: KernelConfiguration | undefined } = {
   current: manifoldKernel,
 };

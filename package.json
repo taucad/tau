@@ -215,7 +215,6 @@
     "nestjs-zod": "^5.4.0",
     "ollama": "^0.5.18",
     "openai": "^4.104.0",
-    "openscad-wasm-prebuilt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "pdf-parse": "catalog:",

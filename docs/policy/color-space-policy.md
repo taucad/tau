@@ -22,9 +22,8 @@ linear → sRGB OETF on the way to the framebuffer. CSS hex strings, OFF integer
 colors, JSCAD `colorize()` tuples, and all common author-facing color formats
 are **sRGB**. Without an explicit sRGB → linear conversion at the writer
 boundary, the rendered output is washed out (mid-tones land at 0.5 instead of
-0.216), and kernels that do convert (Replicad) and kernels that don't (OpenSCAD,
-JSCAD, OCCT-PBR) produce visibly different colors for the same author input.
-This policy locks in the conversion boundary so all kernels are
+0.216), and different writers produce visibly different colors for the same
+author input. This policy locks in the conversion boundary so all kernels are
 visually-consistent end-to-end.
 
 ## Rules
@@ -156,7 +155,7 @@ GLB.
 | Source                                        | Color space at source    | Conversion site                                 | Final `baseColorFactor` |
 | --------------------------------------------- | ------------------------ | ----------------------------------------------- | ----------------------- |
 | Replicad CSS hex → `replicad-to-gltf.ts`      | sRGB                     | `srgbHexToLinearTuple` in writer                | Linear                  |
-| OpenSCAD OFF integer colors → `export-glb.ts` | sRGB (0..1 normalised)   | `srgbTupleToLinear` in `colorGroupToPrimitive`  | Linear                  |
+| OFF integer colors → `export-glb.ts`          | sRGB (0..1 normalised)   | `srgbTupleToLinear` in `colorGroupToPrimitive`  | Linear                  |
 | JSCAD `colorize()` tuple → `jscad-to-gltf.ts` | sRGB                     | `srgbTupleToLinear` in JSCAD GLB adapter        | Linear                  |
 | OCCT non-PBR CSS hex → `Quantity_Color`       | sRGB                     | OCCT internal (`Quantity_TOC_sRGB` constructor) | Linear                  |
 | OCCT PBR CSS hex → `Quantity_ColorRGBA`       | sRGB                     | `srgbToLinear` per channel before constructor   | Linear                  |

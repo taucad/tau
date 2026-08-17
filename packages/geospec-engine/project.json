@@ -10,7 +10,7 @@
       "options": {
         "cwd": "{workspaceRoot}",
         "commands": [
-          "pnpm nx run-many -t copy-assets -p runtime openscad --parallel=2",
+          "pnpm nx run runtime:copy-assets",
           "node packages/geospec-engine/scripts/wave1-inputs.mts --verify"
         ],
         "parallel": false

@@ -46,12 +46,12 @@ describe('electronRuntimeConfig', () => {
     expect(config.main?.build).toMatchObject({
       outDir: 'main-out',
       externalizeDeps: {
-        exclude: ['consumer-root', '@taucad/runtime', '@taucad/openscad'],
+        exclude: ['consumer-root', '@taucad/runtime'],
         include: ['native-addon'],
       },
     });
     expect(config.preload?.build?.externalizeDeps).toEqual({
-      exclude: ['@taucad/runtime', '@taucad/openscad'],
+      exclude: ['@taucad/runtime'],
     });
     expect(config.renderer).toMatchObject({ root: 'renderer-root' });
     expect(pluginNames(config.main?.plugins)).toContain('consumer');

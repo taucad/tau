@@ -40,7 +40,7 @@ const harness = vi.hoisted(() => ({
   selectedModelId: 'cookie-model',
   selectedModelName: 'Cookie Model',
   setKernel: vi.fn(),
-  cookieKernel: 'openscad' as 'openscad' | 'manifold' | 'replicad',
+  cookieKernel: 'openrscad' as 'openrscad' | 'manifold' | 'replicad',
 }));
 
 vi.mock('@ai-sdk/react', () => ({
@@ -244,7 +244,7 @@ beforeEach(() => {
   harness.selectedModelId = 'cookie-model';
   harness.selectedModelName = 'Cookie Model';
   harness.setKernel.mockReset();
-  harness.cookieKernel = 'openscad';
+  harness.cookieKernel = 'openrscad';
   vi.useRealTimers();
 });
 
@@ -324,8 +324,8 @@ describe('ChatComposerProvider', () => {
       wrapper: createComposerWrapper(),
     });
 
-    expect(result.current.kernel.kernelId).toBe('openscad');
-    expect(result.current.kernel.kernel.id).toBe('openscad');
+    expect(result.current.kernel.kernelId).toBe('openrscad');
+    expect(result.current.kernel.kernel.id).toBe('openrscad');
   });
 
   it('should write only the cookie when setActiveModel is called (no chat row to patch)', () => {
@@ -634,7 +634,20 @@ describe('ActiveChatProvider', () => {
       await waitFor(() => {
         expect(harness.getChat).toHaveBeenCalledWith('chat_no_kernel');
       });
-      expect(result.current.kernel.kernelId).toBe('openscad');
+      expect(result.current.kernel.kernelId).toBe('openrscad');
+    });
+
+    it('should heal a retired openscad chat value through the cookie fallback', async () => {
+      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_retired_kernel', activeKernel: 'openscad' as never }));
+
+      const { result } = renderHook(() => useChatComposer(), {
+        wrapper: createSessionWrapper('chat_retired_kernel'),
+      });
+
+      await waitFor(() => {
+        expect(result.current.kernel.kernelId).toBe('openrscad');
+      });
+      expect(result.current.kernel.kernel.id).toBe('openrscad');
     });
 
     it('should dual-write (chat row + cookie) when setActiveKernel is called', async () => {
@@ -645,7 +658,7 @@ describe('ActiveChatProvider', () => {
       });
 
       await waitFor(() => {
-        expect(result.current.kernel.kernelId).toBe('openscad');
+        expect(result.current.kernel.kernelId).toBe('openrscad');
       });
 
       act(() => {

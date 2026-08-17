@@ -17,7 +17,7 @@ let mockKernelIssues = new Map<string, KernelIssue[]>();
 let mockAgent: CadAgentConfigInput = {
   profile: 'cad',
   model: 'cookie-model',
-  kernel: 'openscad',
+  kernel: 'openrscad',
   mode: 'agent',
   toolChoice: 'auto',
   testingEnabled: true,
@@ -143,7 +143,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
     mockAgent = {
       profile: 'cad',
       model: 'cookie-model',
-      kernel: 'openscad',
+      kernel: 'openrscad',
       mode: 'agent',
       toolChoice: 'auto',
       testingEnabled: true,
@@ -160,7 +160,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
 
     const callArgs = mockCreateChat.mock.calls[0]?.[0] as { activeModel?: string; activeKernel?: string };
     expect(callArgs.activeModel).toBe('cookie-model');
-    expect(callArgs.activeKernel).toBe('openscad');
+    expect(callArgs.activeKernel).toBe('openrscad');
   });
 
   it('focuses the newly created chat after seeding', async () => {

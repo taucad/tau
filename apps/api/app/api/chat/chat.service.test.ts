@@ -118,7 +118,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-1',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
@@ -131,7 +131,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-1',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
@@ -144,7 +144,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-1',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
@@ -173,7 +173,7 @@ describe('ChatService', () => {
         service.createAgent({
           chatId: 'test-chat-1',
           modelId: 'model-1',
-          kernel: 'openscad',
+          kernel: 'openrscad',
           mode: 'agent',
           tools: { choice: 'auto', testingEnabled: true },
         }),
@@ -194,7 +194,7 @@ describe('ChatService', () => {
         service.createAgent({
           chatId: 'test-chat-1',
           modelId: 'model-4',
-          kernel: 'openscad',
+          kernel: 'openrscad',
           mode: 'agent',
           tools: { choice: 'auto', testingEnabled: true },
         }),
@@ -216,7 +216,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-1',
         modelId: 'claude-3-opus',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
@@ -248,13 +248,13 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-1',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
 
       // Assert
-      expect(mockToolService.getTools).toHaveBeenCalledWith('auto', 'openscad');
+      expect(mockToolService.getTools).toHaveBeenCalledWith('auto', 'openrscad');
     });
 
     it('should filter provider tools through ModelService before creating the agent', async () => {
@@ -281,7 +281,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-filtered-tools',
         modelId: 'together-glm-5.2',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
         eagerDispatchHandler,
@@ -311,7 +311,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-1',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
@@ -323,7 +323,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-order',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
@@ -352,7 +352,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-tool-compatibility',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
         eagerDispatchHandler: {
@@ -386,7 +386,7 @@ describe('ChatService', () => {
         service.createAgent({
           chatId: 'test-chat-provider',
           modelId: 'orphan-model',
-          kernel: 'openscad',
+          kernel: 'openrscad',
           mode: 'agent',
           tools: { choice: 'auto', testingEnabled: true },
         }),
@@ -397,7 +397,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-1',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
@@ -425,7 +425,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-token-usage',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });
@@ -463,7 +463,7 @@ describe('ChatService', () => {
       await service.createAgent({
         chatId: 'test-chat-interrupt-recovery',
         modelId: 'model-1',
-        kernel: 'openscad',
+        kernel: 'openrscad',
         mode: 'agent',
         tools: { choice: 'auto', testingEnabled: true },
       });

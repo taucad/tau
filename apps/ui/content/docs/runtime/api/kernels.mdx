@@ -1,6 +1,6 @@
 ---
 title: Kernel Factories
-description: Factory functions for Replicad, OpenCASCADE, Manifold, OpenSCAD, JSCAD, Zoo, and Tau kernel plugins.
+description: Factory functions for Replicad, OpenCASCADE, Manifold, OpenRSCAD, JSCAD, Zoo, and Tau kernel plugins.
 icon: lucide:cog
 ---
 
@@ -27,12 +27,12 @@ Use kernel factories when registering CAD engines with `defineRuntime`. Each fac
 | `replicad(options?)`    | `ts`, `js` | OpenCASCADE-based parametric BRep via Replicad API  |
 | `opencascade(options?)` | `ts`, `js` | Direct OpenCASCADE API access                       |
 | `manifold(options?)`    | `ts`, `js` | Mesh-first manifold modeling with robust booleans   |
-| `openscad()` \*         | `scad`     | CSG modeling with OpenSCAD language                 |
+| `openrscad()` \*        | `scad`     | Rust/Wasm implementation of the OpenSCAD language   |
 | `jscad()`               | `ts`, `js` | @jscad/modeling parametric CSG                      |
 | `zoo(options)`          | `kcl`      | KCL via Zoo WebSocket API                           |
 | `tau()`                 | `*`        | Catch-all converter for STEP, STL, 3MF, OBJ imports |
 
-\* `openscad()` ships from the standalone [`@taucad/openscad`](https://www.npmjs.com/package/@taucad/openscad) package (GPL-2.0-or-later) so the MIT-licensed `@taucad/runtime` stays GPL-free. Install it with `pnpm add @taucad/openscad` to opt in.
+\* `openrscad()` ships from [`@taucad/openrscad`](https://github.com/matthova/openrscad) (Apache-2.0) and supports browser workers, Node, and the CLI.
 
 ## Usage
 
@@ -42,7 +42,7 @@ import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { replicad, opencascade, manifold, jscad, zoo, tau } from '@taucad/runtime/kernels';
-import { openscad } from '@taucad/openscad';
+import { openrscad } from '@taucad/openrscad';
 import { esbuild } from '@taucad/runtime/bundler';
 
 const runtime = defineRuntime({
@@ -50,7 +50,7 @@ const runtime = defineRuntime({
     replicad({ withBrepEdges: true }),
     opencascade(),
     manifold(),
-    openscad(),
+    openrscad(),
     jscad(),
     zoo({ baseUrl: 'wss://example.com/v1/kernels/zoo' }),
     tau(),

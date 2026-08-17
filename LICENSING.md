@@ -14,10 +14,9 @@ published `@taucad/*` package, the `geospec` spec package, and everything else n
 | **Perimeter**    | `Apache-2.0`                                              | Every published package, the `geospec` spec package, internal libraries, tooling, examples, and the repository root | Open source (OSI)                                                                    |
 | **Engine**       | `FSL-1.1-Apache-2.0`                                      | `@taucad/geospec-engine` and successor engine artifacts                                                             | **Fair source / source-available** — becomes Apache-2.0 two years after each release |
 | **Applications** | `AGPL-3.0-only` (+ additional permission under section 7) | `apps/ui`, `apps/api`, and the app-side libraries                                                                   | Open source (OSI)                                                                    |
-| **Kernel**       | `GPL-2.0-or-later`                                        | `packages/kernels/openscad` (`@taucad/openscad`), which bundles GPL OpenSCAD WASM                                   | Open source (OSI)                                                                    |
 
-Two of these families are Tau-authored (Apache-2.0 and AGPL-3.0-only; the engine's FSL converts into the first). The
-GPL kernel row is inherited from an upstream dependency, not a Tau licensing choice.
+The perimeter and applications are Tau-authored under open-source licenses; the engine's FSL converts into the
+perimeter's Apache-2.0 license after two years.
 
 The engine is **fair source**, also called source-available: the code is published and readable, but the license
 forbids one class of use. It is deliberately **not** open source, and Tau does not describe it as open source. Every
@@ -27,12 +26,11 @@ other Tau-authored license in this repository is open source.
 
 | Path                                                                                                                           | License                                           |
 | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| `license` (root), `packages/*` except `packages/geospec-engine`, and anything not listed below                                 | `Apache-2.0`                                      |
+| `license` (root), `packages/**` except `packages/geospec-engine`, and anything not listed below                                | `Apache-2.0`                                      |
 | `packages/geospec-engine`                                                                                                      | `FSL-1.1-Apache-2.0`                              |
 | `libs/*` except the app-side libraries below, `scripts`, `tools/*`, `apps/*` except `apps/ui` and `apps/api`, and `examples/*` | `Apache-2.0` (private, not published)             |
 | `apps/ui`, `apps/api`                                                                                                          | `AGPL-3.0-only` + section 7 additional permission |
 | `libs/{billing,chat,lsp,lsp-fs,api-extractor}`                                                                                 | `AGPL-3.0-only` + section 7 additional permission |
-| `packages/kernels/openscad`                                                                                                    | `GPL-2.0-or-later`                                |
 
 Third-party dependency licenses are inventoried separately in [`license-deps`](license-deps).
 
@@ -74,18 +72,6 @@ nothing the AGPL permits. Remove the permission and you are left with the plain 
 sets for an additional permission, and this text passes it deliberately. Stacking extra restrictions on AGPL text
 produces a proprietary license wearing an open-source costume; Tau does not do that. Uses that the permission does not
 reach are handled by a separate commercial license, not by editing the AGPL.
-
-## The OpenSCAD kernel: GPLv3 election
-
-`@taucad/openscad` bundles OpenSCAD WASM under **GPL-2.0-or-later**, and the package itself is published under
-GPL-2.0-or-later for clarity. "Or later" is what makes the combination clean: **Tau elects GPL version 3 for this
-component when it is combined with the AGPL-3.0-only applications.** GPLv3 section 13 and AGPLv3 section 13 grant each
-other mutual linking permission, so an AGPLv3 application may link a GPLv3 work and vice versa. No exception clause is
-needed — only this election, recorded here.
-
-A distribution that includes `@taucad/openscad` is a GPL combined work and must satisfy the GPL terms (source
-availability — already satisfied by this public repository — and shipping the GPL text alongside the WASM). A
-distribution that excludes it carries no GPL obligation.
 
 ## Internal-use FAQ
 

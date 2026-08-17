@@ -15,7 +15,7 @@ import {
 } from '@taucad/runtime/middleware';
 import { converterTranscoder, imageTranscoder } from '@taucad/runtime/transcoder';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { openscad } from '@taucad/openscad';
+import { openrscad } from '@taucad/openrscad';
 import { observability } from '@taucad/telemetry/middleware';
 
 type UiRuntimeOptions = {
@@ -33,7 +33,7 @@ const createUiRuntime = (options: UiRuntimeOptions = {}) =>
     createRuntime(config) {
       return {
         kernels: [
-          openscad(),
+          openrscad(),
           zoo({ baseUrl: `${config.tauWebSocketUrl}/v1/kernels/zoo` }),
           replicad({
             wasm: 'auto',

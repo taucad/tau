@@ -60,7 +60,7 @@ export type RuntimeLogger = {
   error: (message: string, options?: RuntimeLogOptions) => void;
   /**
    * Log a message with a dynamic log level.
-   * Useful for kernels like OpenSCAD that determine log level at runtime.
+   * Useful for kernels like OpenRSCAD that determine log level at runtime.
    */
   custom: (level: LogLevel, message: string, options?: RuntimeLogOptions) => void;
 };

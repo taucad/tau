@@ -530,10 +530,10 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
                   text: 'Call test_model four times in a row with the same arguments, even if the first call returns an error. Do not inspect files first and do not stop after the first failure.',
                 },
               ],
-              metadata: { model: modelId, kernel: 'openscad' },
+              metadata: { model: modelId, kernel: 'openrscad' },
             },
           ],
-          agent: buildCadAgent(modelId, 'openscad', { testingEnabled: true }),
+          agent: buildCadAgent(modelId, 'openrscad', { testingEnabled: true }),
         }),
       });
 

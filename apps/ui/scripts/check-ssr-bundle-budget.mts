@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-/** `du -sk build/server` total; ~10.1 MiB observed (hybrid `ssr.external`: `@taucad/runtime`, `@taucad/openscad` only). */
+/** `du -sk build/server` total; ~10.1 MiB observed (hybrid `ssr.external`: runtime and the active `.scad` kernel only). */
 const ssrBundleByteBudget = 11 * 1024 * 1024;
 
 /** Main SSR entry path — cap cold-parse surface even when code splits into `assets/`. */

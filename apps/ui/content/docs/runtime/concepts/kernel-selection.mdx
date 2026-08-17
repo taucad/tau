@@ -10,7 +10,7 @@ When you call `render({ source: { path } })` or `export(format, { source: { path
 
 ## Context and Motivation
 
-Different CAD kernels handle different file types: OpenSCAD for `.scad`, Zoo for `.kcl`, Replicad, OpenCASCADE, and JSCAD for `.ts`/`.js`. For JS/TS, the same extension can map to multiple kernels; the decision depends on which library the file imports (e.g., `replicad` vs `@jscad/modeling` vs `opencascade.js`). The selection logic must be fast for common cases (extension match) and accurate for ambiguous cases (bundler-assisted import analysis). Caching ensures that repeated renders of the same file skip detection.
+Different CAD kernels handle different file types: OpenRSCAD for `.scad`, Zoo for `.kcl`, Replicad, OpenCASCADE, and JSCAD for `.ts`/`.js`. For JS/TS, the same extension can map to multiple kernels; the decision depends on which library the file imports (e.g., `replicad` vs `@jscad/modeling` vs `libcascade`). The selection logic must be fast for common cases (extension match) and accurate for ambiguous cases (bundler-assisted import analysis). Caching ensures that repeated renders of the same file skip detection.
 
 ## How It Works
 
@@ -43,7 +43,7 @@ For each kernel config in registration order:
 
 1. Check if the file extension is in `config.extensions` (or config has `extensions: ['*']`).
 2. If `extensions: ['*']`, store as catch-all and continue (defer to pass 3 if nothing else matches).
-3. If no `detectImport`, select this kernel immediately. Examples: `.scad` -> OpenSCAD, `.kcl` -> Zoo.
+3. If no `detectImport`, select this kernel immediately. Examples: `.scad` -> OpenRSCAD, `.kcl` -> Zoo.
 4. If `detectImport` exists, read the file and run the regex. On match, select this kernel. Example: `.ts` with `import ... from 'replicad'` -> Replicad.
 
 This pass is fast: at most one file read when regex detection is needed. No bundling.

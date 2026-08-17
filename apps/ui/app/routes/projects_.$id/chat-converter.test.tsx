@@ -629,7 +629,7 @@ describe('ChatConverter', () => {
           },
           {
             targetFormat: 'stl',
-            kernelId: 'openscad',
+            kernelId: 'openrscad',
             sourceFormat: 'stl',
             fidelity: 'mesh',
             exportOptions: {
@@ -653,8 +653,8 @@ describe('ChatConverter', () => {
       expect(screen.getByRole('button', { name: /step/i })).toBeDefined();
     });
 
-    it('should show only openscad routes when activeKernelId is openscad', () => {
-      mockActiveKernelId = 'openscad';
+    it('should show only openrscad routes when activeKernelId is openrscad', () => {
+      mockActiveKernelId = 'openrscad';
       mockCapabilities = createCapabilities({
         routes: [
           {
@@ -666,7 +666,7 @@ describe('ChatConverter', () => {
           },
           {
             targetFormat: 'stl',
-            kernelId: 'openscad',
+            kernelId: 'openrscad',
             sourceFormat: 'stl',
             fidelity: 'mesh',
             exportOptions: {
@@ -763,7 +763,7 @@ describe('ChatConverter', () => {
         routes: [
           {
             targetFormat: 'stl',
-            kernelId: 'openscad',
+            kernelId: 'openrscad',
             sourceFormat: 'stl',
             fidelity: 'mesh',
             exportOptions: {

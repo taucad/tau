@@ -3,7 +3,7 @@ import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 
-const defaultKernel: KernelId = 'openscad';
+const defaultKernel: KernelId = 'openrscad';
 
 type UseKernelResult = {
   readonly kernel: KernelId;
@@ -15,8 +15,7 @@ export const useKernel = (): UseKernelResult => {
   const [raw, setKernel] = useCookie<KernelId>(cookieName.cadKernel, defaultKernel);
   // Heal a stale or tampered cookie at the boundary so downstream
   // consumers can treat `selectedKernel` as a definite `KernelConfiguration`.
-  // Without this, retiring a kernel from `kernelConfigurations` would
-  // silently surface as the OpenSCAD fallback on every render.
+  // Without this, a retired kernel id could reach the closed-union resolver.
   const kernel = isKernelId(raw) ? raw : defaultKernel;
   const selectedKernel = resolveKernel(kernel);
 

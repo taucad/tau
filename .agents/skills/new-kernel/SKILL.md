@@ -5,7 +5,7 @@ description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* p
 
 # New Kernel Integration
 
-Add a new first-party CAD kernel to Tau as a standalone, publishable `@taucad/*` package (like `@taucad/openscad`). Kernels live under `packages/kernels/<id>/` and consume the runtime only through its public author surface (`@taucad/runtime/kernel`, `/types`, `/testing`) — never its `#`-prefixed internals.
+Add a new first-party CAD kernel to Tau as a standalone, publishable `@taucad/*` package (like `@taucad/openrscad`). Kernels live under `packages/kernels/<id>/` and consume the runtime only through its public author surface (`@taucad/runtime/kernel`, `/types`, `/testing`) — never its `#`-prefixed internals.
 
 ## Definition of Done
 
@@ -102,7 +102,7 @@ New kernels must preserve authored/imported names and route Tau-owned generated 
 - Do not derive component IDs from display labels, material indices, or mutable UI text; use payload addresses such as `component:node-0`.
 - Do not copy legacy generated labels such as `AnyShape`, `Geometry`, `Mesh`, zero-index `Shape_*`, color-derived material names, or converter fallback scene/material names.
 
-Reference: `packages/kernels/openscad/src/openscad.kernel.ts`.
+Reference: `packages/kernels/openrscad/src/openrscad.kernel.ts`.
 
 ## 2) Add Tests
 
@@ -145,7 +145,7 @@ describe('<Name>Kernel', () => {
 - `exportGeometry` — supported and unsupported formats + no-geometry failure
 - Geometry naming — parse GLB/glTF output with `NodeIO` and assert node/mesh parity, material/scene naming, component IDs/selectors, and artifact filenames per `docs/policy/geometry-naming-policy.md`
 
-Reference quality bar: `packages/kernels/openscad/src/openscad.kernel.test.ts`.
+Reference quality bar: `packages/kernels/openrscad/src/openrscad.kernel.test.ts`.
 
 ## 3) Wire Into the System
 
@@ -215,7 +215,7 @@ Add kernel prompt config files under `apps/api/app/api/chat/prompts/kernel-promp
 - `<id>.prompt.example.<ext>`
 - Register in `kernel.prompt.config.ts` map
 
-Use existing configs (replicad/jscad/zoo/openscad) as templates.
+Use existing configs (replicad/jscad/zoo/openrscad) as templates.
 
 ## 5) Documentation Updates
 

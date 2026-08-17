@@ -6,7 +6,7 @@
  * unit that loads only the WASM runtime it needs.
  *
  * Kernel selection:
- * 1. Extension-based fast path: .scad -> OpenSCAD, .kcl -> KCL
+ * 1. Extension-based fast path: .scad -> OpenRSCAD, .kcl -> KCL
  * 2. Import-based: for .ts/.js files, bundles the entry and inspects imports
  * 3. Caches selection for subsequent renders of the same file
  *

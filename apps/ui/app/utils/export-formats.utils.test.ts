@@ -59,7 +59,7 @@ describe('deriveAvailableFormats', () => {
   it('should only include routes for the active kernel', () => {
     const client = createClient([
       createRoute('glb', { kernelId: 'replicad' }),
-      createRoute('stl', { kernelId: 'openscad' }),
+      createRoute('stl', { kernelId: 'openrscad' }),
     ]);
 
     expect(deriveAvailableFormats(client, 'replicad')).toEqual([{ format: 'glb', fidelity: 'mesh', direct: true }]);

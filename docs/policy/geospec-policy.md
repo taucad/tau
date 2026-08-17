@@ -18,7 +18,7 @@ related:
 
 # GeoSpec Policy
 
-Internal reference for designing and authoring GeoSpec geometry assertions. GeoSpec is a geometry specification testing library for agents and engineers, spanning **mesh-only kernels** (e.g. OpenSCAD, JSCAD) and **exact-BRep kernels** (e.g. replicad/OpenCascade). Its APIs must be semantically small, evidence-backed, and diagnostic-rich. A failing GeoSpec assertion should tell the next agent exactly what failed, where it failed, and which geometry relationship should be repaired.
+Internal reference for designing and authoring GeoSpec geometry assertions. GeoSpec is a geometry specification testing library for agents and engineers, spanning **mesh-only kernels** (e.g. OpenRSCAD, JSCAD) and **exact-BRep kernels** (e.g. replicad/OpenCascade). Its APIs must be semantically small, evidence-backed, and diagnostic-rich. A failing GeoSpec assertion should tell the next agent exactly what failed, where it failed, and which geometry relationship should be repaired.
 
 ## Rationale
 
@@ -259,7 +259,7 @@ INCORRECT:
 
 ## 12. Keep Matchers Provider-Agnostic
 
-GeoSpec must derive generic geometry diagnostics from geometry evidence, not kernel-specific metadata. Kernel provenance may appear in `details`, but matcher behavior should not branch on Replicad, OpenSCAD, JSCAD, KCL, or OpenCascade source identities.
+GeoSpec must derive generic geometry diagnostics from geometry evidence, not kernel-specific metadata. Kernel provenance may appear in `details`, but matcher behavior should not branch on Replicad, OpenRSCAD, JSCAD, KCL, or OpenCascade source identities.
 
 Exception: runtime-originated diagnostics may preserve generic runtime issue codes such as `GEOMETRY_INVALID`; kernel identity belongs in structured provenance fields.
 
@@ -398,7 +398,7 @@ GeoSpec tests multiple geometry kernels, and the evidence substrate follows each
 
 | Kernel class                         | Primary substrate | Rule                                                                                                                                                                              |
 | ------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mesh-only (OpenSCAD, JSCAD, …)       | Rendered mesh     | The kernel mesh **is** the substrate — proofs run on it directly; there is no BRep to require.                                                                                    |
+| Mesh-only (OpenRSCAD, JSCAD, …)      | Rendered mesh     | The kernel mesh **is** the substrate — proofs run on it directly; there is no BRep to require.                                                                                    |
 | Exact-BRep (replicad/OpenCascade, …) | AP242 STEP BRep   | Exact-geometry proofs run on geometry round-tripped through **AP242 STEP** — the interchange is part of what is certified. Mesh evidence is also available for mesh-grade checks. |
 
 For an exact-BRep kernel, never substitute a kernel-native serialization — OCCT `.brep`, a kernel's internal solid format, or a pre-STEP tessellation — to make the load cheaper: it certifies the kernel, not the AP242 exchange the shop floor receives. Reduce total evidence-production wall by reusing canonical AP242 evidence. A subset artifact is justified only when its producer avoids whole-model construction and a benchmark proves a total-wall win; filtering after whole-model construction is not optimization. Mesh (GLB) evidence — whether primary for mesh-only kernels, derived from AP242 when substituting for BRep, or explicitly asserted as a rendered export (§19) — is first-class for mesh-grade integrity, spatial localization, and topology/CSG compute, but it does not substitute for the AP242 exact-BRep substrate where exactness is asserted (§10).
@@ -409,7 +409,7 @@ CORRECT:
 
 ```typescript
 // Mesh-only kernel: prove on the kernel mesh — that is the substrate.
-expectGeo(openscadGlb).toHaveMeshIntegrity({ watertight: true });
+expectGeo(openrscadGlb).toHaveMeshIntegrity({ watertight: true });
 
 // Exact-BRep kernel: exact proofs run on the AP242-round-tripped BRep.
 expectGeo(await loadModel({ file, format: 'step', mesh: false })).toBeValidBrep({ maxTolerance: 0.01 });

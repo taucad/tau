@@ -45,6 +45,7 @@ groups:
       - PicoGKUnitTests
       - LEAP71_QuasiCrystals
       - PicoGK_SimulationExample
+      - openrscad
   slicers:
     description: 3D printer slicer applications
     repos:
@@ -641,3 +642,8 @@ repos:
     upstream: leap71/LEAP71_QuasiCrystals
   PicoGK_SimulationExample:
     upstream: leap71/PicoGK_SimulationExample
+  openrscad:
+    upstream: matthova/openrscad
+    fork: taucad/openrscad
+    commit: a08461511ebd4c315be8b5cd83702187fbd0878e
+    description: Clean-room Rust implementation of the OpenSCAD language and geometry runtime

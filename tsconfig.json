@@ -71,7 +71,7 @@
       "path": "./packages/geospec"
     },
     {
-      "path": "./kernels/openscad"
+      "path": "./packages/kernels/openrscad"
     },
     {
       "path": "./packages/events"

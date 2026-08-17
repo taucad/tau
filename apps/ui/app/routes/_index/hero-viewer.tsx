@@ -4,7 +4,7 @@ import { Download, Check, ChevronDown, ArrowUpRight } from 'lucide-react';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { openscad } from '@taucad/openscad';
+import { openrscad } from '@taucad/openrscad';
 import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
 import { esbuild } from '@taucad/runtime/bundler';
 import { converterTranscoder } from '@taucad/runtime/transcoder';
@@ -32,7 +32,7 @@ const heroCode = { [heroMainFile]: qrcodeScad };
 const heroUnits: Units = { length: { symbol: 'mm', factor: 1 } };
 
 const heroRuntime = defineRuntime({
-  kernels: [openscad()],
+  kernels: [openrscad()],
   middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
   bundlers: [esbuild()],
   transcoders: [converterTranscoder()],

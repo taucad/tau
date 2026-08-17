@@ -141,7 +141,7 @@ export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;
 // =============================================================================
 
 /**
- * Identifier for a first-party CAD kernel shipped alongside `@taucad/runtime` (replicad, jscad, manifold, zoo, plus the GPL-isolated `@taucad/openscad`).
+ * Identifier for a first-party CAD kernel shipped alongside `@taucad/runtime` (replicad, jscad, manifold, zoo, and standalone `@taucad/openrscad`).
  * @public
  */
 export type KernelProvider = (typeof kernelProviders)[number];

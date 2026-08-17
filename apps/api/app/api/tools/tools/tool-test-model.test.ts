@@ -11,7 +11,7 @@ import { createTestModelTool, createTestModelToolDefinition } from '#api/tools/t
 
 type RpcResult = Awaited<ReturnType<ChatRpcConfigurable['chatRpcService']['sendRpcRequest']>>;
 
-const allKernels: readonly KernelProvider[] = ['openscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
+const allKernels: readonly KernelProvider[] = ['openrscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
 
 const callTool = async (options: {
   kernel: KernelProvider;
@@ -83,8 +83,8 @@ describe('createTestModelToolDefinition', () => {
       expect(description.trim().split(/\s+/u).length).toBeLessThanOrEqual(150);
     });
 
-    it('does NOT bake in OpenSCAD-only "modules / functions" phrasing for non-OpenSCAD kernels', () => {
-      if (kernel === 'openscad') {
+    it('does NOT bake in OpenSCAD-only "modules / functions" phrasing for non-OpenSCAD-language kernels', () => {
+      if (kernel === 'openrscad') {
         return;
       }
       expect(description).not.toMatch(/modules?\s*\/\s*functions?/i);
@@ -195,7 +195,7 @@ describe('createTestModelTool', () => {
     } as unknown as RpcResult);
 
     await callTool({
-      kernel: 'openscad',
+      kernel: 'openrscad',
       configurable: cfg,
       input: {
         files: ['lib'],
@@ -253,7 +253,7 @@ describe('createTestModelTool', () => {
         total: 0,
       } as unknown as RpcResult);
 
-      const result = (await callTool({ kernel: 'openscad', configurable: cfg })) as {
+      const result = (await callTool({ kernel: 'openrscad', configurable: cfg })) as {
         failures: Array<{ id: string; suggestion: string }>;
       };
       expect(result.failures[0]?.id).toBe('missing_geospec_file');

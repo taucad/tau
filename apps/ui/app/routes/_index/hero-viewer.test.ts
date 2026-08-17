@@ -12,7 +12,7 @@ describe('deriveExportFormatOptions', () => {
       routes: [
         {
           targetFormat: 'glb',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'glb',
           fidelity: 'mesh',
           schema: {},
@@ -20,7 +20,7 @@ describe('deriveExportFormatOptions', () => {
         },
         {
           targetFormat: 'stl',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'stl',
           fidelity: 'mesh',
           schema: {},
@@ -41,7 +41,7 @@ describe('deriveExportFormatOptions', () => {
       routes: [
         {
           targetFormat: 'usdz',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'glb',
           transcoderId: 'converter',
           fidelity: 'mesh',
@@ -69,7 +69,7 @@ describe('deriveExportFormatOptions', () => {
       routes: [
         {
           targetFormat: 'stl',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'stl',
           fidelity: 'mesh',
           schema: {},
@@ -77,7 +77,7 @@ describe('deriveExportFormatOptions', () => {
         },
         {
           targetFormat: 'glb',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'glb',
           fidelity: 'mesh',
           schema: {},
@@ -85,7 +85,7 @@ describe('deriveExportFormatOptions', () => {
         },
         {
           targetFormat: '3mf',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'glb',
           transcoderId: 'converter',
           fidelity: 'mesh',

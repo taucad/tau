@@ -15,7 +15,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/openscad": "workspace:*",
+    "@taucad/openrscad": "workspace:*",
     "@taucad/runtime": "workspace:*"
   },
   "devDependencies": {

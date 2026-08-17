@@ -2,7 +2,7 @@ packages:
   - apps/*
   - apps/react-e2e/apps/*
   - examples/*
-  - kernels/*
+  - packages/kernels/*
   - libs/*
   - packages/*
   - scripts
@@ -187,7 +187,7 @@ catalog:
   netlify-cli: ^25.6.2
   next-themes: ^0.4.6
   nx: 22.7.1
-  openscad-wasm-prebuilt: ^1.2.0
+  openrscad-engine: 0.10.1
   oxfmt: ^0.36.0
   oxlint: ^1.70.0
   oxlint-tsgolint: ^0.16.0
@@ -272,6 +272,7 @@ patchedDependencies:
   '@kittycad/lib@2.0.48': patches/@kittycad__lib@2.0.48.patch
   vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
 overrides:
+  openrscad-engine: file:tarballs/openrscad-native-parts/openrscad-engine-0.10.1-native-parts-final7.tgz
   '@langchain/google-common': file:tarballs/langchain-fork/langchain-google-common-2.2.0-beta.0.tgz
   '@types/express': 'catalog:'
   replicad: file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz

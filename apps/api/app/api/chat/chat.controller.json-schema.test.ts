@@ -217,7 +217,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
             },
             "kernel": {
               "enum": [
-                "openscad",
+                "openrscad",
                 "replicad",
                 "manifold",
                 "zoo",

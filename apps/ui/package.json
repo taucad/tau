@@ -25,7 +25,7 @@
     "@taucad/lsp": "workspace:*",
     "@taucad/lsp-fs": "workspace:*",
     "@taucad/memory": "workspace:*",
-    "@taucad/openscad": "workspace:*",
+    "@taucad/openrscad": "workspace:*",
     "@taucad/react": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
@@ -49,6 +49,7 @@
     "radix-ui": "catalog:",
     "react-day-picker": "^10.0.1",
     "sonner": "catalog:",
+    "openrscad-engine": "catalog:",
     "tslib": "catalog:",
     "uint8array-extras": "catalog:",
     "vscode-uri": "catalog:"

@@ -2,7 +2,7 @@
 /**
  * Public author surface for kernels living outside `@taucad/runtime`.
  *
- * Out-of-tree kernels (e.g. `@taucad/openscad`) consume this entry instead
+ * Out-of-tree kernels (e.g. `@taucad/openrscad`) consume this entry instead
  * of reaching into the runtime's `#`-prefixed internals. The surface is
  * intentionally minimal: defineKernel, the lifecycle types it touches, and
  * a couple of pure helpers that every existing first-party kernel already

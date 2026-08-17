@@ -43,7 +43,7 @@ export type KernelConfig = {
   /** File extension for this kernel (e.g., '.scad', '.ts', '.kcl', '.js') */
   fileExtension: string;
 
-  /** Human-readable name for the kernel (e.g., 'OpenSCAD', 'Replicad') */
+  /** Human-readable name for the kernel (e.g., 'OpenRSCAD', 'Replicad') */
   languageName: string;
 
   /** Code output requirements - format constraints only, no examples (example demonstrates) */

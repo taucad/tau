@@ -1,7 +1,7 @@
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 
-export type DefaultKernelId = 'openscad' | 'zoo' | 'replicad' | 'opencascade' | 'manifold' | 'jscad' | 'tau';
+export type DefaultKernelId = 'openrscad' | 'zoo' | 'replicad' | 'opencascade' | 'manifold' | 'jscad' | 'tau';
 
 const createDefaultRuntimeWorker = (): Worker =>
   new Worker(new URL('../runtime/runtime.worker.js', import.meta.url), {

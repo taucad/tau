@@ -1,6 +1,0 @@
-# Binary assets copied from node_modules via copy-files-from-to
-src/fonts/*.ttf
-
-# Build output
-dist/
-out-tsc/

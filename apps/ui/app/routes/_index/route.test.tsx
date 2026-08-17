@@ -49,7 +49,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel() {
     return {
-      kernel: 'openscad',
+      kernel: 'openrscad',
       setKernel: vi.fn(),
     };
   },
@@ -97,7 +97,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
         model: { id: 'gpt-5-test-id', name: 'Test GPT' },
         setActiveModel: vi.fn(),
       },
-      kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
+      kernel: { kernelId: 'openrscad', kernel: resolveKernel('openrscad'), setActiveKernel: vi.fn() },
       status: 'ready',
       stop: () => undefined,
       contextUsage: undefined,
@@ -279,7 +279,7 @@ describe('ChatStart', () => {
     });
     const [firstCallArgs] = mockCreateProject.mock.calls[0] ?? [];
     expect(firstCallArgs).toMatchObject({
-      kernel: 'openscad',
+      kernel: 'openrscad',
       activeModel: 'gpt-5-test-id',
       initialMessage: {
         content: 'design a bracket',

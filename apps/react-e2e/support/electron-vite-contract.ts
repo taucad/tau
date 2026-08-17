@@ -55,7 +55,7 @@ const expectProcessExternalization = async (
   await Promise.all([
     expect(matchesExternal(external, '@taucad/runtime')).resolves.toBe(false),
     expect(matchesExternal(external, '@taucad/runtime/electron/main')).resolves.toBe(false),
-    expect(matchesExternal(external, '@taucad/openscad')).resolves.toBe(false),
+    expect(matchesExternal(external, '@taucad/openrscad')).resolves.toBe(true),
     expect(matchesExternal(external, 'react')).resolves.toBe(true),
     expect(matchesExternal(external, 'react/jsx-runtime')).resolves.toBe(true),
     expect(matchesExternal(external, 'electron')).resolves.toBe(true),

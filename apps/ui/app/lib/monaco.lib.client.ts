@@ -209,9 +209,7 @@ export const configureMonaco = async (): Promise<void> => {
 /**
  * Languages that should use monacopilot AI code completion.
  *
- * KCL and OpenSCAD register their own completion providers via language
- * contributions ({@link kclContribution}, {@link openscadContribution}).
- * Binary/non-code formats (stepfile, stl, usd) don't need AI completion.
+ * @returns A no-op registration while AI completion is disabled.
  */
 export const completionLanguages = [
   monacoLanguages.typescript,

@@ -1,6 +1,6 @@
 ---
 title: Choose a Kernel
-description: Compare Replicad, OpenCASCADE, Manifold, OpenSCAD, JSCAD, Zoo, and Tau kernels for your project.
+description: Compare Replicad, OpenCASCADE, Manifold, OpenRSCAD, JSCAD, Zoo, and Tau kernels for your project.
 icon: lucide:git-compare
 ---
 
@@ -26,7 +26,7 @@ Select the best kernel for your project based on modeling paradigm (BRep, mesh, 
 | **Replicad**    | TypeScript/JS | Parametric BRep via OpenCASCADE. STEP export. Strong typing.        | glTF, GLB, STEP, STL, STL-binary | Professional CAD, mechanical parts, STEP interchange    |
 | **OpenCASCADE** | TypeScript/JS | Direct OpenCASCADE API. Full BRep control over shapes and topology. | glTF, GLB, STEP, IGES, STL       | Advanced geometry, direct OCCT scripting, BRep kernels  |
 | **Manifold**    | TypeScript/JS | Mesh-first modeling with robust booleans and fast WASM execution.   | glTF, GLB                        | Browser-native CAD, procedural booleans, mesh workflows |
-| **OpenSCAD**    | OpenSCAD      | CSG modeling. Familiar `.scad` syntax. Mature ecosystem.            | glTF, GLB, STL, STL-binary       | 3D printing, functional parts, CSG workflows            |
+| **OpenRSCAD**   | OpenSCAD      | Fast Rust/Wasm execution of familiar `.scad` CSG models.            | GLB, 3MF                         | Browser, Node, and CLI agent loops                      |
 | **JSCAD**       | TypeScript/JS | Parametric CSG with `@jscad/modeling`. Browser-native.              | glTF, GLB                        | Web-based CAD, parametric designs, lightweight models   |
 | **Zoo (KCL)**   | KCL           | Cloud-native CAD. AI integration via Zoo API.                       | glTF, GLB, STEP, STL, STL-binary | Cloud workflows, AI-assisted modeling, remote execution |
 | **Tau**         | Any           | Catch-all file converter. Imports STEP, STL, 3MF, OBJ, etc.         | glTF, GLB                        | File import/preview, format conversion                  |
@@ -97,24 +97,24 @@ const client = createRuntimeClient({
 });
 ```
 
-#### OpenSCAD
+#### OpenRSCAD
 
-Use OpenSCAD when you have:
+Use OpenRSCAD when you have:
 
 - Existing `.scad` files
 - CSG-based designs for 3D printing
 - Familiarity with OpenSCAD syntax
 
-> **Note:** OpenSCAD ships as the standalone `@taucad/openscad` package (GPL-2.0-or-later) so it stays isolated from the MIT-licensed runtime. Install it explicitly: `pnpm add @taucad/openscad`.
+OpenRSCAD is the runtime engine for the OpenSCAD authoring language. `@taucad/openrscad` runs in browser workers, Node, and the CLI and exports GLB and 3MF.
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { openscad } from '@taucad/openscad';
+import { openrscad } from '@taucad/openrscad';
 
-const runtime = defineRuntime({ kernels: [openscad()] });
+const runtime = defineRuntime({ kernels: [openrscad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
@@ -254,11 +254,11 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { replicad, opencascade, manifold, jscad, tau } from '@taucad/runtime/kernels';
-import { openscad } from '@taucad/openscad';
+import { openrscad } from '@taucad/openrscad';
 import { esbuild } from '@taucad/runtime/bundler';
 
 const runtime = defineRuntime({
-  kernels: [replicad(), opencascade(), manifold(), openscad(), jscad(), tau()],
+  kernels: [replicad(), opencascade(), manifold(), openrscad(), jscad(), tau()],
   bundlers: [esbuild()],
 });
 const client = createRuntimeClient({

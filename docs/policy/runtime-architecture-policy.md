@@ -106,11 +106,11 @@ Two distinct "define" patterns serve different audiences:
 
 All non-generic capabilities are provided by injectable plugins, not hardcoded in the framework:
 
-| Plugin Type | Author API                              | Consumer API                            | Purpose                                                          | Example                                       |
-| ----------- | --------------------------------------- | --------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------- |
-| Kernel      | `defineKernel` → `KernelDefinition`     | `replicad()` → `KernelPlugin`           | Geometry computation, parameter extraction, export               | replicad, manifold, jscad, openscad, zoo, tau |
-| Bundler     | `defineBundler` → `BundlerDefinition`   | `esbuild()` → `BundlerPlugin`           | File bundling, code execution, module registry, import detection | esbuild bundler                               |
-| Middleware  | `defineMiddleware` → `KernelMiddleware` | `parameterCache()` → `MiddlewarePlugin` | Operation wrapping (caching, transforms, edge detection)         | geometry-cache, parameter-cache               |
+| Plugin Type | Author API                              | Consumer API                            | Purpose                                                          | Example                                        |
+| ----------- | --------------------------------------- | --------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------- |
+| Kernel      | `defineKernel` → `KernelDefinition`     | `replicad()` → `KernelPlugin`           | Geometry computation, parameter extraction, export               | replicad, manifold, jscad, openrscad, zoo, tau |
+| Bundler     | `defineBundler` → `BundlerDefinition`   | `esbuild()` → `BundlerPlugin`           | File bundling, code execution, module registry, import detection | esbuild bundler                                |
+| Middleware  | `defineMiddleware` → `KernelMiddleware` | `parameterCache()` → `MiddlewarePlugin` | Operation wrapping (caching, transforms, edge detection)         | geometry-cache, parameter-cache                |
 
 ### Multi-Bundler Support
 
@@ -288,7 +288,7 @@ Hard `terminate()` and non-draining `shutdown()` reject pending work and close t
 
 2. Pass 1: Extension + regex fast path
    - Try each kernel config's detectImport regex against the entry path
-   - Extension-only kernels (openscad, zoo) match immediately
+   - Extension-only kernels (openrscad, zoo) match immediately
    - Regex kernels (replicad, manifold, jscad) test entry path content
 
 3. Pass 2: Bundler-assisted detection (transitive)
@@ -307,17 +307,17 @@ Hard `terminate()` and non-draining `shutdown()` reject pending work and close t
 ### Detection Priority
 
 ```
-Priority: openscad → zoo → replicad → manifold → jscad → tau
+Priority: openrscad → zoo → replicad → manifold → jscad → tau
 ```
 
-| Kernel   | Detection Method              | Scope                   |
-| -------- | ----------------------------- | ----------------------- |
-| OpenScad | Extension: `.scad`            | Immediate               |
-| Zoo      | Extension: `.kcl`             | Immediate               |
-| Replicad | Regex + bundler detectImports | Entry path + transitive |
-| Manifold | Regex + bundler detectImports | Entry path + transitive |
-| Jscad    | Regex + bundler detectImports | Entry path + transitive |
-| Tau      | Extension: `*` (catch-all)    | Fallback                |
+| Kernel    | Detection Method              | Scope                   |
+| --------- | ----------------------------- | ----------------------- |
+| OpenRSCAD | Extension: `.scad`            | Immediate               |
+| Zoo       | Extension: `.kcl`             | Immediate               |
+| Replicad  | Regex + bundler detectImports | Entry path + transitive |
+| Manifold  | Regex + bundler detectImports | Entry path + transitive |
+| Jscad     | Regex + bundler detectImports | Entry path + transitive |
+| Tau       | Extension: `*` (catch-all)    | Fallback                |
 
 ### Multi-Module Registration
 
@@ -396,7 +396,7 @@ During detection, bare specifiers appear as external imports in `metafile.output
 ```
 @taucad/runtime          → createRuntimeClient, types, presets, fromMemoryFs, fromFsLike, fromFileSystemBridge
 @taucad/runtime/transport → defineRuntimeTransport, inProcessTransport, webWorkerTransport, nodeWorkerTransport
-@taucad/runtime/kernels  → replicad(), manifold(), zoo(), openscad(), jscad(), tau()
+@taucad/runtime/kernels  → replicad(), manifold(), opencascade(), zoo(), jscad(), tau()
 @taucad/runtime/middleware → parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()
 @taucad/runtime/bundler  → esbuild()
 @taucad/runtime/transport → RuntimeTransport, createWorkerTransport()
@@ -435,7 +435,7 @@ createRuntimeClient({
 });
 ```
 
-Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by the display path (`meshGeometry` for kernels that defer it, inline `createGeometry` otherwise); export tessellation is normally used by `exportGeometry` for mesh formats. When tessellation changes native construction, as in OpenSCAD, the kernel declares those construction keys with `createOptionsSchema`. The framework projects the matching resolved render or selected source-export values, deep-merges them over the schema defaults, validates once, and passes only that result to `createGeometry`. BRep exports (STEP/IGES) tessellate nothing.
+Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by the display path (`meshGeometry` for kernels that defer it, inline `createGeometry` otherwise); export tessellation is normally used by `exportGeometry` for mesh formats. When tessellation changes native construction, as in OpenRSCAD, the kernel declares those construction keys with `createOptionsSchema`. The framework projects the matching resolved render or selected source-export values, deep-merges them over the schema defaults, validates once, and passes only that result to `createGeometry`. BRep exports (STEP/IGES) tessellate nothing.
 
 2. **Per-call overrides** — passed as `callOptions` to individual methods:
 
@@ -458,13 +458,13 @@ If no tessellation is specified at any level, each kernel applies its own intern
 
 ### Per-Kernel Interpretation
 
-| Kernel       | Preview Default | Export Default | Mechanism                                                                                                                                                                        |
-| ------------ | --------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Replicad** | `0.02 / 20°`    | `0.01 / 20°`   | Passed to `.mesh()` and `.meshEdges()`; locked by `occt-tessellation-defaults.test.ts`                                                                                           |
-| **Manifold** | ignored         | ignored        | Uses Manifold's own tessellation; fixed by model/API output                                                                                                                      |
-| **OpenSCAD** | schema default  | schema default | Framework-resolved tessellation is injected as `$fn`/`$fa`/`$fs` before `callMain()`; create returns OFF, display conversion runs in `meshGeometry`, and export encodes that OFF |
-| **Zoo/KCL**  | ignored         | ignored        | Tessellation is server-side; future integration point                                                                                                                            |
-| **JSCAD**    | ignored         | ignored        | Uses fixed internal tessellation                                                                                                                                                 |
+| Kernel        | Preview Default | Export Default | Mechanism                                                                                                                                                                 |
+| ------------- | --------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Replicad**  | `0.02 / 20°`    | `0.01 / 20°`   | Passed to `.mesh()` and `.meshEdges()`; locked by `occt-tessellation-defaults.test.ts`                                                                                    |
+| **Manifold**  | ignored         | ignored        | Uses Manifold's own tessellation; fixed by model/API output                                                                                                               |
+| **OpenRSCAD** | schema default  | schema default | Framework-resolved tessellation is injected as `$fn`/`$fa`/`$fs`; create returns exact mesh evidence plus display GLB and export rewrites that evidence deterministically |
+| **Zoo/KCL**   | ignored         | ignored        | Tessellation is server-side; future integration point                                                                                                                     |
+| **JSCAD**     | ignored         | ignored        | Uses fixed internal tessellation                                                                                                                                          |
 
 ### Threading Path
 

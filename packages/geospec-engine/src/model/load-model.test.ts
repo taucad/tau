@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { describe, expect, it, vi } from 'vitest';
-import { openscad } from '@taucad/openscad';
+import { openrscad } from '@taucad/openrscad';
 import { createNodeClient } from '@taucad/runtime/node';
 import { presets } from '@taucad/runtime/presets';
 import { defineRuntime } from '@taucad/runtime/worker';
@@ -50,13 +50,13 @@ difference() {
 `;
 
 const createOpenScadSourceAdapter = (): GeoSpecRuntimeSourceAdapter => ({
-  id: 'openscad',
+  id: 'openrscad',
   extensions: ['.scad'],
   async createRuntime({ projectPath }) {
     const baseRuntime = presets.all();
     const runtime = defineRuntime({
       ...baseRuntime,
-      kernels: [openscad(), ...baseRuntime.kernels],
+      kernels: [openrscad(), ...baseRuntime.kernels],
     });
     return (await createNodeClient(projectPath, { runtime })) as unknown as GeoSpecRuntimeClient;
   },
@@ -508,7 +508,7 @@ describe('loadModel — the runtime branch', () => {
         file: 'part.scad',
         sourceAdapters: [
           {
-            id: 'openscad',
+            id: 'openrscad',
             extensions: ['.scad'],
             createRuntime: async () => {
               created += 1;
@@ -531,7 +531,7 @@ describe('loadModel — the runtime branch', () => {
         projectPath: '/tmp/project',
         sourceAdapters: [
           {
-            id: 'openscad',
+            id: 'openrscad',
             extensions: ['.scad'],
             createRuntime: async (created) => {
               seen = created;

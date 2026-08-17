@@ -38,7 +38,7 @@ describe('kernel-worker constants', () => {
     const resolvedRuntime = await resolveRuntimeDefinition(runtime, parsedConfig);
 
     expect(resolvedRuntime.kernels.map((kernel) => kernel.id)).toEqual([
-      'openscad',
+      'openrscad',
       'zoo',
       'replicad',
       'opencascade',

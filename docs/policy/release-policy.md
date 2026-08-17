@@ -18,12 +18,14 @@ Nx Release with version plans provides native monorepo integration and decouples
 
 ## Packages in Scope
 
-| Package               | Description                                                |
-| --------------------- | ---------------------------------------------------------- |
-| `@taucad/runtime`     | Multi-kernel CAD runtime framework for browser and Node.js |
-| `@taucad/converter`   | CAD file format conversion (STL, STEP, IGES, USDZ, etc.)   |
-| `@taucad/json-schema` | JSON to JSON Schema conversion                             |
-| `@taucad/js`          | Tau JavaScript API                                         |
+| Package                  | Description                                             |
+| ------------------------ | ------------------------------------------------------- |
+| `@taucad/runtime`        | Multi-kernel CAD runtime for browser and Node.js        |
+| `@taucad/cli`            | Headless CAD export CLI                                 |
+| `@taucad/react`          | React bindings for the runtime                          |
+| `geospec`                | GeoSpec authoring contract and CLI-facing specification |
+| `@taucad/geospec-engine` | Fair-source GeoSpec execution/proof engine and CLI      |
+| `@taucad/openrscad`      | OpenRSCAD runtime plugin                                |
 
 Internal workspace packages (`@taucad/types`, `@taucad/utils`, `@taucad/tau-examples`) are not published to npm and are consumed only within the monorepo.
 

@@ -20,7 +20,7 @@ Internal reference for how `@taucad/runtime` constructs glTF 2.0 / GLB binaries 
 
 ## Rationale
 
-The runtime converts kernel geometry (meshes from Replicad, JSCAD, OpenSCAD, Manifold, OpenCASCADE) into GLB binary format for transport to the Three.js viewer. V8 CPU profiling (`docs/research/runtime-overhead-forensics.md`) revealed that GLB serialization via `@gltf-transform/core` consumed ~8ms for a simple box — more than the kernel's 1.4ms of OpenCASCADE work. The library's full document model (animations, extensions, validation) is architectural overhead for our mesh-only use case.
+The runtime transports GLB from Replicad, JSCAD, OpenRSCAD, Manifold, and OpenCASCADE to the Three.js viewer. Tau constructs GLB for Replicad, JSCAD, and shared OFF mesh data; OpenRSCAD and OpenCASCADE produce GLB natively. V8 CPU profiling (`docs/research/runtime-overhead-forensics.md`) revealed that GLB serialization via `@gltf-transform/core` consumed ~8ms for a simple box — more than the kernel's 1.4ms of OpenCASCADE work. The library's full document model (animations, extensions, validation) is architectural overhead for our mesh-only use case.
 
 This policy codifies the decision to use a direct GLB binary writer on the render hot path, the buffer layout decisions, and the integration rules for each kernel. User-visible and identity-bearing names are governed by `docs/policy/geometry-naming-policy.md`.
 
@@ -80,6 +80,7 @@ const glb = await new NodeIO().writeBinary(document);
 | Edge detection middleware       | `gltf-edge-detection.middleware.ts`       | Reads GLB, adds LINES primitives, writes back — requires document model for mutation |
 | Coordinate transform middleware | `gltf-coordinate-transform.middleware.ts` | Reads GLB, applies transforms, writes back                                           |
 | Manifold kernel                 | `manifold.kernel.ts`                      | Uses `manifold-3d`'s own `GLTFNodesToGLTFDoc` which returns a `Document`             |
+| OpenRSCAD kernel                | `openrscad.kernel.ts`                     | Uses `openrscad-engine`'s native GLB output                                          |
 | Test assertions                 | `*.test.ts`                               | `NodeIO().readBinary()` to parse and verify output structure                         |
 
 Do not add new `@gltf-transform/core` `Document` + `NodeIO().writeBinary()` calls to kernel render paths. If a new kernel produces mesh data (positions, normals, indices), map it to `GlbInput` and call `writeGlb()`.
@@ -227,13 +228,14 @@ Do not apply coordinate transforms inside the GLB writer itself. The writer seri
 
 Each kernel maps its geometry output to `GlbInput` before calling `writeGlb()`. The mapping is kernel-specific; the writer is kernel-agnostic.
 
-| Kernel      | Geometry source                           | Mapping location      | Input to GLB                                                                                                                |
-| ----------- | ----------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Replicad    | `GeometryReplicad` (faces, edges, colors) | `replicad-to-gltf.ts` | Pre-transformed positions/normals, indices, optional edge lines                                                             |
-| JSCAD       | Named `geom3` part descriptors            | `jscad-to-gltf.ts`    | One named node/mesh per part, fresh export-only retessellation, triangle normalization, and owner-local topology edge lines |
-| OpenSCAD    | `IndexedPolyhedron` (via OFF parser)      | `export-glb.ts`       | Color-grouped, triangulated, transformed geometry                                                                           |
-| Manifold    | `manifold-3d` GLTF nodes                  | `manifold.kernel.ts`  | Uses `@gltf-transform/core` (out of scope — manifold-3d owns the Document)                                                  |
-| OpenCASCADE | `TopoDS_Shape`                            | `opencascade-mesh.ts` | Native `RWGltf_CafWriter` (out of scope — OCCT produces GLB directly)                                                       |
+| Kernel/utility | Geometry source                           | Mapping location      | Input to GLB                                                                                                                |
+| -------------- | ----------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Replicad       | `GeometryReplicad` (faces, edges, colors) | `replicad-to-gltf.ts` | Pre-transformed positions/normals, indices, optional edge lines                                                             |
+| JSCAD          | Named `geom3` part descriptors            | `jscad-to-gltf.ts`    | One named node/mesh per part, fresh export-only retessellation, triangle normalization, and owner-local topology edge lines |
+| OpenRSCAD      | Native OpenRSCAD geometry                 | `openrscad-engine`    | Native GLB (out of scope — OpenRSCAD owns construction)                                                                     |
+| Shared OFF     | `IndexedPolyhedron` (via OFF parser)      | `export-glb.ts`       | Color-grouped, triangulated, transformed geometry                                                                           |
+| Manifold       | `manifold-3d` GLTF nodes                  | `manifold.kernel.ts`  | Uses `@gltf-transform/core` (out of scope — manifold-3d owns the Document)                                                  |
+| OpenCASCADE    | `TopoDS_Shape`                            | `opencascade-mesh.ts` | Native `RWGltf_CafWriter` (out of scope — OCCT produces GLB directly)                                                       |
 
 ### 6.1 Kernel Mapping Responsibilities
 

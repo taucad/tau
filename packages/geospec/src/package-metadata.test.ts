@@ -37,9 +37,9 @@ describe('geospec package metadata', () => {
   it('does not expose source kernels as optional production peers', async () => {
     const packageJson = await readPackageJson();
 
-    expect(packageJson.peerDependencies?.['@taucad/openscad']).toBeUndefined();
+    expect(packageJson.peerDependencies?.['@taucad/openrscad']).toBeUndefined();
     expect(packageJson.peerDependencies?.['replicad']).toBeUndefined();
-    expect(packageJson.peerDependenciesMeta?.['@taucad/openscad']).toBeUndefined();
+    expect(packageJson.peerDependenciesMeta?.['@taucad/openrscad']).toBeUndefined();
     expect(packageJson.peerDependenciesMeta?.['replicad']).toBeUndefined();
   });
 });

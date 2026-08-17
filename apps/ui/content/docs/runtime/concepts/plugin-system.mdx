@@ -10,7 +10,7 @@ The @taucad/runtime is extensible through a plugin system. Instead of inheritanc
 
 ## Context and Motivation
 
-CAD runtimes must support multiple engines (Replicad, OpenCASCADE, Manifold, OpenSCAD, JSCAD, Zoo), multiple preprocessing steps (caching, coordinate transforms), and multiple bundling strategies (esbuild for JS/TS, none for OpenSCAD). Inheritance would force a rigid class hierarchy; configuration files would push logic into strings. Plugins offer a middle path: typed, composable extensions that the framework discovers at runtime through explicit registration.
+CAD runtimes must support multiple engines (Replicad, OpenCASCADE, Manifold, OpenRSCAD, JSCAD, Zoo), multiple preprocessing steps (caching, coordinate transforms), and multiple bundling strategies (esbuild for JS/TS, none for OpenSCAD-language engines). Inheritance would force a rigid class hierarchy; configuration files would push logic into strings. Plugins offer a middle path: typed, composable extensions that the framework discovers at runtime through explicit registration.
 
 ## How It Works
 
@@ -49,7 +49,7 @@ flowchart LR
 
 ### KernelPlugin
 
-A [KernelPlugin](../api/kernels) describes a CAD engine. Factory functions like `replicad()`, `opencascade()`, `manifold()`, `jscad()`, `zoo()`, and `tau()` from `@taucad/runtime/kernels` -- plus `openscad()` from the separately-published `@taucad/openscad` package -- return a registration object:
+A [KernelPlugin](../api/kernels) describes a CAD engine. Factory functions like `replicad()`, `opencascade()`, `manifold()`, `jscad()`, `zoo()`, and `tau()` from `@taucad/runtime/kernels` -- plus `openrscad()` from its separately published package -- return a registration object:
 
 - `id` -- Unique identifier (e.g., `'replicad'`)
 - `extensions` -- File extensions this kernel handles (`['ts', 'js']`, `['scad']`, or `['*']` for catch-all)
@@ -76,7 +76,7 @@ A [BundlerPlugin](../api/bundler) describes a bundler for specific file extensio
 - `extensions` -- File extensions this bundler handles
 - `options` -- Bundler-specific options (e.g., esbuild target)
 
-Multiple bundlers can be registered; the framework routes by extension. A kernel that does not use the bundler (e.g., OpenSCAD) never loads it.
+Multiple bundlers can be registered; the framework routes by extension. A kernel that does not use the bundler (e.g., OpenRSCAD) never loads it.
 
 ### Presets for Zero-Config Setup
 

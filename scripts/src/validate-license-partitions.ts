@@ -28,9 +28,6 @@ const expectedLicense = (path: string): string => {
   if (path === 'packages/geospec-engine') {
     return 'FSL-1.1-Apache-2.0';
   }
-  if (path === 'packages/kernels/openscad') {
-    return 'GPL-2.0-or-later';
-  }
   if (applicationPaths.has(path)) {
     return 'AGPL-3.0-only';
   }

@@ -88,11 +88,11 @@ describe('useCadAgentConfig', () => {
   });
 
   it('should source `kernel` from useChatComposer().kernel.kernelId — not from model', () => {
-    useChatComposerMock.mockReturnValue(buildComposer({ kernelId: 'openscad' }));
+    useChatComposerMock.mockReturnValue(buildComposer({ kernelId: 'openrscad' }));
 
     const { result } = renderHook(() => useCadAgentConfig());
 
-    expect(result.current.kernel).toBe('openscad');
+    expect(result.current.kernel).toBe('openrscad');
   });
 
   it('should source `mode` and `toolChoice` from the chat draft selector', () => {

@@ -133,7 +133,7 @@ describe('ChatKernelSelector — pro tier badge', () => {
   });
 
   it('does not render KernelTierBadge for free-tier kernels in the combobox label', () => {
-    const openscadKernel = kernelConfigurations.find((k) => k.id === 'openscad')!;
+    const openscadKernel = kernelConfigurations.find((k) => k.id === 'openrscad')!;
     render(<ChatKernelSelector>{() => null}</ChatKernelSelector>);
 
     const label = capturedComboBox.renderLabel?.(openscadKernel, undefined);

@@ -39,7 +39,7 @@ Use the following vocabulary for runtime APIs:
 | Runtime-owned directory-plus-basename value  | structural `file` payload             | `{ path: '/lib', filename: 'cube.scad' }` | Worker and transport protocol internals only                                          |
 | Authority-global routing path                | qualified `path`                      | `/projects/proj_123/lib/cube.scad`        | Trusted host composition; selects a mount before a runtime filesystem is rooted       |
 | Native backing location                      | `basePath`, `hostPath`, or `hostRoot` | `/Users/alice/project`                    | Host adapter boundary only; never exposed to runtime plugins                          |
-| Engine-private location                      | engine-qualified `path`               | `lib/cube.scad` in OpenSCAD MEMFS         | Kernel implementation only                                                            |
+| Engine-private location                      | engine-qualified `path`               | `lib/cube.scad` in OpenRSCAD's module map | Kernel implementation only                                                            |
 
 Do not choose a name merely because two values are both strings or both refer to a file. Apply one name consistently wherever the same semantic identity crosses a public or plugin-author boundary. Document whether an `entryPath` is project-relative or a normalized runtime path at the owning type boundary; do not encode that normalization stage by renaming the field.
 

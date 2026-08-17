@@ -176,9 +176,9 @@ vi.mock('#hooks/use-models.js', () => ({
 
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({
-    kernel: 'openscad',
+    kernel: 'openrscad',
     setKernel: vi.fn(),
-    selectedKernel: resolveKernel('openscad'),
+    selectedKernel: resolveKernel('openrscad'),
   }),
 }));
 

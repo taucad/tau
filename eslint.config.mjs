@@ -511,12 +511,12 @@ const config = [
   {
     /*
      * Static `new URL(literal, import.meta.url)` invariant: every WASM/font/plugin
-     * chunk shipped from `@taucad/runtime` and `@taucad/openscad` must use a
+     * chunk shipped from `@taucad/runtime` must use a
      * string-literal first arg so consumer bundlers (Vite/Rolldown, Webpack 5,
      * Parcel 2, esbuild) lift the asset to a hashed URL during build.
      * See docs/research/runtime-zero-config-bundling.md (Finding 1, R5).
      */
-    files: ['packages/runtime/src/**/*.{ts,tsx}', 'packages/kernels/openscad/src/**/*.{ts,tsx}'],
+    files: ['packages/runtime/src/**/*.{ts,tsx}'],
     plugins: { 'tau-lint': tauLintPlugin },
     rules: {
       'tau-lint/static-import-meta-url': 'error',

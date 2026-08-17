@@ -20,7 +20,7 @@
  * Filesystem:          fs.read, fs.readBatch, fs.exists, fs.readdir
  * WASM:                wasm.compile
  * Middleware:           middleware.wrap({name})
- * Kernel-authored:     {kernelName}.{operation} (e.g., replicad.wasm-init, replicad.run-main, openscad.call-main)
+ * Kernel-authored:     {kernelName}.{operation} (e.g., replicad.wasm-init, replicad.run-main, openrscad.export-3d)
  */
 
 import type { TelemetryEntry } from '#types/runtime-protocol.types.js';

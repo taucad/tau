@@ -88,7 +88,7 @@ describe('GetParametersResult target shape', () => {
 
 describe('ExportRoute bag propagation', () => {
   type ReplicadLike = KernelPlugin<{ stl: { binary?: boolean }; glb: {} }, { tessellation?: unknown }, 'replicad'>;
-  type OpenscadLike = KernelPlugin<{ off: {} }, { tessellation?: unknown }, 'openscad'>;
+  type OpenscadLike = KernelPlugin<{ off: {} }, { tessellation?: unknown }, 'openrscad'>;
   type ConverterLike = TranscoderPlugin<{ usdz: {}; '3mf': { unit?: string } }, 'glb', 'converter'>;
   type Kernels = readonly [ReplicadLike, OpenscadLike];
   type Transcoders = readonly [ConverterLike];
@@ -110,13 +110,13 @@ describe('ExportRoute bag propagation', () => {
 
   it('should narrow kernelId via CollectKernelIds', () => {
     type Id = ExportRoute<Kernels, readonly [], Transcoders>['kernelId'];
-    expectTypeOf<Id>().toEqualTypeOf<'replicad' | 'openscad'>();
+    expectTypeOf<Id>().toEqualTypeOf<'replicad' | 'openrscad'>();
   });
 });
 
 describe('CapabilitiesManifest bag propagation', () => {
   type ReplicadLike = KernelPlugin<{ stl: {}; glb: {} }, { tessellation?: unknown }, 'replicad'>;
-  type OpenscadLike = KernelPlugin<{ off: {} }, { tessellation?: unknown }, 'openscad'>;
+  type OpenscadLike = KernelPlugin<{ off: {} }, { tessellation?: unknown }, 'openrscad'>;
   type ConverterLike = TranscoderPlugin<{ usdz: {} }, 'glb', 'converter'>;
   type Kernels = readonly [ReplicadLike, OpenscadLike];
   type Transcoders = readonly [ConverterLike];
@@ -131,7 +131,9 @@ describe('CapabilitiesManifest bag propagation', () => {
     type Manifest = CapabilitiesManifest<Kernels, readonly [], Transcoders>;
     type Schemas = Manifest['renderCapabilities'];
     expectTypeOf<Schemas['replicad']>().toEqualTypeOf<RenderCapability<Kernels, readonly [], 'replicad'> | undefined>();
-    expectTypeOf<Schemas['openscad']>().toEqualTypeOf<RenderCapability<Kernels, readonly [], 'openscad'> | undefined>();
+    expectTypeOf<Schemas['openrscad']>().toEqualTypeOf<
+      RenderCapability<Kernels, readonly [], 'openrscad'> | undefined
+    >();
   });
 });
 
@@ -144,7 +146,7 @@ describe('RenderCapability bag propagation', () => {
   type OpenscadLike = KernelPlugin<
     {},
     { tessellation?: { segments?: number; minimumAngle?: number; minimumSize?: number } },
-    'openscad'
+    'openrscad'
   >;
   type Kernels = readonly [ReplicadLike, OpenscadLike];
 
@@ -155,8 +157,8 @@ describe('RenderCapability bag propagation', () => {
     }>();
   });
 
-  it('should resolve defaults to the openscad render-options input type', () => {
-    type Defaults = RenderCapability<Kernels, readonly [], 'openscad'>['renderOptions']['defaults'];
+  it('should resolve defaults to the OpenRSCAD render-options input type', () => {
+    type Defaults = RenderCapability<Kernels, readonly [], 'openrscad'>['renderOptions']['defaults'];
     expectTypeOf<Defaults>().toEqualTypeOf<{
       tessellation?: { segments?: number; minimumAngle?: number; minimumSize?: number };
     }>();

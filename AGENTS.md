@@ -28,7 +28,7 @@ Tau is the AI-native CAD platform for the web (`tau.new`), built as an Nx monore
 
 - **Frontend**: React Router v7, React 19, TypeScript, Tailwind CSS, Fumadocs
 - **Backend**: NestJS API with Fastify, PostgreSQL (Drizzle ORM), Redis, Better Auth
-- **CAD Engine**: Multi-kernel runtime (Replicad, JSCAD, Manifold, OpenSCAD, KCL)
+- **CAD Engine**: Multi-kernel runtime (Replicad, JSCAD, Manifold, OpenRSCAD, KCL)
 - **AI**: LangGraph agent with tool-use (OpenAI, Anthropic, Vertex AI, Ollama, Together AI, Cerebras)
 
 ### Project Map

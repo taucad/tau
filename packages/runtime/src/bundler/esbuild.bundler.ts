@@ -20,10 +20,12 @@ import { z } from 'zod';
 
 const autoExportNames = ['main', 'defaultParams', 'getParameterDefinitions'];
 
+/** @public */
 export const esbuildOptionsSchema = z.object({
   extensions: z.array(z.string()).optional(),
 });
 
+/** @public */
 export type EsbuildOptions = z.input<typeof esbuildOptionsSchema>;
 
 const kernelIssueTypes = new Set<KernelIssueType>(['compilation', 'runtime', 'kernel', 'connection', 'unknown']);

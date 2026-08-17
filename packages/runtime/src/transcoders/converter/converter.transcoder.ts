@@ -49,6 +49,7 @@ const edges = [
   { from: 'glb', to: 'x3d', fidelity: 'mesh', sourceOptions: specNativeGlbSource },
 ] as const;
 
+/** @public */
 export const converterTranscoder = defineTranscoder({
   id: 'converter',
   name: 'ConverterTranscoder',

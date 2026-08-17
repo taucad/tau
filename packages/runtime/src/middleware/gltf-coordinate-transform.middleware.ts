@@ -59,6 +59,7 @@ async function transformResult<Result extends CreateGeometryResult>(
   };
 }
 
+/** @public */
 export const gltfCoordinateTransform = defineMiddleware({
   id: 'gltfCoordinateTransform',
   name: 'GltfCoordinateTransform',

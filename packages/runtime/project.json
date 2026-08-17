@@ -48,6 +48,15 @@
         "{projectRoot}/src/client/runtime-client.ts",
         "{projectRoot}/src/vite/index.ts"
       ]
+    },
+    "readme-quickstart": {
+      "command": "node --import tsx scripts/check-readme-quick-start.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["build"],
+      "cache": true,
+      "inputs": ["{projectRoot}/README.md", "{projectRoot}/scripts/check-readme-quick-start.mts"]
     }
   }
 }

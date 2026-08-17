@@ -5,29 +5,24 @@ client, send a command, consume the result.
 
 ## Quick start
 
-`client.export(format, { source })` self-provisions an in-memory
-filesystem, connects on first call, runs the render, and resolves an ordered,
+`createNodeClient()` provides the bundled runtime, transport, and in-memory
+filesystem. Its first command connects the runtime and returns an ordered,
 non-empty export artifact set.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createNodeClient } from '@taucad/runtime/node';
 
-const client = createRuntimeClient(presets.all());
+const client = await createNodeClient();
 const result = await client.export('glb', {
   source: {
     files: {
-      'main.ts': `
-    import { drawRoundedRectangle } from 'replicad';
-    export default () => drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
-  `,
+      'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);',
     },
   },
 });
 
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
-for (const file of result.data) {
-  console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes (${file.mimeType})`);
-}
+console.log(`Exported ${result.data[0].name}: ${result.data[0].bytes.byteLength} bytes`);
 client.terminate();
 ```
 
@@ -70,7 +65,7 @@ construction (`{ transport: webWorkerTransport({ ... }) }`). Opaque
 filesystems are produced by the public factories
 (`fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLike`,
 `fromFileSystemBridge`); raw `MessagePort`s are not part of the public surface.
-See [Embedding in a Host](../../apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx).
+See [Embedding in a Host](https://github.com/taucad/tau/blob/main/apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx).
 
 ## Autonomous render loop (editors and live UIs)
 
@@ -82,9 +77,15 @@ preview; an autonomous successor has no second public outcome. For inline
 `source.files` input the runtime auto-provisions the filesystem on the first call.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { presets } from '@taucad/runtime/presets';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = presets.all();
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
 
 const unsubscribe = client.on('geometry', (result) => {
   if (!result.success) {
@@ -95,7 +96,12 @@ const unsubscribe = client.on('geometry', (result) => {
 });
 
 await client.render({
-  source: { files: { 'main.ts': 'export default () => drawCircle(10).sketchOnPlane().extrude(20);' } },
+  source: {
+    files: {
+      'main.ts':
+        'import { drawCircle } from "replicad";\nexport default () => drawCircle(10).sketchOnPlane().extrude(20);',
+    },
+  },
   parameters: {},
 });
 
@@ -107,7 +113,8 @@ client.terminate();
 
 For viewers that watch a real filesystem (Node fs, OPFS, the browser FM
 worker), pass it once at construction so every `render({ source: { path } })` call
-runs against it: `createRuntimeClient({ ...presets.all(), fileSystem })`.
+runs against it through the transport:
+`createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem }) })`.
 
 ## Lifecycle states
 
@@ -192,20 +199,18 @@ export const remoteCalibration = defineMiddleware({
   name: 'Remote calibration',
   async wrapCreateGeometry(input, handler, { signal }) {
     const response = await fetch('/api/calibration', { signal });
-    signal.throwIfAborted();
     const parameters = { ...input.parameters, ...(await response.json()) };
-    signal.throwIfAborted();
     return handler({ ...input, parameters });
   },
 });
 ```
 
-Pass the signal to cancellable platform APIs, check it around non-cancellable
-awaits, and never retain it after the operation. Do not use `Promise.race()` to
-claim that mutating work stopped while it continues in the background.
+Pass the signal to cancellable platform APIs and never retain it after the
+operation. Do not use `Promise.race()` to claim that mutating work stopped while
+it continues in the background.
 
-See [Configure Render Timeouts](../../apps/ui/content/docs/runtime/guides/render-timeouts.mdx)
-and [Cooperate with Cancellation](../../apps/ui/content/docs/runtime/guides/cooperate-with-cancellation.mdx).
+See [Configure Render Timeouts](https://github.com/taucad/tau/blob/main/apps/ui/content/docs/runtime/guides/render-timeouts.mdx)
+and [Cooperate with Cancellation](https://github.com/taucad/tau/blob/main/apps/ui/content/docs/runtime/guides/cooperate-with-cancellation.mdx).
 
 ## Filesystem ownership
 
@@ -219,7 +224,7 @@ bundlers, middleware, and headless services receive no project id,
 authority-global path, grant, or authorization callback. Rooted filesystems
 remain writable so caches and generated files persist inside the project tree.
 
-See [Path Namespaces](../../apps/ui/content/docs/runtime/concepts/path-namespaces.mdx)
+See [Path Namespaces](https://github.com/taucad/tau/blob/main/apps/ui/content/docs/runtime/concepts/path-namespaces.mdx)
 for consumer, plugin-author, and host-adapter examples.
 
 Watch-capable rooted filesystems own precise-versus-reset event semantics. The
@@ -283,21 +288,23 @@ configuration.
 | Subpath                                | Purpose                                                                                   |
 | -------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `@taucad/runtime`                      | Public client surface, connectors, types, error classes.                                  |
-| `@taucad/runtime/kernels`              | Built-in kernel plugin factories (`replicad`, `openscad`, …).                             |
-| `@taucad/runtime/transcoders`          | Format converters (`converter`, …) injected as plugins.                                   |
+| `@taucad/runtime/presets`              | Zero-config built-in kernel, middleware, bundler, and transcoder composition.             |
+| `@taucad/runtime/kernels`              | Bundled kernel factories (`replicad`, `opencascade`, `manifold`, `jscad`, `zoo`, `tau`).  |
+| `@taucad/runtime/transcoder`           | Transcoder authoring API.                                                                 |
 | `@taucad/runtime/transport`            | Author API only: `defineRuntimeTransport`, `runtimeProtocolSchemas`, shared types.        |
 | `@taucad/runtime/transport/in-process` | `inProcessTransport` — same-isolate transport (cross-env).                                |
 | `@taucad/runtime/transport/web`        | `webWorkerTransport` — browser `Worker` host.                                             |
 | `@taucad/runtime/transport/node`       | `nodeWorkerTransport` — `node:worker_threads` host (gated to keep browser bundles clean). |
 | `@taucad/runtime/middleware`           | Built-in middlewares (parameter cache, geometry cache, file resolver).                    |
-| `@taucad/runtime/filesystem`           | `fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, opaque file primitives.                    |
+| `@taucad/runtime/filesystem`           | `fromMemoryFs`, `fromBrowserFs`, bridge factories, and opaque filesystem types.           |
+| `@taucad/runtime/filesystem/node`      | `fromNodeFs` for a host directory confined as the runtime root.                           |
 | `@taucad/runtime/testing`              | `createMockRuntimeClient`, kernel testing utilities.                                      |
 | `@taucad/runtime/node`                 | `createNodeClient` for headless/CLI usage.                                                |
 
 ## Further reading
 
-- Quick start — `apps/ui/content/docs/runtime/getting-started/quick-start.mdx`
-- Live rendering (autonomous loop, `RenderOutcome`, supersession) — `apps/ui/content/docs/runtime/guides/live-rendering.mdx`
-- Embedding in a host (rooted bridge factories and deferred FS binding) — `apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx`
-- Architecture invariants — `docs/architecture/runtime-topology.md`
-- Per-kernel guides — `apps/ui/content/docs/runtime/`
+- [Quick start](https://github.com/taucad/tau/blob/main/apps/ui/content/docs/runtime/getting-started/quick-start.mdx)
+- [Live rendering](https://github.com/taucad/tau/blob/main/apps/ui/content/docs/runtime/guides/live-rendering.mdx) — autonomous loop, `RenderOutcome`, supersession
+- [Embedding in a host](https://github.com/taucad/tau/blob/main/apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx) — rooted bridge factories and deferred filesystem binding
+- [Architecture invariants](https://github.com/taucad/tau/blob/main/docs/architecture/runtime-topology.md)
+- [Per-kernel guides](https://github.com/taucad/tau/tree/main/apps/ui/content/docs/runtime)

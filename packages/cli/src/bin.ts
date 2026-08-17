@@ -8,7 +8,7 @@ const main = defineCommand({
   },
   subCommands: {
     export: async () => {
-      const { exportCommand } = await import('#commands/export.js');
+      const { exportCommand } = await import('./commands/export.js');
       return exportCommand;
     },
   },

@@ -14,11 +14,11 @@ const cliExternals: Array<RegExp | string> = [
   /^@taucad\//,
   'replicad',
   'replicad-opencascadejs',
-  'opencascade.js',
+  'libcascade',
   'manifold-3d',
   '@kittycad/lib',
   'esbuild-wasm',
-  'openscad-wasm-prebuilt',
+  'openrscad-engine',
   'jszip',
 ];
 

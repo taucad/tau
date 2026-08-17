@@ -3,11 +3,11 @@
   "version": "0.0.1",
   "description": "Shared glTF-Transform extensions for Tau CAD topology metadata",
   "type": "module",
-  "private": false,
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/gltf-extensions"
+    "directory": "libs/gltf-extensions"
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

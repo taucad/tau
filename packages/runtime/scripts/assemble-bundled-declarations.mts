@@ -1,7 +1,7 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
-// eslint-disable-next-line no-restricted-imports -- Adjacent build-only metadata has no public runtime alias.
+// oxlint-disable-next-line no-restricted-imports -- Build script consumes adjacent private bundle metadata.
 import { runtimeBundledPackages } from './runtime-bundled-packages.mts';
 
 const declarationPattern = /\.d\.[cm]?ts$/;

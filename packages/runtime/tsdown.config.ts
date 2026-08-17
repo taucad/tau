@@ -2,6 +2,7 @@ import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 // oxlint-disable-next-line no-restricted-imports -- Build config consumes its adjacent declaration assembly hook.
 import { assembleBundledDeclarations } from './scripts/assemble-bundled-declarations.mts';
+// oxlint-disable-next-line no-restricted-imports -- Build config consumes adjacent private bundle metadata.
 import { runtimeBundledPackages } from './scripts/runtime-bundled-packages.mts';
 
 // oxlint-disable-next-line unicorn-js/prefer-export-from -- The local binding also feeds the bundle matcher below.

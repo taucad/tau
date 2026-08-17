@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- Unit test for this adjacent, unexported build script.
 import { rewriteDeclarationImports } from './assemble-bundled-declarations.mts';
-// eslint-disable-next-line no-restricted-imports -- Unit test exercises adjacent build-only metadata.
+// oxlint-disable-next-line no-restricted-imports -- Unit test exercises adjacent private bundle metadata.
 import { runtimeBundledPackages } from './runtime-bundled-packages.mts';
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..');

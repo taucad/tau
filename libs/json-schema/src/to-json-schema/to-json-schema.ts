@@ -334,10 +334,13 @@ class ToJsonSchema {
  * const schema = toJsonSchema({ name: 'Tau', version: 1 });
  * // { type: 'object', properties: { name: { type: 'string' }, version: { type: 'integer' } } }
  * ```
+ *
+ * @public
  */
 export function toJsonSchema(value: unknown, options?: Options): JSONSchema7 {
   const tjs = new ToJsonSchema(options);
   return tjs.getSchema(value);
 }
 
+/** @public */
 export default toJsonSchema;

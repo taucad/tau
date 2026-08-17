@@ -3,11 +3,11 @@
   "version": "0.0.1",
   "description": "Environment-neutral ESM module VM substrate for Tau and GeoSpec",
   "type": "module",
-  "private": false,
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/vm"
+    "directory": "libs/vm"
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

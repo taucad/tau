@@ -29,7 +29,6 @@ import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.
 import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import { reservePreview, triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
-import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import type { WebWorkerId } from '#transport/_internal/web-worker-id.js';
@@ -259,10 +258,7 @@ export const webWorkerClient = (
       // worker used in unit tests never replies. The runtime client
       // will await readiness before issuing any RPC. Production
       // workers reply with `lh` on module load.
-      return {
-        channel,
-        hello: buildHelloPayload(webWorkerId),
-      };
+      return { channel };
     })();
     return openPromise;
   };

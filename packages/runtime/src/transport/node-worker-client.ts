@@ -31,7 +31,6 @@ import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.
 import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import { reservePreview, triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
-import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { nodeWorkerId } from '#transport/_internal/node-worker-id.js';
 import type { NodeWorkerId } from '#transport/_internal/node-worker-id.js';
@@ -225,10 +224,7 @@ export const nodeWorkerClient = (
         sessionKey: runtimeChannelSessionKey,
         protocolSchemas: runtimeProtocolSchemas,
       });
-      return {
-        channel,
-        hello: buildHelloPayload(nodeWorkerId),
-      };
+      return { channel };
     })();
     return openPromise;
   };

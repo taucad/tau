@@ -111,8 +111,7 @@ const client = createRuntimeClient({
 Trusted host code selects an authority route once and supplies a connection factory. The runtime sees only the rooted project's writable local namespace:
 
 ```typescript
-import { openFileSystemBridge } from '@taucad/fs-bridge';
-import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
+import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fileSystem = fromFileSystemBridge(() => openFileSystemBridge(fileManagerWorker, { root: '/projects/widget' }));
 ```

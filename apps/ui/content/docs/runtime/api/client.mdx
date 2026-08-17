@@ -271,8 +271,7 @@ const result = await client.export('glb', {
 import { createRuntimeClient } from '@taucad/runtime';
 import type { runtime } from './runtime.worker';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { openFileSystemBridge } from '@taucad/fs-bridge';
-import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
+import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fsWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
 const fsBridge = openFileSystemBridge(fsWorker);

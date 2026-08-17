@@ -60,6 +60,100 @@ describe('validate-mdx-codeblocks', () => {
     });
   });
 
+  describe('runtime documentation package boundary', () => {
+    it('should reject private bundled-package imports from runtime examples', () => {
+      const privateImports = [
+        '@taucad/converter',
+        '@taucad/events',
+        '@taucad/filesystem',
+        '@taucad/fs-bridge',
+        '@taucad/gltf-extensions',
+        '@taucad/json-schema',
+        '@taucad/memory',
+        '@taucad/rpc',
+        '@taucad/types',
+        '@taucad/units',
+        '@taucad/utils',
+        '@taucad/vm',
+      ]
+        .map((packageName) => `import '${packageName}';`)
+        .join('\n');
+
+      ruleTester.run('validate-mdx-codeblocks', validateMdxCodeblocksRule, {
+        valid: [
+          {
+            name: 'runtime examples import the public runtime filesystem surface',
+            filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
+            code: "```typescript\nimport { openFileSystemBridge } from '@taucad/runtime/filesystem';\n```",
+          },
+          {
+            name: 'non-runtime internal documentation may describe private packages',
+            filename: '/project/apps/ui/content/docs/internal/test.mdx',
+            code: "```typescript\nimport { openFileSystemBridge } from '@taucad/fs-bridge';\n```",
+          },
+          {
+            name: 'comments and ordinary strings are not imports',
+            filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
+            code: "```typescript\n// import '@taucad/events';\nconst example = '@taucad/types';\n```",
+          },
+          {
+            name: 'longer package prefix is not a private package',
+            filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
+            code: "```typescript\nimport '@taucad/types-extra';\n```",
+          },
+        ],
+        invalid: [
+          {
+            name: 'runtime example imports private fs-bridge package',
+            filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
+            code: "```typescript\nimport { openFileSystemBridge } from '@taucad/fs-bridge';\n```",
+            errors: [
+              {
+                messageId: 'privatePackageImport',
+                data: { packageName: '@taucad/fs-bridge' },
+              },
+            ],
+          },
+          {
+            name: 'all canonical bundled packages are private documentation imports',
+            filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
+            code: `\`\`\`typescript\n${privateImports}\n\`\`\``,
+            errors: [
+              '@taucad/converter',
+              '@taucad/events',
+              '@taucad/filesystem',
+              '@taucad/fs-bridge',
+              '@taucad/gltf-extensions',
+              '@taucad/json-schema',
+              '@taucad/memory',
+              '@taucad/rpc',
+              '@taucad/types',
+              '@taucad/units',
+              '@taucad/utils',
+              '@taucad/vm',
+            ].map((packageName) => ({ messageId: 'privatePackageImport', data: { packageName } })),
+          },
+          {
+            name: 'subpaths, exports, dynamic imports, and import types are checked even with ts-nocheck',
+            filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
+            code: `\`\`\`typescript @ts-nocheck
+import type { FileStat } from '@taucad/types/constants';
+export { Topic } from '@taucad/events';
+const rpc = import('@taucad/rpc/channel');
+type Memory = import('@taucad/memory').SharedPool;
+\`\`\``,
+            errors: [
+              { messageId: 'privatePackageImport', data: { packageName: '@taucad/types' } },
+              { messageId: 'privatePackageImport', data: { packageName: '@taucad/events' } },
+              { messageId: 'privatePackageImport', data: { packageName: '@taucad/rpc' } },
+              { messageId: 'privatePackageImport', data: { packageName: '@taucad/memory' } },
+            ],
+          },
+        ],
+      });
+    });
+  });
+
   describe('type error reporting', () => {
     it('should report diagnostics from tsgolint', () => {
       vi.mocked(runTsgolint).mockImplementation((_binary, blocks) => {

@@ -501,6 +501,14 @@ const config = [
   },
 
   {
+    // The MDX boundary rule consumes runtime's canonical private-library tuple.
+    files: ['libs/oxlint/src/rules/validate-mdx-codeblocks.js'],
+    rules: {
+      '@nx/enforce-module-boundaries': 'off',
+    },
+  },
+
+  {
     /*
      * Static `new URL(literal, import.meta.url)` invariant: every WASM/font/plugin
      * chunk shipped from `@taucad/runtime` and `@taucad/openscad` must use a

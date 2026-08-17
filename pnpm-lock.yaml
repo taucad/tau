@@ -2148,7 +2148,11 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
-  libs/oxlint: {}
+  libs/oxlint:
+    dependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
 
   libs/tau-examples:
     devDependencies:

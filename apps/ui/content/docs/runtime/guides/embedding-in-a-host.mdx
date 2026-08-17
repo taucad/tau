@@ -47,8 +47,7 @@ When the host owns a File Manager Worker (the canonical editor pattern), open a 
 import { createRuntimeClient } from '@taucad/runtime';
 import type { runtime } from './runtime.worker';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { openFileSystemBridge } from '@taucad/fs-bridge';
-import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
+import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fileManagerWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
 const fileSystemBridge = openFileSystemBridge(fileManagerWorker);
@@ -109,8 +108,7 @@ Pair `fileSystem` with `filePoolBuffer` when the host has pre-allocated a `Share
 import { createRuntimeClient } from '@taucad/runtime';
 import type { runtime } from './runtime.worker';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { openFileSystemBridge } from '@taucad/fs-bridge';
-import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
+import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fileManagerWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
 const fileSystemBridge = openFileSystemBridge(fileManagerWorker);

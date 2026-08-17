@@ -35,7 +35,7 @@ Use `defineKernel` with a single config object. The helper returns a callable pl
 
 ```typescript
 import { defineKernel, createKernelSuccess, createKernelError } from '@taucad/runtime';
-import type { GeometryResponse } from '@taucad/types';
+import type { GeometryResponse } from '@taucad/runtime/types';
 import { z } from 'zod';
 
 type MyContext = {
@@ -165,7 +165,7 @@ Return all file paths that affect the geometry. The framework uses this for chan
 
 ```typescript
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
-import { resolveImportPath } from '@taucad/utils/import';
+import { resolveImportPath } from '@taucad/runtime/kernel';
 
 function parseImports(code: string): string[] {
   const out: string[] = [];
@@ -209,7 +209,7 @@ Extract parameters and a JSON Schema for UI generation:
 
 ```typescript
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
-import type { JSONSchema7 } from '@taucad/json-schema';
+import type { JSONSchema7 } from '@taucad/runtime/types';
 import { createKernelSuccess } from '@taucad/runtime';
 
 const PARAM_RE = /^export\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*(\d+(?:\.\d+)?|true|false|"[^"]*")\s*;?/gm;

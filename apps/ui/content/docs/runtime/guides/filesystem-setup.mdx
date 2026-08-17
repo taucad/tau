@@ -143,31 +143,13 @@ Every method accepts a [runtime path](../concepts/path-namespaces) within the su
 
 ### 7. Use Filesystem Bridges for Cross-Worker Communication
 
-When the filesystem owns a **`Worker`** (**`exposeFileSystem`** there) and the client runs in another isolate, pass a factory to **`fromFileSystemBridge(openConnection)`** from **`@taucad/runtime/filesystem`**. For a persisted project, the factory calls **`openFileSystemBridge(worker, { root: '/projects/<id>' })`** from **`@taucad/fs-bridge`** so every runtime binding or retry gets a fresh rooted connection. Use **`createFileSystemBridge(worker)`** plus **`createFileSystemBridgeProxy<T>(bridge)`** when the current isolate needs to call filesystem methods directly.
-
-For the inverse pattern — you host handler objects in-process and hand a port to a worker that will call you — use **`createBridgePort(handlers)`** from **`@taucad/rpc/bridge`**, which returns **`BridgePort`** (`raw` **`MessagePort`**) for **`postMessage(..., [port])`**.
-
-```typescript
-import { createBridgePort } from '@taucad/rpc/bridge';
-import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-
-const fileSystem = fromNodeFs('/path/to/project');
-const { port, dispose } = createBridgePort(fileSystem);
-
-const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-worker.postMessage({ port }, [port]);
-
-const cleanup = () => {
-  worker.terminate();
-  dispose();
-};
-```
+When the filesystem owns a **`Worker`** (**`exposeFileSystem`** there) and the client runs in another isolate, pass a factory to **`fromFileSystemBridge(openConnection)`** from **`@taucad/runtime/filesystem`**. For a persisted project, the factory calls **`openFileSystemBridge(worker, { root: '/projects/<id>' })`** from the same public runtime subpath so every runtime binding or retry gets a fresh rooted connection. Use **`createFileSystemBridge(worker)`** plus **`createFileSystemBridgeProxy<T>(bridge)`** when the current isolate needs to call filesystem methods directly.
 
 **`openFileSystemBridge(worker, options?)`** -- Creates a **`MessageChannel`**, posts the server end to the FS worker, and returns a raw transferable filesystem bridge connection for another consumer such as runtime.
 
 **`createFileSystemBridge(worker, options?)`** -- Creates a **`MessageChannel`**, posts the server end to the FS worker, returns **`FileSystemBridge`** with a **`wrapMessagePort`**-backed **`port`** for same-isolate **`createFileSystemBridgeProxy`**.
 
-**`exposeFileSystem(handlers, options?)`** -- Worker-side counterpart from **`@taucad/fs-bridge`**; listens for the filesystem bridge connect envelope.
+**`exposeFileSystem(handlers, options?)`** -- Worker-side counterpart from **`@taucad/runtime/filesystem`**; listens for the filesystem bridge connect envelope.
 
 Call `dispose()` on either handle when the bridge is no longer needed.
 

@@ -185,8 +185,7 @@ The host page owns a kernel `Worker` and a file-manager `Worker`. The transport 
 import { createRuntimeClient } from '@taucad/runtime';
 import type { runtime } from './runtime.worker';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { openFileSystemBridge } from '@taucad/fs-bridge';
-import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
+import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fmWorker = new Worker(new URL('./fm-worker.ts', import.meta.url), { type: 'module' });
 const fsBridge = openFileSystemBridge(fmWorker);

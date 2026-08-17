@@ -66,6 +66,20 @@ function normalizeToolInput(toolName: string, args: Record<string, unknown>): Re
   return normalized.input;
 }
 
+const hasDuplicateToolCallId = (toolCalls: readonly ToolCall[]): boolean => {
+  const seen = new Set<string>();
+  for (const call of toolCalls) {
+    if (!call.id) {
+      continue;
+    }
+    if (seen.has(call.id)) {
+      return true;
+    }
+    seen.add(call.id);
+  }
+  return false;
+};
+
 /**
  * Eagerly dispatches `StructuredTool.invoke` once per tool call when streamed args are sealed (opening a
  * new Anthropic-style tool block implies prior blocks are stopped) or on `handleLLMEnd` terminal
@@ -176,6 +190,10 @@ export class EagerToolDispatchHandler extends BaseCallbackHandler implements Wri
     } else if (AIMessage.isInstance(terminalMessage)) {
       toolCalls = terminalMessage.tool_calls ?? [];
     } else {
+      return;
+    }
+
+    if (hasDuplicateToolCallId(toolCalls)) {
       return;
     }
 

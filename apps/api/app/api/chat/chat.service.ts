@@ -23,6 +23,7 @@ import { createAgentIterationsMiddleware } from '#api/chat/middleware/agent-iter
 import { MetricsService } from '#telemetry/metrics.js';
 import { AttributeKey } from '@taucad/telemetry';
 import { toolErrorHandlerMiddleware } from '#api/chat/middleware/tool-error-handler.middleware.js';
+import { createToolCallIdentityMiddleware } from '#api/chat/middleware/tool-call-identity.middleware.js';
 import { createToolInputCompatibilityMiddleware } from '#api/chat/middleware/tool-input-compatibility.middleware.js';
 import { createProviderDiagnosticsMiddleware } from '#api/chat/middleware/provider-diagnostics.middleware.js';
 import { createCachedSystemMessage } from '#api/chat/utils/create-cached-system-message.js';
@@ -170,6 +171,7 @@ export class ChatService {
       store,
       middleware: [
         // --- Metrics and error handling ---
+        createToolCallIdentityMiddleware(),
         createToolMetricsMiddleware(this.metricsService),
         toolErrorHandlerMiddleware,
         createToolInputCompatibilityMiddleware(this.metricsService),

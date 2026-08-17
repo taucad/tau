@@ -20,7 +20,6 @@ import {
   extractTargetFile,
   identicalCallReminder,
   identicalErrorReminder,
-  noForwardProgressReminder,
   perTargetEditReminder,
   pingPongReminder,
   sameErrorDifferentArgsReminder,
@@ -252,6 +251,29 @@ describe('summarizeMessages', () => {
     expect(summarizeMessages(glob)[0]?.isEmptyResult).toBe(true);
     expect(summarizeMessages(web)[0]?.isEmptyResult).toBe(true);
   });
+
+  it('should mark untrusted argument evidence with a concrete reason', () => {
+    const duplicateRoundId = 'duplicate_round_id';
+    const missingIdToolMessageId = 'provider_repaired_missing_id';
+    const events = summarizeMessages([
+      successMessage({ toolCallId: 'orphan', toolName: toolName.createFile }),
+      aiCallMessage([
+        { id: duplicateRoundId, name: toolName.createFile, args: { targetFile: 'a.ts' } },
+        { id: duplicateRoundId, name: toolName.createFile, args: { targetFile: 'b.ts' } },
+      ]),
+      successMessage({ toolCallId: duplicateRoundId, toolName: toolName.createFile }),
+      aiCallMessage([{ id: '', name: toolName.createFile, args: { targetFile: 'c.ts' } }]),
+      successMessage({ toolCallId: missingIdToolMessageId, toolName: toolName.createFile }),
+    ]);
+
+    expect(events.map((event) => event.unknownArgsReason)).toEqual([
+      'orphan-tool-message',
+      'duplicate-tool-call-id',
+      'missing-tool-call',
+    ]);
+    expect(events.every((event) => event.argsKnown === false)).toBe(true);
+    expect(events.every((event) => event.argsHash === undefined)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -265,7 +287,6 @@ describe('reminder templates (CS3 byte-determinism)', () => {
     perTargetEditReminder({ targetFile: 'main.scad', count: 5 }),
     pingPongReminder({ toolA: 'read_file', toolB: 'edit_file' }),
     emptyResultReminder({ toolName: 'grep', argsPreview: '{"pattern":"x"}', count: 3 }),
-    noForwardProgressReminder({ count: 8 }),
     sameErrorDifferentArgsReminder({
       toolName: 'test_model',
       errorCode: 'TOOL_EXECUTION_ERROR',
@@ -349,6 +370,21 @@ describe('identicalErrorDetector (AP1)', () => {
     ];
     expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
   });
+
+  it('should not treat unknown arguments as identical error arguments', () => {
+    const messages: BaseMessage[] = [];
+    for (let i = 0; i < 3; i++) {
+      messages.push(
+        errorMessage({
+          toolCallId: `orphan_error_${i}`,
+          toolName: toolName.testModel,
+          message: 'kernel:error',
+        }),
+      );
+    }
+
+    expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -374,6 +410,43 @@ describe('identicalCallDetector (AP2)', () => {
       messages.push(...successPair({ toolName: toolName.readFile, args: { path: 'main.scad' } }));
     }
     messages.push(...successPair({ toolName: toolName.readFile, args: { path: 'other.scad' } }));
+    expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
+  });
+
+  it('should not treat orphan tool messages as repeated null-argument calls', () => {
+    const messages: BaseMessage[] = [];
+    for (let i = 0; i < 5; i++) {
+      messages.push(
+        successMessage({
+          toolCallId: `orphan_create_${i}`,
+          toolName: toolName.createFile,
+          payload: { message: `File created: file_${i}.ts` },
+        }),
+      );
+    }
+
+    expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
+  });
+
+  it('should structurally pair repeated historical tool-call ids instead of overwriting args globally', () => {
+    const messages: BaseMessage[] = [];
+    for (let i = 0; i < 5; i++) {
+      messages.push(
+        aiCallMessage([
+          {
+            name: toolName.createFile,
+            args: { targetFile: `file_${i}.ts`, content: `export const value${i} = ${i};` },
+            id: 'historical_duplicate_id',
+          },
+        ]),
+        successMessage({
+          toolCallId: 'historical_duplicate_id',
+          toolName: toolName.createFile,
+          payload: { message: `File created: file_${i}.ts` },
+        }),
+      );
+    }
+
     expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
   });
 });
@@ -412,6 +485,23 @@ describe('perTargetEditDetector (AP3)', () => {
     expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
   });
 
+  it('should clear when a successful test_model run verifies the edited target', () => {
+    const messages: BaseMessage[] = [];
+    for (let i = 0; i < 4; i++) {
+      messages.push(...successPair({ toolName: toolName.editFile, args: { targetFile: 'main.ts', diff: `v${i}` } }));
+    }
+    messages.push(
+      ...successPair({
+        toolName: toolName.testModel,
+        args: { files: ['main.ts'] },
+        payload: { success: true, failures: [], passed: 2, total: 2, files: ['main.ts'] },
+      }),
+    );
+    messages.push(...successPair({ toolName: toolName.editFile, args: { targetFile: 'main.ts', diff: 'v-final' } }));
+
+    expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
+  });
+
   it('should not fire when edits are spread across different files', () => {
     const messages: BaseMessage[] = [];
     for (let i = 0; i < 5; i++) {
@@ -443,6 +533,17 @@ describe('pingPongDetector (AP4)', () => {
     for (let i = 0; i < 4; i++) {
       messages.push(...successPair({ toolName: toolName.readFile, args: { path: 'main.scad' } }));
     }
+    expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
+  });
+
+  it('should not treat alternating unknown arguments as a stable ping-pong loop', () => {
+    const messages: BaseMessage[] = [
+      successMessage({ toolCallId: 'orphan_edit_1', toolName: toolName.editFile }),
+      successMessage({ toolCallId: 'orphan_test_1', toolName: toolName.testModel }),
+      successMessage({ toolCallId: 'orphan_edit_2', toolName: toolName.editFile }),
+      successMessage({ toolCallId: 'orphan_test_2', toolName: toolName.testModel }),
+    ];
+
     expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
   });
 });
@@ -490,31 +591,44 @@ describe('emptyResultDetector (AP5)', () => {
     ];
     expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
   });
+
+  it('should not treat empty results with unknown arguments as repeated identical empty calls', () => {
+    const messages: BaseMessage[] = [];
+    for (let i = 0; i < 3; i++) {
+      messages.push(
+        successMessage({
+          toolCallId: `orphan_grep_${i}`,
+          toolName: toolName.grep,
+          payload: { matches: [], totalMatches: 0 },
+        }),
+      );
+    }
+
+    expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
+  });
 });
 
 // ---------------------------------------------------------------------------
-// AP6: noForwardProgressDetector
+// AP6: no-forward-progress default-chain contract
 // ---------------------------------------------------------------------------
 
-describe('noForwardProgressDetector (AP6)', () => {
-  const detector = findDetector(anomalyPattern.noForwardProgress);
+describe('default detector chain no-forward-progress contract (AP6)', () => {
+  it('should not include noForwardProgress as a default nudge detector', () => {
+    expect(buildDefaultDetectors().map((detector) => detector.pattern)).not.toContain(anomalyPattern.noForwardProgress);
+  });
 
-  it('should nudge after 8 consecutive read-only tool calls', () => {
+  it('should not report read-only investigation sequences through any default detector', () => {
     const messages: BaseMessage[] = [];
     for (let i = 0; i < 8; i++) {
       messages.push(...successPair({ toolName: toolName.readFile, args: { path: `file_${i}.scad` } }));
     }
-    const result = evaluateDetector(detector, messages) as { kind: string };
-    expect(result.kind).toBe('nudge');
-  });
+    const events = summarizeMessages(messages);
 
-  it('should clear if any of the last 8 calls is a mutation', () => {
-    const messages: BaseMessage[] = [];
-    for (let i = 0; i < 7; i++) {
-      messages.push(...successPair({ toolName: toolName.readFile, args: { path: `file_${i}.scad` } }));
-    }
-    messages.push(...successPair({ toolName: toolName.editFile, args: { targetFile: 'main.scad', diff: 'x' } }));
-    expect(evaluateDetector(detector, messages)).toEqual({ kind: 'clear' });
+    const detection = buildDefaultDetectors()
+      .map((detector) => detector.evaluate(events, baseState()))
+      .find((result) => result.kind !== 'clear');
+
+    expect(detection).toBeUndefined();
   });
 });
 
@@ -594,7 +708,6 @@ describe('defaultThresholds', () => {
       perTargetEdit: 5,
       pingPongCycles: 2,
       emptyResult: 3,
-      noForwardProgress: 8,
       sameErrorDifferentArgsCount: 5,
       sameErrorDifferentArgsWindow: 8,
       sameErrorDifferentArgsDistinctArgs: 2,
@@ -701,9 +814,14 @@ describe('createAgentSafeguardsMiddleware', () => {
         role: 'safeguard',
         pattern: anomalyPattern.identicalError,
         action: 'nudge',
+        argsKnown: true,
+        toolNames: [toolName.testModel],
+        eventCount: 3,
       });
       expect(typeof parsed['signature']).toBe('string');
       expect(typeof parsed['timestamp']).toBe('string');
+      expect(typeof parsed['reminderPreview']).toBe('string');
+      expect((parsed['reminderPreview'] as string).length).toBeLessThanOrEqual(200);
     });
 
     it('dedupes by signature: a second invocation does NOT re-fire the same nudge', () => {
@@ -733,6 +851,20 @@ describe('createAgentSafeguardsMiddleware', () => {
       const result = callBeforeModel(middleware, state, { context: { chatId: 'chat-1' } });
       expect(result).toEqual({});
       expect(metricsService.genAiAgentSafeguardInterventions.add).not.toHaveBeenCalled();
+    });
+
+    it('does not inject a default nudge for read-only investigation sequences', () => {
+      const middleware = createAgentSafeguardsMiddleware(metricsService, chatRpcService);
+      const messages: BaseMessage[] = [new HumanMessage('audit this without editing yet')];
+      for (let i = 0; i < 8; i++) {
+        messages.push(...successPair({ toolName: toolName.readFile, args: { path: `file_${i}.ts` } }));
+      }
+
+      const result = callBeforeModel(middleware, { ...baseState(), messages }, { context: { chatId: 'chat-1' } });
+
+      expect(result).toEqual({});
+      expect(metricsService.genAiAgentSafeguardInterventions.add).not.toHaveBeenCalled();
+      expect(chatRpcService.sendRpcRequest).not.toHaveBeenCalled();
     });
   });
 
@@ -894,6 +1026,7 @@ describe('public type surface', () => {
     const event: ToolEventSummary = {
       index: 0,
       toolName: 'noop',
+      argsKnown: true,
       argsHash: '0',
       argsPreview: '{}',
       isError: false,

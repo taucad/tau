@@ -4,6 +4,7 @@ import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { tool } from '@langchain/core/tools';
 import { createAgent, FakeToolCallingModel } from 'langchain';
 import { z } from 'zod';
+import { createToolCallIdentityMiddleware } from '#api/chat/middleware/tool-call-identity.middleware.js';
 
 /**
  * Builds a deterministic `createAgent` (the production agent constructor) whose first
@@ -37,6 +38,7 @@ function buildParallelAgent(): ReturnType<typeof createAgent> {
   return createAgent({
     model: llm,
     tools: [lookupCity, lookupWeather],
+    middleware: [createToolCallIdentityMiddleware()],
   });
 }
 
@@ -71,6 +73,98 @@ describe('LangGraph parallel tool dispatch', () => {
 
     const toolCallIds = toolMessages.map((message) => message.tool_call_id).sort();
     expect(toolCallIds).toEqual(['call_city', 'call_weather']);
+  });
+
+  it('rejects duplicate tool-call ids before invoking any side-effectful tools', async () => {
+    let invocationCount = 0;
+
+    const lookupCity = tool(
+      async ({ name }: { name: string }) => {
+        invocationCount += 1;
+        return `city:${name}`;
+      },
+      {
+        name: 'lookup_city',
+        description: 'Look up a city by name.',
+        schema: z.object({ name: z.string() }),
+      },
+    );
+
+    const lookupWeather = tool(
+      async ({ name }: { name: string }) => {
+        invocationCount += 1;
+        return `weather:${name}`;
+      },
+      {
+        name: 'lookup_weather',
+        description: 'Look up weather by city name.',
+        schema: z.object({ name: z.string() }),
+      },
+    );
+
+    const llm = new FakeToolCallingModel({
+      toolCalls: [
+        [
+          { id: 'duplicate_call_id', name: 'lookup_city', args: { name: 'sf' } },
+          { id: 'duplicate_call_id', name: 'lookup_weather', args: { name: 'sf' } },
+        ],
+        [],
+      ],
+    });
+
+    const agent = createAgent({
+      model: llm,
+      tools: [lookupCity, lookupWeather],
+      middleware: [createToolCallIdentityMiddleware()],
+    });
+
+    let thrown: unknown;
+    try {
+      await agent.invoke({ messages: [new HumanMessage('Run duplicate tools')] }, { recursionLimit: 10 });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error | undefined)?.message).toMatch(/duplicate/i);
+    expect(invocationCount).toBe(0);
+  });
+
+  it('rejects missing tool-call ids before invoking any side-effectful tools', async () => {
+    let invocationCount = 0;
+
+    const lookupCity = tool(
+      async ({ name }: { name: string }) => {
+        invocationCount += 1;
+        return `city:${name}`;
+      },
+      {
+        name: 'lookup_city',
+        description: 'Look up a city by name.',
+        schema: z.object({ name: z.string() }),
+      },
+    );
+
+    const llm = new FakeToolCallingModel({
+      toolCalls: [[{ name: 'lookup_city', args: { name: 'sf' } }], []],
+    });
+
+    const agent = createAgent({
+      model: llm,
+      tools: [lookupCity],
+      middleware: [createToolCallIdentityMiddleware()],
+    });
+
+    let thrown: unknown;
+    try {
+      await agent.invoke({ messages: [new HumanMessage('Run missing-id tool')] }, { recursionLimit: 10 });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error | undefined)?.message).toMatch(/tool.?call id|missing/i);
+    expect(invocationCount).toBe(0);
   });
 
   // Documents an upstream off-by-one in @langchain/langgraph 1.1.5
@@ -113,6 +207,7 @@ describe('LangGraph parallel tool dispatch', () => {
     const agent = createAgent({
       model: llm,
       tools: [readFile],
+      middleware: [createToolCallIdentityMiddleware()],
     });
 
     const result = (await agent.invoke(

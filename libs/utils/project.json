@@ -1,7 +1,7 @@
 {
   "name": "utils",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/utils",
+  "sourceRoot": "libs/utils",
   "projectType": "library",
   "tags": ["scope:shared", "type:lib"]
 }

@@ -4,36 +4,32 @@ This file lists all third-party dependencies used by Tau and their respective li
 
 ## Licensing Overview
 
-Tau source is **[MIT-licensed](./license)**. The MIT license applies to all
-files authored by the Tau project.
+Tau source is licensed per directory. The repository root and published perimeter
+packages are **[Apache-2.0](./license)**; the applications and their
+app libraries are AGPL-3.0-only; the GeoSpec engine is fair source under
+FSL-1.1-Apache-2.0, converting to Apache-2.0 two years after each release.
+Routing map: **[LICENSING.md](./LICENSING.md)**.
 
 Some third-party dependencies impose additional obligations on **combined
 distributions** that include them:
 
-- **`openscad-wasm-prebuilt` (GPL-2.0-or-later)** — Bundled exclusively by
-  the standalone `@taucad/openscad` package, which is itself published under
-  GPL-2.0-or-later for license clarity. A distribution that includes
-  `@taucad/openscad` is a GPL-2.0-or-later combined work; source must be
-  available (it is, at https://github.com/taucad/tau) and the GPL license
-  text must accompany the OpenSCAD WASM.
 - **LGPL-2.1 / LGPL-3.0 libraries** (see sections below) — Library-style
   copyleft; satisfied by attribution and source availability.
 
-Distributions that exclude `@taucad/openscad` carry no GPL obligation.
-
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-07-06*
+*Generated on 2026-08-17*
 
 ## Summary
 
 | License | Count |
 |---------|-------|
 | (MIT OR GPL-3.0-or-later) | 1 |
-| GPL-2.0-or-later | 1 |
+| AGPL-3.0-only | 1 |
+| LGPL-2.1 | 1 |
 | LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 | 1 |
 | Apache 2.0 | 1 |
-| Apache-2.0 | 40 |
+| Apache-2.0 | 57 |
 | (MIT OR CC0-1.0) | 1 |
 | 0BSD | 1 |
 | BlueOak-1.0.0 | 1 |
@@ -44,9 +40,9 @@ By using Tau, you agree to comply with the license terms of all included depende
 | MPL-2.0 | 1 |
 | SEE LICENSE IN LICENSE | 1 |
 | SIL OPEN FONT LICENSE | 1 |
-| UNKNOWN | 5 |
+| UNKNOWN | 3 |
 | Unlicense | 2 |
-| MIT | 255 |
+| MIT | 258 |
 
 ## (MIT OR GPL-3.0-or-later)
 
@@ -54,21 +50,28 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 - **jszip** v3.10.1 — [Repository](https://github.com/Stuk/jszip)
 
-## GPL-2.0-or-later
+## AGPL-3.0-only
 
-> **GPL-2.0-or-later License Notice**
+> **AGPL-3.0 License Notice**
 >
-> A distribution of Tau that includes this component is a GPL-2.0-or-later
-> combined work. To comply:
+> This component is licensed under AGPL-3.0-only. Source is available at
+> https://github.com/taucad/tau, and the component ships with the AGPL text
+> plus Tau's applicable Section 7 additional permission.
 >
-> - **Make source available** — the Tau source is published at https://github.com/taucad/tau
-> - **Ship the GPL license text** alongside the bundled WASM/binary
->
-> Distributions that exclude this component carry no GPL obligation.
->
-> Full license text: https://www.gnu.org/licenses/gpl-2.0.html
+> Full license text: https://www.gnu.org/licenses/agpl-3.0.html
 
-- **openscad-wasm-prebuilt** v1.2.0 — [Repository](https://github.com/lorenzowritescode/openscad-wasm)
+- **@taucad/chat** v0.1.0
+
+## LGPL-2.1
+
+> **LGPL License Notice**
+>
+> Library-style copyleft. Tau consumes these packages as libraries; the LGPL
+> obligation is satisfied by attribution and source availability.
+>
+> Source for Tau forks of LGPL libraries is available at: https://github.com/taucad
+
+- **occt-import-js** v0.0.23 — [Repository](https://github.com/kovacsv/occt-import-js)
 
 ## LGPL-2.1-only WITH Open-CASCADE-Exception-1.0
 
@@ -79,7 +82,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 >
 > Source for Tau forks of LGPL libraries is available at: https://github.com/taucad
 
-- **@taucad/opencascade.js** v3.0.0-beta.3 — [Repository](https://github.com/taucad/opencascade.js)
+- **libcascade** v3.0.2 — [Repository](https://github.com/taucad/opencascade.js)
 
 ## Apache 2.0
 
@@ -112,6 +115,21 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@rjsf/core** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
 - **@rjsf/utils** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
 - **@rjsf/validator-ajv8** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
+- **@taucad/converter** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/events** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/filesystem** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/fs-bridge** v0.0.1 — [Repository](https://github.com/taucad/tau)
+- **@taucad/gltf-extensions** v0.0.1 — [Repository](https://github.com/taucad/tau)
+- **@taucad/json-schema** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/memory** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/oxlint** v0.1.0
+- **@taucad/react** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/rpc** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/runtime** v0.1.0-beta.1 — [Repository](https://github.com/taucad/tau)
+- **@taucad/types** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/units** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/utils** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taucad/vm** v0.0.1 — [Repository](https://github.com/taucad/tau)
 - **@traceloop/instrumentation-langchain** v0.22.6 — [Repository](https://github.com/traceloop/openllmetry-js)
 - **@typescript/native-preview** v7.0.0-dev.20260223.1 — [Repository](https://github.com/microsoft/typescript-go)
 - **ai** v6.0.208 — [Repository](https://github.com/vercel/ai)
@@ -119,10 +137,12 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **chrome-launcher** v1.2.1 — [Repository](https://github.com/GoogleChrome/chrome-launcher/)
 - **class-variance-authority** v0.7.1 — [Repository](https://github.com/joe-bell/cva)
 - **comlink** v4.4.2 — [Repository](https://github.com/GoogleChromeLabs/comlink)
+- **draco3dgltf** v1.5.7 — [Repository](https://github.com/google/draco)
 - **drizzle-orm** v0.45.2 — [Repository](https://github.com/drizzle-team/drizzle-orm)
 - **fake-indexeddb** v6.2.5 — [Repository](https://github.com/dumbmatter/fakeIndexedDB)
 - **lighthouse** v13.4.0 — [Repository](https://github.com/GoogleChrome/lighthouse)
 - **manifold-3d** v3.3.2 — [Repository](https://github.com/elalish/manifold)
+- **nanoraster** v0.2.0 — [Repository](https://github.com/taucad/nanoraster)
 - **openai** v4.104.0 — [Repository](https://github.com/openai/openai-node)
 - **pdf-parse** v2.4.5 — [Repository](https://github.com/mehmet-kozan/pdf-parse)
 - **reflect-metadata** v0.2.2 — [Repository](https://github.com/rbuckton/reflect-metadata)
@@ -144,7 +164,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 ## BlueOak-1.0.0
 
-- **minimatch** v10.2.5 — [Repository](https://github.com/isaacs/minimatch)
+- **minimatch** v10.2.6 — [Repository](https://github.com/isaacs/minimatch)
 
 ## BSD-2-Clause
 
@@ -187,9 +207,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 - **@better-auth-ui/core** v1.6.15 — [Repository](https://github.com/better-auth-ui/better-auth-ui)
 - **@better-auth-ui/react** v1.6.15 — [Repository](https://github.com/better-auth-ui/better-auth-ui)
-- **@taucad/chat** v0.1.0
 - **@taucad/kcl-wasm-lib** v0.1.148 — [Repository](https://github.com/taucad/modeling-app)
-- **@taucad/oxlint** v0.1.0
 
 ## Unlicense
 
@@ -200,6 +218,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 - **@arethetypeswrong/cli** v0.18.3 — [Repository](https://github.com/arethetypeswrong/arethetypeswrong.github.io)
 - **@better-auth/api-key** v1.6.19 — [Repository](https://github.com/better-auth/better-auth)
+- **@better-auth/stripe** v1.6.26 — [Repository](https://github.com/better-auth/better-auth)
 - **@eslint-community/eslint-plugin-eslint-comments** v4.7.2 — [Repository](https://github.com/eslint-community/eslint-plugin-eslint-comments)
 - **@fastify/cookie** v11.0.2 — [Repository](https://github.com/fastify/fastify-cookie)
 - **@fastify/cors** v11.2.0 — [Repository](https://github.com/fastify/fastify-cors)
@@ -219,13 +238,14 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@langchain/classic** v1.0.36 — [Repository](https://github.com/langchain-ai/langchainjs)
 - **@langchain/community** v1.1.29 — [Repository](https://github.com/langchain-ai/langchainjs-community)
 - **@langchain/core** v1.2.0 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/google-vertexai** v2.1.33 — [Repository](https://github.com/langchain-ai/langchainjs)
+- **@langchain/google-vertexai** v2.2.0 — [Repository](https://github.com/langchain-ai/langchainjs)
 - **@langchain/langgraph** v1.4.4 — [Repository](https://github.com/langchain-ai/langgraphjs)
 - **@langchain/langgraph-checkpoint** v1.1.2 — [Repository](https://github.com/langchain-ai/langgraphjs)
 - **@langchain/langgraph-checkpoint-postgres** v1.0.3 — [Repository](https://github.com/langchain-ai/langgraphjs)
 - **@langchain/ollama** v1.3.0 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/openai** v1.5.1 — [Repository](https://github.com/langchain-ai/langchainjs)
+- **@langchain/openai** v1.5.3 — [Repository](https://github.com/langchain-ai/langchainjs)
 - **@langchain/tavily** v1.2.0 — [Repository](https://github.com/langchain-ai/langchainjs)
+- **@langchain/xai** v1.4.3 — [Repository](https://github.com/langchain-ai/langchainjs)
 - **@monaco-editor/react** v4.7.0 — [Repository](https://github.com/suren-atoyan/monaco-react)
 - **@morphllm/morphsdk** v0.2.180
 - **@nestjs/common** v11.1.27 — [Repository](https://github.com/nestjs/nest)
@@ -278,10 +298,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@tanstack/react-query** v5.101.0 — [Repository](https://github.com/TanStack/query)
 - **@tanstack/react-table** v8.21.3 — [Repository](https://github.com/TanStack/table)
 - **@tanstack/react-virtual** v3.14.3 — [Repository](https://github.com/TanStack/virtual)
-- **@taucad/filesystem** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/json-schema** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/runtime** v0.1.0-beta.1 — [Repository](https://github.com/taucad/tau)
-- **@taucad/utils** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taulabs/assimpjs** v0.0.19 — [Repository](https://github.com/taucad/assimpjs)
 - **@taulabs/replicad** v0.23.4-beta.2 — [Repository](https://github.com/taucad/replicad)
 - **@taulabs/replicad-opencascadejs** v0.23.0-beta.0 — [Repository](https://github.com/taucad/replicad)
 - **@testing-library/jest-dom** v6.6.3 — [Repository](https://github.com/testing-library/jest-dom)
@@ -302,7 +319,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@types/draco3dgltf** v1.4.3 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
 - **@types/emscripten** v1.41.5 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
 - **@types/express** v5.0.6 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/hast** v3.0.4 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/hast** v3.0.5 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
 - **@types/ioredis-mock** v8.2.7 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
 - **@types/js-yaml** v4.0.9 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
 - **@types/jsdom** v21.1.7 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
@@ -340,11 +357,11 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **dockview-react** v6.6.1 — [Repository](https://github.com/mathuo/dockview)
 - **drizzle-kit** v0.31.10 — [Repository](https://github.com/drizzle-team/drizzle-orm)
 - **electron** v36.9.5 — [Repository](https://github.com/electron/electron)
-- **electron-vite** v4.0.1 — [Repository](https://github.com/alex8088/electron-vite)
+- **electron-vite** v5.0.0 — [Repository](https://github.com/alex8088/electron-vite)
 - **embla-carousel-react** v8.6.0 — [Repository](https://github.com/davidjerleke/embla-carousel)
 - **error-stack-parser** v2.1.4 — [Repository](https://github.com/stacktracejs/error-stack-parser)
 - **es-cookie** v1.5.0 — [Repository](https://github.com/theodorejb/es-cookie)
-- **es-module-lexer** v2.1.0 — [Repository](https://github.com/guybedford/es-module-lexer)
+- **es-module-lexer** v2.3.1 — [Repository](https://github.com/guybedford/es-module-lexer)
 - **esbuild** v0.27.7 — [Repository](https://github.com/evanw/esbuild)
 - **esbuild-wasm** v0.27.7 — [Repository](https://github.com/evanw/esbuild)
 - **eslint** v9.32.0 — [Repository](https://github.com/eslint/eslint)
@@ -368,7 +385,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **ink** v6.8.0 — [Repository](https://github.com/vadimdemedes/ink)
 - **ioredis** v5.11.1 — [Repository](https://github.com/luin/ioredis)
 - **ioredis-mock** v8.13.1 — [Repository](https://github.com/stipsan/ioredis-mock)
-- **js-yaml** v4.2.0 — [Repository](https://github.com/nodeca/js-yaml)
+- **js-yaml** v4.3.0 — [Repository](https://github.com/nodeca/js-yaml)
 - **jsdom** v26.0.0 — [Repository](https://github.com/jsdom/jsdom)
 - **json-rpc-2.0** v1.7.1 — [Repository](https://github.com/shogowada/json-rpc-2.0)
 - **json-schema-default** v1.0.2 — [Repository](https://github.com/mdornseif/json-schema-default)
@@ -384,7 +401,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **nanoid** v5.1.14 — [Repository](https://github.com/ai/nanoid)
 - **nestjs-pino** v4.6.1 — [Repository](https://github.com/iamolegga/nestjs-pino)
 - **nestjs-zod** v5.4.0 — [Repository](https://github.com/BenLorantfy/nestjs-zod)
-- **next** v16.2.9 — [Repository](https://github.com/vercel/next.js)
+- **next** v16.3.0 — [Repository](https://github.com/vercel/next.js)
 - **nx** v22.7.1 — [Repository](https://github.com/nrwl/nx)
 - **ollama** v0.5.18 — [Repository](https://github.com/ollama/ollama-js)
 - **oxfmt** v0.36.0 — [Repository](https://github.com/oxc-project/oxc)
@@ -415,7 +432,8 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **remark-parse** v11.0.0 — [Repository](https://github.com/remarkjs/remark/tree/main/packages/remark-parse)
 - **remark-rehype** v11.1.2 — [Repository](https://github.com/remarkjs/remark-rehype)
 - **remix-themes** v2.0.4 — [Repository](https://github.com/abereghici/remix-themes)
-- **rolldown** v1.0.0-rc.17 — [Repository](https://github.com/rolldown/rolldown)
+- **rhino3dm** v8.17.0 — [Repository](https://github.com/mcneel/rhino3dm)
+- **rolldown** v1.2.3 — [Repository](https://github.com/rolldown/rolldown)
 - **rollup-plugin-visualizer** v6.0.11 — [Repository](https://github.com/btd/rollup-plugin-visualizer)
 - **safe-regex** v2.1.1 — [Repository](https://github.com/davisjam/safe-regex)
 - **shiki** v3.23.0 — [Repository](https://github.com/shikijs/shiki)
@@ -423,14 +441,17 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **socket.io** v4.8.3 — [Repository](https://github.com/socketio/socket.io)
 - **socket.io-client** v4.8.3 — [Repository](https://github.com/socketio/socket.io)
 - **sonner** v2.0.7 — [Repository](https://github.com/emilkowalski/sonner)
+- **strip-literal** v3.1.0 — [Repository](https://github.com/antfu/strip-literal)
+- **stripe** v22.4.0 — [Repository](https://github.com/stripe/stripe-node)
+- **svg-sprite** v2.0.4 — [Repository](https://github.com/svg-sprite/svg-sprite)
 - **tailwind-merge** v3.6.0 — [Repository](https://github.com/dcastil/tailwind-merge)
 - **tailwind-scrollbar** v4.0.2 — [Repository](https://github.com/adoxography/tailwind-scrollbar)
-- **tailwindcss** v4.3.1 — [Repository](https://github.com/tailwindlabs/tailwindcss)
+- **tailwindcss** v4.3.3 — [Repository](https://github.com/tailwindlabs/tailwindcss)
 - **three** v0.184.0 — [Repository](https://github.com/mrdoob/three.js)
 - **three-mesh-bvh** v0.9.10 — [Repository](https://github.com/gkjohnson/three-mesh-bvh)
 - **three-viewport-gizmo** v2.2.2-tau.2 — [Repository](https://github.com/Fennec-hub/three-viewport-gizmo)
 - **ts-node** v10.9.2 — [Repository](https://github.com/TypeStrong/ts-node)
-- **tsdown** v0.15.12 — [Repository](https://github.com/rolldown/tsdown)
+- **tsdown** v0.22.14 — [Repository](https://github.com/rolldown/tsdown)
 - **tsx** v4.22.4 — [Repository](https://github.com/privatenumber/tsx)
 - **turndown** v7.2.4 — [Repository](https://github.com/mixmark-io/turndown)
 - **tw-animate-css** v1.4.0 — [Repository](https://github.com/Wombosvideo/tw-animate-css)
@@ -441,16 +462,16 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **uzip** v0.20201231.0
 - **vaul** v1.1.2 — [Repository](https://github.com/emilkowalski/vaul)
 - **vite** v8.0.10 — [Repository](https://github.com/vitejs/vite)
+- **vite** v7.3.6 — [Repository](https://github.com/vitejs/vite)
 - **vite-plugin-mkcert** v2.0.0 — [Repository](https://github.com/liuweiGL/vite-plugin-mkcert)
 - **vite-plugin-node** v8.0.0 — [Repository](https://github.com/axe-me/vite-plugin-node)
 - **vite-plugin-static-copy** v4.1.1 — [Repository](https://github.com/sapphi-red/vite-plugin-static-copy)
-- **vite-svg-sprite-wrapper** v1.5.0 — [Repository](https://github.com/vshepel/vite-svg-sprite-wrapper)
 - **vitest** v4.1.5 — [Repository](https://github.com/vitest-dev/vitest)
 - **vitest-mock-extended** v3.1.1 — [Repository](https://github.com/eratio08/vitest-mock-extended)
 - **vscode-languageserver-protocol** v3.18.0 — [Repository](https://github.com/Microsoft/vscode-languageserver-node)
 - **vscode-uri** v3.1.0 — [Repository](https://github.com/microsoft/vscode-uri)
 - **webpack-cli** v6.0.1 — [Repository](https://github.com/webpack/webpack-cli)
-- **ws** v8.21.0 — [Repository](https://github.com/websockets/ws)
+- **ws** v8.21.2 — [Repository](https://github.com/websockets/ws)
 - **xstate** v5.32.1 — [Repository](https://github.com/statelyai/xstate)
 - **zod** v4.4.3 — [Repository](https://github.com/colinhacks/zod)
 

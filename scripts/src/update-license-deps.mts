@@ -14,7 +14,10 @@ import process from 'node:process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDirectory = join(__dirname, '../..');
-const nodeModulesDirectory = join(rootDirectory, 'node_modules');
+const nodeModulesDirectories = [
+  join(rootDirectory, 'node_modules'),
+  join(rootDirectory, 'packages/runtime/node_modules'),
+];
 const outputFile = join(rootDirectory, 'license-deps');
 
 type PackageInfo = {
@@ -255,6 +258,20 @@ function getLicenseNotice(license: string): string[] {
     return ['> This package is dual-licensed. Tau uses it under the **MIT License** terms.', ''];
   }
 
+  // AGPL is distinct from GPL and must be checked before the GPL-3.0 substring match.
+  if (upper.includes('AGPL')) {
+    return [
+      '> **AGPL-3.0 License Notice**',
+      '>',
+      '> This component is licensed under AGPL-3.0-only. Source is available at',
+      '> https://github.com/taucad/tau, and the component ships with the AGPL text',
+      "> plus Tau's applicable Section 7 additional permission.",
+      '>',
+      '> Full license text: https://www.gnu.org/licenses/agpl-3.0.html',
+      '',
+    ];
+  }
+
   // LGPL notice (library copyleft — checked before plain GPL so LGPL-3.0 doesn't
   // fall through to the GPL-3.0 branch)
   if (upper.includes('LGPL')) {
@@ -269,8 +286,7 @@ function getLicenseNotice(license: string): string[] {
     ];
   }
 
-  // GPL-2.0 specific notice (applies to openscad-wasm-prebuilt — the only
-  // plain-GPL dependency in Tau)
+  // GPL-2.0 specific notice
   if (upper.includes('GPL-2.0')) {
     return [
       '> **GPL-2.0-or-later License Notice**',
@@ -340,8 +356,8 @@ function generateMarkdown(groups: LicenseGroup[]): string {
     '',
     '## Licensing Overview',
     '',
-    'Tau source is licensed per directory. The repository root and every published',
-    '`@taucad/*` package are **[Apache-2.0](./license)**; the applications and their',
+    'Tau source is licensed per directory. The repository root and published perimeter',
+    'packages are **[Apache-2.0](./license)**; the applications and their',
     'app libraries are AGPL-3.0-only; the GeoSpec engine is fair source under',
     'FSL-1.1-Apache-2.0, converting to Apache-2.0 two years after each release.',
     'Routing map: **[LICENSING.md](./LICENSING.md)**.',
@@ -349,16 +365,8 @@ function generateMarkdown(groups: LicenseGroup[]): string {
     'Some third-party dependencies impose additional obligations on **combined',
     'distributions** that include them:',
     '',
-    '- **`openscad-wasm-prebuilt` (GPL-2.0-or-later)** — Bundled exclusively by',
-    '  the standalone `@taucad/openscad` package, which is itself published under',
-    '  GPL-2.0-or-later for license clarity. A distribution that includes',
-    '  `@taucad/openscad` is a GPL-2.0-or-later combined work; source must be',
-    '  available (it is, at https://github.com/taucad/tau) and the GPL license',
-    '  text must accompany the OpenSCAD WASM.',
     '- **LGPL-2.1 / LGPL-3.0 libraries** (see sections below) — Library-style',
     '  copyleft; satisfied by attribution and source availability.',
-    '',
-    'Distributions that exclude `@taucad/openscad` carry no GPL obligation.',
     '',
     'By using Tau, you agree to comply with the license terms of all included dependencies.',
     '',
@@ -428,7 +436,10 @@ async function main(): Promise<void> {
 
   console.log('Scanning node_modules for package licenses...');
 
-  const packages = await scanDirectory(nodeModulesDirectory);
+  const scans = await Promise.all(nodeModulesDirectories.map(async (directory) => scanDirectory(directory)));
+  const packages = [
+    ...new Map(scans.flat().map((packageInfo) => [`${packageInfo.name}@${packageInfo.version}`, packageInfo])).values(),
+  ];
   console.log(`Found ${packages.length} packages`);
 
   const groups = groupByLicense(packages);

@@ -2,17 +2,20 @@ import type { GeometryGltf, GeometryResponse, GeometrySvg } from '@taucad/types'
 import type { CreateGeometryOutput, MeshGeometryOutput } from '#types/runtime-kernel.types.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 
+/** @public */
 export type RenderArtifactFinalizerInput<NativeHandle = unknown> = {
   readonly artifacts: readonly GeometryResponse[];
   readonly nativeHandle: NativeHandle;
   readonly issues?: readonly KernelIssue[];
 };
 
+/** @public */
 export type MeshArtifactFinalizerInput = {
   readonly artifacts: readonly GeometryResponse[];
   readonly issues?: readonly KernelIssue[];
 };
 
+/** @public */
 export class RenderArtifactFinalizationError extends Error {
   public readonly issues: KernelIssue[];
 
@@ -93,6 +96,7 @@ const selectSingleArtifact = (artifacts: readonly GeometryResponse[]): GeometryR
   return normalizeGeometry(artifacts[0]!);
 };
 
+/** @public */
 export const finalizeRenderOutput = <NativeHandle>({
   artifacts,
   nativeHandle,
@@ -108,6 +112,8 @@ export const finalizeRenderOutput = <NativeHandle>({
 /**
  * Finalize the display artifact produced by a kernel's `meshGeometry` phase.
  * Applies the same single-artifact invariants as {@link finalizeRenderOutput}.
+ *
+ * @public
  */
 export const finalizeMeshOutput = ({ artifacts, issues }: MeshArtifactFinalizerInput): MeshGeometryOutput => {
   return {

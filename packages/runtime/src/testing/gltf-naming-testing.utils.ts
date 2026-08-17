@@ -1,7 +1,11 @@
 import { NodeIO } from '@gltf-transform/core';
 import { expect } from 'vitest';
 
-/** Extracted names from a GLB used by cross-kernel naming contract tests. */
+/**
+ * Extracted names from a GLB used by cross-kernel naming contract tests.
+ *
+ * @public
+ */
 export type GltfNamingSummary = {
   nodeNames: string[];
   meshNames: string[];
@@ -14,6 +18,7 @@ export type GltfNamingSummary = {
  *
  * @param bytes - GLB bytes to inspect.
  * @returns A summary of node, mesh, material, and scene names.
+ * @public
  */
 export async function readGltfNamingSummary(bytes: Uint8Array<ArrayBuffer>): Promise<GltfNamingSummary> {
   const document = await new NodeIO().readBinary(bytes);

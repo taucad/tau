@@ -3,11 +3,11 @@
   "version": "0.1.0-beta.0",
   "description": "Zero-dependency pub/sub primitive (Topic) with snapshot-on-emit, AbortSignal lifecycle, handler-error containment",
   "type": "module",
-  "private": false,
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/events"
+    "directory": "libs/events"
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

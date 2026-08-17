@@ -57,6 +57,14 @@
       "dependsOn": ["build"],
       "cache": true,
       "inputs": ["{projectRoot}/README.md", "{projectRoot}/scripts/check-readme-quick-start.mts"]
+    },
+    "npm-local-smoke": {
+      "command": "node scripts/src/check-runtime-pack-install.ts",
+      "options": {
+        "cwd": "{workspaceRoot}"
+      },
+      "dependsOn": ["build"],
+      "cache": false
     }
   }
 }

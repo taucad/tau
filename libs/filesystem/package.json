@@ -3,11 +3,11 @@
   "version": "0.1.0-beta.0",
   "description": "Filesystem abstraction layer with watch-based reactivity for Tau (core / worker-facing; UI client facades live in @taucad/fs-client)",
   "type": "module",
-  "private": false,
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/filesystem"
+    "directory": "libs/filesystem"
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",

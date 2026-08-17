@@ -2892,15 +2892,17 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await svc.getDirectoryStat('/');
       const readdirWithStats = vi.spyOn(provider, 'readdirWithStats');
       const writeFile = provider.writeFile.bind(provider);
+      const successfulPath = '/ok.txt';
+      const failedPath = '/doomed.txt';
       vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
-        if (path === '/doomed.txt') {
+        if (path === failedPath) {
           throw new Error('write failed');
         }
         return writeFile(path, data);
       });
 
       await expect(
-        svc.writeFiles({ '/ok.txt': { content: 'ok' }, '/doomed.txt': { content: 'after' } }),
+        svc.writeFiles({ [successfulPath]: { content: 'ok' }, [failedPath]: { content: 'after' } }),
       ).rejects.toThrow('write failed');
 
       expect(pool.has('/keep.txt')).toBe(true);

@@ -252,9 +252,9 @@ describe('WorkspaceFileService external webaccess observation', () => {
         const entries = alpha.entries.bind(alpha);
         vi.spyOn(alpha, 'entries').mockImplementation(async function* () {
           for await (const [name, child] of entries()) {
-            yield child.kind === 'file' ? [name, instrumentedFile(name)] : [name, child];
+            yield child.kind === 'file' ? [name, instrumentedFile(name) as unknown as typeof child] : [name, child];
           }
-        } as never);
+        });
       },
     });
 

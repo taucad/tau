@@ -534,7 +534,7 @@ describe('FileSystemAccessProvider', () => {
       const root = {
         kind: 'directory',
         name: 'root',
-        entries: async function* () {
+        async *entries() {
           for (const name of names) {
             yield [name, makeFileHandle(name)] as [string, unknown];
           }

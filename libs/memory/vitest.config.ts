@@ -14,7 +14,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/packages/memory',
+      reportsDirectory: '../../coverage/libs/memory',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec,test-d}.ts'],
       thresholds: {

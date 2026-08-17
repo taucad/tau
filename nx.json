@@ -70,7 +70,7 @@
     },
     "lint": {
       "options": {
-        "command": "oxlint -c $NX_WORKSPACE_ROOT/.oxlintrc.json {args.files} && eslint {args.files}",
+        "command": "oxlint --no-error-on-unmatched-pattern -c $NX_WORKSPACE_ROOT/.oxlintrc.json {args.files} && eslint {args.files}",
         "forwardAllArgs": false
       },
       "inputs": [

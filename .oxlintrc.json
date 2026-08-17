@@ -1221,12 +1221,11 @@
        * every downstream import site.
        */
       "files": [
-        "packages/runtime/src/worker-internals.ts",
+        "packages/runtime/src/node.ts",
+        "packages/runtime/src/vm.ts",
         "packages/runtime/src/filesystem/runtime-filesystem.ts",
-        "packages/runtime/src/transport/define-runtime-transport.ts",
         "packages/runtime/src/transport/in-process-transport.ts",
-        "packages/runtime/src/transport/transport-projections.ts",
-        "packages/runtime/src/transport/_internal/runtime-worker-dispatcher.ts"
+        "packages/runtime/src/transport/transport-projections.ts"
       ],
       "rules": {
         "no-barrel-files/no-barrel-files": "off"
@@ -1430,8 +1429,8 @@
       }
     },
     {
-      // Static `new URL(literal, import.meta.url)` invariant for the runtime
-      // and standalone kernels. Computed first arguments silently opt out of
+      // Static `new URL(literal, import.meta.url)` invariant for the runtime.
+      // Computed first arguments silently opt out of
       // bundler asset emission and break downstream consumers.
       // See docs/research/runtime-zero-config-bundling.md (Finding 1, R5).
       "files": ["packages/runtime/src/**/*.{ts,tsx}"],

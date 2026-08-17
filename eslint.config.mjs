@@ -501,6 +501,13 @@ const config = [
   },
 
   {
+    // Compile-only documentation fixtures intentionally model consumer imports outside the Nx graph.
+    files: ['apps/ui/content/docs/**/*.ts'],
+    rules: {
+      '@nx/enforce-module-boundaries': 'off',
+    },
+  },
+  {
     // The MDX boundary rule consumes runtime's canonical private-library tuple.
     files: ['libs/oxlint/src/rules/validate-mdx-codeblocks.js'],
     rules: {

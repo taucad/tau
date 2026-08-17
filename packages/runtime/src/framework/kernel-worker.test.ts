@@ -2003,6 +2003,9 @@ describe('preview admission invariants', () => {
             await reconcileGate.promise;
           }
         })(),
+        closed: new Promise<void>(() => {
+          // This synthetic watch remains open for the duration of the test.
+        }),
       }),
     };
 

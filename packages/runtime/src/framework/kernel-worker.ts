@@ -233,10 +233,21 @@ function adaptInlineFileSystem(fs: RuntimeFileSystemBase): FileSystemProxy {
   };
   if (fs.watch) {
     fileSystem.watch = fs.watch.bind(fs);
-    fileSystem.watchReady = (request, handler) => ({
-      unsubscribe: fs.watch!(request, handler),
-      ready: Promise.resolve(),
-    });
+    fileSystem.watchReady = (request, handler) => {
+      let resolveClosed!: () => void;
+      const closed = new Promise<void>((resolve) => {
+        resolveClosed = resolve;
+      });
+      const unsubscribe = fs.watch!(request, handler);
+      return {
+        unsubscribe: () => {
+          unsubscribe();
+          resolveClosed();
+        },
+        ready: Promise.resolve(),
+        closed,
+      };
+    };
   }
   return fileSystem;
 }

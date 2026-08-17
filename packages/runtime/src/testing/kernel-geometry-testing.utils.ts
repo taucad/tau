@@ -2,7 +2,7 @@
  * Kernel Geometry Testing Utilities
  *
  * Provides helpers for validating GLTF geometry output from kernel workers.
- * Adapted from packages/converter/src/test.utils.ts and gltf.utils.ts patterns.
+ * Adapted from libs/converter/src/test.utils.ts and gltf.utils.ts patterns.
  */
 
 import type { Document } from '@gltf-transform/core';

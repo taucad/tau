@@ -1,3 +1,4 @@
+import { Topic } from '@taucad/events';
 import type { Port } from '#port.js';
 import type {
   WireMessage,
@@ -100,6 +101,7 @@ const unwrapTransferables = (payload: unknown): { value: unknown; transfer: read
  * @public
  */
 export type RpcProtocol = {
+  readonly hello?: unknown;
   readonly calls: Readonly<Record<string, { args: unknown; result: unknown }>>;
   readonly notifies: Readonly<Record<string, { args: unknown }>>;
   readonly listens: Readonly<Record<string, { args: unknown; event: unknown }>>;
@@ -122,6 +124,7 @@ type CallResult<P extends RpcProtocol, N extends CallNames<P>> = P['calls'][N]['
 type NotifyArgs<P extends RpcProtocol, N extends NotifyNames<P>> = P['notifies'][N]['args'];
 type ListenArgs<P extends RpcProtocol, N extends ListenNames<P>> = P['listens'][N]['args'];
 type ListenEvent<P extends RpcProtocol, N extends ListenNames<P>> = P['listens'][N]['event'];
+type ProtocolHello<P extends RpcProtocol> = P extends { readonly hello: infer Hello } ? Hello : unknown;
 
 /**
  * Information passed to `onClose` listeners. `origin` indicates which side initiated the close,
@@ -155,7 +158,7 @@ export type Channel<P extends RpcProtocol = EmptyRpcProtocol> = {
    * consumers must `await channel.ready` before reading. Carries the server's
    * advertised capability set in the handshake.
    */
-  readonly hello: { readonly payload: unknown };
+  readonly hello: { readonly payload: ProtocolHello<P> };
   /**
    * Invoke a remote procedure. With a typed {@link RpcProtocol}, `args` and the resolved
    * type are inferred by name. With the default {@link EmptyRpcProtocol} the result is
@@ -218,7 +221,7 @@ export type ChannelServer<P extends RpcProtocol = EmptyRpcProtocol> = {
  *
  * @public
  */
-export type ChannelClientOptions = {
+export type ChannelClientOptions<P extends RpcProtocol = EmptyRpcProtocol> = {
   port: Port<unknown>;
   sessionKey: string;
   /**
@@ -236,7 +239,7 @@ export type ChannelClientOptions = {
    * Omit to trust the wire (used for transports within the same trust
    * boundary, e.g. in-process for tests).
    */
-  protocolSchemas?: WireProtocolSchemas;
+  protocolSchemas?: WireProtocolSchemas<P>;
 };
 
 /**
@@ -244,15 +247,10 @@ export type ChannelClientOptions = {
  *
  * @public
  */
-export type ChannelServerOptions<P extends RpcProtocol = EmptyRpcProtocol> = {
+type ChannelServerOptionsBase<P extends RpcProtocol> = {
   port: Port<unknown>;
   sessionKey: string;
   impl: ChannelServer<P>;
-  /**
-   * Optional payload to attach to the server hello frame (`lh`). Lets the server publish a
-   * protocol/capability descriptor that the client can read once `ready` resolves.
-   */
-  hello?: unknown;
   /** Fallback timeout for the symmetric close handshake. Defaults to 5000ms. */
   closeTimeout?: number;
   /**
@@ -265,8 +263,15 @@ export type ChannelServerOptions<P extends RpcProtocol = EmptyRpcProtocol> = {
    * Omit to trust the wire (used for transports within the same trust
    * boundary, e.g. in-process for tests).
    */
-  protocolSchemas?: WireProtocolSchemas;
+  protocolSchemas?: WireProtocolSchemas<P>;
 };
+
+type ChannelServerHelloOption<P extends RpcProtocol> = P extends { readonly hello: infer Hello }
+  ? { readonly hello: Hello }
+  : { readonly hello?: unknown };
+
+export type ChannelServerOptions<P extends RpcProtocol = EmptyRpcProtocol> = ChannelServerOptionsBase<P> &
+  ChannelServerHelloOption<P>;
 
 /**
  * Server handle returned by {@link createChannelServer}.
@@ -372,7 +377,7 @@ const createCloseController = (options: {
   closeHandshakeTimeout: number;
 }): CloseController => {
   const { postClose, onTeardown, onFinalize, closeHandshakeTimeout } = options;
-  const handlers = new Set<(info: CloseInfo) => void>();
+  const closeTopic = new Topic<CloseInfo>({ name: 'rpc-close', onError: () => undefined });
   let resolved = false;
   let teardownDone = false;
   let resolveClosed: () => void = (): void => undefined;
@@ -404,14 +409,8 @@ const createCloseController = (options: {
     teardownOnce(origin);
     onFinalize(origin);
     const info: CloseInfo = storedReason === undefined ? { origin } : { origin, reason: storedReason };
-    for (const handler of handlers) {
-      try {
-        handler(info);
-      } catch {
-        // Ignore listener errors so cleanup proceeds.
-      }
-    }
-    handlers.clear();
+    closeTopic.emit(info);
+    closeTopic.dispose();
     resolveClosed();
   };
 
@@ -438,10 +437,7 @@ const createCloseController = (options: {
         }
         return (): void => undefined;
       }
-      handlers.add(handler);
-      return (): void => {
-        handlers.delete(handler);
-      };
+      return closeTopic.subscribe(handler);
     },
     initiateLocal(reason) {
       if (localSent) {
@@ -554,7 +550,12 @@ export const __resetFlowControlWarnings = (): void => {
  * @returns The same `config` reference, narrowed to its literal type.
  * @public
  */
-export const createChannelClientOptions: <T extends ChannelClientOptions>(config: T) => T = (config) => config;
+export const createChannelClientOptions = <
+  P extends RpcProtocol = EmptyRpcProtocol,
+  T extends ChannelClientOptions<P> = ChannelClientOptions<P>,
+>(
+  config: T,
+): T => config;
 
 /**
  * Passthrough for {@link createChannelServer} options; keeps literal parameter types in signatures.
@@ -575,7 +576,7 @@ export const createChannelServerOptions = <P extends RpcProtocol, T extends Chan
  * @public
  */
 export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
-  options: ChannelClientOptions,
+  options: ChannelClientOptions<P>,
 ): Channel<P> => {
   const { port, sessionKey: _sessionKey, closeTimeout = defaultCloseTimeout, protocolSchemas } = options;
   void _sessionKey;
@@ -587,9 +588,9 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   const callPending = new Map<string, PendingCall>();
   const listenSinks = new Map<
     string,
-    { push: (v: unknown) => void; fail: (error: Error) => void; cleanup: () => void }
+    { name: string; push: (v: unknown) => void; fail: (error: Error) => void; cleanup: () => void }
   >();
-  const notifyHandlers = new Map<string, Array<(args: unknown) => void>>();
+  const notifyTopics = new Map<string, Topic<unknown>>();
   type PendingFrame = { frame: WireMessage; transfer?: readonly Transferable[] };
   const sendQueue: PendingFrame[] = [];
   const reportWireVersionMismatch = createWireVersionMismatchReporter();
@@ -612,7 +613,12 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     }
   })();
   // Captured atomically with `isReady = true`; readers must `await ready`.
-  const hello: { payload: unknown } = { payload: undefined };
+  let helloPayload: ProtocolHello<P>;
+  const hello = {
+    get payload(): ProtocolHello<P> {
+      return helloPayload;
+    },
+  };
 
   const post = (frame: WireMessage, transfer?: readonly Transferable[]): void => {
     if (!isReady) {
@@ -634,7 +640,18 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
       return;
     }
     if (frame.o === 1) {
-      hello.payload = frame.d;
+      try {
+        helloPayload = validateWireFrame({
+          validator: protocolSchemas?.hello,
+          site: 'client-hello',
+          entry: 'hello',
+          payload: frame.d,
+        }) as ProtocolHello<P>;
+      } catch (validationError) {
+        rejectReady(validationError instanceof Error ? validationError : new Error(String(validationError)));
+        closeController.initiateLocal('hello-error');
+        return;
+      }
       isReady = true;
       resolveReady();
       flushSendQueue();
@@ -658,7 +675,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     }
     try {
       const validated = validateWireFrame({
-        validator: callName ? protocolSchemas?.calls[callName]?.result : undefined,
+        validator: callName ? protocolSchemas?.calls[callName as keyof P['calls']]?.result : undefined,
         site: 'client-call-result',
         entry: callName ?? '<unknown>',
         payload: frame.d,
@@ -675,7 +692,17 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
       return;
     }
     if (frame.k === 'sn') {
-      sink.push(frame.d);
+      try {
+        const validated = validateWireFrame({
+          validator: protocolSchemas?.listens[sink.name as keyof P['listens']]?.event,
+          site: 'client-listen-event',
+          entry: sink.name,
+          payload: frame.d,
+        });
+        sink.push(validated);
+      } catch (validationError) {
+        sink.fail(validationError instanceof Error ? validationError : new Error(String(validationError)));
+      }
       return;
     }
     listenSinks.delete(frame.i);
@@ -691,14 +718,14 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
       reportUnknownNotify(frame.n);
       return;
     }
-    const handlers = notifyHandlers.get(frame.n);
-    if (!handlers) {
+    const topic = notifyTopics.get(frame.n);
+    if (!topic) {
       return;
     }
     let payload: unknown;
     try {
       payload = validateWireFrame({
-        validator: protocolSchemas?.notifies[frame.n],
+        validator: protocolSchemas?.notifies[frame.n as keyof P['notifies']],
         site: 'client-notify-args',
         entry: frame.n,
         payload: frame.a,
@@ -711,13 +738,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
        * call instead. */
       return;
     }
-    for (const h of handlers) {
-      try {
-        h(payload);
-      } catch {
-        // Drop listener errors so other handlers still run.
-      }
-    }
+    topic.emit(payload);
   };
 
   const onWire = (raw: unknown): void => {
@@ -870,19 +891,15 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
     },
 
     onNotify<N extends NotifyNames<P>>(name: N, handler: (args: NotifyArgs<P, N>) => void): () => void {
-      const list = notifyHandlers.get(name) ?? [];
-      const next = [...list, handler as (args: unknown) => void];
-      notifyHandlers.set(name, next);
+      const topic =
+        notifyTopics.get(name) ?? new Topic<unknown>({ name: `rpc-notify:${name}`, onError: () => undefined });
+      notifyTopics.set(name, topic);
+      const unsubscribe = topic.subscribe(handler as (args: unknown) => void);
       return () => {
-        const current = notifyHandlers.get(name);
-        if (!current) {
-          return;
-        }
-        const remaining = current.filter((h) => h !== handler);
-        if (remaining.length === 0) {
-          notifyHandlers.delete(name);
-        } else {
-          notifyHandlers.set(name, remaining);
+        unsubscribe();
+        if (topic.size === 0) {
+          topic.dispose();
+          notifyTopics.delete(name);
         }
       };
     },
@@ -930,6 +947,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
       };
 
       const sink = {
+        name: event,
         push: (v: unknown): void => {
           deliver(v);
         },
@@ -999,7 +1017,7 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
  */
 export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
   options: ChannelServerOptions<P>,
-): ChannelServerHandle => {
+): ChannelServerHandle<P> => {
   const { port, sessionKey, impl, hello, closeTimeout = defaultCloseTimeout, protocolSchemas } = options;
   const context: ChannelContext = { sessionKey };
   const inFlightCalls = new Map<string, AbortController>();
@@ -1016,7 +1034,7 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
       let validatedArgs: unknown;
       try {
         validatedArgs = validateWireFrame({
-          validator: protocolSchemas?.calls[raw.n]?.args,
+          validator: protocolSchemas?.calls[raw.n as keyof P['calls']]?.args,
           site: 'server-call-args',
           entry: raw.n,
           payload: raw.a,
@@ -1068,7 +1086,7 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
       let validatedArgs: unknown;
       try {
         validatedArgs = validateWireFrame({
-          validator: protocolSchemas?.notifies[raw.n],
+          validator: protocolSchemas?.notifies[raw.n as keyof P['notifies']],
           site: 'server-notify-args',
           entry: raw.n,
           payload: raw.a,
@@ -1089,6 +1107,20 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
     }
     if (raw.k === 'ss') {
       const subId = raw.i;
+      let validatedArgs: unknown;
+      try {
+        validatedArgs = validateWireFrame({
+          validator: protocolSchemas?.listens[raw.n as keyof P['listens']]?.args,
+          site: 'server-listen-args',
+          entry: raw.n,
+          payload: raw.a,
+        });
+      } catch (validationError) {
+        if (!closeController.isClosed()) {
+          port.postMessage({ v: 1, k: 'se', i: subId, e: toWireError(validationError) });
+        }
+        return;
+      }
       const ac = new AbortController();
       inFlightStreams.set(subId, ac);
       const listenImpl = impl.listen as WidenedListenImpl;
@@ -1097,7 +1129,7 @@ export const createChannelServer = <P extends RpcProtocol = EmptyRpcProtocol>(
       void (async () => {
         let iterable: AsyncIterable<unknown>;
         try {
-          const listenResult = listenImpl(context, raw.n, raw.a, ac.signal);
+          const listenResult = listenImpl(context, raw.n, validatedArgs, ac.signal);
           iterable = await resolveListenIterable(listenResult);
         } catch (error) {
           inFlightStreams.delete(subId);

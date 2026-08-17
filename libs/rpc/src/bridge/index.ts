@@ -2,6 +2,7 @@ export type { Port } from '#port.js';
 
 export type {
   BridgeCallOptions,
+  BridgeProtocolSchemas,
   BridgeWatchEvent,
   BridgeWatchRequest,
   StringKeyedObject,

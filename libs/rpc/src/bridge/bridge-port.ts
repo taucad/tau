@@ -1,7 +1,7 @@
 import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '#port.js';
 import { createBridgeServer } from '#bridge/bridge-server.js';
-import type { StringKeyedObject } from '#bridge/bridge-protocol.js';
+import type { BridgeProtocolSchemas, StringKeyedObject } from '#bridge/bridge-protocol.js';
 
 /**
  * Handle returned by {@link createBridgePort}: client-side {@link MessagePort} for
@@ -22,13 +22,19 @@ export type BridgePort = {
  * @returns Handle with port and dispose function.
  * @public
  */
-export function createBridgePort<T extends StringKeyedObject>(handlers: T, options?: { hello?: unknown }): BridgePort {
+export function createBridgePort<T extends StringKeyedObject, Hello = unknown>(
+  handlers: T,
+  options?: { hello?: Hello; protocolSchemas?: BridgeProtocolSchemas<Hello> },
+): BridgePort {
   const channel = new MessageChannel();
   const serverWrapped = wrapMessagePort<unknown>(channel.port1, { label: 'bridge-port-server' });
   if (serverWrapped.start) {
     serverWrapped.start();
   }
-  createBridgeServer(handlers, serverWrapped, { hello: options?.hello });
+  createBridgeServer(handlers, serverWrapped, {
+    hello: options?.hello,
+    protocolSchemas: options?.protocolSchemas,
+  });
   return {
     port: channel.port2,
     dispose() {

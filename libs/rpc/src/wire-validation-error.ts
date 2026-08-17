@@ -11,6 +11,8 @@
  * @public
  */
 
+import type { RpcProtocol } from '#channel.js';
+
 /**
  * Per-field validation issue extracted from the underlying validator
  * (typically Zod).
@@ -63,6 +65,40 @@ export type WireValidator<T = unknown> = {
   readonly safeParse: (value: unknown) => WireValidationResult<T>;
 };
 
+type WireHelloSchema<P extends RpcProtocol> = P extends { readonly hello: infer Hello }
+  ? { readonly hello: WireValidator<Hello> }
+  : { readonly hello?: WireValidator };
+
+type CallWireArgs<P extends RpcProtocol, Name extends keyof P['calls']> = P['calls'][Name] extends {
+  readonly wireArgs: infer WireArgs;
+}
+  ? WireArgs
+  : P['calls'][Name]['args'];
+
+type CallWireResult<P extends RpcProtocol, Name extends keyof P['calls']> = P['calls'][Name] extends {
+  readonly wireResult: infer WireResult;
+}
+  ? WireResult
+  : P['calls'][Name]['result'];
+
+type NotifyWireArgs<P extends RpcProtocol, Name extends keyof P['notifies']> = P['notifies'][Name] extends {
+  readonly wireArgs: infer WireArgs;
+}
+  ? WireArgs
+  : P['notifies'][Name]['args'];
+
+type ListenWireArgs<P extends RpcProtocol, Name extends keyof P['listens']> = P['listens'][Name] extends {
+  readonly wireArgs: infer WireArgs;
+}
+  ? WireArgs
+  : P['listens'][Name]['args'];
+
+type ListenWireEvent<P extends RpcProtocol, Name extends keyof P['listens']> = P['listens'][Name] extends {
+  readonly wireEvent: infer WireEvent;
+}
+  ? WireEvent
+  : P['listens'][Name]['event'];
+
 /**
  * Wire-protocol schema map paired with an `RpcProtocol` contract.
  *
@@ -71,9 +107,22 @@ export type WireValidator<T = unknown> = {
  *
  * @public
  */
-export type WireProtocolSchemas = {
-  readonly calls: Readonly<Record<string, { readonly args: WireValidator; readonly result: WireValidator }>>;
-  readonly notifies: Readonly<Record<string, WireValidator>>;
+export type WireProtocolSchemas<P extends RpcProtocol = RpcProtocol> = WireHelloSchema<P> & {
+  readonly calls: {
+    readonly [Name in keyof P['calls']]: {
+      readonly args: WireValidator<CallWireArgs<P, Name>>;
+      readonly result: WireValidator<CallWireResult<P, Name>>;
+    };
+  };
+  readonly notifies: {
+    readonly [Name in keyof P['notifies']]: WireValidator<NotifyWireArgs<P, Name>>;
+  };
+  readonly listens: {
+    readonly [Name in keyof P['listens']]: {
+      readonly args: WireValidator<ListenWireArgs<P, Name>>;
+      readonly event: WireValidator<ListenWireEvent<P, Name>>;
+    };
+  };
 };
 
 /**
@@ -84,9 +133,12 @@ export type WireProtocolSchemas = {
  * @public
  */
 export type WireValidationSite =
+  | 'client-hello'
   | 'server-call-args'
+  | 'server-listen-args'
   | 'server-notify-args'
   | 'client-call-result'
+  | 'client-listen-event'
   | 'client-notify-args';
 
 /**

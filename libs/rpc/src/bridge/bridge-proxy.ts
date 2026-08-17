@@ -17,7 +17,7 @@ export function createBridgeProxy<
   WatchEventPayload = BridgeWatchEvent,
 >(
   port: Port<unknown>,
-  options?: BridgeCallOptions,
+  options?: BridgeCallOptions<unknown, WatchRequestPayload, WatchEventPayload>,
 ): T & {
   dispose(): void;
   listen(event: string, handler: (data: unknown) => void): () => void;

@@ -1,7 +1,7 @@
 {
   "name": "rpc",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/rpc",
+  "sourceRoot": "libs/rpc",
   "projectType": "library",
   "tags": ["scope:shared", "type:lib"]
 }

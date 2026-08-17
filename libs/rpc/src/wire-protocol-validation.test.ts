@@ -25,18 +25,23 @@ import { WireValidationError, isWireValidationError } from '#wire-validation-err
 import type { WireValidator, WireValidationResult, WireProtocolSchemas } from '#wire-validation-error.js';
 
 type Protocol = {
+  readonly hello: { readonly protocol: 1; readonly label: string };
   readonly calls: {
     readonly echo: { args: { value: number }; result: { ok: true; doubled: number } };
   };
   readonly notifies: {
     readonly ping: { args: { stamp: number } };
   };
-  readonly listens: Record<string, never>;
+  readonly listens: {
+    readonly progress: { readonly args: { readonly since: number }; readonly event: number };
+  };
 };
 
+const hello: Protocol['hello'] = { protocol: 1, label: 'test' };
+
 /** Hand-rolled Zod-shape validator (no Zod dep on @taucad/rpc). */
-const createNumberFieldValidator = (field: string): WireValidator<Record<string, number>> => ({
-  safeParse: (value): WireValidationResult<Record<string, number>> => {
+const createNumberFieldValidator = <Field extends string>(field: Field): WireValidator<Record<Field, number>> => ({
+  safeParse: (value): WireValidationResult<Record<Field, number>> => {
     if (value === null || typeof value !== 'object') {
       return {
         success: false,
@@ -54,12 +59,13 @@ const createNumberFieldValidator = (field: string): WireValidator<Record<string,
         },
       };
     }
-    return { success: true, data: { [field]: v } };
+    const data = Object.fromEntries([[field, v]]) as Record<Field, number>;
+    return { success: true, data };
   },
 });
 
-const createOkResultValidator = (): WireValidator => ({
-  safeParse: (value): WireValidationResult => {
+const createOkResultValidator = (): WireValidator<{ readonly ok: true; readonly doubled: number }> => ({
+  safeParse: (value): WireValidationResult<{ readonly ok: true; readonly doubled: number }> => {
     if (value === null || typeof value !== 'object') {
       return {
         success: false,
@@ -79,12 +85,59 @@ const createOkResultValidator = (): WireValidator => ({
   },
 });
 
-const protocolSchemas: WireProtocolSchemas = {
+const helloValidator: WireValidator<Protocol['hello']> = {
+  safeParse(value): WireValidationResult<Protocol['hello']> {
+    if (value === null || typeof value !== 'object') {
+      return { success: false, error: { issues: [{ path: [], message: 'expected hello object' }] } };
+    }
+    const record = value as Record<string, unknown>;
+    if (record['protocol'] !== 1 || typeof record['label'] !== 'string') {
+      return {
+        success: false,
+        error: { issues: [{ path: ['protocol'], message: 'expected protocol 1', code: 'invalid_literal' }] },
+      };
+    }
+    return { success: true, data: { protocol: 1, label: `parsed:${record['label']}` } };
+  },
+};
+
+const positiveNumberValidator: WireValidator<number> = {
+  safeParse(value): WireValidationResult<number> {
+    if (typeof value !== 'number' || value < 0) {
+      return {
+        success: false,
+        error: { issues: [{ path: [], message: 'expected a non-negative number', code: 'invalid_value' }] },
+      };
+    }
+    return { success: true, data: value };
+  },
+};
+
+const progressArgsValidator: WireValidator<Protocol['listens']['progress']['args']> = {
+  safeParse(value): WireValidationResult<Protocol['listens']['progress']['args']> {
+    const result = createNumberFieldValidator('since').safeParse(value);
+    if (!result.success || result.data.since < 0) {
+      return result.success
+        ? {
+            success: false,
+            error: { issues: [{ path: ['since'], message: 'expected a non-negative number', code: 'invalid_value' }] },
+          }
+        : result;
+    }
+    return result;
+  },
+};
+
+const protocolSchemas: WireProtocolSchemas<Protocol> = {
+  hello: helloValidator,
   calls: {
     echo: { args: createNumberFieldValidator('value'), result: createOkResultValidator() },
   },
   notifies: {
     ping: createNumberFieldValidator('stamp'),
+  },
+  listens: {
+    progress: { args: progressArgsValidator, event: positiveNumberValidator },
   },
 };
 
@@ -100,12 +153,126 @@ const wirePair = (): {
 };
 
 describe('Wire-protocol validation (C14)', () => {
+  it('rejects malformed hello before queued calls dispatch', async () => {
+    const { client, server } = wirePair();
+    const handler = vi.fn(async () => ({ ok: true, doubled: 2 }));
+    const srv = createChannelServer({
+      port: server,
+      sessionKey: 'test',
+      hello: { protocol: 2, label: 'invalid' },
+      impl: {
+        call: handler,
+        async *listen() {
+          yield 0;
+        },
+      },
+    });
+    const cli = createChannelClient<Protocol>({ port: client, sessionKey: 'test', protocolSchemas });
+    const queued = cli.call('echo', { value: 1 });
+    const queuedFailure = expect(queued).rejects.toThrow('Channel closed');
+
+    await expect(cli.ready).rejects.toMatchObject({
+      name: 'WireValidationError',
+      site: 'client-hello',
+      entry: 'hello',
+    });
+    await queuedFailure;
+    expect(handler).not.toHaveBeenCalled();
+
+    cli.close();
+    srv.dispose();
+  });
+
+  it('publishes the parsed hello atomically with readiness', async () => {
+    const { client, server } = wirePair();
+    const srv = createChannelServer({
+      port: server,
+      sessionKey: 'test',
+      hello,
+      impl: {
+        async call() {
+          return undefined;
+        },
+        async *listen() {
+          yield 0;
+        },
+      },
+    });
+    const cli = createChannelClient<Protocol>({ port: client, sessionKey: 'test', protocolSchemas });
+
+    await cli.ready;
+    expect(cli.hello.payload).toEqual({ protocol: 1, label: 'parsed:test' });
+
+    cli.close();
+    srv.dispose();
+  });
+
+  it('rejects malformed listen args before invoking the server handler', async () => {
+    const { client, server } = wirePair();
+    const handler = vi.fn();
+    const srv = createChannelServer<Protocol>({
+      port: server,
+      sessionKey: 'test',
+      hello,
+      protocolSchemas,
+      impl: {
+        async call() {
+          return { ok: true, doubled: 0 };
+        },
+        async *listen() {
+          handler();
+          yield 1;
+        },
+      },
+    });
+    const cli = createChannelClient<Protocol>({ port: client, sessionKey: 'test' });
+    await cli.ready;
+
+    const iterator = cli.listen('progress', { since: -1 })[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toThrow(/server-listen-args 'progress'/);
+    expect(handler).not.toHaveBeenCalled();
+
+    cli.close();
+    srv.dispose();
+  });
+
+  it('rejects malformed listen events before the client iterator yields', async () => {
+    const { client, server } = wirePair();
+    const srv = createChannelServer<Protocol>({
+      port: server,
+      sessionKey: 'test',
+      hello,
+      protocolSchemas,
+      impl: {
+        async call() {
+          return { ok: true, doubled: 0 };
+        },
+        async *listen() {
+          yield -1;
+        },
+      },
+    });
+    const cli = createChannelClient<Protocol>({ port: client, sessionKey: 'test', protocolSchemas });
+    await cli.ready;
+
+    const iterator = cli.listen('progress', { since: 0 })[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toMatchObject({
+      name: 'WireValidationError',
+      site: 'client-listen-event',
+      entry: 'progress',
+    });
+
+    cli.close();
+    srv.dispose();
+  });
+
   it('server rejects inbound call args with WireValidationError when validator fails', async () => {
     const { client, server } = wirePair();
     const handler = vi.fn();
     const srv = createChannelServer<Protocol>({
       port: server,
       sessionKey: 'test',
+      hello,
       protocolSchemas,
       impl: {
         async call(_context, name, args) {
@@ -143,6 +310,7 @@ describe('Wire-protocol validation (C14)', () => {
     const srv = createChannelServer<Protocol>({
       port: server,
       sessionKey: 'test',
+      hello,
       protocolSchemas,
       impl: {
         call: handler as unknown as ChannelServer<Protocol>['call'],
@@ -167,6 +335,7 @@ describe('Wire-protocol validation (C14)', () => {
     const srv = createChannelServer<Protocol>({
       port: server,
       sessionKey: 'test',
+      hello,
       protocolSchemas,
       impl: {
         async call() {
@@ -210,6 +379,7 @@ describe('Wire-protocol validation (C14)', () => {
     const srv = createChannelServer<Protocol>({
       port: server,
       sessionKey: 'test',
+      hello,
       protocolSchemas,
       impl: {
         async call() {
@@ -248,6 +418,7 @@ describe('Wire-protocol validation (C14)', () => {
     const srv = createChannelServer<Protocol>({
       port: server,
       sessionKey: 'test',
+      hello,
       protocolSchemas,
       impl: {
         async call() {
@@ -281,6 +452,7 @@ describe('Wire-protocol validation (C14)', () => {
     const srv = createChannelServer<Protocol>({
       port: server,
       sessionKey: 'test',
+      hello,
       protocolSchemas, // Server validates inbound args ...
       impl: {
         async call() {
@@ -313,6 +485,7 @@ describe('Wire-protocol validation (C14)', () => {
     const srv = createChannelServer<Protocol>({
       port: server,
       sessionKey: 'test',
+      hello,
       /* No protocolSchemas — wire is trusted. */
       impl: {
         async call(_context, _name, args) {
@@ -342,6 +515,7 @@ describe('Wire-protocol validation (C14)', () => {
     const srv = createChannelServer<Protocol>({
       port: server,
       sessionKey: 'test',
+      hello,
       protocolSchemas,
       impl: {
         async call() {

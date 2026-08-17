@@ -9,7 +9,14 @@ import {
   wrapAsTransferables,
 } from '#bridge/bridge-internal.js';
 import type { BroadcastFrame } from '#bridge/bridge-internal.js';
-import type { BridgeWatchEvent, BridgeWatchRequest, StringKeyedObject } from '#bridge/bridge-protocol.js';
+import type {
+  BridgeProtocolSchemas,
+  BridgeWatchEvent,
+  BridgeWatchRequest,
+  StringKeyedObject,
+} from '#bridge/bridge-protocol.js';
+import { createBridgeChannelSchemas } from '#bridge/bridge-schemas.js';
+import type { BridgeRpcProtocol } from '#bridge/bridge-schemas.js';
 import { createPushQueue } from '#bridge/push-queue.js';
 import type { PushQueue } from '#bridge/push-queue.js';
 
@@ -38,6 +45,7 @@ export function createBridgeServer<
   T extends StringKeyedObject,
   WatchRequestPayload = BridgeWatchRequest,
   WatchEventPayload = BridgeWatchEvent,
+  HelloPayload = unknown,
 >(
   handlers: T,
   port: Port<unknown>,
@@ -45,7 +53,8 @@ export function createBridgeServer<
     onDisconnect?: () => void;
     onWatch?: (watchId: string, request: WatchRequestPayload) => void;
     onUnwatch?: (watchId: string) => void;
-    hello?: unknown;
+    hello?: HelloPayload;
+    protocolSchemas?: BridgeProtocolSchemas<HelloPayload, WatchRequestPayload, WatchEventPayload>;
   },
 ): BridgeServerHandle {
   const broadcastQueues = new Set<PushQueue<BroadcastFrame>>();
@@ -64,14 +73,15 @@ export function createBridgeServer<
     return wrapAsTransferables(await handlerFunction.call(handlers, ...args));
   };
 
-  const channelServer = createChannelServer({
+  const channelServer = createChannelServer<BridgeRpcProtocol>({
     port,
     sessionKey: 'bridge',
     hello: options?.hello,
+    protocolSchemas: createBridgeChannelSchemas(options?.protocolSchemas),
     impl: {
       call: async (_context, name, args) => {
         try {
-          const argumentList = (Array.isArray(args) ? args : []) as unknown[];
+          const argumentList = Array.isArray(args) ? args : [];
           return await dispatchHandler(name, argumentList);
         } catch (error) {
           return { __bridgeError: serializeBridgeError(error) };

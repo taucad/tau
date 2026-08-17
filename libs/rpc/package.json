@@ -3,11 +3,11 @@
   "version": "0.1.0-beta.0",
   "description": "Typed RPC channel primitives for postMessage-style transports",
   "type": "module",
-  "private": false,
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/rpc"
+    "directory": "libs/rpc"
   },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
@@ -45,6 +45,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@taucad/events": "workspace:*",
     "@taucad/utils": "workspace:*"
   }
 }

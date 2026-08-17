@@ -1,3 +1,4 @@
+import { Topic } from '@taucad/events';
 import { safeDispose } from '@taucad/utils/dispose';
 import { createChannelClient } from '#channel.js';
 import type { Port } from '#port.js';
@@ -12,6 +13,8 @@ import {
 } from '#bridge/bridge-internal.js';
 import type { BroadcastFrame } from '#bridge/bridge-internal.js';
 import type { BridgeCallOptions, BridgeWatchEvent, BridgeWatchRequest } from '#bridge/bridge-protocol.js';
+import { createBridgeChannelSchemas } from '#bridge/bridge-schemas.js';
+import type { BridgeRpcProtocol } from '#bridge/bridge-schemas.js';
 
 /**
  * Create a low-level RPC call/listen/dispose triple backed by a MessagePort.
@@ -21,9 +24,13 @@ import type { BridgeCallOptions, BridgeWatchEvent, BridgeWatchRequest } from '#b
  * @returns Object with call, listen, watch, and dispose methods.
  * @public
  */
-export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, WatchEventPayload = BridgeWatchEvent>(
+export function createBridgeCall<
+  WatchRequestPayload = BridgeWatchRequest,
+  WatchEventPayload = BridgeWatchEvent,
+  HelloPayload = unknown,
+>(
   port: Port<unknown>,
-  options?: BridgeCallOptions,
+  options?: BridgeCallOptions<HelloPayload, WatchRequestPayload, WatchEventPayload>,
 ): {
   call: (method: string, args: unknown[]) => Promise<unknown>;
   listen: (event: string, handler: (data: unknown) => void) => () => void;
@@ -31,14 +38,18 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
   watchReady: (
     request: WatchRequestPayload,
     handler: (event: WatchEventPayload) => void,
-  ) => { unsubscribe: () => void; ready: Promise<void> };
+  ) => { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> };
   ready: Promise<void>;
-  hello: { readonly payload: unknown };
+  hello: { readonly payload: HelloPayload };
   dispose: () => void;
 } {
-  const channelClient = createChannelClient({ port, sessionKey: 'bridge' });
+  const channelClient = createChannelClient<BridgeRpcProtocol<HelloPayload>>({
+    port,
+    sessionKey: 'bridge',
+    protocolSchemas: createBridgeChannelSchemas(options?.protocolSchemas),
+  });
 
-  const eventListeners = new Map<string, Set<(data: unknown) => void>>();
+  const eventTopics = new Map<string, Topic<unknown>>();
   const pendingCalls = new Set<{ reject: (error: Error) => void; ac: AbortController }>();
   const backgroundTasks = new Set<Promise<void>>();
   let disposed = false;
@@ -58,17 +69,7 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
   };
 
   const dispatchBroadcastFrame = (eventName: string, eventData: unknown): void => {
-    const handlers = eventListeners.get(eventName);
-    if (!handlers) {
-      return;
-    }
-    for (const handler of handlers) {
-      try {
-        handler(eventData);
-      } catch (error) {
-        console.error(`[BridgeCall] Event listener error for '${eventName}':`, error);
-      }
-    }
+    eventTopics.get(eventName)?.emit(eventData);
   };
 
   const consumeBroadcastEvents = async (abort: AbortController): Promise<void> => {
@@ -97,7 +98,10 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
     }
     disposed = true;
     broadcastAbort?.abort();
-    eventListeners.clear();
+    for (const topic of eventTopics.values()) {
+      topic.dispose();
+    }
+    eventTopics.clear();
     for (const entry of pendingCalls) {
       entry.ac.abort();
       entry.reject(new Error('Bridge proxy closed'));
@@ -167,7 +171,7 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
   const startWatch = (
     request: WatchRequestPayload,
     handler: (event: WatchEventPayload) => void,
-  ): { unsubscribe: () => void; ready: Promise<void> } => {
+  ): { unsubscribe: () => void; ready: Promise<void>; closed: Promise<void> } => {
     const ac = new AbortController();
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
@@ -176,6 +180,20 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
       resolveReady = resolve;
       rejectReady = reject;
     });
+    let resolveClosed!: () => void;
+    let rejectClosed!: (error: Error) => void;
+    const closed = new Promise<void>((resolve, reject) => {
+      resolveClosed = resolve;
+      rejectClosed = reject;
+    });
+    const ignoreClosedFailure = async (): Promise<void> => {
+      try {
+        await closed;
+      } catch {
+        // The caller may observe this failure through the public `closed` promise.
+      }
+    };
+    trackBackgroundTask(ignoreClosedFailure());
     const consumeWatchEvents = async (): Promise<void> => {
       try {
         for await (const raw of channelClient.listen(watchEvent, { request }, ac.signal)) {
@@ -192,11 +210,14 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
           settled = true;
           rejectReady(new Error('Bridge watch closed before registration'));
         }
+        resolveClosed();
       } catch (error) {
+        const watchError = error instanceof Error ? error : new Error(String(error));
         if (!settled) {
           settled = true;
-          rejectReady(error instanceof Error ? error : new Error(String(error)));
+          rejectReady(watchError);
         }
+        rejectClosed(watchError);
       }
     };
     trackBackgroundTask(consumeWatchEvents());
@@ -205,6 +226,7 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
         ac.abort();
       },
       ready,
+      closed,
     };
   };
 
@@ -212,16 +234,21 @@ export function createBridgeCall<WatchRequestPayload = BridgeWatchRequest, Watch
     call: callMethod,
     listen(eventName, handler) {
       ensureBroadcastSubscription();
-      let handlers = eventListeners.get(eventName);
-      if (!handlers) {
-        handlers = new Set();
-        eventListeners.set(eventName, handlers);
-      }
-      handlers.add(handler);
+      const topic =
+        eventTopics.get(eventName) ??
+        new Topic<unknown>({
+          name: `bridge:${eventName}`,
+          onError: (error) => {
+            console.error(`[BridgeCall] Event listener error for '${eventName}':`, error);
+          },
+        });
+      eventTopics.set(eventName, topic);
+      const unsubscribe = topic.subscribe(handler);
       return () => {
-        handlers.delete(handler);
-        if (handlers.size === 0) {
-          eventListeners.delete(eventName);
+        unsubscribe();
+        if (topic.size === 0) {
+          topic.dispose();
+          eventTopics.delete(eventName);
         }
       };
     },

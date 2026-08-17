@@ -1,0 +1,27 @@
+{
+  "name": "@taucad/types",
+  "version": "0.1.0-beta.0",
+  "description": "Tau shared TypeScript types (API, project, CAD, file, graphics)",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/types"
+  },
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/types/index.ts",
+    "./constants": "./src/constants/index.ts"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/json-schema": "workspace:*",
+    "@taucad/units": "workspace:*",
+    "zod": "catalog:"
+  }
+}

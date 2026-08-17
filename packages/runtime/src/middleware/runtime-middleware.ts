@@ -174,23 +174,24 @@ type MiddlewarePluginRegistration<
 > = MiddlewarePlugin<Id, MiddlewareRenderContent<Content>, MiddlewareExportContent<Content>> &
   RuntimePluginDefinitionCarrier<KernelMiddleware<StateSchema, OptionsSchema>>;
 
-export type MiddlewarePluginFactory<
+/* oxlint-disable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types -- Named callable type keeps private unique-symbol carriers nameable in emitted declarations; [] is the exact no-options tuple. */
+/** @public */
+export interface MiddlewarePluginFactory<
   Id extends string,
   Options = undefined,
   StateSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
   OptionsSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
   Content extends MiddlewareContentDefinition | undefined = undefined,
-> = Options extends undefined
-  ? () => MiddlewarePluginRegistration<Id, StateSchema, OptionsSchema, Content>
-  : Partial<Options> extends Options
-    ? (options?: Options) => MiddlewarePluginRegistration<Id, StateSchema, OptionsSchema, Content>
-    : (options: Options) => MiddlewarePluginRegistration<Id, StateSchema, OptionsSchema, Content>;
-
-type MiddlewarePluginFactoryWithoutOptions<
-  Id extends string,
-  StateSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,
-  Content extends MiddlewareContentDefinition | undefined = undefined,
-> = () => MiddlewarePluginRegistration<Id, StateSchema, EmptyZodObject, Content>;
+> {
+  (
+    ...options: Options extends undefined
+      ? []
+      : Partial<Options> extends Options
+        ? [options?: Options]
+        : [options: Options]
+  ): MiddlewarePluginRegistration<Id, StateSchema, OptionsSchema, Content>;
+}
+/* oxlint-enable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types */
 
 /**
  * Creates a kernel middleware instance with wrap-style hooks.
@@ -230,7 +231,7 @@ export function defineMiddleware<
     optionsSchema?: undefined;
     content?: Content;
   },
-): MiddlewarePluginFactoryWithoutOptions<Id, StateSchema, Content>;
+): MiddlewarePluginFactory<Id, undefined, StateSchema, EmptyZodObject, Content>;
 export function defineMiddleware<
   const Id extends string,
   StateSchema extends z.ZodObject<z.ZodRawShape> = EmptyZodObject,

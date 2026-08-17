@@ -193,25 +193,26 @@ type EdgePinnedSourceOptionsMap<Edges extends readonly TranscoderEdge[]> = {
     : never;
 };
 
-export type TranscoderPluginFactory<
+/* oxlint-disable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types -- Named callable type keeps private unique-symbol carriers nameable in emitted declarations; [] is the exact no-options tuple. */
+/** @public */
+export interface TranscoderPluginFactory<
   Id extends string,
   EdgeMap extends Record<string, unknown>,
   From extends string,
   Options = undefined,
   ContentMap extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
   PinnedSourceOptionsMap extends Record<string, PropertyKey> = Record<string, PropertyKey>,
-> = Options extends undefined
-  ? () => TranscoderPlugin<EdgeMap, From, Id, ContentMap, PinnedSourceOptionsMap> &
-      RuntimePluginDefinitionCarrier<TranscoderDefinition>
-  : Partial<Options> extends Options
-    ? (
-        options?: Options,
-      ) => TranscoderPlugin<EdgeMap, From, Id, ContentMap, PinnedSourceOptionsMap> &
-        RuntimePluginDefinitionCarrier<TranscoderDefinition>
-    : (
-        options: Options,
-      ) => TranscoderPlugin<EdgeMap, From, Id, ContentMap, PinnedSourceOptionsMap> &
-        RuntimePluginDefinitionCarrier<TranscoderDefinition>;
+> {
+  (
+    ...options: Options extends undefined
+      ? []
+      : Partial<Options> extends Options
+        ? [options?: Options]
+        : [options: Options]
+  ): TranscoderPlugin<EdgeMap, From, Id, ContentMap, PinnedSourceOptionsMap> &
+    RuntimePluginDefinitionCarrier<TranscoderDefinition>;
+}
+/* oxlint-enable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types */
 
 /**
  * Define a transcoder module with full type inference.

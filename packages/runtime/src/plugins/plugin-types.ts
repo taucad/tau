@@ -78,8 +78,7 @@ export type KernelPlugin<
   /**
    * Phantom type brand — carries format-to-options type information at
    * compile time only. Marked `@internal` so doc generators filter it
-   * before serialization (the symbol's TS-internal display name
-   * contains literal `@` characters that break MDX/JSX parsers).
+   * before serialization.
    *
    * @internal
    */
@@ -169,8 +168,7 @@ export type TranscoderPlugin<
   /**
    * Phantom type brand — carries edge option type information at
    * compile time only. Marked `@internal` so doc generators filter it
-   * before serialization (the symbol's TS-internal display name
-   * contains literal `@` characters that break MDX/JSX parsers).
+   * before serialization.
    *
    * @internal
    */

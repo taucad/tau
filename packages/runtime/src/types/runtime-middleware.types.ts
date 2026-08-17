@@ -326,6 +326,7 @@ export type MiddlewareDependencyRuntime<
   readonly options: Options;
 };
 
+/** @public */
 export type GetMiddlewareDependenciesHook<
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
   Options extends Record<string, unknown> = {},

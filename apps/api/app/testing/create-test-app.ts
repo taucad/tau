@@ -7,8 +7,7 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { MemorySaver } from '@langchain/langgraph-checkpoint';
 import { InMemoryStore } from '@langchain/langgraph';
-import { createRuntimeFileSystem, fromMemoryFs } from '@taucad/runtime/filesystem';
-import { extractInlineFileSystem } from '@taucad/runtime/transport-internals';
+import { createMemoryProvider } from '@taucad/filesystem/backend';
 import type { RuntimeFileSystemBase } from '@taucad/runtime';
 import { createRpcDispatcher } from '@taucad/chat/rpc';
 import type { RpcGeoSpecClient, RpcGraphicsClient, RpcImageClient } from '@taucad/chat/rpc';
@@ -207,16 +206,13 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
 
   logger.log(`Test app listening on ${baseUrl}`);
 
-  const memFs = extractInlineFileSystem(fromMemoryFs());
-  if (!memFs) {
-    throw new Error('Expected the benchmark/test app to create an inline memory filesystem.');
-  }
+  const memFs = await createMemoryProvider();
   const checkpointer = moduleRef.get(CheckpointerService).getCheckpointer() as unknown as MemorySaver;
   const headlessRpc: HeadlessChatRpcService = moduleRef.get(ChatRpcService);
   const providerRequestRecorder = moduleRef.get(ProviderRequestRecorder);
 
   const dispatcher = createRpcDispatcher({
-    fileSystem: createHeadlessRpcFileSystem(createRuntimeFileSystem(memFs)),
+    fileSystem: createHeadlessRpcFileSystem(memFs),
     kernelClient: createHeadlessRuntimeClient({ createGeometry: async () => ({ success: true, issues: [] }) }),
     ...(options.graphicsStub ? { graphics: options.graphicsStub } : {}),
     ...(options.imagesStub ? { images: options.imagesStub } : {}),

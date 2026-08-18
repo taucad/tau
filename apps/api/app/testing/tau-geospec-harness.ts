@@ -174,7 +174,6 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
     // oxlint-disable-next-line no-await-in-loop -- tests must run deterministically in filename order
     const result = await runGeoSpecModule({
       filesystem: options.filesystem,
-      projectPath: options.projectPath,
       entryPath,
       testNamePattern: options.testNamePattern,
       testTimeout: options.testTimeout,

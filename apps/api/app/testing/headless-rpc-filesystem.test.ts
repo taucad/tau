@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RuntimeFileSystemBase } from '@taucad/runtime';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { extractInlineFileSystem } from '@taucad/runtime/transport-internals';
+import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createHeadlessRpcFileSystem } from '#testing/headless-rpc-filesystem.js';
 
-const createStrictFileSystem = (files: Record<string, string> = {}) => {
-  const base = extractInlineFileSystem(fromMemoryFs(files));
-  if (!base) {
-    throw new Error('Expected an inline memory filesystem.');
+const createStrictFileSystem = async (files: Record<string, string> = {}) => {
+  const base = new MemoryProvider();
+  for (const [path, content] of Object.entries(files)) {
+    await base.writeFile(path, content);
   }
 
   return {
@@ -19,7 +18,7 @@ const createStrictFileSystem = (files: Record<string, string> = {}) => {
 
 describe('createHeadlessRpcFileSystem', () => {
   it('should list the project root with correct file and directory metadata', async () => {
-    const { fileSystem } = createStrictFileSystem({
+    const { fileSystem } = await createStrictFileSystem({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Absolute runtime fixture path.
       '/main.ts': 'export const main = true;\n',
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Absolute runtime fixture path.
@@ -37,7 +36,7 @@ describe('createHeadlessRpcFileSystem', () => {
   });
 
   it('should map project-relative reads, stats, and existence checks to the strict runtime namespace', async () => {
-    const { fileSystem } = createStrictFileSystem({
+    const { fileSystem } = await createStrictFileSystem({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Absolute runtime fixture path.
       '/main.ts': 'export const main = true;\n',
     });
@@ -52,7 +51,7 @@ describe('createHeadlessRpcFileSystem', () => {
   });
 
   it('should map every project-relative text mutation to the strict runtime namespace', async () => {
-    const { base, fileSystem } = createStrictFileSystem();
+    const { base, fileSystem } = await createStrictFileSystem();
 
     await fileSystem.writeFile('draft.ts', 'const value = 1;\n');
     await fileSystem.appendFile('draft.ts', 'const retained = true;\n');
@@ -63,7 +62,7 @@ describe('createHeadlessRpcFileSystem', () => {
   });
 
   it('should map project-relative binary writes to the strict runtime namespace', async () => {
-    const { base, fileSystem } = createStrictFileSystem();
+    const { base, fileSystem } = await createStrictFileSystem();
     const backing = new Uint8Array([0xff, 0x67, 0x6c, 0x54, 0x46, 0xff]);
     const bytes = backing.subarray(1, 5);
 
@@ -131,7 +130,7 @@ describe('createHeadlessRpcFileSystem', () => {
   });
 
   it('should preserve strict rejection of malformed virtual paths', async () => {
-    const { fileSystem } = createStrictFileSystem({
+    const { fileSystem } = await createStrictFileSystem({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Absolute runtime fixture path.
       '/main.ts': 'export {};',
     });

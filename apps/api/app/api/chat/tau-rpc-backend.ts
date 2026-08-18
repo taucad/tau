@@ -5,6 +5,7 @@ import { Injectable } from '@nestjs/common';
 import type { BackendProtocol, WriteResult, EditResult, FileInfo, GrepMatch, FileData } from 'deepagents';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcExecutionError, RpcValidationError } from '@taucad/chat';
+import { joinRelativePath, resolveVirtualPath, VirtualPathError } from '@taucad/utils/path';
 // oxlint-disable-next-line typescript/consistent-type-imports -- NestJS DI class
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 
@@ -26,6 +27,26 @@ function unwrapRpcResult<T extends { success: boolean }>(
 
   return result as Exclude<T, { success: false }>;
 }
+
+const toTauRpcPath = (path: string): string => {
+  const absolutePath = resolveVirtualPath(path);
+  return absolutePath === '/' ? '' : absolutePath.slice(1);
+};
+
+const toDeepAgentsPath = (path: string, isDirectory = false): string => {
+  const absolutePath = resolveVirtualPath(path === '' ? '/' : `/${path}`);
+  const roundTripPath = absolutePath === '/' ? '' : absolutePath.slice(1);
+  if (roundTripPath !== path) {
+    throw new VirtualPathError('INVALID_PATH', path);
+  }
+  return isDirectory && absolutePath !== '/' ? `${absolutePath}/` : absolutePath;
+};
+
+const assertBasename = (name: string): void => {
+  if (name.length === 0 || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    throw new VirtualPathError('INVALID_PATH', name);
+  }
+};
 
 /**
  * NestJS factory service for creating TauRpcBackend instances.
@@ -55,29 +76,35 @@ export class TauRpcBackend implements BackendProtocol {
   ) {}
 
   public async lsInfo(path: string): Promise<FileInfo[]> {
+    const rpcPath = toTauRpcPath(path);
     const result = await this.chatRpcService.sendRpcRequest({
       chatId: this.chatId,
       toolCallId: this.toolCallId,
       rpcName: rpcName.listDirectory,
-      args: { path },
+      args: { path: rpcPath },
     });
 
     const data = unwrapRpcResult(result);
 
-    return data.entries.map((entry) => ({
-      path: path ? `${path}/${entry.name}` : entry.name,
-      is_dir: entry.type === 'dir',
-      size: entry.size,
-      ...(entry.modifiedAt ? { modified_at: entry.modifiedAt } : {}),
-    }));
+    return data.entries.map((entry) => {
+      assertBasename(entry.name);
+      const isDirectory = entry.type === 'dir';
+      return {
+        path: toDeepAgentsPath(joinRelativePath(rpcPath, entry.name), isDirectory),
+        is_dir: isDirectory,
+        size: entry.size,
+        ...(entry.modifiedAt ? { modified_at: entry.modifiedAt } : {}),
+      };
+    });
   }
 
   public async read(filePath: string, offset?: number, limit?: number): Promise<string> {
+    const rpcPath = toTauRpcPath(filePath);
     const result = await this.chatRpcService.sendRpcRequest({
       chatId: this.chatId,
       toolCallId: this.toolCallId,
       rpcName: rpcName.readFile,
-      args: { targetFile: filePath, offset, limit },
+      args: { targetFile: rpcPath, offset, limit },
     });
 
     const data = unwrapRpcResult(result);
@@ -85,11 +112,12 @@ export class TauRpcBackend implements BackendProtocol {
   }
 
   public async readRaw(filePath: string): Promise<FileData> {
+    const rpcPath = toTauRpcPath(filePath);
     const result = await this.chatRpcService.sendRpcRequest({
       chatId: this.chatId,
       toolCallId: this.toolCallId,
       rpcName: rpcName.readFile,
-      args: { targetFile: filePath },
+      args: { targetFile: rpcPath },
     });
 
     const data = unwrapRpcResult(result);
@@ -101,39 +129,47 @@ export class TauRpcBackend implements BackendProtocol {
     };
   }
 
-  public async grepRaw(pattern: string, path?: string, glob?: string): Promise<GrepMatch[] | string> {
+  public async grepRaw(
+    pattern: string,
+    // oxlint-disable-next-line typescript/no-deprecated -- DeepAgents compatibility protocol owns this parameter type.
+    path?: Parameters<BackendProtocol['grepRaw']>[1],
+    // oxlint-disable-next-line typescript/no-deprecated -- DeepAgents compatibility protocol owns this parameter type.
+    glob?: Parameters<BackendProtocol['grepRaw']>[2],
+  ): Promise<GrepMatch[] | string> {
+    const rpcPath = path === undefined || path === null ? undefined : toTauRpcPath(path);
     const result = await this.chatRpcService.sendRpcRequest({
       chatId: this.chatId,
       toolCallId: this.toolCallId,
       rpcName: rpcName.grep,
       args: {
         pattern,
-        ...(path ? { path } : {}),
-        ...(glob ? { glob } : {}),
+        ...(rpcPath === undefined ? {} : { path: rpcPath }),
+        ...(glob === undefined || glob === null ? {} : { glob }),
       },
     });
 
     const data = unwrapRpcResult(result);
 
     return data.matches.map((match) => ({
-      path: match.file,
+      path: toDeepAgentsPath(match.file),
       line: match.line,
       text: match.content,
     }));
   }
 
   public async globInfo(pattern: string, path?: string): Promise<FileInfo[]> {
+    const rpcPath = path === undefined ? undefined : toTauRpcPath(path);
     const result = await this.chatRpcService.sendRpcRequest({
       chatId: this.chatId,
       toolCallId: this.toolCallId,
       rpcName: rpcName.globSearch,
-      args: { pattern, ...(path ? { path } : {}) },
+      args: { pattern, ...(rpcPath === undefined ? {} : { path: rpcPath }) },
     });
 
     const data = unwrapRpcResult(result);
 
     return data.entries.map((entry) => ({
-      path: entry.path,
+      path: toDeepAgentsPath(entry.path, entry.isDirectory ?? false),
       is_dir: entry.isDirectory ?? false,
       size: entry.size,
       ...(entry.modifiedAt ? { modified_at: entry.modifiedAt } : {}),
@@ -141,51 +177,54 @@ export class TauRpcBackend implements BackendProtocol {
   }
 
   public async write(filePath: string, content: string): Promise<WriteResult> {
+    const rpcPath = toTauRpcPath(filePath);
     const result = await this.chatRpcService.sendRpcRequest({
       chatId: this.chatId,
       toolCallId: this.toolCallId,
       rpcName: rpcName.createFile,
-      args: { targetFile: filePath, content },
+      args: { targetFile: rpcPath, content },
     });
 
     const data = unwrapRpcResult(result);
 
     return {
-      path: filePath,
+      path: toDeepAgentsPath(rpcPath),
       filesUpdate: null,
       metadata: { message: data.message },
     };
   }
 
   public async append(filePath: string, content: string): Promise<WriteResult> {
+    const rpcPath = toTauRpcPath(filePath);
     const result = await this.chatRpcService.sendRpcRequest({
       chatId: this.chatId,
       toolCallId: this.toolCallId,
       rpcName: rpcName.appendFile,
-      args: { targetFile: filePath, content },
+      args: { targetFile: rpcPath, content },
     });
 
     const data = unwrapRpcResult(result);
 
     return {
-      path: filePath,
+      path: toDeepAgentsPath(rpcPath),
       filesUpdate: null,
       metadata: { message: data.message },
     };
   }
 
   public async edit(filePath: string, oldString: string, newString: string, replaceAll?: boolean): Promise<EditResult> {
+    const rpcPath = toTauRpcPath(filePath);
     const result = await this.chatRpcService.sendRpcRequest({
       chatId: this.chatId,
       toolCallId: this.toolCallId,
       rpcName: rpcName.editFile,
-      args: { targetFile: filePath, oldString, newString, replaceAll },
+      args: { targetFile: rpcPath, oldString, newString, replaceAll },
     });
 
     const data = unwrapRpcResult(result);
 
     return {
-      path: filePath,
+      path: toDeepAgentsPath(rpcPath),
       filesUpdate: null,
       occurrences: data.occurrences,
     };

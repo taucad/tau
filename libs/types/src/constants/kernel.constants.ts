@@ -103,16 +103,22 @@ export default function main(p = defaultParams) {}
     name: 'Zoo (KCL)',
     dimensions: [3],
     language: 'kcl',
-    description: 'Cloud-native CAD modeling',
+    description: 'Server-side engine for heavy models',
     mainFile: 'main.kcl',
     backendProvider: 'zoo',
     longDescription:
-      'Cloud-native CAD modeling with precise parametric geometry. Designed for modern CAD workflows with AI integration and collaborative features.',
+      "Geometry runs on Zoo's GPU-accelerated engine in the cloud rather than in your browser, so model complexity is bounded by the server, not by the tab. Best for large assemblies and detailed parts that stall a WASM kernel, with precise parametric geometry and STEP export.",
     emptyCode: `@settings(defaultLengthUnit = mm, kclVersion = 1.0)
 `,
-    recommended: 'Cloud-native & AI-driven CAD',
-    tags: ['Cloud-native', 'Parametric', 'AI Integration', 'Modern CAD', 'KCL'],
-    features: ['Cloud-native modeling', 'AI-assisted design', 'Precise geometry', 'Modern syntax', 'STL/STEP export'],
+    recommended: 'Large Assemblies & Complex Parts',
+    tags: ['GPU-Accelerated', 'Cloud Engine', 'Large Assemblies', 'Parametric', 'KCL'],
+    features: [
+      'GPU-accelerated cloud execution',
+      'Scales past browser memory limits',
+      'Precise parametric geometry',
+      'Modern KCL syntax',
+      'STL/STEP export',
+    ],
   },
   {
     id: 'jscad',

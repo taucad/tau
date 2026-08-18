@@ -32,12 +32,10 @@ const callTool = async (options: {
 
 const buildConfigurable = (overrides?: Partial<ChatRpcConfigurable>): ChatRpcConfigurable => {
   const chatRpcService = mock<ChatRpcConfigurable['chatRpcService']>();
-  const geometryAnalysisService = mock<ChatRpcConfigurable['geometryAnalysisService']>();
   const fileEditService = mock<ChatRpcConfigurable['fileEditService']>();
 
   return {
     chatRpcService,
-    geometryAnalysisService,
     fileEditService,
     thread_id: 'chat-1',
     ...overrides,
@@ -229,7 +227,6 @@ describe('createTestModelTool', () => {
 
         const rpcCalls = vi.mocked(cfg.chatRpcService.sendRpcRequest).mock.calls.map((call) => call[0].rpcName);
         expect(rpcCalls).toEqual([rpcName.runGeoSpecTests]);
-        expect(cfg.geometryAnalysisService.runMeasurementTests).not.toHaveBeenCalled();
       });
     });
   });
@@ -280,7 +277,7 @@ describe('createTestModelTool', () => {
     };
 
     describe.each(allKernels)('%s', (kernel) => {
-      it('propagates browser-runner client errors without falling back to API-side geometry testing', async () => {
+      it('propagates browser-runner client errors', async () => {
         const cfg = buildConfigurable();
         vi.mocked(cfg.chatRpcService.sendRpcRequest).mockResolvedValue({
           success: false,
@@ -289,7 +286,6 @@ describe('createTestModelTool', () => {
         } as unknown as RpcResult);
 
         await expectToolErrorMessage(kernel, cfg, 'GeoSpec tests could not run', 'browser-connected Tau runner');
-        expect(cfg.geometryAnalysisService.runMeasurementTests).not.toHaveBeenCalled();
       });
     });
   });

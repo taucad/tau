@@ -53,7 +53,9 @@ function scanFixtures(): ManifestEntry[] {
   const entries: ManifestEntry[] = [];
 
   for (const kernelEntry of readdirSync(kernelsDirectory, { withFileTypes: true })) {
-    if (!kernelEntry.isDirectory()) {
+    // Skip dot/cache directories at the kernel level too: a `.tau/` runtime
+    // cache at the kernels root would otherwise register as a kernel.
+    if (!kernelEntry.isDirectory() || kernelEntry.name.startsWith('.') || excludedDirectories.has(kernelEntry.name)) {
       continue;
     }
 
@@ -62,7 +64,11 @@ function scanFixtures(): ManifestEntry[] {
     for (const exampleEntry of readdirSync(kernelDirectory, {
       withFileTypes: true,
     })) {
-      if (!exampleEntry.isDirectory()) {
+      if (
+        !exampleEntry.isDirectory() ||
+        exampleEntry.name.startsWith('.') ||
+        excludedDirectories.has(exampleEntry.name)
+      ) {
         continue;
       }
 

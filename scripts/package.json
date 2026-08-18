@@ -15,10 +15,13 @@
   "dependencies": {
     "@inkjs/ui": "catalog:",
     "@playwright/test": "catalog:",
+    "@taucad/openrscad": "workspace:*",
+    "@taucad/runtime": "workspace:*",
     "ink": "catalog:",
     "ipaddr.js": "catalog:",
     "jsdom": "catalog:",
     "js-yaml": "catalog:",
+    "openrscad-engine": "catalog:",
     "pdf-parse": "catalog:",
     "react": "catalog:",
     "remark-gfm": "catalog:",

@@ -4,6 +4,7 @@
   "description": "Tau examples",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
     "./fixtures": "./src/fixture-loader.ts",

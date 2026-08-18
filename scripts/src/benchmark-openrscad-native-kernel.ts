@@ -9,7 +9,7 @@ import { glob, readFile, writeFile } from 'node:fs/promises';
 import { cpus, platform, release } from 'node:os';
 import { dirname, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
-import { clearCache } from 'openrscad-engine';
+import { clearCache } from '@taulabs/openrscad-engine';
 import { openrscad } from '@taucad/openrscad/kernel';
 import type { AnyKernelDefinition, KernelRuntime } from '@taucad/runtime/kernel';
 

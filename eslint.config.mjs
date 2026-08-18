@@ -613,7 +613,7 @@ const config = [
   },
 
   {
-    files: ['apps/ui/**/*.{ts,tsx}', 'libs/**/*.{ts,tsx}', 'packages/runtime/**/*.{ts,tsx}'],
+    files: ['apps/ui/**/*.{ts,tsx}', 'apps/libs/**/*.{ts,tsx}', 'libs/**/*.{ts,tsx}', 'packages/runtime/**/*.{ts,tsx}'],
     ignores: [
       '**/*.test.ts',
       '**/*.test.tsx',

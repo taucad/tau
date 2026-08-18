@@ -11,7 +11,7 @@
       "path": "./apps/api"
     },
     {
-      "path": "./packages/converter"
+      "path": "./libs/converter"
     },
     {
       "path": "./libs/tau-examples"
@@ -26,25 +26,25 @@
       "path": "./apps/libs/api-extractor"
     },
     {
-      "path": "./packages/types"
+      "path": "./libs/types"
     },
     {
-      "path": "./packages/json-schema"
+      "path": "./libs/json-schema"
     },
     {
       "path": "./packages/runtime"
     },
     {
-      "path": "./packages/units"
+      "path": "./libs/units"
     },
     {
-      "path": "./libs/billing"
+      "path": "./apps/libs/billing"
     },
     {
       "path": "./libs/chat"
     },
     {
-      "path": "./packages/utils"
+      "path": "./libs/utils"
     },
     {
       "path": "./apps/libs/vite"
@@ -56,7 +56,7 @@
       "path": "./examples/react-router"
     },
     {
-      "path": "./packages/filesystem"
+      "path": "./libs/filesystem"
     },
     {
       "path": "./apps/libs/fs-client"
@@ -74,13 +74,13 @@
       "path": "./packages/kernels/openrscad"
     },
     {
-      "path": "./packages/events"
+      "path": "./libs/events"
     },
     {
       "path": "./examples/nextjs"
     },
     {
-      "path": "./packages/memory"
+      "path": "./libs/memory"
     },
     {
       "path": "./packages/react"
@@ -89,10 +89,10 @@
       "path": "./packages/cli"
     },
     {
-      "path": "./packages/rpc"
+      "path": "./libs/rpc"
     },
     {
-      "path": "./packages/fs-bridge"
+      "path": "./libs/fs-bridge"
     },
     {
       "path": "./apps/libs/lsp-fs"
@@ -101,7 +101,7 @@
       "path": "./libs/oxlint"
     },
     {
-      "path": "./packages/vm"
+      "path": "./libs/vm"
     },
     {
       "path": "./apps/libs/lsp"

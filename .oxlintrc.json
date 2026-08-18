@@ -1207,7 +1207,7 @@
       // is the UI app's internal package-equivalent layer (each subdirectory
       // behaves like a libs/-style local package without being extracted),
       // so its `index.ts` aggregators inherit the same exemption.
-      "files": ["{packages,libs}/**/index.ts", "apps/ui/app/lib/**/index.ts"],
+      "files": ["{packages,libs,apps/libs}/**/index.ts", "apps/ui/app/lib/**/index.ts"],
       "rules": {
         "no-barrel-files/no-barrel-files": "off"
       }

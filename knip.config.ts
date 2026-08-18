@@ -70,7 +70,7 @@ const config: KnipConfig = {
       entry: ['app/routes/**/*.tsx', 'app/types/**/*.d.ts', 'vite-environment.d.ts', 'content/docs/**/*.{ts,tsx}'],
       ignore: ['public/**'],
     },
-    'packages/converter': {
+    'libs/converter': {
       ignore: ['src/assets/**'],
       entry: ['src/types/**/*.d.ts'],
     },

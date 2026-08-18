@@ -604,7 +604,7 @@ const config = [
             {
               name: '@taucad/runtime/testing',
               message:
-                'Do not import `@taucad/runtime/testing` from non-test sources (it pulls Vitest into unrelated bundles). Prefer `@taucad/runtime/transport-internals` (`extractInlineFileSystem`) and opaque filesystem factories (`fromNodeFs`, `fromMemoryFs`, …).',
+                'Do not import `@taucad/runtime/testing` from non-test sources (it pulls Vitest into unrelated bundles). Prefer opaque filesystem factories (`fromNodeFs`, `fromMemoryFs`, …).',
             },
           ],
         },

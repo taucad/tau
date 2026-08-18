@@ -1,7 +1,6 @@
 ---
 name: find-research
 description: Finds, evaluates, ingests, and synthesizes research for a bounded subject using Tau's anonymous discovery and durable reference workflows. Use only when invoked as /find-research.
-disable-model-invocation: true
 argument-hint: '[subject]'
 ---
 

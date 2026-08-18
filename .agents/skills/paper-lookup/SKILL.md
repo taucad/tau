@@ -1,7 +1,6 @@
 ---
 name: paper-lookup
 description: Finds research-paper metadata through anonymous arXiv and Crossref searches and returns bounded, provenance-rich candidates. Use only when explicitly invoked or composed by find-research.
-disable-model-invocation: true
 ---
 
 # Paper Lookup

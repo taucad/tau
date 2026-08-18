@@ -1,7 +1,6 @@
 ---
 name: hugging-science
 description: Discovers bounded scientific-ML catalog leads from four fixed Hugging Science topic pages without loading or executing resources. Use only when explicitly invoked or composed by find-research.
-disable-model-invocation: true
 ---
 
 # Hugging Science

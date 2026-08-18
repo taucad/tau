@@ -1,7 +1,6 @@
 ---
 name: regen-sprite
 description: Regenerates the checked-in UI SVG sprite and icon-id declaration from raw SVG icons. Use only when invoked as /regen-sprite after changing UI icons.
-disable-model-invocation: true
 ---
 
 # Regenerate UI SVG Sprite

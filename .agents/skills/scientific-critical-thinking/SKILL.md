@@ -1,7 +1,6 @@
 ---
 name: scientific-critical-thinking
 description: Evaluates engineering and computational research evidence, limitations, and claim strength with calibrated confidence. Use only when explicitly invoked or composed by find-research.
-disable-model-invocation: true
 ---
 
 # Scientific Critical Thinking

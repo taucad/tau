@@ -1,6 +1,6 @@
 ---
 name: create-script
-description: Author a workspace script in the Tau monorepo following established conventions for bash and TypeScript scripts (shebang, set -euo pipefail, header comment template, env-var validation, REPO_ROOT pattern, location decision tree, chmod, Nx wiring). Use when creating a new script under scripts/, apps/*/scripts/, packages/*/scripts/, or a skill-bundled script, or when the user asks to add a script, helper, CLI tool, smoke test, release helper, or operator runbook.
+description: Author a workspace script in the Tau monorepo following established conventions for bash and TypeScript scripts (shebang, set -euo pipefail, header comment template, env-var validation, REPO_ROOT pattern, location decision tree, chmod, Nx wiring). Use when creating a new script under scripts/, apps/*/scripts/, packages/**/scripts/, or a skill-bundled script, or when the user asks to add a script, helper, CLI tool, smoke test, release helper, or operator runbook.
 disable-model-invocation: true
 ---
 

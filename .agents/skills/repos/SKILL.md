@@ -65,12 +65,12 @@ repos:
     branch: feat/...
     description: LangChain.js - LLM framework
   three.js:
-    upstream: mrdoob/three.js # no fork = read-only
+    upstream: mrdoob/three.js # no fork = origin is upstream
     branch: dev
 ```
 
 - Repos with `fork` field: you can push to origin (the fork). Upstream is read-only.
-- Repos without `fork`: origin points to upstream. Read-only exploration.
+- Repos without `fork`: origin points to upstream. Write access depends on repository ownership and permissions.
 - Repos with `commit` field: pinned to a specific commit hash. Clone checks out that commit; sync verifies/restores it instead of pulling latest.
 
 ## Commit Pinning

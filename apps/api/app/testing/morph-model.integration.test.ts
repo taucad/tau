@@ -53,7 +53,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       const chunks = await collectStreamChunks(response);
       const message = await collectFinalMessage(chunks);
 
-      expectNoErrors(message);
+      expectNoErrors(chunks);
       expectHasToolCall(message, 'create_file');
       expect(extractUsageData(chunks)).toBeDefined();
     });

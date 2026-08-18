@@ -27,7 +27,7 @@ export const buildCadAgent = (
   modelId: string,
   kernel: KernelId = 'replicad',
   options: BuildCadAgentOptions = {},
-): AgentConfigInput => ({
+): Extract<AgentConfigInput, { profile: 'cad' }> => ({
   profile: 'cad',
   model: modelId,
   kernel,

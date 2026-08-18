@@ -14,7 +14,7 @@ import { toolName } from '@taucad/chat/constants';
 import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
 import { collectFinalMessage, collectStreamChunks } from '#testing/stream-consumer.js';
 import { expectNoErrors } from '#testing/stream-assertions.js';
-import { createTestApp } from '#testing/create-test-app.js';
+import { createTestApp, createTestModel } from '#testing/create-test-app.js';
 import type { CreateTestAppOptions, TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent } from '#testing/skip-helpers.js';
 
@@ -136,6 +136,7 @@ class BracketAliasTestModel extends BaseChatModel {
 }
 
 const createModelService = (model: BracketAliasTestModel): CreateTestAppOptions['modelService'] => ({
+  models: [createTestModel({ id: modelId, providerId: 'vertexai', family: 'gemini' })],
   buildModel() {
     return {
       model,
@@ -147,9 +148,9 @@ const createModelService = (model: BracketAliasTestModel): CreateTestAppOptions[
     };
   },
   getProviderId() {
-    return 'google';
+    return 'vertexai';
   },
-  createProviderDiagnosticsContext(options: Record<string, unknown>) {
+  createProviderDiagnosticsContext(options) {
     return {
       ...options,
       verbose: false,

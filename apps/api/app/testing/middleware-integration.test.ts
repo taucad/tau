@@ -22,7 +22,7 @@ import {
   extractContextCompactionData,
   expectHasTextContent,
 } from '#testing/stream-assertions.js';
-import { createTestApp } from '#testing/create-test-app.js';
+import { createTestApp, createTestModel } from '#testing/create-test-app.js';
 import type { CreateTestAppOptions, TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent, providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
 
@@ -195,6 +195,7 @@ class GeminiStreamingSignatureReplayModel extends BaseChatModel {
 }
 
 const scriptedModelService = {
+  models: [createTestModel({ id: modelId, providerId: 'anthropic', family: 'claude' })],
   buildModel() {
     return {
       model: new ScriptedGeoSpecLoopModel(),
@@ -208,7 +209,7 @@ const scriptedModelService = {
   getProviderId() {
     return 'anthropic';
   },
-  createProviderDiagnosticsContext(options: Record<string, unknown>) {
+  createProviderDiagnosticsContext(options) {
     return {
       ...options,
       verbose: false,

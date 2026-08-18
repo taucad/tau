@@ -16,10 +16,10 @@ import { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
 import type { ChatResult } from '@langchain/core/outputs';
 import type { CheckpointTuple, MemorySaver } from '@langchain/langgraph-checkpoint';
-import type { ChatUsageCost, ChatUsageTokens } from '@taucad/chat';
+import type { ChatUsageCost } from '#api/chat/chat.schema.js';
 import { toolName } from '@taucad/chat/constants';
 import type { AgentConfigInput } from '@taucad/chat/schemas';
-import { createTestApp } from '#testing/create-test-app.js';
+import { createTestApp, createTestModel } from '#testing/create-test-app.js';
 import type { CreateTestAppOptions, TestApp } from '#testing/create-test-app.js';
 import { collectStreamChunks } from '#testing/stream-consumer.js';
 import { buildCadAgent } from '#testing/skip-helpers.js';
@@ -130,6 +130,7 @@ const waitForAbortableDelay = async (options: {
 };
 
 const buildScriptedModelService = (model: ScriptedReadFileModel): CreateTestAppOptions['modelService'] => ({
+  models: [createTestModel({ id: scriptedModelId })],
   buildModel() {
     return {
       model,
@@ -143,7 +144,7 @@ const buildScriptedModelService = (model: ScriptedReadFileModel): CreateTestAppO
   getProviderId() {
     return 'openai';
   },
-  createProviderDiagnosticsContext(options: Record<string, unknown>) {
+  createProviderDiagnosticsContext(options) {
     return {
       ...options,
       verbose: false,
@@ -171,10 +172,10 @@ const buildScriptedModelService = (model: ScriptedReadFileModel): CreateTestAppO
   getOtelProviderName() {
     return 'test';
   },
-  normalizeUsageTokens(_modelId: string, usage: ChatUsageTokens): ChatUsageTokens {
+  normalizeUsageTokens(_modelId, usage) {
     return usage;
   },
-  getModelCost(_modelId: string, _usage: ChatUsageTokens): ChatUsageCost {
+  getModelCost(_modelId, _usage): ChatUsageCost {
     return {
       inputTokensCost: 0,
       outputTokensCost: 0,
@@ -196,7 +197,7 @@ const seedReadFiles = async (options: { testApp: TestApp; count: number }): Prom
     Array.from({ length: count }, async (_, index) => {
       const fileNumber = index + 1;
       await testApp.memFs.writeFile(
-        `checkpoint-fixture-${fileNumber}.ts`,
+        `/checkpoint-fixture-${fileNumber}.ts`,
         `export const checkpointFixture${fileNumber} = ${fileNumber};\n`,
       );
     }),
@@ -239,7 +240,9 @@ const countMemorySaverWriteBuckets = (checkpointer: MemorySaver, threadId: strin
 
 const getCheckpointMessages = (checkpoint: CheckpointTuple | undefined): unknown[] => {
   const messages = checkpoint?.checkpoint.channel_values['messages'];
-  expect(Array.isArray(messages)).toBe(true);
+  if (!Array.isArray(messages)) {
+    throw new Error('Expected checkpoint messages');
+  }
   return messages;
 };
 
@@ -438,7 +441,7 @@ describe('LangGraph checkpoint durability', () => {
 
       const checkpoints = await listThreadCheckpoints(testApp.checkpointer, chatId);
       expect(checkpoints).toHaveLength(1);
-      expect(checkpoints[0]?.metadata.source).toBe('loop');
+      expect(checkpoints[0]?.metadata?.source).toBe('loop');
       expect(countMemorySaverWriteBuckets(testApp.checkpointer, chatId)).toBe(0);
       expect(model.calls).toHaveLength(4);
     } finally {
@@ -475,7 +478,7 @@ describe('LangGraph checkpoint durability', () => {
 
       const checkpoints = await listThreadCheckpoints(testApp.checkpointer, chatId);
       expect(checkpoints).toHaveLength(1);
-      expect(checkpoints[0]?.metadata.source).toBe('loop');
+      expect(checkpoints[0]?.metadata?.source).toBe('loop');
       const checkpointMessages = getCheckpointMessages(checkpoints[0]);
       const checkpointPayload = JSON.stringify(checkpointMessages);
       expect(checkpointPayload).toContain('checkpointFixture1');
@@ -492,7 +495,12 @@ describe('LangGraph checkpoint durability', () => {
     const recordFile = path.join(temporaryDirectory, 'records.jsonl');
     const child: ChildProcess = spawn(process.execPath, ['--input-type=module', '--eval', crashProbeScript], {
       cwd: process.cwd(),
-      env: { ...process.env, RECORD_FILE: recordFile },
+      env: {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+        ),
+        RECORD_FILE: recordFile,
+      } as unknown as NodeJS.ProcessEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

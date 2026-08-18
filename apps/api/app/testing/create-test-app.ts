@@ -33,6 +33,7 @@ import { HeadlessChatRpcService } from '#testing/headless-chat-rpc.service.js';
 import { createHeadlessRpcFileSystem } from '#testing/headless-rpc-filesystem.js';
 import { createHeadlessRuntimeClient } from '#testing/headless-runtime-client.js';
 import { ProviderRequestRecorder } from '#api/chat/utils/provider-request-recorder.js';
+import type { Model } from '#api/models/model.schema.js';
 
 /**
  * In-memory checkpointer service that replaces the PostgreSQL-backed one.
@@ -128,6 +129,29 @@ export type TestApp = {
   providerRequestRecorder: ProviderRequestRecorder;
 };
 
+export const createTestModel = (options: {
+  id: string;
+  providerId?: Model['provider']['id'];
+  family?: Model['details']['family'];
+}): Model => {
+  const { id, providerId = 'openai', family = 'gpt' } = options;
+  return {
+    id,
+    name: id,
+    slug: id,
+    model: id,
+    provider: { id: providerId, name: providerId },
+    details: {
+      family,
+      families: [family],
+      contextWindow: 200_000,
+      maxTokens: 16_000,
+      cost: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 1, cacheWriteTokens: 1 },
+    },
+    configuration: { streaming: true },
+  };
+};
+
 /**
  * Optional overrides for {@link createTestApp}.
  *
@@ -145,6 +169,7 @@ export type CreateTestAppOptions = {
   storeService?: Pick<StoreService, 'getStore' | 'getReadDedupClearer'>;
   modelService?: Pick<
     ModelService,
+    | 'models'
     | 'buildModel'
     | 'createProviderDiagnosticsContext'
     | 'filterProviderToolNamesForModel'

@@ -12,7 +12,7 @@ import type { UIMessageChunk } from 'ai';
 import { toolName } from '@taucad/chat/constants';
 import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
 import { collectStreamChunks } from '#testing/stream-consumer.js';
-import { createTestApp } from '#testing/create-test-app.js';
+import { createTestApp, createTestModel } from '#testing/create-test-app.js';
 import type { CreateTestAppOptions, TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent } from '#testing/skip-helpers.js';
 
@@ -86,6 +86,7 @@ class MalformedGeminiToolCallModel extends BaseChatModel {
 }
 
 const createModelService = (model: MalformedGeminiToolCallModel): CreateTestAppOptions['modelService'] => ({
+  models: [createTestModel({ id: modelId, providerId: 'vertexai', family: 'gemini' })],
   buildModel() {
     return {
       model,
@@ -99,7 +100,7 @@ const createModelService = (model: MalformedGeminiToolCallModel): CreateTestAppO
   getProviderId() {
     return 'vertexai';
   },
-  createProviderDiagnosticsContext(options: Record<string, unknown>) {
+  createProviderDiagnosticsContext(options) {
     return {
       ...options,
       verbose: false,

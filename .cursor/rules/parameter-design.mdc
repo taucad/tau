@@ -38,7 +38,7 @@ Within a contract interface, every method must follow the same positional patter
 
 # Naming Conventions
 
-These conventions apply most strictly to **public API packages** (`packages/*`).
+These conventions apply most strictly to **public API packages** (`packages/**`).
 App code (`apps/*`) and internal libraries (`libs/*`) should use descriptive names
 but may follow framework-specific conventions (React hooks, NestJS decorators).
 

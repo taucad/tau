@@ -31,7 +31,12 @@ const repositoryRoot = resolve(currentDirectory, '../../../../..');
  */
 export const placementMetadata: Record<Placement, PlacementMetadata> = {
   packages: {
-    tags: ['scope:shared', 'type:lib'],
+    /*
+     * A new published package starts as a leaf: `type:package-veneer` may only
+     * depend on package roots. Promoting one to `type:package-root` is the
+     * deliberate act of letting other published packages build on it.
+     */
+    tags: ['scope:shared', 'type:package-veneer'],
     private: false,
     license: 'Apache-2.0',
     canonicalLicensePath: 'LICENSE',

@@ -67,7 +67,7 @@ describe('package generator', () => {
       scope: 'packages',
       isPrivate: false,
       license: 'Apache-2.0',
-      tags: ['scope:shared', 'type:lib'],
+      tags: ['scope:shared', 'type:package-veneer'],
     },
     {
       scope: 'libs',

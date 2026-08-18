@@ -35,9 +35,9 @@ export const kernelGenerator = async (tree: Tree, schema: KernelGeneratorSchema)
   const importPath = `@taucad/${schema.name}`;
   const description = schema.description ?? '';
   const { className, propertyName } = names(schema.name);
-  // Kernels are published packages with a veneer layering role.
+  // Kernels are published packages, so they inherit the `packages/` placement.
   const placement = placementMetadata.packages;
-  const tags = ['scope:shared', 'type:package-veneer'];
+  const tags = placement.tags;
 
   addProjectConfiguration(tree, schema.name, {
     root: projectRoot,

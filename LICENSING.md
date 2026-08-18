@@ -102,11 +102,6 @@ That is the whole of the restriction. Everything else the license text grants yo
 No. It is fair source (source-available), and it converts to Apache-2.0 two years after each release. The rest of the
 Tau stack is open source today.
 
-**What about versions already published under MIT?**
-They stay MIT. Every version of every package already published to npm, and every commit already pushed, remains under
-the license it carried at that moment — this relicensing applies to future versions only. It does not, and cannot,
-retroactively change what was already released.
-
 **Do I need a commercial license?**
 Only for a Competing Use of the engine, or for uses the AGPL section 7 permission does not reach. Contact
 **support@tau.new** for commercial licensing.

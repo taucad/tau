@@ -3,7 +3,7 @@ title: 'Runtime API Policy'
 description: 'Naming and ownership rules for runtime consumer, plugin-author, transport, filesystem, and artifact APIs.'
 status: active
 created: '2026-07-20'
-updated: '2026-07-21'
+updated: '2026-08-17'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-architecture-policy.md

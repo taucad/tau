@@ -3,7 +3,7 @@ title: 'Color Space Policy'
 description: 'Canonical handling of sRGB vs linear color in glTF/GLB output across kernels and exporters.'
 status: active
 created: '2026-04-21'
-updated: '2026-04-21'
+updated: '2026-08-17'
 related:
   - docs/research/kernel-color-space-srgb-conversion.md
   - docs/research/cross-kernel-color-parity.md

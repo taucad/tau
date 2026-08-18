@@ -3,7 +3,7 @@ title: 'SSR bundle policy (`apps/ui`)'
 description: Avoid pulling client-only CAD/kernel/Three.js graphs into the Netlify SSR function bundle.
 status: active
 created: '2026-05-06'
-updated: '2026-06-03'
+updated: '2026-08-17'
 related:
   - docs/research/ssr-bundle-audit.md
   - docs/research/netlify-production-performance-audit.md

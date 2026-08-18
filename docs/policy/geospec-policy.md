@@ -3,7 +3,7 @@ title: 'GeoSpec Policy'
 description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, C++/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-08-13'
+updated: '2026-08-17'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md

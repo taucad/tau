@@ -1,6 +1,6 @@
 /** Host-side helpers for issuing one Contract-B claim. @module */
 
-import type { JSONValue } from '@taucad/types';
+import type { JSONValue } from '@taucad/runtime/types';
 import { encodeGeoSpecCanonicalJson, geoSpecMatcherRegistryVersion, toGeoSpecProtocolJson } from '#engine/protocol.js';
 import type { GeoSpecClaimResult, GeoSpecSubjectId } from '#engine/protocol.js';
 import { getGeoSpecEngineProtocol } from '#engine/registry.js';

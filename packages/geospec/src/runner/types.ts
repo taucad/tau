@@ -1,4 +1,4 @@
-import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/vm';
+import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/runtime/vm';
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelector } from '#selector/types.js';
 import type { GeoSpecModelLoader } from '#model/index.js';

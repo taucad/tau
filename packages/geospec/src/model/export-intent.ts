@@ -5,10 +5,15 @@ import type { ExportRoute } from '@taucad/runtime/types';
 
 /**
  *
+ *
+ * @public
  */
 export type RuntimeBackedModelFormat = Exclude<GeoSpecModelFormat, 'mesh-buffer'>;
 
-/** Runtime route metadata used to decide whether a runtime export can honor GeoSpec evidence requirements. */
+/** Runtime route metadata used to decide whether a runtime export can honor GeoSpec evidence requirements.
+ *
+ * @public
+ */
 export type GeoSpecExportRoute = Partial<ExportRoute> & {
   kernelId?: string;
   sourceFormat?: string;
@@ -23,19 +28,28 @@ export type GeoSpecExportRoute = Partial<ExportRoute> & {
   };
 };
 
-/** Runtime client shape for route-aware Tau runtimes. */
+/** Runtime client shape for route-aware Tau runtimes.
+ *
+ * @public
+ */
 export type RuntimeClientWithRoutes = GeoSpecRuntimeClient & {
   bestRouteFor(format: string, options?: { readonly kernelId?: string }): GeoSpecExportRoute | undefined;
 };
 
-/** Resolved runtime export request and provenance for a GeoSpec model load. */
+/** Resolved runtime export request and provenance for a GeoSpec model load.
+ *
+ * @public
+ */
 export type RuntimeExportIntent = {
   options: Record<string, unknown>;
   provenance: GeometryExportIntent;
   sourceUnit: GeoSpecUnit;
 };
 
-/** Structured failure returned when a runtime cannot provide the requested GeoSpec evidence. */
+/** Structured failure returned when a runtime cannot provide the requested GeoSpec evidence.
+ *
+ * @public
+ */
 export type RuntimeExportIntentFailure = {
   success: false;
   diagnostics: GeometryDiagnostic[];
@@ -146,6 +160,7 @@ const canonicalUnsupported = (options: {
   ],
 });
 
+/** @public */
 export const resolveRuntimeExportIntent = (options: {
   runtime: GeoSpecRuntimeClient;
   format: RuntimeBackedModelFormat;

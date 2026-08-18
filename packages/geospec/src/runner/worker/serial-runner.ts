@@ -8,7 +8,7 @@ import type {
 } from '#runner/worker/index.js';
 import { createNoMatchingGeoSpecTestsIssue } from '#runner/worker/index.js';
 import type { GeoSpecTestCase } from '#runner/types.js';
-import type { VmIssue } from '@taucad/vm';
+import type { VmIssue } from '@taucad/runtime/vm';
 
 const createRunnerClosedIssue = (): VmIssue => ({
   code: 'GEOSPEC_RUNNER_CLOSED',

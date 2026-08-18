@@ -116,11 +116,9 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/types": "workspace:*",
-    "@taucad/vm": "workspace:*"
+    "@taucad/runtime": "workspace:*"
   },
   "devDependencies": {
-    "@gltf-transform/core": "^4.4.0",
-    "@taucad/runtime": "workspace:*"
+    "@gltf-transform/core": "^4.4.0"
   }
 }

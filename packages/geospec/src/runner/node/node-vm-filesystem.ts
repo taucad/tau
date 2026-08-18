@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { VmFileSystem } from '@taucad/vm';
+import type { VmFileSystem } from '@taucad/runtime/vm';
 import { requireRegisteredGeoSpecHostBinding } from '#engine/registry.js';
 
 /**

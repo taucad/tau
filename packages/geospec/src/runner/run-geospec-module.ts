@@ -1,4 +1,4 @@
-import { createEsbuildModuleVm } from '@taucad/vm';
+import { createEsbuildModuleVm } from '@taucad/runtime/vm';
 import { createCollector } from '#runner/collector.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
 import { getRegisteredGeoSpecHostBinding } from '#engine/registry.js';

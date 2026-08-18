@@ -25,10 +25,7 @@ const packageConfig: UserConfig = {
   unbundle: true,
   format: 'esm',
   outDir: 'dist',
-  // Type-only peers: they are devDependencies (the substrate compiles against
-  // their types and never calls them), so rolldown would otherwise try to
-  // bundle their declarations instead of importing them.
-  external: ['@taucad/runtime', '@taucad/runtime/types', '@gltf-transform/core'],
+  external: ['@taucad/runtime', '@taucad/runtime/types', '@taucad/runtime/vm', '@gltf-transform/core'],
 };
 
 export default defineConfig(packageConfig);

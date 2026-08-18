@@ -8,7 +8,7 @@
  * @module
  */
 
-import type { JSONValue } from '@taucad/types';
+import type { JSONValue } from '@taucad/runtime/types';
 
 /** Contract-B protocol version spoken by this substrate. @public */
 export const geoSpecEngineProtocolVersion = 2;

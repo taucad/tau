@@ -20,7 +20,7 @@
  * @module
  */
 
-import type { VmFileSystem } from '@taucad/vm';
+import type { VmFileSystem } from '@taucad/runtime/vm';
 import type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 import type { GeometryDiagnostic, GeometrySubject } from '#mesh/types.js';
 import type { LoadModelOptions } from '#model/types.js';
@@ -45,15 +45,20 @@ import {
 } from '#engine/registry.js';
 import type { GeoSpecEngineRegistryDescriptor, GeoSpecEngineRegistryImplementation } from '#engine/registry.js';
 
+/** @public */
 export const geoSpecEngineUnavailableCode = 'GEOSPEC_ENGINE_UNAVAILABLE';
+/** @public */
 export const geoSpecEngineGlobalKey = '__GEOSPEC_ENGINE__';
+/** @public */
 export const geoSpecEngineUnavailableDiagnostic = (capability: string): GeometryDiagnostic =>
   registeredGeoSpecEngineUnavailableDiagnostic(capability);
+/** @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the registry error's constructor identity.
 export const GeoSpecEngineUnavailableError = RegisteredGeoSpecEngineUnavailableError;
 /**
  *
  */
+/** @public */
 export type GeoSpecEngineUnavailableError = RegisteredGeoSpecEngineUnavailableError;
 
 /**

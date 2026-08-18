@@ -32,6 +32,8 @@ type GeoSpecRuntimeExportFormat = ExportFormatsFor<readonly KernelPlugin[], read
 
 /**
  *
+ *
+ * @public
  */
 export type GeoSpecRuntimeClient = {
   connect(): Promise<void>;

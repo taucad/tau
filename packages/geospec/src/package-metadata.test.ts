@@ -13,13 +13,13 @@ const readPackageJson = async (): Promise<PackageJson> =>
   JSON.parse(await readFile(resolve(import.meta.dirname, '../package.json'), 'utf8')) as PackageJson;
 
 describe('geospec package metadata', () => {
-  it('keeps @taucad/runtime a type-only dependency', async () => {
+  it('depends only on the runtime-owned substrate surface', async () => {
     const packageJson = await readPackageJson();
 
-    // The substrate compiles against the runtime's export-route types; it never
-    // calls the runtime. Only the engine takes it as a value dependency.
-    expect(packageJson.devDependencies?.['@taucad/runtime']).toBe('workspace:*');
-    expect(packageJson.dependencies?.['@taucad/runtime']).toBeUndefined();
+    expect(packageJson.dependencies?.['@taucad/runtime']).toBe('workspace:*');
+    expect(packageJson.dependencies?.['@taucad/types']).toBeUndefined();
+    expect(packageJson.dependencies?.['@taucad/vm']).toBeUndefined();
+    expect(packageJson.devDependencies?.['@taucad/runtime']).toBeUndefined();
     expect(packageJson.peerDependencies?.['@taucad/runtime']).toBeUndefined();
     expect(packageJson.peerDependenciesMeta?.['@taucad/runtime']).toBeUndefined();
   });

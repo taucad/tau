@@ -21,7 +21,7 @@ import {
   toGeoSpecProtocolJson,
 } from '#engine/protocol.js';
 import type { GeoSpecClaimResult, GeoSpecExecutionOptions } from '#engine/protocol.js';
-import type { JSONValue } from '@taucad/types';
+import type { JSONValue } from '@taucad/runtime/types';
 import { geoSpecEngineUnavailableDiagnostic, getGeoSpecEngineProtocol } from '#engine/registry.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
 import { matchesGeoSpecTestName } from '#runner/filter.js';
@@ -340,6 +340,7 @@ const isGeoSpecTestCase = (value: unknown): value is GeoSpecTestCase =>
  *
  * @returns A fresh collector instance.
  */
+/** @public */
 export const createCollector = (options?: { matcherWallBackstop?: number; forensic?: boolean }): GeoSpecCollector => {
   const execution: GeoSpecExecutionOptions = {
     forensic: options?.forensic ?? false,
@@ -563,6 +564,7 @@ export const createCollector = (options?: { matcherWallBackstop?: number; forens
 /**
  * Clear runner globals after a module finishes.
  */
+/** @public */
 export const clearCollectorGlobals = (): void => {
   Reflect.deleteProperty(geospecGlobal, collectorGlobalKey);
 };
@@ -572,6 +574,7 @@ export const clearCollectorGlobals = (): void => {
  *
  * @param collector - Collector for the active run.
  */
+/** @public */
 export const installCollector = (collector: GeoSpecCollector): void => {
   geospecGlobal[collectorGlobalKey] = collector;
 };

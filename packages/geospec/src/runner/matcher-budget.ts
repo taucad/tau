@@ -110,6 +110,7 @@ export const defaultMatcherWallBackstop = 600_000;
  *
  * @param units - Native work units in this batch (points, extrema, volumes).
  */
+/** @public */
 export const chargeBudget = (units: number): void => {
   const current = activeBudget;
   if (!current) {
@@ -129,6 +130,7 @@ export const chargeBudget = (units: number): void => {
  * backstop. Retained for call sites whose unit accounting happens at the
  * native call itself.
  */
+/** @public */
 export const checkBudget = (): void => {
   chargeBudget(0);
 };

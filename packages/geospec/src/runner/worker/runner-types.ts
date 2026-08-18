@@ -1,6 +1,6 @@
 import type { GeoSpecRunResult, RunGeoSpecModuleOptions } from '#runner/types.js';
 import type { GeoSpecRunProfile } from '#runner/profile.js';
-import type { VmFileSystem, VmIssue } from '@taucad/vm';
+import type { VmFileSystem, VmIssue } from '@taucad/runtime/vm';
 
 /**
  * One GeoSpec test file executed by a worker-style runner.

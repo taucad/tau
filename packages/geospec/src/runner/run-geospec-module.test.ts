@@ -1,4 +1,4 @@
-import type { VmFileSystem } from '@taucad/vm';
+import type { VmFileSystem } from '@taucad/runtime/vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { geoSpecEngineProtocolVersion } from '#engine/protocol.js';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';

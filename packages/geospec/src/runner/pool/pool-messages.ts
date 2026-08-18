@@ -7,7 +7,10 @@
 
 import type { GeoSpecRunResult } from '#runner/types.js';
 
-/** One schedulable work unit. */
+/** One schedulable work unit.
+ *
+ * @public
+ */
 export type GeoSpecPoolShard = {
   /** Stable shard id, unique within one pool run. */
   id: number;
@@ -18,6 +21,7 @@ export type GeoSpecPoolShard = {
 };
 
 /** Host → worker messages. */
+/** @public */
 export type GeoSpecPoolHostMessage =
   | {
       type: 'run-shard';
@@ -39,6 +43,7 @@ export type GeoSpecPoolHostMessage =
   | { type: 'shutdown' };
 
 /** Worker → host messages. */
+/** @public */
 export type GeoSpecPoolWorkerMessage =
   | { type: 'ready' }
   | { type: 'file-start'; shardId: number; file: string }
@@ -64,6 +69,7 @@ export type GeoSpecPoolWorkerMessage =
   | { type: 'shard-error'; shardId: number; file: string; message: string };
 
 /** Minimal worker handle the host-agnostic pool drives (Node or Web Worker). */
+/** @public */
 export type GeoSpecPoolWorkerHandle = {
   postMessage(message: GeoSpecPoolHostMessage): void;
   onMessage(listener: (message: GeoSpecPoolWorkerMessage) => void): void;

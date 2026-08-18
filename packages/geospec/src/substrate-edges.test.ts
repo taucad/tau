@@ -3,7 +3,7 @@ import { mock } from 'vitest-mock-extended';
 import { geoSpecEngineProtocolVersion } from '#engine/protocol.js';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
 import { createTestGeoSpecEngineProtocol } from '#engine/protocol.test-support.js';
-import type { VmFileSystem } from '@taucad/vm';
+import type { VmFileSystem } from '@taucad/runtime/vm';
 import type { GeometrySubject } from '#mesh/types.js';
 import type { GeoSpecRunProfile } from '#runner/profile.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';

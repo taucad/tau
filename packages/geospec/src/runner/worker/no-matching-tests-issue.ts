@@ -1,4 +1,4 @@
-import type { VmIssue } from '@taucad/vm';
+import type { VmIssue } from '@taucad/runtime/vm';
 
 /**
  * Create a run-level issue when filters select no tests.

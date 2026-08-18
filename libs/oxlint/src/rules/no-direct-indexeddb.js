@@ -17,7 +17,7 @@ const DEFAULT_ALLOWLIST = [
   // Per-device workspace handle/config schema (tau-fs-handles).
   'apps/ui/app/filesystem/handle-store.ts',
   // Filesystem backend providers.
-  'packages/filesystem/src/backend/**',
+  'libs/filesystem/src/backend/**',
   // Tests set up and tear down fake-indexeddb.
   '**/*.test.ts',
   '**/*.test.tsx',

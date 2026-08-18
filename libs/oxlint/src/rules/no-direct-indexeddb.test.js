@@ -17,7 +17,7 @@ const ruleTester = new RuleTester({
 const root = process.cwd();
 const objectStoreProvider = path.join(root, 'apps/ui/app/db/indexeddb-storage.ts');
 const handleStore = path.join(root, 'apps/ui/app/filesystem/handle-store.ts');
-const backendProvider = path.join(root, 'packages/filesystem/src/backend/direct-idb-provider.ts');
+const backendProvider = path.join(root, 'libs/filesystem/src/backend/direct-idb-provider.ts');
 const testFile = path.join(root, 'apps/ui/app/db/indexeddb-storage.test.ts');
 const offendingFile = path.join(root, 'apps/ui/app/components/settings/some-panel.tsx');
 

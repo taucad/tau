@@ -20,7 +20,7 @@
  * @module
  */
 
-import { sha256String } from '@taucad/utils/hash';
+import { sha256String } from '@taucad/runtime/kernel';
 import { decodeSections, encodeSections, float32ToSection, sectionToFloat32 } from '#cache/section-codec.js';
 import { readEvidenceBytes, writeEvidenceBytes } from '#cache/evidence-cache.js';
 

@@ -16,7 +16,7 @@
  * @module
  */
 
-import { hashString, sha256Bytes } from '@taucad/utils/hash';
+import { hashString, sha256Bytes } from '@taucad/runtime/kernel';
 import { GeoSpecModelLoadError } from 'geospec/model';
 import { copyTriangleSoup, getOpenCascadeStepModule } from '#native/opencascade-module.js';
 import { buildSoupStats, toMeshBufferPositions } from '#mesh/soup.js';

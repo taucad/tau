@@ -1,7 +1,7 @@
 /** Contract-B implementation for the Wave-1 TypeScript engine. @module */
 
-import type { JSONValue } from '@taucad/types';
-import { sha256Bytes } from '@taucad/utils/hash';
+import type { JSONValue } from '@taucad/runtime/types';
+import { sha256Bytes } from '@taucad/runtime/kernel';
 import {
   assertGeoSpecJsonValue,
   decodeGeoSpecCanonicalJson,

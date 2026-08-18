@@ -2,14 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { sha256Bytes } from '@taucad/utils/hash';
+import { sha256Bytes } from '@taucad/runtime/kernel';
 import {
   encodeGeoSpecCanonicalJson,
   geoSpecEngineProtocolVersion,
   geoSpecMatcherRegistryVersion,
 } from 'geospec/engine';
 import type { GeoSpecIngestSubjectRequest } from 'geospec/engine';
-import type { JSONValue } from '@taucad/types';
+import type { JSONValue } from '@taucad/runtime/types';
 import {
   createGeoSpecEngineProtocol,
   decodeProtocolClaim,

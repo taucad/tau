@@ -1,6 +1,6 @@
 # Tau Logo
 
-Parametric 2D reconstruction of the Tau brandmark. Set `avatar` to inset the mark within a transparent safe area and use `avatarScale` to target the crop shape. `generate-logo.ts` exports the canonical logo assets plus explicit circle-safe and square-optimized avatar files.
+Parametric 2D reconstruction of the Tau brandmark. Set `avatar` to inset the mark within a transparent safe area and use `avatarScale` to target the crop shape. `generate-logo.ts` exports the canonical logo assets, explicit circle-safe and square-optimized avatar files, and the UI sprite badge (white mark on the brand-coloured rounded rectangle).
 
 ## Part Census
 
@@ -22,16 +22,19 @@ The three regions are fused into one disconnected 2D drawing. There are no BRep 
 | Fill                    | `#00987c`                         |
 | Circle avatar scale     | `0.64` about `(256, 256)`         |
 | Square avatar scale     | `0.8` about `(256, 256)`          |
+| Sprite badge corner     | `rx 111` (`0.2167` of the side)   |
 
 ## Verification
 
 Regenerate the SVG artifacts, then check that they have not drifted:
 
 ```bash
-pnpm exec tsx libs/tau-examples/src/kernels/replicad/logo/generate-logo.ts
-pnpm exec tsx libs/tau-examples/src/kernels/replicad/logo/generate-logo.ts --check
+pnpm nx generate-logo tau-examples
+pnpm nx check-logo tau-examples
 pnpm nx check-thumbnails tau-examples
 ```
+
+Regenerating the badge changes `apps/ui/app/components/icons/raw/tau.svg`, so follow it with `pnpm nx run ui:generate-svg-sprite`.
 
 GeoSpec currently accepts mesh and BRep evidence, not 2D SVG drawings; the generated-asset check and runtime thumbnail drift gate cover this example instead.
 

@@ -28,6 +28,20 @@
         "cwd": "{projectRoot}"
       }
     },
+    "generate-logo": {
+      "command": "tsx src/kernels/replicad/logo/generate-logo.ts",
+      "inputs": ["default", "^default"],
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
+    "check-logo": {
+      "command": "tsx src/kernels/replicad/logo/generate-logo.ts --check",
+      "inputs": ["default", "^default"],
+      "options": {
+        "cwd": "{projectRoot}"
+      }
+    },
     "test": {
       "command": "vitest --run",
       "options": {

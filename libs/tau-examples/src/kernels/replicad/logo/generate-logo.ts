@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { tauBrandColor } from '../tau-brand.js';
 import { createTauLogo } from './main.js';
 
-setOC(await openCascade());
+setOC(openCascade);
 
 const formatPath = (path: string): string =>
   path.replaceAll(/-?\d+(?:\.\d+)?/g, (value) =>
@@ -126,6 +126,8 @@ const outputs = [
   [join(workspaceRoot, 'apps/ui/public/avatar-square.svg'), squareAvatarSvg],
   [join(workspaceRoot, 'apps/ui/public/avatar-square.png'), squareAvatarPng],
   [join(workspaceRoot, 'apps/ui/app/components/icons/tau.tsx'), component],
+  // UI sprite icon: the bare brand mark, full-bleed to the view box.
+  [join(workspaceRoot, 'apps/ui/app/components/icons/raw/tau.svg'), svg],
   [
     join(
       workspaceRoot,

@@ -16,8 +16,8 @@ const ruleTester = new RuleTester({
 
 const root = process.cwd();
 const eventsTopicFile = path.join(root, 'libs/events/src/topic.ts');
-const testFile = path.join(root, 'libs/fs-client/src/example.test.ts');
-const offendingFile = path.join(root, 'libs/fs-client/src/example-service.ts');
+const testFile = path.join(root, 'apps/libs/fs-client/src/example.test.ts');
+const offendingFile = path.join(root, 'apps/libs/fs-client/src/example-service.ts');
 
 describe('no-handrolled-fanout', () => {
   it('flags hand-rolled fan-out declarations; allows Topic and non-function containers', () => {

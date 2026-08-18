@@ -8,7 +8,7 @@
     "types": ["node", "vitest/importMeta", "vite-plugin-node", "vitest"],
     "paths": {
       "#*": ["./app/*"],
-      "libcascade": ["../../libs/api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
+      "libcascade": ["../libs/api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
     }
   },
   "include": [

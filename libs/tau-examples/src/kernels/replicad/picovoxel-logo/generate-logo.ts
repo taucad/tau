@@ -5,7 +5,7 @@ import openCascade from 'replicad-opencascadejs';
 import { setOC } from 'replicad';
 import { createPicoVoxelLogo, type LogoTile } from './main.js';
 
-setOC(await openCascade());
+setOC(openCascade);
 
 const formatPath = (path: string): string =>
   path.replaceAll(/-?\d+(?:\.\d+)?/g, (value) =>

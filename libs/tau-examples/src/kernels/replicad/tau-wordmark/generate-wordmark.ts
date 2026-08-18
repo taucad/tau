@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { tauBrandColor } from '../tau-brand.js';
 import { createTauWordmark } from './main.js';
 
-setOC(await openCascade());
+setOC(openCascade);
 
 const formatPath = (path: string): string =>
   path.replaceAll(/-?\d+(?:\.\d+)?/g, (value) =>

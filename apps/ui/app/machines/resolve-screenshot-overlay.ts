@@ -1,8 +1,7 @@
 import type { ActorRefFrom } from 'xstate';
 import type { ScreenshotOverlay } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { getIconIdFromExtension } from '#components/icons/file-extension-icon.js';
-import { getFileExtension } from '#utils/filesystem.utils.js';
+import { getIconIdForFilename } from '#components/icons/file-extension-icon.js';
 
 type CadActorRef = ActorRefFrom<typeof cadMachine>;
 
@@ -11,7 +10,7 @@ type CadActorRef = ActorRefFrom<typeof cadMachine>;
  *
  * Reads the project-relative `entryPath` (for example `lib/part.ts`) and
  * resolves the matching sprite icon via the same priority chain the file tree / editor tabs use
- * ({@link getIconIdFromExtension}). Returns `undefined` when the CAD machine
+ * ({@link getIconIdForFilename}). Returns `undefined` when the CAD machine
  * has no file loaded so the screenshot pipeline simply skips stamping rather
  * than rendering a partial chip.
  *
@@ -35,8 +34,7 @@ export function resolveScreenshotOverlay(cadRef: CadActorRef | undefined): Scree
  * have the path in hand without a CAD ref (e.g. agent RPC handlers).
  */
 export function buildScreenshotOverlayForPath(filePath: string): ScreenshotOverlay {
-  const extension = getFileExtension(filePath);
-  const iconKey = extension ? getIconIdFromExtension(extension) : undefined;
+  const iconKey = getIconIdForFilename(filePath);
   return {
     filePath,
     iconKey,

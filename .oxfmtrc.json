@@ -19,6 +19,7 @@
     "/tarballs/**",
     "/experiments/**",
     "/packages/runtime/occt-reports/**",
+    "/packages/kernels/openrscad/benchmarks/**",
     "/packages/converter/src/assets/**",
     "**/generated/**",
     "**/assets/**",

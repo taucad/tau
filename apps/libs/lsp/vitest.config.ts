@@ -14,7 +14,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/libs/lsp',
+      reportsDirectory: '../../../coverage/apps/libs/lsp',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec}.ts'],
     },

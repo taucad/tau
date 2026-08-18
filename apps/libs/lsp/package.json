@@ -4,6 +4,7 @@
   "description": "Monaco LSP bindings and language filesystem bridge for the web editor",
   "type": "module",
   "private": true,
+  "license": "AGPL-3.0-only",
   "exports": {
     "./in-process-jsonrpc": {
       "types": "./src/in-process-jsonrpc.ts",

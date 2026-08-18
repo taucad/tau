@@ -176,7 +176,7 @@ export default defineConfig(({ mode }) => {
      */
     ssr: {
       noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
-      external: ['@taucad/runtime', '@taucad/openrscad', 'openrscad-engine'],
+      external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
     },
 
     server: {

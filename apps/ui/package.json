@@ -36,6 +36,7 @@
     "@taucad/vm": "workspace:*",
     "better-auth": "catalog:",
     "bowser": "catalog:",
+    "@taulabs/openrscad-engine": "catalog:",
     "camera-controls": "3.1.2",
     "class-variance-authority": "catalog:",
     "date-fns": "catalog:",
@@ -49,7 +50,6 @@
     "radix-ui": "catalog:",
     "react-day-picker": "^10.0.1",
     "sonner": "catalog:",
-    "openrscad-engine": "catalog:",
     "tslib": "catalog:",
     "uint8array-extras": "catalog:",
     "vscode-uri": "catalog:"

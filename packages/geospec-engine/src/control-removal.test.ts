@@ -28,7 +28,8 @@ const roots = [
   'packages/geospec-engine',
   'packages/runtime/src/kernels/replicad',
   'libs/tau-examples/src/kernels/replicad/v8-engine-rev2',
-  'apps/runtime-e2e/src',
+  // `apps/runtime-e2e/src` is covered by an app-owned test; a package must not
+  // read `apps/**` (workspace-license-boundary-migration.md, Finding 2).
 ].map((path) => resolve(workspace, path));
 const skippedDirectories = new Set(['node_modules', 'verification']);
 const sourceExtensions = new Set(['.cjs', '.cpp', '.h', '.js', '.json', '.md', '.mjs', '.ts', '.tsx', '.yaml', '.yml']);

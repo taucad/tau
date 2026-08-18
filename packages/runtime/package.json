@@ -348,7 +348,7 @@
     "es-module-lexer": "catalog:",
     "esbuild-wasm": "catalog:",
     "json-schema-default": "catalog:",
-    "libcascade": "3.0.0",
+    "libcascade": "3.0.2",
     "jszip": "^3.10.1",
     "manifold-3d": "catalog:",
     "nanoraster": "^0.2.0",

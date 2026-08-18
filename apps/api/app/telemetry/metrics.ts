@@ -73,6 +73,12 @@ export class MetricsService {
     unit: TauMetrics.genAiToolInvocations.unit,
   });
 
+  public readonly genAiToolDuration = this.apiMeter.createHistogram(TauMetrics.genAiToolDuration.name, {
+    description: TauMetrics.genAiToolDuration.description,
+    unit: TauMetrics.genAiToolDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.genAiToolDuration.buckets] },
+  });
+
   public readonly genAiToolInputRepairs = this.apiMeter.createCounter(TauMetrics.genAiToolInputRepairs.name, {
     description: TauMetrics.genAiToolInputRepairs.description,
     unit: TauMetrics.genAiToolInputRepairs.unit,

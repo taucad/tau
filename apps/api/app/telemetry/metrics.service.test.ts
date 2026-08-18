@@ -60,6 +60,10 @@ describe('MetricsService', () => {
       expect(service.genAiToolInvocations).toBeDefined();
     });
 
+    it('should create genAiToolDuration histogram', () => {
+      expect(service.genAiToolDuration).toBeDefined();
+    });
+
     it('should create genAiToolInputRepairs counter', () => {
       expect(service.genAiToolInputRepairs).toBeDefined();
       expect(() => service.genAiToolInputRepairs.add(1)).not.toThrow();

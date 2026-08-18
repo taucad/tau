@@ -3,6 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
 import { createProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
+import type { Environment } from '#config/environment.config.js';
 
 describe('ProviderService xai', () => {
   it('should construct TauChatXaiResponses with reasoning and conversation affinity', () => {
@@ -15,7 +16,7 @@ describe('ProviderService xai', () => {
       },
     };
 
-    const providerService = new ProviderService(configService as ConfigService);
+    const providerService = new ProviderService(configService as unknown as ConfigService<Environment, true>);
     const diagnosticsContext = createProviderDiagnosticsContext({
       chatId: 'chat_xai_1',
       modelId: 'xai-grok-4.6',
@@ -36,12 +37,12 @@ describe('ProviderService xai', () => {
         },
       },
       { diagnosticsContext },
-    );
+    ) as TauChatXaiResponses;
 
     expect(model).toBeInstanceOf(TauChatXaiResponses);
     expect(model.model).toBe('grok-4.6');
-    expect((model as TauChatXaiResponses).maxOutputTokens).toBe(64_000);
-    expect((model as TauChatXaiResponses).reasoning).toEqual({ effort: 'high', summary: 'auto' });
-    expect((model as TauChatXaiResponses).conversationId).toBe('chat_xai_1');
+    expect(model.maxOutputTokens).toBe(64_000);
+    expect(model.reasoning).toEqual({ effort: 'high', summary: 'auto' });
+    expect(model.conversationId).toBe('chat_xai_1');
   });
 });

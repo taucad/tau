@@ -3,6 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
+import type { Environment } from '#config/environment.config.js';
 
 describe('ProviderService Together Kimi', () => {
   const configService: Pick<ConfigService, 'get'> = {
@@ -10,7 +11,7 @@ describe('ProviderService Together Kimi', () => {
   };
 
   it('should construct the Kimi adapter with Together credentials and no Moonshot controls', () => {
-    const providerService = new ProviderService(configService as ConfigService);
+    const providerService = new ProviderService(configService as unknown as ConfigService<Environment, true>);
     const model = providerService.createModelClass('together', {
       model: 'moonshotai/Kimi-K3',
       streaming: true,
@@ -18,10 +19,10 @@ describe('ProviderService Together Kimi', () => {
         apiKey: 'sk-test-together',
         baseURL: 'https://api.together.xyz/v1',
       },
-    });
+    }) as TauChatKimiCompletions;
 
     expect(model).toBeInstanceOf(TauChatKimiCompletions);
-    expect((model as TauChatKimiCompletions).modelProvider).toBe('together');
+    expect(model.modelProvider).toBe('together');
     expect(model.model).toBe('moonshotai/Kimi-K3');
     expect(model.reasoning).toBeUndefined();
     expect(model.promptCacheKey).toBeUndefined();
@@ -30,7 +31,7 @@ describe('ProviderService Together Kimi', () => {
   });
 
   it('should keep non-Kimi Together models on the generic ChatOpenAI path', () => {
-    const providerService = new ProviderService(configService as ConfigService);
+    const providerService = new ProviderService(configService as unknown as ConfigService<Environment, true>);
     const model = providerService.createModelClass('together', {
       model: 'zai-org/GLM-5.2',
       streaming: true,
@@ -45,7 +46,9 @@ describe('ProviderService Together Kimi', () => {
   });
 
   it('should expose Together inclusive-cache accounting semantics', () => {
-    const provider = new ProviderService(configService as ConfigService).getProvider('together');
+    const provider = new ProviderService(configService as unknown as ConfigService<Environment, true>).getProvider(
+      'together',
+    );
 
     expect(provider).toMatchObject({
       provider: 'together',

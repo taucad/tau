@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import { ProviderService } from '#api/providers/provider.service.js';
+import type { Environment } from '#config/environment.config.js';
 
 describe('ProviderService morph', () => {
   it('should construct ChatOpenAI against Morph API with reasoning config', () => {
@@ -14,7 +15,7 @@ describe('ProviderService morph', () => {
       },
     };
 
-    const providerService = new ProviderService(configService as ConfigService);
+    const providerService = new ProviderService(configService as unknown as ConfigService<Environment, true>);
     const model = providerService.createModelClass('morph', {
       model: 'morph-qwen35-397b',
       configuration: {
@@ -24,7 +25,7 @@ describe('ProviderService morph', () => {
       reasoning: {
         effort: 'medium',
       },
-    });
+    }) as ChatOpenAI;
 
     expect(model).toBeInstanceOf(ChatOpenAI);
     expect(model.model).toBe('morph-qwen35-397b');

@@ -283,7 +283,6 @@ const config = [
       '@nx/enforce-module-boundaries': [
         'error',
         {
-          allow: ['@taucad/runtime'],
           allowCircularSelfDependency: true,
           depConstraints: [
             {
@@ -296,11 +295,24 @@ const config = [
             },
             {
               sourceTag: 'type:app',
-              onlyDependOnLibsWithTags: ['type:ui', 'type:lib', 'type:app-lib', 'type:examples'],
+              onlyDependOnLibsWithTags: [
+                'type:ui',
+                'type:lib',
+                'type:app-lib',
+                'type:examples',
+                'type:package-root',
+                'type:package-veneer',
+              ],
             },
             {
               sourceTag: 'type:ui',
-              onlyDependOnLibsWithTags: ['type:ui', 'type:lib', 'type:app-lib'],
+              onlyDependOnLibsWithTags: [
+                'type:ui',
+                'type:lib',
+                'type:app-lib',
+                'type:package-root',
+                'type:package-veneer',
+              ],
             },
             {
               /*
@@ -321,16 +333,32 @@ const config = [
               onlyDependOnLibsWithTags: ['type:app-lib', 'type:lib', 'type:package-root', 'type:package-veneer'],
             },
             {
+              sourceTag: 'type:package-root',
+              onlyDependOnLibsWithTags: ['type:package-root', 'type:package-veneer', 'type:lib'],
+            },
+            {
+              sourceTag: 'type:package-veneer',
+              onlyDependOnLibsWithTags: ['type:package-root'],
+            },
+            {
               // Example projects (fixtures) depend on libs they demonstrate —
               // geospec for `.geospec.ts` suites, runtime for export scripts.
               sourceTag: 'type:examples',
-              onlyDependOnLibsWithTags: ['type:lib', 'type:examples'],
+              onlyDependOnLibsWithTags: ['type:lib', 'type:examples', 'type:package-root', 'type:package-veneer'],
             },
             {
               // E2e/regression packages sit at the top of the graph and may
               // consume anything they exercise: apps, ui, libs, and examples.
               sourceTag: 'type:e2e',
-              onlyDependOnLibsWithTags: ['type:app', 'type:ui', 'type:lib', 'type:app-lib', 'type:examples'],
+              onlyDependOnLibsWithTags: [
+                'type:app',
+                'type:ui',
+                'type:lib',
+                'type:app-lib',
+                'type:examples',
+                'type:package-root',
+                'type:package-veneer',
+              ],
             },
           ],
         },

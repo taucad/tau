@@ -38,7 +38,7 @@
     "check-registry-dependencies": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node scripts/src/check-registry-dependencies.ts packages/runtime/package.json"
+        "command": "node scripts/src/check-registry-dependencies.ts packages/runtime/package.json packages/geospec/package.json packages/geospec-engine/package.json packages/react/package.json packages/cli/package.json packages/kernels/openrscad/package.json"
       }
     },
     "audit-singular-render-output": {

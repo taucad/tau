@@ -2,13 +2,13 @@
  * Validate that @taucad/runtime's emitted dependency imports resolve from npm,
  * including subpaths, named exports, and one private-transitive workspace hop.
  *
- * Usage: node scripts/src/check-registry-dependencies.ts [manifest-path]
+ * Usage: node scripts/src/check-registry-dependencies.ts [manifest-path…]
  */
 import { execFile } from 'node:child_process';
 import { existsSync, globSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { load } from 'js-yaml';
@@ -502,17 +502,28 @@ export const checkRegistryDependencies = async (manifestPath: string): Promise<s
 };
 
 const main = async (): Promise<void> => {
-  const manifestPath = resolve(process.argv[2] ?? 'packages/runtime/package.json');
-  const issues = await checkRegistryDependencies(manifestPath);
-  if (issues.length === 0) {
-    console.log('Every runtime dependency resolves from the public npm registry.');
-    return;
+  const manifestPaths = (process.argv.length > 2 ? process.argv.slice(2) : ['packages/runtime/package.json']).map(
+    (path) => resolve(path),
+  );
+  let blockers = 0;
+  for (const manifestPath of manifestPaths) {
+    // Serial: each manifest installs into its own temporary registry sandbox.
+    // eslint-disable-next-line no-await-in-loop -- One npm sandbox at a time.
+    const issues = await checkRegistryDependencies(manifestPath);
+    const label = relative(process.cwd(), manifestPath);
+    if (issues.length === 0) {
+      console.log(`${label}: every dependency resolves from the public npm registry.`);
+      continue;
+    }
+    blockers += issues.length;
+    console.error(`${label}: registry dependency blockers (${issues.length}):`);
+    for (const issue of issues) {
+      console.error(`- ${issue}`);
+    }
   }
-  console.error(`Registry dependency blockers (${issues.length}):`);
-  for (const issue of issues) {
-    console.error(`- ${issue}`);
+  if (blockers > 0) {
+    process.exitCode = 1;
   }
-  process.exitCode = 1;
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

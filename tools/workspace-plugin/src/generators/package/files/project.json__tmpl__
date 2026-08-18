@@ -3,5 +3,5 @@
   "$schema": "<%= offset %>node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "<%= scope %>/<%= name %>",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"]
+  "tags": <%- tags %>
 }

@@ -19,9 +19,9 @@
     },
     "scope": {
       "type": "string",
-      "enum": ["packages", "libs"],
+      "enum": ["packages", "libs", "apps/libs"],
       "default": "packages",
-      "description": "Directory scope (packages for publishable, libs for internal)"
+      "description": "Placement, which derives tags, privacy, and license (packages for publishable Apache surfaces, libs for shared Apache capabilities, apps/libs for private AGPL application capabilities)"
     }
   },
   "required": ["name"]

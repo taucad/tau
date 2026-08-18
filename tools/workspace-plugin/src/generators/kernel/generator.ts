@@ -11,6 +11,8 @@ import type { Tree } from '@nx/devkit';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { canonicalLicenseText, placementMetadata } from '#generators/package/generator.js';
+
 type KernelGeneratorSchema = {
   name: string;
   description?: string;
@@ -33,12 +35,15 @@ export const kernelGenerator = async (tree: Tree, schema: KernelGeneratorSchema)
   const importPath = `@taucad/${schema.name}`;
   const description = schema.description ?? '';
   const { className, propertyName } = names(schema.name);
+  // Kernels are published packages with a veneer layering role.
+  const placement = placementMetadata.packages;
+  const tags = ['scope:shared', 'type:package-veneer'];
 
   addProjectConfiguration(tree, schema.name, {
     root: projectRoot,
     sourceRoot: projectRoot,
     projectType: 'library',
-    tags: ['scope:shared', 'type:package-veneer'],
+    tags,
   });
 
   const substitutions = {
@@ -48,6 +53,9 @@ export const kernelGenerator = async (tree: Tree, schema: KernelGeneratorSchema)
     scope,
     className,
     propertyName,
+    tags: JSON.stringify(tags),
+    private: String(placement.private),
+    license: placement.license,
     offset: offsetFromRoot(projectRoot),
     dot: '.',
     tmpl: '',
@@ -59,11 +67,10 @@ export const kernelGenerator = async (tree: Tree, schema: KernelGeneratorSchema)
   // Kernel-specific overlay wins for package.json / tsdown / src.
   generateFiles(tree, join(currentDirectory, 'files'), projectRoot, substitutions);
 
+  tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, placement.canonicalLicensePath));
+
   const project = readProjectConfiguration(tree, schema.name);
-  updateProjectConfiguration(tree, schema.name, {
-    ...project,
-    tags: ['scope:shared', 'type:package-veneer'],
-  });
+  updateProjectConfiguration(tree, schema.name, { ...project, tags });
 
   await formatFiles(tree);
 };

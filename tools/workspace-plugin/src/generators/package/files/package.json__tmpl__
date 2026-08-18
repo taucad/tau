@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "<%= description %>",
   "type": "module",
-  "private": false,
+  "private": <%- private %>,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
@@ -14,7 +14,7 @@
   "files": ["dist", "README.md"],
   "keywords": ["cad", "typescript"],
   "author": "Richard Fontein",
-  "license": "Apache-2.0",
+  "license": "<%= license %>",
   "exports": {
     ".": "./src/index.ts"
   },

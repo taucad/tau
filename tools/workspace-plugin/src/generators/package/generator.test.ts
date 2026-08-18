@@ -61,4 +61,40 @@ describe('package generator', () => {
     expect(tsdownConfig).toContain('export default defineConfig(packageConfig);');
     expect(tsdownConfig).not.toMatch(/cjsConfig|format: 'cjs'|dist\/esm|dist\/cjs|defineConfig\(\[/);
   });
+
+  it.each([
+    {
+      scope: 'packages',
+      isPrivate: false,
+      license: 'Apache-2.0',
+      tags: ['scope:shared', 'type:lib'],
+    },
+    {
+      scope: 'libs',
+      isPrivate: true,
+      license: 'Apache-2.0',
+      tags: ['scope:shared', 'type:lib'],
+    },
+    {
+      scope: 'apps/libs',
+      isPrivate: true,
+      license: 'AGPL-3.0-only',
+      tags: ['scope:shared', 'type:app-lib'],
+    },
+  ] as const)('derives layering, privacy, and license from the $scope placement', async (placement) => {
+    const tree = createTreeWithEmptyWorkspace();
+
+    await packageGenerator(tree, { name: 'example', scope: placement.scope });
+
+    const root = `${placement.scope}/example`;
+    const packageJson = readJson<{ private?: boolean; license?: string }>(tree, `${root}/package.json`);
+    const projectJson = readJson<{ tags?: string[] }>(tree, `${root}/project.json`);
+
+    expect(packageJson.private).toBe(placement.isPrivate);
+    expect(packageJson.license).toBe(placement.license);
+    expect(projectJson.tags).toStrictEqual(placement.tags);
+    expect(readText(tree, `${root}/LICENSE`)).toContain(
+      placement.license === 'Apache-2.0' ? 'Apache License' : 'GNU AFFERO GENERAL PUBLIC LICENSE',
+    );
+  });
 });

@@ -4,13 +4,14 @@ import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { OpenAIClient } from '@langchain/openai';
 import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
-import type { KimiModelProvider, TauChatKimiCompletionsInput } from '#api/providers/kimi-completions.adapter.js';
+import type {
+  KimiCompletion,
+  KimiCompletionChunk,
+  KimiModelProvider,
+  TauChatKimiCompletionsInput,
+} from '#api/providers/kimi-completions.adapter.js';
 
-type KimiUsage = OpenAIClient.Completions.CompletionUsage & { cached_tokens?: number };
-type KimiCompletion = Omit<OpenAIClient.Chat.Completions.ChatCompletion, 'usage'> & { usage?: KimiUsage };
-type KimiChunk = Omit<OpenAIClient.Chat.Completions.ChatCompletionChunk, 'usage'> & {
-  usage?: KimiUsage;
-};
+type KimiChunk = KimiCompletionChunk;
 type KimiRequest = OpenAIClient.Chat.Completions.ChatCompletionCreateParams;
 
 const baseCompletion = {

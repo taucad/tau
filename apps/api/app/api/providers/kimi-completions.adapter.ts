@@ -24,20 +24,35 @@ type KimiUsage = OpenAIClient.Completions.CompletionUsage & {
   readonly cached_tokens?: number;
 };
 
-type KimiCompletion = Omit<OpenAIClient.Chat.Completions.ChatCompletion, 'usage'> & {
-  readonly usage?: KimiUsage;
-};
-
-type KimiCompletionChunk = Omit<OpenAIClient.Chat.Completions.ChatCompletionChunk, 'usage'> & {
-  readonly usage?: KimiUsage;
-};
-
-type KimiAssistantMessage = OpenAIClient.Chat.Completions.ChatCompletionAssistantMessageParam & {
+export type KimiResponseMessage = OpenAIClient.Chat.Completions.ChatCompletionMessage & {
   readonly reasoning?: string;
   readonly reasoning_content?: string;
 };
 
-type KimiResponseMessage = OpenAIClient.Chat.Completions.ChatCompletionMessage & {
+type KimiCompletionChoice = Omit<OpenAIClient.Chat.Completions.ChatCompletion['choices'][number], 'message'> & {
+  readonly message: KimiResponseMessage;
+};
+
+export type KimiCompletion = Omit<OpenAIClient.Chat.Completions.ChatCompletion, 'choices' | 'usage'> & {
+  readonly choices: KimiCompletionChoice[];
+  readonly usage?: KimiUsage;
+};
+
+type KimiCompletionChunkDelta = OpenAIClient.Chat.Completions.ChatCompletionChunk['choices'][number]['delta'] & {
+  readonly reasoning?: string;
+  readonly reasoning_content?: string;
+};
+
+type KimiCompletionChunkChoice = Omit<OpenAIClient.Chat.Completions.ChatCompletionChunk['choices'][number], 'delta'> & {
+  readonly delta: KimiCompletionChunkDelta;
+};
+
+export type KimiCompletionChunk = Omit<OpenAIClient.Chat.Completions.ChatCompletionChunk, 'choices' | 'usage'> & {
+  readonly choices: KimiCompletionChunkChoice[];
+  readonly usage?: KimiUsage;
+};
+
+type KimiAssistantMessage = OpenAIClient.Chat.Completions.ChatCompletionAssistantMessageParam & {
   readonly reasoning?: string;
   readonly reasoning_content?: string;
 };

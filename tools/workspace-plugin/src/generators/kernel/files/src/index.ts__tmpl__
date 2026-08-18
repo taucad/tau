@@ -6,4 +6,5 @@
  */
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- public package entry */
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference is the workspace's public-entry convention.
 export { <%= propertyName %>, <%= propertyName %>RenderSchema, <%= propertyName %>ExportSchemas } from '#<%= name %>.kernel.js';

@@ -82,10 +82,22 @@ describe('kernel generator', () => {
     expect(tree.exists('packages/kernels/example/tsconfig.spec.json')).toBe(true);
     expect(tree.exists('packages/kernels/example/tsconfig.build.json')).toBe(true);
 
-    const project = readJson<{ sourceRoot?: string }>(tree, 'packages/kernels/example/project.json');
+    const project = readJson<{ sourceRoot?: string; tags?: string[] }>(tree, 'packages/kernels/example/project.json');
     expect(project.sourceRoot).toBe('packages/kernels/example');
+    expect(project.tags).toEqual(['scope:shared', 'type:package-veneer']);
 
     const vitest = readText(tree, 'packages/kernels/example/vitest.config.ts');
     expect(vitest).toContain('coverage/packages/kernels/example');
+  });
+
+  it('uses the current tsdown type and permits the package self-reference barrel', async () => {
+    const tree = createTreeWithEmptyWorkspace();
+
+    await kernelGenerator(tree, { name: 'example' });
+
+    expect(readText(tree, 'packages/kernels/example/tsdown.config.ts')).toContain('UserConfig');
+    expect(readText(tree, 'packages/kernels/example/src/index.ts')).toContain(
+      "package-import self-reference is the workspace's public-entry convention",
+    );
   });
 });

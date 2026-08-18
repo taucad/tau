@@ -1,4 +1,12 @@
-import { addProjectConfiguration, formatFiles, generateFiles, names, offsetFromRoot } from '@nx/devkit';
+import {
+  addProjectConfiguration,
+  formatFiles,
+  generateFiles,
+  names,
+  offsetFromRoot,
+  readProjectConfiguration,
+  updateProjectConfiguration,
+} from '@nx/devkit';
 import type { Tree } from '@nx/devkit';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +38,7 @@ export const kernelGenerator = async (tree: Tree, schema: KernelGeneratorSchema)
     root: projectRoot,
     sourceRoot: projectRoot,
     projectType: 'library',
-    tags: ['scope:shared', 'type:lib'],
+    tags: ['scope:shared', 'type:package-veneer'],
   });
 
   const substitutions = {
@@ -50,6 +58,12 @@ export const kernelGenerator = async (tree: Tree, schema: KernelGeneratorSchema)
   generateFiles(tree, join(currentDirectory, '../package/files'), projectRoot, substitutions);
   // Kernel-specific overlay wins for package.json / tsdown / src.
   generateFiles(tree, join(currentDirectory, 'files'), projectRoot, substitutions);
+
+  const project = readProjectConfiguration(tree, schema.name);
+  updateProjectConfiguration(tree, schema.name, {
+    ...project,
+    tags: ['scope:shared', 'type:package-veneer'],
+  });
 
   await formatFiles(tree);
 };

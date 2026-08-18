@@ -87,7 +87,7 @@
     "manifold-3d": "catalog:"
   },
   "devDependencies": {
-    "@libcascade/toolchain": "file:../../repos/opencascade.js/.local-pack/libcascade-toolchain-3.0.0-beta.0-closure-final.tgz",
+    "@libcascade/toolchain": "3.0.2",
     "@playwright/test": "catalog:",
     "@taucad/chat": "workspace:*",
     "@taucad/openrscad": "workspace:*",

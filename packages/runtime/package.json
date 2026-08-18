@@ -328,7 +328,6 @@
     }
   },
   "imports": {
-    "#kernels/opencascade/wasm/opencascade_full.js": "./src/kernels/opencascade/wasm/opencascade_full.js",
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },

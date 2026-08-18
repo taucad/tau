@@ -10,10 +10,8 @@ import { Logger as PinoLogger } from 'nestjs-pino';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
-import { publicationMaxMultipartFiles } from '@taucad/types/constants';
 import { FastifyOtelInstrumentation } from '@fastify/otel';
-import { apiHeaders } from '@taucad/runtime/cross-origin-isolation';
-import { idPrefix } from '@taucad/types/constants';
+import { idPrefix, publicationMaxMultipartFiles } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { AppModule } from '#app.module.js';
 import type { Environment } from '#config/environment.config.js';
@@ -52,13 +50,11 @@ async function createApiApp() {
   app.enableVersioning({
     type: VersioningType.URI,
   });
-  // Consume the canonical `apiHeaders` CORP value so the Netlify-hosted UI —
-  // which sets COEP `require-corp` — can read cross-origin API responses. Helmet
-  // defaults to CORP `same-origin`, which would block those reads.
+  // CORP `cross-origin` so the Netlify-hosted UI — which sets COEP
+  // `require-corp` — can read cross-origin API responses. Helmet defaults to
+  // CORP `same-origin`, which would block those reads.
   await app.register(helmet, {
-    crossOriginResourcePolicy: {
-      policy: apiHeaders['Cross-Origin-Resource-Policy'] as 'cross-origin',
-    },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
   });
 
   const fastifyInstance = app.getHttpAdapter().getInstance();

@@ -4,6 +4,7 @@
   "description": "LSP workspace filesystem bridge protocol (async JSON-RPC + optional sync SAB channel)",
   "type": "module",
   "private": true,
+  "license": "AGPL-3.0-only",
   "exports": {
     ".": {
       "types": "./src/index.ts",

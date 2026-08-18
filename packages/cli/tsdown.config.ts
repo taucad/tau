@@ -18,7 +18,7 @@ const cliExternals: Array<RegExp | string> = [
   'manifold-3d',
   '@kittycad/lib',
   'esbuild-wasm',
-  'openrscad-engine',
+  '@taulabs/openrscad-engine',
   'jszip',
 ];
 

@@ -294,7 +294,7 @@ Adapted from Stripe's "safe changes" definition. These changes are always backwa
 - Adding new properties to response/result objects
 - Adding new event types to `on()` subscriptions
 - Adding new enum values when the consumer handles an `else`/`default` case
-- Adding new export subpaths to `package.json`
+- Adding new export subpaths to `package.json` after satisfying [Public Surface Policy](public-surface-policy.md)
 - Adding new kernels, middleware, or bundler plugins
 - Adding new methods to existing objects (when the object is not user-constructible)
 - Widening input types (accepting more inputs)

@@ -7,6 +7,7 @@ updated: '2026-07-14'
 related:
   - docs/policy/release-policy.md
   - docs/policy/library-api-policy.md
+  - docs/policy/public-surface-policy.md
 ---
 
 # Version Policy
@@ -243,7 +244,7 @@ APIs intended for framework-internal use or advanced escape hatches use specific
 | ----------------------- | ------------------------------------------ | -------------------------------- |
 | `@internal` JSDoc       | Framework code only, never consumer-facing | None — may change in any release |
 | `UNSAFE_` export prefix | Advanced consumers who accept the risk     | None — may change in any release |
-| `/internal` subpath     | Framework-level integration code           | None — may change in any release |
+| `-internals` subpath    | Framework-level integration code           | None — may change in any release |
 
 From React Router's `UNSAFE_` pattern:
 
@@ -254,7 +255,7 @@ From React Router's `UNSAFE_` pattern:
 export { createMemoryHistory as UNSAFE_createMemoryHistory } from './history';
 ```
 
-Tau uses `@internal` JSDoc for non-exported internals and the `/internal` subpath export (if needed) for cross-package framework code. The `UNSAFE_` prefix is reserved for exported escape hatches that consumers may need but that carry no stability guarantee.
+Tau uses `@internal` JSDoc for non-exported internals and a `-internals` subpath export (if needed) for cross-package framework code. `@internal` is never the sole boundary for a declaration reachable from a public export. The `UNSAFE_` prefix is reserved for exported escape hatches that consumers may need but that carry no stability guarantee. See [Public Surface Policy](public-surface-policy.md).
 
 ## Pre-Release Strategy
 
@@ -318,7 +319,7 @@ Adapted from Stripe's "safe changes" definition:
 - Adding new optional fields to option objects
 - Adding new properties to response/result objects
 - Adding new event types
-- Adding new export subpaths
+- Adding new export subpaths after satisfying Public Surface Policy's admission gate
 - Adding new kernels, middleware, or bundler plugins
 - Widening a type (accepting more inputs)
 - Performance improvements

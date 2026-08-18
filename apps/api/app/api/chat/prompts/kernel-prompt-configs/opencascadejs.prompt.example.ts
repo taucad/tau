@@ -6,7 +6,7 @@ import {
   gp_Pnt,
   gp_Ax2,
   gp_Dir,
-} from 'opencascade.js';
+} from 'libcascade';
 
 export const defaultParams = {
   width: 80,

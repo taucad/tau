@@ -69,6 +69,7 @@ Project skills in `.agents/skills/` provide guided workflows. Read the relevant 
 | `create-vite-plugin`    | Adding a Vite plugin to `@taucad/vite`                                                     |
 | `add-monaco-language`   | Adding Monaco + Shiki highlighting for a new file extension / TextMate grammar             |
 | `new-kernel`            | Adding a first-party CAD kernel to `@taucad/runtime`                                       |
+| `optimize-for-gpu`      | Profiling and safely designing non-rendering WebGPU compute acceleration                   |
 | `package-release`       | Versioning, building, publishing `@taucad/*` packages                                      |
 | `repos`                 | Investigating dependency source code; cloning, adding, or exploring repos via `repos.yaml` |
 | `submit-pr`             | Submitting draft PRs to upstream dependency forks                                          |

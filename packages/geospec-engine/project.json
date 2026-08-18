@@ -5,49 +5,6 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:lib"],
   "targets": {
-    "verify-wave1-inputs": {
-      "executor": "nx:run-commands",
-      "options": {
-        "cwd": "{workspaceRoot}",
-        "commands": [
-          "pnpm nx run runtime:copy-assets",
-          "node packages/geospec-engine/scripts/wave1-inputs.mts --verify"
-        ],
-        "parallel": false
-      }
-    },
-    "wave1-closeout": {
-      "executor": "nx:run-commands",
-      "cache": false,
-      "parallelism": false,
-      "options": {
-        "cwd": "{workspaceRoot}",
-        "commands": [
-          "pnpm nx verify-wave1-inputs geospec-engine",
-          "pnpm nx test geospec --watch=false --coverage --reporter=dot --maxWorkers=4",
-          "pnpm nx test geospec-engine --watch=false --coverage --reporter=dot --maxWorkers=4",
-          "pnpm nx e2e geospec-engine",
-          "pnpm nx test ui --watch=false --run app/workers/geospec-runner.jscad-integration.test.ts",
-          "pnpm nx test:geospec api",
-          "pnpm nx test runtime-e2e --watch=false --run src/geospec-suites.test.ts src/geospec-clean-step-lifecycle.test.ts --maxWorkers=1",
-          "pnpm nx run-many -t typecheck -p geospec geospec-engine runtime runtime-e2e tau-examples ui api --parallel=3",
-          "pnpm nx run-many -t lint -p geospec geospec-engine --parallel=2",
-          "pnpm nx lint runtime --files='src/kernels/replicad/**/*.ts'",
-          "pnpm nx lint runtime-e2e --files='src/geospec-*.test.ts'",
-          "pnpm nx lint tau-examples --files='src/kernels/replicad/{v8-engine-rev2,logo-keychain}/**/*.ts'",
-          "pnpm nx lint ui --files='app/workers/geospec-*.ts'",
-          "pnpm nx lint api --files='app/testing/geospec-*.test.ts'",
-          "pnpm nx run-many -t build -p geospec geospec-engine runtime api --parallel=3",
-          "pnpm nx build:verify ui",
-          "pnpm nx run-many -t pkgcheck -p geospec geospec-engine --parallel=2",
-          "node packages/geospec-engine/scripts/package-audit.mts",
-          "pnpm nx validate-license-partitions scripts",
-          "pnpm license-deps:validate",
-          "pnpm docs:validate"
-        ],
-        "parallel": false
-      }
-    },
     "e2e": {
       "executor": "nx:run-commands",
       "cache": false,

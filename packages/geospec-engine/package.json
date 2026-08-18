@@ -87,7 +87,8 @@
     "@libcascade/toolchain": "file:../../repos/opencascade.js/.local-pack/libcascade-toolchain-3.0.0-beta.0-closure-final.tgz",
     "@playwright/test": "catalog:",
     "@taucad/chat": "workspace:*",
-    "@taucad/openrscad": "workspace:*"
+    "@taucad/openrscad": "workspace:*",
+    "@taucad/tau-examples": "workspace:*"
   },
   "scripts": {
     "prepack": "node scripts/generate-provenance.mjs"

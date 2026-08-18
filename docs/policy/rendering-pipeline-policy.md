@@ -3,7 +3,7 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-07-16'
+updated: '2026-08-16'
 related:
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
   - docs/research/project-card-thumbnail-preview-parity.md
@@ -28,7 +28,7 @@ baseColorFactor:  [0.8, 0.8, 0.8, 1]  (fallback when no source color)
 doubleSided:      true
 ```
 
-These values are defined in `packages/types/src/constants/material.constants.ts` as `cadMaterialDefaults` and imported by all conversion pipelines.
+These values are defined in `libs/types/src/constants/material.constants.ts` as `cadMaterialDefaults` and imported by all conversion pipelines.
 
 ### Pipelines Covered
 
@@ -47,7 +47,7 @@ Authored and imported line primitives preserve their source materials in artifac
 
 ## Material Policy
 
-- **Non-metallic default**: All CAD surfaces default to `metallicFactor: 0.0`. None of the source formats (STEP, Replicad, JSCAD, OpenSCAD) carry per-part metal/non-metal metadata.
+- **Non-metallic default**: All CAD surfaces default to `metallicFactor: 0.0`. None of the source formats (STEP, Replicad, JSCAD, OpenRSCAD) carry per-part metal/non-metal metadata.
 - **Semi-glossy roughness**: `roughnessFactor: 0.35` produces a glossy CAD sheen with visible specular highlights under studio lighting, closely matching professional CAD viewers like Onshape.
 - **Source materials preserved**: Source color overrides the default `baseColorFactor`; authored metallic and roughness values override their defaults when the kernel or imported format supplies them.
 - **Fallback material**: Meshes with no source color receive a unified neutral grey material (`[0.8, 0.8, 0.8, 1]`) across all pipelines rather than inheriting Three.js defaults.

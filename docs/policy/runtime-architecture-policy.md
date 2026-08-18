@@ -3,7 +3,7 @@ title: 'Kernel Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers ProjectMachine, CadMachine, RuntimeClient, plugin model, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-08-07'
+updated: '2026-08-17'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -12,6 +12,7 @@ related:
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
   - docs/research/runtime-rooted-filesystem-residual-migration.md
+  - docs/research/language-kernel-selection-architecture.md
 ---
 
 # Kernel Architecture Policy
@@ -139,7 +140,7 @@ With the single-worker-per-geometry-unit architecture, only the WASM runtime for
 
 - replicad file: ~55-66 MB (OpenCASCADE WASM)
 - manifold file: ~14 MB (Manifold WASM)
-- openscad file: ~14 MB (Manifold WASM)
+- openrscad file: ~14 MB (Manifold WASM)
 - jscad file: ~5 MB
 - kcl file: ~3 MB (KCL WASM)
 - STEP/STL file: ~5 MB (converter)
@@ -362,7 +363,7 @@ Kernel modules define geometry computation logic. Each kernel is an ES module lo
 - `initialize(options, runtime)` — load WASM, register builtin modules. `options` is type-safe via the `Options` generic inferred from `optionsSchema`
 - `getDependencies(input, runtime, ctx)` — return file dependencies
 - `getParameters(input, runtime, ctx)` — extract parameters from code
-- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Manifold and Tau return display-ready inline `geometry`; Replicad, OpenCascade, Zoo, JSCAD, and OpenSCAD return reusable native evidence and implement `meshGeometry`. Every input contains only `entryPath` and `parameters`; `options` exists only when the kernel positively declares a Zod-object `createOptionsSchema`. Content and render/export route intent never cross this boundary
+- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Manifold, OpenRSCAD, and Tau return display-ready inline `geometry`; Replicad, OpenCascade, Zoo, and JSCAD return reusable native evidence and implement `meshGeometry`. Every input contains only `entryPath` and `parameters`; `options` exists only when the kernel positively declares a Zod-object `createOptionsSchema`. Content and render/export route intent never cross this boundary
 - `meshGeometry(input, runtime, ctx)` _(optional)_ — nativeHandle → display artifact (`GeometryResponse`) at preview tessellation or display packing. Runs **only on the display path**, at the kernel boundary; export-only requests never call it. Contract invariant: a kernel provides a display path either via inline `geometry` or via `meshGeometry` — the orchestrator rejects display renders when neither exists
 - `exportGeometry(input, runtime, ctx)` — export using the framework-materialized nativeHandle. Mesh formats tessellate internally at export quality; BRep formats (STEP/IGES) never tessellate
 

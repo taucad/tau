@@ -3,7 +3,7 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-07-21'
+updated: '2026-08-17'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/first-party-runtime-library-tracing-blueprint.md
@@ -43,7 +43,7 @@ All span names follow the pattern `{subsystem}.{operation}`, inspired by OpenTel
 ### Rules
 
 - Use lowercase with dots as separators.
-- Framework spans use the `kernel.` prefix. Kernel-authored spans use the kernel's ID as prefix (e.g., `replicad.`, `openscad.`).
+- Framework spans use the `kernel.` prefix. Kernel-authored spans use the kernel's ID as prefix (e.g., `replicad.`, `openrscad.`).
 - Dynamic names are permitted only for `middleware.wrap({MiddlewareName})` where the middleware name is interpolated.
 - New subsystem prefixes require updating this document.
 

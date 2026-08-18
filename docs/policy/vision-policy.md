@@ -3,7 +3,7 @@ title: 'Vision Policy'
 description: "Tau's long-term vision for connecting hardware engineering through code, AI agents, and verification as the reward function."
 status: active
 created: '2026-03-04'
-updated: '2026-07-13'
+updated: '2026-08-17'
 ---
 
 # Vision Policy
@@ -44,7 +44,7 @@ Verification is therefore a first-class pillar in its own right, not a feature o
 
 Solve code-first mechanical CAD. Tau today is an AI-native, multi-kernel CAD platform:
 
-- **Multi-kernel runtime** (`@taucad/runtime`) — Replicad, JSCAD, Manifold, OpenSCAD, KCL, any CAD kernel behind a unified `defineKernel()` API. BRep and mesh geometry, parametric models as TypeScript/OpenSCAD/KCL functions.
+- **Multi-kernel runtime** (`@taucad/runtime`) — Replicad, JSCAD, Manifold, OpenRSCAD, KCL, any CAD kernel behind a unified `defineKernel()` API. BRep and mesh geometry, parametric models as TypeScript/OpenSCAD/KCL functions.
 - **AI agent** — LangGraph agent with file editing, kernel execution, TDD via GeoSpec, screenshot verification. The agent writes geometry code, runs it, measures the result, iterates.
 - **Converter** (`@taucad/converter`) — 41 input formats, 11 output formats. STEP, STL, glTF, USDZ, IFC, and more. Convert any file format to another.
 - **Browser-native** — No install. Web Workers for computation, WebGL for rendering. Embeddable components for third-party apps.

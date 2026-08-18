@@ -23,6 +23,6 @@ describe('module side effects', () => {
   });
 
   it('normalizes bundled declarations to LF line endings', () => {
-    expect(buildBundledTypes().replicad).not.toContain('\r');
+    expect(buildBundledTypes()['replicad']).not.toContain('\r');
   });
 });

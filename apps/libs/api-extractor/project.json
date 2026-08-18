@@ -1,0 +1,93 @@
+{
+  "name": "api-extractor",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/api-extractor",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:app-lib"],
+  "targets": {
+    "extract-replicad": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-replicad-api.ts",
+        "cwd": "apps/libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-replicad-api.ts",
+        "{workspaceRoot}/node_modules/replicad/dist/replicad.d.ts",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/replicad"]
+    },
+    "extract-jscad": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-jscad-types.ts",
+        "cwd": "apps/libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-jscad-types.ts",
+        "{workspaceRoot}/node_modules/@jscad/modeling/src/**/*",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/jscad"]
+    },
+    "extract-geospec": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-geospec-types.ts",
+        "cwd": "apps/libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-geospec-types.ts",
+        "{workspaceRoot}/packages/geospec/src/**/*",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/geospec"]
+    },
+    "extract-kcl": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-kcl-api.ts",
+        "cwd": "apps/libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-kcl-api.ts",
+        "{workspaceRoot}/repos/zoo-modeling-app/docs/kcl-std/kcl-stdlib-export.json",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/kcl"]
+    },
+    "extract-manifold": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-manifold-types.ts",
+        "cwd": "apps/libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-manifold-types.ts",
+        "{workspaceRoot}/packages/runtime/node_modules/manifold-3d/**/*.d.ts",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/manifold"]
+    },
+    "extract-opencascade": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-opencascade-types.ts",
+        "cwd": "apps/libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-opencascade-types.ts",
+        "{workspaceRoot}/packages/runtime/src/kernels/opencascade/wasm/opencascade_full.d.ts",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/opencascade"]
+    }
+  }
+}

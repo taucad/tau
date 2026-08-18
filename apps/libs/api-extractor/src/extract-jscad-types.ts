@@ -28,7 +28,7 @@ type TsExtractionContext = {
 // Configuration
 // =============================================================================
 
-const jscadSourceDirectory = join(import.meta.dirname, '../../../node_modules/@jscad/modeling/src');
+const jscadSourceDirectory = join(import.meta.dirname, '../../../../node_modules/@jscad/modeling/src');
 const entryPath = join(jscadSourceDirectory, 'index.d.ts');
 
 /** Files containing cross-cutting foundation types referenced across namespaces. */

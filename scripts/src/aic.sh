@@ -10,7 +10,7 @@ POLICY_FILE="$REPO_ROOT/docs/policy/commit-policy.md"
 
 discover_scopes() {
   local scopes=("root")
-  for dir in "$REPO_ROOT"/apps/*/project.json "$REPO_ROOT"/packages/*/project.json "$REPO_ROOT"/packages/kernels/*/project.json "$REPO_ROOT"/libs/*/project.json; do
+  for dir in "$REPO_ROOT"/apps/*/project.json "$REPO_ROOT"/apps/libs/*/project.json "$REPO_ROOT"/packages/*/project.json "$REPO_ROOT"/packages/kernels/*/project.json "$REPO_ROOT"/libs/*/project.json; do
     [ -f "$dir" ] || continue
     local name
     name=$(node -e "console.log(require('$dir').name || '')" 2>/dev/null)
@@ -34,7 +34,7 @@ detect_touched_scopes() {
     local matched=false
     for scope in "${all_scopes[@]}"; do
       [ "$scope" = "root" ] && continue
-      if [[ "$file" == apps/"$scope"/* ]] || [[ "$file" == packages/"$scope"/* ]] || [[ "$file" == packages/kernels/"$scope"/* ]] || [[ "$file" == libs/"$scope"/* ]]; then
+      if [[ "$file" == apps/"$scope"/* ]] || [[ "$file" == apps/libs/"$scope"/* ]] || [[ "$file" == packages/"$scope"/* ]] || [[ "$file" == packages/kernels/"$scope"/* ]] || [[ "$file" == libs/"$scope"/* ]]; then
         touched+=("$scope")
         matched=true
         break
@@ -58,6 +58,8 @@ build_scope_map() {
       map+="  - root: files not under apps/, packages/, or libs/ (e.g. config, CI, docs, scripts)"$'\n'
     elif [ -d "$REPO_ROOT/packages/kernels/$scope" ]; then
       map+="  - $scope: packages/kernels/$scope/"$'\n'
+    elif [ -d "$REPO_ROOT/apps/libs/$scope" ]; then
+      map+="  - $scope: apps/libs/$scope/"$'\n'
     else
       for parent in apps packages libs; do
         if [ -d "$REPO_ROOT/$parent/$scope" ]; then

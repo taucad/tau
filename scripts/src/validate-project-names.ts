@@ -3,7 +3,7 @@ import { join, resolve, basename } from 'node:path';
 import process from 'node:process';
 
 const root = resolve(import.meta.dirname, '../..');
-const projectDirectories = ['apps', 'packages', 'packages/kernels', 'libs'];
+const projectDirectories = ['apps', 'apps/libs', 'packages', 'packages/kernels', 'libs'];
 
 type Diagnostic = { level: 'ERROR' | 'WARN'; message: string };
 type ProjectResult = { path: string; diagnostics: Diagnostic[] };

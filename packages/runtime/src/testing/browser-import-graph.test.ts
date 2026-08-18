@@ -231,9 +231,6 @@ describe('runtime browser import graph guards', () => {
     const sourceRoots = [
       'packages/runtime/src/',
       'packages/kernels/openrscad/src/',
-      'libs/telemetry/src/',
-      'apps/ui/app/middleware/',
-      'apps/ui/app/runtime/',
       'examples/electron/src/',
       'examples/nextjs/app/',
       'examples/nextjs/runtime/',

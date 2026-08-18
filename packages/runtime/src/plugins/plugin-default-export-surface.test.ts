@@ -19,13 +19,13 @@ const pluginImplementationFiles = [
   'packages/kernels/openrscad/src/openrscad.kernel.ts',
 ] as const;
 
-const sourceRoots = [
-  'packages/runtime/src',
-  'packages/kernels/openrscad/src',
-  'libs/telemetry/src',
-  'apps/ui/app/middleware',
-  'apps/ui/app/runtime',
-] as const;
+/*
+ * Package-owned roots only. The application side runs the same guard over its
+ * own source in `apps/ui/app/runtime/plugin-default-export-surface.test.ts`; a
+ * published package must not read `apps/**` (see
+ * `docs/research/workspace-license-boundary-migration.md`, Finding 2).
+ */
+const sourceRoots = ['packages/runtime/src', 'packages/kernels/openrscad/src'] as const;
 
 const pluginImportPrefixes = [
   '#bundler/',

@@ -129,7 +129,55 @@ const twoBoxSubject = (x: number): GeometrySubject =>
     ...trianglesFromFlat('right-box#0', shiftBox(x), 12),
   ]);
 
+const occurrenceSubject = (
+  occurrences: Array<{ path?: string; instanceName?: string; productName?: string }>,
+  occurrenceMesh: NonNullable<GeometrySubject['occurrenceMesh']>,
+): GeometrySubject => ({
+  ...subjectFromTriangles(trianglesFromFlat('assembly', boxPositions)),
+  step: { xde: { occurrences } } as unknown as GeometrySubject['step'],
+  occurrenceMesh,
+});
+
 describe('analyzeMeshOverlap', () => {
+  it('should reject incomplete STEP occurrence partitions', async () => {
+    const missingStep = occurrenceSubject([], () => undefined);
+    missingStep.step = undefined;
+    const onlyMesh = { positions: Float32Array.from(boxPositions), triangleCount: 12 };
+    const results = await Promise.all(
+      [
+        missingStep,
+        occurrenceSubject([{ path: 'only' }], () => onlyMesh),
+        occurrenceSubject([{ path: 'left' }, { path: 'missing' }], (index) => (index === 0 ? onlyMesh : undefined)),
+      ].map(async (subject) => analyzeMeshOverlap({ subject, tolerance: 0.001 })),
+    );
+
+    expect(results.every((result) => !result.success)).toBe(true);
+  });
+
+  it('should partition usable STEP occurrence meshes with stable fallback labels', async () => {
+    const result = await analyzeMeshOverlap({
+      subject: occurrenceSubject([{}, { productName: 'right' }, { path: 'empty' }], (index) => {
+        if (index === 2) {
+          return { positions: new Float32Array(), triangleCount: 0 };
+        }
+        return {
+          positions: Float32Array.from(index === 0 ? boxPositions : shiftBox(15)),
+          triangleCount: 12,
+        };
+      }),
+      tolerance: 0.001,
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      evidence: {
+        componentCount: 2,
+        checkedPairs: 0,
+        overlaps: [],
+      },
+    });
+  });
+
   it('should report no overlaps for disjoint manifold components', { timeout: 10_000 }, async () => {
     const result = await analyzeMeshOverlap({ subject: twoBoxSubject(15), tolerance: 0.001 });
 

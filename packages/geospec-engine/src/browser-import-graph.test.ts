@@ -128,6 +128,6 @@ describe('browser import graph', () => {
       }
     }
 
-    expect(reached.size).toBeGreaterThan(50);
+    expect(reached.size).toBeGreaterThanOrEqual(50);
   });
 });

@@ -161,7 +161,7 @@ const renderSvgThumbnail = async (svg: string): Promise<Uint8Array<ArrayBuffer>>
 const entries = JSON.parse(readFileSync(manifestPath, 'utf8')) as ManifestEntry[];
 const allRenderable = entries.filter(
   (entry): entry is ManifestEntry & { readonly mainFile: string } =>
-    entry.mainFile !== undefined && supportedKernels.has(entry.kernel),
+    entry.mainFile !== undefined && supportedKernels.has(engineIdForFixtureFamily(entry.kernel)),
 );
 const renderable =
   only.size === 0 ? allRenderable : allRenderable.filter((entry) => only.has(`${entry.kernel}/${entry.name}`));
@@ -169,7 +169,9 @@ const missing = [...only].filter((key) => !renderable.some((entry) => `${entry.k
 if (missing.length > 0) {
   throw new Error(`Unknown or unsupported examples: ${missing.join(', ')}`);
 }
-const skipped = entries.filter((entry) => entry.mainFile === undefined || !supportedKernels.has(entry.kernel));
+const skipped = entries.filter(
+  (entry) => entry.mainFile === undefined || !supportedKernels.has(engineIdForFixtureFamily(entry.kernel)),
+);
 for (const entry of skipped) {
   const reason = entry.mainFile ? `kernel ${entry.kernel} is not composed` : 'no supported main entrypoint';
   console.log(`Skipping ${entry.kernel}/${entry.name}: ${reason}`);

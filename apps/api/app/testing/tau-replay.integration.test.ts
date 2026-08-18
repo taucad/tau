@@ -3,14 +3,22 @@ import { describe, expect, it } from 'vitest';
 import type { UIMessage, UIMessageChunk } from 'ai';
 import type { GlobSearchRpcSuccess, ListDirectoryRpcSuccess } from '@taucad/chat';
 import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
+import {
+  planetaryGearGeoSpec,
+  planetaryGearLibrary,
+  planetaryGearMain,
+} from '#api/tau-replay/fixtures/planetary-gear-composite.fixture.js';
+import { tauReplayCompositeModelId } from '#api/tau-replay/tau-replay.service.js';
 import { createTestApp } from '#testing/create-test-app.js';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
-import { expectToolCallOutput } from '#testing/stream-assertions.js';
+import { expectToolCallOutput, extractToolCallParts } from '#testing/stream-assertions.js';
 import {
   buildTauReplayModelService,
   geospecStub,
   imagesStub,
+  postCompositeChat,
   postCubeChat,
+  seedCompositeProject,
   seedCubeProject,
 } from '#testing/tau-replay-test-support.js';
 
@@ -23,6 +31,67 @@ const partText = (message: UIMessage, type: 'reasoning' | 'text'): string =>
   message.parts.flatMap((part) => (part.type === type && 'text' in part ? [part.text] : [])).join('');
 
 describe('Tau replay provider (hermetic)', () => {
+  it('replays one composite chat through successful primary and secondary JSCAD compilation units', async () => {
+    const testApp = await createTestApp({
+      modelService: buildTauReplayModelService(tauReplayCompositeModelId),
+      geospecStub,
+      imagesStub,
+    });
+    const chatId = `tau_replay_composite_${Date.now()}`;
+
+    try {
+      await seedCompositeProject(testApp);
+
+      const response = await postCompositeChat(testApp, chatId);
+      expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
+
+      const chunks: UIMessageChunk[] = await collectStreamChunks(response);
+      expect(chunks.find((chunk) => chunk.type === 'error')).toBeUndefined();
+
+      const message = await collectFinalMessage(chunks);
+      expect(await testApp.memFs.readFile('/main.ts', 'utf8')).toBe(planetaryGearMain);
+      expect(await testApp.memFs.readFile('/lib/planetaryGear.ts', 'utf8')).toBe(planetaryGearLibrary);
+      expect(await testApp.memFs.readFile('/main.geospec.ts', 'utf8')).toBe(planetaryGearGeoSpec);
+
+      const compilationUnits = extractToolCallParts(message, 'get_kernel_result');
+      expect(compilationUnits).toHaveLength(2);
+      expect(compilationUnits.map(({ input }) => input)).toEqual([
+        { targetFile: '/main.ts' },
+        { targetFile: '/lib/planetaryGear.ts' },
+      ]);
+      expect(compilationUnits.map(({ state, output }) => ({ state, output }))).toEqual([
+        { state: 'output-available', output: { status: 'ready', kernelIssues: [] } },
+        { state: 'output-available', output: { status: 'ready', kernelIssues: [] } },
+      ]);
+      expectToolCallOutput(message, 'test_model', (output) => {
+        expect(output).toMatchObject({ failures: [], passed: 1, total: 1 });
+      });
+      const screenshots = extractToolCallParts(message, 'screenshot');
+      expect(screenshots).toHaveLength(1);
+      expect(screenshots[0]).toMatchObject({
+        state: 'output-available',
+        input: { mode: 'multi_angle', targetFile: '/main.ts' },
+      });
+      expect((screenshots[0]!.output as { images: Array<{ view: string }> }).images.map(({ view }) => view)).toEqual([
+        'front',
+        'back',
+        'right',
+        'left',
+        'top',
+        'bottom',
+      ]);
+      expect(partText(message, 'reasoning')).toContain('5,000–80,000 rendered vertices');
+      expect(partText(message, 'text')).toContain('multi-file planetary gear system');
+
+      const usage = usageParts(message);
+      expect(usage.reduce((sum, part) => sum + part.inputTokens, 0)).toBe(10_700);
+      expect(usage.reduce((sum, part) => sum + part.outputTokens, 0)).toBe(870);
+      expect(usage.reduce((sum, part) => sum + part.totalCost, 0)).toBeGreaterThan(0);
+    } finally {
+      await testApp.app.close();
+    }
+  }, 30_000);
+
   it('replays the cube-cutout transcript through the real chat pipeline: reasoning, tool calls, files, text, usage', async () => {
     const testApp = await createTestApp({ modelService: buildTauReplayModelService(), geospecStub, imagesStub });
     const chatId = `tau_replay_${Date.now()}`;

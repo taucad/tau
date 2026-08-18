@@ -4,22 +4,24 @@ import type { Model } from '#api/models/model.schema.js';
 import type { TauReplayModelProvider } from '#api/tau-replay/tau-replay.contract.js';
 import { TauReplayChatModel } from '#api/tau-replay/tau-replay-chat-model.js';
 import { cubeCylinderCutoutFixture } from '#api/tau-replay/fixtures/cube-cylinder-cutout.fixture.js';
+import { planetaryGearCompositeFixture } from '#api/tau-replay/fixtures/planetary-gear-composite.fixture.js';
 import { replayFixtureSchema } from '#api/tau-replay/replay-fixture.schema.js';
 import type { ReplayFixture } from '#api/tau-replay/replay-fixture.schema.js';
 
-const tauReplayModelId = 'tau-replay';
+export const tauReplayModelId = 'tau-replay';
+export const tauReplayCompositeModelId = 'tau-replay-composite';
 
 /**
  * The registered fixtures, validated at load so any drift between the fixture
  * and the tool input schemas (or the fixture schema) fails the boot loudly.
- * One model for now (OQ2): `tau-replay` → the cube-cutout fixture.
  */
 const fixtures: Record<string, ReplayFixture> = {
   [tauReplayModelId]: replayFixtureSchema.parse(cubeCylinderCutoutFixture),
+  [tauReplayCompositeModelId]: replayFixtureSchema.parse(planetaryGearCompositeFixture),
 };
 
 /**
- * Catalog row for the single replay model. Priced to mirror the source model
+ * Catalog row for the recorded replay model. Priced to mirror the source model
  * (google-gemini-3.5-flash, per-million tokens) so the recorded token usage
  * meters realistically against the real credit ledger (R6/OQ5).
  */
@@ -44,6 +46,23 @@ export const tauReplayModel: Model = {
   support: { tools: true, toolChoice: true, modalities: { input: ['text', 'image'], output: ['text'] } },
 };
 
+/** Synthetic multi-file replay, priced and sized like its GPT-5.6 Luna source. */
+export const tauReplayCompositeModel: Model = {
+  ...tauReplayModel,
+  id: tauReplayCompositeModelId,
+  name: 'Tau Replay (composite)',
+  slug: tauReplayCompositeModelId,
+  description:
+    'Deterministic replay model for a multi-file JSCAD planetary gear and dual compilation-unit verification.',
+  model: tauReplayCompositeModelId,
+  details: {
+    ...tauReplayModel.details,
+    maxTokens: 128_000,
+    knowledgeCutoff: '2026-02',
+    cost: { inputTokens: 0.2, outputTokens: 1.2, cacheReadTokens: 0.02, cacheWriteTokens: 0.25 },
+  },
+};
+
 /**
  * Implements the {@link TauReplayModelProvider} seam: surfaces the `tau` catalog
  * row(s) and constructs the replay chat model. Provided only by `TauReplayModule`
@@ -52,7 +71,7 @@ export const tauReplayModel: Model = {
 @Injectable()
 export class TauReplayService implements TauReplayModelProvider {
   public listModels(): Model[] {
-    return [tauReplayModel];
+    return [tauReplayModel, tauReplayCompositeModel];
   }
 
   public createModel(modelId: string): BaseChatModel {
@@ -60,6 +79,6 @@ export class TauReplayService implements TauReplayModelProvider {
     if (fixture === undefined) {
       throw new Error(`No tau replay fixture registered for model "${modelId}"`);
     }
-    return new TauReplayChatModel(fixture);
+    return new TauReplayChatModel(fixture, modelId);
   }
 }

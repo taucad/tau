@@ -1,27 +1,37 @@
 import type { RpcGeoSpecClient, RpcImageClient } from '@taucad/chat/rpc';
 import type { ModelSupport } from '#api/models/model.schema.js';
-import { createTestModel } from '#testing/create-test-app.js';
 import type { CreateTestAppOptions, TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent } from '#testing/skip-helpers.js';
 import { TauReplayChatModel } from '#api/tau-replay/tau-replay-chat-model.js';
 import { cubeCylinderCutoutFixture } from '#api/tau-replay/fixtures/cube-cylinder-cutout.fixture.js';
-
-/** Shared setup for the hermetic tau-replay integration tests. */
-export const tauReplayModelId = 'tau-replay';
+import { planetaryGearCompositeFixture } from '#api/tau-replay/fixtures/planetary-gear-composite.fixture.js';
+import {
+  tauReplayCompositeModel,
+  tauReplayCompositeModelId,
+  tauReplayModel,
+  tauReplayModelId,
+} from '#api/tau-replay/tau-replay.service.js';
 
 /** A ModelService stub returning the deterministic replay model. */
-export const buildTauReplayModelService = (): NonNullable<CreateTestAppOptions['modelService']> => {
+export const buildTauReplayModelService = (
+  modelId: typeof tauReplayModelId | typeof tauReplayCompositeModelId = tauReplayModelId,
+): NonNullable<CreateTestAppOptions['modelService']> => {
   const support: ModelSupport = {
     tools: true,
     toolChoice: true,
     modalities: { input: ['text', 'image'], output: ['text'] },
   };
-  const replayModel = createTestModel({ id: tauReplayModelId, providerId: 'tau', family: 'tau' });
+  const composite = modelId === tauReplayCompositeModelId;
+  const replayModel = composite ? tauReplayCompositeModel : tauReplayModel;
+  const fixture = composite ? planetaryGearCompositeFixture : cubeCylinderCutoutFixture;
   // Base is typed as the stub contract so the method signatures are contextually checked.
   const base: NonNullable<CreateTestAppOptions['modelService']> = {
     models: [replayModel],
-    buildModel() {
-      return { model: new TauReplayChatModel(cubeCylinderCutoutFixture), support };
+    buildModel(requestedModelId) {
+      if (requestedModelId !== modelId) {
+        throw new Error(`Unexpected replay model "${requestedModelId}"`);
+      }
+      return { model: new TauReplayChatModel(fixture, modelId), support };
     },
     getProviderId() {
       return 'tau';
@@ -36,7 +46,7 @@ export const buildTauReplayModelService = (): NonNullable<CreateTestAppOptions['
       };
     },
     getContextWindow() {
-      return 200_000;
+      return replayModel.details.contextWindow;
     },
     normalizeUsageTokens(_modelId, usage) {
       return usage;
@@ -58,7 +68,7 @@ export const buildTauReplayModelService = (): NonNullable<CreateTestAppOptions['
       };
     },
     getKnowledgeCutoff() {
-      return '2026-01';
+      return replayModel.details.knowledgeCutoff;
     },
     getModelSupport() {
       return support;
@@ -81,8 +91,15 @@ export const geospecStub: RpcGeoSpecClient = {
 
 /** Deterministic headless screenshot client for replayed visual-inspection calls. */
 export const imagesStub: RpcImageClient = {
-  async captureImages() {
-    return { success: true, images: [{ view: 'isometric', dataUrl: 'data:image/png;base64,' }] };
+  async captureImages({ mode }) {
+    const views =
+      mode === 'multi_angle'
+        ? (['front', 'back', 'right', 'left', 'top', 'bottom'] as const)
+        : (['isometric'] as const);
+    return {
+      success: true,
+      images: views.map((view) => ({ view, dataUrl: 'data:image/png;base64,AQ==' })),
+    };
   },
 };
 
@@ -91,6 +108,13 @@ export const seedCubeProject = async (testApp: TestApp): Promise<void> => {
   await testApp.memFs.writeFile('/tau.json', JSON.stringify({ name: 'Cube Cylinder Cutout' }));
   await testApp.memFs.writeFile('/package.json', '{ "type": "module" }\n');
   await testApp.memFs.writeFile('/main.scad', '');
+};
+
+/** Seed the empty ESM JSCAD project used by the composite replay. */
+export const seedCompositeProject = async (testApp: TestApp): Promise<void> => {
+  await testApp.memFs.writeFile('/tau.json', JSON.stringify({ name: 'Planetary Gear System' }));
+  await testApp.memFs.writeFile('/package.json', '{ "type": "module" }\n');
+  await testApp.memFs.writeFile('/main.ts', '');
 };
 
 export const postCubeChat = async (testApp: TestApp, chatId: string): Promise<Response> =>
@@ -103,5 +127,22 @@ export const postCubeChat = async (testApp: TestApp, chatId: string): Promise<Re
         { id: `${chatId}_user`, role: 'user', parts: [{ type: 'text', text: 'a cube with a cylinder cutout' }] },
       ],
       agent: buildCadAgent(tauReplayModelId, 'openscad', { testingEnabled: true }),
+    }),
+  });
+
+export const postCompositeChat = async (testApp: TestApp, chatId: string): Promise<Response> =>
+  fetch(`${testApp.baseUrl}/v1/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: chatId,
+      messages: [
+        {
+          id: `${chatId}_user`,
+          role: 'user',
+          parts: [{ type: 'text', text: 'build a multi-file planetary gear system' }],
+        },
+      ],
+      agent: buildCadAgent(tauReplayCompositeModelId, 'jscad', { testingEnabled: true }),
     }),
   });

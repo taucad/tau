@@ -25,11 +25,12 @@ const fixture: ReplayFixture = {
     },
   ],
 };
+const modelId = 'tau-replay-composite';
 
 // The model derives its step from the number of assistant turns already in the
 // history; `invoke` routes through `_generate` and returns the assistant message.
 const replayStep = async (priorAiTurns: number, latestToolResult = 'ok'): Promise<AIMessageType> => {
-  const model = new TauReplayChatModel(fixture);
+  const model = new TauReplayChatModel(fixture, modelId);
   const history: BaseMessage[] = [new SystemMessage('system'), new HumanMessage('a cube')];
   for (let index = 0; index < priorAiTurns; index += 1) {
     history.push(
@@ -50,7 +51,20 @@ describe('TauReplayChatModel', () => {
 
     expect(message.tool_calls).toHaveLength(1);
     expect(message.tool_calls?.[0]).toMatchObject({ name: 'list_directory', args: { path: '' } });
+    expect(message.response_metadata).toMatchObject({ model: modelId, model_provider: 'tau' });
     expect(message.usage_metadata).toMatchObject({ input_tokens: 100, output_tokens: 10, total_tokens: 110 });
+  });
+
+  it('should report the selected model in streaming response metadata', async () => {
+    const chunks = [];
+    const model = new TauReplayChatModel(fixture, modelId);
+
+    for await (const chunk of await model.stream([new HumanMessage('a cube')])) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.some((chunk) => chunk.response_metadata['model'] === modelId)).toBe(true);
+    expect(chunks.some((chunk) => chunk.response_metadata.model_provider === 'tau')).toBe(true);
   });
 
   it('should advance to the reasoning + create_file turn after one assistant turn', async () => {

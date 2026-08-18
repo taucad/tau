@@ -31,10 +31,14 @@ type ReplayContentBlock =
  * under interleaved runs.
  */
 export class TauReplayChatModel extends BaseChatModel {
-  private readonly responseMetadata = { model: 'tau-replay', model_provider: 'tau' };
+  private readonly responseMetadata: { model: string; model_provider: string };
 
-  public constructor(private readonly fixture: ReplayFixture) {
+  public constructor(
+    private readonly fixture: ReplayFixture,
+    modelId: string,
+  ) {
     super({});
+    this.responseMetadata = { model: modelId, model_provider: 'tau' };
   }
 
   public override _llmType(): string {

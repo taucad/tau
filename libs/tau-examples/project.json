@@ -9,24 +9,52 @@
       "command": "tsx scripts/generate-manifest.mts",
       "options": {
         "cwd": "{projectRoot}"
-      }
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/**/*",
+        "!{projectRoot}/src/manifest.json",
+        "!{projectRoot}/src/manifest.ts",
+        "!{projectRoot}/src/thumbnail.assets.ts",
+        "!{projectRoot}/src/kernels/**/thumbnail.webp",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/manifest.json", "{projectRoot}/src/manifest.ts"]
     },
     "generate-thumbnails": {
       "command": "tsx scripts/generate-thumbnails.mts",
       "dependsOn": ["generate-manifest"],
-      "inputs": ["default", "^default"],
+      "inputs": [
+        "{projectRoot}/**/*",
+        "!{projectRoot}/src/manifest.json",
+        "!{projectRoot}/src/manifest.ts",
+        "!{projectRoot}/src/thumbnail.assets.ts",
+        "!{projectRoot}/src/kernels/**/thumbnail.webp",
+        "sharedGlobals",
+        "^default"
+      ],
       "outputs": ["{projectRoot}/src/kernels/**/thumbnail.webp", "{projectRoot}/src/thumbnail.assets.ts"],
       "options": {
         "cwd": "{projectRoot}"
-      }
+      },
+      "cache": true
     },
     "check-thumbnails": {
       "command": "tsx scripts/generate-thumbnails.mts --check",
       "dependsOn": ["generate-manifest"],
-      "inputs": ["default", "^default"],
+      "inputs": [
+        "{projectRoot}/**/*",
+        "!{projectRoot}/src/manifest.json",
+        "!{projectRoot}/src/manifest.ts",
+        "!{projectRoot}/src/thumbnail.assets.ts",
+        "!{projectRoot}/src/kernels/**/thumbnail.webp",
+        "sharedGlobals",
+        "^default"
+      ],
       "options": {
         "cwd": "{projectRoot}"
-      }
+      },
+      "cache": true
     },
     "generate-logo": {
       "command": "tsx src/kernels/replicad/logo/generate-logo.ts",
@@ -46,7 +74,9 @@
       "command": "vitest --run",
       "options": {
         "cwd": "{projectRoot}"
-      }
+      },
+      "cache": true,
+      "inputs": ["default", "^default"]
     }
   }
 }

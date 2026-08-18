@@ -244,6 +244,7 @@ export type MountResolution = {
  * @public
  * @example <caption>Multi-backend routing</caption>
  * ```typescript
+ * // Internal to the bundled runtime; not part of its published surface.
  * import { MountTable } from '@taucad/filesystem';
  * import type { FileSystemProvider } from '@taucad/filesystem';
  *

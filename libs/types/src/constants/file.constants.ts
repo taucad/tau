@@ -55,6 +55,7 @@ export const exportFidelities = {
  *
  * @example <caption>Classify a CAD interchange format</caption>
  * ```typescript
+ * // Published consumers import this from '@taucad/runtime/types'.
  * import { lookupExportFidelity } from '@taucad/types/constants';
  *
  * lookupExportFidelity('step'); // -> 'brep'

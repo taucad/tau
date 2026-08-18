@@ -73,6 +73,7 @@ export type ModuleVm = {
  *
  * @example <caption>Create a VM and execute a test module.</caption>
  * ```typescript
+ * // Published consumers import this from '@taucad/runtime/vm'.
  * import { createEsbuildModuleVm } from '@taucad/vm';
  * import type { EsbuildModuleVmOptions } from '@taucad/vm';
  *

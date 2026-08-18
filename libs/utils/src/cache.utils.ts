@@ -8,6 +8,7 @@
  * @example <caption>Content-addressable geometry cache</caption>
  *
  * ```typescript
+ * // Internal to the bundled runtime; not part of its published surface.
  * import { LruMap } from '@taucad/utils/cache';
  *
  * const cache = new LruMap<Uint8Array>({ maxEntries: 20 });
@@ -127,6 +128,7 @@ export class LruMap<V> {
  * @example <caption>WASM module singleton</caption>
  *
  * ```typescript
+ * // Internal to the bundled runtime; not part of its published surface.
  * import { lazyAsync } from '@taucad/utils/cache';
  *
  * const initNodeIo = async () => ({ read: () => 'data' });

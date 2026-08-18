@@ -329,6 +329,7 @@ class ToJsonSchema {
  *
  * @example <caption>Inferring schema from a value</caption>
  * ```typescript
+ * // Internal to the bundled runtime; not part of its published surface.
  * import { toJsonSchema } from '@taucad/json-schema';
  *
  * const schema = toJsonSchema({ name: 'Tau', version: 1 });

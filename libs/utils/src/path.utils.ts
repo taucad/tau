@@ -87,6 +87,7 @@ export function normalizePath(path: string): string {
  *
  * @example <caption>Joining path segments</caption>
  * ```typescript
+ * // Published consumers import this from '@taucad/runtime/kernel'.
  * import { joinPath } from '@taucad/utils/path';
  *
  * joinPath('/root', 'dir', 'file.txt'); // '/root/dir/file.txt'
@@ -150,6 +151,7 @@ export function parentDirectory(path: string): string {
  *
  * @example <caption>Joining relative path segments</caption>
  * ```typescript
+ * // Internal to the bundled runtime; not part of its published surface.
  * import { joinRelativePath } from '@taucad/utils/path';
  *
  * joinRelativePath('lib', 'utils.ts'); // 'lib/utils.ts'

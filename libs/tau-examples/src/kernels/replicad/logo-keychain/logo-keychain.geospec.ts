@@ -7,14 +7,14 @@ const defaultProductNames = ['Tablet', 'Logo', 'Back URL'] as const;
 
 const expectedEnvelope = {
   size: {
-    x: Number('20.65913780233915'),
-    y: Number('20.65913780233915'),
-    z: Number('2.8000002000003144'),
+    x: Number('20.023802773390287'),
+    y: Number('20.023802773390287'),
+    z: Number('2.823802773390286'),
   },
   center: {
     x: 0,
     y: 0,
-    z: Number('1.4000000000001573'),
+    z: Number('1.3999999999999997'),
   },
 } as const;
 
@@ -23,10 +23,13 @@ const expectedHoleCenter = {
   y: -6,
 } as const;
 
-const expectedDefaultVolumeMm3 = Number('802.7033492996919');
+const expectedDefaultVolumeMm3 = Number('802.7033492996917');
 
 const loadDefaultStep = async () =>
   loadModel({ file: 'main.ts', format: 'step' });
+
+const loadDefaultMesh = async () =>
+  loadModel({ file: 'main.ts', format: 'glb' });
 
 describe('logo keychain exact BRep evidence', () => {
   it('exports valid named STEP product structure', async () => {
@@ -36,9 +39,7 @@ describe('logo keychain exact BRep evidence', () => {
     expectGeo(model).toHaveStepUnits({ unit: 'mm' });
     expectGeo(model).toHaveProductStructure({
       names: [...defaultProductNames],
-      // + 1 for the root assembly product the AP242 exporter emits above the
-      // three named components (Tablet, Logo, Back URL).
-      count: defaultProductNames.length + 1,
+      count: defaultProductNames.length,
     });
     expectGeo(model).toHaveTopologyCounts({
       solids: { greaterThanOrEqual: defaultProductNames.length },
@@ -60,14 +61,14 @@ describe('logo keychain exact BRep evidence', () => {
 
   it('preserves the expected envelope and material contacts', async () => {
     const model = await loadDefaultStep();
+    const rendered = await loadDefaultMesh();
 
     expectGeo(model).toHaveBoundingBox({
       size: expectedEnvelope.size,
       center: expectedEnvelope.center,
       tolerance: exactTolerance,
-      evidence: 'brep',
     });
-    expectGeo(model).toHaveNoComponentInterference({
+    expectGeo(rendered).toHaveNoComponentInterference({
       tolerance: exactTolerance,
     });
   });

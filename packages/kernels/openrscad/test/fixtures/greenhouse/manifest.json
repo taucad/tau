@@ -1,0 +1,154 @@
+[
+  {
+    "name": "Greenhouse",
+    "parent": null,
+    "children": [
+      "Base Frame",
+      "Upright Frame",
+      "Roof Frame",
+      "Side Panels",
+      "End Panel 1",
+      "End Panel 2",
+      "Roof Panels",
+      "Door Assembly",
+      "Bench 1",
+      "Bench 2",
+      "Roof Vent"
+    ],
+    "moduleName": "greenhouse",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 0,
+    "materialNames": []
+  },
+  {
+    "name": "Base Frame",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "base_frame",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 48,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Upright Frame",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "upright_frame",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 132,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Roof Frame",
+    "parent": "Greenhouse",
+    "children": ["Arch Hoop"],
+    "moduleName": "roof_frame",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 0,
+    "materialNames": []
+  },
+  {
+    "name": "Arch Hoop",
+    "parent": "Roof Frame",
+    "children": [],
+    "moduleName": "arch_hoop",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 1100,
+    "materialNames": ["#8A9297FF Material"]
+  },
+  {
+    "name": "Side Panels",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "side_panels",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 24,
+    "materialNames": ["#B7E4F042 Material"]
+  },
+  {
+    "name": "End Panel 1",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "end_panel",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 56,
+    "materialNames": ["#B7E4F04D Material"]
+  },
+  {
+    "name": "End Panel 2",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "end_panel",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 40,
+    "materialNames": ["#B7E4F04D Material"]
+  },
+  {
+    "name": "Roof Panels",
+    "parent": "Greenhouse",
+    "children": ["Roof Panel Strip"],
+    "moduleName": "roof_panels",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 0,
+    "materialNames": []
+  },
+  {
+    "name": "Roof Panel Strip",
+    "parent": "Roof Panels",
+    "children": [],
+    "moduleName": "roof_panel_strip",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 96,
+    "materialNames": ["#B7E4F03D Material"]
+  },
+  {
+    "name": "Door Assembly",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "door_assembly",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 124,
+    "materialNames": ["#6F787DFF Material", "#A9DCE861 Material", "#B2B8BBFF Material"]
+  },
+  {
+    "name": "Bench 1",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "bench",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 108,
+    "materialNames": ["#6F7475FF Material", "#8B5A2BFF Material"]
+  },
+  {
+    "name": "Bench 2",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "bench",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 108,
+    "materialNames": ["#6F7475FF Material", "#8B5A2BFF Material"]
+  },
+  {
+    "name": "Roof Vent",
+    "parent": "Greenhouse",
+    "children": [],
+    "moduleName": "roof_vent",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 48,
+    "materialNames": ["#667176FF Material", "#9FD7DE73 Material"]
+  }
+]

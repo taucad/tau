@@ -1,0 +1,161 @@
+[
+  {
+    "name": "Gearbox",
+    "parent": null,
+    "children": [
+      "Housing",
+      "Sun Assembly",
+      "Planet Set",
+      "Carrier Assembly",
+      "End Cap 1",
+      "End Cap 2",
+      "Bearing 1",
+      "Bearing 2"
+    ],
+    "moduleName": "gearbox",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 0,
+    "materialNames": []
+  },
+  {
+    "name": "Housing",
+    "parent": "Gearbox",
+    "children": ["Internal Ring"],
+    "moduleName": "housing",
+    "definitionSource": "lib/housing.scad",
+    "attribution": "ambiguous",
+    "triangleCount": 606,
+    "materialNames": ["#4F5B66FF Material"]
+  },
+  {
+    "name": "Internal Ring",
+    "parent": "Housing",
+    "children": [],
+    "moduleName": "internal_ring",
+    "definitionSource": "lib/gear.scad",
+    "attribution": "exact",
+    "triangleCount": 12708,
+    "materialNames": ["#4F5B66FF Material"]
+  },
+  {
+    "name": "Sun Assembly",
+    "parent": "Gearbox",
+    "children": ["Spur Gear"],
+    "moduleName": "sun_assembly",
+    "definitionSource": "lib/sun.scad",
+    "attribution": "exact",
+    "triangleCount": 144,
+    "materialNames": ["#C9A227FF Material"]
+  },
+  {
+    "name": "Spur Gear",
+    "parent": "Sun Assembly",
+    "children": [],
+    "moduleName": "spur_gear",
+    "definitionSource": "lib/gear.scad",
+    "attribution": "exact",
+    "triangleCount": 8538,
+    "materialNames": ["#C9A227FF Material"]
+  },
+  {
+    "name": "Planet Set",
+    "parent": "Gearbox",
+    "children": ["Planet Gear"],
+    "moduleName": "planet_set",
+    "definitionSource": "<main>",
+    "attribution": "exact",
+    "triangleCount": 0,
+    "materialNames": []
+  },
+  {
+    "name": "Planet Gear",
+    "parent": "Planet Set",
+    "children": ["Spur Gear"],
+    "moduleName": "planet_gear",
+    "definitionSource": "lib/planet.scad",
+    "attribution": "ambiguous",
+    "triangleCount": 80,
+    "materialNames": ["#B0843BFF Material"]
+  },
+  {
+    "name": "Spur Gear",
+    "parent": "Planet Gear",
+    "children": [],
+    "moduleName": "spur_gear",
+    "definitionSource": "lib/gear.scad",
+    "attribution": "exact",
+    "triangleCount": 9056,
+    "materialNames": ["#B0843BFF Material"]
+  },
+  {
+    "name": "Carrier Assembly",
+    "parent": "Gearbox",
+    "children": ["Plate 1", "Plate 2"],
+    "moduleName": "carrier_assembly",
+    "definitionSource": "lib/carrier.scad",
+    "attribution": "exact",
+    "triangleCount": 256,
+    "materialNames": ["#6E7B8BFF Material"]
+  },
+  {
+    "name": "Plate 1",
+    "parent": "Carrier Assembly",
+    "children": [],
+    "moduleName": "_plate",
+    "definitionSource": "lib/carrier.scad",
+    "attribution": "exact",
+    "triangleCount": 388,
+    "materialNames": ["#6E7B8BFF Material"]
+  },
+  {
+    "name": "Plate 2",
+    "parent": "Carrier Assembly",
+    "children": [],
+    "moduleName": "_plate",
+    "definitionSource": "lib/carrier.scad",
+    "attribution": "exact",
+    "triangleCount": 388,
+    "materialNames": ["#6E7B8BFF Material"]
+  },
+  {
+    "name": "End Cap 1",
+    "parent": "Gearbox",
+    "children": [],
+    "moduleName": "end_cap",
+    "definitionSource": "lib/cap.scad",
+    "attribution": "exact",
+    "triangleCount": 750,
+    "materialNames": ["#3B4650FF Material"]
+  },
+  {
+    "name": "End Cap 2",
+    "parent": "Gearbox",
+    "children": [],
+    "moduleName": "end_cap",
+    "definitionSource": "lib/cap.scad",
+    "attribution": "exact",
+    "triangleCount": 750,
+    "materialNames": ["#3B4650FF Material"]
+  },
+  {
+    "name": "Bearing 1",
+    "parent": "Gearbox",
+    "children": [],
+    "moduleName": "bearing",
+    "definitionSource": "lib/bearing.scad",
+    "attribution": "exact",
+    "triangleCount": 776,
+    "materialNames": ["#9AA3ADFF Material", "#D6DBE0FF Material"]
+  },
+  {
+    "name": "Bearing 2",
+    "parent": "Gearbox",
+    "children": [],
+    "moduleName": "bearing",
+    "definitionSource": "lib/bearing.scad",
+    "attribution": "exact",
+    "triangleCount": 776,
+    "materialNames": ["#9AA3ADFF Material", "#D6DBE0FF Material"]
+  }
+]

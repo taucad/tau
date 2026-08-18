@@ -1,0 +1,58 @@
+[
+  {
+    "fixture": "annulus.scad",
+    "defect": "D5 — multi-loop extrusion layers",
+    "shipped": 25,
+    "lineSegments": 192,
+    "note": "Four complete rims. Shipped drew a handful of disconnected stubs."
+  },
+  {
+    "fixture": "bored-cylinder.scad",
+    "defect": "D2 — patch identity through Manifold",
+    "shipped": 48,
+    "lineSegments": 48,
+    "note": "Already correct here and broken natively at 71: manifold-rust carried a faceID that manifold-csg has no field for. This fixture is the witness that the run channel closed that gap."
+  },
+  {
+    "fixture": "flush-union.scad",
+    "defect": "guard — coplanar seam",
+    "shipped": 20,
+    "lineSegments": 16,
+    "note": "Twelve cube edges and four more where the two halves meet. Shipped drew part of the shared face as a seam."
+  },
+  {
+    "fixture": "hex-prism.scad",
+    "defect": "guard — over-merging",
+    "shipped": 12,
+    "lineSegments": 12,
+    "note": "Unchanged by design: six genuine 60-degree edges no smoothing rule may reach."
+  },
+  {
+    "fixture": "hulled-nacelle.scad",
+    "defect": "D4 — hull operand patches",
+    "shipped": 848,
+    "lineSegments": 80,
+    "note": "Bore mouth and exit rim, each one closed ring. Shipped drew the hull's whole tessellation."
+  },
+  {
+    "fixture": "plate-with-hole.scad",
+    "defect": "D6 — combined 2D profile",
+    "shipped": 14,
+    "lineSegments": 76,
+    "note": "The whole side wall reaches the classifier instead of falling through unclassified."
+  },
+  {
+    "fixture": "polyhedron-dome.scad",
+    "defect": "D3 — patch-pair merge",
+    "shipped": 240,
+    "lineSegments": 0,
+    "note": "A sampled smooth surface has no feature to draw."
+  },
+  {
+    "fixture": "steinmetz.scad",
+    "defect": "D3 — merge on the maximum dihedral",
+    "shipped": 48,
+    "lineSegments": 48,
+    "note": "Three complete seams, and the count that must not move: an earlier per-edge crease gate held the total plausible while drawing only 24 of them, which is why closure is asserted alongside."
+  }
+]

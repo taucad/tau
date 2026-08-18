@@ -1,0 +1,8 @@
+{
+  "name": "@fixture/private-transitive",
+  "version": "1.0.0",
+  "private": false,
+  "dependencies": {
+    "@fixture/private-leaf": "workspace:*"
+  }
+}

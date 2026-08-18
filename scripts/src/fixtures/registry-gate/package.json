@@ -1,0 +1,9 @@
+{
+  "name": "registry-gate-fixture",
+  "private": true,
+  "dependencies": {
+    "@fixture/missing-export": "1.0.0",
+    "@fixture/missing-subpath": "1.0.0",
+    "@fixture/private-transitive": "1.0.0"
+  }
+}

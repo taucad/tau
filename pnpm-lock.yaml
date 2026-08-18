@@ -231,6 +231,9 @@ catalogs:
     '@taucad/kcl-wasm-lib':
       specifier: 0.1.148
       version: 0.1.148
+    '@taulabs/openrscad-engine':
+      specifier: 0.11.0-beta.1
+      version: 0.11.0-beta.1
     '@testing-library/jest-dom':
       specifier: 6.6.3
       version: 6.6.3
@@ -670,7 +673,6 @@ catalogs:
 overrides:
   '@langchain/google-common': file:tarballs/langchain-fork/langchain-google-common-2.2.0-beta.0.tgz
   '@types/express': ^5.0.0
-  openrscad-engine: file:tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz
   replicad: file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz
   replicad-opencascadejs: file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz
   vitest: 4.1.5
@@ -2032,6 +2034,9 @@ importers:
       '@taucad/vm':
         specifier: workspace:*
         version: link:../../libs/vm
+      '@taulabs/openrscad-engine':
+        specifier: 'catalog:'
+        version: 0.11.0-beta.1
       better-auth:
         specifier: 'catalog:'
         version: 1.6.19(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@electric-sql/pglite@0.3.16)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(kysely@0.29.2)(pg@8.22.0)(postgres@3.4.9))(next@16.3.1(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.61.0)(@types/node@26.2.0)(babel-plugin-macros@3.1.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(pg@8.22.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.1.5)
@@ -2071,9 +2076,6 @@ importers:
       next-themes:
         specifier: 'catalog:'
         version: 0.4.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      openrscad-engine:
-        specifier: file:../../tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz
-        version: '@taulabs/openrscad-engine@file:tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz'
       radix-ui:
         specifier: 'catalog:'
         version: 1.6.0(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -2505,6 +2507,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@taulabs/openrscad-engine':
+        specifier: 'catalog:'
+        version: 0.11.0-beta.1
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -2515,9 +2520,6 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
-      openrscad-engine:
-        specifier: file:../../../tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz
-        version: '@taulabs/openrscad-engine@file:tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz'
 
   packages/react:
     dependencies:
@@ -2709,6 +2711,9 @@ importers:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../packages/runtime
+      '@taulabs/openrscad-engine':
+        specifier: 'catalog:'
+        version: 0.11.0-beta.1
       ink:
         specifier: 'catalog:'
         version: 6.8.0(@types/react@19.0.12)(react@19.2.7)
@@ -2721,9 +2726,6 @@ importers:
       jsdom:
         specifier: 'catalog:'
         version: 26.0.0(canvas@3.2.3)(supports-color@10.2.2)
-      openrscad-engine:
-        specifier: file:../tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz
-        version: '@taulabs/openrscad-engine@file:tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz'
       pdf-parse:
         specifier: 'catalog:'
         version: 2.4.5
@@ -11880,9 +11882,8 @@ packages:
   '@taulabs/assimpjs@0.0.19':
     resolution: {integrity: sha512-GA/uzj9Pmjqhh94nHuIDo0aKXJSSdiGkDKrF5NxDLKwRzPUq0Yv3FnD++DHP/G/NopERmMsXcHPcq+ldLz4UZg==}
 
-  '@taulabs/openrscad-engine@file:tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz':
-    resolution: {integrity: sha512-QMZuBhe4qFMbBiXhO+c8HCk8deA8nq/xCWI0l625D+BAw7Z11hShbrUUmmzLVaGzY0FhqWgzlJVkkSIJRgV0qg==, tarball: file:tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz}
-    version: 0.11.0-beta.0
+  '@taulabs/openrscad-engine@0.11.0-beta.1':
+    resolution: {integrity: sha512-XEhVgqOGPugf4uWb7BtWQNa0dK4sns9pxE2sVAvixf4BAu7by8JRVJ83qnTk8f/WmVmvQRU5gPtw6kXYsOC2dA==}
 
   '@taulabs/replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz':
     resolution: {integrity: sha512-z97ik0x+qZMx8oXszvzmwN/zJPbZ7lA0EbxgehCQbCYjAXH4OamvgacR8Uv6BBUjIoLxyLZUuRLP+AHcS4vPXw==, tarball: file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz}
@@ -33948,7 +33949,7 @@ snapshots:
 
   '@taulabs/assimpjs@0.0.19': {}
 
-  '@taulabs/openrscad-engine@file:tarballs/openrscad-native-parts/taulabs-openrscad-engine-0.11.0-beta.0.tgz': {}
+  '@taulabs/openrscad-engine@0.11.0-beta.1': {}
 
   '@taulabs/replicad-opencascadejs@file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz': {}
 

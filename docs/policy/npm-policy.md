@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-08-17'
+updated: '2026-08-18'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -168,6 +168,8 @@ Optional fields by package shape:
 ### 4. Bundle Workspace `@taucad/*` Deps via `deps.alwaysBundle`
 
 When a publishable package depends on a private workspace library (anything under `libs/*`, or any `packages/**` package the user does not want to expose as a separate install), bundle it via tsdown's `deps.alwaysBundle`. Move the dep specifier from `dependencies` to `devDependencies` so it is not re-installed by consumers.
+
+**Invariant: a published package must resolve no first-party workspace package at install time.** Every `@taucad/*` workspace library it uses lives under `libs/*`, is `private: true`, and ships inlined — code and declarations — inside the publishable artifact. A consumer installing `@taucad/runtime` therefore never resolves another workspace `@taucad/*` package, and a workspace library can never 404 or version-skew against it. This invariant governs the _workspace_ closure only: externally-published artifacts and ordinary third-party packages remain external `dependencies`, per the exclusion below.
 
 Use a single regex per package that names every workspace dep explicitly. Do not use a catch-all `/^@taucad\//` — externally-published packages (e.g., `@taucad/kcl-wasm-lib`, `libcascade`) must stay external.
 

@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-08-17'
+updated: '2026-08-18'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -29,7 +29,7 @@ Nx Release with version plans provides native monorepo integration and decouples
 | `@taucad/geospec-engine` | Fair-source GeoSpec execution/proof engine and CLI      |
 | `@taucad/openrscad`      | OpenRSCAD runtime plugin                                |
 
-The following internal libraries remain in the fixed Nx version group so a change forces a runtime version, but `private: true` and the publish workflow prevent publishing them independently: `@taucad/converter`, `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/gltf-extensions`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, `@taucad/units`, `@taucad/utils`, and `@taucad/vm`. Their code and declarations ship inside `@taucad/runtime`.
+The following internal libraries remain in the fixed Nx version group so a change forces a runtime version, but `private: true` and the publish workflow prevent publishing them independently: `@taucad/converter`, `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/gltf-extensions`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, `@taucad/units`, `@taucad/utils`, and `@taucad/vm`. All twelve live under `libs/*`. Their code and declarations ship inside `@taucad/runtime`, which resolves no first-party workspace package at install time (`npm-policy.md` Rule 4). Externally-published artifacts such as `@taucad/kcl-wasm-lib` and `libcascade`, and ordinary third-party packages, remain external dependencies and are outside that invariant.
 
 `@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference and units remain implementation libraries with no public runtime veneer or subpath.
 

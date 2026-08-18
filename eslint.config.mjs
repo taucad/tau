@@ -333,8 +333,15 @@ const config = [
               onlyDependOnLibsWithTags: ['type:app-lib', 'type:lib', 'type:package-root', 'type:package-veneer'],
             },
             {
+              /*
+               * Layering runs one way: a package root may build on other roots
+               * and on shared libraries, never on a published leaf. The one
+               * root-to-veneer edge in the workspace is a GeoSpec engine test
+               * that loads the standalone openrscad kernel — exempted by file
+               * below rather than by widening this allowlist.
+               */
               sourceTag: 'type:package-root',
-              onlyDependOnLibsWithTags: ['type:package-root', 'type:package-veneer', 'type:lib'],
+              onlyDependOnLibsWithTags: ['type:package-root', 'type:lib'],
             },
             {
               sourceTag: 'type:package-veneer',
@@ -556,6 +563,14 @@ const config = [
   {
     // Compile-only documentation fixtures intentionally model consumer imports outside the Nx graph.
     files: ['apps/ui/content/docs/**/*.ts'],
+    rules: {
+      '@nx/enforce-module-boundaries': 'off',
+    },
+  },
+  {
+    // Loads the standalone openrscad kernel as a fixture; see the
+    // `type:package-root` constraint above.
+    files: ['packages/geospec-engine/src/model/load-model.test.ts'],
     rules: {
       '@nx/enforce-module-boundaries': 'off',
     },

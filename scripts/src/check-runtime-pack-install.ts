@@ -108,6 +108,14 @@ const main = (): void => {
 
     writeFileSync(join(appRoot, 'smoke.mjs'), quickStartSource(readFileSync(join(installedRoot, 'README.md'), 'utf8')));
     const quickStartOutput = run(process.execPath, ['smoke.mjs'], appRoot).trim();
+    // The quick start reports the exported artifact's size; a zero-byte or absent
+    // GLB otherwise exits 0 and reports success, so assert the bytes it names.
+    const exportedBytes = /(?<bytes>\d+) bytes/u.exec(quickStartOutput)?.groups?.['bytes'];
+    invariant(
+      exportedBytes !== undefined,
+      `README quick start did not report an exported byte count: ${quickStartOutput}`,
+    );
+    invariant(Number(exportedBytes) > 0, `README quick start exported an empty artifact: ${quickStartOutput}`);
     console.log(`README quick start: ${quickStartOutput}`);
     console.log('npm-local runtime TGZ install and standalone quick start passed.');
     passed = true;

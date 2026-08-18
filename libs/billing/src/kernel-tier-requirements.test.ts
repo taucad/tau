@@ -11,7 +11,7 @@ describe('kernelTierRequirements', () => {
 
   it('requires pro for Zoo and free for all other kernels', () => {
     expect(getKernelRequiredTier('zoo')).toBe('pro');
-    expect(getKernelRequiredTier('openrscad')).toBe('free');
+    expect(getKernelRequiredTier('openscad')).toBe('free');
     expect(getKernelRequiredTier('replicad')).toBe('free');
     expect(getKernelRequiredTier('manifold')).toBe('free');
     expect(getKernelRequiredTier('jscad')).toBe('free');

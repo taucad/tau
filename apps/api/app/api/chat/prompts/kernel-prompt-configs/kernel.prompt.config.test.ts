@@ -6,7 +6,7 @@ import {
   getKernelConfig,
 } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
 
-const allKernels: readonly KernelProvider[] = ['openrscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
+const allKernels: readonly KernelProvider[] = ['openscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
 
 describe('KernelConfig raw declaration prompts', () => {
   it('should preserve JSCAD root and subpath declarations in the prompt', () => {
@@ -48,7 +48,7 @@ describe('KernelConfig.topLevelExportExample', () => {
 
   describe('kernel-specific vocabulary', () => {
     it('openscad example should mention a top-level invocation', () => {
-      const config = getKernelConfig('openrscad');
+      const config = getKernelConfig('openscad');
       expect(config.topLevelExportExample).toMatch(/\(\s*\)|invocation|module/i);
     });
 
@@ -143,7 +143,7 @@ describe('KernelConfig.topLevelExportExample', () => {
     it('kernel code standards should preserve language-specific code casing guidance', () => {
       expect(getKernelConfig('replicad').codeStandards).toContain('Use camelCase for variables');
       expect(getKernelConfig('zoo').codeStandards).toContain('Use camelCase for variables');
-      expect(getKernelConfig('openrscad').codeStandards).toContain('Use snake_case for variables');
+      expect(getKernelConfig('openscad').codeStandards).toContain('Use snake_case for variables');
     });
   });
 });
@@ -193,7 +193,7 @@ describe('KernelConfig.multiFileExample', () => {
 
   describe('OpenSCAD `use` regression guard (dollhouse `include`-duplicate smoking gun)', () => {
     it('should import library files with `use <…>` and never `include <…>`', () => {
-      const example = getKernelConfig('openrscad').multiFileExample;
+      const example = getKernelConfig('openscad').multiFileExample;
       if (!example) {
         throw new Error('multiFileExample is required');
       }
@@ -310,7 +310,7 @@ describe('KernelConfig.topologyHints', () => {
     });
 
     it('openscad should prefer $fa/$fs and warn on hull/minkowski misuse and render() overuse', () => {
-      const { topologyHints } = getKernelConfig('openrscad');
+      const { topologyHints } = getKernelConfig('openscad');
       expect(topologyHints).toMatch(/\$fa/);
       expect(topologyHints).toMatch(/\$fs/);
       expect(topologyHints).toMatch(/hull\(\)/);
@@ -330,7 +330,7 @@ describe('KernelConfig.topologyHints', () => {
     });
 
     it('mesh kernel hints should not leak B-rep curve vocabulary', () => {
-      for (const kernel of ['manifold', 'jscad', 'openrscad'] as const) {
+      for (const kernel of ['manifold', 'jscad', 'openscad'] as const) {
         const { topologyHints } = getKernelConfig(kernel);
         expect(topologyHints).not.toMatch(/drawSplineCurve/);
         expect(topologyHints).not.toMatch(/Geom2dAPI_PointsToBSpline/);
@@ -345,7 +345,7 @@ describe('KernelConfig.testingProfile', () => {
     expect(getKernelConfig('replicad').testingProfile.includeBrepFeatureExamples).toBe(true);
     expect(getKernelConfig('opencascadejs').testingProfile.includeBrepFeatureExamples).toBe(true);
 
-    for (const kernel of ['openrscad', 'jscad', 'manifold', 'zoo'] as const) {
+    for (const kernel of ['openscad', 'jscad', 'manifold', 'zoo'] as const) {
       expect(getKernelConfig(kernel).testingProfile.includeBrepFeatureExamples).toBe(false);
     }
   });

@@ -102,6 +102,6 @@ export const postCubeChat = async (testApp: TestApp, chatId: string): Promise<Re
       messages: [
         { id: `${chatId}_user`, role: 'user', parts: [{ type: 'text', text: 'a cube with a cylinder cutout' }] },
       ],
-      agent: buildCadAgent(tauReplayModelId, 'openrscad', { testingEnabled: true }),
+      agent: buildCadAgent(tauReplayModelId, 'openscad', { testingEnabled: true }),
     }),
   });

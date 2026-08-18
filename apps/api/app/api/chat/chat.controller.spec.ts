@@ -79,7 +79,7 @@ type CadAgent = Extract<AgentConfig, { profile: 'cad' }>;
 const cadAgent = (overrides: Partial<CadAgent> = {}): CadAgent => ({
   profile: 'cad',
   model: 'test-model',
-  kernel: 'openrscad',
+  kernel: 'openscad',
   mode: 'agent',
   toolChoice: 'auto',
   testingEnabled: true,
@@ -260,7 +260,7 @@ describe('ChatController', () => {
         expect.objectContaining({
           chatId: 'chat_123',
           modelId: 'test-model',
-          kernel: 'openrscad',
+          kernel: 'openscad',
           mode: 'agent',
           tools: { choice: 'auto', testingEnabled: true },
           /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest `expect.any()` is typed as `any` */
@@ -313,7 +313,7 @@ describe('ChatController', () => {
         expect.objectContaining({
           chatId: 'chat_tool_choice',
           modelId: 'test-model',
-          kernel: 'openrscad',
+          kernel: 'openscad',
           mode: 'agent',
           tools: { choice: 'none', testingEnabled: true },
           /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest `expect.any()` is typed as `any` */

@@ -34,7 +34,7 @@ const useChatComposerMock = vi.fn(
         model: chatModelState.current,
         setActiveModel,
       },
-      kernel: { kernelId: 'openrscad', kernel: resolveKernel('openrscad'), setActiveKernel: vi.fn() },
+      kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
       status: 'ready',
       stop: () => undefined,
       contextUsage: undefined,

@@ -47,7 +47,7 @@ export const replicadProjects: ProjectsWithFiles[] = mockProjects.map((model) =>
 
 export const openscadProjects: ProjectsWithFiles[] = openscadExamples.map((model) => {
   const mainFile = 'main.scad';
-  const kernel: KernelProvider = 'openrscad';
+  const kernel: KernelProvider = 'openscad';
   return createProject(model, mainFile, kernel);
 });
 

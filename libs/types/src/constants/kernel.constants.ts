@@ -9,7 +9,23 @@ export type KernelDimensions = 2 | 3;
 /** @public */
 export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad';
 
-/** @public */
+/**
+ * Product catalog entry for a kernel offering, not an engine registry.
+ *
+ * `name`, `description`, `longDescription`, `recommended`, `tags`, and
+ * `features` are user-facing copy. `id` is a persisted and wire identity
+ * (the `cadKernel` cookie, the chat `agent-config` enum, and the
+ * `publications.kernels` column), so it changes only when the offering
+ * itself changes.
+ *
+ * The engine that executes a kernel's files is chosen in
+ * `apps/ui/app/runtime/ui-runtime.definition.ts` and matched by file
+ * extension, never by this `id`. Swapping the engine behind an offering
+ * (for example OpenSCAD moving from `@taucad/openscad` to
+ * `@taucad/openrscad`) should not touch this file.
+ *
+ * @public
+ */
 export type KernelConfiguration = {
   id: string;
   name: string;
@@ -28,18 +44,18 @@ export type KernelConfiguration = {
 /** @public */
 export const kernelConfigurations = [
   {
-    id: 'openrscad',
-    name: 'OpenRSCAD',
+    id: 'openscad',
+    name: 'OpenSCAD',
     dimensions: [3],
     language: 'openscad',
-    description: 'Rust-powered OpenSCAD-language modeling',
+    description: 'Constructive Solid Geometry for 3D printing',
     mainFile: 'main.scad',
     backendProvider: 'manifold',
     longDescription:
-      'OpenSCAD-compatible Constructive Solid Geometry powered by a Rust WebAssembly kernel, with exact fused geometry, dependency resolution, customizer parameters, and native GLB and 3MF output.',
+      'Constructive Solid Geometry (CSG) — build complex geometries by combining primitives with boolean operations. Supports customizer parameters, dependency resolution, and native GLB and 3MF output for 3D printing.',
     emptyCode: ``,
     recommended: '3D Printing & Prototyping',
-    tags: ['Constructive Solid Geometry', 'Rust', 'WebAssembly', 'Scripting', '3D Printing'],
+    tags: ['Constructive Solid Geometry', 'Mesh Export', 'Scripting', '3D Printing'],
     features: ['Boolean operations', 'Parametric design', 'GLB export', '3MF export'],
   },
   {

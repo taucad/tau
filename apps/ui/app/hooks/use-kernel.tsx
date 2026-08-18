@@ -3,7 +3,7 @@ import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 
-const defaultKernel: KernelId = 'openrscad';
+const defaultKernel: KernelId = 'openscad';
 
 type UseKernelResult = {
   readonly kernel: KernelId;

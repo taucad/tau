@@ -34,7 +34,7 @@ export type ComposerMockOverrides = {
  * Build a {@link ChatComposerContextValue} suitable for `useChatComposer`
  * mocks. Defaults populate every required field with a working shape; the
  * `kernel` field always carries a real `KernelEntry` resolved from
- * `kernelId` (defaulting to `'openrscad'`) so consumers can read
+ * `kernelId` (defaulting to `'openscad'`) so consumers can read
  * `kernel.name` / `kernel.id` without an optional-chain.
  *
  * The return value is `unknown`-cast to `ChatComposerContextValue` because
@@ -43,7 +43,7 @@ export type ComposerMockOverrides = {
  * need the real shape should override via `draftActorRef` / `model` props.
  */
 export function buildComposerMock(overrides: ComposerMockOverrides = {}): ChatComposerContextValue {
-  const kernelId: KernelId = overrides.kernelId ?? 'openrscad';
+  const kernelId: KernelId = overrides.kernelId ?? 'openscad';
   const modelId = overrides.modelId ?? 'openai-gpt-5.5';
   // The real `ResolvedModel` carries `family` + `provider` shape literals
   // that test mocks don't need; the `unknown` hop satisfies

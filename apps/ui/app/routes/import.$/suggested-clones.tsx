@@ -33,7 +33,7 @@ const suggestedRepositories: readonly SuggestedRepository[] = [
     mainFile: 'examples/Basics/logo.scad',
     stars: 8500,
     forks: 1400,
-    kernel: 'openrscad',
+    kernel: 'openscad',
     kernelIcon: 'openscad',
     ref: 'master',
     path: 'examples',

@@ -10,7 +10,6 @@ const pngIcons = {
 const iconAliases = {
   llama: 'meta',
   glm: 'zai',
-  openrscad: 'openscad',
 } as const satisfies Record<string, SvgIcons>;
 
 /** Keys of {@link pngIcons} — icons rendered via `<image>` instead of the sprite. */

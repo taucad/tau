@@ -32,7 +32,7 @@ describe('KernelTierBadge', () => {
   });
 
   it('returns null for free-tier kernels', () => {
-    const { container } = render(<KernelTierBadge kernelId='openrscad' />);
+    const { container } = render(<KernelTierBadge kernelId='openscad' />);
     expect(container).toBeEmptyDOMElement();
   });
 });

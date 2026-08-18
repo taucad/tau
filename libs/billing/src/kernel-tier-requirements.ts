@@ -8,7 +8,7 @@ import { tierMeets } from '#billing-tier.js';
  * @public
  */
 export const kernelTierRequirements = {
-  openrscad: 'free',
+  openscad: 'free',
   replicad: 'free',
   manifold: 'free',
   jscad: 'free',

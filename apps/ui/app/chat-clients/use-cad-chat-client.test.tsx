@@ -327,14 +327,14 @@ describe('useCadChatClient', () => {
       body: { agent: buildAgent({ kernel: 'replicad' }) },
     });
 
-    mountAgentMock(buildAgent({ kernel: 'openrscad' }));
+    mountAgentMock(buildAgent({ kernel: 'openscad' }));
     rerender();
 
     act(() => {
       result.current.submit({ text: 'second' });
     });
     expect(actions.sendMessage.mock.calls.at(-1)?.[1]).toEqual({
-      body: { agent: buildAgent({ kernel: 'openrscad' }) },
+      body: { agent: buildAgent({ kernel: 'openscad' }) },
     });
   });
 });

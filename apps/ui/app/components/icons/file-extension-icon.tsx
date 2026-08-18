@@ -121,7 +121,7 @@ function getIconConfig(extension: string): IconConfig | undefined {
   if (kernelId) {
     // Map kernel IDs to lib types
     const kernelLibMap: Record<string, SvgIcons> = {
-      openrscad: 'openscad',
+      openscad: 'openscad',
       zoo: 'zoo',
       replicad: 'typescript',
       manifold: 'typescript',

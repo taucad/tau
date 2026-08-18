@@ -8,7 +8,7 @@ import { replicadConfig } from '#api/chat/prompts/kernel-prompt-configs/replicad
 import { zooConfig } from '#api/chat/prompts/kernel-prompt-configs/zoo.prompt.config.js';
 
 const kernelConfigs: Record<KernelProvider, KernelConfig> = {
-  openrscad: openscadConfig,
+  openscad: openscadConfig,
   replicad: replicadConfig,
   manifold: manifoldConfig,
   zoo: zooConfig,

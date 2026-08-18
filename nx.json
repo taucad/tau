@@ -119,12 +119,28 @@
     "default": ["{projectRoot}/**/*", "sharedGlobals"]
   },
   "release": {
-    "projects": ["packages/*", "packages/kernels/*"],
+    "projects": [
+      "packages/*",
+      "packages/kernels/*",
+      "converter",
+      "events",
+      "filesystem",
+      "fs-bridge",
+      "gltf-extensions",
+      "json-schema",
+      "memory",
+      "rpc",
+      "types",
+      "units",
+      "utils",
+      "vm"
+    ],
+    "projectsRelationship": "fixed",
     "versionPlans": {
       "ignorePatternsForPlanCheck": ["**/*.spec.ts", "**/*.test.ts", "**/*.md"]
     },
     "version": {
-      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*,packages/kernels/*",
+      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,converter,events,filesystem,fs-bridge,gltf-extensions,json-schema,memory,rpc,types,units,utils,vm",
       "conventionalCommits": true
     },
     "changelog": {

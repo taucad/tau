@@ -20,6 +20,7 @@ const mockDatabaseService = {
 // Mock RedisService for tests that don't need Redis access
 const mockRedisService = {
   client: {
+    defineCommand: () => undefined,
     get: async () => null,
     set: async () => 'OK',
     del: async () => 1,

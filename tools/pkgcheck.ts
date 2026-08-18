@@ -1,4 +1,4 @@
-// oxlint-disable unicorn/no-process-exit -- CLI tool
+// oxlint-disable unicorn/no-process-exit, no-restricted-imports, import/extensions -- CLI tool shares its adjacent helper.
 /**
  * Package Check Orchestrator
  *
@@ -7,11 +7,29 @@
  *
  * Usage: tsx tools/pkgcheck.ts <projectRoot>
  */
-import { execSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { execFileSync, execSync } from 'node:child_process';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
+import {
+  bundledArtifactIssues,
+  bundleOwnershipIssues,
+  packageMetadataIssues,
+  strictConsumerCompilerOptions,
+} from './pkgcheck-metadata.js';
 
 type CheckResult = {
   name: string;
@@ -20,7 +38,11 @@ type CheckResult = {
 };
 
 type PackageJson = Record<string, unknown> & {
+  dependencies?: Record<string, string>;
+  exports?: unknown;
+  files?: unknown;
   name?: string;
+  private?: boolean;
   publishConfig?: Record<string, unknown>;
   'size-limit'?: unknown;
 };
@@ -32,6 +54,7 @@ if (!projectRoot) {
 }
 
 const absoluteRoot = resolve(projectRoot);
+const workspaceRoot = resolve(import.meta.dirname, '..');
 const packageJsonPath = join(absoluteRoot, 'package.json');
 
 if (!existsSync(packageJsonPath)) {
@@ -168,7 +191,7 @@ function validateEsmOnlyPackageMetadata(): CheckResult {
   };
 }
 
-function validateFlatDistLayout(): CheckResult {
+function validateFlatDistributionLayout(): CheckResult {
   const publishPackage = applyPublishConfig(packageJson);
   const issues: string[] = [];
 
@@ -217,6 +240,185 @@ function validateFlatDistLayout(): CheckResult {
   };
 }
 
+function validatePackageMetadata(): CheckResult {
+  const issues = packageMetadataIssues(packageJson, (path) => existsSync(join(absoluteRoot, path)));
+  return issues.length === 0
+    ? { name: 'tau-package-metadata', status: 'pass', details: ['exports and packed files match reality'] }
+    : {
+        name: 'tau-package-metadata',
+        status: 'fail',
+        details: [`${String(issues.length)} package metadata issue(s) found`, ...issues],
+      };
+}
+
+async function validateBundleOwnership(): Promise<CheckResult> {
+  const roots: Array<{ owner: string; bundled: string[] }> = [];
+
+  for (const parent of ['packages', 'packages/kernels', 'libs']) {
+    const parentDirectory = join(workspaceRoot, parent);
+    if (!existsSync(parentDirectory)) {
+      continue;
+    }
+
+    for (const entry of readdirSync(parentDirectory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const directory = join(parentDirectory, entry.name);
+      const configPath = join(directory, 'tsdown.config.ts');
+      const manifestPath = join(directory, 'package.json');
+      if (!existsSync(configPath) || !existsSync(manifestPath)) {
+        continue;
+      }
+      if (!readFileSync(configPath, 'utf8').includes('export const bundledWorkspaceDependencies')) {
+        continue;
+      }
+
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PackageJson;
+      if (manifest.private) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Bounded config loading preserves deterministic workspace scan order.
+      const config = (await import(pathToFileURL(configPath).href)) as { bundledWorkspaceDependencies?: unknown };
+      if (!Array.isArray(config.bundledWorkspaceDependencies)) {
+        continue;
+      }
+      roots.push({
+        owner: manifest.name ?? entry.name,
+        bundled: config.bundledWorkspaceDependencies.filter((value): value is string => typeof value === 'string'),
+      });
+    }
+  }
+
+  const issues = bundleOwnershipIssues(roots);
+  return issues.length === 0
+    ? { name: 'tau-bundle-ownership', status: 'pass', details: ['bundled workspace modules have one owner'] }
+    : {
+        name: 'tau-bundle-ownership',
+        status: 'fail',
+        details: [`${String(issues.length)} bundle ownership conflict(s) found`, ...issues],
+      };
+}
+
+async function runtimeBundledWorkspaceDependencies(): Promise<string[]> {
+  const configPath = join(absoluteRoot, 'tsdown.config.ts');
+  const config = (await import(pathToFileURL(configPath).href)) as { bundledWorkspaceDependencies?: unknown };
+  if (!Array.isArray(config.bundledWorkspaceDependencies)) {
+    throw new TypeError(`${configPath} must export bundledWorkspaceDependencies`);
+  }
+  return config.bundledWorkspaceDependencies.filter((value): value is string => typeof value === 'string');
+}
+
+async function validateBundledArtifact(): Promise<CheckResult> {
+  const bundledPackages = (await runtimeBundledWorkspaceDependencies()).map((name) => `@taucad/${name}`);
+  const files = walkDirectory(join(absoluteRoot, 'dist'))
+    .filter((path) => /(?:\.[cm]?js|\.d\.[cm]?ts)$/u.test(path))
+    .map((path) => ({ path: relative(absoluteRoot, path), source: readFileSync(path, 'utf8') }));
+  const issues = bundledArtifactIssues(packageJson.dependencies ?? {}, files, bundledPackages);
+  return issues.length === 0
+    ? {
+        name: 'tau-bundled-artifact',
+        status: 'pass',
+        details: ['bundled workspace packages are absent from production dependencies and emitted specifiers'],
+      }
+    : {
+        name: 'tau-bundled-artifact',
+        status: 'fail',
+        details: [`${String(issues.length)} bundled artifact issue(s) found`, ...issues],
+      };
+}
+
+function validateStrictConsumerTypes(): CheckResult {
+  const directory = mkdtempSync(join(workspaceRoot, '.pkgcheck-consumer-'));
+  const packageDirectory = join(directory, 'node_modules/@taucad/runtime');
+  const failures: string[] = [];
+
+  try {
+    mkdirSync(packageDirectory, { recursive: true });
+    const publishPackage = applyPublishConfig(packageJson);
+    delete publishPackage.scripts;
+    writeFileSync(join(packageDirectory, 'package.json'), JSON.stringify(publishPackage, undefined, 2));
+    cpSync(join(absoluteRoot, 'dist'), join(packageDirectory, 'dist'), { recursive: true });
+    for (const dependency of Object.keys(packageJson.dependencies ?? {})) {
+      const source = join(absoluteRoot, 'node_modules', dependency);
+      if (!existsSync(source)) {
+        failures.push(`installed dependency is missing: ${dependency}`);
+        continue;
+      }
+      const destination = join(directory, 'node_modules', dependency);
+      mkdirSync(dirname(destination), { recursive: true });
+      symlinkSync(source, destination, 'junction');
+    }
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
+    writeFileSync(
+      join(directory, 'probe.ts'),
+      `import { createNodeClient } from '@taucad/runtime/node';
+import { presets } from '@taucad/runtime/presets';
+import { runtimeContentSchema, type RuntimeContentInput } from '@taucad/runtime/types';
+import { defineRuntimeTransport, type RuntimeTransportClient } from '@taucad/runtime/transport';
+import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { parameterFileResolver } from '@taucad/runtime/middleware/parameter-file-resolver';
+import { parameterCache } from '@taucad/runtime/middleware/parameter-cache';
+import { geometryCache } from '@taucad/runtime/middleware/geometry-cache';
+import { gltfCoordinateTransform } from '@taucad/runtime/middleware/gltf-coordinate-transform';
+import { gltfEdgeDetection } from '@taucad/runtime/middleware/gltf-edge-detection';
+
+type ConsumerTypes = [RuntimeContentInput, RuntimeTransportClient];
+declare const consumerTypes: ConsumerTypes;
+void [
+  createNodeClient,
+  presets,
+  runtimeContentSchema,
+  defineRuntimeTransport,
+  fromNodeFs,
+  parameterFileResolver,
+  parameterCache,
+  geometryCache,
+  gltfCoordinateTransform,
+  gltfEdgeDetection,
+  consumerTypes,
+];
+`,
+    );
+
+    for (const resolution of ['bundler', 'nodenext'] as const) {
+      const configPath = join(directory, `tsconfig.${resolution}.json`);
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          { compilerOptions: strictConsumerCompilerOptions(resolution), include: ['probe.ts'] },
+          undefined,
+          2,
+        ),
+      );
+      try {
+        execFileSync(join(workspaceRoot, 'node_modules/.bin/tsc'), ['--project', configPath, '--pretty', 'false'], {
+          cwd: directory,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch (error) {
+        const execError = error as { stdout?: string; stderr?: string };
+        failures.push(`${resolution}:\n${execError.stdout ?? ''}${execError.stderr ?? ''}`.trim());
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+
+  return failures.length === 0
+    ? {
+        name: 'tau-strict-consumer-types',
+        status: 'pass',
+        details: ['skipLibCheck:false passes under bundler and nodenext resolution'],
+      }
+    : {
+        name: 'tau-strict-consumer-types',
+        status: 'fail',
+        details: [`${String(failures.length)} strict consumer mode(s) failed`, ...failures],
+      };
+}
+
 /**
  * Create a publish-ready staging directory with publishConfig applied,
  * then pack and run attw against the tarball.
@@ -250,11 +452,15 @@ async function runAttw(): Promise<CheckResult> {
       cpSync(attwConfigSource, join(stagingDirectory, '.attw.json'));
     }
 
-    const output = execSync('pnpm attw --pack . --format table --profile esm-only', {
-      cwd: stagingDirectory,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const output = execFileSync(
+      resolve('node_modules/.bin/attw'),
+      ['--pack', '.', '--format', 'table', '--profile', 'esm-only'],
+      {
+        cwd: stagingDirectory,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
 
     return {
       name: 'attw',
@@ -736,8 +942,22 @@ async function main(): Promise<void> {
   results.push(validateEsmOnlyPackageMetadata());
   printResult(results.at(-1)!);
 
-  results.push(validateFlatDistLayout());
+  results.push(validateFlatDistributionLayout());
   printResult(results.at(-1)!);
+
+  results.push(validatePackageMetadata());
+  printResult(results.at(-1)!);
+
+  if (packageName === '@taucad/runtime') {
+    results.push(await validateBundleOwnership());
+    printResult(results.at(-1)!);
+
+    results.push(await validateBundledArtifact());
+    printResult(results.at(-1)!);
+
+    results.push(validateStrictConsumerTypes());
+    printResult(results.at(-1)!);
+  }
 
   results.push(await runPublint());
   printResult(results.at(-1)!);

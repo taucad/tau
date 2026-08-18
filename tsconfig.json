@@ -23,7 +23,7 @@
       "path": "./apps/ui-e2e"
     },
     {
-      "path": "./libs/api-extractor"
+      "path": "./apps/libs/api-extractor"
     },
     {
       "path": "./packages/types"
@@ -47,7 +47,7 @@
       "path": "./packages/utils"
     },
     {
-      "path": "./libs/vite"
+      "path": "./apps/libs/vite"
     },
     {
       "path": "./tools/workspace-plugin"
@@ -59,10 +59,10 @@
       "path": "./packages/filesystem"
     },
     {
-      "path": "./packages/fs-client"
+      "path": "./apps/libs/fs-client"
     },
     {
-      "path": "./packages/telemetry"
+      "path": "./apps/libs/telemetry"
     },
     {
       "path": "./examples/electron"
@@ -95,7 +95,7 @@
       "path": "./packages/fs-bridge"
     },
     {
-      "path": "./libs/lsp-fs"
+      "path": "./apps/libs/lsp-fs"
     },
     {
       "path": "./libs/oxlint"
@@ -104,7 +104,7 @@
       "path": "./packages/vm"
     },
     {
-      "path": "./libs/lsp"
+      "path": "./apps/libs/lsp"
     }
   ],
   "files": [],

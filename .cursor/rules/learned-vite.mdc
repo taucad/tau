@@ -1,7 +1,7 @@
 ---
-description: Auto-curated learned facts and preferences for the `vite` library (libs/vite)
+description: Auto-curated learned facts and preferences for the `vite` library (apps/libs/vite)
 globs:
-  - "libs/vite/**"
+  - "apps/libs/vite/**"
 alwaysApply: false
 ---
 
@@ -15,4 +15,4 @@ cleanup; they may exceed the 200-char cap.
 ## Learned Workspace Facts
 
 - For Vite dev worker HMR crashes, prove the module-graph root cause first; keep workers on worker-safe subpaths. Use `?worker_file` guards only for generic client-only transforms.
-- Vite 8 `vite:oxc` can resolve CJS `@oxc-project/runtime` helpers into an SSR ESM runner; `oxcRuntimeEsmPlugin` in `libs/vite` owns that compatibility fix. Runtime SSR asset scanning is internal to `packages/runtime`, package-root scoped, cheap-regex first, and bounded before `stripLiteral`; never scan application TypeScript or rewrite source-module URLs.
+- Vite 8 `vite:oxc` can resolve CJS `@oxc-project/runtime` helpers into an SSR ESM runner; `oxcRuntimeEsmPlugin` in `apps/libs/vite` owns that compatibility fix. Runtime SSR asset scanning is internal to `packages/runtime`, package-root scoped, cheap-regex first, and bounded before `stripLiteral`; never scan application TypeScript or rewrite source-module URLs.

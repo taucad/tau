@@ -15,6 +15,11 @@ Tools follow a client-server RPC pattern via Socket.IO:
 2. **Frontend (UI)**: RPC handlers execute the actual logic (filesystem, kernel, graphics) and return results via Socket.IO
 3. **Schemas (libs/chat)**: Shared type definitions between frontend and backend
 
+`libs/chat` is a **shared Apache-2.0 capability**, not application code. Its tool schemas and
+`src/rpc/**` handlers are the CAD-loop contract a published MCP tool layer will consume, so keep them
+host-agnostic and dependency-injected: no `apps/**` import, no browser-only assumption baked into a
+schema. See `docs/research/workspace-license-boundary-migration.md` (Finding 3).
+
 ## Step-by-Step Process
 
 ### Step 1: Define Tool Schema (libs/chat)

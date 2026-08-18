@@ -11,7 +11,14 @@ import { createApiDevViteNodeLifecycle } from '#api-dev-vite-node-lifecycle.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
+  // Nx loads apps/api/.env before Vite evaluates this config. Force Vite's
+  // documented production semantics so import.meta.env.DEV branches compile
+  // correctly even when the application env says NODE_ENV=development.
+  if (command === 'build') {
+    process.env.NODE_ENV = 'production';
+  }
+
   const isTest = mode === 'test';
   const apiDevPlugins = isTest
     ? []
@@ -32,6 +39,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: __dirname,
+    // Nest owns application environment loading. Letting Vite also read the
+    // local .env turns NODE_ENV=development into import.meta.env.DEV=true
+    // during `vite build` and tree-shakes the standalone server bootstrap.
+    envDir: false,
     cacheDir: '../../node_modules/.vite/apps/api',
     build: {
       outDir: 'dist',

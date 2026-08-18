@@ -1,4 +1,4 @@
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](license)
+[![Apache 2.0 License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](license)
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-7289da?logo=discord&logoColor=white)](https://discord.gg/6pfSAN3t7A)
 [![XO code style](https://shields.io/badge/code_style-5ed9c7?logo=xo&labelColor=gray&logoSize=auto)](https://github.com/xojs/xo)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-brightgreen?logo=node.js&logoColor=white)](https://nodejs.org)
@@ -19,7 +19,7 @@ The AI-native CAD platform — open-source, browser-based, and kernel-agnostic. 
 
 ## Features
 
-- **Open Source** — MIT licensed
+- **Open Source** — Apache-2.0 packages, AGPL-3.0 apps (see [LICENSING.md](LICENSING.md))
 - **Browser-Based** — Run CAD on mobile or desktop, no **installation** required
 - **Code-Based CAD** — Precise, version-controlled designs through code
 - **AI-Powered** — Natural language interface for design creation and modification
@@ -92,7 +92,12 @@ Special thanks to [OpenSCAD Playground](https://github.com/openscad/openscad-pla
 
 ## License
 
-Tau is **[MIT-licensed](license)**.
+Tau is licensed per directory. The repository root is **[Apache-2.0](license)**, which covers every published
+`@taucad/*` package and the `geospec` spec package — everything an npm consumer or embedder installs. The applications
+(`apps/ui`, `apps/api`) and their app libraries are **AGPL-3.0-only**, with an additional permission under AGPL section
+7 allowing combination with the GeoSpec engine. The GeoSpec engine (`@taucad/geospec-engine`) is **fair source** under
+FSL-1.1-Apache-2.0 — free for every purpose except a competing commercial offering, and Apache-2.0 two years after each
+release.
 
 **[LICENSING.md](LICENSING.md) is the routing map**: which license applies where, what the FSL conversion means, and an
 internal-use FAQ (short version: running GeoSpec, including commercially and in CI, is free, and no engine license

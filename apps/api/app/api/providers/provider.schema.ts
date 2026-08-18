@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 export const providerIdSchema = z
-  .enum(['openai', 'anthropic', 'ollama', 'vertexai', 'cerebras', 'together', 'morph', 'xai', 'moonshot'])
+  // 'tau' is the TAU_TEST_MODE replay provider (dev/test only); it is never in
+  // the static catalog and is appended at runtime like Ollama.
+  .enum(['openai', 'anthropic', 'ollama', 'vertexai', 'cerebras', 'together', 'morph', 'xai', 'moonshot', 'tau'])
   .describe('The provider of the model');
 
 export const modelFamilySchema = z.enum([
@@ -15,6 +17,7 @@ export const modelFamilySchema = z.enum([
   'minimax',
   'grok',
   'kimi',
+  'tau',
 ]);
 
 export const providerSchema = z.object({

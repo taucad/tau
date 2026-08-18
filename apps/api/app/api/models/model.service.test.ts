@@ -4,7 +4,9 @@ import { toolName } from '@taucad/chat/constants';
 import type { ConfigService } from '@nestjs/config';
 import { modelList } from '#api/models/model.constants.js';
 import { ModelService } from '#api/models/model.service.js';
+import type { Model } from '#api/models/model.schema.js';
 import { ProviderService } from '#api/providers/provider.service.js';
+import type { TauReplayModelProvider } from '#api/tau-replay/tau-replay.contract.js';
 import type { Environment } from '#config/environment.config.ts';
 
 const maxEffectiveContextWindow = 200_000;
@@ -244,5 +246,79 @@ describe('ModelService', () => {
         toolNames: [toolName.screenshot, toolName.testModel, toolName.getKernelResult, toolName.exportGeometry],
       }),
     ).toEqual([toolName.testModel, toolName.getKernelResult, toolName.exportGeometry]);
+  });
+});
+
+/**
+ * The replay seam is optional DI: `TauReplayModule` binds it only under
+ * TAU_TEST_MODE, and it is absent in production. These exercise the real
+ * ModelService — the integration suites stub ModelService wholesale, so nothing
+ * else would notice if this wiring went missing.
+ */
+describe('ModelService tau replay seam', () => {
+  const replayModel: Model = {
+    id: 'tau-replay',
+    name: 'Tau Replay (test)',
+    slug: 'tau-replay',
+    model: 'tau-replay',
+    provider: { id: 'tau', name: 'Tau' },
+    details: {
+      family: 'tau',
+      families: ['tau'],
+      contextWindow: 200_000,
+      maxTokens: 64_000,
+      cost: { inputTokens: 1.5, outputTokens: 9, cacheReadTokens: 0.15, cacheWriteTokens: 0 },
+    },
+    configuration: { streaming: true },
+  };
+
+  const createServiceWithReplay = (tauReplay?: TauReplayModelProvider) => {
+    const configService = {
+      get: vi.fn().mockReturnValue(false),
+    } satisfies Pick<ConfigService<Environment>, 'get'>;
+
+    return new ModelService(
+      {} as unknown as ProviderService,
+      configService as unknown as ConfigService<Environment>,
+      tauReplay,
+    );
+  };
+
+  it('appends replay models to the listed catalog when the seam is bound', async () => {
+    const service = createServiceWithReplay({
+      listModels: () => [replayModel],
+      createModel: () => {
+        throw new Error('not used');
+      },
+    });
+
+    const listed = await service.getModels();
+
+    expect(listed.map((model) => model.id)).toContain('tau-replay');
+  });
+
+  it('registers the replay model for buildModel lookups', async () => {
+    const service = createServiceWithReplay({
+      listModels: () => [replayModel],
+      createModel: () => {
+        throw new Error('not used');
+      },
+    });
+
+    await service.getModels();
+
+    // `buildModel` resolves against `models`, so a replay model missing here is
+    // unreachable even when the provider factory exists.
+    expect(service.models.map((model) => model.id)).toContain('tau-replay');
+    expect(service.getProviderId('tau-replay')).toBe('tau');
+  });
+
+  it('omits replay models entirely when the seam is unbound', async () => {
+    const service = createServiceWithReplay();
+
+    const listed = await service.getModels();
+
+    expect(listed.map((model) => model.id)).not.toContain('tau-replay');
+    expect(service.models.map((model) => model.id)).not.toContain('tau-replay');
   });
 });

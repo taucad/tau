@@ -72,7 +72,12 @@ const environmentSchemaBase = z.object({
 
   // Local Model Providers
   OLLAMA_ENABLED: z.coerce.boolean().default(false).describe('Enable Ollama local model provider'),
-
+  TAU_TEST_MODE: z.coerce
+    .boolean()
+    .default(false)
+    .describe(
+      'Enable the "tau" replay provider + model for deterministic chat/billing testing (dev/test only; forbidden in production)',
+    ),
   // Kernel Integrations
   ZOO_API_KEY: z.string().describe('Zoo.dev API key for KCL kernel proxy'),
   ZOO_WEBSOCKET_URL: z.string().describe('Zoo.dev API URL for KCL kernel proxy').default('wss://api.zoo.dev'),
@@ -116,6 +121,17 @@ const environmentSchemaBase = z.object({
 export const environmentSchema = environmentSchemaBase.superRefine((data, context) => {
   if (data.NODE_ENV !== 'production') {
     return;
+  }
+
+  // The replay provider fakes the LLM and never settles a real provider bill,
+  // but it must never exist in production — it exposes a deterministic model and
+  // (deliberately) meters real credits. Fail the boot rather than risk exposure.
+  if (data.TAU_TEST_MODE) {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_TEST_MODE must not be enabled in production',
+      path: ['TAU_TEST_MODE'],
+    });
   }
 
   try {

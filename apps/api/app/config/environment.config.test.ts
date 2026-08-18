@@ -127,6 +127,7 @@ describe('environmentSchema', () => {
       TAU_S3_SECRET_ACCESS_KEY: 'secret',
       TAU_S3_FORCE_PATH_STYLE: false,
       TAU_API_URL: 'https://api.tau.new',
+      TAU_TEST_MODE: false,
     });
 
     expect(result.success).toBe(true);

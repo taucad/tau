@@ -9,7 +9,7 @@ conform to this spec; non-conforming frames are dropped silently by
 `isWireMessage`.
 
 This document is the authoritative reference cited from
-[`packages/rpc/src/wire.ts`](../../packages/rpc/src/wire.ts) and
+[`libs/rpc/src/wire.ts`](../../libs/rpc/src/wire.ts) and
 [`docs/research/runtime-channel-blueprint-v5.md`](../research/runtime-channel-blueprint-v5.md).
 
 ## Design Principles
@@ -29,8 +29,8 @@ This document is the authoritative reference cited from
    keeping the envelope itself free of host-specific objects.
 4. **Discriminated union, never magic strings.** All consumers parse the
    wire format through the
-   [`WireMessage`](../../packages/rpc/src/wire.ts) discriminated union and
-   the [`isWireMessage`](../../packages/rpc/src/wire.ts) type guard. Adding
+   [`WireMessage`](../../libs/rpc/src/wire.ts) discriminated union and
+   the [`isWireMessage`](../../libs/rpc/src/wire.ts) type guard. Adding
    a kind requires extending both the union and the guard.
 5. **No correlation id for fan-out frames.** `nt` (notify) carries no `i`
    slot; receivers pattern-match on `n` (name). This mirrors LSP
@@ -119,16 +119,16 @@ stack traces in development mode.
 
 ## Conformance Fixtures
 
-[`packages/rpc/test/conformance/*.json`](../../packages/rpc/test/conformance/)
+[`libs/rpc/test/conformance/*.json`](../../libs/rpc/test/conformance/)
 holds one fixture per kind. The
-[`conformance.test.ts`](../../packages/rpc/src/conformance.test.ts) suite
+[`conformance.test.ts`](../../libs/rpc/src/conformance.test.ts) suite
 asserts that every fixture:
 
 1. Passes `isWireMessage`.
 2. Round-trips byte-for-byte through `JSON.stringify` / `JSON.parse`.
 3. Advertises a `kind` metadata field that matches `frame.k`.
 
-Adding a new wire kind REQUIRES adding a fixture under `packages/rpc/test/conformance/`.
+Adding a new wire kind REQUIRES adding a fixture under `libs/rpc/test/conformance/`.
 
 ## Mapping to Prior Art
 
@@ -153,11 +153,11 @@ Adding a new wire kind REQUIRES adding a fixture under `packages/rpc/test/confor
 
 ## References
 
-- [`packages/rpc/src/wire.ts`](../../packages/rpc/src/wire.ts) — TypeScript
+- [`libs/rpc/src/wire.ts`](../../libs/rpc/src/wire.ts) — TypeScript
   source of truth for the union, type guard, and known-kind set.
-- [`packages/rpc/src/channel.ts`](../../packages/rpc/src/channel.ts) — Wire
+- [`libs/rpc/src/channel.ts`](../../libs/rpc/src/channel.ts) — Wire
   emission and reception per kind.
-- [`packages/rpc/src/trace.ts`](../../packages/rpc/src/trace.ts) — Structured
+- [`libs/rpc/src/trace.ts`](../../libs/rpc/src/trace.ts) — Structured
   logger keyed by kind, gated on `RPC_TRACE` env flag.
 - [`docs/research/runtime-channel-blueprint-v5.md`](../research/runtime-channel-blueprint-v5.md) —
   Blueprint document with the full requirements catalogue (R1–R17).

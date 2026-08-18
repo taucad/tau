@@ -1,7 +1,6 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
-import type { JSONSchema7 } from '@taucad/json-schema';
-import type { Geometry } from '@taucad/types';
+import type { Geometry, JSONSchema7 } from '@taucad/runtime/types';
 import type {
   RuntimeClient,
   HashedGeometryResult,

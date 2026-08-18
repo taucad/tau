@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FileExtension, Geometry } from '@taucad/types';
+import type { FileExtension, Geometry, JSONSchema7 } from '@taucad/runtime/types';
 import type {
   CapabilitiesManifest,
   ExportFormatsFor,
@@ -28,7 +28,6 @@ import type {
   RuntimeTranscoders,
 } from '@taucad/runtime/worker';
 import { createRuntimeClient } from '@taucad/runtime/client';
-import type { JSONSchema7 } from '@taucad/json-schema';
 
 type RuntimeTransportPlugin = TransportPlugin<
   RuntimeProtocol,

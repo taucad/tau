@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { JSONSchema7 } from '@taucad/json-schema';
+import type { JSONSchema7 } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { ExportResult } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';

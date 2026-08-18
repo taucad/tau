@@ -39,9 +39,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/json-schema": "workspace:*",
-    "@taucad/runtime": "workspace:*",
-    "@taucad/types": "workspace:*"
+    "@taucad/runtime": "workspace:*"
   },
   "peerDependencies": {
     "react": ">=18.0.0"

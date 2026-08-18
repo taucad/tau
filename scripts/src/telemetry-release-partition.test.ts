@@ -10,11 +10,11 @@ describe('telemetry release partition', () => {
   it('keeps telemetry private and outside package release ownership', () => {
     expect(existsSync(join(repositoryRoot, 'packages/telemetry'))).toBe(false);
 
-    const manifest = readJson('libs/telemetry/package.json');
-    const project = readJson('libs/telemetry/project.json');
+    const manifest = readJson('apps/libs/telemetry/package.json');
+    const project = readJson('apps/libs/telemetry/project.json');
     expect(manifest['name']).toBe('@taucad/telemetry');
     expect(manifest['private']).toBe(true);
-    expect(project['tags']).toContain('type:lib');
+    expect(project['tags']).toContain('type:app-lib');
 
     const workflow = readFileSync(join(repositoryRoot, '.github/workflows/publish.yml'), 'utf8');
     const publishCommands = workflow

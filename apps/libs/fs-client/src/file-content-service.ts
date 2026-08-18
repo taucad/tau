@@ -164,7 +164,6 @@ export class FileContentService {
   private readonly orphanedPaths = new Set<string>();
   private readonly editorSaves = new Map<string, EditorSaveState>();
   private readonly editorMutationBarriers: EditorMutationBarrier[] = [];
-  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- Holds worker-channel unsubscribe callbacks; event fan-out uses Topic/PathSubscriberRegistry.
   private readonly unsubscribeChannel: Array<() => void>;
   readonly #orphanTopic = new Topic<OrphanChangeEvent>({ name: 'FileContentService.orphan' });
   readonly #outcomeTopic = new Topic<OutcomeChangeEvent>({ name: 'FileContentService.outcome' });

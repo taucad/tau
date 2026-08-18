@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { Topic } from '@taucad/events';
 import type { DirectoryListing, DirectoryListingError } from '#directory-listing.js';
 import { DirectoryListingFailedError, classifyDirectoryListingError } from '#directory-listing.js';
 import type { FileTreeService } from '#file-tree-service.js';
@@ -11,22 +12,17 @@ type ListingStore = {
 
 const createListingStore = (): ListingStore => {
   let snapshot: DirectoryListing = { kind: 'unready' };
-  const listeners = new Set<() => void>();
+  const topic = new Topic<void>({ name: 'directory-listing' });
   return {
     subscribe(onStoreChange: () => void) {
-      listeners.add(onStoreChange);
-      return () => {
-        listeners.delete(onStoreChange);
-      };
+      return topic.subscribe(onStoreChange);
     },
     getSnapshot(): DirectoryListing {
       return snapshot;
     },
     emit(next: DirectoryListing) {
       snapshot = next;
-      for (const listener of listeners) {
-        listener();
-      }
+      topic.emit();
     },
   };
 };

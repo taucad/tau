@@ -3,11 +3,11 @@
   "version": "0.1.0-beta.0",
   "description": "Client-side filesystem services (FileContentService, FileTreeService, WorkerChangeChannel) for Tau",
   "type": "module",
-  "private": false,
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/fs-client"
+    "directory": "apps/libs/fs-client"
   },
   "files": [
     "dist",
@@ -20,7 +20,7 @@
     "typescript"
   ],
   "author": "Richard Fontein",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-only",
   "exports": {
     "./workspace-path-resolver": "./src/workspace-path-resolver.ts",
     "./path-subscriber-registry": "./src/path-subscriber-registry.ts",

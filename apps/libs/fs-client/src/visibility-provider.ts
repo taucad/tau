@@ -1,3 +1,5 @@
+import { Topic } from '@taucad/events';
+
 /**
  * Tab visibility contract for services that throttle polling when hidden.
  *
@@ -43,24 +45,21 @@ export const headlessVisibilityProvider: VisibilityProvider = {
  * @public
  */
 export function createDomVisibilityProvider(): VisibilityProvider {
-  const callbacks = new Set<() => void>();
+  const topic = new Topic<void>({ name: 'document-visibility' });
   const onDocumentVisibilityChange = (): void => {
-    const subscribers = [...callbacks];
-    for (const callback of subscribers) {
-      callback();
-    }
+    topic.emit();
   };
   return {
     isVisible: () => (typeof document === 'undefined' ? true : document.visibilityState === 'visible'),
     onVisibilityChange(callback: () => void): () => void {
-      const isFirst = callbacks.size === 0;
-      callbacks.add(callback);
+      const isFirst = topic.size === 0;
+      const unsubscribe = topic.subscribe(callback);
       if (isFirst && typeof document !== 'undefined') {
         document.addEventListener('visibilitychange', onDocumentVisibilityChange);
       }
       return () => {
-        callbacks.delete(callback);
-        if (callbacks.size === 0 && typeof document !== 'undefined') {
+        unsubscribe();
+        if (topic.size === 0 && typeof document !== 'undefined') {
           document.removeEventListener('visibilitychange', onDocumentVisibilityChange);
         }
       };

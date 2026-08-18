@@ -147,7 +147,6 @@ export class FileTreeService {
   private readonly _listingPathSubscribers = new PathSubscriberRegistry<void>();
   private readonly _listingGuard = new RefreshGenerationGuard();
   private readonly _inFlightDirectoryList = new Map<string, Promise<void>>();
-  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- Holds worker-channel unsubscribe callbacks; event fan-out uses Topic/PathSubscriberRegistry.
   private readonly unsubscribeChannel: Array<() => void>;
   readonly #treeTopic = new Topic<void>({ name: 'FileTreeService.tree' });
 

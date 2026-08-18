@@ -6,18 +6,27 @@ import { createCrossProviderContentNormalizerMiddleware } from '#api/chat/middle
 import { messageContentSanitizerMiddleware } from '#api/chat/middleware/message-content-sanitizer.middleware.js';
 import { invokeWrapModelCall } from '#testing/middleware-testing.utils.js';
 
+type ResponsesInputRecord = Record<string, unknown> & {
+  id?: unknown;
+  call_id?: unknown;
+  type?: unknown;
+  role?: unknown;
+  content?: unknown;
+  arguments?: unknown;
+};
+
 /**
  * Runs the real upstream OpenAI Responses converter over normalized messages so
  * assertions target the actual wire payload shape (not regex over content). The
  * converter rejects `input_text` for the assistant role and only honors native
  * items via the `non_standard` passthrough gated on `model_provider === 'openai'`.
  */
-const toResponsesInput = (messages: BaseMessage[]): Array<Record<string, unknown>> =>
+const toResponsesInput = (messages: BaseMessage[]): ResponsesInputRecord[] =>
   convertMessagesToResponsesInput({
     messages,
     zdrEnabled: false,
     model: 'gpt-4.1',
-  }) as Array<Record<string, unknown>>;
+  }) as unknown as ResponsesInputRecord[];
 
 /**
  * The Responses API rejects an `id` (or `call_id`) of `''`: it must be omitted
@@ -29,12 +38,12 @@ const isValidOrAbsentId = (value: unknown): boolean =>
 const assertNoEmptyIds = (items: Array<Record<string, unknown>>): void => {
   for (const [index, item] of items.entries()) {
     expect(
-      isValidOrAbsentId(item.id),
-      `input[${index}].id must be valid or absent, got ${JSON.stringify(item.id)}`,
+      isValidOrAbsentId(item['id']),
+      `input[${index}].id must be valid or absent, got ${JSON.stringify(item['id'])}`,
     ).toBe(true);
     expect(
-      isValidOrAbsentId(item.call_id),
-      `input[${index}].call_id must be valid or absent, got ${JSON.stringify(item.call_id)}`,
+      isValidOrAbsentId(item['call_id']),
+      `input[${index}].call_id must be valid or absent, got ${JSON.stringify(item['call_id'])}`,
     ).toBe(true);
   }
 };
@@ -206,8 +215,8 @@ describe('cross-provider tool-call replay (hermetic)', () => {
     expect(assistant.content).toEqual([{ type: 'text', text: '[interrupted]' }]);
     expect(assistant.tool_calls ?? []).toEqual([]);
     const legacyMetadata = assistant.additional_kwargs as Record<string, unknown>;
-    expect(legacyMetadata.tool_calls).toBeUndefined();
-    expect(legacyMetadata.function_call).toBeUndefined();
+    expect(legacyMetadata['tool_calls']).toBeUndefined();
+    expect(legacyMetadata['function_call']).toBeUndefined();
     expect(assistant.invalid_tool_calls).toHaveLength(1);
     assertGooglePortableMessages(normalized);
   });

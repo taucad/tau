@@ -133,7 +133,7 @@ describe('transformAiMessageContent', () => {
           name: 'read_file',
           args: '{"targetFile":',
           error: 'Malformed args.',
-          type: 'invalid_tool_call',
+          type: 'invalid_tool_call' as const,
         },
       ];
       const message = new AIMessage({

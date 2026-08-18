@@ -146,7 +146,13 @@ describe('LangGraph parallel tool dispatch', () => {
     );
 
     const llm = new FakeToolCallingModel({
-      toolCalls: [[{ name: 'lookup_city', args: { name: 'sf' } }], []],
+      toolCalls: [
+        [
+          // @ts-expect-error -- The malformed tool call deliberately omits the required id.
+          { name: 'lookup_city', args: { name: 'sf' } },
+        ],
+        [],
+      ],
     });
 
     const agent = createAgent({

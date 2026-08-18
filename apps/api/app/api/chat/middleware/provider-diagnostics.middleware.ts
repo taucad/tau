@@ -81,7 +81,7 @@ function assertNoInvalidToolCalls(message: AIMessage): void {
 
   const details = invalidToolCalls
     .map((toolCall) => {
-      const name = toolCall.name.length > 0 ? toolCall.name : '<unknown>';
+      const name = toolCall.name && toolCall.name.length > 0 ? toolCall.name : '<unknown>';
       const error = toolCall.error ?? 'invalid tool call';
       return `${name}: ${error}`;
     })

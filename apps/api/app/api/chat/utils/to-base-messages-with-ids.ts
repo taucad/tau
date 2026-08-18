@@ -13,7 +13,8 @@ const additionalKwargsKey = 'additional_kwargs';
  * replacement and removal semantics.
  */
 export async function toBaseMessagesWithIds(messages: readonly MyUIMessage[]): Promise<BaseMessagesWithIds> {
-  const baseMessages = await toBaseMessages(messages as MyUIMessage[]);
+  // @ts-expect-error -- Tau's validated UI parts add optional metadata that the AI SDK accepts at runtime.
+  const baseMessages = await toBaseMessages(messages);
   return applyUiMessageIds(baseMessages, messages) as BaseMessagesWithIds;
 }
 

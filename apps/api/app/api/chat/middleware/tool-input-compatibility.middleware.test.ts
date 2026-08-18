@@ -35,7 +35,7 @@ describe('createToolInputCompatibilityMiddleware', () => {
       id: 'call_test_model',
       name: toolName.testModel,
       args: { 'files[0]': 'main.geospec.ts', 'exclude[0]': '**/*.slow.geospec.ts' },
-      type: 'tool_call',
+      type: 'tool_call' as const,
     };
     const aiMessage = new AIMessage({
       id: 'msg-1',
@@ -50,6 +50,9 @@ describe('createToolInputCompatibilityMiddleware', () => {
 
     expect(update.messages).toHaveLength(1);
     const healedMessage = update.messages[0];
+    if (!healedMessage) {
+      throw new Error('expected healed AI message');
+    }
     expect(healedMessage.id).toBe('msg-1');
     expect(healedMessage.tool_calls?.[0]).toBe(readFileToolCall);
     expect(healedMessage.tool_calls?.[1]?.args).toEqual({

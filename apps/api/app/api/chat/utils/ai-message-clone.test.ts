@@ -4,16 +4,24 @@ import { cloneAiMessage } from '#api/chat/utils/ai-message-clone.js';
 
 describe('cloneAiMessage', () => {
   it('preserves provider replay metadata unless explicitly overridden', () => {
-    const toolCalls = [{ id: 'call_read', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' }];
+    const toolCalls = [
+      { id: 'call_read', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' as const },
+    ];
     const invalidToolCalls = [
-      { id: 'bad_call', name: 'read_file', args: '{"targetFile":', error: 'Malformed args', type: 'invalid_tool_call' },
+      {
+        id: 'bad_call',
+        name: 'read_file',
+        args: '{"targetFile":',
+        error: 'Malformed args',
+        type: 'invalid_tool_call' as const,
+      },
     ];
     const additionalKwargs = {
       providerNative: {
         functionCallSignatures: [{ id: 'call_read', thoughtSignature: 'sig_google' }],
       },
     };
-    const responseMetadata = { model_provider: 'vertexai', output_version: 'v1' };
+    const responseMetadata = { model_provider: 'vertexai', output_version: 'v1' as const };
     const usageMetadata = { input_tokens: 10, output_tokens: 2, total_tokens: 12 };
     const message = new AIMessage({
       content: [{ type: 'text', text: 'hello' }],

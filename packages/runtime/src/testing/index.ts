@@ -29,6 +29,7 @@ export { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definiti
 export {
   validateGlbData,
   getInspectReport,
+  getSignedVolumeFromGlb,
   getGeometryStatsFromInspect,
   getBoundingBoxFromInspect,
   extractGltfFromResult,

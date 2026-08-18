@@ -78,6 +78,46 @@ export const getInspectReport = async (glbData: Uint8Array<ArrayBuffer>): Promis
 };
 
 /**
+ * Compute signed volume from every triangle primitive in a GLB.
+ *
+ * @param glbData - The GLB binary content to measure.
+ * @returns Signed volume in the GLB coordinate units cubed.
+ * @public
+ */
+export const getSignedVolumeFromGlb = async (glbData: Uint8Array<ArrayBuffer>): Promise<number> => {
+  const document = await glbToDocument(glbData);
+  let volume = 0;
+  for (const mesh of document.getRoot().listMeshes()) {
+    for (const primitive of mesh.listPrimitives()) {
+      if (primitive.getMode() !== 4) {
+        continue;
+      }
+      const positions = primitive.getAttribute('POSITION');
+      const indices = primitive.getIndices();
+      if (!positions || !indices) {
+        continue;
+      }
+      const point = (index: number): [number, number, number] => {
+        const value = [0, 0, 0];
+        positions.getElement(index, value);
+        return value as [number, number, number];
+      };
+      for (let index = 0; index < indices.getCount(); index += 3) {
+        const a = point(indices.getScalar(index));
+        const b = point(indices.getScalar(index + 1));
+        const c = point(indices.getScalar(index + 2));
+        volume +=
+          (a[0] * (b[1] * c[2] - b[2] * c[1]) +
+            a[1] * (b[2] * c[0] - b[0] * c[2]) +
+            a[2] * (b[0] * c[1] - b[1] * c[0])) /
+          6;
+      }
+    }
+  }
+  return volume;
+};
+
+/**
  * Validates that GLB data has proper format (non-empty with correct header).
  *
  * @param glb - The GLB binary content to validate

@@ -59,6 +59,11 @@
         "import": "./dist/register.mjs",
         "default": "./dist/register.mjs"
       },
+      "./register/node": {
+        "types": "./dist/register-node.d.mts",
+        "import": "./dist/register-node.mjs",
+        "default": "./dist/register-node.mjs"
+      },
       "./native/opencascade/single": {
         "types": "./dist/native/opencascade/init.d.ts",
         "import": "./dist/native/opencascade/init.js",

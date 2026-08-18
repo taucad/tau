@@ -26,10 +26,16 @@ const nativeOpenCascadeArtifacts = [
 ] as const;
 
 const packageConfig: UserConfig = {
-  // Four entries: the library, the side-effect registration, the `geospec`
-  // bin, and the pool worker's thread entry — a worker loads a URL, so its
-  // module must exist as a real file beside the runner that spawns it.
-  entry: ['src/index.ts', 'src/register.ts', 'src/cli/main.ts', 'src/runner/node/pool-worker-entry.ts'],
+  // Five entries: the library, the host-neutral and Node registrations, the
+  // `geospec` bin, and the pool worker's thread entry — a worker loads a URL,
+  // so its module must exist as a real file beside the runner that spawns it.
+  entry: [
+    'src/index.ts',
+    'src/register.ts',
+    'src/register-node.ts',
+    'src/cli/main.ts',
+    'src/runner/node/pool-worker-entry.ts',
+  ],
   sourcemap: false,
   clean: ['dist'],
   dts: true,

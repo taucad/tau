@@ -472,38 +472,25 @@ const client = createRuntimeClient({
 });
 ```
 
-## 16. Type-Safe Options Helpers
+## 16. Type-Safe Options Constants
 
-Every options type that consumers declare as a standalone constant should have a companion `createXOptions()` helper. The helper provides full intellisense via generic inference -- consumers get autocomplete and type checking without importing the type explicitly.
+Use TypeScript's native `satisfies` operator for standalone options constants. Do not add identity functions whose only behavior is returning an options object unchanged.
 
 ```typescript
-// Without helper: requires explicit type import
 import type { RuntimeClientOptions } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const runtime = defineRuntime({ kernels: [replicad()] });
 const transport = inProcessTransport({ runtime });
-const options: RuntimeClientOptions<typeof runtime, typeof transport> = { transport };
-
-// With helper: intellisense via inference, no type import needed
-import { createRuntimeHostConfig } from '@taucad/runtime/host';
-const options = createRuntimeHostConfig({ transport });
+const options = { transport } satisfies RuntimeClientOptions<typeof runtime, typeof transport>;
 ```
 
-The identity overload returns the input as-is (zero runtime cost). A second merge overload enables declarative overrides when consumers need variations of a base configuration.
-
-Add `createXOptions` to the naming conventions table in section 5:
-
-| Prefix           | Role                                  | Examples                  |
-| ---------------- | ------------------------------------- | ------------------------- |
-| `createXOptions` | Options helper (intellisense + merge) | `createRuntimeHostConfig` |
-
-**Canonical implementation**: `createRuntimeHostConfig` in `@taucad/runtime/host`.
+This keeps inference and excess-property checking without adding a runtime API or a second name for the options type.
 
 ## 17. Options Override Patterns
 
-When an options object contains **plugin arrays** (items with an `id` field), **config objects** (nested plain objects), and **opaque fields** (functional objects like transports), use a three-tier merge strategy in the `createXOptions` merge overload:
+When explicitly composing a runtime definition from an existing definition, apply these field-specific override patterns at the declaration site:
 
 | Tier           | Field type                          | Strategy                                                                               | Rationale                                                                                               |
 | -------------- | ----------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -511,16 +498,7 @@ When an options object contains **plugin arrays** (items with an `id` field), **
 | Config objects | `tessellation`, nested settings     | **Deep merge**: recursively merge keys; absent keys preserve base                      | Config objects have structure (keys); consumers want to override one nested key without losing siblings |
 | Opaque fields  | `transport`, `fileSystem`           | **Full replacement**: override replaces entirely                                       | Functional objects have unity (methods work as a set); deep merge would create broken hybrids           |
 
-### Before (manual array manipulation)
-
-```typescript
-const debugRuntime = defineRuntime({
-  ...defaultRuntime,
-  kernels: defaultRuntime.kernels.map((k) => (k.id === 'replicad' ? replicad({ withSourceMapping: true }) : k)),
-});
-```
-
-### After (declarative ID-based merge)
+### Explicit plugin replacement
 
 ```typescript
 const debugRuntime = defineRuntime({

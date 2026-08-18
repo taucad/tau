@@ -38,7 +38,7 @@
         "serveStaticTargetName": "serve-static",
         "outputPath": "dist"
       },
-      "exclude": ["examples/**"]
+      "exclude": ["examples/**", "apps/react-e2e/apps/**"]
     },
     {
       "plugin": "@nx/eslint/plugin",
@@ -58,7 +58,7 @@
       "options": {
         "testTargetName": "test"
       },
-      "exclude": ["examples/**"]
+      "exclude": ["examples/**", "apps/react-e2e/apps/**"]
     }
   ],
   "targetDefaults": {

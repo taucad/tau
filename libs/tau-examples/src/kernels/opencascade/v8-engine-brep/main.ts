@@ -24,7 +24,7 @@ import {
   type BRepAlgoAPI_BooleanOperation,
   type TopoDS_Edge,
   type TopoDS_Shape,
-} from 'opencascade.js';
+} from 'libcascade';
 
 export const defaultParams = {
   bore: 94,

@@ -8,7 +8,8 @@
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext",
     "paths": {
-      "#*": ["./src/*"]
+      "#*": ["./src/*"],
+      "libcascade": ["../api-extractor/src/generated/opencascade/modules/libcascade/index.d.ts"]
     }
   },
   "include": [

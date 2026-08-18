@@ -2,7 +2,7 @@
 
 This is a Python/build123d sibling of the Replicad ``v8-engine-brep`` fixture.
 It intentionally mirrors the same part layout and BRep-native construction
-patterns so Tau can compare Replicad/opencascade.js against native
+patterns so Tau can compare Replicad/libcascade against native
 build123d/OCP without changing the visible reference model.
 """
 

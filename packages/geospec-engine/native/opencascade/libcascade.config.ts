@@ -54,7 +54,6 @@ export default defineBuild({
     // (lazy-evidence blueprint R6, per the ocjs benchmark survey).
     MALLOC: 'mimalloc',
   },
-  /* eslint-enable @typescript-eslint/naming-convention -- Back to normal identifier rules. */
   compilerFlags: { lto: true, optimize: 'O3', exceptions: 'wasm', simd: true, noEntry: true },
   variants: [
     { name: 'single', settings: { EVAL_CTORS: 2 } },
@@ -65,3 +64,4 @@ export default defineBuild({
     },
   ],
 });
+/* eslint-enable @typescript-eslint/naming-convention -- Back to normal identifier rules. */

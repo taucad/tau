@@ -135,12 +135,12 @@ const facePolygon = (
 ): readonly Vector3[] => {
   const across = (axis + 1) % 3;
   const along = (axis + 2) % 3;
-  const trim = (index: number): readonly [number, number] => [
-    origin[index] === 0 ? 0 : channel / 2,
-    origin[index] + size === grid ? size : size - channel / 2,
+  const trim = (start: number): readonly [number, number] => [
+    start === 0 ? 0 : channel / 2,
+    start + size === grid ? size : size - channel / 2,
   ];
-  const [acrossLow, acrossHigh] = trim(across);
-  const [alongLow, alongHigh] = trim(along);
+  const [acrossLow, acrossHigh] = trim(origin[across] ?? 0);
+  const [alongLow, alongHigh] = trim(origin[along] ?? 0);
 
   return (
     [

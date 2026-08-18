@@ -9,7 +9,8 @@ import * as mdxParser from '@taucad/oxlint/mdx-parser';
 
 /**
  * Workspace root plus every workspace member directory that has a `package.json`
- * (`packages/*`, `packages/kernels/*`, `libs/*`, `apps/*`, `examples/*`, `scripts`), so
+ * (`packages/*`, `packages/kernels/*`, `libs/*`, `apps/*`, `apps/libs/*`, `examples/*`,
+ * `scripts`), so
  * `import-x/no-extraneous-dependencies` resolves deps from the owning manifest.
  */
 const workspacePackageDirectories = () => {
@@ -40,6 +41,7 @@ const workspacePackageDirectories = () => {
   absorbChildren(path.join(root, 'packages/kernels'));
   absorbChildren(path.join(root, 'libs'));
   absorbChildren(path.join(root, 'apps'));
+  absorbChildren(path.join(root, 'apps/libs'));
   absorbChildren(path.join(root, 'examples'));
   if (fs.existsSync(path.join(root, 'scripts/package.json'))) {
     directories.add(path.join(root, 'scripts'));
@@ -123,9 +125,18 @@ const namingConventionBase = [
     format: ['StrictPascalCase'],
   },
   {
+    /*
+     * A name that cannot be written as a bare identifier is not an identifier,
+     * so identifier casing does not apply to it. The redundant always-true
+     * `filter` is load-bearing: `naming-convention` ranks a config carrying a
+     * filter above one carrying only modifiers, so without it the quoted-name
+     * exemption loses to the `strictCamelCase` entry above for any quoted key
+     * that happens to contain neither a hyphen nor a space (`'files[0]'`).
+     */
     selector: ['classProperty', 'objectLiteralProperty'],
     format: null,
     modifiers: ['requiresQuotes'],
+    filter: { regex: '.', match: true },
   },
 ];
 
@@ -285,15 +296,29 @@ const config = [
             },
             {
               sourceTag: 'type:app',
-              onlyDependOnLibsWithTags: ['type:ui', 'type:lib', 'type:examples'],
+              onlyDependOnLibsWithTags: ['type:ui', 'type:lib', 'type:app-lib', 'type:examples'],
             },
             {
               sourceTag: 'type:ui',
-              onlyDependOnLibsWithTags: ['type:ui', 'type:lib'],
+              onlyDependOnLibsWithTags: ['type:ui', 'type:lib', 'type:app-lib'],
             },
             {
+              /*
+               * Shared libraries may consume published packages. `tau-examples`
+               * and `chat` both do: a tool contract that describes kernel
+               * results necessarily speaks the runtime's issue vocabulary.
+               * `type:app-lib` is deliberately absent here and from every other
+               * allowlist except `type:app`, `type:ui`, and `type:e2e` — that
+               * omission is what stops a published package or shared library
+               * from consuming private application code.
+               */
               sourceTag: 'type:lib',
-              onlyDependOnLibsWithTags: ['type:lib'],
+              onlyDependOnLibsWithTags: ['type:lib', 'type:package-root', 'type:package-veneer'],
+            },
+            {
+              // Private application capabilities under `apps/libs/*`.
+              sourceTag: 'type:app-lib',
+              onlyDependOnLibsWithTags: ['type:app-lib', 'type:lib', 'type:package-root', 'type:package-veneer'],
             },
             {
               // Example projects (fixtures) depend on libs they demonstrate —
@@ -305,7 +330,7 @@ const config = [
               // E2e/regression packages sit at the top of the graph and may
               // consume anything they exercise: apps, ui, libs, and examples.
               sourceTag: 'type:e2e',
-              onlyDependOnLibsWithTags: ['type:app', 'type:ui', 'type:lib', 'type:examples'],
+              onlyDependOnLibsWithTags: ['type:app', 'type:ui', 'type:lib', 'type:app-lib', 'type:examples'],
             },
           ],
         },

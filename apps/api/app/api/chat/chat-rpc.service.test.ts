@@ -1,14 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { Socket } from 'socket.io';
-import { ChatRpcService, rpcExecutionTimeout, abortCleanupDelay } from '#api/chat/chat-rpc.service.js';
+import { rpcExecutionTimeout } from '@taucad/chat/constants';
+import { ChatRpcService, abortCleanupDelay } from '#api/chat/chat-rpc.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
 
 const mockMetricsService = new MetricsService();
 
 let requestIdCounter = 0;
 const chatModuleMock = vi.hoisted(() => {
-  const readFileResultSafeParse = vi.fn(() => ({ success: true, data: { content: 'hello' } }));
+  // Mirrors Zod's discriminated `safeParse` result — the failure arm is what the
+  // OUTPUT_VALIDATION_FAILED path reads, so the mock has to offer both arms.
+  const readFileResultSafeParse = vi.fn(
+    ():
+      | { success: true; data: { content: string } }
+      | { success: false; error: { issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> } } => ({
+      success: true,
+      data: { content: 'hello' },
+    }),
+  );
 
   return {
     readFileResultSafeParse,
@@ -251,8 +261,9 @@ describe('ChatRpcService', () => {
         rpcName: 'read_file',
         validationErrors: [{ path: 'content', message: 'Required' }],
         rawOutput,
+        // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest assertion
+        message: expect.stringContaining('returned invalid result'),
       });
-      expect(result.message).toContain('returned invalid result');
     });
   });
 

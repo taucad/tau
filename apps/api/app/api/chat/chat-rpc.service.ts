@@ -4,6 +4,7 @@ import type { Socket } from 'socket.io';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { rpcSchemasRegistry } from '@taucad/chat';
+import { rpcExecutionTimeout } from '@taucad/chat/constants';
 import type {
   RpcSchemasRegistry,
   RpcInput,
@@ -16,9 +17,6 @@ import type {
 import { AttributeKey } from '@taucad/telemetry';
 import { MetricsService } from '#telemetry/metrics.js';
 import { injectTraceContext } from '#telemetry/tracer.service.js';
-
-/** Timeout for RPC execution (60 seconds). Milliseconds. */
-export const rpcExecutionTimeout = 60_000;
 
 /** Delay before clearing the aborted-chat entry after an abort signal fires.
  *  Catches straggler RPCs that start after abort but before LangGraph fully stops.
@@ -55,6 +53,13 @@ const summarizeValidationIssue = (issue: ValidationIssue): { path: string; messa
   path: issue.path.map(String).join('.'),
   message: issue.message,
 });
+
+const rpcResultErrorCode = (result: unknown): string | undefined => {
+  if (typeof result !== 'object' || result === null || !('success' in result) || result.success !== false) {
+    return undefined;
+  }
+  return 'errorCode' in result && typeof result.errorCode === 'string' ? result.errorCode : 'UNKNOWN';
+};
 
 /**
  * Service for managing Socket.IO-based RPC execution.
@@ -379,7 +384,12 @@ export class ChatRpcService implements OnModuleDestroy {
     const validated = this.validateRpcResult(rpcName, response.result);
 
     if (validated.success) {
-      this.recordRpcDuration(startTime, rpcName, { status: 'ok' });
+      const errorType = rpcResultErrorCode(validated.data);
+      this.recordRpcDuration(
+        startTime,
+        rpcName,
+        errorType === undefined ? { status: 'ok' } : { status: 'error', errorType },
+      );
       this.logger.debug(`Resolved RPC call ${requestId} for ${rpcName}`);
       return validated.data;
     }

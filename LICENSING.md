@@ -13,7 +13,7 @@ published `@taucad/*` package, the `geospec` spec package, and everything else n
 | ---------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | **Perimeter**    | `Apache-2.0`                                              | Every published package, the `geospec` spec package, internal libraries, tooling, examples, and the repository root | Open source (OSI)                                                                    |
 | **Engine**       | `FSL-1.1-Apache-2.0`                                      | `@taucad/geospec-engine` and successor engine artifacts                                                             | **Fair source / source-available** — becomes Apache-2.0 two years after each release |
-| **Applications** | `AGPL-3.0-only` (+ additional permission under section 7) | `apps/ui`, `apps/api`, and the app-side libraries                                                                   | Open source (OSI)                                                                    |
+| **Applications** | `AGPL-3.0-only` (+ additional permission under section 7) | `apps/ui`, `apps/api`, and every application library under `apps/libs/*`                                            | Open source (OSI)                                                                    |
 
 The perimeter and applications are Tau-authored under open-source licenses; the engine's FSL converts into the
 perimeter's Apache-2.0 license after two years.
@@ -24,13 +24,16 @@ other Tau-authored license in this repository is open source.
 
 ## Per-directory routing
 
-| Path                                                                                                                           | License                                           |
-| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| `license` (root), `packages/**` except `packages/geospec-engine`, and anything not listed below                                | `Apache-2.0`                                      |
-| `packages/geospec-engine`                                                                                                      | `FSL-1.1-Apache-2.0`                              |
-| `libs/*` except the app-side libraries below, `scripts`, `tools/*`, `apps/*` except `apps/ui` and `apps/api`, and `examples/*` | `Apache-2.0` (private, not published)             |
-| `apps/ui`, `apps/api`                                                                                                          | `AGPL-3.0-only` + section 7 additional permission |
-| `libs/{billing,chat,lsp,lsp-fs,api-extractor}`                                                                                 | `AGPL-3.0-only` + section 7 additional permission |
+License is derived from location and enforced by `scripts/src/validate-license-partitions.ts`, which checks every
+workspace package's SPDX field, the presence of a same-directory `LICENSE`, and byte-identity with the canonical text.
+
+| Path                                                                                                       | License                                           |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `license` (root), `packages/**` except `packages/geospec-engine`, and anything not listed below            | `Apache-2.0`                                      |
+| `packages/geospec-engine`                                                                                  | `FSL-1.1-Apache-2.0`                              |
+| `libs/*`, `scripts`, `tools/*`, `apps/*` except `apps/ui`, `apps/api`, and `apps/libs/*`, and `examples/*` | `Apache-2.0` (private, not published)             |
+| `apps/ui`, `apps/api`                                                                                      | `AGPL-3.0-only` + section 7 additional permission |
+| `apps/libs/*`                                                                                              | `AGPL-3.0-only` + section 7 additional permission |
 
 Third-party dependency licenses are inventoried separately in [`license-deps`](license-deps).
 
@@ -57,7 +60,7 @@ release.
 
 ## The applications: AGPL plus a section 7 additional permission
 
-`apps/ui`, `apps/api`, and the app-side libraries are AGPL-3.0-only. Their `LICENSE` files carry the full, unmodified
+`apps/ui`, `apps/api`, and every application library under `apps/libs/*` are AGPL-3.0-only. Their `LICENSE` files carry the full, unmodified
 GNU AGPL v3 text, followed by an **additional permission under AGPL section 7**, in the style of the GNU Classpath
 exception.
 

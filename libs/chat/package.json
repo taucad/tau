@@ -4,7 +4,7 @@
   "description": "Tau AI-SDK chat tools",
   "type": "module",
   "private": true,
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "exports": {
     ".": {
       "types": "./src/index.ts",

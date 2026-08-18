@@ -385,12 +385,12 @@ Publishable packages must declare `"private": false` (or omit the field entirely
 Every workspace package — published _and_ private — declares a `license` field, and its value is fixed by the ratified
 license partition. No package may be license-less; no package picks its own.
 
-| Bucket                | Projects                                                                                                                                                                                                                                                      | `license` field      | `LICENSE` file                                                                                           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------- |
-| Perimeter (published) | `packages/{cli,geospec,react,runtime}`, `packages/kernels/openrscad`                                                                                                                                                                                          | `Apache-2.0`         | Required — canonical Apache-2.0 text                                                                     |
-| Engine (published)    | `packages/geospec-engine`                                                                                                                                                                                                                                     | `FSL-1.1-Apache-2.0` | Required — FSL 1.1 Apache-2.0-future text                                                                |
-| Applications          | `apps/{ui,api}`, `libs/{billing,chat,lsp,lsp-fs,api-extractor}`                                                                                                                                                                                               | `AGPL-3.0-only`      | Required — AGPL v3 text **plus the section 7 additional permission** for combination with the FSL engine |
-| Internal (private)    | `libs/{converter,events,filesystem,fs-bridge,fs-client,gltf-extensions,json-schema,memory,oxlint,rpc,tau-examples,telemetry,types,units,utils,vite,vm}`, `scripts`, `tools/workspace-plugin`, `apps/runtime-e2e`, `apps/react-e2e/apps/*`, `examples/*`, root | `Apache-2.0`         | Not required unless bundled into a published artifact                                                    |
+| Bucket                | Projects                                                                                                       | `license` field      | `LICENSE` file                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------- |
+| Perimeter (published) | `packages/{cli,geospec,react,runtime}`, `packages/kernels/openrscad`                                           | `Apache-2.0`         | Required — canonical Apache-2.0 text                                                                     |
+| Engine (published)    | `packages/geospec-engine`                                                                                      | `FSL-1.1-Apache-2.0` | Required — FSL 1.1 Apache-2.0-future text                                                                |
+| Applications          | `apps/{ui,api}`, `apps/libs/*`                                                                                 | `AGPL-3.0-only`      | Required — AGPL v3 text **plus the section 7 additional permission** for combination with the FSL engine |
+| Internal (private)    | `libs/*`, `scripts`, `tools/workspace-plugin`, `apps/runtime-e2e`, `apps/react-e2e/apps/*`, `examples/*`, root | `Apache-2.0`         | Not required unless bundled into a published artifact                                                    |
 
 Rules that follow from the table:
 
@@ -399,13 +399,16 @@ Rules that follow from the table:
 - License texts are **verbatim**. Do not add a preamble, a summary, or extra restrictions to a license text; GitHub's
   licensee stops recognising a modified text, and stacking restrictions onto AGPL is void under its own sections 7 and 10. Additional _permissions_ (the section 7 grant on the AGPL projects) are appended as a clearly delimited block
   after the unmodified license text.
-- Private packages get the field but no text. The field is what keeps the partition auditable — a missing `license` on
-  a private package is the defect this rule closes.
+- **Every** workspace package carries a same-directory `LICENSE`, private ones included, and its bytes must be
+  identical to the canonical Apache or AGPL text at the repository root. Private packages are not exempt: location
+  derives the license, and `scripts/src/validate-license-partitions.ts` proves SPDX field, file presence, and byte
+  identity for all of them.
 - The engine is described as **fair source** or **source-available**, never as open source. The perimeter and apps
   are open source.
-- New packages inherit `Apache-2.0` from the workspace generator template
-  (`tools/workspace-plugin/src/generators/{package,kernel}/files/package.json__tmpl__`). Moving a new package into
-  another bucket is a deliberate edit, not a default.
+- New packages derive their bucket from **placement**, not from a switch. The workspace generator's `scope` option
+  (`packages`, `libs`, `apps/libs`) fixes the tags, the `private` flag, the SPDX field, and which canonical `LICENSE`
+  is copied in, so an invalid combination cannot be scaffolded. Moving a package between buckets is a deliberate edit
+  of all four together.
 
 Routing prose for consumers lives in `LICENSING.md` at the repository root; the partition's decision record is
 `docs/research/licensing-strategy.md` and `docs/research/geospec-v2-licensing-options.md`.
@@ -420,7 +423,7 @@ license unambiguously.
 
 | Dep characteristic                                                | Bundle into `dist/`            | Externalise (`dependencies`)            |
 | ----------------------------------------------------------------- | ------------------------------ | --------------------------------------- |
-| Listed in `libs/*` with `private: true`                           | **Yes** (Rule 4)               | No — never publishable                  |
+| Listed in `libs/*` or `apps/libs/*` with `private: true`          | **Yes** (Rule 4)               | No — never publishable                  |
 | Listed in `packages/**` and consumer wants single-install         | **Yes**                        | No                                      |
 | Listed in `packages/**` and consumer wants independent versioning | No                             | **Yes**                                 |
 | Published externally (npm registry)                               | No                             | **Yes**                                 |

@@ -5,8 +5,8 @@ This file lists all third-party dependencies used by Tau and their respective li
 ## Licensing Overview
 
 Tau source is licensed per directory. The repository root and published perimeter
-packages are **[Apache-2.0](./license)**; the applications and their
-app libraries are AGPL-3.0-only; the GeoSpec engine is fair source under
+packages are **[Apache-2.0](./license)**; `apps/ui`, `apps/api`, and every
+application library under `apps/libs/*` are AGPL-3.0-only; the GeoSpec engine is fair source under
 FSL-1.1-Apache-2.0, converting to Apache-2.0 two years after each release.
 Routing map: **[LICENSING.md](./LICENSING.md)**.
 
@@ -18,18 +18,17 @@ distributions** that include them:
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-08-17*
+*Generated on 2026-08-18*
 
 ## Summary
 
 | License | Count |
 |---------|-------|
 | (MIT OR GPL-3.0-or-later) | 1 |
-| AGPL-3.0-only | 1 |
 | LGPL-2.1 | 1 |
-| LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 | 1 |
+| LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 | 2 |
 | Apache 2.0 | 1 |
-| Apache-2.0 | 57 |
+| Apache-2.0 | 58 |
 | (MIT OR CC0-1.0) | 1 |
 | 0BSD | 1 |
 | BlueOak-1.0.0 | 1 |
@@ -49,18 +48,6 @@ By using Tau, you agree to comply with the license terms of all included depende
 > This package is dual-licensed. Tau uses it under the **MIT License** terms.
 
 - **jszip** v3.10.1 — [Repository](https://github.com/Stuk/jszip)
-
-## AGPL-3.0-only
-
-> **AGPL-3.0 License Notice**
->
-> This component is licensed under AGPL-3.0-only. Source is available at
-> https://github.com/taucad/tau, and the component ships with the AGPL text
-> plus Tau's applicable Section 7 additional permission.
->
-> Full license text: https://www.gnu.org/licenses/agpl-3.0.html
-
-- **@taucad/chat** v0.1.0
 
 ## LGPL-2.1
 
@@ -83,6 +70,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 > Source for Tau forks of LGPL libraries is available at: https://github.com/taucad
 
 - **libcascade** v3.0.2 — [Repository](https://github.com/taucad/opencascade.js)
+- **libcascade** v3.0.0 — [Repository](https://github.com/taucad/opencascade.js)
 
 ## Apache 2.0
 
@@ -115,6 +103,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@rjsf/core** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
 - **@rjsf/utils** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
 - **@rjsf/validator-ajv8** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
+- **@taucad/chat** v0.1.0
 - **@taucad/converter** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
 - **@taucad/events** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
 - **@taucad/filesystem** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)

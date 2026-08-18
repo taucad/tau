@@ -13,8 +13,12 @@ describe('createToolResultBudgetMiddleware', () => {
   let rpcBackendFactory: ReturnType<typeof mock<TauRpcBackendFactory>>;
   let mockBackend: ReturnType<typeof mock<TauRpcBackend>>;
   let metricsService: ReturnType<typeof mock<MetricsService>>;
-  let chatToolResultOffloadedAdd: ReturnType<typeof vi.fn>;
-  let chatToolResultMediaPreservedAdd: ReturnType<typeof vi.fn>;
+  let chatToolResultOffloadedAdd: ReturnType<
+    typeof vi.fn<NonNullable<MetricsService['chatToolResultOffloaded']['add']>>
+  >;
+  let chatToolResultMediaPreservedAdd: ReturnType<
+    typeof vi.fn<NonNullable<MetricsService['chatToolResultMediaPreserved']['add']>>
+  >;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -22,8 +26,8 @@ describe('createToolResultBudgetMiddleware', () => {
     mockBackend = mock<TauRpcBackend>();
     rpcBackendFactory.create.mockReturnValue(mockBackend);
     mockBackend.write.mockResolvedValue({ path: 'test', filesUpdate: null });
-    chatToolResultOffloadedAdd = vi.fn();
-    chatToolResultMediaPreservedAdd = vi.fn();
+    chatToolResultOffloadedAdd = vi.fn<NonNullable<MetricsService['chatToolResultOffloaded']['add']>>();
+    chatToolResultMediaPreservedAdd = vi.fn<NonNullable<MetricsService['chatToolResultMediaPreserved']['add']>>();
     metricsService = mock<MetricsService>({
       chatToolResultOffloaded: mock<MetricsService['chatToolResultOffloaded']>({
         add: chatToolResultOffloadedAdd,
@@ -206,7 +210,7 @@ describe('createToolResultBudgetMiddleware', () => {
     expect(passedReadFile.content as string).toContain('<persisted-output>');
     expect(passedScreenshot.content).toBe(screenshotContent);
     expect(mockBackend.write).toHaveBeenCalledTimes(1);
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-1/call_read.txt', readFileMessage.content);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-1/call_read.txt', readFileMessage.content);
     expect(chatToolResultOffloadedAdd).toHaveBeenCalledOnce();
     expect(chatToolResultMediaPreservedAdd).toHaveBeenCalledOnce();
   });
@@ -284,7 +288,7 @@ describe('createToolResultBudgetMiddleware', () => {
     );
 
     const writeCalls = mockBackend.write.mock.calls;
-    expect(writeCalls.find((call) => call[0] === '.tau/tool-results/chat-1/a.txt')).toBeUndefined();
+    expect(writeCalls.find((call) => call[0] === '/.tau/tool-results/chat-1/a.txt')).toBeUndefined();
   });
 
   it('should be idempotent: a second pass over the post-budget messages persists nothing new', async () => {

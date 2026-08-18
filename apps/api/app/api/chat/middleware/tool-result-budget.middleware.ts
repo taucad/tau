@@ -17,7 +17,7 @@ import {
  * Aggregate text char budget across every non-media `ToolMessage` in the latest turn.
  * Mirrors claude-code's `MAX_TOOL_RESULTS_PER_MESSAGE_CHARS` envelope: a
  * single turn whose text tool fan-out blows past this ceiling has the largest
- * fresh text results persisted to `.tau/tool-results/` and replaced with a
+ * fresh text results persisted to `/.tau/tool-results/` and replaced with a
  * `<persisted-output>` envelope until the budget is satisfied. Media-bearing
  * results are preserved for the trimmer/provider adapter instead.
  */
@@ -88,7 +88,7 @@ function buildEnvelope(options: { toolName: string; persistedPath: string; rawCo
 }
 
 function buildPersistedPath(options: { chatId: string; toolCallId: string }): string {
-  return `.tau/tool-results/${options.chatId}/${options.toolCallId}.txt`;
+  return `/.tau/tool-results/${options.chatId}/${options.toolCallId}.txt`;
 }
 
 function estimateTokens(chars: number): number {

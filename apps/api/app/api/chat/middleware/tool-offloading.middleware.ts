@@ -151,12 +151,12 @@ function looksLikeJson(content: string): boolean {
 
 /**
  * Computes the persisted path for an offloaded tool result. Session-scoped
- * under `.tau/tool-results/<chatId>/` so concurrent chats never collide and
+ * under `/.tau/tool-results/<chatId>/` so concurrent chats never collide and
  * eviction can be done by directory.
  */
 function buildPersistedPath(options: { chatId: string; toolCallId: string; isJson: boolean }): string {
   const extension = options.isJson ? 'json' : 'txt';
-  return `.tau/tool-results/${options.chatId}/${options.toolCallId}.${extension}`;
+  return `/.tau/tool-results/${options.chatId}/${options.toolCallId}.${extension}`;
 }
 
 function estimateTokens(chars: number): number {
@@ -181,7 +181,7 @@ function extractReadFileContent(serialised: string): string {
  * Creates middleware that offloads large tool results to the chat virtual
  * filesystem. When a configured tool's payload exceeds its per-tool
  * `maxChars`, the full result is written to
- * `.tau/tool-results/<chatId>/<toolCallId>.{json,txt}` and the `ToolMessage`
+ * `/.tau/tool-results/<chatId>/<toolCallId>.{json,txt}` and the `ToolMessage`
  * content is replaced with a `<persisted-output>` envelope carrying a
  * head-truncated preview plus directive copy for narrower re-reads. Unknown
  * tools fall back to structure-preserving JSON compaction so downstream

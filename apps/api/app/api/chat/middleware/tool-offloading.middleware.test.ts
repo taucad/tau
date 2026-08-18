@@ -90,10 +90,10 @@ describe('createToolOffloadingMiddleware', () => {
 
     expect(content).toContain('<persisted-output>');
     expect(content).toContain('</persisted-output>');
-    expect(content).toContain('.tau/tool-results/chat-1/toolu_abc.txt');
+    expect(content).toContain('/.tau/tool-results/chat-1/toolu_abc.txt');
     expect(content).toContain(`Tool ${toolName.readFile} output persisted`);
     expect(content).toContain('Re-read narrower ranges via read_file');
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-1/toolu_abc.txt', rawContent);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-1/toolu_abc.txt', rawContent);
   });
 
   it('should head-truncate the envelope preview at a newline boundary', async () => {
@@ -216,8 +216,8 @@ describe('createToolOffloadingMiddleware', () => {
 
     expect(results[0]!['title']).toBe('large result');
     expect(results[0]!['body']).toMatch(/^\[offloaded: \d+ chars]$/);
-    expect(parsed['_offloadedTo']).toBe('.tau/tool-results/chat-1/tc1.json');
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-1/tc1.json', jsonContent);
+    expect(parsed['_offloadedTo']).toBe('/.tau/tool-results/chat-1/tc1.json');
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-1/tc1.json', jsonContent);
   });
 
   it('should persist with .txt extension for non-JSON envelopes', async () => {
@@ -242,7 +242,7 @@ describe('createToolOffloadingMiddleware', () => {
       handler,
     );
 
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-1/tc1.txt', rawContent);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-1/tc1.txt', rawContent);
   });
 
   it('should scope persisted paths by chatId so concurrent chats never collide', async () => {
@@ -276,8 +276,8 @@ describe('createToolOffloadingMiddleware', () => {
       handler,
     );
 
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-a/toolu_shared.txt', rawContent);
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-b/toolu_shared.txt', rawContent);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-a/toolu_shared.txt', rawContent);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-b/toolu_shared.txt', rawContent);
   });
 
   it('should fall back to flat-string envelope for non-JSON unknown-tool content', async () => {
@@ -304,7 +304,7 @@ describe('createToolOffloadingMiddleware', () => {
 
     const content = (result as ToolMessage).content as string;
     expect(content).toContain('Tool result too large');
-    expect(content).toContain('.tau/tool-results/chat-1/tc1.txt');
+    expect(content).toContain('/.tau/tool-results/chat-1/tc1.txt');
   });
 
   it('should handle RPC write failures gracefully and return the original result', async () => {

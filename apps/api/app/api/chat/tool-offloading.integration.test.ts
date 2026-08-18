@@ -14,7 +14,7 @@ import type { MetricsService } from '#telemetry/metrics.js';
 import { invokeWrapToolCall, invokeWrapModelCall } from '#testing/middleware-testing.utils.js';
 
 /**
- * Integration: replay the eight `read_file node_modules/opencascade.js/index.d.ts`
+ * Integration: replay the eight `read_file node_modules/libcascade/index.d.ts`
  * tool calls from the involute-gear transcript through the full
  * tool-offloading + tool-result-budget middleware stack with a stub
  * `TauRpcBackend`. Validates the architectural fix from
@@ -35,8 +35,12 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
   let rpcBackendFactory: ReturnType<typeof mock<TauRpcBackendFactory>>;
   let mockBackend: ReturnType<typeof mock<TauRpcBackend>>;
   let metricsService: ReturnType<typeof mock<MetricsService>>;
-  let chatToolResultOffloadedAdd: ReturnType<typeof vi.fn>;
-  let chatToolResultMediaPreservedAdd: ReturnType<typeof vi.fn>;
+  let chatToolResultOffloadedAdd: ReturnType<
+    typeof vi.fn<NonNullable<MetricsService['chatToolResultOffloaded']['add']>>
+  >;
+  let chatToolResultMediaPreservedAdd: ReturnType<
+    typeof vi.fn<NonNullable<MetricsService['chatToolResultMediaPreserved']['add']>>
+  >;
 
   const chatId = 'chat-involute-gear';
 
@@ -57,8 +61,8 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
     rpcBackendFactory.create.mockReturnValue(mockBackend);
     mockBackend.write.mockResolvedValue({ path: 'test', filesUpdate: null });
 
-    chatToolResultOffloadedAdd = vi.fn();
-    chatToolResultMediaPreservedAdd = vi.fn();
+    chatToolResultOffloadedAdd = vi.fn<NonNullable<MetricsService['chatToolResultOffloaded']['add']>>();
+    chatToolResultMediaPreservedAdd = vi.fn<NonNullable<MetricsService['chatToolResultMediaPreserved']['add']>>();
     metricsService = mock<MetricsService>({
       chatToolResultOffloaded: mock<MetricsService['chatToolResultOffloaded']>({
         add: chatToolResultOffloadedAdd,
@@ -160,7 +164,7 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
           toolCall: {
             name: toolName.readFile,
             id: toolCallId,
-            args: { targetFile: 'node_modules/opencascade.js/index.d.ts' },
+            args: { targetFile: 'node_modules/libcascade/index.d.ts' },
           },
           runtime: { context: { chatId } },
         },
@@ -217,7 +221,7 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
       const replaced = await invokeWrapToolCall(
         offloading,
         {
-          toolCall: { name: toolName.readFile, id, args: { targetFile: 'node_modules/opencascade.js/index.d.ts' } },
+          toolCall: { name: toolName.readFile, id, args: { targetFile: 'node_modules/libcascade/index.d.ts' } },
           runtime: { context: { chatId } },
         },
         vi.fn().mockResolvedValue(original),
@@ -249,7 +253,7 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
       const replaced = await invokeWrapToolCall(
         offloading,
         {
-          toolCall: { name: toolName.readFile, id, args: { targetFile: 'node_modules/opencascade.js/index.d.ts' } },
+          toolCall: { name: toolName.readFile, id, args: { targetFile: 'node_modules/libcascade/index.d.ts' } },
           runtime: { context: { chatId } },
         },
         vi.fn().mockResolvedValue(original),
@@ -369,7 +373,7 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
 
     expect(finalScreenshotContent.some((block) => block['type'] === 'image_url')).toBe(true);
     expect(mockBackend.write).toHaveBeenCalledTimes(1);
-    expect(mockBackend.write.mock.calls[0]![0]).toBe('.tau/tool-results/chat-involute-gear/call_read_mixed.txt');
+    expect(mockBackend.write.mock.calls[0]![0]).toBe('/.tau/tool-results/chat-involute-gear/call_read_mixed.txt');
     expect(chatToolResultOffloadedAdd).toHaveBeenCalledOnce();
     expect(chatToolResultMediaPreservedAdd).toHaveBeenCalledOnce();
   });

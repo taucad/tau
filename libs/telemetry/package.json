@@ -7,10 +7,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "apps/libs/telemetry"
+    "directory": "libs/telemetry"
   },
   "author": "Richard Fontein",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts"
   },

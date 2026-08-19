@@ -27,7 +27,7 @@ import process from 'node:process';
 
 const opencascadeDtsPath = join(
   import.meta.dirname,
-  '../../../../packages/runtime/src/kernels/opencascade/wasm/opencascade_full.d.ts',
+  '../../../packages/runtime/src/kernels/opencascade/wasm/opencascade_full.d.ts',
 );
 
 // =============================================================================

@@ -178,22 +178,22 @@ The editor provides IntelliSense for kernel imports via bundled `.d.ts` files re
 
 All kernels use the same **JSON map approach**: `buildBundledTypes()` returns `Record<string, string>` mapping module paths to raw `.d.ts` content. Each entry is registered at `file:///node_modules/<modulePath>/index.d.ts`. Do **not** use `declare module` wrappers (causes TS1038 in already-ambient contexts).
 
-1. **Create extraction script:** `apps/libs/api-extractor/src/extract-<id>-types.ts`
+1. **Create extraction script:** `libs/api-extractor/src/extract-<id>-types.ts`
    - Read the kernel's `.d.ts` file(s); keep `export declare` as-is
    - Export `buildBundledTypes(): Record<string, string>` (for testability) and a `main()` CLI entry
    - In `main()`, write `<id>.bundled.json` to `generated/<id>/`, and individual `.d.ts` files under `generated/<id>/modules/<module-path>/index.d.ts` for type-level testing
    - Use `extract-manifold-types.ts` (simple wrapping) or `extract-jscad-types.ts` (TS Compiler API) as a template
 
-2. **Add Nx target:** `apps/libs/api-extractor/project.json`
+2. **Add Nx target:** `libs/api-extractor/project.json`
 
    ```json
    "extract-<id>": {
      "executor": "nx:run-commands",
-     "options": { "command": "tsx src/extract-<id>-types.ts", "cwd": "apps/libs/api-extractor" }
+     "options": { "command": "tsx src/extract-<id>-types.ts", "cwd": "libs/api-extractor" }
    }
    ```
 
-3. **Export from `@taucad/api-extractor`:** `apps/libs/api-extractor/src/index.ts`
+3. **Export from `@taucad/api-extractor`:** `libs/api-extractor/src/index.ts`
 
    ```typescript
    import <id>Raw from '#generated/<id>/<id>.bundled.json?raw';
@@ -203,7 +203,7 @@ All kernels use the same **JSON map approach**: `buildBundledTypes()` returns `R
 
 4. **Register in Monaco:** no change — `apps/ui/app/lib/javascript-contribution.ts` iterates `kernelTypeMaps` automatically.
 
-5. **Add type-level tests:** `apps/libs/api-extractor/src/generated/<id>/<id>.bundled.test-d.ts` and path mappings in `tsconfig.typetest.json`.
+5. **Add type-level tests:** `libs/api-extractor/src/generated/<id>/<id>.bundled.test-d.ts` and path mappings in `tsconfig.typetest.json`.
 
 6. **Run extraction:** `pnpm nx extract-<id> api-extractor`
 
@@ -268,10 +268,10 @@ Keep commits logically grouped (scaffold, implementation, wiring, docs) if pract
 - [ ] `libs/types/src/constants/kernel.constants.ts` — catalog + extensions entry
 - [ ] `apps/api/app/api/chat/prompts/kernel-prompt-configs/<id>.prompt.config.ts`
 - [ ] `apps/api/app/api/chat/prompts/kernel-prompt-configs/<id>.prompt.example.<ext>`
-- [ ] `apps/libs/api-extractor/src/extract-<id>-types.ts` (extraction script producing JSON map)
-- [ ] `apps/libs/api-extractor/src/index.ts` (export `<id>Types`, add to `kernelTypeMaps`)
-- [ ] `apps/libs/api-extractor/src/generated/<id>/<id>.bundled.test-d.ts` (type-level tests)
-- [ ] `apps/libs/api-extractor/tsconfig.typetest.json` (add path mappings for the new kernel)
+- [ ] `libs/api-extractor/src/extract-<id>-types.ts` (extraction script producing JSON map)
+- [ ] `libs/api-extractor/src/index.ts` (export `<id>Types`, add to `kernelTypeMaps`)
+- [ ] `libs/api-extractor/src/generated/<id>/<id>.bundled.test-d.ts` (type-level tests)
+- [ ] `libs/api-extractor/tsconfig.typetest.json` (add path mappings for the new kernel)
 - [ ] Kernel docs pages + architecture policy updates
 
 ## Common Failure Modes

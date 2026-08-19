@@ -460,7 +460,7 @@ function main(): void {
     // Paths
     const zooJsonPath = join(
       import.meta.dirname,
-      '../../../../repos/zoo-modeling-app/docs/kcl-std/kcl-stdlib-export.json',
+      '../../../repos/zoo-modeling-app/docs/kcl-std/kcl-stdlib-export.json',
     );
     const outputDirectory = join(import.meta.dirname, 'generated/kcl');
     const localJsonPath = join(outputDirectory, 'kcl-stdlib-export.json');

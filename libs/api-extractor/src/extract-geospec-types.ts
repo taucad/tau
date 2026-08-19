@@ -11,7 +11,7 @@ type GeneratedPackageTypes = {
   packageJson: Record<string, unknown>;
 };
 
-const repoRoot = resolve(import.meta.dirname, '../../../..');
+const repoRoot = resolve(import.meta.dirname, '../../..');
 const geospecSourceRoot = join(repoRoot, 'packages/geospec/src');
 const outputDirectory = join(import.meta.dirname, 'generated/geospec');
 

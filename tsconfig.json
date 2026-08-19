@@ -23,7 +23,7 @@
       "path": "./apps/ui-e2e"
     },
     {
-      "path": "./apps/libs/api-extractor"
+      "path": "./libs/api-extractor"
     },
     {
       "path": "./libs/types"
@@ -47,7 +47,7 @@
       "path": "./libs/utils"
     },
     {
-      "path": "./apps/libs/vite"
+      "path": "./libs/vite"
     },
     {
       "path": "./tools/workspace-plugin"
@@ -62,7 +62,7 @@
       "path": "./apps/libs/fs-client"
     },
     {
-      "path": "./apps/libs/telemetry"
+      "path": "./libs/telemetry"
     },
     {
       "path": "./examples/electron"

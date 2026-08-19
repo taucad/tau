@@ -11,7 +11,7 @@ import type { ApiData, ApiEntry } from '#api-extraction.types.js';
 // Configuration
 // =============================================================================
 
-const typeDefinitionsPath = join(import.meta.dirname, '../../../../node_modules/replicad/dist/replicad.d.ts');
+const typeDefinitionsPath = join(import.meta.dirname, '../../../node_modules/replicad/dist/replicad.d.ts');
 
 // =============================================================================
 // Categorization

@@ -58,7 +58,7 @@ export type GeoSpecMatcherDescriptor = {
 
 /**
  * The 23-entry matcher registry. Insertion order is contract: it fixes
- * `geoSpecMatcherNames`, which `apps/libs/api-extractor` and the LLM prompt
+ * `geoSpecMatcherNames`, which `libs/api-extractor` and the LLM prompt
  * pipeline consume.
  *
  * @public

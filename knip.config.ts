@@ -8,7 +8,7 @@ const config: KnipConfig = {
     duplicates: 'off',
   },
 
-  ignoreWorkspaces: ['tools/*', 'apps/libs/api-extractor', 'libs/tau-examples'],
+  ignoreWorkspaces: ['tools/*', 'libs/api-extractor', 'libs/tau-examples'],
 
   vitest: {
     config: ['vitest.config.{js,ts}', 'vite.config.{js,ts}'],

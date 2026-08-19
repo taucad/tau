@@ -1,7 +1,0 @@
-{
-  "name": "telemetry",
-  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "apps/libs/telemetry",
-  "projectType": "library",
-  "tags": ["scope:shared", "type:app-lib"]
-}

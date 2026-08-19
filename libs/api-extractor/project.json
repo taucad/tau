@@ -1,15 +1,15 @@
 {
   "name": "api-extractor",
-  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "apps/libs/api-extractor",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/api-extractor",
   "projectType": "library",
-  "tags": ["scope:shared", "type:app-lib"],
+  "tags": ["scope:shared", "type:lib"],
   "targets": {
     "extract-replicad": {
       "executor": "nx:run-commands",
       "options": {
         "command": "tsx src/extract-replicad-api.ts",
-        "cwd": "apps/libs/api-extractor"
+        "cwd": "libs/api-extractor"
       },
       "cache": true,
       "inputs": [
@@ -23,7 +23,7 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "tsx src/extract-jscad-types.ts",
-        "cwd": "apps/libs/api-extractor"
+        "cwd": "libs/api-extractor"
       },
       "cache": true,
       "inputs": [
@@ -37,7 +37,7 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "tsx src/extract-geospec-types.ts",
-        "cwd": "apps/libs/api-extractor"
+        "cwd": "libs/api-extractor"
       },
       "cache": true,
       "inputs": [
@@ -51,7 +51,7 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "tsx src/extract-kcl-api.ts",
-        "cwd": "apps/libs/api-extractor"
+        "cwd": "libs/api-extractor"
       },
       "cache": true,
       "inputs": [
@@ -65,7 +65,7 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "tsx src/extract-manifold-types.ts",
-        "cwd": "apps/libs/api-extractor"
+        "cwd": "libs/api-extractor"
       },
       "cache": true,
       "inputs": [
@@ -79,7 +79,7 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "tsx src/extract-opencascade-types.ts",
-        "cwd": "apps/libs/api-extractor"
+        "cwd": "libs/api-extractor"
       },
       "cache": true,
       "inputs": [

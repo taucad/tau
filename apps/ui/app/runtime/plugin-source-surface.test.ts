@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
  */
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-const sourceRoots = ['apps/libs/telemetry/src', 'apps/ui/app/middleware', 'apps/ui/app/runtime'] as const;
+const sourceRoots = ['libs/telemetry/src', 'apps/ui/app/middleware', 'apps/ui/app/runtime'] as const;
 
 const pluginImportPrefixes = [
   '#bundler/',

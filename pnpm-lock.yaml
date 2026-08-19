@@ -1688,7 +1688,7 @@ importers:
         version: 0.4.13(express@5.2.1)(fastify@5.8.5)(supports-color@10.2.2)
       '@taucad/api-extractor':
         specifier: workspace:*
-        version: link:../libs/api-extractor
+        version: link:../../libs/api-extractor
       '@taucad/billing':
         specifier: workspace:*
         version: link:../../libs/billing
@@ -1700,7 +1700,7 @@ importers:
         version: link:../../libs/filesystem
       '@taucad/telemetry':
         specifier: workspace:*
-        version: link:../libs/telemetry
+        version: link:../../libs/telemetry
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
@@ -1725,12 +1725,10 @@ importers:
         version: link:../../packages/runtime
       '@taucad/vite':
         specifier: workspace:*
-        version: link:../libs/vite
+        version: link:../../libs/vite
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec
-
-  apps/libs/api-extractor: {}
 
   libs/billing:
     dependencies:
@@ -1832,21 +1830,6 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
 
-  apps/libs/telemetry:
-    dependencies:
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
-
-  apps/libs/vite:
-    dependencies:
-      '@oxc-project/runtime':
-        specifier: 0.128.0
-        version: 0.128.0
-      vite:
-        specifier: 'catalog:'
-        version: 8.0.10(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
-
   apps/react-e2e/apps/electron:
     dependencies:
       '@taucad/react':
@@ -1934,7 +1917,7 @@ importers:
         version: 3.1.3
       '@taucad/api-extractor':
         specifier: workspace:*
-        version: link:../libs/api-extractor
+        version: link:../../libs/api-extractor
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../libs/filesystem
@@ -1988,7 +1971,7 @@ importers:
         version: 5.101.0(react@19.2.7)
       '@taucad/api-extractor':
         specifier: workspace:*
-        version: link:../libs/api-extractor
+        version: link:../../libs/api-extractor
       '@taucad/billing':
         specifier: workspace:*
         version: link:../../libs/billing
@@ -2039,7 +2022,7 @@ importers:
         version: link:../../libs/tau-examples
       '@taucad/telemetry':
         specifier: workspace:*
-        version: link:../libs/telemetry
+        version: link:../../libs/telemetry
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
@@ -2115,7 +2098,7 @@ importers:
     devDependencies:
       '@taucad/vite':
         specifier: workspace:*
-        version: link:../libs/vite
+        version: link:../../libs/vite
       '@types/express':
         specifier: ^5.0.0
         version: 5.0.6
@@ -2300,6 +2283,8 @@ importers:
         specifier: catalog:react-router8
         version: 8.0.10(@types/node@26.1.2)(esbuild@0.28.1)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
 
+  libs/api-extractor: {}
+
   libs/chat:
     dependencies:
       '@taucad/runtime':
@@ -2432,6 +2417,12 @@ importers:
         specifier: ^0.34.5
         version: 0.34.5
 
+  libs/telemetry:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+
   libs/types:
     dependencies:
       '@taucad/json-schema':
@@ -2457,6 +2448,15 @@ importers:
       cdn-resolve:
         specifier: 'catalog:'
         version: 2.1.2
+
+  libs/vite:
+    dependencies:
+      '@oxc-project/runtime':
+        specifier: 0.128.0
+        version: 0.128.0
+      vite:
+        specifier: 'catalog:'
+        version: 8.0.10(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
 
   libs/vm:
     dependencies:

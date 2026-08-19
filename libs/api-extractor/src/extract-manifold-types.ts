@@ -18,7 +18,7 @@ import process from 'node:process';
 // Configuration
 // =============================================================================
 
-const manifoldPackageDirectory = join(import.meta.dirname, '../../../../packages/runtime/node_modules/manifold-3d');
+const manifoldPackageDirectory = join(import.meta.dirname, '../../../packages/runtime/node_modules/manifold-3d');
 
 // =============================================================================
 // Helpers

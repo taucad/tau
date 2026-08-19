@@ -5,18 +5,18 @@ description: Create a new Vite plugin in the @taucad/vite package following proj
 
 # Create Vite Plugin
 
-Add a new Vite plugin to `apps/libs/vite/` (`@taucad/vite`) following project conventions and Vite 8 best practices.
+Add a new Vite plugin to `libs/vite/` (`@taucad/vite`) following project conventions and Vite 8 best practices.
 
 ## Definition of Done
 
-1. Plugin file at `apps/libs/vite/src/<name>.vite-plugin.ts`
-2. Subpath export added to `apps/libs/vite/package.json`
+1. Plugin file at `libs/vite/src/<name>.vite-plugin.ts`
+2. Subpath export added to `libs/vite/package.json`
 3. Plugin wired into consumer `vite.config.ts` (typically `apps/ui/vite.config.ts`)
 4. Lint passes: `pnpm nx lint vite`
 
 ## 1) Create the Plugin File
 
-**File:** `apps/libs/vite/src/<name>.vite-plugin.ts`
+**File:** `libs/vite/src/<name>.vite-plugin.ts`
 
 Convention: kebab-case name, `.vite-plugin.ts` suffix. Export a named function (not default) that returns `Plugin`.
 
@@ -59,7 +59,7 @@ export function myPlugins(): Plugin[] {
 
 ## 2) Add Subpath Export
 
-**File:** `apps/libs/vite/package.json`
+**File:** `libs/vite/package.json`
 
 Add a new entry to `exports` — all three conditions point to the `.ts` source file (no build step):
 

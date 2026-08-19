@@ -618,10 +618,10 @@ Each kernel exports a JSON map of `Record<string, string>` where keys are module
 
 ### Adding Types for a New Kernel
 
-1. Create `apps/libs/api-extractor/src/extract-<id>-types.ts` with a `buildBundledTypes(): Record<string, string>` function
-2. Write output to `apps/libs/api-extractor/src/generated/<id>/<id>.bundled.json`
+1. Create `libs/api-extractor/src/extract-<id>-types.ts` with a `buildBundledTypes(): Record<string, string>` function
+2. Write output to `libs/api-extractor/src/generated/<id>/<id>.bundled.json`
 3. Also write individual `.d.ts` files under `generated/<id>/modules/` for type-level testing
-4. In `apps/libs/api-extractor/src/kernel-types.ts`, import the raw JSON, export its typed `KernelTypesMap`, and add the known package root to `kernelTypePackageMaps`
+4. In `libs/api-extractor/src/kernel-types.ts`, import the raw JSON, export its typed `KernelTypesMap`, and add the known package root to `kernelTypePackageMaps`
 5. Verify that root declarations become `content` and every import subpath becomes `<subpath>/index.d.ts` in `files`
 6. Add `.test-d.ts` type-level tests under `generated/<id>/` using `tsconfig.typetest.json` path mappings
 

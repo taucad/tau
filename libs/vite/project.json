@@ -1,0 +1,7 @@
+{
+  "name": "vite",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/vite",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"]
+}

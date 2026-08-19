@@ -33,7 +33,7 @@ The following internal libraries remain in the fixed Nx version group so a chang
 
 `@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference and units remain implementation libraries with no public runtime veneer or subpath.
 
-`@taucad/fs-client` and `@taucad/telemetry` are private and outside the release group. Telemetry is Tau application infrastructure; its contracts live in `apps/libs/telemetry`, its observability middleware lives in the UI, and it is neither bundled into runtime nor published.
+`@taucad/fs-client` and `@taucad/telemetry` are private and outside the release group. Telemetry is Tau application infrastructure; its contracts live in `libs/telemetry`, its observability middleware lives in the UI, and it is neither bundled into runtime nor published.
 
 ## Versioning Strategy
 

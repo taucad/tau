@@ -3,9 +3,9 @@ packages:
   - apps/libs/*
   - apps/react-e2e/apps/*
   - examples/*
-  - packages/kernels/*
   - libs/*
   - packages/*
+  - packages/kernels/*
   - scripts
   - tools/*
 
@@ -62,6 +62,7 @@ catalog:
   '@langchain/tavily': ^1.2.0
   '@langchain/xai': ^1.4.3
   '@msgpack/msgpack': ^3.1.3
+  '@libcascade/toolchain': 3.0.2
   '@nestjs/common': ^11.1.27
   '@nestjs/core': ^11.1.27
   '@nestjs/platform-fastify': ^11.1.27
@@ -104,7 +105,6 @@ catalog:
   '@tanstack/react-pacer': ^0.22.1
   '@tanstack/react-query': ^5.101.0
   '@taucad/kcl-wasm-lib': 0.1.148
-  '@taucad/opencascade.js': beta
   '@testing-library/dom': ^10.4.1
   '@testing-library/jest-dom': 6.6.3
   '@testing-library/react': 16.2.0
@@ -174,11 +174,13 @@ catalog:
   isbot: ^5.1.43
   js-yaml: 4.3.0
   jsdom: ~26.0.0
+  '@types/jsdom': ^21.1.7
   json-schema: ^0.4.0
   json-schema-default: ^1.0.2
   katex: ^0.16.47
   knip: ^6.17.1
   langchain: ^1.5.0
+  libcascade: 3.0.2
   lighthouse: ^13.4.0
   lint-staged: ^16.4.0
   lucide-react: ^0.552.0
@@ -186,6 +188,7 @@ catalog:
   manifold-3d: 3.4.1
   mermaid: ^11.15.0
   netlify-cli: ^25.6.2
+  next: ^16.2.12
   next-themes: ^0.4.6
   nx: 22.7.1
   '@taulabs/openrscad-engine': 0.11.0-beta.1
@@ -194,12 +197,14 @@ catalog:
   oxlint-tsgolint: ^0.16.0
   pdf-parse: 2.4.5
   polygon-clipping: ^0.15.7
+  replicad: npm:@taulabs/replicad@0.23.4-beta.2
+  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0
   radix-ui: ^1.6.0
-  react: ^19.2.7
+  react: 19.2.7
   react-day-picker: ^10.0.0
-  react-dom: ^19.2.7
+  react-dom: 19.2.7
   react-email: ^6.6.3
   react-router: 7.14.2
   rehype-sanitize: ^6.0.0
@@ -217,10 +222,12 @@ catalog:
   source-map-explorer: ^2.5.3
   source-map-js: ^1.2.1
   strip-literal: ^3.1.0
+  tailwindcss: ^4.3.3
   three: ^0.184.0
   tsdown: ^0.22.14
   tslib: ^2.8.1
   turndown: ^7.2.4
+  tsx: ^4.22.4
   type-fest: ^4.41.0
   typedoc: ^0.28.19
   typescript: ~5.9.3
@@ -239,16 +246,49 @@ catalog:
   ws: ^8.21.0
   xstate: ^5.32.1
   zod: ^4.4.3
-
+catalogs:
+  electron-vite7:
+    electron-vite: 5.0.0
+    vite: 7.3.6
+  electron-vite8:
+    electron-vite: 6.0.0-beta.1
+    vite: 8.0.10
+  react-router7:
+    '@react-router/dev': 7.18.2
+    '@react-router/node': 7.18.2
+    react-router: 7.18.2
+    vite: 7.3.6
+  react-router8:
+    '@react-router/dev': 8.3.0
+    '@react-router/node': 8.3.0
+    react-router: 8.3.0
+    vite: 8.0.10
+  next15:
+    next: 15.5.22
+  next16:
+    next: 16.3.0
 catalogMode: prefer
 minimumReleaseAgeExclude:
   - '@taucad/*'
   - '@taulabs/*'
-  # nanoraster's root and native packages are first-party releases.
   - nanoraster
   - nanoraster-darwin-arm64
   - nanoraster-linux-x64-gnu
   - nanoraster-win32-x64-msvc
+  # First-party too — we publish these, so they never need to age. The bare
+  # name and the scope are both ours (libcascade, @libcascade/toolchain).
+  - libcascade
+  - '@libcascade/*'
+  - '@next/env@16.3.0'
+  - '@next/swc-darwin-arm64@16.3.0'
+  - '@next/swc-darwin-x64@16.3.0'
+  - '@next/swc-linux-arm64-gnu@16.3.0'
+  - '@next/swc-linux-arm64-musl@16.3.0'
+  - '@next/swc-linux-x64-gnu@16.3.0'
+  - '@next/swc-linux-x64-musl@16.3.0'
+  - '@next/swc-win32-arm64-msvc@16.3.0'
+  - '@next/swc-win32-x64-msvc@16.3.0'
+  - next@16.3.0
   - '@rolldown/binding-android-arm64@1.2.3'
   - '@rolldown/binding-darwin-arm64@1.2.3'
   - '@rolldown/binding-darwin-x64@1.2.3'
@@ -263,7 +303,7 @@ minimumReleaseAgeExclude:
   - '@rolldown/binding-openharmony-arm64@1.2.3'
   - '@rolldown/binding-win32-arm64-msvc@1.2.3'
   - '@rolldown/binding-win32-x64-msvc@1.2.3'
-  - 'rolldown@1.2.3'
+  - rolldown@1.2.3
 peerDependencyRules:
   allowedVersions:
     fumadocs-mdx>vite: ^8.0.0
@@ -275,8 +315,8 @@ patchedDependencies:
 overrides:
   '@langchain/google-common': file:tarballs/langchain-fork/langchain-google-common-2.2.0-beta.0.tgz
   '@types/express': 'catalog:'
-  replicad: file:tarballs/replicad-interface-export-migration/taulabs-replicad-0.23.4-beta.2.tgz
-  replicad-opencascadejs: file:tarballs/replicad-interface-export-migration/taulabs-replicad-opencascadejs-0.23.0-beta.0.tgz
+  replicad: 'catalog:'
+  replicad-opencascadejs: 'catalog:'
   vitest: 'catalog:'
 ignoreWorkspaceRootCheck: true
 pmOnFail: error

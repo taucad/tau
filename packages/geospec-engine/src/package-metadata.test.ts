@@ -46,6 +46,20 @@ describe('@taucad/geospec-engine package metadata', () => {
     expect(packageJson.peerDependenciesMeta?.['replicad']).toBeUndefined();
   });
 
+  it('generates its gitignored provenance record before pkgcheck reads it', async () => {
+    // F3: `provenance.json` is gitignored and written only by `prepack`, so in a
+    // fresh checkout pkgcheck's files-entry assertion fails unless the target
+    // chain regenerates it first.
+    const packageJson = await readPackageJson();
+    const projectJson = JSON.parse(await readFile(resolve(import.meta.dirname, '../project.json'), 'utf8')) as {
+      targets: Record<string, { dependsOn?: string[] }>;
+    };
+
+    expect(packageJson.files).toContain('provenance.json');
+    expect(projectJson.targets['generate-provenance']?.dependsOn).toContain('build');
+    expect(projectJson.targets['pkgcheck']?.dependsOn).toContain('generate-provenance');
+  });
+
   it('ships the single-only assembly through its one generated initialiser', async () => {
     // The assembly declares exactly one variant (closeout C1), so `init.js` has
     // nothing to select: no capability probe, one glue URL. It is also the only

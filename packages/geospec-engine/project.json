@@ -5,6 +5,17 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package-root"],
   "targets": {
+    "generate-provenance": {
+      "command": "node scripts/generate-provenance.mjs",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "pkgcheck": {
+      "dependsOn": ["generate-provenance", "^build"]
+    },
     "e2e": {
       "executor": "nx:run-commands",
       "cache": false,

@@ -48,7 +48,7 @@ const packageConfig: UserConfig = {
   unbundle: true,
   format: 'esm',
   outDir: 'dist',
-  external: ['@taucad/geospec-engine/native/opencascade/single'],
+  deps: { neverBundle: ['@taucad/geospec-engine/native/opencascade/single'] },
   copy: nativeOpenCascadeArtifacts.map((artifact) => ({
     from: `native/opencascade/dist/${artifact}`,
     to: 'dist/native/opencascade',

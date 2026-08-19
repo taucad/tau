@@ -60,6 +60,17 @@ describe('taucad CLI dist (real binary)', () => {
     expect(head.startsWith('#!/usr/bin/env node')).toBe(true);
   });
 
+  it('should report the version declared in its own package.json for --version', async () => {
+    const manifest = JSON.parse(await readFile(resolve(repoRoot, 'packages/cli/package.json'), 'utf8')) as {
+      version: string;
+    };
+
+    const result = await runCli(['--version']);
+
+    expect(result.exitCode, `stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout.trim()).toBe(manifest.version);
+  }, 60_000);
+
   it('should exit 0 and emit a valid glTF 2.0 binary when exporting the birdhouse fixture to GLB', async () => {
     const outputPath = join(workspace, 'birdhouse-default.glb');
 

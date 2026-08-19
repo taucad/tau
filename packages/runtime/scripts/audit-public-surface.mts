@@ -234,6 +234,8 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   //   - `@taucad/runtime/transport/in-process`
   //   - `@taucad/runtime/transport/web`
   //   - `@taucad/runtime/transport/node`
+  //   - `@taucad/runtime/transport/websocket`
+  //   - `@taucad/runtime/transport/websocket-host`
   //
   // See `transport-browser-safe.test.ts` for the runtime-level
   // contract pin.

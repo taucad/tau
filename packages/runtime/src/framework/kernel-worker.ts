@@ -235,21 +235,28 @@ function adaptInlineFileSystem(fs: RuntimeFileSystemBase): FileSystemProxy {
   };
   if (fs.watch) {
     fileSystem.watch = fs.watch.bind(fs);
-    fileSystem.watchReady = (request, handler) => {
-      let resolveClosed!: () => void;
-      const closed = new Promise<void>((resolve) => {
-        resolveClosed = resolve;
-      });
-      const unsubscribe = fs.watch!(request, handler);
-      return {
-        unsubscribe: () => {
-          unsubscribe();
-          resolveClosed();
-        },
-        ready: Promise.resolve(),
-        closed,
-      };
-    };
+    /* A bridged inline filesystem registers its watch over a round trip and
+     * carries its own `watchReady`; only a same-isolate `fs.watch` (armed
+     * synchronously) may have its readiness synthesised. */
+    const suppliedWatchReady = (fs as Pick<Partial<FileSystemProxy>, 'watchReady'>).watchReady;
+    fileSystem.watchReady =
+      typeof suppliedWatchReady === 'function'
+        ? suppliedWatchReady.bind(fs)
+        : (request, handler) => {
+            let resolveClosed!: () => void;
+            const closed = new Promise<void>((resolve) => {
+              resolveClosed = resolve;
+            });
+            const unsubscribe = fs.watch!(request, handler);
+            return {
+              unsubscribe: () => {
+                unsubscribe();
+                resolveClosed();
+              },
+              ready: Promise.resolve(),
+              closed,
+            };
+          };
   }
   return fileSystem;
 }

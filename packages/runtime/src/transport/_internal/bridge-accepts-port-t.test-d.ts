@@ -56,4 +56,12 @@ describe('filesystem entry-seam port typing (X7)', () => {
     expectTypeOf<Parameters<typeof createTransferredFileSystemBridgeProxy>[0]>().toEqualTypeOf<MessagePortLike>();
     expectTypeOf<RuntimeInitializeMemoryHandle['fileSystemPort']>().toEqualTypeOf<MessagePortLike | undefined>();
   });
+
+  /* A socket transport has no `MessagePort` to hand over: it supplies a
+   * `FileSystemBridge` whose `port` is any `Port`. */
+  it('accepts either a transferable port or an already-wired FileSystemBridge', () => {
+    expectTypeOf<Parameters<typeof createWorkerFileSystemProxy>[0]>().toEqualTypeOf<
+      MessagePortLike | FileSystemBridge
+    >();
+  });
 });

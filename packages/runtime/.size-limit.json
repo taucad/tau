@@ -2,7 +2,7 @@
   {
     "name": "total (ESM JS)",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
-    "limit": "200 kB"
+    "limit": "205 kB"
   },
   {
     "name": "@taucad/runtime",
@@ -23,6 +23,16 @@
     "name": "@taucad/runtime/vm",
     "path": "dist/vm.mjs",
     "limit": "1 kB"
+  },
+  {
+    "name": "@taucad/runtime/transport/websocket",
+    "path": "dist/transport/websocket.mjs",
+    "limit": "1 kB"
+  },
+  {
+    "name": "@taucad/runtime/transport/websocket-host",
+    "path": "dist/transport/websocket-host.mjs",
+    "limit": "2 kB"
   },
   {
     "name": "kernel: replicad",

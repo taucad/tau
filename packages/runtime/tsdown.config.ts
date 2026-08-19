@@ -19,6 +19,12 @@ export const runtimeCopyTargets = (outDirectory: string): Array<{ from: string; 
     to: `${outDirectory}/kernels/replicad`,
   },
   {
+    // `replicad.kernel.ts` resolves `sourcemaps/replicad.js.map` relative to
+    // itself so library frames keep source mapping in shipped error traces.
+    from: 'src/kernels/replicad/sourcemaps',
+    to: `${outDirectory}/kernels/replicad`,
+  },
+  {
     from: 'src/kernels/zoo/wasm',
     to: `${outDirectory}/kernels/zoo`,
   },
@@ -65,6 +71,8 @@ const baseConfig: UserConfig = {
     'src/transport/in-process.ts',
     'src/transport/web.ts',
     'src/transport/node.ts',
+    'src/transport/websocket.ts',
+    'src/transport/websocket-host.ts',
     'src/electron/main.ts',
     'src/electron/preload.ts',
     'src/electron/renderer.ts',

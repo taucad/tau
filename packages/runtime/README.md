@@ -230,10 +230,13 @@ for consumer, plugin-author, and host-adapter examples.
 Watch-capable rooted filesystems own precise-versus-reset event semantics. The
 worker acknowledges entry observation before discovery, replaces its complete
 multi-path subscription with overlap-and-swap, and keeps current-preview watch
-ownership independent from successful artifact publication. Watcherless adapters
-reread volatile file state at each explicit source-bearing operation while
-retaining kernel initialization and persistent project-local caches. Exact-source
-exports use request-local ownership and cannot replace the active preview.
+ownership independent from successful artifact publication. `fromNodeFs` is
+watch-capable through one non-recursive `fs.watch` per parent directory of the
+dependency set. The remaining watcherless adapters (`fromMemoryFs`,
+`fromBrowserFs`, arbitrary `fromFsLike`) reread volatile file state at each
+explicit source-bearing operation while retaining kernel initialization and
+persistent project-local caches. Exact-source exports use request-local
+ownership and cannot replace the active preview.
 
 ## Transports
 
@@ -252,6 +255,76 @@ resolution, and FS bridging:
   `MessageChannelMain`-style port handoff so the host and worker share
   the same `Port<unknown>` shape as the browser. The application supplies
   the worker entry URL because only its build owns that executable module.
+- `webSocketTransport` — a kernel host in another process or on another
+  machine. The client is browser-safe (`@taucad/runtime/transport/websocket`);
+  the Node server half is `webSocketHost`
+  (`@taucad/runtime/transport/websocket-host`), which serves one kernel worker
+  per connection. Geometry is delivered by `copy` and aborts travel as wire
+  notifications — a socket carries neither transferables nor a
+  `SharedArrayBuffer`.
+
+### WebSocket transport
+
+The host owns the project filesystem (`host-local`):
+
+```typescript
+import { createRuntimeWorker } from '@taucad/runtime/worker';
+import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
+
+const host = webSocketHost({
+  worker: () => createRuntimeWorker({ runtime }),
+  fileSystem: fromNodeFs('/srv/projects/demo'),
+  allowedOrigins: ['https://app.example.com'],
+  host: '0.0.0.0', // defaults to 127.0.0.1, which a remote browser cannot reach
+  port: 8080,
+});
+await host.ready;
+```
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { webSocketTransport } from '@taucad/runtime/transport/websocket';
+
+const client = createRuntimeClient({
+  transport: webSocketTransport({ url: 'ws://127.0.0.1:8080' }),
+});
+```
+
+Or the consumer keeps the filesystem and serves it to the remote kernel
+(`bridged`). Start the host **without** a `fileSystem`, and pass one on the
+client; the transport opens a second socket (`/fs`) on which the consumer is
+the bridge server, so watch events and the kernel's cache writes cross the
+wire. There is no multiplexer — the two sockets are correlated by a private
+session id.
+
+```typescript
+const client = createRuntimeClient({
+  transport: webSocketTransport({ url: 'ws://127.0.0.1:8080', fileSystem: fromNodeFs(projectRoot) }),
+});
+```
+
+`allowedOrigins` is an exact-match allowlist checked at the HTTP upgrade. A
+request carrying no `Origin` (any Node client) is admitted, so the default
+`[]` denies every browser. Remote hosts are bound to the same build: the wire
+hello carries `protocolVersion` and a mismatch is rejected at connect.
+
+The host can also share someone else's server. `server` attaches to an
+existing `http.Server` (or `https.Server`) and `pathPrefix` moves both routes
+under a path — matched exactly as `${pathPrefix}/runtime` and
+`${pathPrefix}/fs`. On a server it does not own, every other upgrade is
+**ignored** rather than refused, so another `WebSocketServer` on the same
+server keeps its own paths in either registration order; a host that owns its
+server still answers an unknown path with a raw `404`. `authorize(request)`
+runs after the origin check and refuses the upgrade with a raw `401` on
+`false` or a throw — there is no client→server hello frame, so a credential
+travels on the URL (the client preserves the base URL's search params on both
+sockets) or in `Sec-WebSocket-Protocol`.
+
+`maxPayload` bounds a single inbound frame, defaulting to `ws`'s 100 MiB.
+There is no chunking or streaming sub-protocol: one frame carries one whole
+message, so a `readFile` result above the ceiling is never delivered and the
+socket closes with `1009`, which the client settles as `wire-failure`.
 
 Custom client transports are authored with
 `defineRuntimeTransport({ id, clientOptionsSchema?, client })`. Host factories
@@ -285,21 +358,40 @@ configuration.
 
 ## Plugin entry points
 
-| Subpath                                | Purpose                                                                                   |
-| -------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `@taucad/runtime`                      | Public client surface, connectors, types, error classes.                                  |
-| `@taucad/runtime/presets`              | Zero-config built-in kernel, middleware, bundler, and transcoder composition.             |
-| `@taucad/runtime/kernels`              | Bundled kernel factories (`replicad`, `opencascade`, `manifold`, `jscad`, `zoo`, `tau`).  |
-| `@taucad/runtime/transcoder`           | Transcoder authoring API.                                                                 |
-| `@taucad/runtime/transport`            | Author API only: `defineRuntimeTransport`, `runtimeProtocolSchemas`, shared types.        |
-| `@taucad/runtime/transport/in-process` | `inProcessTransport` — same-isolate transport (cross-env).                                |
-| `@taucad/runtime/transport/web`        | `webWorkerTransport` — browser `Worker` host.                                             |
-| `@taucad/runtime/transport/node`       | `nodeWorkerTransport` — `node:worker_threads` host (gated to keep browser bundles clean). |
-| `@taucad/runtime/middleware`           | Built-in middlewares (parameter cache, geometry cache, file resolver).                    |
-| `@taucad/runtime/filesystem`           | `fromMemoryFs`, `fromBrowserFs`, bridge factories, and opaque filesystem types.           |
-| `@taucad/runtime/filesystem/node`      | `fromNodeFs` for a host directory confined as the runtime root.                           |
-| `@taucad/runtime/testing`              | `createMockRuntimeClient`, kernel testing utilities.                                      |
-| `@taucad/runtime/node`                 | `createNodeClient` for headless/CLI usage.                                                |
+| Subpath                                    | Purpose                                                                                   |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `@taucad/runtime`                          | Public client surface, connectors, types, error classes.                                  |
+| `@taucad/runtime/presets`                  | Zero-config built-in kernel, middleware, bundler, and transcoder composition.             |
+| `@taucad/runtime/kernels`                  | Bundled kernel factories (`replicad`, `opencascade`, `manifold`, `jscad`, `zoo`, `tau`).  |
+| `@taucad/runtime/transcoder`               | Transcoder authoring API.                                                                 |
+| `@taucad/runtime/transport`                | Author API only: `defineRuntimeTransport`, `runtimeProtocolSchemas`, shared types.        |
+| `@taucad/runtime/transport/in-process`     | `inProcessTransport` — same-isolate transport (cross-env).                                |
+| `@taucad/runtime/transport/web`            | `webWorkerTransport` — browser `Worker` host.                                             |
+| `@taucad/runtime/transport/node`           | `nodeWorkerTransport` — `node:worker_threads` host (gated to keep browser bundles clean). |
+| `@taucad/runtime/transport/websocket`      | `webSocketTransport` — client for a remote kernel host (browser-safe).                    |
+| `@taucad/runtime/transport/websocket-host` | `webSocketHost` — Node `ws` server serving one kernel per connection.                     |
+| `@taucad/runtime/middleware`               | Built-in middlewares (parameter cache, geometry cache, file resolver).                    |
+| `@taucad/runtime/filesystem`               | `fromMemoryFs`, `fromBrowserFs`, bridge factories, and opaque filesystem types.           |
+| `@taucad/runtime/filesystem/node`          | `fromNodeFs` for a host directory confined as the runtime root.                           |
+| `@taucad/runtime/testing`                  | `createMockRuntimeClient`, kernel testing utilities.                                      |
+| `@taucad/runtime/node`                     | `createNodeClient` for headless/CLI usage.                                                |
+
+### Sandboxed preloads
+
+`@taucad/runtime/electron/preload` is sandbox-compatible source: it uses only
+`contextBridge`, `ipcRenderer`, `window.postMessage`, and `process.env` — all of
+which Electron's sandboxed preload environment provides (the sandbox bootstrap
+hands the preload a `process` object carrying a snapshot of the main process's
+`env`).
+
+What `sandbox: true` additionally requires is on the application's side: Electron's
+sandboxed loader wraps preload source in a CommonJS function wrapper and exposes no
+arbitrary `require`, so the app's **preload bundle must be emitted as CommonJS**. With
+`electron-vite`, that is the preload config's `build.rollupOptions.output.format`.
+`electronRuntimeConfig` already does the other half — it de-externalises
+`@taucad/runtime` for the preload build, so the runtime's preload source is inlined
+rather than left as a bare import the sandboxed loader cannot resolve. Main and the
+utility process stay ESM either way.
 
 ## Further reading
 

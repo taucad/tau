@@ -43,6 +43,8 @@
     "./transport/in-process": "./src/transport/in-process.ts",
     "./transport/web": "./src/transport/web.ts",
     "./transport/node": "./src/transport/node.ts",
+    "./transport/websocket": "./src/transport/websocket.ts",
+    "./transport/websocket-host": "./src/transport/websocket-host.ts",
     "./electron/main": "./src/electron/main.ts",
     "./electron/preload": "./src/electron/preload.ts",
     "./electron/renderer": "./src/electron/renderer.ts",
@@ -169,6 +171,16 @@
         "types": "./dist/transport/node.d.mts",
         "import": "./dist/transport/node.mjs",
         "default": "./dist/transport/node.mjs"
+      },
+      "./transport/websocket": {
+        "types": "./dist/transport/websocket.d.mts",
+        "import": "./dist/transport/websocket.mjs",
+        "default": "./dist/transport/websocket.mjs"
+      },
+      "./transport/websocket-host": {
+        "types": "./dist/transport/websocket-host.d.mts",
+        "import": "./dist/transport/websocket-host.mjs",
+        "default": "./dist/transport/websocket-host.mjs"
       },
       "./electron/main": {
         "types": "./dist/electron/main.d.mts",
@@ -403,6 +415,7 @@
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/vm": "workspace:*",
+    "@types/ws": "^8.18.1",
     "electron-vite": "catalog:electron-vite7",
     "geist": "catalog:",
     "next": "catalog:next16",

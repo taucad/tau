@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { webWorkerTransport } from '#transport/web-worker-transport.js';
+import { webSocketTransport } from '#transport/web-socket-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 
@@ -48,6 +49,13 @@ describe('transport descriptor snapshot (C6)', () => {
     const withPoolClient = pluginWithPool.materialize();
     void noPoolClient.close();
     void withPoolClient.close();
+  });
+
+  it('webSocketTransport wiring returns equivalent descriptor snapshots per call', () => {
+    const pluginA = webSocketTransport({ url: 'ws://127.0.0.1:8080' });
+    const pluginB = webSocketTransport({ url: 'ws://127.0.0.1:8080' });
+    expect(pluginA.describe()).toEqual(pluginB.describe());
+    expect(pluginA.describe()).not.toBe(pluginB.describe());
   });
 });
 

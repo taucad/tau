@@ -14,6 +14,8 @@
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
  * import { webWorkerTransport } from '@taucad/runtime/transport/web';
  * import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
+ * import { webSocketTransport } from '@taucad/runtime/transport/websocket';
+ * import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
  * ```
  *
  * Why split:
@@ -28,6 +30,10 @@
  *   - `inProcessTransport` is cross-env (`MessageChannel` is global
  *     in Node 15+ and every modern browser), so it co-locates at its
  *     own subpath for architectural symmetry.
+ *   - `webSocketTransport` (client) is browser-safe, while its
+ *     `webSocketHost` server half statically imports `ws` and
+ *     `node:http` — hence two subpaths, `websocket` and
+ *     `websocket-host`.
  *
  * The pattern mirrors the filesystem split
  * (`@taucad/runtime/filesystem/{node,browser}`).

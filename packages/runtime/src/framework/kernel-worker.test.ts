@@ -558,6 +558,62 @@ describe('KernelWorker lifecycle', () => {
         expect(worker.bundleResultCache.has('/main.ts')).toBe(false);
       });
     });
+
+    it('should install no subscription when the inline filesystem exposes no watch', async () => {
+      const worker = createConfiguredWorker();
+
+      // @ts-expect-error - accessing private for test verification
+      worker.fileSystem = { dispose: vi.fn(), listen: vi.fn() };
+
+      // @ts-expect-error - exercising the private observation handoff seam
+      await worker.reconcileWatchSet(new Map([['/main.ts', 50]]));
+
+      // The watcherless arm still records the desired set (explicit operations
+      // reread through it) but must leave no subscription to dispose.
+      expect(worker.getWatchedPaths()).toEqual(new Set(['/main.ts']));
+      // @ts-expect-error - accessing private for test verification
+      expect(worker.watchUnsubscribe).toBeUndefined();
+    });
+  });
+
+  describe('inline filesystem watch readiness', () => {
+    it('should await a real watchReady before completing watch reconciliation', async () => {
+      const worker = createConfiguredWorker();
+      const armed = Promise.withResolvers<void>();
+      const unsubscribe = vi.fn();
+      // A socket-backed inline filesystem registers its watch with a round trip,
+      // so its own `ready` — not a synthesised resolved promise — gates the
+      // post-subscribe hash revalidation.
+      const inlineFileSystem = Object.assign(createMockFileSystem(), {
+        watch: vi.fn(() => unsubscribe),
+        watchReady: vi.fn(() => ({
+          unsubscribe,
+          ready: armed.promise,
+          closed: new Promise<void>(() => {
+            // This synthetic watch stays open for the duration of the test.
+          }),
+        })),
+      });
+
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+
+      let settled = false;
+      const reconciled = (async () => {
+        // @ts-expect-error - exercising the private observation handoff seam
+        await worker.reconcileWatchSet(new Map([['/main.ts', 50]]));
+        settled = true;
+      })();
+      await flushMicrotasks();
+
+      expect(settled).toBe(false);
+      expect(inlineFileSystem.watchReady).toHaveBeenCalledOnce();
+
+      armed.resolve();
+      await reconciled;
+
+      expect(worker.getWatchedPaths()).toEqual(new Set(['/main.ts']));
+      await worker.cleanup();
+    });
   });
 
   describe('exact and loss invalidation routing', () => {

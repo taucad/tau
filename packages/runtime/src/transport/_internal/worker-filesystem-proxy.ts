@@ -1,6 +1,8 @@
 import { RootedFileSystemError } from '@taucad/filesystem';
 import type { WatchEvent, WatchRequest } from '@taucad/filesystem';
-import { createTransferredFileSystemBridgeProxy } from '@taucad/fs-bridge';
+import { createFileSystemBridgeProxy, createTransferredFileSystemBridgeProxy } from '@taucad/fs-bridge';
+import type { FileSystemBridge } from '@taucad/fs-bridge';
+import type { MessagePortLike } from '@taucad/rpc';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
 export type WorkerFileSystemProxy = RuntimeFileSystemBase & {
@@ -11,8 +13,18 @@ export type WorkerFileSystemProxy = RuntimeFileSystemBase & {
   dispose(): void;
 };
 
-export const createWorkerFileSystemProxy = async (port: MessagePort): Promise<WorkerFileSystemProxy> => {
-  const bridge = createTransferredFileSystemBridgeProxy(port);
+/**
+ * Upgrade a filesystem bridge into the worker-facing filesystem.
+ *
+ * @param source - Either a raw structured-clone `MessagePortLike` (worker
+ * topologies) or an already-wired {@link FileSystemBridge} whose `port` is any
+ * {@link Port} — a socket, for instance.
+ */
+export const createWorkerFileSystemProxy = async (
+  source: MessagePortLike | FileSystemBridge,
+): Promise<WorkerFileSystemProxy> => {
+  const bridge =
+    'port' in source ? createFileSystemBridgeProxy(source) : createTransferredFileSystemBridgeProxy(source);
   await bridge.ready;
   const hello = bridge.hello.payload;
   if (hello.state === 'unavailable') {

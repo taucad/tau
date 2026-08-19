@@ -124,6 +124,113 @@ describe('runtime browser import graph guards', () => {
     }
   });
 
+  it('should keep `ws` and Node builtins out of a browser build of the WebSocket client subpath', async () => {
+    const temporaryParent = join(fileURLToPath(workspaceRoot), 'tmp');
+    mkdirSync(temporaryParent, { recursive: true });
+    const temporaryRoot = mkdtempSync(join(temporaryParent, 'runtime-websocket-client-vite-'));
+    const entryPath = join(temporaryRoot, 'entry.ts');
+    const htmlPath = join(temporaryRoot, 'index.html');
+    const outputDirectory = join(temporaryRoot, 'dist');
+
+    writeFileSync(
+      entryPath,
+      [
+        "import { webSocketTransport } from '@taucad/runtime/transport/websocket';",
+        "void webSocketTransport({ url: 'ws://127.0.0.1:8080' });",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      htmlPath,
+      '<!doctype html><html><body><script type="module" src="/entry.ts"></script></body></html>',
+      'utf8',
+    );
+
+    try {
+      await build({
+        configFile: false,
+        logLevel: 'silent',
+        root: temporaryRoot,
+        build: {
+          emptyOutDir: true,
+          minify: false,
+          outDir: outputDirectory,
+        },
+      });
+
+      const javascript = collectRuntimeSourceFiles(pathToFileURL(`${outputDirectory}/`))
+        .filter((path) => path.endsWith('.js'))
+        .map((path) => readFileSync(path, 'utf8'))
+        .join('\n');
+
+      /* Guard against a vacuous assertion: the client really is in there. */
+      expect(javascript).toContain('web-socket');
+
+      /* The `ws` fallback goes through a non-literal specifier, so no
+       * bundler ever resolves the Node socket package into a browser graph. */
+      expect(javascript).not.toMatch(/from\s*["']ws["']/);
+      expect(javascript).not.toMatch(/(?:^|[^\w.])import\(\s*["']ws["']\s*\)/);
+      expect(javascript).not.toContain('node:');
+      expect(javascript).not.toContain('__vite-browser-external');
+      expect(javascript).not.toContain('webSocketHost');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('should stub every Node builtin the Node filesystem subpath imports in a client build', async () => {
+    /* Dead-but-reachable graph edge: `@taucad/runtime/node` is only ever a
+     * fallback, but a dynamic import is still a bundler edge, so browser
+     * builds plan `fromNodeFs` and every `node:fs` import it names has to
+     * exist on the stub. A missing named export fails the build outright. */
+    const temporaryParent = join(fileURLToPath(workspaceRoot), 'tmp');
+    mkdirSync(temporaryParent, { recursive: true });
+    const temporaryRoot = mkdtempSync(join(temporaryParent, 'runtime-node-fs-stub-vite-'));
+    const entryPath = join(temporaryRoot, 'entry.ts');
+    const htmlPath = join(temporaryRoot, 'index.html');
+    const outputDirectory = join(temporaryRoot, 'dist');
+
+    writeFileSync(
+      entryPath,
+      [
+        "import { fromNodeFs } from '@taucad/runtime/filesystem/node';",
+        /* A live reference: `void fromNodeFs(...)` is tree-shaken whole, and
+         * a build with nothing in it cannot fail on a missing stub export. */
+        "globalThis.__fs = fromNodeFs('/project');",
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      htmlPath,
+      '<!doctype html><html><body><script type="module" src="/entry.ts"></script></body></html>',
+      'utf8',
+    );
+
+    try {
+      await build({
+        configFile: false,
+        logLevel: 'silent',
+        root: temporaryRoot,
+        plugins: tauRuntime({ crossOriginIsolation: false }),
+        build: {
+          emptyOutDir: true,
+          minify: false,
+          outDir: outputDirectory,
+        },
+      });
+
+      const javascript = collectRuntimeSourceFiles(pathToFileURL(`${outputDirectory}/`))
+        .filter((path) => path.endsWith('.js'))
+        .map((path) => readFileSync(path, 'utf8'))
+        .join('\n');
+
+      /* Guard against a vacuous assertion: the stub really is what got bundled. */
+      expect(javascript).toContain('is unavailable in a browser runtime');
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('marks generated browser module imports as external to bundlers', () => {
     const importerSource = readWorkspace('libs/vm/src/browser-module-import.ts');
 

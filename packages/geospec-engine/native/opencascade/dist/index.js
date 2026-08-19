@@ -11,8 +11,6 @@ const wasmUrl = (() => {
   switch (variant) {
     case 'single':
       return new URL('./geospec_opencascade_single.wasm', import.meta.url).href;
-    case 'multi':
-      return new URL('./geospec_opencascade_multi.wasm', import.meta.url).href;
     default:
       throw new Error(`Unknown selected variant "${variant}".`);
   }

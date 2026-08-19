@@ -55,13 +55,6 @@ export default defineBuild({
     MALLOC: 'mimalloc',
   },
   compilerFlags: { lto: true, optimize: 'O3', exceptions: 'wasm', simd: true, noEntry: true },
-  variants: [
-    { name: 'single', settings: { EVAL_CTORS: 2 } },
-    {
-      name: 'multi',
-      compilerFlags: { threads: true },
-      settings: { SHARED_MEMORY: true },
-    },
-  ],
+  variants: [{ name: 'single', settings: { EVAL_CTORS: 2 } }],
 });
 /* eslint-enable @typescript-eslint/naming-convention -- Back to normal identifier rules. */

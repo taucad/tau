@@ -2,22 +2,26 @@ import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
 /**
- * Everything `libcascade build` + `libcascade assemble` leave in
- * `native/opencascade/dist/`, copied verbatim.
+ * The subset of `native/opencascade/dist/` that the published subpath reaches,
+ * copied verbatim: `init.js`, the only declaration file it imports, and the
+ * glue it loads.
  *
- * The assembled `init.js` resolves the glue with
+ * `libcascade.config.ts` declares a single variant (closeout C1), so `init.js`
+ * has nothing to select: no capability probe, one glue URL.
+ *
+ * It resolves that glue with
  * `new URL('./geospec_opencascade_single.js', import.meta.url)` and the glue
  * resolves its `.wasm` the same way, so all three must stay siblings. That is
  * also why `@taucad/geospec-engine/native/opencascade/single` stays external:
  * bundling `init.js` would relocate it away from its siblings.
+ *
+ * The eager `index` root and the raw-glue `variant.d.ts` are deliberately
+ * absent — nothing published imports them.
  */
 const nativeOpenCascadeArtifacts = [
   'init.js',
   'init.d.ts',
-  'index.js',
-  'index.d.ts',
   'types.d.ts',
-  'variant.d.ts',
   'geospec_opencascade_single.js',
   'geospec_opencascade_single.d.ts',
   'geospec_opencascade_single.wasm',

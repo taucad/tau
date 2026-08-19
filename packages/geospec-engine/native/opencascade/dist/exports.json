@@ -12,19 +12,6 @@
       "types": "./dist/variant.d.ts",
       "default": "./dist/geospec_opencascade_single.js"
     },
-    "./single/init": {
-      "types": "./dist/init.single.d.ts",
-      "default": "./dist/init.single.js"
-    },
-    "./single/wasm": "./dist/geospec_opencascade_single.wasm",
-    "./multi": {
-      "types": "./dist/variant.d.ts",
-      "default": "./dist/geospec_opencascade_multi.js"
-    },
-    "./multi/init": {
-      "types": "./dist/init.multi.d.ts",
-      "default": "./dist/init.multi.js"
-    },
-    "./multi/wasm": "./dist/geospec_opencascade_multi.wasm"
+    "./single/wasm": "./dist/geospec_opencascade_single.wasm"
   }
 }

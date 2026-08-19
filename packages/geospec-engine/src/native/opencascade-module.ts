@@ -19,6 +19,10 @@ const instantiate = async (): Promise<GeoSpecNativeStepBackend> => {
   const module_ = (await import(/* @vite-ignore */ nativeEntry)) as {
     default: (options?: Record<string, unknown>) => Promise<GeoSpecNativeStepBackend>;
   };
+  // No `variant` option: the assembly is built single-only
+  // (`native/opencascade/libcascade.config.ts`), so the subpath's `init.js` has
+  // exactly one variant to hand back and no capability probe to run.
+  //
   // Suppress OCCT messenger chatter; structured host events own observability
   // and JSON output must remain valid.
   return module_.default({ print: () => undefined, printErr: () => undefined });

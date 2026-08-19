@@ -39,6 +39,31 @@ describe('OCCT module adapter', () => {
     }
   });
 
+  it('should let the single-only assembly pick its own variant', async () => {
+    let received: object | undefined;
+    vi.doMock('@taucad/geospec-engine/native/opencascade/single', () => ({
+      default: async (options?: object) => {
+        received = options;
+        return { HEAPF64: new Float64Array(0) } as unknown as GeoSpecNativeStepBackend;
+      },
+    }));
+    vi.resetModules();
+    try {
+      const adapter = await import('#native/opencascade-module.js');
+      await adapter.getOpenCascadeStepModule();
+    } finally {
+      vi.doUnmock('@taucad/geospec-engine/native/opencascade/single');
+    }
+
+    // The subpath resolves to `init.js`, and the assembly declares one variant,
+    // so `selectVariant()` can only return `single`. Naming it here would be a
+    // second source of truth for something `libcascade.config.ts` already
+    // decides. The real module is only instantiated by the suite's first test,
+    // so this mock is what pins the option shape.
+    expect(received).toBeDefined();
+    expect(Object.hasOwn(received ?? {}, 'variant')).toBe(false);
+  });
+
   it('should copy a triangle soup out of the heap without aliasing it', () => {
     const module_: GeoSpecNativeStepBackend = { HEAPF64: new Float64Array([0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) };
 

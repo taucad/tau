@@ -459,6 +459,10 @@ The current kernelMachine exists because the old protocol required orchestrating
 
 ### RuntimeClient
 
+**One host, one trust domain.** A runtime host serves exactly one trust domain. The filesystem root, the kernel set and the process privileges are chosen at host bootstrap and are not negotiable over the wire; a host must not be shared between mutually distrusting clients, and multi-tenant hosting is out of contract.
+
+**Model code runs with host-process privilege.** Under `createNodeClient` and any inline/in-process Node arm, model modules are imported into the host process with no `vm` context and no capability restriction -- a model can read and write anything the host process can. The mitigation that exists is a process boundary: put untrusted models behind `nodeWorkerTransport`, `webSocketHost`, or the Electron utility process, which bounds a compromise to that process's own filesystem root and lifetime.
+
 Becomes the primary reactive API surface. Transports own SAB allocation (geometry pool, abort channel); the client itself contains zero `Atomics`/`SharedArrayBuffer` references. The wire-level abort signal is delegated through `transport.signalAbort(reason)` before the supersession `postMessage`:
 
 ```typescript

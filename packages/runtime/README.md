@@ -227,6 +227,19 @@ remain writable so caches and generated files persist inside the project tree.
 See [Path Namespaces](https://github.com/taucad/tau/blob/main/apps/ui/content/docs/runtime/concepts/path-namespaces.mdx)
 for consumer, plugin-author, and host-adapter examples.
 
+A runtime host serves exactly one trust domain. The filesystem root, the kernel
+set, and the process privileges are chosen at host bootstrap and are not
+negotiable over the wire; a host must not be shared between mutually distrusting
+clients, and multi-tenant hosting is out of contract.
+
+Model code runs with host-process privilege. Under `createNodeClient` — and any
+inline/in-process Node arm — model modules are imported into the host process
+with no `vm` context and no capability restriction, so a model can read and write
+anything the host process can. The mitigation is a process boundary: put
+untrusted models behind `nodeWorkerTransport`, `webSocketHost`, or the Electron
+utility process, each of which bounds a compromise to that process's own
+filesystem root and lifetime.
+
 Watch-capable rooted filesystems own precise-versus-reset event semantics. The
 worker acknowledges entry observation before discovery, replaces its complete
 multi-path subscription with overlap-and-swap, and keeps current-preview watch

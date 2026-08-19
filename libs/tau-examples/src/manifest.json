@@ -72,6 +72,12 @@
     "files": ["main.ts"]
   },
   {
+    "kernel": "manifold",
+    "name": "manifold-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "main.ts", "manifold.svg"]
+  },
+  {
     "kernel": "occt",
     "name": "v8-engine-brep",
     "mainFile": "main.cpp",

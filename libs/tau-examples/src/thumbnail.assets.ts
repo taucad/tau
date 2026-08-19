@@ -14,42 +14,43 @@ import thumbnail7 from './kernels/jscad/section-overlap-fixture/thumbnail.webp?u
 import thumbnail8 from './kernels/jscad/section-overlap-heavy-planetary-fixture/thumbnail.webp?url';
 import thumbnail9 from './kernels/jscad/section-overlap-heavy-v8-fixture/thumbnail.webp?url';
 import thumbnail10 from './kernels/jscad/section-picking-fixture/thumbnail.webp?url';
-import thumbnail11 from './kernels/opencascade/v8-engine-brep/thumbnail.webp?url';
-import thumbnail12 from './kernels/openscad/kitchen-sink/thumbnail.webp?url';
-import thumbnail13 from './kernels/replicad/bambu-plate/thumbnail.webp?url';
-import thumbnail14 from './kernels/replicad/birdhouse/thumbnail.webp?url';
-import thumbnail15 from './kernels/replicad/bottle/thumbnail.webp?url';
-import thumbnail16 from './kernels/replicad/card-holder/thumbnail.webp?url';
-import thumbnail17 from './kernels/replicad/chair/thumbnail.webp?url';
-import thumbnail18 from './kernels/replicad/cycloidal-gear/thumbnail.webp?url';
-import thumbnail19 from './kernels/replicad/decorated-box/thumbnail.webp?url';
-import thumbnail20 from './kernels/replicad/drinking-glass/thumbnail.webp?url';
-import thumbnail21 from './kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp?url';
-import thumbnail22 from './kernels/replicad/gridfinity-box/thumbnail.webp?url';
-import thumbnail23 from './kernels/replicad/helical-gear/thumbnail.webp?url';
-import thumbnail24 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
-import thumbnail25 from './kernels/replicad/hollow-box/thumbnail.webp?url';
-import thumbnail26 from './kernels/replicad/ibeam/thumbnail.webp?url';
-import thumbnail27 from './kernels/replicad/jscad-logo/thumbnail.webp?url';
-import thumbnail28 from './kernels/replicad/lego/thumbnail.webp?url';
-import thumbnail29 from './kernels/replicad/logo/thumbnail.webp?url';
-import thumbnail30 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
-import thumbnail31 from './kernels/replicad/nanoraster-logo/thumbnail.webp?url';
-import thumbnail32 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
-import thumbnail33 from './kernels/replicad/pot-plant/thumbnail.webp?url';
-import thumbnail34 from './kernels/replicad/projection-test/thumbnail.webp?url';
-import thumbnail35 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
-import thumbnail36 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
-import thumbnail37 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail38 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail39 from './kernels/replicad/stress-test/thumbnail.webp?url';
-import thumbnail40 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail41 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail42 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
-import thumbnail43 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail44 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail45 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail46 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail11 from './kernels/manifold/manifold-logo/thumbnail.webp?url';
+import thumbnail12 from './kernels/opencascade/v8-engine-brep/thumbnail.webp?url';
+import thumbnail13 from './kernels/openscad/kitchen-sink/thumbnail.webp?url';
+import thumbnail14 from './kernels/replicad/bambu-plate/thumbnail.webp?url';
+import thumbnail15 from './kernels/replicad/birdhouse/thumbnail.webp?url';
+import thumbnail16 from './kernels/replicad/bottle/thumbnail.webp?url';
+import thumbnail17 from './kernels/replicad/card-holder/thumbnail.webp?url';
+import thumbnail18 from './kernels/replicad/chair/thumbnail.webp?url';
+import thumbnail19 from './kernels/replicad/cycloidal-gear/thumbnail.webp?url';
+import thumbnail20 from './kernels/replicad/decorated-box/thumbnail.webp?url';
+import thumbnail21 from './kernels/replicad/drinking-glass/thumbnail.webp?url';
+import thumbnail22 from './kernels/replicad/flower-attachment-section-outline-fixture/thumbnail.webp?url';
+import thumbnail23 from './kernels/replicad/gridfinity-box/thumbnail.webp?url';
+import thumbnail24 from './kernels/replicad/helical-gear/thumbnail.webp?url';
+import thumbnail25 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
+import thumbnail26 from './kernels/replicad/hollow-box/thumbnail.webp?url';
+import thumbnail27 from './kernels/replicad/ibeam/thumbnail.webp?url';
+import thumbnail28 from './kernels/replicad/jscad-logo/thumbnail.webp?url';
+import thumbnail29 from './kernels/replicad/lego/thumbnail.webp?url';
+import thumbnail30 from './kernels/replicad/logo/thumbnail.webp?url';
+import thumbnail31 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
+import thumbnail32 from './kernels/replicad/nanoraster-logo/thumbnail.webp?url';
+import thumbnail33 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
+import thumbnail34 from './kernels/replicad/pot-plant/thumbnail.webp?url';
+import thumbnail35 from './kernels/replicad/projection-test/thumbnail.webp?url';
+import thumbnail36 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
+import thumbnail37 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
+import thumbnail38 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail39 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail40 from './kernels/replicad/stress-test/thumbnail.webp?url';
+import thumbnail41 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail42 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail43 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
+import thumbnail44 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail45 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail46 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail47 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
 
 /** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */
 export const thumbnailAssets = {
@@ -64,42 +65,43 @@ export const thumbnailAssets = {
   'jscad/section-overlap-heavy-planetary-fixture': thumbnail8,
   'jscad/section-overlap-heavy-v8-fixture': thumbnail9,
   'jscad/section-picking-fixture': thumbnail10,
-  'opencascade/v8-engine-brep': thumbnail11,
-  'openscad/kitchen-sink': thumbnail12,
-  'replicad/bambu-plate': thumbnail13,
-  'replicad/birdhouse': thumbnail14,
-  'replicad/bottle': thumbnail15,
-  'replicad/card-holder': thumbnail16,
-  'replicad/chair': thumbnail17,
-  'replicad/cycloidal-gear': thumbnail18,
-  'replicad/decorated-box': thumbnail19,
-  'replicad/drinking-glass': thumbnail20,
-  'replicad/flower-attachment-section-outline-fixture': thumbnail21,
-  'replicad/gridfinity-box': thumbnail22,
-  'replicad/helical-gear': thumbnail23,
-  'replicad/hex-screwdriver': thumbnail24,
-  'replicad/hollow-box': thumbnail25,
-  'replicad/ibeam': thumbnail26,
-  'replicad/jscad-logo': thumbnail27,
-  'replicad/lego': thumbnail28,
-  'replicad/logo': thumbnail29,
-  'replicad/logo-keychain': thumbnail30,
-  'replicad/nanoraster-logo': thumbnail31,
-  'replicad/picovoxel-logo': thumbnail32,
-  'replicad/pot-plant': thumbnail33,
-  'replicad/projection-test': thumbnail34,
-  'replicad/rao-nozzle': thumbnail35,
-  'replicad/replicad-logo': thumbnail36,
-  'replicad/simple-tray': thumbnail37,
-  'replicad/staircase': thumbnail38,
-  'replicad/stress-test': thumbnail39,
-  'replicad/t-slot-rail': thumbnail40,
-  'replicad/table': thumbnail41,
-  'replicad/tau-wordmark': thumbnail42,
-  'replicad/tray': thumbnail43,
-  'replicad/vase': thumbnail44,
-  'replicad/wavy-vase': thumbnail45,
-  'replicad/wedge-door-stopper': thumbnail46,
+  'manifold/manifold-logo': thumbnail11,
+  'opencascade/v8-engine-brep': thumbnail12,
+  'openscad/kitchen-sink': thumbnail13,
+  'replicad/bambu-plate': thumbnail14,
+  'replicad/birdhouse': thumbnail15,
+  'replicad/bottle': thumbnail16,
+  'replicad/card-holder': thumbnail17,
+  'replicad/chair': thumbnail18,
+  'replicad/cycloidal-gear': thumbnail19,
+  'replicad/decorated-box': thumbnail20,
+  'replicad/drinking-glass': thumbnail21,
+  'replicad/flower-attachment-section-outline-fixture': thumbnail22,
+  'replicad/gridfinity-box': thumbnail23,
+  'replicad/helical-gear': thumbnail24,
+  'replicad/hex-screwdriver': thumbnail25,
+  'replicad/hollow-box': thumbnail26,
+  'replicad/ibeam': thumbnail27,
+  'replicad/jscad-logo': thumbnail28,
+  'replicad/lego': thumbnail29,
+  'replicad/logo': thumbnail30,
+  'replicad/logo-keychain': thumbnail31,
+  'replicad/nanoraster-logo': thumbnail32,
+  'replicad/picovoxel-logo': thumbnail33,
+  'replicad/pot-plant': thumbnail34,
+  'replicad/projection-test': thumbnail35,
+  'replicad/rao-nozzle': thumbnail36,
+  'replicad/replicad-logo': thumbnail37,
+  'replicad/simple-tray': thumbnail38,
+  'replicad/staircase': thumbnail39,
+  'replicad/stress-test': thumbnail40,
+  'replicad/t-slot-rail': thumbnail41,
+  'replicad/table': thumbnail42,
+  'replicad/tau-wordmark': thumbnail43,
+  'replicad/tray': thumbnail44,
+  'replicad/vase': thumbnail45,
+  'replicad/wavy-vase': thumbnail46,
+  'replicad/wedge-door-stopper': thumbnail47,
 } as const;
 
 /** Key of a generated example thumbnail asset. @public */

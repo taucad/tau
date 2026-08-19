@@ -17,6 +17,7 @@ export type ExampleManifest = {
     | 'section-overlap-heavy-planetary-fixture'
     | 'section-overlap-heavy-v8-fixture'
     | 'section-picking-fixture';
+  manifold: 'manifold-logo';
   occt: 'v8-engine-brep';
   opencascade: 'v8-engine-brep';
   openscad: 'kitchen-sink';

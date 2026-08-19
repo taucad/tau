@@ -6,8 +6,8 @@
  * {@link ../../../docs/architecture/rpc-wire-spec.md}.
  */
 
-export type { MessagePortLike, Port } from '#port.js';
-export { wrapMessagePort } from '#port.js';
+export type { Codec, MessagePortLike, Port, WebSocketLike } from '#port.js';
+export { wrapMessagePort, wrapWebSocket } from '#port.js';
 
 export type {
   Channel,

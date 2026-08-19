@@ -1,4 +1,4 @@
-export type { Port } from '#port.js';
+export type { MessagePortLike, Port } from '#port.js';
 
 export type {
   BridgeCallOptions,

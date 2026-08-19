@@ -6,7 +6,7 @@
  * {@link ../../../docs/architecture/rpc-wire-spec.md}.
  */
 
-export type { Port } from '#port.js';
+export type { MessagePortLike, Port } from '#port.js';
 export { wrapMessagePort } from '#port.js';
 
 export type {

@@ -22,12 +22,21 @@ export type Port<T> = {
   close(): void;
 };
 
-type AnyMessagePort = {
-  // oxlint-disable-next-line typescript/no-explicit-any -- intentionally accept DOM MessagePort and node:worker_threads MessagePort
+/**
+ * WHATWG-shaped `MessagePort` surface: the structural form of a DOM
+ * `MessagePort`, a `node:worker_threads` `MessagePort`, or any in-process
+ * object that speaks the same four methods. Listener and transfer
+ * *parameters* are deliberately `any` so one type spans the DOM and Node
+ * signatures — assert on member presence, never on parameter types.
+ *
+ * @public
+ */
+export type MessagePortLike = {
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- intentionally accept DOM MessagePort and node:worker_threads MessagePort
   postMessage(data: any, transfer?: any): void;
-  // oxlint-disable-next-line typescript/no-explicit-any -- DOM uses EventListener, node uses (msg) => void
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- DOM uses EventListener, node uses (msg) => void
   addEventListener(type: 'message', listener: any, options?: any): void;
-  // oxlint-disable-next-line typescript/no-explicit-any -- mirror of addEventListener
+  // oxlint-disable-next-line typescript/no-explicit-any, typescript/explicit-module-boundary-types -- mirror of addEventListener
   removeEventListener(type: 'message', listener: any, options?: any): void;
   start?(): void;
   close(): void;
@@ -41,7 +50,7 @@ type AnyMessagePort = {
  * @returns A {@link Port} bound to the given `MessagePort`.
  * @public
  */
-export const wrapMessagePort = <T>(port: AnyMessagePort, options?: { label?: string }): Port<T> => {
+export const wrapMessagePort = <T>(port: MessagePortLike, options?: { label?: string }): Port<T> => {
   const label = options?.label ?? 'MessagePort';
   return {
     postMessage(data: T, transfer?: readonly Transferable[]): void {

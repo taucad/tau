@@ -9,4 +9,13 @@ describe('runtime package copy targets', () => {
 
     expect(converterAssets?.to).toBe('dist/libs/converter/src');
   });
+
+  it('ships the replicad source map where the kernel resolves it', () => {
+    const copies = runtimeCopyTargets('dist');
+    const sourceMaps = copies.find((copy) => copy.from === 'src/kernels/replicad/sourcemaps');
+
+    // `replicad.kernel.ts` reads `new URL('sourcemaps/replicad.js.map', import.meta.url)`
+    // from `dist/kernels/replicad/`, so the copy destination directory is that folder.
+    expect(sourceMaps?.to).toBe('dist/kernels/replicad');
+  });
 });

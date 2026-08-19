@@ -59,7 +59,7 @@
       "inputs": ["{projectRoot}/README.md", "{projectRoot}/scripts/check-readme-quick-start.mts"]
     },
     "npm-local-smoke": {
-      "command": "node scripts/src/check-runtime-pack-install.ts",
+      "command": "node scripts/src/check-pack-install.ts packages/runtime",
       "options": {
         "cwd": "{workspaceRoot}"
       },

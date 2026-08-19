@@ -26,12 +26,17 @@ type ExportConditions = {
   readonly require?: unknown;
 };
 
-type PublishExports = Readonly<Record<string, ExportConditions>>;
+type PublishExports = Readonly<Record<string, ExportConditions | string>>;
 
 type RuntimePackage = {
   readonly main?: string;
   readonly module?: string;
   readonly types?: string;
+  readonly exports?: Readonly<Record<string, unknown>>;
+  readonly dependencies?: Readonly<Record<string, string>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
+  readonly devDependencies?: Readonly<Record<string, string>>;
   readonly publishConfig?: { readonly exports?: PublishExports };
 };
 
@@ -73,15 +78,21 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
   });
 
   const exportsMap = packageJson.publishConfig?.exports ?? {};
-  const subpaths = Object.keys(exportsMap);
+  // `./package.json` is a self-referential asset export, not a built chunk.
+  const subpaths = Object.keys(exportsMap).filter((subpath) => subpath !== './package.json');
 
   it('should have a non-empty exports map', () => {
     expect(subpaths.length).toBeGreaterThan(0);
   });
 
+  it('should export its own package.json in both maps', () => {
+    expect(packageJson.exports?.['./package.json']).toBe('./package.json');
+    expect(exportsMap['./package.json']).toBe('./package.json');
+  });
+
   it.each(subpaths)('subpath "%s" should map to a tsdown entry', (subpath) => {
     const conditions = exportsMap[subpath];
-    if (!conditions) {
+    if (!conditions || typeof conditions === 'string') {
       throw new Error(`Missing export conditions for ${subpath}`);
     }
     expect(conditions.require, `${subpath} must not declare a CommonJS "require" branch`).toBeUndefined();
@@ -97,5 +108,18 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
     expect(tsdownEntries, `${subpath} → ${conditions.default} requires tsdown entry "${expectedEntry}"`).toContain(
       expectedEntry,
     );
+  });
+});
+
+describe('runtime test-library dependency classification', () => {
+  const packageJson = readJson<RuntimePackage>(resolve(packageRoot, 'package.json'));
+
+  // `./testing` ships an import of `vitest-mock-extended`, so it is an optional peer
+  // (docs/policy/npm-policy.md, Rule 10) — never a production dependency.
+  it('declares vitest-mock-extended as an optional peer, not a dependency', () => {
+    expect(packageJson.dependencies?.['vitest-mock-extended']).toBeUndefined();
+    expect(packageJson.peerDependencies?.['vitest-mock-extended']).toBeDefined();
+    expect(packageJson.peerDependenciesMeta?.['vitest-mock-extended']?.optional).toBe(true);
+    expect(packageJson.devDependencies?.['vitest-mock-extended']).toBeDefined();
   });
 });

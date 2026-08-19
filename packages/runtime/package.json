@@ -77,7 +77,8 @@
     "./react-router": "./src/react-router/index.ts",
     "./vite": "./src/vite/index.ts",
     "./nextjs/config": "./src/nextjs/config.ts",
-    "./nextjs/browser-node-builtins": "./src/nextjs/browser-node-builtins.ts"
+    "./nextjs/browser-node-builtins": "./src/nextjs/browser-node-builtins.ts",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
@@ -336,8 +337,10 @@
         "types": "./dist/nextjs/browser-node-builtins.d.mts",
         "import": "./dist/nextjs/browser-node-builtins.mjs",
         "default": "./dist/nextjs/browser-node-builtins.mjs"
-      }
-    }
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
   },
   "imports": {
     "#*.js": "./src/*.ts",
@@ -360,7 +363,7 @@
     "es-module-lexer": "catalog:",
     "esbuild-wasm": "catalog:",
     "json-schema-default": "catalog:",
-    "libcascade": "3.0.2",
+    "libcascade": "catalog:",
     "jszip": "^3.10.1",
     "manifold-3d": "catalog:",
     "nanoraster": "^0.2.0",
@@ -374,7 +377,6 @@
     "type-fest": "catalog:",
     "uint8array-extras": "catalog:",
     "uzip": "catalog:",
-    "vitest-mock-extended": "catalog:",
     "ws": "catalog:",
     "zod": "catalog:"
   },
@@ -383,7 +385,8 @@
     "electron-vite": "^5.0.0 || ^6.0.0-beta.1",
     "next": ">=15.3.0 <17.0.0",
     "vite": "^7.0.0 || ^8.0.0",
-    "vitest": ">=2.0.0"
+    "vitest": ">=2.0.0",
+    "vitest-mock-extended": ">=3.0.0"
   },
   "peerDependenciesMeta": {
     "electron": {
@@ -399,6 +402,9 @@
       "optional": true
     },
     "vitest": {
+      "optional": true
+    },
+    "vitest-mock-extended": {
       "optional": true
     }
   },
@@ -420,6 +426,7 @@
     "geist": "catalog:",
     "next": "catalog:next16",
     "vite": "catalog:electron-vite7",
-    "vitest": "4.1.5"
+    "vitest": "4.1.5",
+    "vitest-mock-extended": "catalog:"
   }
 }

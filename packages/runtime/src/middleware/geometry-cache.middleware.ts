@@ -21,9 +21,9 @@ import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpa
 import type { ExportFile, GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
 import { LruMap } from '@taucad/utils/cache';
-import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
 import type { ExportGeometryResult, KernelIssue, KernelSuccessResult } from '#types/runtime.types.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { cleanupOldCacheEntries } from '#middleware/_internal/cache-retention.js';
 import { nativeBuildInputSymbol } from '#framework/render-artifact.js';
 import type { NativeBuildInput, NativeBuildInputCarrier } from '#framework/render-artifact.js';
 
@@ -282,70 +282,6 @@ function hasVideoStreamGeometry(geometry: GeometryResponse): boolean {
 }
 
 /**
- * Clean up old cache entries to prevent unbounded cache growth.
- * Deletes entries older than `maxAge` and keeps only `maxEntries` most recent files.
- */
-async function cleanupOldCacheEntries({
-  filesystem,
-  cacheDirectory,
-  maxAge,
-  maxEntries,
-}: {
-  /** The filesystem for file operations */
-  filesystem: KernelFileSystem;
-  /** The cache directory path */
-  cacheDirectory: string;
-  /** Maximum age for cache entries. Milliseconds. */
-  maxAge: number;
-  /** Maximum number of cache entries to keep */
-  maxEntries: number;
-}): Promise<void> {
-  try {
-    const files = await filesystem.readdirStat(cacheDirectory);
-
-    // Filter to only .bin cache files (MessagePack binary format)
-    const cacheFiles = files.filter((file) => file.type === 'file' && file.name.endsWith('.bin'));
-
-    if (cacheFiles.length === 0) {
-      return;
-    }
-
-    const now = Date.now();
-    const filesToDelete: string[] = [];
-
-    // First pass: identify files older than maxAge
-    for (const file of cacheFiles) {
-      const age = now - file.mtimeMs;
-      if (age > maxAge) {
-        filesToDelete.push(file.path);
-      }
-    }
-
-    // Second pass: if still over maxEntries, delete oldest files
-    const remainingFiles = cacheFiles.filter((file) => !filesToDelete.includes(file.path));
-
-    if (remainingFiles.length > maxEntries) {
-      // Sort by modification time (oldest first)
-      remainingFiles.sort((a, b) => a.mtimeMs - b.mtimeMs);
-
-      // Delete oldest files to get under maxEntries
-      const excessCount = remainingFiles.length - maxEntries;
-      for (let index = 0; index < excessCount; index++) {
-        const file = remainingFiles[index];
-        if (file) {
-          filesToDelete.push(file.path);
-        }
-      }
-    }
-
-    // Delete identified files
-    await Promise.all(filesToDelete.map(async (path) => filesystem.unlink(path)));
-  } catch {
-    // Cleanup errors are non-fatal - silently ignore
-  }
-}
-
-/**
  * Geometry cache middleware.
  *
  * Caches createGeometry and exportGeometry results based on all dependencies
@@ -419,6 +355,7 @@ export const geometryCache = defineMiddleware({
           await cleanupOldCacheEntries({
             filesystem,
             cacheDirectory,
+            extension: '.bin',
             maxAge: options.maxAge,
             maxEntries: options.maxEntries,
           });
@@ -473,6 +410,7 @@ export const geometryCache = defineMiddleware({
         await cleanupOldCacheEntries({
           filesystem,
           cacheDirectory,
+          extension: '.bin',
           maxAge: options.maxAge,
           maxEntries: options.maxEntries,
         });
@@ -519,6 +457,7 @@ export const geometryCache = defineMiddleware({
         await cleanupOldCacheEntries({
           filesystem,
           cacheDirectory,
+          extension: '.bin',
           maxAge: options.maxAge,
           maxEntries: options.maxEntries,
         });

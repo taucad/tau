@@ -64,22 +64,29 @@ function createSerializedCacheContent(result: GetParametersResult): string {
  * Create input and runtime configured for cache testing.
  */
 
+type ParameterCacheOptions = { maxEntries: number; maxAge: number };
+
 function createCacheContext(options?: {
   cacheExists?: boolean;
   cachedResult?: GetParametersResult;
   input?: Parameters<typeof createMockInput>[0];
   dependencies?: readonly Dependency[];
   dependencyHash?: string;
+  cacheOptions?: ParameterCacheOptions;
 }) {
   const serializedContent = options?.cachedResult ? createSerializedCacheContent(options.cachedResult) : '';
 
-  const runtime = createMockRuntime({
+  const runtime = createMockRuntime<Record<string, never>, ParameterCacheOptions>({
     filesystemOverrides: {
       existsResult: options?.cacheExists ?? false,
       readFileResult: serializedContent,
     },
     dependencies: options?.dependencies ?? createMockDependencies(),
     dependencyHash: options?.dependencyHash ?? 'a'.repeat(64),
+    options: options?.cacheOptions ?? {
+      maxEntries: 100,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    },
   });
 
   return {
@@ -476,6 +483,102 @@ describe('parameterCacheMiddleware', () => {
         await wrapGetParameters!(input, handler, runtime);
 
         expect(runtime.logger.debug).toHaveBeenCalledWith(expect.stringContaining('memory cache hit'));
+      });
+    });
+
+    describe('cache cleanup', () => {
+      it('should call cleanup after a successful cache write', async () => {
+        const { input, runtime } = createCacheContext({ cacheExists: false });
+        const handler = createMockGetParametersHandler(createSuccessResult());
+
+        const { wrapGetParameters } = parameterCacheMiddleware;
+        await wrapGetParameters!(input, handler, runtime);
+
+        expect(runtime.filesystem.mocks.readdirStat).toHaveBeenCalledWith('/.tau/cache/parameters');
+      });
+
+      it('should delete cache entries older than maxAge', async () => {
+        const oldMtimeMs = Date.now() - 8 * 24 * 60 * 60 * 1000; // 8 days ago (older than the 7 day max age)
+        const { input, runtime } = createCacheContext({ cacheExists: false });
+
+        runtime.filesystem.mocks.readdirStat.mockResolvedValue([
+          {
+            path: '/.tau/cache/parameters/old-cache.json',
+            name: 'old-cache.json',
+            type: 'file',
+            size: 100,
+            mtimeMs: oldMtimeMs,
+          },
+        ]);
+
+        const handler = createMockGetParametersHandler(createSuccessResult());
+
+        const { wrapGetParameters } = parameterCacheMiddleware;
+        await wrapGetParameters!(input, handler, runtime);
+
+        expect(runtime.filesystem.mocks.unlink).toHaveBeenCalledWith('/.tau/cache/parameters/old-cache.json');
+      });
+
+      it('should delete excess entries when over maxEntries', async () => {
+        const now = Date.now();
+        const { input, runtime } = createCacheContext({ cacheExists: false });
+
+        // 102 files (2 over the 100 max), staggered mtimeMs newest first.
+        const entries = Array.from({ length: 102 }, (_, index) => ({
+          path: `/.tau/cache/parameters/cache-${index}.json`,
+          name: `cache-${index}.json`,
+          type: 'file',
+          size: 100,
+          mtimeMs: now - index * 1000,
+        }));
+        runtime.filesystem.mocks.readdirStat.mockResolvedValue(entries);
+
+        const handler = createMockGetParametersHandler(createSuccessResult());
+
+        const { wrapGetParameters } = parameterCacheMiddleware;
+        await wrapGetParameters!(input, handler, runtime);
+
+        expect(runtime.filesystem.mocks.unlink).toHaveBeenCalledTimes(2);
+        expect(runtime.filesystem.mocks.unlink.mock.calls.map(([path]) => path as string)).toEqual([
+          '/.tau/cache/parameters/cache-101.json',
+          '/.tau/cache/parameters/cache-100.json',
+        ]);
+      });
+
+      it('should ignore files that are not parameter cache entries', async () => {
+        const oldMtimeMs = Date.now() - 8 * 24 * 60 * 60 * 1000;
+        const { input, runtime } = createCacheContext({ cacheExists: false });
+
+        runtime.filesystem.mocks.readdirStat.mockResolvedValue([
+          {
+            path: '/.tau/cache/parameters/stray.bin',
+            name: 'stray.bin',
+            type: 'file',
+            size: 100,
+            mtimeMs: oldMtimeMs,
+          },
+        ]);
+
+        const handler = createMockGetParametersHandler(createSuccessResult());
+
+        const { wrapGetParameters } = parameterCacheMiddleware;
+        await wrapGetParameters!(input, handler, runtime);
+
+        expect(runtime.filesystem.mocks.unlink).not.toHaveBeenCalled();
+      });
+
+      it('should tolerate cleanup errors', async () => {
+        const { input, runtime } = createCacheContext({ cacheExists: false });
+        runtime.filesystem.mocks.readdirStat.mockRejectedValue(new Error('Readdir error'));
+
+        const handlerResult = createSuccessResult();
+        const handler = createMockGetParametersHandler(handlerResult);
+
+        const { wrapGetParameters } = parameterCacheMiddleware;
+        const result = await wrapGetParameters!(input, handler, runtime);
+
+        expect(result).toBe(handlerResult);
+        expect(runtime.filesystem.mocks.writeFile).toHaveBeenCalled();
       });
     });
   });

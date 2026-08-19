@@ -10,10 +10,12 @@
  * 3. Write result to cache on the way back up
  */
 
+import { z } from 'zod';
 import { LruMap } from '@taucad/utils/cache';
 import type { GetParametersResult } from '#types/runtime.types.js';
 import { getParametersResultSchema } from '#types/runtime-protocol.schemas.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { cleanupOldCacheEntries } from '#middleware/_internal/cache-retention.js';
 
 /**
  * In-memory L1 cache for parsed parameter results.
@@ -54,7 +56,13 @@ export const parameterCache = defineMiddleware({
   name: 'ParameterCache',
   version: '1.0.0',
 
-  async wrapGetParameters(input, handler, { logger, filesystem, dependencyHash }) {
+  optionsSchema: z.object({
+    maxEntries: z.number().default(100),
+    /** Maximum age for cache entries. Milliseconds. */
+    maxAge: z.number().default(7 * 24 * 60 * 60 * 1000),
+  }),
+
+  async wrapGetParameters(input, handler, { logger, filesystem, dependencyHash, options }) {
     const cacheKey = dependencyHash;
 
     // L1: In-memory cache (fast, no I/O)
@@ -92,6 +100,14 @@ export const parameterCache = defineMiddleware({
 
         await filesystem.writeFile(cachePath, JSON.stringify(result));
         logger.debug(`Cached parameters at ${cacheKey}`);
+
+        await cleanupOldCacheEntries({
+          filesystem,
+          cacheDirectory,
+          extension: '.json',
+          maxAge: options.maxAge,
+          maxEntries: options.maxEntries,
+        });
       } catch (error) {
         logger.warn(`Parameter cache write error for ${cacheKey}: ${String(error)}`);
       }

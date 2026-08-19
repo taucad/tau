@@ -20,7 +20,7 @@
     "/experiments/**",
     "/packages/runtime/occt-reports/**",
     "/packages/kernels/openrscad/benchmarks/**",
-    "/packages/converter/src/assets/**",
+    "/libs/converter/src/assets/**",
     "**/generated/**",
     "**/assets/**",
     "**/public/*.js",

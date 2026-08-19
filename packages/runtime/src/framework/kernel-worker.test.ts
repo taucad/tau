@@ -4300,6 +4300,43 @@ describe('export schema hard-fail', () => {
     });
   });
 
+  it('aborts an export at the filesystem checkpoint', async () => {
+    const filesystem = createMockFileSystem();
+    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1, 2, 3]) });
+    const readDuringExport = defineMiddleware({
+      id: 'readsDuringExport',
+      name: 'ReadsDuringExport',
+      version: '1.0.0',
+      async wrapExportGeometry(input, handler, runtime) {
+        await runtime.filesystem.exists('/main.ts');
+        return handler(input);
+      },
+    });
+    const worker = createConfiguredWorker({ filesystem, middleware: [readDuringExport] });
+    // Initializing with an inline filesystem installs the worker's own
+    // abort-checked filesystem facade over the mock.
+    await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem: filesystem } });
+
+    await openAndWaitForRender(worker);
+    filesystem.mocks.exists.mockClear();
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await worker.exportGeometry('glb', {}, undefined, controller.signal);
+
+    // `throwIfAborted` fires at the facade checkpoint; the worker's middleware
+    // error boundary surfaces it as a structured failure, so no artifact is published.
+    expect(result).toMatchObject({
+      success: false,
+      issues: [expect.objectContaining({ message: expect.stringContaining('aborted') as string })],
+    });
+    expect(result).not.toHaveProperty('data');
+    // The checkpoint fires before the read reaches the supplied filesystem.
+    expect(filesystem.mocks.exists).not.toHaveBeenCalled();
+    await worker.cleanup();
+  });
+
   it('should allow export without options for undeclared format (transcoder route)', async () => {
     const worker = createConfiguredWorker({
       exportZodSchemas: { glb: z.object({}) },

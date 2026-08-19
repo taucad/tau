@@ -13,7 +13,7 @@ import type { Geometry } from '@taucad/types';
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
-import type { CapabilitiesManifest } from '#types/runtime.types.js';
+import type { CapabilitiesManifest, ExportGeometryResult } from '#types/runtime.types.js';
 import type { GeometryEncoder } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { EncodedGeometry } from '#transport/runtime-transport.types.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
@@ -207,13 +207,16 @@ describe('createWorkerDispatcher', () => {
         exportOptions: { binary: true },
       });
 
-      expect(exportModel).toHaveBeenCalledWith({
-        file: { path: '/', filename: 'main.ts' },
-        parameters: { height: 10 },
-        options: { quality: 'fine' },
-        format: 'glb',
-        exportOptions: { binary: true },
-      });
+      expect(exportModel).toHaveBeenCalledWith(
+        {
+          file: { path: '/', filename: 'main.ts' },
+          parameters: { height: 10 },
+          options: { quality: 'fine' },
+          format: 'glb',
+          exportOptions: { binary: true },
+        },
+        expect.any(AbortSignal),
+      );
       expect(result).toMatchObject({ success: true });
       const data = (result as { data: Array<{ name: string; bytes: Uint8Array; mimeType: string }> }).data;
       expect(data[0]?.bytes).toEqual(expectedSnapshot);
@@ -235,6 +238,73 @@ describe('createWorkerDispatcher', () => {
         success: false,
         issues: [{ severity: 'error', type: 'kernel', message: 'failed', code: 'UNKNOWN' }],
       });
+    });
+
+    it('passes the per-call abort signal to the worker export', async () => {
+      let observed: AbortSignal | undefined;
+      const worker = createMockWorker({
+        // The signal is `exportGeometry`'s fourth argument; rest args keep the
+        // stub inside `max-params` while still recording it.
+        exportGeometry: vi.fn(
+          async (...args: unknown[]) =>
+            new Promise<ExportGeometryResult>((_resolve, reject) => {
+              const signal = args[3] as AbortSignal | undefined;
+              observed = signal;
+              signal?.addEventListener(
+                'abort',
+                () => {
+                  reject(new Error('worker export aborted'));
+                },
+                { once: true },
+              );
+            }),
+        ),
+      });
+      fixture = await buildFixture(worker);
+
+      const controller = new AbortController();
+      const call = fixture.client.call('export', { format: 'stl' }, controller.signal);
+      await flushMicrotasks();
+      controller.abort();
+
+      await expect(call).rejects.toMatchObject({ name: 'AbortError' });
+      // The client rejects synchronously; the `rc` cancel frame reaches the server one turn later.
+      await flushMicrotasks();
+      expect(observed?.aborted).toBe(true);
+    });
+
+    it('passes the per-call abort signal to exportModel', async () => {
+      let observed: AbortSignal | undefined;
+      const worker = createMockWorker({
+        exportModel: vi.fn(
+          async (_request: unknown, signal?: AbortSignal) =>
+            new Promise<ExportGeometryResult>((_resolve, reject) => {
+              observed = signal;
+              signal?.addEventListener(
+                'abort',
+                () => {
+                  reject(new Error('worker export aborted'));
+                },
+                { once: true },
+              );
+            }),
+        ),
+      });
+      fixture = await buildFixture(worker);
+
+      const controller = new AbortController();
+      const call = fixture.client.call(
+        'exportModel',
+        { file: { path: '/', filename: 'main.ts' }, parameters: {}, format: 'glb' },
+        controller.signal,
+      );
+      await flushMicrotasks();
+      controller.abort();
+
+      await expect(call).rejects.toMatchObject({ name: 'AbortError' });
+      // The client rejects synchronously; the `rc` cancel frame reaches the server one turn later.
+      await flushMicrotasks();
+      expect(observed?.aborted).toBe(true);
     });
 
     it('forwards memoryHandle SABs to the worker setters', async () => {

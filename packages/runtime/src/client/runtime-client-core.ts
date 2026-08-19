@@ -181,7 +181,16 @@ export type RuntimeExportOptions<
   Files extends RuntimeSourceFiles = RuntimeSourceFiles,
 > = RuntimeExportSourceInput<Files> & {
   readonly exportOptions?: ExportOptionsFor<Kernels, Transcoders, Format>;
-} & ContentRequestFor<ExportContentFor<Kernels, Middleware, Transcoders, Format>>;
+} & ContentRequestFor<ExportContentFor<Kernels, Middleware, Transcoders, Format>> & {
+    /**
+     * Per-call cancellation. Aborting rejects the export with a `DOMException`
+     * named `AbortError` and cancels the in-flight worker operation at its
+     * existing abort checkpoints. `render` has no equivalent: it cancels by
+     * supersession, so an in-flight render is invalidated by the next render
+     * rather than by a signal.
+     */
+    readonly signal?: AbortSignal;
+  };
 
 /**
  * Consumer-facing complete ordered export artifact set.
@@ -502,7 +511,7 @@ type NormalizedRuntimeSource = {
   readonly file: RuntimeFileLocator;
 };
 
-const exportInputKeys = new Set(['source', 'parameters', 'exportOptions', 'content']);
+const exportInputKeys = new Set(['source', 'parameters', 'exportOptions', 'content', 'signal']);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -572,7 +581,7 @@ const assertExportInputShape = (input: Record<string, unknown>): void => {
   for (const key of Object.keys(input)) {
     if (!exportInputKeys.has(key)) {
       throw new TypeError(
-        `RuntimeClient.export options support only source, parameters, exportOptions, and content; received "${key}".`,
+        `RuntimeClient.export options support only source, parameters, exportOptions, content, and signal; received "${key}".`,
       );
     }
   }
@@ -849,7 +858,7 @@ export type RuntimeClient<
    * through the nested `exportOptions` field.
    *
    * @param format - Export format identifier (e.g., 'stl', 'step', '3mf')
-   * @param options - Optional request-scoped source, parameters, content, and format-specific export options
+   * @param options - Optional request-scoped source, parameters, content, cancellation `signal`, and format-specific export options
    * @returns Export result with an ordered, non-empty ExportFile array
    * @public
    */
@@ -1576,6 +1585,8 @@ export function createRuntimeClient(options: RuntimeClientOptionsWithTransport<A
         assertExportInputShape(inputOrOptions);
       }
 
+      const exportSignal = inputOrOptions?.['signal'] as AbortSignal | undefined;
+
       if (inputOrOptions?.['source'] !== undefined) {
         const normalized = normalizeRuntimeSource(inputOrOptions['source']);
         requestScopedExport = {
@@ -1623,7 +1634,7 @@ export function createRuntimeClient(options: RuntimeClientOptionsWithTransport<A
           internalResult = await trackInFlight(
             new Promise<Awaited<ReturnType<typeof client.exportModel>>>((resolve, reject) => {
               exportReject = reject;
-              client.exportModel(request).then(resolve).catch(reject);
+              client.exportModel(request, exportSignal).then(resolve).catch(reject);
             }),
           );
         } else {
@@ -1631,7 +1642,12 @@ export function createRuntimeClient(options: RuntimeClientOptionsWithTransport<A
             new Promise<Awaited<ReturnType<typeof client.exportGeometry>>>((resolve, reject) => {
               exportReject = reject;
               client
-                .exportGeometry(format, resolvedExportOptions, inputOrOptions?.['content'] as RuntimeContentInput)
+                .exportGeometry(
+                  format,
+                  resolvedExportOptions,
+                  inputOrOptions?.['content'] as RuntimeContentInput,
+                  exportSignal,
+                )
                 .then(resolve)
                 .catch(reject);
             }),

@@ -30,9 +30,21 @@ const exportResult: ExportGeometryResult = {
   issues: [],
 };
 
-function createFakeTransport() {
-  const exportCall = vi.fn(async (_format: string, _options?: Record<string, unknown>) => exportResult);
-  const exportModelCall = vi.fn(async (_request: RuntimeProtocol['calls']['exportModel']['args']) => exportResult);
+/**
+ * @param options - `deferExports` keeps both export calls in flight so a
+ * mid-flight abort has something to cancel.
+ */
+function createFakeTransport(options?: { deferExports?: boolean }) {
+  const stayPending = async (): Promise<ExportGeometryResult> =>
+    new Promise<ExportGeometryResult>(() => {
+      /* The deferred export stays in flight for the whole test. */
+    });
+  const exportCall = vi.fn(async (_format: string, _exportOptions?: Record<string, unknown>) =>
+    options?.deferExports ? stayPending() : exportResult,
+  );
+  const exportModelCall = vi.fn(async (_request: RuntimeProtocol['calls']['exportModel']['args']) =>
+    options?.deferExports ? stayPending() : exportResult,
+  );
   const channel: Channel<RuntimeProtocol> = {
     ready: Promise.resolve(),
     closed: Promise.resolve(),
@@ -44,13 +56,25 @@ function createFakeTransport() {
     hello: { payload: { server: 'kernel-runtime-worker', runtimeVersion: '0.0.0-test', protocolVersion } },
     onNotify: vi.fn(() => () => undefined),
     notify: vi.fn(),
-    call: vi.fn(async (method: keyof RuntimeProtocol['calls'], args: unknown) => {
+    call: vi.fn(async (method: keyof RuntimeProtocol['calls'], args: unknown, signal?: AbortSignal) => {
+      /* Mirrors the real channel (`libs/rpc/src/channel.ts:839-868`): a supplied
+       * signal rejects the in-flight call with `DOMException(…, 'AbortError')`. */
+      const abortRejection = new Promise<never>((_resolve, reject) => {
+        const rejectAborted = (): void => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        };
+        if (signal?.aborted) {
+          rejectAborted();
+          return;
+        }
+        signal?.addEventListener('abort', rejectAborted, { once: true });
+      });
       if (method === 'export') {
         const request = args as { format: string; options?: Record<string, unknown> };
-        return exportCall(request.format, request.options);
+        return Promise.race([exportCall(request.format, request.options), abortRejection]);
       }
       if (method === 'exportModel') {
-        return exportModelCall(args as RuntimeProtocol['calls']['exportModel']['args']);
+        return Promise.race([exportModelCall(args as RuntimeProtocol['calls']['exportModel']['args']), abortRejection]);
       }
       throw new Error(`Unexpected RPC call: ${String(method)}`);
     }),
@@ -202,6 +226,30 @@ describe('RuntimeClient request-scoped export', () => {
       'renderOptions',
     );
     await expect(exportFromJavaScript('glb', { unexpected: true })).rejects.toThrow('unexpected');
+    // `signal` joined the allowlist with D6; a typo of it is still rejected.
+    await expect(
+      exportFromJavaScript('glb', { source: { path: 'main.ts' }, signal: undefined }),
+    ).resolves.toMatchObject({ success: true });
+    await expect(
+      exportFromJavaScript('glb', { source: { path: 'main.ts' }, singal: new AbortController().signal }),
+    ).rejects.toThrow('singal');
+    client.terminate();
+  });
+
+  it('rejects an aborted export with the abort error', async () => {
+    const { channel, plugin } = createFakeTransport({ deferExports: true });
+    const client = createRuntimeClient({
+      transport: plugin,
+    });
+    const controller = new AbortController();
+
+    const settled = client.export('glb', { source: { path: 'main.ts' }, signal: controller.signal });
+    await vi.waitFor(() => {
+      expect(channel.call).toHaveBeenCalledWith('exportModel', expect.anything(), controller.signal);
+    });
+    controller.abort();
+
+    await expect(settled).rejects.toMatchObject({ name: 'AbortError' });
     client.terminate();
   });
 });

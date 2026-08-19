@@ -385,30 +385,39 @@ export class RuntimeWorkerClient {
    *
    * @param format - export file format identifier (e.g. `'stl'`, `'glb'`).
    * @param options - format-specific export options (may include `tessellation`).
+   * @param content - request-scoped content input.
+   * @param signal - per-call cancellation; the channel carries it as an `rc` frame.
    */
+  // oxlint-disable-next-line max-params -- mirrors the fixed `export` protocol call shape (format, options, content, signal).
   public async exportGeometry(
     format: FileExtension,
     options?: Record<string, unknown>,
     content?: RuntimeContentInput,
+    signal?: AbortSignal,
   ): Promise<ExportGeometryResult> {
     this.ensureNotTerminated();
     this.ensureChannel();
-    return this.channel!.call('export', {
-      format,
-      ...(options === undefined ? {} : { options }),
-      ...(content === undefined ? {} : { content }),
-    });
+    return this.channel!.call(
+      'export',
+      {
+        format,
+        ...(options === undefined ? {} : { options }),
+        ...(content === undefined ? {} : { content }),
+      },
+      signal,
+    );
   }
 
   /**
    * Export geometry for an exact request without mutating the autonomous preview render state.
    *
    * @param request - source file, parameters, render options, export format, and optional staged source bytes
+   * @param signal - per-call cancellation; the channel carries it as an `rc` frame.
    */
-  public async exportModel(request: RuntimeExportModelArgs): Promise<ExportGeometryResult> {
+  public async exportModel(request: RuntimeExportModelArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
     this.ensureNotTerminated();
     this.ensureChannel();
-    return this.channel!.call('exportModel', request);
+    return this.channel!.call('exportModel', request, signal);
   }
 
   /** Cleanup any worker-side state without tearing down the channel. */

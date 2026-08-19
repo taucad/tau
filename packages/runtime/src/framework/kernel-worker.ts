@@ -1376,14 +1376,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @param format - The export format identifier (e.g. 'stl', 'step', 'glb').
    * @param options - Format-specific export options. Validated against Zod schema when available.
+   * @param content - Optional request-scoped content input.
+   * @param signal - Per-call cancellation, observed at the operation's existing abort checkpoints.
    * @returns The exported geometry.
    */
+  // oxlint-disable-next-line max-params -- mirrors the fixed `export` protocol call shape (format, options, content, signal).
   public async exportGeometry(
     format: FileExtension,
     options?: Record<string, unknown>,
     content?: RuntimeContentInput,
+    signal?: AbortSignal,
   ): Promise<ExportGeometryResult> {
-    return this.enqueueOperation(async () => this.exportGeometryInLane(format, options, content));
+    return this.enqueueOperation(async () => this.exportGeometryInLane(format, options, content), signal);
   }
 
   private async exportGeometryInLane(
@@ -1428,10 +1432,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Export an exact render request without publishing it to the autonomous preview loop.
    *
    * @param request - Request-scoped render/export input from the runtime protocol.
+   * @param signal - Per-call cancellation, observed at the operation's existing abort checkpoints.
    * @returns Exported files or structured runtime issues.
    */
-  public async exportModel(request: RuntimeExportModelArgs): Promise<ExportGeometryResult> {
-    return this.enqueueOperation(async () => this.exportModelInLane(request));
+  public async exportModel(request: RuntimeExportModelArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
+    return this.enqueueOperation(async () => this.exportModelInLane(request), signal);
   }
 
   private async exportModelInLane(request: RuntimeExportModelArgs): Promise<ExportGeometryResult> {

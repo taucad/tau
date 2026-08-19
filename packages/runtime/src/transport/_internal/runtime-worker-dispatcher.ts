@@ -348,12 +348,13 @@ export function createWorkerDispatcher(
     }
   };
 
-  const handleExport: (args: RuntimeProtocol['calls']['export']['args']) => Promise<ExportGeometryResult> = async (
-    args,
-  ) => {
+  const handleExport: (
+    args: RuntimeProtocol['calls']['export']['args'],
+    signal?: AbortSignal,
+  ) => Promise<ExportGeometryResult> = async (args, signal) => {
     const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
     try {
-      return await Promise.race([worker.exportGeometry(args.format, args.options, args.content), trapPromise]);
+      return await Promise.race([worker.exportGeometry(args.format, args.options, args.content, signal), trapPromise]);
     } finally {
       worker.flushTelemetry();
       cleanupTrap();
@@ -362,10 +363,11 @@ export function createWorkerDispatcher(
 
   const handleExportModel: (
     args: RuntimeProtocol['calls']['exportModel']['args'],
-  ) => Promise<ExportGeometryResult> = async (args) => {
+    signal?: AbortSignal,
+  ) => Promise<ExportGeometryResult> = async (args, signal) => {
     const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
     try {
-      return await Promise.race([worker.exportModel(args), trapPromise]);
+      return await Promise.race([worker.exportModel(args, signal), trapPromise]);
     } finally {
       worker.flushTelemetry();
       cleanupTrap();
@@ -376,14 +378,14 @@ export function createWorkerDispatcher(
 
   const impl: ChannelServer<RuntimeProtocol> = {
     // oxlint-disable-next-line max-params -- ChannelServer.call signature is fixed (ctx, name, args, signal); parameter count is enforced by the protocol contract.
-    async call(_context, name, args, _signal) {
+    async call(_context, name, args, signal) {
       switch (name) {
         case 'initialize': {
           const result = await handleInitialize(args as RuntimeProtocol['calls']['initialize']['args']);
           return result as unknown as CallResult;
         }
         case 'export': {
-          const result = await handleExport(args as RuntimeProtocol['calls']['export']['args']);
+          const result = await handleExport(args as RuntimeProtocol['calls']['export']['args'], signal);
           const transferables: Transferable[] = [];
           const value = prepareExportTransfer(result, transferables);
           const envelope: WithTransferables<unknown> = {
@@ -393,7 +395,7 @@ export function createWorkerDispatcher(
           return envelope as unknown as CallResult;
         }
         case 'exportModel': {
-          const result = await handleExportModel(args as RuntimeProtocol['calls']['exportModel']['args']);
+          const result = await handleExportModel(args as RuntimeProtocol['calls']['exportModel']['args'], signal);
           const transferables: Transferable[] = [];
           const value = prepareExportTransfer(result, transferables);
           const envelope: WithTransferables<unknown> = {

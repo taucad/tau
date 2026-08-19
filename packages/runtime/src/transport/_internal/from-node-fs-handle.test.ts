@@ -1,11 +1,14 @@
-import { describe, it, expect, afterAll, vi } from 'vitest';
+import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs/promises';
+import * as nodeFs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { _fromNodeFsHandle as fromNodeFS } from '#transport/_internal/from-node-fs-handle.js';
-import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
+import type { RuntimeFileSystemBase, RuntimeWatchEvent } from '#types/runtime-kernel.types.js';
 
 const { realpathMock } = vi.hoisted(() => ({ realpathMock: vi.fn<typeof fs.realpath>() }));
+const { watchMock } = vi.hoisted(() => ({ watchMock: vi.fn<typeof nodeFs.watch>() }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof fs>();
@@ -14,6 +17,16 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     ...actual,
     default: { ...actual, realpath: realpathMock },
     realpath: realpathMock,
+  };
+});
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof nodeFs>();
+  watchMock.mockImplementation(actual.watch);
+  return {
+    ...actual,
+    default: { ...actual, watch: watchMock },
+    watch: watchMock,
   };
 });
 
@@ -150,22 +163,9 @@ describe('fromNodeFS', () => {
     expect(await fileSystem.readFile('/vfs-root.txt', 'utf8')).toBe('vfs');
   });
 
-  it.each<readonly [string, (fileSystem: RuntimeFileSystemBase) => Promise<unknown>]>([
-    ['readFile', async (fileSystem) => fileSystem.readFile('/../outside.txt')],
-    ['writeFile', async (fileSystem) => fileSystem.writeFile('/../outside.txt', 'no')],
-    ['mkdir', async (fileSystem) => fileSystem.mkdir('/../outside')],
-    ['readdir', async (fileSystem) => fileSystem.readdir('/../outside')],
-    ['unlink', async (fileSystem) => fileSystem.unlink('/../outside.txt')],
-    ['stat', async (fileSystem) => fileSystem.stat('/../outside.txt')],
-    ['rmdir', async (fileSystem) => fileSystem.rmdir('/../outside')],
-    ['rename source', async (fileSystem) => fileSystem.rename('/../outside.txt', '/safe.txt')],
-    ['rename destination', async (fileSystem) => fileSystem.rename('/safe.txt', '/../outside.txt')],
-    ['lstat', async (fileSystem) => fileSystem.lstat('/../outside.txt')],
-    ['exists', async (fileSystem) => fileSystem.exists('/../outside.txt')],
-  ])('should reject lexical traversal for %s before host filesystem access', async (_operation, invoke) => {
-    const fileSystem = unwrap(temporaryDirectory);
-    await expect(invoke(fileSystem)).rejects.toMatchObject({ code: 'PATH_OUTSIDE_ROOT' });
-  });
+  /* The above-root traversal table moved to the shared adapter conformance
+   * suite (`filesystem/adapter-conformance.test.ts`), which runs the same
+   * eleven operations against every adapter instead of this one. */
 
   it('should hide a symlink whose real target is outside the base directory', async () => {
     const outsideDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'kernels-node-fs-outside-'));
@@ -254,5 +254,242 @@ describe('fromNodeFS', () => {
       code: 'PATH_OUTSIDE_ROOT',
     });
     await expect(fileSystem.readFile('/rename-guard.txt', 'utf8')).resolves.toBe('keep');
+  });
+});
+
+describe('fromNodeFS watch', () => {
+  /* FSEvents/inotify deliver asynchronously and, under machine load, well past
+   * vi.waitFor's 1 s default; the budget is generous because these tests assert
+   * delivery, never latency. */
+  const watchDeliveryBudget = { timeout: 10_000 } as const;
+
+  const roots: string[] = [];
+  const passthroughWatch = watchMock.getMockImplementation();
+
+  /** Drain the macOS FSEvents replay window that can surface writes made just before arming. */
+  const settleFsEvents = async (): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, 150);
+    });
+
+  const createRoot = async (): Promise<string> => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kernels-node-fs-watch-'));
+    roots.push(root);
+    return root;
+  };
+
+  /** Collect every event a subscription delivers; the caller owns the returned unsubscribe. */
+  const subscribe = (
+    fileSystem: RuntimeFileSystemBase,
+    request: Parameters<NonNullable<RuntimeFileSystemBase['watch']>>[0],
+  ): { readonly events: RuntimeWatchEvent[]; readonly unsubscribe: () => void } => {
+    const events: RuntimeWatchEvent[] = [];
+    if (!fileSystem.watch) {
+      throw new Error('The Node filesystem adapter must expose watch().');
+    }
+    return { events, unsubscribe: fileSystem.watch(request, (event) => events.push(event)) };
+  };
+
+  afterEach(async () => {
+    if (!passthroughWatch) {
+      throw new Error('Expected the node:fs watch mock to delegate to the native implementation.');
+    }
+    watchMock.mockImplementation(passthroughWatch);
+    await Promise.all(roots.splice(0).map(async (root) => fs.rm(root, { recursive: true, force: true })));
+  });
+
+  it('should deliver a change for an externally written path and nothing for its peers', async () => {
+    const root = await createRoot();
+    await fs.writeFile(path.join(root, 'main.ts'), 'first');
+    await fs.writeFile(path.join(root, 'peer.ts'), 'peer');
+    const fileSystem = unwrap(root);
+    const { events, unsubscribe } = subscribe(fileSystem, { paths: ['/main.ts', '/peer.ts'], recursive: false });
+
+    try {
+      // FSEvents on macOS can replay writes that happened just before the watcher
+      // armed; drain that window so the assertion below judges only this write.
+      // (The kernel is immune to the replay anyway — it content-hash-dedupes.)
+      await settleFsEvents();
+      events.length = 0;
+      await fs.writeFile(path.join(root, 'main.ts'), 'second');
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: '/main.ts' });
+      }, watchDeliveryBudget);
+      // The OS may repeat an event for the written path; no peer path may ever appear.
+      expect(events.filter((event) => event.type !== 'change' || event.path !== '/main.ts')).toEqual([]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('should report an atomic save as a change and an unlink as a delete', async () => {
+    const root = await createRoot();
+    await fs.writeFile(path.join(root, 'main.ts'), 'first');
+    const fileSystem = unwrap(root);
+    const { events, unsubscribe } = subscribe(fileSystem, { paths: ['/main.ts'], recursive: false });
+
+    try {
+      const temporaryPath = path.join(root, '.main.ts.editor.tmp');
+      await fs.writeFile(temporaryPath, 'saved');
+      await fs.rename(temporaryPath, path.join(root, 'main.ts'));
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: '/main.ts' });
+      }, watchDeliveryBudget);
+      // The editor's temporary sibling is not a requested path and must stay invisible.
+      expect(events.some((event) => 'path' in event && event.path.includes('tmp'))).toBe(false);
+
+      events.length = 0;
+      await fs.unlink(path.join(root, 'main.ts'));
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'delete', path: '/main.ts' });
+      }, watchDeliveryBudget);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('should accept paths that do not exist and report their later creation', async () => {
+    const root = await createRoot();
+    const fileSystem = unwrap(root);
+    const { events, unsubscribe } = subscribe(fileSystem, {
+      paths: ['/missing.ts', '/absent-dir/nested/deep.ts'],
+      recursive: false,
+    });
+
+    try {
+      await fs.writeFile(path.join(root, 'missing.ts'), 'created');
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: '/missing.ts' });
+      }, watchDeliveryBudget);
+
+      // The nearest existing ancestor of `/absent-dir/nested/deep.ts` is the root, so the
+      // adapter has to re-arm onto each directory as it appears before the leaf is visible.
+      events.length = 0;
+      await fs.mkdir(path.join(root, 'absent-dir', 'nested'), { recursive: true });
+      await fs.writeFile(path.join(root, 'absent-dir', 'nested', 'deep.ts'), 'deep');
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: '/absent-dir/nested/deep.ts' });
+      }, watchDeliveryBudget);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('should deliver no events for excluded cache paths under a write burst', async () => {
+    const root = await createRoot();
+    await fs.mkdir(path.join(root, '.tau', 'cache', 'geometry'), { recursive: true });
+    await fs.writeFile(path.join(root, 'main.ts'), 'first');
+    const fileSystem = unwrap(root);
+    const { events, unsubscribe } = subscribe(fileSystem, {
+      paths: ['/.tau/cache/geometry/warm.bin', '/main.ts'],
+      recursive: false,
+      excludes: ['/.tau/cache/**'],
+    });
+
+    try {
+      for (let index = 0; index < 20; index++) {
+        // oxlint-disable-next-line no-await-in-loop -- sequential burst mirrors the cache writer's own ordering
+        await fs.writeFile(path.join(root, '.tau', 'cache', 'geometry', 'warm.bin'), `burst-${index}`);
+      }
+      await fs.writeFile(path.join(root, 'main.ts'), 'second');
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: '/main.ts' });
+      }, watchDeliveryBudget);
+      expect(events.filter((event) => 'path' in event && event.path.startsWith('/.tau/'))).toEqual([]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('should reject a watch path that escapes the base directory', async () => {
+    const root = await createRoot();
+    const fileSystem = unwrap(root);
+
+    expect(() => subscribe(fileSystem, { paths: ['/../outside.txt'], recursive: false })).toThrow(
+      expect.objectContaining({ code: 'PATH_OUTSIDE_ROOT' }),
+    );
+  });
+
+  it('should arm its watchers before returning', async () => {
+    const root = await createRoot();
+    await fs.writeFile(path.join(root, 'main.ts'), 'first');
+    const fileSystem = unwrap(root);
+    const { events, unsubscribe } = subscribe(fileSystem, { paths: ['/main.ts'], recursive: false });
+
+    try {
+      // No await between arming and writing: an asynchronously armed watcher would miss this.
+      nodeFs.writeFileSync(path.join(root, 'main.ts'), 'second');
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: '/main.ts' });
+      }, watchDeliveryBudget);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('should close every watcher once on unsubscribe and on dispose', async () => {
+    const root = await createRoot();
+    await fs.writeFile(path.join(root, 'main.ts'), 'first');
+    if (!passthroughWatch) {
+      throw new Error('Expected the node:fs watch mock to delegate to the native implementation.');
+    }
+    const opened: nodeFs.FSWatcher[] = [];
+    watchMock.mockImplementation(((...parameters: Parameters<typeof nodeFs.watch>) => {
+      const watcher = passthroughWatch(...parameters);
+      vi.spyOn(watcher, 'close');
+      opened.push(watcher);
+      return watcher;
+    }) as typeof nodeFs.watch);
+    const fileSystem = unwrap(root);
+
+    const first = subscribe(fileSystem, { paths: ['/main.ts'], recursive: false });
+    expect(opened).toHaveLength(1);
+    first.unsubscribe();
+    first.unsubscribe();
+    expect(opened[0]!.close).toHaveBeenCalledTimes(1);
+
+    const second = subscribe(fileSystem, { paths: ['/main.ts'], recursive: false });
+    expect(opened).toHaveLength(2);
+    fileSystem.dispose();
+    expect(opened[1]!.close).toHaveBeenCalledTimes(1);
+    second.unsubscribe();
+    expect(opened[1]!.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('should emit exactly one reset per watcher loss and none for its own unsubscribe', async () => {
+    const root = await createRoot();
+    await fs.writeFile(path.join(root, 'main.ts'), 'first');
+    const fakes: Array<EventEmitter & { readonly close: () => void }> = [];
+    watchMock.mockImplementation((() => {
+      // oxlint-disable-next-line unicorn/prefer-event-target -- fs.watch returns an EventEmitter; the fake must match its shape
+      const fake: EventEmitter & { close: () => void } = Object.assign(new EventEmitter(), {
+        close: vi.fn(() => {
+          fake.emit('close');
+        }),
+      });
+      fakes.push(fake);
+      return fake;
+    }) as unknown as typeof nodeFs.watch);
+    const fileSystem = unwrap(root);
+
+    const lossy = subscribe(fileSystem, { paths: ['/main.ts'], recursive: false });
+    try {
+      expect(fakes).toHaveLength(1);
+
+      fakes[0]!.emit('change', 'rename', null);
+      expect(lossy.events).toEqual([{ type: 'reset' }]);
+
+      fakes[0]!.emit('error', new Error('watcher failed'));
+      // The error closes the watcher; the resulting close must not double-report the loss.
+      expect(lossy.events).toEqual([{ type: 'reset' }, { type: 'reset' }]);
+      fakes[0]!.emit('close');
+      expect(lossy.events).toHaveLength(2);
+    } finally {
+      lossy.unsubscribe();
+    }
+
+    const quiet = subscribe(fileSystem, { paths: ['/main.ts'], recursive: false });
+    quiet.unsubscribe();
+    expect(quiet.events).toEqual([]);
   });
 });

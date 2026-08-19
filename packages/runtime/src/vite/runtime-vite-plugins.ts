@@ -58,8 +58,10 @@ export const fileURLToPath = unavailable('url.fileURLToPath');
 export const readFile = unavailable('fs.readFile');
 export const readFileSync = unavailable('fs.readFileSync');
 export const writeFileSync = unavailable('fs.writeFileSync');
+export const statSync = unavailable('fs.statSync');
+export const watch = unavailable('fs.watch');
 export const promises = { readFile };
-export default { promises, readFile, readFileSync, writeFileSync };
+export default { promises, readFile, readFileSync, statSync, watch, writeFileSync };
 `;
 
 const browserNodeBuiltins = (): Plugin => ({

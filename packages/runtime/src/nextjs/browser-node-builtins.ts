@@ -41,6 +41,7 @@ export const stat = method('fs.stat');
 export const statSync = method('fs.statSync');
 export const unlink = method('fs.unlink');
 export const unlinkSync = method('fs.unlinkSync');
+export const watch = method('fs.watch');
 export const writeFile = method('fs.writeFile');
 export const writeFileSync = method('fs.writeFileSync');
 
@@ -72,6 +73,7 @@ const browserNodeBuiltins = Object.freeze({
   statSync,
   unlink,
   unlinkSync,
+  watch,
   writeFile,
   writeFileSync,
 });

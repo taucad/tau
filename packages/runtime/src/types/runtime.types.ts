@@ -458,7 +458,9 @@ export type TransportCapabilities = {
  * - `autonomousRenderLoop` reflects whether the active transport drives
  *   its own render loop. `false` on no-worker hostings (browser main
  *   thread, edge worker) where consumers must call `client.render(...)`
- *   explicitly; `true` for in-process and worker transports.
+ *   explicitly; `true` for in-process and worker transports. It does not
+ *   imply filesystem reactivity — whether an external edit rerenders
+ *   depends on the supplied filesystem adapter exposing `watch`.
  * - `transport.descriptor` is diagnostic only — `RuntimeClient` does not
  *   branch on transport identity.
  *

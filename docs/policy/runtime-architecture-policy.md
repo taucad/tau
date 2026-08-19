@@ -229,6 +229,8 @@ type RuntimeTransport = {
 1. User edits code in Monaco editor
    │
 2. Filesystem authority writes the file and emits a concrete runtime-path watch event
+   │  (not the exclusive source: a watch-capable adapter such as `fromNodeFs` also
+   │   emits one for an edit made outside the runtime entirely)
    │
 3. KernelRuntimeWorker matches the path against its active entry and dependency watch set
    │  ├─ Related path → invalidate affected caches and schedule one preview

@@ -68,36 +68,6 @@ export function isWebWorker(): boolean {
 }
 
 /**
- * Assert that the current environment supports SharedArrayBuffer.
- * In browsers/workers, this requires cross-origin isolation (COOP + COEP headers).
- * In Node.js, SharedArrayBuffer is always available.
- *
- * @throws TypeError when SharedArrayBuffer is not supported by the browser
- * @throws Error when cross-origin isolation headers are missing
- */
-export function assertCrossOriginIsolated(): void {
-  if (isNode()) {
-    return;
-  }
-
-  if (typeof SharedArrayBuffer === 'undefined') {
-    throw new TypeError(
-      'SharedArrayBuffer is not available in this browser. Use a modern browser that supports SharedArrayBuffer.',
-    );
-  }
-
-  if (!globalThis.crossOriginIsolated) {
-    throw new Error(
-      'SharedArrayBuffer requires cross-origin isolation. ' +
-        'The server must send these HTTP headers:\n' +
-        '  Cross-Origin-Opener-Policy: same-origin\n' +
-        '  Cross-Origin-Embedder-Policy: require-corp (or credentialless)\n' +
-        'See https://web.dev/articles/cross-origin-isolation-guide',
-    );
-  }
-}
-
-/**
  * Convert a `file://` URL to a filesystem path in Node.js.
  * In browser/worker environments, returns the original URL string unchanged.
  *

@@ -78,6 +78,51 @@ export type IsolationStatus =
   | { crossOriginIsolated: false; sharedArrayBuffer: boolean; reason: IsolationFailureReason };
 
 /**
+ * Snapshot this realm's cross-origin isolation readiness.
+ *
+ * Every `SharedArrayBuffer` consumer — the geometry pool, the `Atomics.wait`
+ * sync channel, multi-threaded OCCT — reads the flags of the realm it runs in,
+ * so this answers locally and is never carried over the wire.
+ *
+ * The failure branches are ordered most-specific cause first, and compare with
+ * `=== false` rather than `!`: Node leaves both flags `undefined` and ships
+ * `SharedArrayBuffer` unconditionally, so a missing flag means "not gated" and
+ * falls through to the isolated result without an environment check.
+ *
+ * @returns The isolation snapshot, carrying the failure reason when degraded.
+ *
+ * @public
+ *
+ * @example <caption>Choose a geometry tier from the local realm</caption>
+ * ```typescript
+ * import { getIsolationStatus } from '@taucad/runtime/cross-origin-isolation';
+ *
+ * const status = getIsolationStatus();
+ * const tier = status.sharedArrayBuffer ? 'shared' : 'copy';
+ * ```
+ */
+export function getIsolationStatus(): IsolationStatus {
+  const sharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
+  /* The DOM lib types both flags as `boolean`, but Node defines neither; the
+   * `=== false` fall-through only means something against a view that admits
+   * the absent flag. */
+  const { crossOriginIsolated, isSecureContext } = globalThis as {
+    crossOriginIsolated?: boolean;
+    isSecureContext?: boolean;
+  };
+  if (isSecureContext === false) {
+    return { crossOriginIsolated: false, sharedArrayBuffer, reason: 'no-secure-context' };
+  }
+  if (crossOriginIsolated === false) {
+    return { crossOriginIsolated: false, sharedArrayBuffer, reason: 'no-coep' };
+  }
+  if (!sharedArrayBuffer) {
+    return { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-sab-constructor' };
+  }
+  return { crossOriginIsolated: true, sharedArrayBuffer: true };
+}
+
+/**
  * Apply {@link documentHeaders} to a `Headers` instance or a plain header
  * record. Existing values for the same names are replaced.
  *

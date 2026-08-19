@@ -4,6 +4,7 @@ import deepmerge from 'deepmerge';
 import { logLevels, lookupExportFidelity } from '@taucad/types/constants';
 import { joinPath, parentDirectory, resolveVirtualPath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
+import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { SharedPool } from '@taucad/memory';
@@ -665,6 +666,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     // Create logger (depends on onLog being set)
     this._logger = this.createLogger();
+
+    /* One warn per initialize when this realm cannot host SharedArrayBuffer.
+     * Degradation is otherwise silent at every consumer. Structurally silent in
+     * the Electron utility topology — a Node process is never gated — so this
+     * is the browser web-worker signal; Electron's header defect is caught by
+     * the `installElectronRuntimeHeaders` regression test instead. */
+    const isolation = getIsolationStatus();
+    if (!isolation.crossOriginIsolated) {
+      this._logger.warn(
+        `Cross-origin isolation degraded (${isolation.reason}): geometry pool falls back to copy delivery, render abort to wire-notify, OCCT to single-threaded`,
+      );
+    }
 
     if (this._geometryPoolBuffer) {
       this._geometryPool = new SharedPool(this._geometryPoolBuffer);

@@ -13,6 +13,8 @@
  * call site.
  */
 
+import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
+import type { IsolationFailureReason } from '#cross-origin-isolation/headers.js';
 import type { RuntimeLogger } from '#types/runtime-kernel.types.js';
 
 /** Result of probing the host for multi-threaded (pthread) WASM support. */
@@ -23,6 +25,13 @@ export type MultiThreadSupport = {
   reason: string;
 };
 
+/** Auto-selection log vocabulary, keyed by the isolation producer's reasons. */
+const multiThreadReasons: Readonly<Record<IsolationFailureReason, string>> = {
+  'no-sab-constructor': 'SharedArrayBuffer unavailable',
+  'no-coep': 'crossOriginIsolated=false (missing COOP/COEP headers)',
+  'no-secure-context': 'crossOriginIsolated=false (insecure context)',
+};
+
 /**
  * Detect whether the runtime can host the multi-threaded (pthread) build.
  *
@@ -31,23 +40,19 @@ export type MultiThreadSupport = {
  * `Cross-Origin-Embedder-Policy: require-corp`). Node 22+ exposes SAB
  * unconditionally — no headers needed.
  *
+ * Derived from {@link getIsolationStatus} so the runtime has exactly one
+ * detector of this fact; only the human-readable vocabulary lives here.
+ *
  * @returns flag plus a human-readable reason for the chosen variant.
  * @public
  * @see https://github.com/taucad/opencascade.js/blob/main/docs-site/content/docs/package/guides/multi-threading.mdx
  */
 export function detectMultiThreadSupport(): MultiThreadSupport {
-  if (typeof SharedArrayBuffer === 'undefined') {
-    return { supported: false, reason: 'SharedArrayBuffer unavailable' };
+  const status = getIsolationStatus();
+  if (status.crossOriginIsolated) {
+    return { supported: true, reason: 'SAB available' };
   }
-
-  // Browsers expose `crossOriginIsolated` as a boolean. Node and most non-browser
-  // runtimes do not define it — treat the missing flag as "not gated" (Node 22+
-  // ships SAB unconditionally).
-  if (typeof globalThis.crossOriginIsolated === 'boolean' && !globalThis.crossOriginIsolated) {
-    return { supported: false, reason: 'crossOriginIsolated=false (missing COOP/COEP headers)' };
-  }
-
-  return { supported: true, reason: 'SAB available' };
+  return { supported: false, reason: multiThreadReasons[status.reason] };
 }
 
 /**

@@ -424,7 +424,14 @@ const twoStringArgs = args<[string, string]>(
   (items) => items.length === 2 && isString(items[0]) && isString(items[1]),
   'Expected two strings',
 );
-const voidResult = result<void>((value) => value === undefined, 'Expected no result');
+/* `null` is admitted alongside `undefined` because a binary codec (msgpack)
+ * encodes an absent response payload as nil and decodes it back as `null`;
+ * the accepted value is normalised to `undefined` so a void call resolves
+ * identically on every transport. */
+const voidResult: WireValidator<void> = {
+  safeParse: (value) =>
+    value === undefined || value === null ? { success: true, data: undefined } : failure('Expected no result'),
+};
 const booleanResult = result<boolean>(isBoolean, 'Expected a boolean');
 const statResult = result<FileStat>(isFileStat, 'Expected a filesystem stat');
 
@@ -772,7 +779,7 @@ type HelloInput =
   | { readonly state: 'workspace'; readonly watchable: boolean }
   | { readonly state: 'unavailable'; readonly error: { readonly code: 'ROOT_UNAVAILABLE'; readonly message: string } };
 
-/** The sole first-party filesystem hello construction boundary. @internal */
+/** The sole first-party filesystem hello construction boundary. @public */
 export const createFileSystemBridgeHello = (input: HelloInput): FileSystemBridgeHello => {
   if (input.state === 'ready') {
     return { v: fileSystemBridgeProtocolVersion, ...input };

@@ -28,6 +28,7 @@ export type {
 } from '#filesystem-bridge.js';
 
 export {
+  createFileSystemBridgeHello,
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
   FileSystemBridgeProtocolVersionError,

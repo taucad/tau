@@ -10,11 +10,14 @@
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@msgpack/msgpack": "catalog:",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
-    "geospec": "workspace:*"
+    "@types/ws": "^8.18.1",
+    "geospec": "workspace:*",
+    "ws": "catalog:"
   }
 }

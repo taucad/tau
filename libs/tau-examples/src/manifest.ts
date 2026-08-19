@@ -35,6 +35,7 @@ export type ExampleManifest = {
     | 'hex-screwdriver'
     | 'hollow-box'
     | 'ibeam'
+    | 'jscad-logo'
     | 'lego'
     | 'logo'
     | 'logo-keychain'

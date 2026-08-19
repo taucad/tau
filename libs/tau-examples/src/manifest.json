@@ -175,6 +175,12 @@
   },
   {
     "kernel": "replicad",
+    "name": "jscad-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "jscad.svg", "main.ts"]
+  },
+  {
+    "kernel": "replicad",
     "name": "lego",
     "mainFile": "main.ts",
     "files": ["main.ts"]

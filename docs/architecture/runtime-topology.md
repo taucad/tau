@@ -248,9 +248,9 @@ The abort flag must be readable during **synchronous WASM execution**, when the 
 6. Worker event loop resumes, processes the queued `openFile`/`updateParameters` message.
 7. New render starts; the superseded Promise resolves with `{ superseded: true }`.
 
-Cross-origin isolation (COOP + COEP headers) is already a prerequisite for Tau -- `assertCrossOriginIsolated()` is called during kernel initialization for OpenCASCADE's pthread support. No new requirements.
+Cross-origin isolation (COOP + COEP headers) is already a prerequisite for Tau. Nothing throws when it is missing: kernel initialization reads `getIsolationStatus()` and logs exactly one warn naming the reason and the consequences (geometry pool falls back to copy delivery, render abort to wire-notify), and OCCT variant selection derives single-threaded mode from the same producer. No new requirements.
 
-For **watch events** (originating from the file manager worker, not the main thread), the signal arrives as a MessagePort message to the runtime worker. During synchronous WASM, these queue. The abort for watch events takes effect at the next async boundary (strategy 2) rather than mid-WASM (strategy 1). This is acceptable because the file debounce timer (500ms) already adds latency -- saving a few hundred milliseconds of wasted WASM computation is a marginal improvement that doesn't justify the complexity of a three-way SharedArrayBuffer.
+For **watch events** on the bridge arm (originating from the file manager worker, not the main thread), the signal arrives as a MessagePort message to the runtime worker. On the inline Node arm the event is delivered in-isolate by `fromNodeFs`'s own `fs.watch` handler, with no port hop. During synchronous WASM, these queue either way. The abort for watch events takes effect at the next async boundary (strategy 2) rather than mid-WASM (strategy 1). This is acceptable because the file debounce timer (500ms) already adds latency -- saving a few hundred milliseconds of wasted WASM computation is a marginal improvement that doesn't justify the complexity of a three-way SharedArrayBuffer.
 
 #### Signal channel slot layout and notification strategy
 
@@ -455,7 +455,7 @@ The current kernelMachine exists because the old protocol required orchestrating
 
 **Before:** Lines 148-167 subscribe to `fileWritten` and fan out `setFile` to every geometry unit.
 
-**After:** Entire relay deleted. Nothing replaces it -- the worker watches its own dependencies.
+**After:** Entire relay deleted. Nothing replaces it -- the worker watches its own dependencies. This now holds on the inline Node arm as well as the bridge arm: `fromNodeFs` opens one non-recursive `fs.watch` per parent directory of the dependency set, so a Node- or Electron-hosted worker rerenders autonomously without any filesystem service in front of it.
 
 ### RuntimeClient
 
@@ -535,14 +535,14 @@ Simplified. `render`, `fileChanged`, `cancel`, `setFile`, `setParameters`, and `
 
 ### Vite HMR
 
-| Concept              | Vite                                | Tau (target)                                         |
-| -------------------- | ----------------------------------- | ---------------------------------------------------- |
-| File watcher         | chokidar (OS-level)                 | `FileService.watch()` (VFS-level via ChangeEventBus) |
-| Dependency graph     | Module graph (import analysis)      | Bundle deps (esbuild metafile) + kernel resolvers    |
-| Change detection     | Watcher + module graph invalidation | Watch subscription scoped to dependency set          |
-| Debounce             | HMR batching                        | Worker-internal 500ms/50ms timers                    |
-| Rebuild trigger      | HMR update pushed to browser        | `geometryComputed` pushed to main thread             |
-| Scheduling authority | Vite dev server (autonomous)        | Kernel worker (autonomous)                           |
+| Concept              | Vite                                | Tau (target)                                                                                                                  |
+| -------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| File watcher         | chokidar (OS-level)                 | `FileService.watch()` (VFS-level via ChangeEventBus); inline Node arm -- `fs.watch` on parent directories inside `fromNodeFs` |
+| Dependency graph     | Module graph (import analysis)      | Bundle deps (esbuild metafile) + kernel resolvers                                                                             |
+| Change detection     | Watcher + module graph invalidation | Watch subscription scoped to dependency set                                                                                   |
+| Debounce             | HMR batching                        | Worker-internal 500ms/50ms timers                                                                                             |
+| Rebuild trigger      | HMR update pushed to browser        | `geometryComputed` pushed to main thread                                                                                      |
+| Scheduling authority | Vite dev server (autonomous)        | Kernel worker (autonomous)                                                                                                    |
 
 ### VS Code Language Server Protocol
 

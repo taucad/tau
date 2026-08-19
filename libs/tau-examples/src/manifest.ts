@@ -43,6 +43,7 @@ export type ExampleManifest = {
     | 'pot-plant'
     | 'projection-test'
     | 'rao-nozzle'
+    | 'replicad-logo'
     | 'simple-tray'
     | 'staircase'
     | 'stress-test'

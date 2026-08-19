@@ -223,6 +223,12 @@
   },
   {
     "kernel": "replicad",
+    "name": "replicad-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "main.ts", "replicad.svg"]
+  },
+  {
+    "kernel": "replicad",
     "name": "simple-tray",
     "mainFile": "main.ts",
     "files": ["main.ts"]

@@ -38,16 +38,17 @@ import thumbnail31 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
 import thumbnail32 from './kernels/replicad/pot-plant/thumbnail.webp?url';
 import thumbnail33 from './kernels/replicad/projection-test/thumbnail.webp?url';
 import thumbnail34 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
-import thumbnail35 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail36 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail37 from './kernels/replicad/stress-test/thumbnail.webp?url';
-import thumbnail38 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail39 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail40 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
-import thumbnail41 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail42 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail43 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail44 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail35 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
+import thumbnail36 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail37 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail38 from './kernels/replicad/stress-test/thumbnail.webp?url';
+import thumbnail39 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail40 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail41 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
+import thumbnail42 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail43 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail44 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail45 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
 
 /** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */
 export const thumbnailAssets = {
@@ -86,16 +87,17 @@ export const thumbnailAssets = {
   'replicad/pot-plant': thumbnail32,
   'replicad/projection-test': thumbnail33,
   'replicad/rao-nozzle': thumbnail34,
-  'replicad/simple-tray': thumbnail35,
-  'replicad/staircase': thumbnail36,
-  'replicad/stress-test': thumbnail37,
-  'replicad/t-slot-rail': thumbnail38,
-  'replicad/table': thumbnail39,
-  'replicad/tau-wordmark': thumbnail40,
-  'replicad/tray': thumbnail41,
-  'replicad/vase': thumbnail42,
-  'replicad/wavy-vase': thumbnail43,
-  'replicad/wedge-door-stopper': thumbnail44,
+  'replicad/replicad-logo': thumbnail35,
+  'replicad/simple-tray': thumbnail36,
+  'replicad/staircase': thumbnail37,
+  'replicad/stress-test': thumbnail38,
+  'replicad/t-slot-rail': thumbnail39,
+  'replicad/table': thumbnail40,
+  'replicad/tau-wordmark': thumbnail41,
+  'replicad/tray': thumbnail42,
+  'replicad/vase': thumbnail43,
+  'replicad/wavy-vase': thumbnail44,
+  'replicad/wedge-door-stopper': thumbnail45,
 } as const;
 
 /** Key of a generated example thumbnail asset. @public */

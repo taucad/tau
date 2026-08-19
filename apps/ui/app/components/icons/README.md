@@ -45,9 +45,10 @@ pnpm nx run ui:generate-svg-sprite
   `sprite.svg` below ~125 KB (compressed in transit, but uncompressed in the
   initial document). If it grows further, split icons into multiple sprites or
   move large/rare icons to lazy-loaded React components.
-- For raster brand assets (e.g. `manifold.png`), `<SvgIcon>` already supports a
-  PNG fallback via the `pngIcons` map — use it when an asset cannot be expressed
-  cleanly as path data.
+- Every icon is path data. The `pngIcons` `<image>` fallback that once carried
+  `manifold.png` is gone, along with the raster: the Manifold mark is now
+  generated as an SVG from the model itself, in
+  `libs/tau-examples/src/kernels/manifold/manifold-logo`.
 
 ## Attribution
 

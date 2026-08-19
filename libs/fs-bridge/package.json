@@ -1,6 +1,6 @@
 {
   "name": "@taucad/fs-bridge",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "MessagePort filesystem bridge adapters for @taucad/filesystem",
   "type": "module",
   "private": true,

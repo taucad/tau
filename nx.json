@@ -141,7 +141,8 @@
     },
     "version": {
       "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,converter,events,filesystem,fs-bridge,gltf-extensions,json-schema,memory,rpc,types,units,utils,vm",
-      "conventionalCommits": true
+      "currentVersionResolver": "git-tag",
+      "fallbackCurrentVersionResolver": "disk"
     },
     "changelog": {
       "workspaceChangelog": {

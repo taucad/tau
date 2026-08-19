@@ -1,6 +1,6 @@
 {
   "name": "@taucad/react",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "React hooks for @taucad/runtime",
   "type": "module",
   "private": false,
@@ -22,7 +22,8 @@
   "author": "Richard Fontein",
   "license": "Apache-2.0",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
@@ -31,8 +32,10 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
-      }
-    }
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
   },
   "imports": {
     "#*.js": "./src/*.ts",

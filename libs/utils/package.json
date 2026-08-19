@@ -1,6 +1,6 @@
 {
   "name": "@taucad/utils",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Tau shared utilities (ID generation, path, file, schema, dispose)",
   "type": "module",
   "private": true,

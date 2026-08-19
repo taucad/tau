@@ -1,6 +1,6 @@
 {
   "name": "@taucad/events",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Zero-dependency pub/sub primitive (Topic) with snapshot-on-emit, AbortSignal lifecycle, handler-error containment",
   "type": "module",
   "private": true,

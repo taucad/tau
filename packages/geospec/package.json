@@ -1,6 +1,6 @@
 {
   "name": "geospec",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.1",
   "description": "Geometry specification API for CAD models: DSL, selector language, diagnostics schema, and the executor seam",
   "type": "module",
   "sideEffects": false,
@@ -39,7 +39,8 @@
     "./runner/web": "./src/runner/web/index.ts",
     "./runner/worker": "./src/runner/worker/index.ts",
     "./selector": "./src/selector/index.ts",
-    "./step": "./src/step/index.ts"
+    "./step": "./src/step/index.ts",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
@@ -108,8 +109,10 @@
         "types": "./dist/step/index.d.mts",
         "import": "./dist/step/index.mjs",
         "default": "./dist/step/index.mjs"
-      }
-    }
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
   },
   "imports": {
     "#*.js": "./src/*.ts",

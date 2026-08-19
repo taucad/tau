@@ -1,6 +1,6 @@
 {
   "name": "@taucad/types",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Tau shared TypeScript types (API, project, CAD, file, graphics)",
   "type": "module",
   "private": true,

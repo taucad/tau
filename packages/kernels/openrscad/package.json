@@ -1,6 +1,6 @@
 {
   "name": "@taucad/openrscad",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "OpenRSCAD Rust WebAssembly kernel for OpenSCAD language models",
   "type": "module",
   "private": false,
@@ -24,7 +24,8 @@
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
-    "./kernel": "./src/openrscad.kernel.ts"
+    "./kernel": "./src/openrscad.kernel.ts",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
@@ -38,8 +39,10 @@
         "types": "./dist/openrscad.kernel.d.mts",
         "import": "./dist/openrscad.kernel.mjs",
         "default": "./dist/openrscad.kernel.mjs"
-      }
-    }
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
   },
   "imports": {
     "#*.js": "./src/*.ts",

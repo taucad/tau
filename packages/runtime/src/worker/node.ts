@@ -3,10 +3,11 @@
  *
  * Composes a {@link KernelRuntimeWorker} with {@link nodeWorkerHost}
  * to acquire `parentPort` from `node:worker_threads`, wire the
- * dispatcher, and install the crash trap. Consumers may target this explicit
- * subpath when its empty runtime definition is appropriate; configured
- * runtimes should use an application-owned worker entry and pass its URL to
- * `nodeWorkerTransport`.
+ * dispatcher, and install the crash trap. This entry hosts the full bundled
+ * preset — the same plugin set `createNodeClient` runs in-process — so a Node
+ * daemon or CLI gets a crash-isolated runtime without owning a worker entry;
+ * write your own entry only when a different plugin set is wanted, and pass its
+ * URL to `nodeWorkerTransport`.
  *
  * Per `library-api-policy.md` §6 (Subpath Exports) and §10 (High-Level
  * Wrappers + Low-Level Escape Hatches): each environment ships its
@@ -32,8 +33,8 @@
  */
 
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
-import { createRuntimeWorker, defineRuntime } from '#worker/index.js';
+import { presets } from '#plugins/presets.js';
+import { createRuntimeWorker } from '#worker/index.js';
 
-const runtime = defineRuntime({});
-const worker = createRuntimeWorker({ runtime });
+const worker = createRuntimeWorker({ runtime: presets.all() });
 await nodeWorkerHost({ worker }).open();

@@ -65,6 +65,12 @@ describe('node-worker transport split — cycle prevention (R2)', () => {
     expect(stripped).not.toMatch(/new URL\(\s*["'][^"']*["']\s*,\s*import\.meta\.url/);
   });
 
+  it('`worker/node.ts` hosts the bundled preset', () => {
+    const source = stripComments(read(workerEntryPath));
+    expect(source).toMatch(/import\s+{[^}]*\bpresets\b[^}]*}\s+from\s+["']#plugins\/presets/);
+    expect(source).toMatch(/createRuntimeWorker\({\s*runtime:\s*presets\.all\(\)\s*}\)/);
+  });
+
   it('`worker/node.ts` STATIC-imports `nodeWorkerHost` and never reaches the transport composition or the client', () => {
     const source = stripComments(read(workerEntryPath));
     expect(source).toMatch(/import\s+{[^}]*\bnodeWorkerHost\b[^}]*}\s+from\s+["']#transport\/node-worker-host/);

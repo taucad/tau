@@ -255,6 +255,12 @@ resolution, and FS bridging:
   `MessageChannelMain`-style port handoff so the host and worker share
   the same `Port<unknown>` shape as the browser. The application supplies
   the worker entry URL because only its build owns that executable module.
+  The bundled `@taucad/runtime/worker/node` entry hosts `presets.all()` — the
+  same plugin set `createNodeClient` runs in-process — so an unbundled Node
+  process (daemon, CLI) can name it directly with
+  `new URL(import.meta.resolve('@taucad/runtime/worker/node'))` instead of
+  writing an entry. A bundled application should still point at its own entry
+  so the bundler can see the worker module and emit its chunk.
 - `webSocketTransport` — a kernel host in another process or on another
   machine. The client is browser-safe (`@taucad/runtime/transport/websocket`);
   the Node server half is `webSocketHost`

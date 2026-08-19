@@ -39,7 +39,7 @@ type CleanupModule = {
   cleanup: () => void;
 };
 
-const manifoldModuleVersion = '3.3.2';
+const manifoldModuleVersion = '3.4.1';
 
 /**
  * Canonical regex for detecting manifold-3d usage in source code.
@@ -180,7 +180,7 @@ async function createGlbFromManifoldOutput(output: unknown): Promise<Uint8Array<
     gltfNodeModule['anyToGLTFNodeList'],
     'anyToGLTFNodeList',
   );
-  const toGltfDocument = getRequiredFunction<(nodes: unknown[]) => Document>(
+  const toGltfDocument = getRequiredFunction<(nodes: unknown[]) => Promise<Document>>(
     sceneBuilderModule['GLTFNodesToGLTFDoc'],
     'GLTFNodesToGLTFDoc',
   );
@@ -191,7 +191,7 @@ async function createGlbFromManifoldOutput(output: unknown): Promise<Uint8Array<
     throw new Error('No geometry was returned from the Manifold model.');
   }
 
-  const document = toGltfDocument(nodes);
+  const document = await toGltfDocument(nodes);
   const io = configureIo(new NodeIO());
   return io.writeBinary(document);
 }

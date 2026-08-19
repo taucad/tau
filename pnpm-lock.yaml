@@ -460,8 +460,8 @@ catalogs:
       specifier: ^8.0.0
       version: 8.0.0
     manifold-3d:
-      specifier: 3.3.2
-      version: 3.3.2
+      specifier: 3.4.1
+      version: 3.4.1
     mermaid:
       specifier: ^11.15.0
       version: 11.15.0
@@ -1153,7 +1153,7 @@ importers:
         version: 0.552.0(react@19.2.7)
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.3.2
+        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.27.7)
       mermaid:
         specifier: 'catalog:'
         version: 11.15.0
@@ -2484,7 +2484,7 @@ importers:
         version: link:../geospec
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.3.2
+        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.27.7)
     devDependencies:
       '@libcascade/toolchain':
         specifier: 3.0.2
@@ -2601,7 +2601,7 @@ importers:
         version: 3.0.0
       manifold-3d:
         specifier: 'catalog:'
-        version: 3.3.2
+        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.27.7)
       nanoid:
         specifier: ^5.1.14
         version: 5.1.14
@@ -18603,8 +18603,8 @@ packages:
   makeerror@1.0.12:
     resolution: {integrity: sha512-JmqCvUhmt43madlpFzG4BQzG2Z3m6tvQDNKdClZnO3VbIudJYmxsT0FNJMeiB2+JTSlTQTSbU8QdesVmwJcmLg==}
 
-  manifold-3d@3.3.2:
-    resolution: {integrity: sha512-Xx+S7kkbqlZxSPfBKH5yVKDO6k/eW7JRvnG1dKCFO0D4zjifOV5GM18TR0sREDcbKAzglHZ5OoxxpZRkxg6U5A==}
+  manifold-3d@3.4.1:
+    resolution: {integrity: sha512-qb20ldFMUBu3w0dBZ61Hmi3FKCqGxST92wC+wH3iOTyT+5qCyKPvi9xDAFDfhPtkw0YfJQ5XsQfUIvFClyRFOw==}
     hasBin: true
 
   map-obj@5.0.2:
@@ -18615,6 +18615,11 @@ packages:
     resolution: {integrity: sha512-WWC0ZuMzCyDHYCasEGs4IPvLyTGftYwh6wIEOULOF0HXcqZlhwRzrK0w2VUlxWA98xnvb/jszw4ZSkJ6ADpM6Q==}
     engines: {node: '>=0.10.0'}
 
+    peerDependencies:
+      '@gltf-transform/core': ^4.2.0
+      '@gltf-transform/extensions': ^4.2.0
+      '@gltf-transform/functions': ^4.2.0
+      esbuild-wasm: ^0.27.3
   markdown-extensions@2.0.0:
     resolution: {integrity: sha512-o5vL7aDWatOTX8LzaS1WMoaoxIiLRQJuIKKe2wAw6IeULDHaqbiqiggmx+pKvZDb1Sj+pE46Sn1T7lCqfFtg1Q==}
     engines: {node: '>=16'}
@@ -42035,8 +42040,9 @@ snapshots:
   makeerror@1.0.12:
     dependencies:
       tmpl: 1.0.5
+      '@jridgewell/resolve-uri': 3.1.2
 
-  manifold-3d@3.3.2:
+  manifold-3d@3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.27.7):
     dependencies:
       '@gltf-transform/core': 4.4.0
       '@gltf-transform/extensions': 4.4.0

@@ -26,18 +26,39 @@
  * @internal
  */
 
+import type { MessagePortLike } from '@taucad/rpc';
+
 /**
- * Detect any DOM `MessagePort` or Node `worker_threads` `MessagePort`
- * instance via a structural sniff — `globalThis.MessagePort` is absent
- * in Node and `node:worker_threads` is async-loaded, so an `instanceof`
- * check is unreliable across environments.
+ * Detect a port by shape rather than by `instanceof`. `globalThis.MessagePort`
+ * has existed in Node since v15 and `worker_threads.MessagePort` *is* it, so
+ * the `instanceof` arm is not the problem it was once documented to be — the
+ * sniff exists because the runtime also admits plain structural ports
+ * supplied by in-process hosts, which are not `MessagePort` instances.
+ *
+ * The accepted shape is exactly `MessagePortLike` — `postMessage`,
+ * `addEventListener`, `removeEventListener`, `close` — because every consumer
+ * of the value drives it through `wrapMessagePort`, which calls those four.
+ * EventEmitter-shaped ports (`on`/`off`) are deliberately **not** admitted:
+ * the validator must not accept a shape its consumer cannot drive
+ * (`wrapMessagePortMain` in `electron/electron-utility-host.ts` is the
+ * adapter for that family, and it never crosses the initialize path).
+ *
+ * Shared with `runtime-protocol.schemas.ts`, which validates
+ * `InitializeMemoryHandle.fileSystemPort` with it.
+ *
+ * @internal
  */
-function isMessagePortLike(value: Record<string, unknown>): boolean {
-  const candidate = value as { postMessage?: unknown; addEventListener?: unknown; on?: unknown; close?: unknown };
-  if (typeof candidate.postMessage !== 'function' || typeof candidate.close !== 'function') {
+export function isMessagePortLike(value: unknown): value is MessagePortLike {
+  if (value === null || typeof value !== 'object') {
     return false;
   }
-  return typeof candidate.addEventListener === 'function' || typeof candidate.on === 'function';
+  const candidate = value as Record<keyof MessagePortLike, unknown>;
+  return (
+    typeof candidate.postMessage === 'function' &&
+    typeof candidate.addEventListener === 'function' &&
+    typeof candidate.removeEventListener === 'function' &&
+    typeof candidate.close === 'function'
+  );
 }
 
 /**

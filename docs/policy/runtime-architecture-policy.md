@@ -211,17 +211,15 @@ Runtime filesystem access is intentionally authorization-blind. It resolves, rea
 
 ## Transport Abstraction
 
-```typescript
-type RuntimeTransport = {
-  send(message: RuntimeCommand, transferables?: Transferable[]): void;
-  onMessage(handler: (message: RuntimeResponse) => void): void;
-  close(): void;
-};
-```
+A transport is a `TransportPlugin` built with `defineRuntimeTransport` (`packages/runtime/src/transport/runtime-transport.types.ts`, `@taucad/runtime/transport`): `{ id, describe(), materialize() }`. `describe()` returns the diagnostic `TransportDescriptor` (`wire`, `memory.geometryDelivery`, `memory.abortSignal`, `fileSystem`) and runtime behaviour MUST NOT branch on it. `materialize()` returns the client-side fat handle `RuntimeTransportClient` — `open()` yields a typed RPC channel and hello, `closed` settles exactly once with a `RuntimeTransportCloseResult` (`requested | render-timeout | host-exit | wire-failure`), and `renderTimeoutRecovery` is the behavioural (not descriptor-derived) recovery contract. Host-side constructors are standalone named exports (`RuntimeTransportHost`), never accessors on the plugin.
 
-**Built-in:** `createWorkerTransport(workerUrl)` wraps a Web Worker as a `RuntimeTransport`.
+Every wire is carried by `@taucad/rpc`'s callback-shaped `Port<T>` (`postMessage` / `onMessage` / `start?` / `close`); adapters map the concrete substrate onto it — `wrapMessagePort` for DOM and `worker_threads` ports (`MessagePortLike`), `wrapWorkerAsPort` for a `Worker`, `wrapMessagePortMain` for Electron. A new wire is a new adapter to `Port<T>` plus a codec if the substrate is not structured-clone; the `WireMessage` envelope and `protocolVersion` do not change.
 
-**Future transports:** WebSocket (remote kernel server), HTTP + SSE (serverless endpoints), `worker_threads` (Node.js).
+**Built-in:** `webWorkerTransport`, `nodeWorkerTransport`, `inProcessTransport`, `electronUtilityTransport` (+ `electronUtilityHost`), `webSocketTransport` (+ `webSocketHost`).
+
+**Remote wire (shipped):** `webSocketTransport` (client, browser-safe — `@taucad/runtime/transport/websocket`) and `webSocketHost` (Node `ws` server — `@taucad/runtime/transport/websocket-host`) carry the runtime wire to a kernel host in another process or on another machine: `wire: 'remote'`, `copy` delivery, `wire-notify` abort, one kernel worker per connection, msgpack on the wire (`wrapWebSocket` + the codec in `@taucad/rpc`), and an exact-match origin allowlist that default-denies browsers. The consumer's own filesystem is served to the remote kernel over a **second socket** (`/fs`), never multiplexed onto the runtime socket — no multiplexer exists and `sessionKey` never crosses the wire, so two channels on one port would consume each other's frames. Remote hosts are bound to the same build (`docs/policy/runtime-compatibility-policy.md:74`); `TransportProtocolVersionError` is the enforced arm and a cross-version compatibility matrix is the add-when. See `docs/research/runtime-websocket-transport-blueprint.md`.
+
+**Future transports:** HTTP + SSE (serverless endpoints).
 
 ## Data Flow: File Edit to Geometry Display
 

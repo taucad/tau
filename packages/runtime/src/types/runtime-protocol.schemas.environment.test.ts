@@ -107,4 +107,30 @@ describe('runtime initialize memory handle port validation (X7)', () => {
     expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: { postMessage: 1 } }).success).toBe(false);
     expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: {} }).success).toBe(false);
   });
+
+  it('should reject port shapes that wrapMessagePort cannot drive', async () => {
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const noop = (): void => {
+      /* No-op. */
+    };
+
+    // EventEmitter-shaped: `on`/`off` instead of add/removeEventListener. Previously admitted, then crashed in wrapMessagePort.
+    expect(
+      runtimeInitializeMemoryHandleSchema.safeParse({
+        fileSystemPort: { postMessage: noop, on: noop, off: noop, close: noop },
+      }).success,
+    ).toBe(false);
+    // Missing removeEventListener: unsubscribe would throw.
+    expect(
+      runtimeInitializeMemoryHandleSchema.safeParse({
+        fileSystemPort: { postMessage: noop, addEventListener: noop, close: noop },
+      }).success,
+    ).toBe(false);
+    // Missing close: transport shutdown would throw.
+    expect(
+      runtimeInitializeMemoryHandleSchema.safeParse({
+        fileSystemPort: { postMessage: noop, addEventListener: noop, removeEventListener: noop },
+      }).success,
+    ).toBe(false);
+  });
 });

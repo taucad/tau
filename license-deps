@@ -1,6 +1,9 @@
 # Third-Party Licenses
 
-This file lists all third-party dependencies used by Tau and their respective licenses.
+This file lists the third-party dependencies distributed with the published `@taucad/runtime`
+artifact — its production and optional dependency closure, plus that of the workspace libraries
+bundled into it — and their respective licenses. It ships inside the artifact as
+`THIRD_PARTY_LICENSES.md`.
 
 ## Licensing Overview
 
@@ -25,29 +28,50 @@ By using Tau, you agree to comply with the license terms of all included depende
 | License | Count |
 |---------|-------|
 | (MIT OR GPL-3.0-or-later) | 1 |
+| Apache-2.0 AND LGPL-3.0-or-later | 3 |
+| Apache-2.0 AND LGPL-3.0-or-later AND MIT | 1 |
 | LGPL-2.1 | 1 |
-| LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 | 2 |
-| Apache 2.0 | 1 |
-| Apache-2.0 | 58 |
+| LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 | 1 |
+| LGPL-3.0-or-later | 10 |
+| Apache-2.0 | 18 |
+| (AFL-2.1 OR BSD-3-Clause) | 1 |
+| (MIT AND Zlib) | 1 |
 | (MIT OR CC0-1.0) | 1 |
 | 0BSD | 1 |
-| BlueOak-1.0.0 | 1 |
-| BSD-2-Clause | 1 |
-| BSD-3-Clause | 3 |
-| BSL-1.0 | 2 |
-| ISC | 4 |
-| MPL-2.0 | 1 |
-| SEE LICENSE IN LICENSE | 1 |
-| SIL OPEN FONT LICENSE | 1 |
-| UNKNOWN | 3 |
-| Unlicense | 2 |
-| MIT | 258 |
+| BSD-3-Clause | 2 |
+| ISC | 6 |
+| UNKNOWN | 1 |
+| MIT | 80 |
 
 ## (MIT OR GPL-3.0-or-later)
 
 > This package is dual-licensed. Tau uses it under the **MIT License** terms.
 
 - **jszip** v3.10.1 — [Repository](https://github.com/Stuk/jszip)
+
+## Apache-2.0 AND LGPL-3.0-or-later
+
+> **LGPL License Notice**
+>
+> Library-style copyleft. Tau consumes these packages as libraries; the LGPL
+> obligation is satisfied by attribution and source availability.
+>
+> Source for Tau forks of LGPL libraries is available at: https://github.com/taucad
+
+- **@img/sharp-win32-arm64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-win32-ia32** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-win32-x64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+
+## Apache-2.0 AND LGPL-3.0-or-later AND MIT
+
+> **LGPL License Notice**
+>
+> Library-style copyleft. Tau consumes these packages as libraries; the LGPL
+> obligation is satisfied by attribution and source availability.
+>
+> Source for Tau forks of LGPL libraries is available at: https://github.com/taucad
+
+- **@img/sharp-wasm32** v0.34.5 — [Repository](https://github.com/lovell/sharp)
 
 ## LGPL-2.1
 
@@ -70,76 +94,57 @@ By using Tau, you agree to comply with the license terms of all included depende
 > Source for Tau forks of LGPL libraries is available at: https://github.com/taucad
 
 - **libcascade** v3.0.2 — [Repository](https://github.com/taucad/opencascade.js)
-- **libcascade** v3.0.0 — [Repository](https://github.com/taucad/opencascade.js)
 
-## Apache 2.0
+## LGPL-3.0-or-later
 
-> Apache-2.0 licensed packages require preservation of copyright notices and disclaimers.
+> **LGPL License Notice**
+>
+> Library-style copyleft. Tau consumes these packages as libraries; the LGPL
+> obligation is satisfied by attribution and source availability.
+>
+> Source for Tau forks of LGPL libraries is available at: https://github.com/taucad
 
-- **qrcode-terminal** v0.12.0 — [Repository](https://github.com/gtanner/qrcode-terminal)
+- **@img/sharp-libvips-darwin-arm64** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-darwin-x64** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-linux-arm** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-linux-arm64** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-linux-ppc64** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-linux-riscv64** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-linux-s390x** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-linux-x64** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-linuxmusl-arm64** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
+- **@img/sharp-libvips-linuxmusl-x64** v1.2.4 — [Repository](https://github.com/lovell/sharp-libvips)
 
 ## Apache-2.0
 
 > Apache-2.0 licensed packages require preservation of copyright notices and disclaimers.
 
-- **@ai-sdk/cerebras** v2.0.57 — [Repository](https://github.com/vercel/ai)
-- **@ai-sdk/langchain** v2.0.181 — [Repository](https://github.com/vercel/ai)
-- **@ai-sdk/openai** v3.0.73 — [Repository](https://github.com/vercel/ai)
-- **@ai-sdk/provider-utils** v4.0.30 — [Repository](https://github.com/vercel/ai)
-- **@ai-sdk/react** v3.0.210 — [Repository](https://github.com/vercel/ai)
-- **@ai-sdk/ui-utils** v1.2.11 — [Repository](https://github.com/vercel/ai)
-- **@opentelemetry/api** v1.9.1 — [Repository](https://github.com/open-telemetry/opentelemetry-js)
-- **@opentelemetry/auto-instrumentations-node** v0.71.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js-contrib)
-- **@opentelemetry/exporter-logs-otlp-http** v0.213.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js)
-- **@opentelemetry/exporter-prometheus** v0.213.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js)
-- **@opentelemetry/exporter-trace-otlp-http** v0.213.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js)
-- **@opentelemetry/instrumentation-pino** v0.59.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js-contrib)
-- **@opentelemetry/instrumentation-socket.io** v0.60.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js-contrib)
-- **@opentelemetry/resources** v2.8.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js)
-- **@opentelemetry/sdk-logs** v0.213.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js)
-- **@opentelemetry/sdk-metrics** v2.8.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js)
-- **@opentelemetry/sdk-node** v0.213.0 — [Repository](https://github.com/open-telemetry/opentelemetry-js)
-- **@playwright/test** v1.61.0 — [Repository](https://github.com/microsoft/playwright)
-- **@rjsf/core** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
-- **@rjsf/utils** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
-- **@rjsf/validator-ajv8** v5.24.13 — [Repository](https://github.com/rjsf-team/react-jsonschema-form)
-- **@taucad/chat** v0.1.0
-- **@taucad/converter** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/events** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/filesystem** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/fs-bridge** v0.0.1 — [Repository](https://github.com/taucad/tau)
-- **@taucad/gltf-extensions** v0.0.1 — [Repository](https://github.com/taucad/tau)
-- **@taucad/json-schema** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/memory** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/oxlint** v0.1.0
-- **@taucad/react** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/rpc** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/runtime** v0.1.0-beta.1 — [Repository](https://github.com/taucad/tau)
-- **@taucad/types** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/units** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/utils** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
-- **@taucad/vm** v0.0.1 — [Repository](https://github.com/taucad/tau)
-- **@traceloop/instrumentation-langchain** v0.22.6 — [Repository](https://github.com/traceloop/openllmetry-js)
-- **@typescript/native-preview** v7.0.0-dev.20260223.1 — [Repository](https://github.com/microsoft/typescript-go)
-- **ai** v6.0.208 — [Repository](https://github.com/vercel/ai)
-- **bson** v6.10.4 — [Repository](https://github.com/mongodb/js-bson)
-- **chrome-launcher** v1.2.1 — [Repository](https://github.com/GoogleChrome/chrome-launcher/)
-- **class-variance-authority** v0.7.1 — [Repository](https://github.com/joe-bell/cva)
-- **comlink** v4.4.2 — [Repository](https://github.com/GoogleChromeLabs/comlink)
+- **@img/sharp-darwin-arm64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-darwin-x64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-linux-arm** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-linux-arm64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-linux-ppc64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-linux-riscv64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-linux-s390x** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-linux-x64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-linuxmusl-arm64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **@img/sharp-linuxmusl-x64** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+- **detect-libc** v2.1.2 — [Repository](https://github.com/lovell/detect-libc)
 - **draco3dgltf** v1.5.7 — [Repository](https://github.com/google/draco)
-- **drizzle-orm** v0.45.2 — [Repository](https://github.com/drizzle-team/drizzle-orm)
-- **fake-indexeddb** v6.2.5 — [Repository](https://github.com/dumbmatter/fakeIndexedDB)
-- **lighthouse** v13.4.0 — [Repository](https://github.com/GoogleChrome/lighthouse)
 - **manifold-3d** v3.4.1 — [Repository](https://github.com/elalish/manifold)
 - **nanoraster** v0.2.0 — [Repository](https://github.com/taucad/nanoraster)
-- **openai** v4.104.0 — [Repository](https://github.com/openai/openai-node)
-- **pdf-parse** v2.4.5 — [Repository](https://github.com/mehmet-kozan/pdf-parse)
-- **reflect-metadata** v0.2.2 — [Repository](https://github.com/rbuckton/reflect-metadata)
-- **rxjs** v7.8.2 — [Repository](https://github.com/reactivex/rxjs)
-- **source-map-explorer** v2.5.3 — [Repository](https://github.com/danvk/source-map-explorer)
-- **streamdown** v1.6.11 — [Repository](https://github.com/vercel/streamdown)
-- **typescript** v5.9.3 — [Repository](https://github.com/microsoft/TypeScript)
-- **web-vitals** v5.3.0 — [Repository](https://github.com/GoogleChrome/web-vitals)
+- **nanoraster-darwin-arm64** v0.2.0 — [Repository](https://github.com/taucad/nanoraster)
+- **nanoraster-linux-x64-gnu** v0.2.0 — [Repository](https://github.com/taucad/nanoraster)
+- **nanoraster-win32-x64-msvc** v0.2.0 — [Repository](https://github.com/taucad/nanoraster)
+- **sharp** v0.34.5 — [Repository](https://github.com/lovell/sharp)
+
+## (AFL-2.1 OR BSD-3-Clause)
+
+- **json-schema** v0.4.0 — [Repository](http://github.com/kriszyp/json-schema)
+
+## (MIT AND Zlib)
+
+- **pako** v1.0.11 — [Repository](https://github.com/nodeca/pako)
 
 ## (MIT OR CC0-1.0)
 
@@ -151,317 +156,105 @@ By using Tau, you agree to comply with the license terms of all included depende
 
 - **tslib** v2.8.1 — [Repository](https://github.com/Microsoft/tslib)
 
-## BlueOak-1.0.0
-
-- **minimatch** v10.2.6 — [Repository](https://github.com/isaacs/minimatch)
-
-## BSD-2-Clause
-
-- **dotenv** v17.4.2 — [Repository](https://github.com/motdotla/dotenv)
-
 ## BSD-3-Clause
 
-- **diff** v8.0.4 — [Repository](https://github.com/kpdecker/jsdiff)
-- **eslint-plugin-jsdoc** v62.9.0 — [Repository](https://github.com/gajus/eslint-plugin-jsdoc)
+- **diff** v4.0.4 — [Repository](https://github.com/kpdecker/jsdiff)
 - **source-map-js** v1.2.1 — [Repository](https://github.com/7rulnik/source-map-js)
-
-## BSL-1.0
-
-> Boost Software License 1.0 packages are permissive and compatible with Tau distribution.
-> Preserve copyright notices and license disclaimers in third-party notices.
-
-- **clipper2-ts** v2.0.1-17 — [Repository](https://github.com/countertype/clipper2-ts)
-- **clipper2-wasm** v0.4.0 — [Repository](https://github.com/ErikSom/Clipper2-WASM)
 
 ## ISC
 
 - **@msgpack/msgpack** v3.1.3 — [Repository](https://github.com/msgpack/msgpack-javascript)
-- **eslint-plugin-no-barrel-files** v1.3.1 — [Repository](https://github.com/art0rz/eslint-plugin-no-barrel-files)
-- **knip** v6.17.1 — [Repository](https://github.com/webpro-nl/knip)
-- **lucide-react** v0.552.0 — [Repository](https://github.com/lucide-icons/lucide)
-
-## MPL-2.0
-
-- **@axe-core/playwright** v4.11.3 — [Repository](https://github.com/dequelabs/axe-core-npm)
-
-## SEE LICENSE IN LICENSE
-
-- **posthog-js** v1.391.2 — [Repository](https://github.com/PostHog/posthog-js)
-
-## SIL OPEN FONT LICENSE
-
-- **geist** v1.7.2 — [Repository](https://github.com/vercel/geist-font)
+- **flatbush** v4.6.2 — [Repository](https://github.com/mourner/flatbush)
+- **flatqueue** v3.1.0 — [Repository](https://github.com/mourner/flatqueue)
+- **inherits** v2.0.4 — [Repository](https://github.com/isaacs/inherits)
+- **make-error** v1.3.6 — [Repository](https://github.com/JsCommunity/make-error)
+- **semver** v7.8.5 — [Repository](https://github.com/npm/node-semver)
 
 ## UNKNOWN
 
-- **@better-auth-ui/core** v1.6.15 — [Repository](https://github.com/better-auth-ui/better-auth-ui)
-- **@better-auth-ui/react** v1.6.15 — [Repository](https://github.com/better-auth-ui/better-auth-ui)
 - **@taucad/kcl-wasm-lib** v0.1.148 — [Repository](https://github.com/taucad/modeling-app)
-
-## Unlicense
-
-- **isbot** v5.1.43 — [Repository](https://github.com/omrilotan/isbot)
-- **postgres** v3.4.9 — [Repository](https://github.com/porsager/postgres)
 
 ## MIT
 
-- **@arethetypeswrong/cli** v0.18.3 — [Repository](https://github.com/arethetypeswrong/arethetypeswrong.github.io)
-- **@better-auth/api-key** v1.6.19 — [Repository](https://github.com/better-auth/better-auth)
-- **@better-auth/stripe** v1.6.26 — [Repository](https://github.com/better-auth/better-auth)
-- **@eslint-community/eslint-plugin-eslint-comments** v4.7.2 — [Repository](https://github.com/eslint-community/eslint-plugin-eslint-comments)
-- **@fastify/cookie** v11.0.2 — [Repository](https://github.com/fastify/fastify-cookie)
-- **@fastify/cors** v11.2.0 — [Repository](https://github.com/fastify/fastify-cors)
-- **@fastify/helmet** v13.0.2 — [Repository](https://github.com/fastify/fastify-helmet)
-- **@fastify/otel** v0.17.1 — [Repository](https://github.com/fastify/otel)
+- **@cspotcode/source-map-support** v0.8.1 — [Repository](https://github.com/cspotcode/node-source-map-support)
+- **@emnapi/runtime** v1.11.3 — [Repository](https://github.com/toyobayashi/emnapi)
 - **@gltf-transform/core** v4.4.0 — [Repository](https://github.com/donmccurdy/glTF-Transform)
 - **@gltf-transform/extensions** v4.4.0 — [Repository](https://github.com/donmccurdy/glTF-Transform)
 - **@gltf-transform/functions** v4.4.0 — [Repository](https://github.com/donmccurdy/glTF-Transform)
-- **@headless-tree/core** v1.7.0 — [Repository](https://github.com/lukasbach/headless-tree)
-- **@headless-tree/react** v1.7.0 — [Repository](https://github.com/lukasbach/headless-tree)
-- **@hookform/resolvers** v5.4.0 — [Repository](https://github.com/react-hook-form/resolvers)
-- **@inkjs/ui** v2.0.0 — [Repository](https://github.com/vadimdemedes/ink-ui)
+- **@img/colour** v1.1.0 — [Repository](https://github.com/lovell/colour)
+- **@jridgewell/resolve-uri** v3.1.2 — [Repository](https://github.com/jridgewell/resolve-uri)
+- **@jridgewell/sourcemap-codec** v1.5.5 — [Repository](https://github.com/jridgewell/sourcemaps)
+- **@jridgewell/trace-mapping** v0.3.31 — [Repository](https://github.com/jridgewell/sourcemaps)
+- **@jridgewell/trace-mapping** v0.3.9 — [Repository](https://github.com/jridgewell/trace-mapping)
 - **@jscad/modeling** v2.13.0 — [Repository](https://github.com/jscad/OpenJSCAD.org)
+- **@jscadui/3mf-export** v0.5.0
 - **@kittycad/lib** v2.0.48 — [Repository](https://github.com/KittyCAD/kittycad.ts)
-- **@langchain/anthropic** v1.5.0 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/cerebras** v1.0.4 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/classic** v1.0.36 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/community** v1.1.29 — [Repository](https://github.com/langchain-ai/langchainjs-community)
-- **@langchain/core** v1.2.0 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/google-vertexai** v2.2.0 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/langgraph** v1.4.4 — [Repository](https://github.com/langchain-ai/langgraphjs)
-- **@langchain/langgraph-checkpoint** v1.1.2 — [Repository](https://github.com/langchain-ai/langgraphjs)
-- **@langchain/langgraph-checkpoint-postgres** v1.0.3 — [Repository](https://github.com/langchain-ai/langgraphjs)
-- **@langchain/ollama** v1.3.0 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/openai** v1.5.3 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/tavily** v1.2.0 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@langchain/xai** v1.4.3 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **@monaco-editor/react** v4.7.0 — [Repository](https://github.com/suren-atoyan/monaco-react)
-- **@morphllm/morphsdk** v0.2.180
-- **@nestjs/common** v11.1.27 — [Repository](https://github.com/nestjs/nest)
-- **@nestjs/config** v4.0.4 — [Repository](https://github.com/nestjs/config)
-- **@nestjs/core** v11.1.27 — [Repository](https://github.com/nestjs/nest)
-- **@nestjs/platform-fastify** v11.1.27 — [Repository](https://github.com/nestjs/nest)
-- **@nestjs/platform-socket.io** v11.1.27 — [Repository](https://github.com/nestjs/nest)
-- **@nestjs/platform-ws** v11.1.27 — [Repository](https://github.com/nestjs/nest)
-- **@nestjs/schematics** v11.1.0 — [Repository](https://github.com/nestjs/schematics)
-- **@nestjs/terminus** v11.1.1 — [Repository](https://github.com/nestjs/terminus)
-- **@nestjs/testing** v11.1.27 — [Repository](https://github.com/nestjs/nest)
-- **@nestjs/websockets** v11.1.27 — [Repository](https://github.com/nestjs/nest)
-- **@netlify/vite-plugin-react-router** v3.1.1 — [Repository](https://github.com/netlify/remix-compute)
-- **@nx/devkit** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/eslint** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/eslint-plugin** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/js** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/nest** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/node** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/playwright** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/react** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/vite** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/vitest** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/web** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@nx/webpack** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **@octokit/rest** v22.0.1 — [Repository](https://github.com/octokit/rest.js)
-- **@oxc-node/core** v0.0.35 — [Repository](https://github.com/oxc-project/oxc-node)
-- **@panzoom/panzoom** v4.6.2 — [Repository](https://github.com/timmywil/panzoom)
-- **@protontech/eslint-plugin-enforce-uint8array-arraybuffer** v2.0.0 — [Repository](https://github.com/ProtonMail/eslint-plugin-enforce-uint8array-arraybuffer)
-- **@react-router/dev** v7.14.2 — [Repository](https://github.com/remix-run/react-router)
-- **@react-router/express** v7.14.2 — [Repository](https://github.com/remix-run/react-router)
-- **@react-router/fs-routes** v7.14.2 — [Repository](https://github.com/remix-run/react-router)
-- **@react-router/node** v7.14.2 — [Repository](https://github.com/remix-run/react-router)
-- **@react-three/drei** v10.7.7 — [Repository](https://github.com/pmndrs/drei)
-- **@react-three/fiber** v9.6.1 — [Repository](https://github.com/pmndrs/react-three-fiber)
-- **@react-three/postprocessing** v3.0.4 — [Repository](https://github.com/pmndrs/react-postprocessing)
-- **@remix-pwa/client** v3.0.7 — [Repository](https://github.com/remix-pwa/monorepo)
-- **@remix-pwa/dev** v3.1.0 — [Repository](https://github.com/remix-pwa/monorepo)
-- **@remix-pwa/sw** v3.0.10 — [Repository](https://github.com/remix-pwa/monorepo)
-- **@remix-pwa/worker-runtime** v2.1.4
-- **@shikijs/langs-precompiled** v3.23.0 — [Repository](https://github.com/shikijs/shiki)
-- **@shikijs/monaco** v3.23.0 — [Repository](https://github.com/shikijs/shiki)
-- **@shikijs/themes** v3.23.0 — [Repository](https://github.com/shikijs/shiki)
-- **@silvenon/vite-plugin-devtools-json** v1.0.1 — [Repository](https://github.com/silvenon/vite-plugin-devtools-json)
-- **@size-limit/file** v12.1.0 — [Repository](https://github.com/ai/size-limit)
-- **@socket.io/redis-streams-adapter** v0.3.1 — [Repository](https://github.com/socketio/socket.io-redis-streams-adapter)
-- **@statelyai/inspect** v0.4.0 — [Repository](https://github.com/statelyai/inspect)
-- **@tailwindcss/typography** v0.5.20 — [Repository](https://github.com/tailwindlabs/tailwindcss-typography)
-- **@tailwindcss/vite** v4.3.1 — [Repository](https://github.com/tailwindlabs/tailwindcss)
-- **@tanstack/react-query** v5.101.0 — [Repository](https://github.com/TanStack/query)
-- **@tanstack/react-table** v8.21.3 — [Repository](https://github.com/TanStack/table)
-- **@tanstack/react-virtual** v3.14.3 — [Repository](https://github.com/TanStack/virtual)
+- **@nodable/entities** v2.2.0 — [Repository](https://github.com/nodable/val-parsers)
 - **@taulabs/assimpjs** v0.0.19 — [Repository](https://github.com/taucad/assimpjs)
 - **@taulabs/replicad** v0.23.4-beta.2 — [Repository](https://github.com/taucad/replicad)
 - **@taulabs/replicad-opencascadejs** v0.23.0-beta.0 — [Repository](https://github.com/taucad/replicad)
-- **@testing-library/jest-dom** v6.6.3 — [Repository](https://github.com/testing-library/jest-dom)
-- **@testing-library/react** v16.2.0 — [Repository](https://github.com/testing-library/react-testing-library)
-- **@testing-library/user-event** v14.6.1 — [Repository](https://github.com/testing-library/user-event)
-- **@tiptap/core** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/extension-document** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/extension-hard-break** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/extension-history** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/extension-mention** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/extension-paragraph** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/extension-placeholder** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/extension-text** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/pm** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/react** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@tiptap/suggestion** v3.27.1 — [Repository](https://github.com/ueberdosis/tiptap)
-- **@types/culori** v4.0.1 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/draco3dgltf** v1.4.3 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/emscripten** v1.41.5 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/express** v5.0.6 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/hast** v3.0.5 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/ioredis-mock** v8.2.7 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/js-yaml** v4.0.9 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/jsdom** v21.1.7 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@tsconfig/node10** v1.0.12 — [Repository](https://github.com/tsconfig/bases)
+- **@tsconfig/node12** v1.0.11 — [Repository](https://github.com/tsconfig/bases)
+- **@tsconfig/node14** v1.0.3 — [Repository](https://github.com/tsconfig/bases)
+- **@tsconfig/node16** v1.0.4 — [Repository](https://github.com/tsconfig/bases)
 - **@types/json-schema** v7.0.15 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/madge** v5.0.3 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/mdx** v2.0.14 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/node** v24.0.15 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/pg** v8.20.0 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/pluralize** v0.0.33 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/react** v19.0.12 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/react-dom** v19.0.4 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/safe-regex** v1.1.6 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/three** v0.184.1 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/turndown** v5.0.6 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/uzip** v0.20201231.2 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@types/ws** v8.18.1 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
-- **@typescript/vfs** v1.6.4 — [Repository](https://github.com/microsoft/TypeScript-Website)
-- **@vitest/coverage-v8** v4.1.5 — [Repository](https://github.com/vitest-dev/vitest)
-- **@vitest/ui** v4.1.5 — [Repository](https://github.com/vitest-dev/vitest)
-- **@xstate/react** v5.0.5 — [Repository](https://github.com/statelyai/xstate)
-- **@xyflow/react** v12.11.0 — [Repository](https://github.com/xyflow/xyflow)
-- **allotment** v1.20.5 — [Repository](https://github.com/johnwalley/allotment)
-- **autoprefixer** v10.4.21 — [Repository](https://github.com/postcss/autoprefixer)
-- **better-auth** v1.6.19 — [Repository](https://github.com/better-auth/better-auth)
-- **canvas** v3.2.3 — [Repository](https://github.com/Automattic/node-canvas)
+- **@types/ndarray** v1.0.14 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **@types/opentype.js** v1.3.4 — [Repository](https://github.com/DefinitelyTyped/DefinitelyTyped)
+- **acorn** v8.18.0 — [Repository](https://github.com/acornjs/acorn)
+- **acorn-walk** v8.3.5 — [Repository](https://github.com/acornjs/acorn)
+- **anynum** v1.0.1 — [Repository](https://github.com/NaturalIntelligence/anynum)
+- **arg** v4.1.3 — [Repository](https://github.com/zeit/arg)
 - **cdn-resolve** v2.1.2 — [Repository](https://github.com/luxass/cdn-resolve)
-- **cheerio** v1.2.0 — [Repository](https://github.com/cheeriojs/cheerio)
-- **clsx** v2.1.1 — [Repository](https://github.com/lukeed/clsx)
-- **cmdk** v1.0.4 — [Repository](https://github.com/pacocoursey/cmdk)
-- **copy-files-from-to** v3.14.0 — [Repository](https://github.com/webextensions/copy-files-from-to)
+- **commander** v13.1.0 — [Repository](https://github.com/tj/commander.js)
+- **convert-source-map** v2.0.0 — [Repository](https://github.com/thlorenz/convert-source-map)
+- **core-util-is** v1.0.3 — [Repository](https://github.com/isaacs/core-util-is)
+- **create-require** v1.1.1 — [Repository](https://github.com/nuxt-contrib/create-require)
 - **culori** v4.0.2 — [Repository](https://github.com/Evercoder/culori)
-- **date-fns** v4.4.0 — [Repository](https://github.com/date-fns/date-fns)
-- **deepagents** v1.10.5 — [Repository](https://github.com/langchain-ai/deepagentsjs)
+- **cwise-compiler** v1.1.3 — [Repository](https://github.com/scijs/cwise-compiler)
 - **deepmerge** v4.3.1 — [Repository](https://github.com/TehShrike/deepmerge)
-- **dockview-react** v6.6.1 — [Repository](https://github.com/mathuo/dockview)
-- **drizzle-kit** v0.31.10 — [Repository](https://github.com/drizzle-team/drizzle-orm)
-- **electron** v36.9.5 — [Repository](https://github.com/electron/electron)
-- **electron-vite** v5.0.0 — [Repository](https://github.com/alex8088/electron-vite)
-- **embla-carousel-react** v8.6.0 — [Repository](https://github.com/davidjerleke/embla-carousel)
-- **error-stack-parser** v2.1.4 — [Repository](https://github.com/stacktracejs/error-stack-parser)
-- **es-cookie** v1.5.0 — [Repository](https://github.com/theodorejb/es-cookie)
 - **es-module-lexer** v2.3.1 — [Repository](https://github.com/guybedford/es-module-lexer)
-- **esbuild** v0.27.7 — [Repository](https://github.com/evanw/esbuild)
 - **esbuild-wasm** v0.27.7 — [Repository](https://github.com/evanw/esbuild)
-- **eslint** v9.32.0 — [Repository](https://github.com/eslint/eslint)
-- **eslint-plugin-import-x** v4.16.2 — [Repository](https://github.com/un-ts/eslint-plugin-import-x)
-- **eslint-plugin-max-params-no-constructor** v0.0.4 — [Repository](https://github.com/paulomenezes/max-params-no-constructor)
-- **eslint-plugin-n** v17.24.0 — [Repository](https://github.com/eslint-community/eslint-plugin-n)
-- **eslint-plugin-no-use-extend-native** v0.7.3 — [Repository](https://github.com/dustinspecker/eslint-plugin-no-use-extend-native)
-- **eslint-plugin-react** v7.37.5 — [Repository](https://github.com/jsx-eslint/eslint-plugin-react)
-- **eslint-plugin-unicorn** v63.0.0 — [Repository](https://github.com/sindresorhus/eslint-plugin-unicorn)
-- **express** v5.2.1 — [Repository](https://github.com/expressjs/express)
-- **fastify** v5.8.5 — [Repository](https://github.com/fastify/fastify)
-- **fumadocs-core** v16.10.4 — [Repository](https://github.com/fuma-nama/fumadocs)
-- **fumadocs-mdx** v14.3.2 — [Repository](https://github.com/fuma-nama/fumadocs)
-- **fumadocs-typescript** v5.2.6 — [Repository](https://github.com/fuma-nama/fumadocs)
-- **fumadocs-ui** v16.10.4 — [Repository](https://github.com/fuma-nama/fumadocs)
-- **gray-matter** v4.0.3 — [Repository](https://github.com/jonschlinkert/gray-matter)
-- **happy-dom** v16.8.1 — [Repository](https://github.com/capricorn86/happy-dom)
-- **hast-util-sanitize** v5.0.2 — [Repository](https://github.com/syntax-tree/hast-util-sanitize)
-- **husky** v9.1.7 — [Repository](https://github.com/typicode/husky)
-- **immer** v10.2.0 — [Repository](https://github.com/immerjs/immer)
-- **ink** v6.8.0 — [Repository](https://github.com/vadimdemedes/ink)
-- **ioredis** v5.11.1 — [Repository](https://github.com/luin/ioredis)
-- **ioredis-mock** v8.13.1 — [Repository](https://github.com/stipsan/ioredis-mock)
-- **js-yaml** v4.3.0 — [Repository](https://github.com/nodeca/js-yaml)
-- **jsdom** v26.0.0 — [Repository](https://github.com/jsdom/jsdom)
-- **json-rpc-2.0** v1.7.1 — [Repository](https://github.com/shogowada/json-rpc-2.0)
+- **fast-xml-builder** v1.3.1 — [Repository](https://github.com/NaturalIntelligence/fast-xml-builder)
+- **fast-xml-parser** v5.7.3 — [Repository](https://github.com/NaturalIntelligence/fast-xml-parser)
+- **fflate** v0.8.3 — [Repository](https://github.com/101arrowz/fflate)
+- **immediate** v3.0.6 — [Repository](https://github.com/calvinmetcalf/immediate)
+- **iota-array** v1.0.0 — [Repository](https://github.com/mikolalysenko/iota-array)
+- **is-buffer** v1.1.6 — [Repository](https://github.com/feross/is-buffer)
+- **isarray** v1.0.0 — [Repository](https://github.com/juliangruber/isarray)
+- **js-tokens** v9.0.1 — [Repository](https://github.com/lydell/js-tokens)
 - **json-schema-default** v1.0.2 — [Repository](https://github.com/mdornseif/json-schema-default)
-- **katex** v0.16.47 — [Repository](https://github.com/KaTeX/KaTeX)
-- **ky** v1.14.3 — [Repository](https://github.com/sindresorhus/ky)
-- **langchain** v1.5.0 — [Repository](https://github.com/langchain-ai/langchainjs)
-- **lint-staged** v16.4.0 — [Repository](https://github.com/lint-staged/lint-staged)
-- **madge** v8.0.0 — [Repository](https://github.com/pahen/madge)
-- **mermaid** v11.15.0 — [Repository](https://github.com/mermaid-js/mermaid)
-- **monaco-editor** v0.55.1 — [Repository](https://github.com/microsoft/monaco-editor)
-- **monacopilot** v1.2.12 — [Repository](https://github.com/arshad-yaseen/monacopilot)
-- **motion** v12.40.0 — [Repository](https://github.com/motiondivision/motion)
+- **json-schema-traverse** v1.0.0 — [Repository](https://github.com/epoberezkin/json-schema-traverse)
+- **ktx-parse** v1.1.0 — [Repository](https://github.com/donmccurdy/ktx-parse)
+- **lie** v3.3.0 — [Repository](https://github.com/calvinmetcalf/lie)
+- **magic-string** v0.30.21 — [Repository](https://github.com/Rich-Harris/magic-string)
 - **nanoid** v5.1.14 — [Repository](https://github.com/ai/nanoid)
-- **nestjs-pino** v4.6.1 — [Repository](https://github.com/iamolegga/nestjs-pino)
-- **nestjs-zod** v5.4.0 — [Repository](https://github.com/BenLorantfy/nestjs-zod)
-- **next** v16.3.0 — [Repository](https://github.com/vercel/next.js)
-- **nx** v22.7.1 — [Repository](https://github.com/nrwl/nx)
-- **ollama** v0.5.18 — [Repository](https://github.com/ollama/ollama-js)
-- **oxfmt** v0.36.0 — [Repository](https://github.com/oxc-project/oxc)
-- **oxlint** v1.70.0 — [Repository](https://github.com/oxc-project/oxc)
-- **oxlint-tsgolint** v0.16.0 — [Repository](https://github.com/oxc-project/tsgolint)
-- **pgvector** v0.2.1 — [Repository](https://github.com/pgvector/pgvector-node)
-- **pino-http** v10.5.0 — [Repository](https://github.com/pinojs/pino-http)
-- **pino-pretty** v13.1.3 — [Repository](https://github.com/pinojs/pino-pretty)
-- **pluralize** v8.0.0 — [Repository](https://github.com/blakeembrey/pluralize)
-- **polygon-clipping** v0.15.7 — [Repository](https://github.com/mfogel/polygon-clipping)
-- **publint** v0.3.21 — [Repository](https://github.com/publint/publint)
-- **radix-ui** v1.6.0 — [Repository](https://github.com/radix-ui/primitives)
-- **react** v19.2.7 — [Repository](https://github.com/facebook/react)
-- **react-colorful** v5.7.0 — [Repository](https://github.com/omgovich/react-colorful)
-- **react-day-picker** v9.14.0 — [Repository](https://github.com/gpbl/react-day-picker)
-- **react-dom** v19.2.7 — [Repository](https://github.com/facebook/react)
-- **react-dropzone** v14.4.1 — [Repository](https://github.com/react-dropzone/react-dropzone)
-- **react-hook-form** v7.79.0 — [Repository](https://github.com/react-hook-form/react-hook-form)
-- **react-icons** v5.6.0 — [Repository](https://github.com/react-icons/react-icons)
-- **react-resizable-panels** v2.1.9 — [Repository](https://github.com/bvaughn/react-resizable-panels)
-- **react-router** v7.14.2 — [Repository](https://github.com/remix-run/react-router)
-- **react-shiki** v0.7.4 — [Repository](https://github.com/avgvstvs96/react-shiki)
-- **react-virtuoso** v4.18.7 — [Repository](https://github.com/petyosi/react-virtuoso)
-- **recharts** v3.8.1 — [Repository](https://github.com/recharts/recharts)
-- **rehype-sanitize** v6.0.0 — [Repository](https://github.com/rehypejs/rehype-sanitize)
-- **rehype-stringify** v10.0.1 — [Repository](https://github.com/rehypejs/rehype/tree/main/packages/rehype-stringify)
-- **remark-math** v6.0.0 — [Repository](https://github.com/remarkjs/remark-math/tree/main/packages/remark-math)
-- **remark-parse** v11.0.0 — [Repository](https://github.com/remarkjs/remark/tree/main/packages/remark-parse)
-- **remark-rehype** v11.1.2 — [Repository](https://github.com/remarkjs/remark-rehype)
-- **remix-themes** v2.0.4 — [Repository](https://github.com/abereghici/remix-themes)
+- **ndarray** v1.0.19 — [Repository](https://github.com/mikolalysenko/ndarray)
+- **ndarray-lanczos** v0.3.0 — [Repository](https://github.com/donmccurdy/ndarray-lanczos)
+- **ndarray-ops** v1.2.2 — [Repository](https://github.com/mikolalysenko/ndarray-ops)
+- **ndarray-pixels** v5.0.1 — [Repository](https://github.com/donmccurdy/ndarray-pixels)
+- **openapi-types** v12.1.3 — [Repository](https://github.com/kogosoftwarellc/open-api/tree/master/packages/openapi-types)
+- **opentype.js** v1.3.4 — [Repository](https://github.com/opentypejs/opentype.js)
+- **path-expression-matcher** v1.6.2 — [Repository](https://github.com/NaturalIntelligence/path-expression-matcher)
+- **process-nextick-args** v2.0.1 — [Repository](https://github.com/calvinmetcalf/process-nextick-args)
+- **property-graph** v4.1.0 — [Repository](https://github.com/donmccurdy/property-graph)
+- **readable-stream** v2.3.8 — [Repository](https://github.com/nodejs/readable-stream)
 - **rhino3dm** v8.17.0 — [Repository](https://github.com/mcneel/rhino3dm)
-- **rolldown** v1.2.3 — [Repository](https://github.com/rolldown/rolldown)
-- **rollup-plugin-visualizer** v6.0.11 — [Repository](https://github.com/btd/rollup-plugin-visualizer)
-- **safe-regex** v2.1.1 — [Repository](https://github.com/davisjam/safe-regex)
-- **shiki** v3.23.0 — [Repository](https://github.com/shikijs/shiki)
-- **size-limit** v12.1.0 — [Repository](https://github.com/ai/size-limit)
-- **socket.io** v4.8.3 — [Repository](https://github.com/socketio/socket.io)
-- **socket.io-client** v4.8.3 — [Repository](https://github.com/socketio/socket.io)
-- **sonner** v2.0.7 — [Repository](https://github.com/emilkowalski/sonner)
+- **safe-buffer** v5.1.2 — [Repository](https://github.com/feross/safe-buffer)
+- **setimmediate** v1.0.5 — [Repository](https://github.com/YuzuJS/setImmediate)
+- **string_decoder** v1.1.1 — [Repository](https://github.com/nodejs/string_decoder)
+- **string.prototype.codepointat** v0.2.1 — [Repository](https://github.com/mathiasbynens/String.prototype.codePointAt)
 - **strip-literal** v3.1.0 — [Repository](https://github.com/antfu/strip-literal)
-- **stripe** v22.4.0 — [Repository](https://github.com/stripe/stripe-node)
-- **svg-sprite** v2.0.4 — [Repository](https://github.com/svg-sprite/svg-sprite)
-- **tailwind-merge** v3.6.0 — [Repository](https://github.com/dcastil/tailwind-merge)
-- **tailwind-scrollbar** v4.0.2 — [Repository](https://github.com/adoxography/tailwind-scrollbar)
-- **tailwindcss** v4.3.3 — [Repository](https://github.com/tailwindlabs/tailwindcss)
-- **three** v0.184.0 — [Repository](https://github.com/mrdoob/three.js)
-- **three-mesh-bvh** v0.9.10 — [Repository](https://github.com/gkjohnson/three-mesh-bvh)
-- **three-viewport-gizmo** v2.2.2-tau.2 — [Repository](https://github.com/Fennec-hub/three-viewport-gizmo)
+- **strnum** v2.4.2 — [Repository](https://github.com/NaturalIntelligence/strnum)
+- **tiny-inflate** v1.0.3 — [Repository](https://github.com/devongovett/tiny-inflate)
 - **ts-node** v10.9.2 — [Repository](https://github.com/TypeStrong/ts-node)
-- **tsdown** v0.22.14 — [Repository](https://github.com/rolldown/tsdown)
-- **tsx** v4.22.4 — [Repository](https://github.com/privatenumber/tsx)
-- **turndown** v7.2.4 — [Repository](https://github.com/mixmark-io/turndown)
-- **tw-animate-css** v1.4.0 — [Repository](https://github.com/Wombosvideo/tw-animate-css)
-- **typescript-eslint** v8.61.1 — [Repository](https://github.com/typescript-eslint/typescript-eslint)
 - **uint8array-extras** v1.5.0 — [Repository](https://github.com/sindresorhus/uint8array-extras)
-- **unified** v11.0.5 — [Repository](https://github.com/unifiedjs/unified)
-- **unist-util-visit** v5.1.0 — [Repository](https://github.com/syntax-tree/unist-util-visit)
+- **uniq** v1.0.1 — [Repository](https://github.com/mikolalysenko/uniq)
+- **util-deprecate** v1.0.2 — [Repository](https://github.com/TooTallNate/util-deprecate)
 - **uzip** v0.20201231.0
-- **vaul** v1.1.2 — [Repository](https://github.com/emilkowalski/vaul)
-- **vite** v8.0.10 — [Repository](https://github.com/vitejs/vite)
-- **vite** v7.3.6 — [Repository](https://github.com/vitejs/vite)
-- **vite-plugin-mkcert** v2.0.0 — [Repository](https://github.com/liuweiGL/vite-plugin-mkcert)
-- **vite-plugin-node** v8.0.0 — [Repository](https://github.com/axe-me/vite-plugin-node)
-- **vite-plugin-static-copy** v4.1.1 — [Repository](https://github.com/sapphi-red/vite-plugin-static-copy)
-- **vitest** v4.1.5 — [Repository](https://github.com/vitest-dev/vitest)
-- **vitest-mock-extended** v3.1.1 — [Repository](https://github.com/eratio08/vitest-mock-extended)
-- **vscode-languageserver-protocol** v3.18.0 — [Repository](https://github.com/Microsoft/vscode-languageserver-node)
-- **vscode-uri** v3.1.0 — [Repository](https://github.com/microsoft/vscode-uri)
-- **webpack-cli** v6.0.1 — [Repository](https://github.com/webpack/webpack-cli)
+- **v8-compile-cache-lib** v3.0.1 — [Repository](https://github.com/cspotcode/v8-compile-cache-lib)
 - **ws** v8.21.2 — [Repository](https://github.com/websockets/ws)
-- **xstate** v5.32.1 — [Repository](https://github.com/statelyai/xstate)
+- **xml-naming** v0.3.0 — [Repository](https://github.com/NaturalIntelligence/xml-naming)
+- **yn** v3.1.1 — [Repository](https://github.com/sindresorhus/yn)
 - **zod** v4.4.3 — [Repository](https://github.com/colinhacks/zod)
 
 ---

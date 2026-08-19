@@ -80,7 +80,7 @@ const createPkgcheckTarget = (
           pkgcheck: {
             executor: 'nx:run-commands',
             cache: true,
-            dependsOn: ['build'],
+            dependsOn: ['build', '^build'],
             options: {
               command: `tsx tools/pkgcheck.ts ${projectRoot}`,
               cwd: '.',

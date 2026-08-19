@@ -3,7 +3,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   bundledArtifactIssues,
+  bundledWorkspaceMirrors,
   bundleOwnershipIssues,
+  copyTargetPaths,
+  doubledPathSegments,
   packageMetadataIssues,
   strictConsumerCompilerOptions,
 } from './pkgcheck-metadata.js';
@@ -57,6 +60,50 @@ describe('pkgcheck metadata', () => {
       'dist/index.d.mts: bundled package specifier remains: @taucad/utils',
       'package.json: bundled package remains a production dependency: @taucad/filesystem',
     ]);
+  });
+
+  it('resolves copy targets as destination directories, honouring rename and the default outDir', () => {
+    expect(
+      copyTargetPaths(
+        [
+          { from: 'src/kernels/replicad/wasm', to: 'dist/kernels/replicad' },
+          { from: '../../license', to: 'dist', rename: 'LICENSE' },
+          { from: ['native/dist/init.js', 'native/dist/init.d.ts'], to: 'dist/native' },
+          'assets/logo.svg',
+          { from: 'src/**/*.wasm', to: 'dist' },
+        ],
+        'dist',
+      ),
+    ).toEqual([
+      'dist/kernels/replicad/wasm',
+      'dist/LICENSE',
+      'dist/native/init.js',
+      'dist/native/init.d.ts',
+      'dist/logo.svg',
+    ]);
+  });
+
+  it('reports an emitted path whose segment repeats its parent', () => {
+    expect(
+      doubledPathSegments([
+        'dist/kernels/replicad/wasm/replicad_single.wasm',
+        'dist/kernels/kernels/stub.mjs',
+        'dist/fonts/fonts/HelvetikerRegular.json',
+      ]),
+    ).toEqual(['dist/fonts/fonts', 'dist/kernels/kernels']);
+  });
+
+  it('detects bundled workspace projects from the mirror directories unbundled builds emit', () => {
+    expect(
+      bundledWorkspaceMirrors(
+        ['kernels', 'libs', 'libs/vm', 'libs/vm/src', 'libs/vm/src/wasm', 'packages/runtime'],
+        [
+          { name: '@taucad/vm', directory: 'libs/vm' },
+          { name: '@taucad/chat', directory: 'libs/chat' },
+          { name: '@taucad/billing', directory: 'apps/libs/billing' },
+        ],
+      ),
+    ).toEqual(['@taucad/vm']);
   });
 
   it('keeps both consumer probes strict with library checking enabled', () => {

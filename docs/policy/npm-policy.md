@@ -423,15 +423,16 @@ license unambiguously.
 
 ### When to Bundle vs Externalise a Dep
 
-| Dep characteristic                                                | Bundle into `dist/`            | Externalise (`dependencies`)            |
-| ----------------------------------------------------------------- | ------------------------------ | --------------------------------------- |
-| Listed in `libs/*` or `apps/libs/*` with `private: true`          | **Yes** (Rule 4)               | No — never publishable                  |
-| Listed in `packages/**` and consumer wants single-install         | **Yes**                        | No                                      |
-| Listed in `packages/**` and consumer wants independent versioning | No                             | **Yes**                                 |
-| Published externally (npm registry)                               | No                             | **Yes**                                 |
-| Test-only (`vitest-mock-extended`, `@vitest/spy`)                 | No — move to `devDependencies` | No                                      |
-| Build-time integration (`vite`, `rolldown`)                       | No                             | No — declare as optional peer (Rule 10) |
-| Node built-in shim (`ws` before Node 22)                          | Optional — depends on min Node | No — use `optionalDependencies`         |
+| Dep characteristic                                                                | Bundle into `dist/`            | Externalise (`dependencies`)            |
+| --------------------------------------------------------------------------------- | ------------------------------ | --------------------------------------- |
+| Listed in `libs/*` or `apps/libs/*` with `private: true`                          | **Yes** (Rule 4)               | No — never publishable                  |
+| Listed in `packages/**` and consumer wants single-install                         | **Yes**                        | No                                      |
+| Listed in `packages/**` and consumer wants independent versioning                 | No                             | **Yes**                                 |
+| Published externally (npm registry)                                               | No                             | **Yes**                                 |
+| Test-only, imported by a shipped subpath (`vitest-mock-extended` via `./testing`) | No                             | No — declare as optional peer (Rule 10) |
+| Test-only, used by the package's own tests alone (`@vitest/spy`)                  | No — `devDependencies`         | No                                      |
+| Build-time integration (`vite`, `rolldown`)                                       | No                             | No — declare as optional peer (Rule 10) |
+| Node built-in shim (`ws` before Node 22)                                          | Optional — depends on min Node | No — use `optionalDependencies`         |
 
 ### attw Profile Selection
 

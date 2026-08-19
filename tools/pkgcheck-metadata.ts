@@ -106,6 +106,60 @@ export const bundledArtifactIssues = (
   return [...issues].sort();
 };
 
+type CopyEntry = string | { from: string | string[]; to?: string; rename?: string };
+
+/**
+ * Destination paths a tsdown `copy` list produces. `to` is a destination
+ * *directory*: the basename of `from` lands under it, or `rename` when given.
+ *
+ * @see tsdown/dist/watch-*.mjs `resolveCopyEntry`
+ */
+export const copyTargetPaths = (entries: readonly CopyEntry[], outDirectory: string): string[] => {
+  const targets: string[] = [];
+  for (const entry of entries) {
+    const { from, to = outDirectory, rename } = typeof entry === 'string' ? { from: entry } : entry;
+    for (const source of Array.isArray(from) ? from : [from]) {
+      // No workspace config uses a glob `from`; expanding one needs the filesystem, so add it when one appears.
+      if (source.includes('*')) {
+        continue;
+      }
+      targets.push(`${to}/${rename ?? source.split('/').pop() ?? source}`);
+    }
+  }
+
+  return targets;
+};
+
+/** Emitted paths whose segment repeats its parent (`wasm/wasm`, `fonts/fonts`), reported at the repeat. */
+export const doubledPathSegments = (paths: readonly string[]): string[] => {
+  const issues = new Set<string>();
+  for (const path of paths) {
+    const segments = path.split('/');
+    for (const [index, segment] of segments.entries()) {
+      if (index > 0 && segment === segments[index - 1]) {
+        issues.add(segments.slice(0, index + 1).join('/'));
+      }
+    }
+  }
+
+  return [...issues].sort();
+};
+
+/**
+ * Workspace projects a package actually bundled, detected from the mirror
+ * directories `unbundle: true` emits for sources outside the package root
+ * (`dist/libs/<name>/src/...`). A bundled project leaves a mirror; an external
+ * one leaves only a bare specifier, which {@linkcode bundledArtifactIssues} covers.
+ */
+export const bundledWorkspaceMirrors = (
+  distributionDirectories: readonly string[],
+  projects: ReadonlyArray<{ name: string; directory: string }>,
+): string[] =>
+  projects
+    .filter(({ directory }) => distributionDirectories.some((path) => `/${path}/`.includes(`/${directory}/src/`)))
+    .map(({ name }) => name)
+    .sort();
+
 export const strictConsumerCompilerOptions = (moduleResolution: 'bundler' | 'nodenext'): Record<string, unknown> => ({
   lib: ['ES2022', 'DOM', 'DOM.Iterable'],
   module: moduleResolution === 'bundler' ? 'ESNext' : 'NodeNext',

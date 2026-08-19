@@ -26,7 +26,10 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import {
   bundledArtifactIssues,
+  bundledWorkspaceMirrors,
   bundleOwnershipIssues,
+  copyTargetPaths,
+  doubledPathSegments,
   packageMetadataIssues,
   strictConsumerCompilerOptions,
 } from './pkgcheck-metadata.js';
@@ -35,6 +38,8 @@ type CheckResult = {
   name: string;
   status: 'pass' | 'fail' | 'skip';
   details?: string[];
+  /** Printed on pass as well as failure, so an allow-listed defect stays visible. */
+  notes?: string[];
 };
 
 type PackageJson = Record<string, unknown> & {
@@ -42,10 +47,13 @@ type PackageJson = Record<string, unknown> & {
   exports?: unknown;
   files?: unknown;
   name?: string;
+  peerDependencies?: Record<string, string>;
   private?: boolean;
   publishConfig?: Record<string, unknown>;
   'size-limit'?: unknown;
 };
+
+type WorkspaceProject = { name: string; directory: string; manifest: PackageJson };
 
 const projectRoot = process.argv[2];
 if (!projectRoot) {
@@ -70,6 +78,80 @@ console.log('='.repeat(`${packageName} package check`.length));
 console.log();
 
 const results: CheckResult[] = [];
+
+/** Workspace globs that can hold a bundle-able library or a publishable package. */
+const workspaceParents = ['libs', 'apps/libs', 'packages', 'packages/kernels'];
+
+function readWorkspaceProjects(): WorkspaceProject[] {
+  const projects: WorkspaceProject[] = [];
+  for (const parent of workspaceParents) {
+    const parentDirectory = join(workspaceRoot, parent);
+    if (!existsSync(parentDirectory)) {
+      continue;
+    }
+
+    for (const entry of readdirSync(parentDirectory, { withFileTypes: true }).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      const manifestPath = join(parentDirectory, entry.name, 'package.json');
+      if (!entry.isDirectory() || !existsSync(manifestPath)) {
+        continue;
+      }
+
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PackageJson;
+      if (manifest.name) {
+        projects.push({ name: manifest.name, directory: `${parent}/${entry.name}`, manifest });
+      }
+    }
+  }
+
+  return projects;
+}
+
+const workspaceProjects = readWorkspaceProjects();
+
+/** Publishable roots, discovered the way `tools/pkgcheck.plugin.ts` discovers them. */
+const publishableProjects = workspaceProjects.filter(
+  (project) =>
+    project.manifest.private !== true &&
+    (project.directory.startsWith('packages/') || project.directory.startsWith('packages/kernels/')) &&
+    existsSync(join(workspaceRoot, project.directory, 'tsdown.config.ts')),
+);
+
+/** Every directory under `<projectDirectory>/dist`, relative to that `dist`. */
+function distributionDirectories(projectDirectory: string): string[] {
+  const distribution = join(projectDirectory, 'dist');
+  const directories: string[] = [];
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const fullPath = join(directory, entry.name);
+      directories.push(relative(distribution, fullPath));
+      walk(fullPath);
+    }
+  };
+
+  if (existsSync(distribution)) {
+    walk(distribution);
+  }
+
+  return directories;
+}
+
+/**
+ * Workspace projects whose sources were inlined into a package's build output.
+ * The project itself always owns its own name, so bundling a *published*
+ * package is reported as the ownership conflict it is.
+ */
+function bundledWorkspaceProjects(project: WorkspaceProject): string[] {
+  const others = workspaceProjects.filter((candidate) => candidate.directory !== project.directory);
+  return [
+    project.name,
+    ...bundledWorkspaceMirrors(distributionDirectories(join(workspaceRoot, project.directory)), others),
+  ];
+}
 
 async function runPublint(): Promise<CheckResult> {
   try {
@@ -251,66 +333,52 @@ function validatePackageMetadata(): CheckResult {
       };
 }
 
-async function validateBundleOwnership(): Promise<CheckResult> {
-  const roots: Array<{ owner: string; bundled: string[] }> = [];
-
-  for (const parent of ['packages', 'packages/kernels', 'libs']) {
-    const parentDirectory = join(workspaceRoot, parent);
-    if (!existsSync(parentDirectory)) {
-      continue;
-    }
-
-    for (const entry of readdirSync(parentDirectory, { withFileTypes: true })) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const directory = join(parentDirectory, entry.name);
-      const configPath = join(directory, 'tsdown.config.ts');
-      const manifestPath = join(directory, 'package.json');
-      if (!existsSync(configPath) || !existsSync(manifestPath)) {
-        continue;
-      }
-      if (!readFileSync(configPath, 'utf8').includes('export const bundledWorkspaceDependencies')) {
-        continue;
-      }
-
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PackageJson;
-      if (manifest.private) {
-        continue;
-      }
-      // oxlint-disable-next-line no-await-in-loop -- Bounded config loading preserves deterministic workspace scan order.
-      const config = (await import(pathToFileURL(configPath).href)) as { bundledWorkspaceDependencies?: unknown };
-      if (!Array.isArray(config.bundledWorkspaceDependencies)) {
-        continue;
-      }
-      roots.push({
-        owner: manifest.name ?? entry.name,
-        bundled: config.bundledWorkspaceDependencies.filter((value): value is string => typeof value === 'string'),
-      });
-    }
-  }
+function validateBundleOwnership(): CheckResult {
+  const unbuilt = publishableProjects.filter((project) => !existsSync(join(workspaceRoot, project.directory, 'dist')));
+  const roots = publishableProjects
+    .filter((project) => !unbuilt.includes(project))
+    .map((project) => ({ owner: project.name, bundled: bundledWorkspaceProjects(project) }));
 
   const issues = bundleOwnershipIssues(roots);
+  const notes =
+    unbuilt.length === 0
+      ? undefined
+      : [`ownership unverified for unbuilt package(s): ${unbuilt.map((project) => project.name).join(', ')}`];
+
   return issues.length === 0
-    ? { name: 'tau-bundle-ownership', status: 'pass', details: ['bundled workspace modules have one owner'] }
+    ? { name: 'tau-bundle-ownership', status: 'pass', details: ['bundled workspace modules have one owner'], notes }
     : {
         name: 'tau-bundle-ownership',
         status: 'fail',
         details: [`${String(issues.length)} bundle ownership conflict(s) found`, ...issues],
+        notes,
       };
 }
 
-async function runtimeBundledWorkspaceDependencies(): Promise<string[]> {
+/**
+ * Workspace packages inlined into this artifact: whatever the build actually
+ * mirrored, unioned with whatever the config declares it bundles. The config
+ * half keeps the runtime's explicit contract enforced even if a mirror moves.
+ */
+async function bundledWorkspacePackages(): Promise<string[]> {
+  const project = publishableProjects.find((candidate) => candidate.name === packageName);
+  const mirrored = project ? bundledWorkspaceProjects(project).filter((name) => name !== packageName) : [];
+
   const configPath = join(absoluteRoot, 'tsdown.config.ts');
-  const config = (await import(pathToFileURL(configPath).href)) as { bundledWorkspaceDependencies?: unknown };
-  if (!Array.isArray(config.bundledWorkspaceDependencies)) {
-    throw new TypeError(`${configPath} must export bundledWorkspaceDependencies`);
-  }
-  return config.bundledWorkspaceDependencies.filter((value): value is string => typeof value === 'string');
+  const config = existsSync(configPath)
+    ? ((await import(pathToFileURL(configPath).href)) as { bundledWorkspaceDependencies?: unknown })
+    : {};
+  const declared = Array.isArray(config.bundledWorkspaceDependencies)
+    ? config.bundledWorkspaceDependencies
+        .filter((value): value is string => typeof value === 'string')
+        .map((name) => `@taucad/${name}`)
+    : [];
+
+  return [...new Set([...mirrored, ...declared])].sort();
 }
 
 async function validateBundledArtifact(): Promise<CheckResult> {
-  const bundledPackages = (await runtimeBundledWorkspaceDependencies()).map((name) => `@taucad/${name}`);
+  const bundledPackages = await bundledWorkspacePackages();
   const files = walkDirectory(join(absoluteRoot, 'dist'))
     .filter((path) => /(?:\.[cm]?js|\.d\.[cm]?ts)$/u.test(path))
     .map((path) => ({ path: relative(absoluteRoot, path), source: readFileSync(path, 'utf8') }));
@@ -328,31 +396,165 @@ async function validateBundledArtifact(): Promise<CheckResult> {
       };
 }
 
-function validateStrictConsumerTypes(): CheckResult {
-  const directory = mkdtempSync(join(workspaceRoot, '.pkgcheck-consumer-'));
-  const packageDirectory = join(directory, 'node_modules/@taucad/runtime');
-  const failures: string[] = [];
+/**
+ * Every tsdown `copy` target landed, and nothing was emitted at a doubled path.
+ * `copy` may be absent, an entry, an array, or a function of the resolved config.
+ */
+async function validateDistributionAssets(): Promise<CheckResult> {
+  const configPath = join(absoluteRoot, 'tsdown.config.ts');
+  const configModule = existsSync(configPath)
+    ? ((await import(pathToFileURL(configPath).href)) as { default?: unknown })
+    : {};
+  const configs = (Array.isArray(configModule.default) ? configModule.default : [configModule.default]).filter(
+    (value): value is Record<string, unknown> => isRecord(value),
+  );
 
-  try {
-    mkdirSync(packageDirectory, { recursive: true });
-    const publishPackage = applyPublishConfig(packageJson);
-    delete publishPackage.scripts;
-    writeFileSync(join(packageDirectory, 'package.json'), JSON.stringify(publishPackage, undefined, 2));
-    cpSync(join(absoluteRoot, 'dist'), join(packageDirectory, 'dist'), { recursive: true });
-    for (const dependency of Object.keys(packageJson.dependencies ?? {})) {
-      const source = join(absoluteRoot, 'node_modules', dependency);
-      if (!existsSync(source)) {
-        failures.push(`installed dependency is missing: ${dependency}`);
-        continue;
-      }
-      const destination = join(directory, 'node_modules', dependency);
-      mkdirSync(dirname(destination), { recursive: true });
-      symlinkSync(source, destination, 'junction');
+  const issues: string[] = [];
+  const targets: string[] = [];
+  for (const config of configs) {
+    const outDirectory = typeof config['outDir'] === 'string' ? config['outDir'] : 'dist';
+    const copy =
+      typeof config['copy'] === 'function'
+        ? // oxlint-disable-next-line no-await-in-loop -- Bounded config list; sequential keeps target order stable.
+          await (config['copy'] as (options: { outDir: string }) => unknown)({ outDir: outDirectory })
+        : config['copy'];
+    if (copy === undefined) {
+      continue;
     }
-    writeFileSync(join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
-    writeFileSync(
-      join(directory, 'probe.ts'),
-      `import { createNodeClient } from '@taucad/runtime/node';
+    targets.push(...copyTargetPaths(Array.isArray(copy) ? copy : [copy], outDirectory));
+  }
+
+  for (const target of targets) {
+    const fullPath = join(absoluteRoot, target);
+    if (!existsSync(fullPath)) {
+      issues.push(`copy target is missing from the build output: ${target}`);
+      continue;
+    }
+    if (statSync(fullPath).isDirectory() && readdirSync(fullPath).length === 0) {
+      issues.push(`copy target is an empty directory: ${target}`);
+    }
+  }
+
+  for (const doubled of doubledPathSegments(
+    walkDirectory(join(absoluteRoot, 'dist')).map((path) => relative(absoluteRoot, path)),
+  )) {
+    issues.push(`emitted path repeats its parent segment: ${doubled}`);
+  }
+
+  return issues.length === 0
+    ? {
+        name: 'tau-distribution-assets',
+        status: 'pass',
+        details: [`${String(targets.length)} copy target(s) present, no doubled path segments`],
+      }
+    : {
+        name: 'tau-distribution-assets',
+        status: 'fail',
+        details: [`${String(issues.length)} distribution asset issue(s) found`, ...issues],
+      };
+}
+
+/** `react` -> `@types/react`, `@scope/name` -> `@types/scope__name`. */
+function typesPackageName(dependency: string): string {
+  return `@types/${dependency.startsWith('@') ? dependency.slice(1).replace('/', '__') : dependency}`;
+}
+
+function linkInstalledPackage(from: string, nodeModules: string, dependency: string): boolean {
+  const source = join(from, 'node_modules', dependency);
+  const fallback = join(workspaceRoot, 'node_modules', dependency);
+  const resolved = existsSync(source) ? source : existsSync(fallback) ? fallback : undefined;
+  if (!resolved) {
+    return false;
+  }
+
+  const destination = join(nodeModules, dependency);
+  if (existsSync(destination)) {
+    return true;
+  }
+  mkdirSync(dirname(destination), { recursive: true });
+  symlinkSync(resolved, destination, 'junction');
+  return true;
+}
+
+/**
+ * Install one workspace package into a throwaway consumer the way npm would:
+ * its `publishConfig`-applied manifest plus its built `dist`, never its source
+ * manifest (whose `exports` point at `.ts`). Workspace dependencies are staged
+ * the same way, recursively; everything else is symlinked from the real install.
+ */
+function stagePublishedPackage(projectDirectory: string, nodeModules: string, staged: Set<string>): string[] {
+  const manifest = JSON.parse(readFileSync(join(projectDirectory, 'package.json'), 'utf8')) as PackageJson;
+  const name = manifest.name ?? projectDirectory;
+  if (staged.has(name)) {
+    return [];
+  }
+  staged.add(name);
+
+  const failures: string[] = [];
+  const destination = join(nodeModules, name);
+  mkdirSync(destination, { recursive: true });
+  const publishManifest = applyPublishConfig(manifest);
+  delete publishManifest.scripts;
+  writeFileSync(join(destination, 'package.json'), JSON.stringify(publishManifest, undefined, 2));
+
+  const distribution = join(projectDirectory, 'dist');
+  if (existsSync(distribution)) {
+    cpSync(distribution, join(destination, 'dist'), { recursive: true });
+  } else {
+    failures.push(`${name}: dist/ is missing; build it before running pkgcheck`);
+  }
+
+  for (const [dependency, range] of [
+    ...Object.entries(manifest.dependencies ?? {}),
+    ...Object.entries(manifest.peerDependencies ?? {}),
+  ]) {
+    const workspaceProject = range.startsWith('workspace:')
+      ? workspaceProjects.find((project) => project.name === dependency)
+      : undefined;
+    if (workspaceProject) {
+      failures.push(...stagePublishedPackage(join(workspaceRoot, workspaceProject.directory), nodeModules, staged));
+      continue;
+    }
+
+    if (!linkInstalledPackage(projectDirectory, nodeModules, dependency)) {
+      // A peer dependency the workspace never installs is a legitimate absence;
+      // the resulting TS2307 (if any) is the real signal.
+      if (dependency in (manifest.dependencies ?? {})) {
+        failures.push(`installed dependency is missing: ${dependency}`);
+      }
+      continue;
+    }
+    linkInstalledPackage(projectDirectory, nodeModules, typesPackageName(dependency));
+  }
+
+  return failures;
+}
+
+/**
+ * The runtime's `./nextjs`, `./vite`, `./electron/*` and `./testing` surfaces are
+ * typed against peer frameworks whose *own* shipped declarations do not survive
+ * `skipLibCheck: false` (next@16.3.0 alone emits 12 errors of its own under both
+ * resolution modes). Those are the peer's defects, not this package's, and a
+ * consumer only meets them by opting into that framework. The runtime is probed
+ * through the curated entry points below plus its whole kernels surface instead.
+ */
+const runtimeProbedSubpaths = /^\.\/kernels(\/|$)/u;
+
+/** Every published subpath, as an importable specifier. Wildcards cannot be probed. */
+function publishedSpecifiers(): string[] {
+  const { exports } = applyPublishConfig(packageJson);
+  if (!isRecord(exports)) {
+    return [];
+  }
+
+  return Object.keys(exports)
+    .filter((subpath) => subpath.startsWith('.') && !subpath.includes('*') && subpath !== './package.json')
+    .filter((subpath) => packageName !== '@taucad/runtime' || runtimeProbedSubpaths.test(subpath))
+    .map((subpath) => `${packageName}${subpath.slice(1)}`);
+}
+
+/** Named imports that pin the runtime's headline entry points by name, not just by module. */
+const runtimeConsumerProbe = `import { createNodeClient } from '@taucad/runtime/node';
 import { presets } from '@taucad/runtime/presets';
 import { runtimeContentSchema, type RuntimeContentInput } from '@taucad/runtime/types';
 import { defineRuntimeTransport, type RuntimeTransportClient } from '@taucad/runtime/transport';
@@ -378,8 +580,33 @@ void [
   gltfEdgeDetection,
   consumerTypes,
 ];
-`,
-    );
+`;
+
+/**
+ * A namespace import per published subpath: enough for `tsc` to load and fully
+ * check every shipped `.d.mts` under both resolution modes.
+ */
+function consumerProbeSource(specifiers: readonly string[]): string {
+  const imports = specifiers.map((specifier, index) => `import * as probe${String(index)} from '${specifier}';`);
+  const bindings = specifiers.map((_, index) => `probe${String(index)}`);
+  const prologue = packageName === '@taucad/runtime' ? runtimeConsumerProbe : '';
+  return `${prologue}${imports.join('\n')}\nvoid [${bindings.join(', ')}];\n`;
+}
+
+function validateStrictConsumerTypes(): CheckResult {
+  const specifiers = publishedSpecifiers();
+  if (specifiers.length === 0) {
+    return { name: 'tau-strict-consumer-types', status: 'skip', details: ['no published export subpaths'] };
+  }
+
+  const directory = mkdtempSync(join(workspaceRoot, '.pkgcheck-consumer-'));
+  const failures: string[] = [];
+
+  try {
+    const nodeModules = join(directory, 'node_modules');
+    failures.push(...stagePublishedPackage(absoluteRoot, nodeModules, new Set()));
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
+    writeFileSync(join(directory, 'probe.ts'), consumerProbeSource(specifiers));
 
     for (const resolution of ['bundler', 'nodenext'] as const) {
       const configPath = join(directory, `tsconfig.${resolution}.json`);
@@ -399,19 +626,16 @@ void [
         });
       } catch (error) {
         const execError = error as { stdout?: string; stderr?: string };
-        failures.push(`${resolution}:\n${execError.stdout ?? ''}${execError.stderr ?? ''}`.trim());
+        failures.push(`${resolution}:\n${`${execError.stdout ?? ''}${execError.stderr ?? ''}`.trim()}`);
       }
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 
+  const summary = `${String(specifiers.length)} published subpath(s) typecheck with skipLibCheck:false under bundler and nodenext`;
   return failures.length === 0
-    ? {
-        name: 'tau-strict-consumer-types',
-        status: 'pass',
-        details: ['skipLibCheck:false passes under bundler and nodenext resolution'],
-      }
+    ? { name: 'tau-strict-consumer-types', status: 'pass', details: [summary] }
     : {
         name: 'tau-strict-consumer-types',
         status: 'fail',
@@ -423,7 +647,8 @@ void [
  * Create a publish-ready staging directory with publishConfig applied,
  * then pack and run attw against the tarball.
  *
- * pnpm pack does NOT apply publishConfig.exports, so we must do it manually.
+ * pnpm pack DOES apply publishConfig overrides (npm does not); attw's own
+ * `--pack` shells out to npm, so publishConfig is applied here by hand.
  */
 async function runAttw(): Promise<CheckResult> {
   const stagingDirectory = join(tmpdir(), `pkgcheck-attw-${Date.now()}`);
@@ -929,6 +1154,10 @@ function printResult(result: CheckResult): void {
 
   console.log(`  [${tag}] ${icon} ${result.name} -- ${summary}`);
 
+  for (const note of result.notes ?? []) {
+    console.log(`  [NOTE] ! ${note}`);
+  }
+
   if (result.status === 'fail' && result.details && result.details.length > 1) {
     for (const detail of result.details.slice(1)) {
       for (const line of detail.split('\n')) {
@@ -948,16 +1177,17 @@ async function main(): Promise<void> {
   results.push(validatePackageMetadata());
   printResult(results.at(-1)!);
 
-  if (packageName === '@taucad/runtime') {
-    results.push(await validateBundleOwnership());
-    printResult(results.at(-1)!);
+  results.push(validateBundleOwnership());
+  printResult(results.at(-1)!);
 
-    results.push(await validateBundledArtifact());
-    printResult(results.at(-1)!);
+  results.push(await validateDistributionAssets());
+  printResult(results.at(-1)!);
 
-    results.push(validateStrictConsumerTypes());
-    printResult(results.at(-1)!);
-  }
+  results.push(await validateBundledArtifact());
+  printResult(results.at(-1)!);
+
+  results.push(validateStrictConsumerTypes());
+  printResult(results.at(-1)!);
 
   results.push(await runPublint());
   printResult(results.at(-1)!);

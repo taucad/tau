@@ -39,7 +39,24 @@ export type RegisterElectronRuntimeMainOptions = {
   readonly channel?: string;
   /** Environment passed to each spawned utility process. */
   readonly env?: NodeJS.ProcessEnv;
-  /** Electron IPC main implementation, primarily for alternate hosts and tests. */
+  /**
+   * Executable arguments for each spawned utility process — canonically
+   * `['--max-old-space-size=8192']` to raise the utility's V8 heap for large
+   * assemblies. Omitted entirely when unset, so Electron's default applies.
+   *
+   * Caveat: Electron documents `execArgv` only as "arguments passed to the
+   * executable" and says nothing about V8 flags. The utility process is a Node
+   * environment that parses them, but that is unverified against Electron
+   * 36.9.5 here; if a flag does not take effect, pass it as `NODE_OPTIONS`
+   * through `env` instead.
+   */
+  readonly execArgv?: readonly string[];
+  /**
+   * Electron IPC main implementation, primarily for alternate hosts and tests.
+   * Also the admission seam: a view that filters before delegating to the real
+   * `ipcMain` gates which frames may fork a utility.
+   */
+  // ponytail: admission rides the existing ipcMain injection point; add a predicate the day the desktop spike proves the wrapper awkward.
   readonly ipcMain?: IpcMain;
   /** Receives utility-spawn and relay failures. */
   readonly onError?: (error: Error) => void;
@@ -87,6 +104,28 @@ export const installElectronRuntimeHeaders = (options: ElectronRuntimeHeadersOpt
  * Register the main-process broker that owns one utility host per renderer client.
  * Each relayed port carries an opaque lease used for exact-host close and timeout recovery.
  *
+ * Admission is the application's: every `requestRuntimePort()` from any frame
+ * holding the preload bridge forks one utility, and the broker imposes no cap.
+ * An application that must gate this — by sender, or with a concurrency cap —
+ * supplies its own `ipcMain` view that filters before delegating. The broker
+ * owns the only listeners on its channels, so `off` may delegate wholesale:
+ *
+ * ```typescript
+ * import { ipcMain } from 'electron';
+ * import type { IpcMain, IpcMainEvent } from 'electron';
+ *
+ * const allowFrame = (event: IpcMainEvent): boolean => event.senderFrame?.url.startsWith('app://') === true;
+ * const gatedIpcMain = {
+ *   on: (channel: string, listener: (event: IpcMainEvent) => void) =>
+ *     ipcMain.on(channel, (event) => {
+ *       if (allowFrame(event)) {
+ *         listener(event);
+ *       }
+ *     }),
+ *   off: (channel: string) => ipcMain.removeAllListeners(channel),
+ * } as unknown as IpcMain;
+ * ```
+ *
  * @param options - Utility entry and optional Electron wiring overrides.
  * @returns A handle that unregisters IPC listeners and terminates remaining owned utilities.
  * @public
@@ -131,36 +170,50 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     let utility: UtilityProcess | undefined;
     let hostId: string | undefined;
     try {
+      const targetFrame = event.senderFrame;
+      if (!targetFrame) {
+        throw new Error('registerElectronRuntimeMain: IPC event did not include senderFrame');
+      }
       const utilityEntry =
         options.utilityEntry instanceof URL ? fileURLToPath(options.utilityEntry) : options.utilityEntry;
       const spawnedUtility = utilityProcess.fork(utilityEntry, [], {
         env: options.env,
+        /* Copied because Electron declares `execArgv?: string[]` (TS4104). */
+        ...(options.execArgv === undefined ? {} : { execArgv: [...options.execArgv] }),
         serviceName: options.serviceName ?? 'tau-runtime-host',
         stdio: options.stdio ?? 'inherit',
       });
       utility = spawnedUtility;
       hostId = randomUUID();
       liveUtilities.set(hostId, { utility: spawnedUtility, sender: event.sender });
-      spawnedUtility.on('exit', () => {
-        if (hostId) {
-          liveUtilities.delete(hostId);
+      /* Main is the only process that sees the utility's exit code. Relay it to
+       * the same frame the port goes to, so the renderer client can settle
+       * `closed` with it; `WebFrameMain.postMessage` throws on a destroyed
+       * frame, which must not take the bookkeeping down with it. */
+      const exitHostId = hostId;
+      spawnedUtility.on('exit', (code: number) => {
+        liveUtilities.delete(exitHostId);
+        try {
+          targetFrame.postMessage(`${channel}:host-exit`, { hostId: exitHostId, exitCode: code });
+        } catch (error) {
+          reportError(error);
         }
       });
 
       const { port1: rendererPort, port2: utilityPort } = new MessageChannelMain();
       spawnedUtility.postMessage({ taucadRuntime: true }, [utilityPort]);
-
-      const targetFrame = event.senderFrame;
-      if (!targetFrame) {
-        throw new Error('registerElectronRuntimeMain: IPC event did not include senderFrame');
-      }
       targetFrame.postMessage(`${channel}:port`, { hostId }, [rendererPort]);
 
-      event.sender.once('destroyed', () => {
+      const releaseOnce = (): void => {
         if (hostId) {
           releaseUtility(hostId);
         }
-      });
+      };
+      event.sender.once('destroyed', releaseOnce);
+      /* A crashed renderer never fires `pagehide` and is never `destroyed`
+       * until its window closes; only main sees this. `releaseUtility` is
+       * idempotent, so a later `'destroyed'` is harmless. */
+      event.sender.once('render-process-gone', releaseOnce);
     } catch (error) {
       if (hostId) {
         releaseUtility(hostId);

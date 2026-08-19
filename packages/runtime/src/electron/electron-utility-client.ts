@@ -21,7 +21,7 @@ import type {
 } from '#transport/index.js';
 
 import type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
-import { takeElectronRuntimeHostRelease } from '#electron/_internal/runtime-host-lease.js';
+import { takeElectronRuntimeHostExit, takeElectronRuntimeHostRelease } from '#electron/_internal/runtime-host-lease.js';
 
 const electronUtilityId = 'electron-utility';
 const sessionKey = 'tau.runtime/v1';
@@ -109,6 +109,22 @@ export const electronUtilityClient = (
     }
     resolveClosed?.(result);
   };
+
+  /* Utility death is otherwise invisible: without a signal nothing settles
+   * `closed` and every in-flight promise hangs. Two independent ones exist.
+   * `close` is the fast path: the renderer port is entangled with the utility's
+   * `MessagePortMain`, so a dying utility disentangles the far end and fires it
+   * here (Chromium >= 133 / Electron >= 34; unverified against a utility death
+   * in this repository). The `host-exit` relay from main's own `'exit'` handler
+   * is the guaranteed path and is the only one carrying the exit code. `finish`
+   * is idempotent, so both may fire and the first cause wins — including our
+   * own `close()` re-entry. */
+  receivedPort.addEventListener('close', () => {
+    void finish({ cause: 'host-exit' });
+  });
+  takeElectronRuntimeHostExit(receivedPort)?.((exitCode) => {
+    void finish({ cause: 'host-exit', ...(exitCode === undefined ? {} : { exitCode }) });
+  });
 
   const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {

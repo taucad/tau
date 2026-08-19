@@ -1,3 +1,4 @@
+import type { IpcMain } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 
 type Handler = (...args: unknown[]) => void;
@@ -57,6 +58,36 @@ vi.mock('electron', () => {
     },
   };
 });
+
+/**
+ * Drive one `requestRuntimePort` IPC message into the registered broker.
+ *
+ * @param sender - Renderer `webContents` stub used for lifecycle listeners.
+ * @param senderFrame - Frame stub that receives the relayed port and host-exit messages.
+ * @returns The frame stub, so a caller can observe what the broker posted to it.
+ */
+const requestRuntimePort = <Frame extends { postMessage: ReturnType<typeof vi.fn> }>(
+  sender: { once: ReturnType<typeof vi.fn> },
+  senderFrame?: Frame,
+): Frame => {
+  const frame = senderFrame ?? ({ postMessage: vi.fn() } as unknown as Frame);
+  listeners.get('taucad:connect-runtime')?.({ sender, senderFrame: frame });
+  return frame;
+};
+
+/**
+ * Read the `'exit'` listener the broker installed on the most recent utility.
+ *
+ * @returns The exit handler Electron would invoke with the process exit code.
+ */
+const lastUtilityExitHandler = (): ((code: number) => void) => {
+  const utility = liveUtilities.at(-1);
+  const call = utility?.on.mock.calls.find(([event]) => event === 'exit');
+  if (!call) {
+    throw new Error('The broker registered no utility exit listener');
+  }
+  return call[1] as (code: number) => void;
+};
 
 describe('Electron main runtime helpers', () => {
   it('installs cross-origin isolation headers while preserving existing headers', async () => {
@@ -136,5 +167,112 @@ describe('Electron main runtime helpers', () => {
     handle.dispose();
     expect(first?.kill).toHaveBeenCalledOnce();
     expect(second?.kill).toHaveBeenCalledOnce();
+  });
+  it('releases the utility when the renderer process is gone', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const senderOnce = vi.fn<(event: string, handler: () => void) => void>();
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+
+    requestRuntimePort({ once: senderOnce });
+
+    expect(senderOnce).toHaveBeenCalledWith('render-process-gone', expect.any(Function));
+    const utility = liveUtilities.at(-1);
+    const handlerFor = (event: string): (() => void) => senderOnce.mock.calls.find(([name]) => name === event)![1];
+
+    handlerFor('render-process-gone')();
+    expect(utility?.kill).toHaveBeenCalledTimes(1);
+
+    handlerFor('destroyed')();
+    expect(utility?.kill).toHaveBeenCalledTimes(1);
+
+    handle.dispose();
+  });
+
+  it('forwards execArgv to the utility fork and omits the key when unset', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const { utilityProcess } = await import('electron');
+    const fork = vi.mocked(utilityProcess.fork);
+    const execArgv = ['--max-old-space-size=8192'];
+
+    const tuned = registerElectronRuntimeMain({ execArgv, utilityEntry: '/dist/main/kernel-host.js' });
+    requestRuntimePort({ once: vi.fn() });
+    const tunedOptions = fork.mock.calls.at(-1)?.[2];
+    expect(tunedOptions).toMatchObject({ execArgv: ['--max-old-space-size=8192'] });
+    expect(tunedOptions?.execArgv).not.toBe(execArgv);
+    tuned.dispose();
+
+    const untuned = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+    requestRuntimePort({ once: vi.fn() });
+    expect(fork.mock.calls.at(-1)?.[2]).not.toHaveProperty('execArgv');
+    untuned.dispose();
+  });
+
+  it('honours a filtering ipcMain view', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const { utilityProcess } = await import('electron');
+    const fork = vi.mocked(utilityProcess.fork);
+    const forkCallsBefore = fork.mock.calls.length;
+    const allowedSender = { once: vi.fn() };
+    const gated = new Map<string, Handler>();
+    const filteringIpcMain = {
+      on: vi.fn((channel: string, handler: Handler) => {
+        gated.set(channel, (event) => {
+          if ((event as { sender?: unknown }).sender !== allowedSender) {
+            return;
+          }
+          handler(event);
+        });
+      }),
+      off: vi.fn((channel: string) => {
+        gated.delete(channel);
+      }),
+    };
+
+    const handle = registerElectronRuntimeMain({
+      ipcMain: filteringIpcMain as unknown as IpcMain,
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    gated.get('taucad:connect-runtime')?.({ sender: { once: vi.fn() }, senderFrame: { postMessage: vi.fn() } });
+
+    expect(fork).toHaveBeenCalledTimes(forkCallsBefore);
+
+    gated.get('taucad:connect-runtime')?.({ sender: allowedSender, senderFrame: { postMessage: vi.fn() } });
+    expect(fork).toHaveBeenCalledTimes(forkCallsBefore + 1);
+    handle.dispose();
+  });
+
+  it('relays the utility exit code to the owning renderer frame', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const postMessage = vi.fn<(channel: string, payload: { readonly hostId: string }, ports?: unknown[]) => void>();
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+
+    const senderFrame = requestRuntimePort({ once: vi.fn() }, { postMessage });
+    const { hostId } = senderFrame.postMessage.mock.calls[0]![1] as { hostId: string };
+
+    lastUtilityExitHandler()(7);
+
+    expect(postMessage).toHaveBeenLastCalledWith('taucad:connect-runtime:host-exit', { hostId, exitCode: 7 });
+    handle.dispose();
+  });
+
+  it('survives a destroyed frame on utility exit', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const onError = vi.fn();
+    const postMessage = vi.fn((channel: string) => {
+      if (channel.endsWith(':host-exit')) {
+        throw new Error('Render frame was disposed before host-exit');
+      }
+    });
+    const handle = registerElectronRuntimeMain({ onError, utilityEntry: '/dist/main/kernel-host.js' });
+
+    requestRuntimePort({ once: vi.fn() }, { postMessage });
+    const utility = liveUtilities.at(-1);
+
+    lastUtilityExitHandler()(3);
+
+    expect(onError).toHaveBeenCalledOnce();
+    /* The record is gone, so disposing the broker has nothing left to kill. */
+    handle.dispose();
+    expect(utility?.kill).not.toHaveBeenCalled();
   });
 });

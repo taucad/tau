@@ -9,7 +9,10 @@
 import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client-core.js';
 import { electronUtilityTransport } from '#electron/electron-utility-transport.js';
 import type { AnyRuntimeDefinition, RuntimeConfigInput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
-import { registerElectronRuntimeHostRelease } from '#electron/_internal/runtime-host-lease.js';
+import {
+  registerElectronRuntimeHostExit,
+  registerElectronRuntimeHostRelease,
+} from '#electron/_internal/runtime-host-lease.js';
 
 export { electronUtilityClient, electronUtilityClientDescribe } from '#electron/electron-utility-client.js';
 export { electronUtilityTransport } from '#electron/electron-utility-transport.js';
@@ -23,6 +26,12 @@ export type { ElectronUtilityTransportOptions } from '#electron/electron-utility
 export type ElectronRuntimeRendererBridge = {
   /** Relay tags exposed by preload for Electron runtime messages. */
   readonly relayTag: {
+    /**
+     * Relay tag carrying the exit code of a dead utility host. Optional so a
+     * preload bundled before this tag existed still satisfies the bridge; the
+     * exit relay is simply not subscribed when it is absent.
+     */
+    readonly hostExit?: string;
     /** Relay tag used for runtime utility-process port delivery. */
     readonly runtime: string;
   };
@@ -70,6 +79,15 @@ export type CreateElectronClientOptionsOptions<Runtime extends AnyRuntimeDefinit
 type ElectronRuntimeMessageTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
 const runtimeHostIdsByPort = new WeakMap<MessagePort, string>();
 
+/* The relay crosses the page's own `window`, so any script or same-page frame
+ * can post one; `contextIsolation` does not fence it. The `source` identity
+ * check is the load-bearing condition — a foreign window cannot forge its own
+ * identity. The origin comparison is the cheap second condition and is
+ * honestly weak here: a `loadFile()` document has an opaque origin, where both
+ * sides stringify as `'null'`. */
+const isSameWindowRelay = (event: MessageEvent): boolean =>
+  event.source === globalThis.window && event.origin === globalThis.location.origin;
+
 const isElectronRuntimeRendererBridge = (value: unknown): value is ElectronRuntimeRendererBridge =>
   value !== null &&
   typeof value === 'object' &&
@@ -107,7 +125,7 @@ export const awaitElectronRuntimePort = async (
   new Promise<MessagePort>((resolve) => {
     const handler = (event: MessageEvent): void => {
       const data = event.data as { taucadRelay?: string; hostId?: string } | undefined;
-      if (!data || data.taucadRelay !== relayTag) {
+      if (!data || data.taucadRelay !== relayTag || !isSameWindowRelay(event)) {
         return;
       }
       const port = event.ports[0];
@@ -142,9 +160,45 @@ export const requestElectronRuntimePort = async (
     port.close();
     throw new Error('requestElectronRuntimePort: preload relay omitted the runtime host ID');
   }
-  registerElectronRuntimeHostRelease(port, (reason) => {
+  /* One release closure for both triggers. The transport client takes the
+   * lease at materialize time, so `pagehide` must call this same closure —
+   * re-taking the lease from the listener would release nothing. The document
+   * is unloading and main kills the utility, so the port is left alone; a
+   * `persisted` branch is unnecessary because Electron renderers have no
+   * back/forward cache. */
+  let released = false;
+  const onPagehide = (): void => {
+    release('requested');
+  };
+  /* Main relays the dead utility's exit code through the same preload relay
+   * that carried the port. The client subscribes at materialize time, so the
+   * notifier is a slot the listener reads rather than a callback it captures. */
+  let notifyHostExit: ((exitCode?: number) => void) | undefined;
+  const hostExitTag = bridge.relayTag.hostExit;
+  const onHostExit = (event: MessageEvent): void => {
+    const data = event.data as { taucadRelay?: string; hostId?: string; exitCode?: number } | undefined;
+    if (!data || data.taucadRelay !== hostExitTag || data.hostId !== hostId || !isSameWindowRelay(event)) {
+      return;
+    }
+    notifyHostExit?.(data.exitCode);
+  };
+  const release = (reason: 'requested' | 'render-timeout'): void => {
+    if (released) {
+      return;
+    }
+    released = true;
+    target.removeEventListener('pagehide', onPagehide);
+    target.removeEventListener('message', onHostExit);
     bridge.releaseRuntimeHost(hostId, reason);
-  });
+  };
+  target.addEventListener('pagehide', onPagehide, { once: true });
+  if (hostExitTag !== undefined) {
+    target.addEventListener('message', onHostExit);
+    registerElectronRuntimeHostExit(port, (notify) => {
+      notifyHostExit = notify;
+    });
+  }
+  registerElectronRuntimeHostRelease(port, release);
   port.start();
   return port;
 };

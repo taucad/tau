@@ -17,6 +17,7 @@ const liveUtilities: Array<{
   readonly postMessage: ReturnType<typeof vi.fn>;
 }> = [];
 const headerHandlers: HeadersReceivedHandler[] = [];
+const headerFilters: unknown[] = [];
 
 vi.mock('electron', () => {
   class MessageChannelMain {
@@ -39,7 +40,8 @@ vi.mock('electron', () => {
     session: {
       defaultSession: {
         webRequest: {
-          onHeadersReceived: vi.fn((handler: HeadersReceivedHandler) => {
+          onHeadersReceived: vi.fn((filter: unknown, handler: HeadersReceivedHandler) => {
+            headerFilters.push(filter);
             headerHandlers.push(handler);
           }),
         },
@@ -58,6 +60,27 @@ vi.mock('electron', () => {
     },
   };
 });
+
+/**
+ * Install the header handler and run one response through the freshly
+ * registered listener (`headerHandlers` is module-scoped and accumulates one
+ * entry per install).
+ *
+ * @param responseHeaders - Headers Electron delivers for the response.
+ * @returns The headers the handler hands back to Electron.
+ */
+const applyRuntimeHeaders = async (responseHeaders: Record<string, string[]>): Promise<Record<string, string[]>> => {
+  const { installElectronRuntimeHeaders } = await import('#electron/main.js');
+  installElectronRuntimeHeaders();
+  let applied: Record<string, string[]> | undefined;
+  headerHandlers.at(-1)?.({ responseHeaders }, (value) => {
+    applied = (value as { responseHeaders: Record<string, string[]> }).responseHeaders;
+  });
+  if (!applied) {
+    throw new Error('installElectronRuntimeHeaders did not invoke its callback');
+  }
+  return applied;
+};
 
 /**
  * Drive one `requestRuntimePort` IPC message into the registered broker.
@@ -104,6 +127,7 @@ describe('Electron main runtime helpers', () => {
           [existingHeaderName]: ['kept'],
           'Cross-Origin-Embedder-Policy': ['require-corp'],
           'Cross-Origin-Opener-Policy': ['same-origin'],
+          'Cross-Origin-Resource-Policy': ['same-origin'],
         },
       },
     ]);
@@ -168,6 +192,41 @@ describe('Electron main runtime helpers', () => {
     expect(first?.kill).toHaveBeenCalledOnce();
     expect(second?.kill).toHaveBeenCalledOnce();
   });
+  it('emits exactly one entry per managed header when input keys are lowercase', async () => {
+    const applied = await applyRuntimeHeaders({
+      'cross-origin-opener-policy': ['unsafe-none'],
+      'cross-origin-embedder-policy': ['unsafe-none'],
+    });
+
+    const entriesFor = (name: string): Array<[string, string[]]> =>
+      Object.entries(applied).filter(([key]) => key.toLowerCase() === name);
+    expect(entriesFor('cross-origin-opener-policy')).toEqual([['Cross-Origin-Opener-Policy', ['same-origin']]]);
+    expect(entriesFor('cross-origin-embedder-policy')).toEqual([['Cross-Origin-Embedder-Policy', ['require-corp']]]);
+  });
+
+  it('preserves unrelated headers and their casing', async () => {
+    const applied = await applyRuntimeHeaders({ [existingHeaderName]: ['kept'], 'x-Tau-Trace': ['abc'] });
+
+    expect(applied[existingHeaderName]).toEqual(['kept']);
+    expect(applied['x-Tau-Trace']).toEqual(['abc']);
+  });
+
+  it('is idempotent across two applications', async () => {
+    const once = await applyRuntimeHeaders({ [existingHeaderName]: ['kept'] });
+    const twice = await applyRuntimeHeaders(once);
+
+    expect(twice).toEqual(once);
+  });
+
+  it('stays in sync with the canonical documentHeaders', async () => {
+    const { documentHeaders } = await import('#cross-origin-isolation/index.js');
+    const applied = await applyRuntimeHeaders({});
+
+    expect(applied).toEqual(
+      Object.fromEntries(Object.entries(documentHeaders).map(([name, value]) => [name, [value]])),
+    );
+  });
+
   it('releases the utility when the renderer process is gone', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     const senderOnce = vi.fn<(event: string, handler: () => void) => void>();
@@ -205,6 +264,25 @@ describe('Electron main runtime helpers', () => {
     requestRuntimePort({ once: vi.fn() });
     expect(fork.mock.calls.at(-1)?.[2]).not.toHaveProperty('execArgv');
     untuned.dispose();
+  });
+
+  it('registers a document-only web request filter', async () => {
+    const { installElectronRuntimeHeaders } = await import('#electron/main.js');
+
+    installElectronRuntimeHeaders();
+
+    expect(headerFilters.at(-1)).toEqual({ urls: ['<all_urls>'], types: ['mainFrame', 'subFrame'] });
+  });
+
+  it('emits the complete documentHeaders set on a document response', async () => {
+    const { documentHeaders } = await import('#cross-origin-isolation/index.js');
+    const applied = await applyRuntimeHeaders({ 'cross-origin-resource-policy': ['cross-origin'] });
+
+    for (const [name, value] of Object.entries(documentHeaders)) {
+      expect(Object.entries(applied).filter(([key]) => key.toLowerCase() === name.toLowerCase())).toEqual([
+        [name, [value]],
+      ]);
+    }
   });
 
   it('honours a filtering ipcMain view', async () => {

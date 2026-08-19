@@ -7,10 +7,11 @@
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
-import type { ForkOptions, IpcMain, IpcMainEvent, Session, UtilityProcess } from 'electron';
+import type { ForkOptions, IpcMain, IpcMainEvent, Session, UtilityProcess, WebRequestFilter } from 'electron';
 import { ipcMain as defaultIpcMain, MessageChannelMain, session as defaultSession, utilityProcess } from 'electron';
 
 import { electronRuntimeChannel as runtimeChannel } from '#electron/constants.js';
+import { documentHeaders } from '#cross-origin-isolation/index.js';
 
 /**
  * Default IPC channel used by Tau's Electron runtime bridge.
@@ -80,6 +81,26 @@ export type ElectronRuntimeMainHandle = {
 
 const toError = (error: unknown): Error => (error instanceof Error ? error : new Error(String(error)));
 
+/* Document headers this handler manages, in canonical casing — the complete
+ * canonical set, CORP included. CORP is safe here *because* the handler is
+ * registered with a document-only filter (see `documentResponseFilter`): the
+ * cross-origin API responses that a `require-corp` document would then reject
+ * never reach it. Restoring CORP reverses the earlier unconditional exclusion,
+ * whose stated precondition — an unfiltered handler that rewrites every
+ * response in the session — no longer holds (see
+ * `docs/research/runtime-desktop-crossover-batch-d-blueprint.md`, D3(c)).
+ * Residual: a cross-origin `subFrame` document response now carries
+ * `same-origin`; under `require-corp` such a frame is already excluded unless
+ * it opts in. Narrow to `types: ['mainFrame']` if cross-origin iframes are
+ * ever needed. */
+const managedHeaders: ReadonlyArray<readonly [string, string]> = Object.entries(documentHeaders);
+const managedHeaderNamesLc: ReadonlySet<string> = new Set(managedHeaders.map(([name]) => name.toLowerCase()));
+
+/* `<all_urls>`, never a scheme-wildcard pattern: the wildcard form does not
+ * match the custom standard schemes (`app://`) that `protocol.handle` serves a
+ * packaged renderer from, which is exactly where cross-origin isolation fails. */
+const documentResponseFilter: WebRequestFilter = { urls: ['<all_urls>'], types: ['mainFrame', 'subFrame'] };
+
 /**
  * Install COOP/COEP response headers for Electron renderer pages.
  *
@@ -89,14 +110,23 @@ const toError = (error: unknown): Error => (error instanceof Error ? error : new
  */
 export const installElectronRuntimeHeaders = (options: ElectronRuntimeHeadersOptions = {}): void => {
   const targetSession = options.session ?? defaultSession.defaultSession;
-  targetSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Cross-Origin-Embedder-Policy': ['require-corp'],
-        'Cross-Origin-Opener-Policy': ['same-origin'],
-      },
-    });
+  targetSession.webRequest.onHeadersReceived(documentResponseFilter, (details, callback) => {
+    /* Electron delivers response headers with lowercase keys; adding a
+     * Title-Case copy leaves the name case-duplicated, and Chromium then
+     * refuses cross-origin isolation on a custom scheme. Upsert case-
+     * insensitively instead, leaving unrelated headers and their casing alone.
+     * Not `applyDocumentHeaders`: its `Object.assign` would re-add Title-Case
+     * keys beside the lowercase ones Electron delivered. */
+    const responseHeaders: Record<string, string[]> = {};
+    for (const [name, value] of Object.entries(details.responseHeaders ?? {})) {
+      if (!managedHeaderNamesLc.has(name.toLowerCase())) {
+        responseHeaders[name] = value;
+      }
+    }
+    for (const [name, value] of managedHeaders) {
+      responseHeaders[name] = [value];
+    }
+    callback({ responseHeaders });
   });
 };
 

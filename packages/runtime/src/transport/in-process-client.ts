@@ -261,6 +261,13 @@ export const inProcessClient = (
       } catch {
         /* Best-effort */
       }
+      try {
+        // Inline adapters own host resources (node-fs `fs.watch` handles) that
+        // otherwise outlive the client and pin the process open.
+        inlineFileSystem?.dispose();
+      } catch {
+        /* Best-effort */
+      }
       resolveClosed?.({ cause: 'requested' });
     },
     closed,

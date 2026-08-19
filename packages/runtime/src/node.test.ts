@@ -1,5 +1,8 @@
 /* eslint-disable @typescript-eslint/naming-convention -- file map keys are filesystem paths, not symbols */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createNodeClient } from '#node.js';
 import { extractGltfFromExportResult } from '#testing/kernel-geometry-testing.utils.js';
 
@@ -132,5 +135,28 @@ describe('createNodeClient', () => {
     expect(second.success).toBe(true);
 
     client.terminate();
+  });
+
+  // A filesystem-backed export subscribes `fs.watch` handles through the inline
+  // node-fs adapter; `terminate()` must release them or the host process never
+  // exits (`taucad export` hung after writing its artifact).
+  it('releases fs.watch handles on terminate for a path-backed client', { timeout: 30_000 }, async () => {
+    const projectDirectory = await mkdtemp(join(tmpdir(), 'taucad-node-client-'));
+    await writeFile(
+      join(projectDirectory, 'main.ts'),
+      "import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(10, 20, 30);\n",
+    );
+    const client = await createNodeClient(projectDirectory);
+
+    const result = await client.export('glb', { source: { path: 'main.ts' } });
+    expect(result.success).toBe(true);
+    expect(process.getActiveResourcesInfo()).toContain('FSEventWrap');
+
+    client.terminate();
+
+    // `FSWatcher.close()` releases the libuv handle asynchronously.
+    await vi.waitFor(() => {
+      expect(process.getActiveResourcesInfo()).not.toContain('FSEventWrap');
+    });
   });
 });

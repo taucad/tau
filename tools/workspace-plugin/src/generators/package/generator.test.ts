@@ -28,6 +28,7 @@ describe('package generator', () => {
       main?: string;
       module?: string;
       types?: string;
+      exports?: Record<string, unknown>;
       publishConfig?: {
         exports?: {
           '.'?: {
@@ -36,7 +37,9 @@ describe('package generator', () => {
             default?: string;
             require?: unknown;
           };
+          './package.json'?: string;
         };
+        imports?: Record<string, string>;
       };
       imports?: Record<string, string>;
     }>(tree, 'packages/example/package.json');
@@ -51,6 +54,10 @@ describe('package generator', () => {
     });
     expect(packageJson.imports?.['#*.js']).toBe('./src/*.ts');
     expect(packageJson.imports?.['#*']).toBe('./src/*');
+    expect(packageJson.exports?.['./package.json']).toBe('./package.json');
+    expect(packageJson.publishConfig?.exports?.['./package.json']).toBe('./package.json');
+    // The source subpath-import map must never reach the registry — see R14/R15.
+    expect(packageJson.publishConfig?.imports).toEqual({});
     expect(packageJson.publishConfig?.exports?.['.']?.require).toBeUndefined();
     expect(JSON.stringify(packageJson)).not.toMatch(/dist\/esm|dist\/cjs|\.cjs|\.d\.cts/);
 

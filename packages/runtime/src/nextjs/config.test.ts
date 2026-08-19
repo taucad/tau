@@ -30,6 +30,13 @@ describe('withTauRuntime', () => {
     });
   });
 
+  it('should stay in sync with the canonical documentHeaders from @taucad/runtime/cross-origin-isolation', async () => {
+    const { documentHeaders } = await import('#cross-origin-isolation/index.js');
+    const [documentRule] = nextRuntimeHeaders({ document: '/workspace/:path*' });
+
+    expect(documentRule?.headers).toEqual(Object.entries(documentHeaders).map(([key, value]) => ({ key, value })));
+  });
+
   it('should compose application config without replacing sibling Turbopack or header settings', async () => {
     const appHeader = { source: '/api/:path*', headers: [{ key: 'X-App', value: 'true' }] };
     const config = withTauRuntime(

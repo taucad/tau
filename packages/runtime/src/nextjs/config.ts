@@ -64,6 +64,12 @@ type NextRuntimeConfig = Omit<NextConfig, 'headers' | 'turbopack' | 'webpack'> &
   webpack: InstalledWebpackHook;
 };
 
+/* Duplicated from `#cross-origin-isolation/headers.js` rather than imported:
+ * this entry is loaded by Next's own config resolver, under the same class of
+ * cross-entry resolution risk the Vite adapter documents in its header. Parity
+ * is enforced by config.test.ts's `stays in sync with the canonical
+ * documentHeaders` case, which is the source of truth here, not the literal. */
+// ponytail: duplicated deliberately; the parity test is the single source of truth, not the literal.
 const documentHeaders: Readonly<Record<string, string>> = Object.freeze({
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Embedder-Policy': 'require-corp',

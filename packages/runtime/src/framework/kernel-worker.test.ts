@@ -614,6 +614,67 @@ describe('KernelWorker lifecycle', () => {
       expect(worker.getWatchedPaths()).toEqual(new Set(['/main.ts']));
       await worker.cleanup();
     });
+
+    it('does not supersede the arming render when the watch replays a pre-arm write', async () => {
+      /* Measured on macOS: `fs.watch` delivers a `change` for the entry a few
+       * milliseconds after the arm, replaying the write that created the file
+       * just before the client connected. Nothing has hashed `/main.ts` yet, so
+       * without a baseline recorded at arm time the replay reads as a change
+       * against `undefined`, schedules an autonomous re-render, and aborts the
+       * explicit render that armed the watch — which then reaches terminal
+       * `idle` with no geometry and settles as `{ superseded: true }`. */
+      const entryBytes = new Uint8Array([1, 2, 3]);
+      const filesystem = createMockFileSystem();
+      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': entryBytes });
+      filesystem.mocks.readFile.mockResolvedValue(entryBytes);
+
+      let deliverWatchEvent!: (event: WatchEvent) => void;
+      const inlineFileSystem = Object.assign(filesystem, {
+        watch: vi.fn(() => vi.fn()),
+        watchReady: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          deliverWatchEvent = handler;
+          return {
+            unsubscribe: vi.fn(),
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              // This synthetic watch stays open for the duration of the test.
+            }),
+          };
+        }),
+      });
+
+      /* Dependency discovery is the first step of the render that follows the
+       * arm, so holding it open puts the replay exactly where the measured
+       * failure put it: after the watch is live, before anything has hashed the
+       * entry (`cachedHashes=[["/main.ts", null]]`). */
+      const discovering = Promise.withResolvers<void>();
+      const releaseDiscovery = Promise.withResolvers<void>();
+      class GatedKernelWorker extends MockKernelWorker {
+        protected override async onGetDependencies({
+          entryPath,
+        }: GetDependenciesInput): Promise<GetDependenciesResult> {
+          discovering.resolve();
+          await releaseDiscovery.promise;
+          return { resolved: [entryPath], unresolved: [] };
+        }
+      }
+
+      const worker = new GatedKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+      const observed = observePreview(worker);
+      const renderId = previewId(204);
+
+      worker.handleOpenFile({ renderId, file: createGeometryFile('main.ts'), parameters: {} });
+      await discovering.promise;
+      deliverWatchEvent({ type: 'change', path: '/main.ts' });
+      await flushMicrotasks();
+      releaseDiscovery.resolve();
+
+      const terminal = await observed.waitForState(({ state }) => state === 'idle' || state === 'error');
+      expect(terminal.renderId).toBe(renderId);
+      expect(observed.geometries.map((entry) => entry.renderId)).toEqual([renderId]);
+      await worker.cleanup();
+    });
   });
 
   describe('exact and loss invalidation routing', () => {

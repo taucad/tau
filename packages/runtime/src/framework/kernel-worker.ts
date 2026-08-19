@@ -3863,7 +3863,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           readFailed = true;
         }
       }
-      if (readFailed || revision?.hash !== this.fileHashCache.get(path)) {
+      const known = this.fileHashCache.get(path);
+      if (!readFailed && known === undefined && revision) {
+        /* No prior revision means the render that armed this watch has not read
+         * the path yet — every path a render *has* observed carries a hash (or
+         * `'missing'`) by the time it enters the watch set. So this read is the
+         * path's baseline, not evidence of a change: an OS that replays the
+         * write predating the arm (macOS does, milliseconds later) would
+         * otherwise schedule an autonomous re-render that aborts the very
+         * render doing the arming, which then settles as `{ superseded: true }`. */
+        this.fileHashCache.set(path, revision.hash);
+        if (revision.content !== undefined) {
+          this.fileContentCache.set(path, revision.content);
+        }
+        continue;
+      }
+      if (readFailed || revision?.hash !== known) {
         changed.set(path, revision);
       }
     }

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { exposeFileSystem, filesystemBridgeConnectMessageType, openFileSystemBridge } from '@taucad/fs-bridge';
 import { createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
@@ -25,10 +25,6 @@ const delay = async (milliseconds: number): Promise<void> =>
   });
 
 describe('autonomous preview invalidation', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it('should render once when a parameter update is followed by unrelated project writes', async () => {
     const providerRegistry = new ProviderRegistry();
     const rootStorageRootKey = 'memory:parameter-update-root';
@@ -60,19 +56,19 @@ describe('autonomous preview invalidation', () => {
     await service.writeFile(`/projects/${projectId}/main.ts`, mainSource);
 
     const workerScope = new EventTarget();
-    vi.stubGlobal('self', workerScope);
     const exposed = exposeFileSystem(service, {
       changeEventBus: eventBus,
       handlerForRoot: (root, context) => service.createRootedFileSystem(root, context),
+      messageSource: workerScope,
     });
     const bridgeWorker = {
       postMessage(message: unknown): void {
         workerScope.dispatchEvent(new MessageEvent('message', { data: message }));
       },
-    } satisfies Pick<Worker, 'postMessage'>;
+    };
 
     const fileSystem = fromFileSystemBridge(() =>
-      openFileSystemBridge(bridgeWorker as Worker, {
+      openFileSystemBridge(bridgeWorker, {
         messageType: filesystemBridgeConnectMessageType,
         root: `/projects/${projectId}`,
       }),

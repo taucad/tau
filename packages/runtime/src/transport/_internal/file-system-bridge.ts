@@ -1,6 +1,9 @@
 /**
  * Resolve a consumer-supplied {@link RuntimeFileSystem} into a
- * `MessagePort` suitable for the dispatcher's filesystem bridge.
+ * `MessagePortLike` suitable for the dispatcher's filesystem bridge. A
+ * transport that posts the handle across a real structured-clone boundary
+ * must still supply a genuinely transferable `MessagePort`; in-process and
+ * `node:worker_threads` hosts may supply any structural port.
  *
  * - `kind: 'inline'`  → wrap in a fresh `BridgePort` so the worker can
  *                       consume it via the same proxy plumbing.

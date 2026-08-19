@@ -8,7 +8,7 @@
  * autonomous client→worker commands and worker→client events.
  */
 
-import type { WithTransferables } from '@taucad/rpc';
+import type { MessagePortLike, WithTransferables } from '@taucad/rpc';
 import type { FileExtension, GeometrySvg, GeometryWebRtc, LogEntry } from '@taucad/types';
 import type {
   GetParametersResult,
@@ -88,16 +88,20 @@ export type SignalBufferHandle = SharedArrayBuffer;
  * transports can pass `{}` and the dispatcher's `case 'initialize':`
  * branch stays uniform.
  *
- * `fileSystemPort` is the bridge `MessagePort` constructed by the transport
+ * `fileSystemPort` is the bridge port constructed by the transport
  * plugin from the opaque `RuntimeFileSystem` value handed to its
  * `client({ fileSystem })` factory. The dispatcher reads it from this
- * handle to attach the FS bridge to the kernel worker.
+ * handle to attach the FS bridge to the kernel worker. It is typed
+ * structurally ({@link MessagePortLike}) so in-process and
+ * `node:worker_threads` hosts can supply their own port; a transport that
+ * posts the handle across a real `postMessage` boundary must still supply a
+ * genuinely transferable `MessagePort`.
  * @public
  */
 export type InitializeMemoryHandle = {
   signalBuffer?: SignalBufferHandle;
   geometryPoolBuffer?: GeometryPoolHandle;
-  fileSystemPort?: MessagePort;
+  fileSystemPort?: MessagePortLike;
 };
 
 /** Numeric timeout reason accepted by the targeted wire abort command. @public */

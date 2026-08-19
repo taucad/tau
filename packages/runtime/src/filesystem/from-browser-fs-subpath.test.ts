@@ -14,7 +14,6 @@ import { describe, it, expect, vi } from 'vitest';
 
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
 describe('filesystem/browser subpath (R20)', () => {
   it('exposes only the public fromBrowserFs factory', async () => {
@@ -48,43 +47,9 @@ describe('filesystem/browser subpath (R20)', () => {
     expect(isRuntimeFileSystem(fs)).toBe(true);
   });
 
-  it.each<readonly [string, (fileSystem: RuntimeFileSystemBase) => Promise<unknown>]>([
-    ['readFile', async (fileSystem) => fileSystem.readFile('/../sibling/secret.ts')],
-    ['writeFile', async (fileSystem) => fileSystem.writeFile('/../sibling/secret.ts', 'no')],
-    ['mkdir', async (fileSystem) => fileSystem.mkdir('/../sibling')],
-    ['readdir', async (fileSystem) => fileSystem.readdir('/../sibling')],
-    ['unlink', async (fileSystem) => fileSystem.unlink('/../sibling/secret.ts')],
-    ['stat', async (fileSystem) => fileSystem.stat('/../sibling/secret.ts')],
-    ['rmdir', async (fileSystem) => fileSystem.rmdir('/../sibling')],
-    ['rename source', async (fileSystem) => fileSystem.rename('/../sibling/secret.ts', '/safe.ts')],
-    ['rename destination', async (fileSystem) => fileSystem.rename('/safe.ts', '/../sibling/secret.ts')],
-    ['lstat', async (fileSystem) => fileSystem.lstat('/../sibling/secret.ts')],
-    ['exists', async (fileSystem) => fileSystem.exists('/../sibling/secret.ts')],
-  ])('rejects above-root traversal for %s before traversing the directory handle', async (_operation, invoke) => {
-    const getDirectoryHandle = vi.fn();
-    const getFileHandle = vi.fn();
-    const removeEntry = vi.fn();
-    const root = {
-      kind: 'directory',
-      name: 'root',
-      async *entries() {
-        yield* [];
-      },
-      getDirectoryHandle,
-      getFileHandle,
-      removeEntry,
-    } as unknown as FileSystemDirectoryHandle;
-    const { fromBrowserFs } = await import('#filesystem/from-browser-fs.js');
-    const handle = resolveRuntimeFileSystem(fromBrowserFs(root));
-    if (handle.kind !== 'inline') {
-      throw new Error('fromBrowserFs must produce an inline filesystem handle.');
-    }
-
-    await expect(invoke(handle.create())).rejects.toMatchObject({ code: 'PATH_OUTSIDE_ROOT' });
-    expect(getDirectoryHandle).not.toHaveBeenCalled();
-    expect(getFileHandle).not.toHaveBeenCalled();
-    expect(removeEntry).not.toHaveBeenCalled();
-  });
+  /* The above-root traversal table moved to the shared adapter conformance
+   * suite (`filesystem/adapter-conformance.test.ts`), which runs the same
+   * eleven operations against every adapter instead of this one. */
 
   it('preserves permission failures from directory traversal', async () => {
     const denied = new DOMException('permission denied', 'NotAllowedError');

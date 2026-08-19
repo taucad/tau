@@ -24,10 +24,14 @@ import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-files
 import { fileStatFromBytes } from '@taucad/filesystem';
 import { resolveVirtualPath } from '@taucad/utils/path';
 
-function enoent(message: string): Error {
+function errno(code: string, message: string): Error {
   const error = new Error(message);
-  (error as NodeJS.ErrnoException).code = 'ENOENT';
+  (error as NodeJS.ErrnoException).code = code;
   return error;
+}
+
+function enoent(message: string): Error {
+  return errno('ENOENT', message);
 }
 
 /**
@@ -121,10 +125,24 @@ function buildMemoryFsBase(
         directories.add(parts.slice(0, i).join('/'));
       }
     },
-    async mkdir(directoryPath) {
+    async mkdir(directoryPath, options) {
       const canonicalPath = resolveVirtualPath(directoryPath);
-      directories.add(canonicalPath);
+      /* `options.recursive` was previously ignored, so `mkdir` never reported
+       * EEXIST or a missing parent and diverged from every other adapter. */
+      if (store.has(canonicalPath) || directories.has(canonicalPath)) {
+        if (options?.recursive === true) {
+          return;
+        }
+        throw errno('EEXIST', `EEXIST: file already exists: ${canonicalPath}`);
+      }
       const parts = canonicalPath.split('/');
+      if (options?.recursive !== true) {
+        const parent = parts.slice(0, -1).join('/') || '/';
+        if (!directories.has(parent)) {
+          throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
+        }
+      }
+      directories.add(canonicalPath);
       for (let i = 1; i < parts.length; i++) {
         directories.add(parts.slice(0, i).join('/'));
       }
@@ -152,7 +170,11 @@ function buildMemoryFsBase(
       return [...entries].filter(Boolean);
     },
     async unlink(filePath) {
-      store.delete(resolveVirtualPath(filePath));
+      const canonicalPath = resolveVirtualPath(filePath);
+      if (!store.has(canonicalPath) && directories.has(canonicalPath)) {
+        throw errno('EISDIR', `EISDIR: illegal operation on a directory: ${canonicalPath}`);
+      }
+      store.delete(canonicalPath);
     },
     async stat(filePath) {
       const canonicalPath = resolveVirtualPath(filePath);
@@ -169,7 +191,21 @@ function buildMemoryFsBase(
       throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
     },
     async rmdir(directoryPath) {
-      directories.delete(resolveVirtualPath(directoryPath));
+      /* Previously an unconditional delete: it removed files, removed
+       * non-empty directories, and silently succeeded on missing paths. */
+      const canonicalPath = resolveVirtualPath(directoryPath);
+      if (store.has(canonicalPath)) {
+        throw errno('ENOTDIR', `ENOTDIR: not a directory: ${canonicalPath}`);
+      }
+      if (!directories.has(canonicalPath)) {
+        throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
+      }
+      const prefix = canonicalPath === '/' ? '/' : `${canonicalPath}/`;
+      const hasChild = [...store.keys(), ...directories].some((key) => key !== canonicalPath && key.startsWith(prefix));
+      if (hasChild) {
+        throw errno('ENOTEMPTY', `ENOTEMPTY: directory not empty: ${canonicalPath}`);
+      }
+      directories.delete(canonicalPath);
     },
     async rename(oldPath, newPath) {
       const canonicalOldPath = resolveVirtualPath(oldPath);

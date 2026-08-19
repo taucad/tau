@@ -19,7 +19,8 @@ import { z } from 'zod';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
 import { fileExtensions } from '@taucad/types/constants';
 import type { FileExtension } from '@taucad/types';
-import type { WireProtocolSchemas } from '@taucad/rpc';
+import type { MessagePortLike, WireProtocolSchemas } from '@taucad/rpc';
+import { isMessagePortLike } from '#transport/_internal/wire-transferables.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 
@@ -142,18 +143,15 @@ const sharedArrayBufferSchema = z.custom<SharedArrayBuffer>(
   (value) => typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer,
 );
 
-const messagePortSchema = z.custom<MessagePort>(
-  (value) => typeof MessagePort !== 'undefined' && value instanceof MessagePort,
-);
+/* Structural, not `instanceof`: the handle legitimately carries a DOM
+ * `MessagePort`, a `node:worker_threads` port, or an in-process structural
+ * port (X7). Reuses the transport's single port sniff. */
+const messagePortSchema = z.custom<MessagePortLike>(isMessagePortLike);
 
 export const runtimeInitializeMemoryHandleSchema = z
   .object({
     signalBuffer: sharedArrayBufferSchema.optional(),
     geometryPoolBuffer: sharedArrayBufferSchema.optional(),
-    /* `MessagePort` is the global DOM type in browser/Worker contexts
-     * and resolves to the structurally-equivalent worker_threads
-     * `MessagePort` in Node. Either backs the runtime FS bridge so the
-     * schema accepts the global form. */
     fileSystemPort: messagePortSchema.optional(),
   })
   .catchall(z.unknown());

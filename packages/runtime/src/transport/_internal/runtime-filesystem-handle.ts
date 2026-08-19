@@ -26,8 +26,10 @@ import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
  * Internal discriminated filesystem handle. The transport plane reads this
  * to decide whether the FS lives in the same isolate (`inline` — invoke
  * `create()` to mint a fresh `RuntimeFileSystemBase` per binding) or
- * behind a `MessagePort` bridge (`channel` — wire it through
- * `createBridgeServer` in the host).
+ * behind a structural-port bridge (`channel` — wire it through
+ * `createBridgeServer` in the host; the port is a `MessagePortLike`, so a
+ * DOM `MessagePort`, a `node:worker_threads` port, or an in-process
+ * structural port all qualify).
  *
  * The inline arm is a **per-binding factory**, not a captured live
  * instance. Mirroring the v6 transport callable-plugin contract: the

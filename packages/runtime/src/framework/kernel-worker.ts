@@ -7,6 +7,7 @@ import { named, preserveMethodNames } from '#framework/named.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import type { MessagePortLike } from '@taucad/rpc';
 import { SharedPool } from '@taucad/memory';
 import type {
   HashedGeometryResult,
@@ -652,11 +653,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param input.callbacks - Object containing callback functions (proxied)
    * @param input.callbacks.onLog - The function to call when a log is emitted
    * @param input.transferables - Object containing transferable resources like MessagePorts
-   * @param input.transferables.fileSystemPort - Optional MessagePort for direct communication with file-manager worker
+   * @param input.transferables.fileSystemPort - Optional port for direct communication with the
+   * file-manager worker. Typed structurally ({@link MessagePortLike}) so in-process and
+   * `node:worker_threads` hosts can supply their own port; worker transports transfer a `MessagePort`.
    */
   public async initialize(input: {
     callbacks: { onLog: OnWorkerLog };
-    transferables: { fileSystemPort?: MessagePort; inlineFileSystem?: RuntimeFileSystemBase };
+    transferables: { fileSystemPort?: MessagePortLike; inlineFileSystem?: RuntimeFileSystemBase };
     options?: Options;
     config?: unknown;
   }): Promise<void> {

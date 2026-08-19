@@ -28,7 +28,7 @@ describe('filesystem constructors', () => {
     it('should mkdir and create all parent directories', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/a/b/c');
+      await fileSystem.mkdir('/a/b/c', { recursive: true });
 
       expect(await fileSystem.exists('/a/b/c')).toBe(true);
       expect(await fileSystem.exists('/a/b')).toBe(true);
@@ -38,7 +38,7 @@ describe('filesystem constructors', () => {
     it('should make parent directories visible via stat', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/x/y/z');
+      await fileSystem.mkdir('/x/y/z', { recursive: true });
 
       const statX = await fileSystem.stat('/x');
       expect(statX.type).toBe('dir');
@@ -50,7 +50,7 @@ describe('filesystem constructors', () => {
     it('should list children created by mkdir in readdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/parent/child');
+      await fileSystem.mkdir('/parent/child', { recursive: true });
 
       const entries = await fileSystem.readdir('/parent');
       expect(entries).toContain('child');
@@ -59,7 +59,7 @@ describe('filesystem constructors', () => {
     it('should list deeply nested mkdir directories via readdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/a/b/c/d');
+      await fileSystem.mkdir('/a/b/c/d', { recursive: true });
 
       expect(await fileSystem.readdir('/a')).toContain('b');
       expect(await fileSystem.readdir('/a/b')).toContain('c');
@@ -69,7 +69,7 @@ describe('filesystem constructors', () => {
     it('should read and write files in directories created by mkdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/project/src');
+      await fileSystem.mkdir('/project/src', { recursive: true });
       await fileSystem.writeFile('/project/src/index.ts', 'export {}');
 
       const content = await fileSystem.readFile('/project/src/index.ts', 'utf8');

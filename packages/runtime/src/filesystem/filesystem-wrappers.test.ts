@@ -151,7 +151,7 @@ describe('filesystem high-level wrappers', () => {
 
   describe('waitForWorkerReady', () => {
     it('should resolve when worker posts the ready message', async () => {
-      const worker = new EventTarget() as unknown as Worker;
+      const worker = new EventTarget();
       const ready = waitForWorkerReady(worker);
 
       worker.dispatchEvent(new MessageEvent('message', { data: { type: workerReadyMessageType } }));
@@ -160,7 +160,7 @@ describe('filesystem high-level wrappers', () => {
     });
 
     it('should not resolve for unrelated messages', async () => {
-      const worker = new EventTarget() as unknown as Worker;
+      const worker = new EventTarget();
       const ready = waitForWorkerReady(worker);
       const notYet = Symbol('not-yet');
 
@@ -174,7 +174,7 @@ describe('filesystem high-level wrappers', () => {
     });
 
     it('should reject when signal is aborted before ready', async () => {
-      const worker = new EventTarget() as unknown as Worker;
+      const worker = new EventTarget();
       const controller = new AbortController();
 
       const ready = waitForWorkerReady(worker, controller.signal);
@@ -184,7 +184,7 @@ describe('filesystem high-level wrappers', () => {
     });
 
     it('should clean up listener after resolving', async () => {
-      const worker = new EventTarget() as unknown as Worker;
+      const worker = new EventTarget();
       const removeSpy = vi.spyOn(worker, 'removeEventListener');
 
       const ready = waitForWorkerReady(worker);

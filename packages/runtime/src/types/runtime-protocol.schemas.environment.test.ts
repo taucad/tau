@@ -66,3 +66,45 @@ describe('runtime protocol schemas in constrained browser environments', () => {
     });
   });
 });
+
+describe('runtime initialize memory handle port validation (X7)', () => {
+  it('should accept a Node MessageChannel port', async () => {
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const channel = new MessageChannel();
+
+    try {
+      expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: channel.port1 }).success).toBe(true);
+    } finally {
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+
+  it('should accept a structural port that is not a MessagePort instance', async () => {
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const structuralPort = {
+      postMessage(): void {
+        /* No-op. */
+      },
+      addEventListener(): void {
+        /* No-op. */
+      },
+      removeEventListener(): void {
+        /* No-op. */
+      },
+      close(): void {
+        /* No-op. */
+      },
+    };
+
+    expect(structuralPort instanceof MessagePort).toBe(false);
+    expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: structuralPort }).success).toBe(true);
+  });
+
+  it('should reject a plain object that exposes no port methods', async () => {
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+
+    expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: { postMessage: 1 } }).success).toBe(false);
+    expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: {} }).success).toBe(false);
+  });
+});

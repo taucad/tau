@@ -134,19 +134,19 @@ describe('rooted filesystem production topology', () => {
     await service.writeFile(`/projects/${betaProjectId}/shape.ts`, shapeSource(99));
 
     const workerScope = new EventTarget();
-    vi.stubGlobal('self', workerScope);
     const exposed = exposeFileSystem(service, {
       changeEventBus: eventBus,
       handlerForRoot: (root, context) => service.createRootedFileSystem(root, context),
+      messageSource: workerScope,
     });
     const bridgeWorker = {
       postMessage(message: unknown): void {
         workerScope.dispatchEvent(new MessageEvent('message', { data: message }));
       },
-    } satisfies Pick<Worker, 'postMessage'>;
+    };
 
     const fileSystem = fromFileSystemBridge(() =>
-      openFileSystemBridge(bridgeWorker as Worker, {
+      openFileSystemBridge(bridgeWorker, {
         messageType: filesystemBridgeConnectMessageType,
         root: `/projects/${alphaProjectId}`,
       }),

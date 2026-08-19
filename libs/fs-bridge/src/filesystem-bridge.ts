@@ -10,6 +10,7 @@ import {
 } from '@taucad/filesystem';
 import { safeDispose } from '@taucad/utils/dispose';
 import { wrapMessagePort } from '@taucad/rpc';
+import type { MessagePortLike } from '@taucad/rpc';
 import type { ChangeEvent } from '@taucad/types';
 import type {
   FileStat,
@@ -99,7 +100,7 @@ const defaultUiCoalescingWindow = 500;
 
 const asFileSystemBridgePort = (port: MessagePort): FileSystemBridgePort => port as FileSystemBridgePort;
 
-const wrapFileSystemBridgePort = (port: MessagePort, label: string): Port<unknown> => {
+const wrapFileSystemBridgePort = (port: MessagePortLike, label: string): Port<unknown> => {
   const wrapped = wrapMessagePort<unknown>(port, { label });
   if (wrapped.start !== undefined) {
     wrapped.start();
@@ -492,6 +493,10 @@ const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
 type InternalExposeFileSystemOptions = FileSystemBridgeOptions & {
   handlerForRoot?: (root: string, context: WorkspaceMutationContext) => StringKeyedObject | undefined;
   changeEventBus?: BridgeChangeEventBus;
+  /* Inline `Pick`, no named alias.
+   * ponytail: one more port-like type declaration is exactly the failure mode
+   * this batch guards against — six already exist in the tree. */
+  messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
 };
 
 function exposeFileSystemHandlers(
@@ -656,18 +661,22 @@ function exposeFileSystemHandlers(
     }
   };
 
-  // Use addEventListener (not self.onmessage) so multiple listeners can coexist
-  // on the DedicatedWorkerGlobalScope. Unlike MessagePort, the worker global
-  // scope does not require onmessage for implicit start() — addEventListener
-  // works identically. Using onmessage would be overwritten by other code
-  // (e.g. Vite HMR client) and silently break bridge connections.
-  self.addEventListener('message', handler);
+  // Use addEventListener (not onmessage) so multiple listeners can coexist on
+  // the injected message source — the worker global by default. Unlike
+  // MessagePort, the worker global scope does not require onmessage for
+  // implicit start(); addEventListener works identically, and a Node
+  // `worker_threads` MessagePort auto-starts on it. Using onmessage would be
+  // overwritten by other code (e.g. Vite HMR client) and silently break
+  // bridge connections.
+  // oxlint-disable-next-line unicorn/prefer-global-this -- `self` is the worker global and the historical default; `globalThis` is not an EventTarget in Node, where the injected source is used instead
+  const messageSource: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> = options?.messageSource ?? self;
+  messageSource.addEventListener('message', handler as EventListener);
 
   return {
     cleanup() {
       coalescer?.dispose();
       unsubscribeEventBus?.();
-      self.removeEventListener('message', handler);
+      messageSource.removeEventListener('message', handler as EventListener);
       for (const port of activePorts) {
         safeDispose(() => {
           port.close();
@@ -694,6 +703,13 @@ export function exposeFileSystem(
   options?: FileSystemBridgeOptions & {
     handlerForRoot?: RootedFileSystemHandlerFactory;
     changeEventBus?: BridgeChangeEventBus;
+    /**
+     * Where to listen for connect envelopes. Defaults to the worker global,
+     * exactly as before. A `node:worker_threads` `MessagePort` satisfies this
+     * directly (it *is* an `EventTarget`), which is what lets the authority
+     * run in a plain Node process, an Electron utility, or a daemon.
+     */
+    messageSource?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
   },
 ): ExposeFileSystemHandle {
   return exposeFileSystemHandlers(handlers, options);
@@ -752,18 +768,24 @@ export async function waitForWorkerReady(worker: Worker | EventTarget, signal?: 
 }
 
 /**
- * Open a raw filesystem bridge connection to a worker.
+ * Open a raw filesystem bridge connection to a `postMessage`-capable target.
  *
  * The returned raw `MessagePort` is intended for transfer to another worker,
  * such as the runtime worker. Same-isolate clients should use
  * {@link createFileSystemBridge}.
  *
- * @param worker - Target worker to receive the bridge port.
+ * @param worker - Target that receives the bridge port. A browser `Worker`,
+ * or any `postMessage`-capable target — a `node:worker_threads` `Worker` or
+ * `MessagePort` is first-class, which is how the authority is reached when it
+ * is hosted outside a browser worker.
  * @param options - Optional message type configuration.
  * @returns Bridge connection with raw port and disposal.
  * @public
  */
-export function openFileSystemBridge(worker: Worker, options?: FileSystemBridgeOptions): FileSystemBridgeConnection {
+export function openFileSystemBridge(
+  worker: Pick<Worker, 'postMessage'>,
+  options?: FileSystemBridgeOptions,
+): FileSystemBridgeConnection {
   const messageType = options?.messageType ?? filesystemBridgeConnectMessageType;
   const channel = new MessageChannel();
   const envelope =
@@ -809,12 +831,16 @@ export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeServ
  *
  * The returned `Port` adapter from {@link wrapMessagePort} is intended for same-isolate RPC clients.
  *
- * @param worker - Target worker to receive the bridge port
+ * @param worker - Target that receives the bridge port; any
+ * `postMessage`-capable target, see {@link openFileSystemBridge}
  * @param options - Optional message type configuration
  * @returns Bridge handle with wrapped port and dispose
  * @public
  */
-export function createFileSystemBridge(worker: Worker, options?: FileSystemBridgeOptions): FileSystemBridge {
+export function createFileSystemBridge(
+  worker: Pick<Worker, 'postMessage'>,
+  options?: FileSystemBridgeOptions,
+): FileSystemBridge {
   const connection = openFileSystemBridge(worker, options);
   const rawPort = connection.port;
   const wrappedPort = wrapFileSystemBridgePort(rawPort, 'fs-bridge-client');
@@ -906,9 +932,13 @@ export function createFileSystemBridgeProxy(
  *
  * @public
  */
-export function createTransferredFileSystemBridgeProxy(port: MessagePort): FileSystemBridgeProxy {
+export function createTransferredFileSystemBridgeProxy(port: MessagePortLike): FileSystemBridgeProxy {
+  /* Wrap here rather than branding the port, so the parameter can be any
+   * `MessagePortLike`.
+   * ponytail: `createFileSystemBridgeProxy`'s connection arm performs exactly
+   * this wrap with the same label, so behaviour is unchanged. */
   return createFileSystemBridgeProxy({
-    port: asFileSystemBridgePort(port),
+    port: wrapFileSystemBridgePort(port, 'fs-bridge-proxy'),
     dispose() {
       port.close();
     },

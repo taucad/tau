@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { z } from 'zod';
+import { logLevels } from '@taucad/types/constants';
 import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 import type { OnWorkerLog } from '@taucad/types';
 import type { WatchEvent } from '@taucad/filesystem';
@@ -190,6 +191,28 @@ describe('KernelWorker lifecycle', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('should warn exactly once per initialize when cross-origin isolation is degraded', async () => {
+    const isolatedLog = vi.fn<OnWorkerLog>();
+    await createConfiguredWorker().initialize({
+      callbacks: { onLog: isolatedLog },
+      transferables: {},
+      options: {},
+    });
+    expect(isolatedLog.mock.calls.filter(([entry]) => entry.level === logLevels.warn)).toEqual([]);
+
+    vi.stubGlobal('crossOriginIsolated', false);
+    const degradedLog = vi.fn<OnWorkerLog>();
+    await createConfiguredWorker().initialize({
+      callbacks: { onLog: degradedLog },
+      transferables: {},
+      options: {},
+    });
+
+    const warnings = degradedLog.mock.calls.filter(([entry]) => entry.level === logLevels.warn);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.[0].message).toContain('no-coep');
   });
 
   // ---------------------------------------------------------------------------

@@ -30,6 +30,8 @@ export type ExposeElectronRuntimeOptions = {
 export type ElectronRuntimePreloadBridge = {
   /** Relay tags exposed to the renderer. */
   readonly relayTag: {
+    /** Relay tag carrying the exit code of a dead utility host. */
+    readonly hostExit: string;
     /** Relay tag used for runtime utility-process port delivery. */
     readonly runtime: string;
   };
@@ -44,6 +46,11 @@ export type ElectronRuntimePreloadBridge = {
    */
   releaseRuntimeHost(hostId: string, reason: 'requested' | 'render-timeout'): void;
 };
+
+const readHostId = (payload: unknown): string | undefined =>
+  payload && typeof payload === 'object' && typeof (payload as { hostId?: unknown }).hostId === 'string'
+    ? (payload as { hostId: string }).hostId
+    : undefined;
 
 /**
  * Expose the narrow runtime request/release bridge from Electron preload.
@@ -62,6 +69,7 @@ export type ElectronRuntimePreloadBridge = {
 export const exposeElectronRuntime = (options: ExposeElectronRuntimeOptions = {}): ElectronRuntimePreloadBridge => {
   const channel = options.channel ?? electronRuntimeChannel;
   const relayTag = `${channel}:port`;
+  const hostExitTag = `${channel}:host-exit`;
   const globalName = options.globalName ?? 'taucad';
   const debugGlobalName = options.debugGlobalName ?? '__TAU_ELECTRON_DEBUG';
 
@@ -71,14 +79,26 @@ export const exposeElectronRuntime = (options: ExposeElectronRuntimeOptions = {}
     if (event.ports.length === 0) {
       return;
     }
-    const hostId =
-      payload && typeof payload === 'object' && typeof (payload as { hostId?: unknown }).hostId === 'string'
-        ? (payload as { hostId: string }).hostId
-        : undefined;
+    const hostId = readHostId(payload);
     if (!hostId) {
       return;
     }
-    window.postMessage({ taucadRelay: relayTag, hostId }, '*', event.ports as unknown as Transferable[]);
+    /* Target `'/'` — the spec's "same origin as this document" — never
+     * `location.origin`: a `loadFile()` renderer has an opaque origin, whose
+     * `location.origin` is the string `'null'` and is not a valid target. */
+    window.postMessage({ taucadRelay: relayTag, hostId }, '/', event.ports as unknown as Transferable[]);
+  });
+
+  ipcRenderer.on(hostExitTag, (_event, payload: unknown) => {
+    const hostId = readHostId(payload);
+    if (!hostId) {
+      return;
+    }
+    const { exitCode } = payload as { exitCode?: unknown };
+    window.postMessage(
+      { taucadRelay: hostExitTag, hostId, exitCode: typeof exitCode === 'number' ? exitCode : undefined },
+      '/',
+    );
   });
 
   const bridge = {
@@ -89,6 +109,7 @@ export const exposeElectronRuntime = (options: ExposeElectronRuntimeOptions = {}
       ipcRenderer.send(`${channel}:release`, { hostId, reason });
     },
     relayTag: Object.freeze({
+      hostExit: hostExitTag,
       runtime: relayTag,
     }),
   } satisfies ElectronRuntimePreloadBridge;

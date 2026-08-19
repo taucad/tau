@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-08-15'
+updated: '2026-08-19'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -909,7 +909,7 @@ const client = createRuntimeClient<typeof runtime>({
 await client.connect();    // no arguments
 ```
 
-A Worker / in-process transport binds the FS bridge via `MessagePort` internally; a WebSocket transport multiplexes it over the same socket; an Electron IPC transport binds it via `MessagePortMain`. The runtime client never types against any wire primitive — that responsibility lives entirely inside the wired {@link TransportPlugin} callable and its `.materialize()` handle.
+A Worker / in-process transport binds the FS bridge via `MessagePort` internally; a WebSocket transport carries it on a second socket (`/fs`) — no multiplexer exists; an Electron IPC transport binds it via `MessagePortMain`. The runtime client never types against any wire primitive — that responsibility lives entirely inside the wired {@link TransportPlugin} callable and its `.materialize()` handle.
 
 The opaque filesystem is also the complete runtime reachability contract. Plugin callbacks accept normalized runtime paths within the supplied filesystem; never add project roots, ids, grants, authorization callbacks, or wire-derived capability objects to kernel, bundler, middleware, or headless-service inputs. A leading `/` names the supplied filesystem's root, not the host OS root. Exact source requests keep their operation ownership local instead of mutating the active preview's public state.
 

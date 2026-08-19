@@ -3,7 +3,7 @@ title: 'Kernel Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers ProjectMachine, CadMachine, RuntimeClient, plugin model, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-08-17'
+updated: '2026-08-19'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md

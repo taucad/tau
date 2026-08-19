@@ -2,7 +2,7 @@ import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
 const baseConfig: UserConfig = {
-  entry: ['src/index.ts', 'src/bridge/index.ts'],
+  entry: ['src/index.ts', 'src/bridge/index.ts', 'src/codec/msgpack.ts'],
   sourcemap: false,
   clean: ['dist'],
   dts: true,

@@ -1009,6 +1009,21 @@ describe('RuntimeClient render timeout control plane', () => {
     expect(client.lifecycleState).toBe('terminated');
   });
 
+  it('logs the host exit code before tearing down', async () => {
+    const { client, closeTransport } = createStatusClientFixture();
+    const entries: Array<{ level: string; message: string }> = [];
+    client.on('log', (entry) => entries.push({ level: entry.level, message: entry.message }));
+    await client.connect();
+
+    closeTransport({ cause: 'host-exit', exitCode: 9 });
+    await nextTask();
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.level).toBe('warn');
+    expect(entries[0]?.message).toContain('9');
+    expect(client.lifecycleState).toBe('terminated');
+  });
+
   it('discards every late render-scoped frame from a superseded preview', async () => {
     const { client, handlers, notify } = createStatusClientFixture();
     const states: WorkerState[] = [];

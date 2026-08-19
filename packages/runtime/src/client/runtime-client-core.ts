@@ -15,6 +15,8 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public client entrypoint facade */
 
 import type { FileExtension, LogEntry } from '@taucad/types';
+import { idPrefix, logLevels } from '@taucad/types/constants';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { Topic } from '@taucad/events';
 import type {
   HashedGeometryResult,
@@ -1401,6 +1403,23 @@ export function createRuntimeClient(options: RuntimeClientOptionsWithTransport<A
     if (result.cause === 'requested') {
       terminateFromTransport(terminalCause ?? 'explicit');
       return;
+    }
+    if (result.cause === 'host-exit' || result.cause === 'wire-failure') {
+      /* `terminateFromTransport` disposes every topic, so the one detail a
+       * consumer cannot otherwise recover — the host's exit code, or the wire
+       * error — has to ride the log topic before that happens.
+       * ponytail: the exit code reaches consumers as a log entry, not a typed
+       * field; promote it when a consumer needs to branch on it. */
+      handlers.log.emit({
+        id: generatePrefixedId(idPrefix.log),
+        timestamp: Date.now(),
+        level: logLevels.warn,
+        message:
+          result.cause === 'host-exit'
+            ? `Runtime host exited (exit code ${result.exitCode ?? 'unknown'}); the client is terminating.`
+            : `Runtime transport failed (${result.error.message}); the client is terminating.`,
+        origin: { component: 'RuntimeClient', operation: 'observeTransportClosure' },
+      });
     }
     terminateFromTransport(result.cause === 'render-timeout' ? 'render-timeout' : 'transport-closed');
   };

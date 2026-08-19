@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { useRuntime } from '@taucad/react';
 import type { UseRuntimeOptions, UseRuntimeTransportPlugin } from '@taucad/react';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+import { getIsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 import { summarizeGlb } from './glb-bounds';
 
 type InlineSourceFiles = { readonly '/main.ts': string };
@@ -35,9 +36,10 @@ export function RuntimeFixture<Runtime extends AnyRuntimeDefinition>({
   }, [runtimeState.geometry]);
 
   useEffect(() => {
+    const status = getIsolationStatus();
     setBrowserCapabilities({
-      isolation: globalThis.crossOriginIsolated ? 'isolated' : 'non-isolated',
-      sharedMemory: typeof globalThis.SharedArrayBuffer === 'function' ? 'available' : 'unavailable',
+      isolation: status.crossOriginIsolated ? 'isolated' : 'non-isolated',
+      sharedMemory: status.sharedArrayBuffer ? 'available' : 'unavailable',
     });
   }, []);
 

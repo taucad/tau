@@ -95,10 +95,11 @@ export default defineConfig({
     //   name: 'firefox',
     //   use: { ...devices['Desktop Firefox'] },
     // },
-    // {
-    //   name: 'webkit',
-    //   use: { ...devices['Desktop Safari'] },
-    // },
+    {
+      name: 'webkit',
+      testMatch: /(?:birdhouse-)?preview\.spec\.ts/,
+      use: { ...devices['Desktop Safari'] },
+    },
 
     // Uncomment for mobile browsers support
     /* {

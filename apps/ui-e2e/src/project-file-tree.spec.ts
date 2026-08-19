@@ -13,7 +13,7 @@ function treeItem(page: Page, path: string): Locator {
 async function openSeededProject(page: Page): Promise<void> {
   await page.goto(seedRoute);
   try {
-    await expect(page).toHaveURL(/\/projects\/proj_/u, { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/w\/[^/]+\/[^/]+/u, { timeout: 10_000 });
   } catch {
     const seededProject = page.getByRole('link', { name: seedProjectName }).first();
     await expect(seededProject).toBeVisible({ timeout: 60_000 });
@@ -23,7 +23,7 @@ async function openSeededProject(page: Page): Promise<void> {
     }
 
     await page.goto(projectHref);
-    await expect(page).toHaveURL(/\/projects\/proj_/u, { timeout: 60_000 });
+    await expect(page).toHaveURL(/\/w\/[^/]+\/[^/]+/u, { timeout: 60_000 });
   }
 
   await expect(page.getByRole('heading', { name: 'Files' })).toBeVisible({ timeout: 60_000 });

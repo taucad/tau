@@ -316,7 +316,7 @@ const collectFixtureDiagnostics = async ({
   page,
   testInfo,
 }: FixtureDiagnosticsOptions): Promise<void> => {
-  await page.goto(`/projects/${fixture.projectId}/preview?graphicsBackend=${backend}`);
+  await page.goto(`/examples/${fixture.projectId}?graphicsBackend=${backend}`);
   await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
   await page.waitForFunction(() =>

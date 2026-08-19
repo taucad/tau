@@ -25,14 +25,11 @@ test.describe('Birdhouse preview (TAU_DEBUG)', () => {
     await expect(communityHeading).toBeVisible({ timeout: 30_000 });
     await communityHeading.scrollIntoViewIfNeeded();
 
-    /* The card title is the visual handle — click navigates the whole
-     * card to `/projects/<id>/preview` (see `project-grid.tsx`
-     * `handleCardClick`). */
-    const birdhouseTitle = page.getByText(/^birdhouse$/i).first();
-    await expect(birdhouseTitle).toBeVisible({ timeout: 30_000 });
-    await birdhouseTitle.click();
+    const birdhouseLink = page.getByRole('link', { name: /^preview birdhouse$/i });
+    await expect(birdhouseLink).toBeVisible({ timeout: 30_000 });
+    await birdhouseLink.click();
 
-    await page.waitForURL(/\/projects\/proj_birdhouse\/preview$/, { timeout: 30_000 });
+    await page.waitForURL(/\/examples\/proj_birdhouse$/, { timeout: 30_000 });
 
     /* The preview canvas is the same accessibility surface as the
      * `proj_hollow_box` smoke spec — both routes share `<CadPreviewViewer>`

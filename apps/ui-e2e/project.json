@@ -5,5 +5,13 @@
   "sourceRoot": "apps/ui-e2e/src",
   "tags": ["scope:ui", "type:e2e"],
   "implicitDependencies": ["ui"],
-  "targets": {}
+  "targets": {
+    "test:e2e:development": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "playwright test --config apps/ui-e2e/playwright.development.config.ts"
+      }
+    }
+  }
 }

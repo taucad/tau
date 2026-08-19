@@ -6,5 +6,5 @@
       "#*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "playwright.config.ts"]
+  "include": ["src/**/*.ts", "playwright.config.ts", "playwright.development.config.ts"]
 }

@@ -22,7 +22,7 @@ type SectionViewBridgeWindow = Window & {
 };
 
 const previewCanvasSelector = '[role="img"][aria-label*="3D model preview" i] canvas';
-const sectionPickingFixtureRoute = '/projects/jscad_section_picking_fixture/preview?graphicsBackend=webgl';
+const sectionPickingFixtureRoute = '/examples/jscad_section_picking_fixture?graphicsBackend=webgl';
 
 async function openSectionPickingFixture(page: Page): Promise<void> {
   await page.setViewportSize({ width: 960, height: 720 });

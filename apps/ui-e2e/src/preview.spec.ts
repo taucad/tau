@@ -2,9 +2,35 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Build Preview', () => {
   test('renders a 3D model for the Hollow Box project', async ({ page }) => {
-    await page.goto('/projects/proj_hollow_box/preview');
-
     const canvas = page.getByRole('img', { name: /3d model preview/i });
+    const attempts = test.info().project.metadata['mode'] === 'development' ? 3 : 1;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const outdatedDependency = page
+        .waitForResponse((response) => response.status() === 504 && response.url().includes('/node_modules/.vite/'), {
+          timeout: 15_000,
+        })
+        /* oxlint-disable-next-line promise/prefer-await-to-then -- start the response waiter before navigation. */
+        .then(
+          () => true,
+          () => false,
+        );
+      /* oxlint-disable-next-line eslint/no-await-in-loop -- retries must navigate sequentially. */
+      await page.goto('/examples/proj_hollow_box');
+      if (
+        attempts === 1 ||
+        /* oxlint-disable-next-line eslint/no-await-in-loop -- each navigation races its own response/render waiters. */
+        !(await Promise.race([
+          outdatedDependency,
+          canvas.waitFor({ state: 'visible', timeout: 15_000 }).then(
+            () => false,
+            () => false,
+          ),
+        ]))
+      ) {
+        break;
+      }
+    }
+
     await expect(canvas).toBeVisible({ timeout: 45_000 });
 
     await expect(page.getByRole('alert')).not.toBeVisible();
@@ -34,7 +60,7 @@ test.describe('Build Preview', () => {
   });
 
   test('shows loading state before model is ready', async ({ page }) => {
-    await page.goto('/projects/proj_hollow_box/preview');
+    await page.goto('/examples/proj_hollow_box');
 
     const loading = page.getByRole('status', { name: /loading preview/i });
     const canvas = page.getByRole('img', { name: /3d model preview/i });
@@ -44,7 +70,7 @@ test.describe('Build Preview', () => {
   });
 
   test('displays an error for a non-existent project', async ({ page }) => {
-    await page.goto('/projects/proj_does_not_exist/preview');
+    await page.goto('/examples/proj_does_not_exist');
 
     const alert = page.getByRole('alert', { name: /preview error/i });
     await expect(alert).toBeVisible({ timeout: 45_000 });

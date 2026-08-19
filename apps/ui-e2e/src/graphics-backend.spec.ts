@@ -471,7 +471,7 @@ async function renderAndSampleEdgeOcclusionFixture(
   page: Page,
   backend: GraphicsBackend,
 ): Promise<EdgeOcclusionSampleStats> {
-  await page.goto(`/projects/jscad_edge_occlusion_fixture/preview?graphicsBackend=${backend}`);
+  await page.goto(`/examples/jscad_edge_occlusion_fixture?graphicsBackend=${backend}`);
 
   const canvas = page.getByRole('img', { name: /3d model preview/i });
   await expect(canvas).toBeVisible({ timeout: 60_000 });
@@ -520,7 +520,7 @@ test.describe('Graphics backend regression guard', () => {
         test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
       }
 
-      await page.goto(`/projects/jscad_edge_occlusion_fixture/preview?graphicsBackend=${backend}`);
+      await page.goto(`/examples/jscad_edge_occlusion_fixture?graphicsBackend=${backend}`);
 
       const canvas = page.getByRole('img', { name: /3d model preview/i });
       await expect(canvas).toBeVisible({ timeout: 60_000 });
@@ -563,7 +563,7 @@ test.describe('Graphics backend regression guard', () => {
         test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
       }
 
-      await page.goto(`/projects/jscad_edge_occlusion_fixture/preview?graphicsBackend=${backend}`);
+      await page.goto(`/examples/jscad_edge_occlusion_fixture?graphicsBackend=${backend}`);
 
       const canvas = page.getByRole('img', { name: /3d model preview/i });
       await expect(canvas).toBeVisible({ timeout: 60_000 });
@@ -608,7 +608,7 @@ test.describe('Graphics backend regression guard', () => {
     const listener = attachWebGpuValidationListener(page);
 
     try {
-      await page.goto('/projects/proj_birdhouse/preview');
+      await page.goto('/examples/proj_birdhouse');
 
       const canvas = page.getByRole('img', { name: /3d model preview/i });
       await expect(canvas).toBeVisible({ timeout: 60_000 });
@@ -639,7 +639,7 @@ test.describe('Graphics backend regression guard', () => {
     const listener = attachWebGpuValidationListener(page);
 
     try {
-      await page.goto('/projects/proj_birdhouse/preview');
+      await page.goto('/examples/proj_birdhouse');
 
       const canvas = page.getByRole('img', { name: /3d model preview/i });
       await expect(canvas).toBeVisible({ timeout: 60_000 });

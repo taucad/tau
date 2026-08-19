@@ -404,7 +404,7 @@ test.describe('Section view overlap cap shading', () => {
       const listener = backend === 'webgpu' ? attachWebGpuValidationListener(page) : undefined;
 
       try {
-        await page.goto(`/projects/jscad_section_overlap_fixture/preview?graphicsBackend=${backend}`);
+        await page.goto(`/examples/jscad_section_overlap_fixture?graphicsBackend=${backend}`);
         await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
         await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
         await page.waitForFunction(() =>

@@ -36,6 +36,9 @@ const createUiRuntime = (options: UiRuntimeOptions = {}) =>
           openrscad(),
           zoo({ baseUrl: `${config.tauWebSocketUrl}/v1/kernels/zoo` }),
           replicad({
+            // 'auto' picks the pthread build only when the host is cross-origin
+            // isolated; a pinned 'multi' fails kernel binding on plain-http LAN
+            // origins where SharedArrayBuffer is unavailable.
             wasm: 'auto',
             withSourceMapping: options.withSourceMapping === true,
           }),

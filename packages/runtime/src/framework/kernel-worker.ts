@@ -686,7 +686,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const isolation = getIsolationStatus();
     if (!isolation.crossOriginIsolated) {
       this._logger.warn(
-        `Cross-origin isolation degraded (${isolation.reason}): geometry pool falls back to copy delivery, render abort to wire-notify, OCCT to single-threaded`,
+        `Cross-origin isolation degraded (${isolation.reason}): geometry pool falls back to copy delivery, render abort to wire-notify, auto-selected OCCT kernels to single-threaded`,
       );
     }
 

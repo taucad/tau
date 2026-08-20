@@ -104,6 +104,7 @@
     "tau-lint/no-async-iife": "error",
     "tau-lint/no-monaco-create-model": "error",
     // Storage-policy Rule 0: direct indexedDB access only in allowlisted storage providers.
+    "tau-lint/no-bare-random-uuid": "error",
     "tau-lint/no-direct-indexeddb": "error",
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",

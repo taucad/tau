@@ -62,7 +62,11 @@ const rendererLoadErrorMessage = (error: unknown): string => {
 export const imageTranscoder = defineTranscoder({
   id: 'image',
   name: 'ImageTranscoder',
-  version: '5.0.0',
+  // Bump whenever the renderer's output bytes change for identical input, or
+  // persisted export caches keep serving images from the previous renderer.
+  // 6.0.0 = nanoraster 0.3.0, which retunes the studio lighting (ACES tone map,
+  // diffuse environment irradiance, warmer rig) and so changes every pixel.
+  version: '6.0.0',
   edges,
 
   async initialize() {

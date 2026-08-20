@@ -23,6 +23,7 @@ import type { RuntimeFileSystemBase, RuntimeWatchEvent, RuntimeWatchRequest } fr
 import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
 import fs from 'node:fs/promises';
 import type { FSWatcher } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { statSync, watch as watchDirectory } from 'node:fs';
 import path from 'node:path';
 import { resolveVirtualPath, VirtualPathError } from '@taucad/utils/path';
@@ -138,7 +139,7 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
     const admittedTargetPath = path.join(admittedDirectory, path.basename(targetPath));
     const temporaryPath = path.join(
       admittedDirectory,
-      `.${path.basename(targetPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+      `.${path.basename(targetPath)}.${process.pid}.${randomUUID()}.tmp`,
     );
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
     let existingMode: number | undefined;

@@ -133,7 +133,7 @@ describe('randomSessionId', () => {
     vi.stubGlobal('crypto', { getRandomValues: getRandomValues.bind(globalThis.crypto) });
 
     const id = randomSessionId();
-    expect(id).toMatch(/^[\da-f]{32}$/);
+    expect(id).toMatch(/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/);
     expect(id).not.toBe(randomSessionId());
   });
 });

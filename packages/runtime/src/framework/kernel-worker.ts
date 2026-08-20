@@ -2,6 +2,7 @@
 /* oxlint-disable unicorn/prefer-math-trunc, no-bitwise -- cancellation generations require ECMAScript ToUint32 wrap semantics. */
 import deepmerge from 'deepmerge';
 import { logLevels, lookupExportFidelity } from '@taucad/types/constants';
+import { randomUuid } from '@taucad/utils/id';
 import { joinPath, parentDirectory, resolveVirtualPath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
@@ -979,7 +980,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private createAutonomousPreviewRecord(): RenderCancellationRecord {
     const generation = this.reserveGeneration();
-    return this.createRenderRecord(crypto.randomUUID(), generation);
+    return this.createRenderRecord(randomUuid(), generation);
   }
 
   private reserveGeneration(): number {

@@ -886,7 +886,9 @@ describe('transport conformance — web-socket (C2)', () => {
     try {
       expect(bed.dialled).toHaveLength(0);
       await client.open();
-      expect(new URL(bed.dialled[0]!.url).searchParams.get('session')).toMatch(/^[\da-f]{32}$/);
+      expect(new URL(bed.dialled[0]!.url).searchParams.get('session')).toMatch(
+        /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/,
+      );
     } finally {
       await client.close();
       bed.dispose();

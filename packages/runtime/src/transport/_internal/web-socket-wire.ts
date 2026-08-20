@@ -12,6 +12,7 @@
  * @internal
  */
 
+import { randomUuid } from '@taucad/utils/id';
 import type { RuntimeTransportCloseResult } from '#transport/runtime-transport.types.js';
 
 /** Literal transport id carried by the descriptor and the plugin. */
@@ -43,18 +44,12 @@ export const fileSystemSocketLostCloseReason = '/fs socket closed before the fil
 export const unexpectedFileSystemSocketCloseReason = 'host owns its filesystem; /fs socket is not accepted';
 
 /**
- * Transport-private pairing id. `crypto.randomUUID` is secure-context-only in
- * browsers, so a plain-`http` LAN page falls back to `getRandomValues` — the id
- * only has to be unguessable and unique per host, never durable.
+ * Transport-private pairing id — only has to be unguessable and unique per
+ * host, never durable. `randomUuid` stays available on plain-`http` LAN pages.
  *
  * @returns A fresh session id.
  */
-export const randomSessionId = (): string => {
-  if (typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return [...crypto.getRandomValues(new Uint8Array(16))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-};
+export const randomSessionId = (): string => randomUuid();
 
 /**
  * Join a consumer-supplied base URL with one of the transport's routes and

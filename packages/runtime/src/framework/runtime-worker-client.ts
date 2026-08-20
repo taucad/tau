@@ -24,6 +24,7 @@
  */
 
 import type { FileExtension, LogEntry } from '@taucad/types';
+import { randomUuid } from '@taucad/utils/id';
 import type { Channel } from '@taucad/rpc';
 import { Topic } from '@taucad/events';
 import type {
@@ -276,7 +277,7 @@ export class RuntimeWorkerClient {
   /** Select a preview synchronously before connection or command awaits. */
   public admitPreview(): RuntimePreviewIdentity {
     this.ensureNotTerminated();
-    const renderId = crypto.randomUUID();
+    const renderId = randomUuid();
     const reservation = this.transport.reservePreview();
     const identity: RuntimePreviewIdentity = { renderId, ...reservation };
     this.clearPreviewTimer(this.selectedPreview);

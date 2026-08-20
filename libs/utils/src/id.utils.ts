@@ -16,6 +16,27 @@ export function generatePrefixedId<T extends IdPrefix>(prefix: T): `${T}_${strin
 }
 
 /**
+ * RFC 4122 v4 UUID. `crypto.randomUUID` is secure-context-only in browsers
+ * (absent on a plain-http LAN origin); `getRandomValues` is not, so fall back
+ * to it with the version/variant bits set so `z.uuid()` still accepts the id.
+ * @returns A v4 UUID string
+ * @public
+ */
+export function randomUuid(): string {
+  const c = globalThis.crypto;
+  if (typeof c.randomUUID === 'function') {
+    return c.randomUUID();
+  }
+  const b = c.getRandomValues(new Uint8Array(16));
+  // oxlint-disable-next-line no-bitwise -- RFC 4122 version nibble
+  b[6] = (b[6]! & 0x0f) | 0x40;
+  // oxlint-disable-next-line no-bitwise -- RFC 4122 variant bits
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/**
  * Extracts the prefix from a prefixed ID
  * @param id - The prefixed ID
  * @returns The prefix portion of the ID

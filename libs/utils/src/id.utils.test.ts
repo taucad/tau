@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { idPrefix } from '@taucad/types/constants';
-import { extractPrefix, generatePrefixedId, isValidPrefixedId, validatePrefixedId } from '@taucad/utils/id';
+import { extractPrefix, generatePrefixedId, isValidPrefixedId, randomUuid, validatePrefixedId } from '@taucad/utils/id';
 
 describe('id.utils', () => {
   describe('generatePrefixedId', () => {
@@ -236,6 +236,28 @@ describe('id.utils', () => {
         expect(isValidPrefixedId(id)).toBe(true);
         expect(extractPrefix(id)).toBe(prefix);
       }
+    });
+  });
+
+  describe('randomUuid', () => {
+    const v4 = /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/;
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('mints distinct v4 uuids', () => {
+      expect(randomUuid()).toMatch(v4);
+      expect(randomUuid()).not.toBe(randomUuid());
+    });
+
+    it('falls back to getRandomValues where randomUUID is unavailable (insecure browser context)', () => {
+      const { getRandomValues } = globalThis.crypto;
+      vi.stubGlobal('crypto', { getRandomValues: getRandomValues.bind(globalThis.crypto) });
+
+      const id = randomUuid();
+      expect(id).toMatch(v4);
+      expect(id).not.toBe(randomUuid());
     });
   });
 });

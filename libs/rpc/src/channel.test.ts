@@ -544,7 +544,7 @@ describe('createChannelClient / createChannelServer', () => {
     await expect(client.call('a', null, ac.signal)).rejects.toMatchObject({ name: 'AbortError' });
   });
 
-  it('uses time-based id when randomUUID is unavailable', async () => {
+  it('falls back to getRandomValues where randomUUID is unavailable (insecure browser context)', async () => {
     const portServer = wrapMessagePort<unknown>(channel.port1);
     const portClient = wrapMessagePort<unknown>(channel.port2);
     if (portServer.start) {
@@ -554,7 +554,7 @@ describe('createChannelClient / createChannelServer', () => {
       portClient.start();
     }
     const originalCrypto = globalThis.crypto;
-    const stubCrypto = { getRandomValues: (a: Int8Array) => a } as unknown as Crypto;
+    const stubCrypto = { getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto) } as unknown as Crypto;
     Object.defineProperty(globalThis, 'crypto', { value: stubCrypto, configurable: true });
     try {
       dispose = createChannelServer({

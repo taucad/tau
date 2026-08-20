@@ -1,4 +1,5 @@
 import { Topic } from '@taucad/events';
+import { randomUuid } from '@taucad/utils/id';
 import type { Port } from '#port.js';
 import type {
   WireMessage,
@@ -293,13 +294,7 @@ export type ChannelServerHandle<P extends RpcProtocol = EmptyRpcProtocol> = {
   notify<N extends NotifyNames<P>>(name: N, args?: NotifyArgs<P, N> | WithTransferables<NotifyArgs<P, N>>): void;
 };
 
-const createId: () => string = () => {
-  const g = globalThis as { crypto?: Crypto };
-  if (g.crypto && typeof g.crypto.randomUUID === 'function') {
-    return g.crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-};
+const createId: () => string = () => randomUuid();
 
 const toWireError = (error: unknown): WireError => {
   if (error instanceof Error) {

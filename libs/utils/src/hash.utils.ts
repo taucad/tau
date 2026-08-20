@@ -6,6 +6,8 @@
  * `crypto.subtle`) wherever collision resistance against adversaries matters.
  */
 
+import { sha256 } from '#sha256.js';
+
 /**
  * Hashes a byte array with djb2, avoiding UTF-8 decode overhead.
  *
@@ -73,10 +75,17 @@ export function canonicalJson(value: unknown): string {
   return serialized;
 }
 
-/** Compute lowercase hexadecimal SHA-256 with the host Web Crypto implementation. @public */
+/**
+ * Compute lowercase hexadecimal SHA-256. Uses WebCrypto where present and falls
+ * back to a pure-JS implementation on insecure origins (plain-http LAN pages),
+ * where `crypto.subtle` is undefined; the digest is identical either way.
+ * @public
+ */
 export async function sha256Bytes(data: Uint8Array<ArrayBuffer>): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  // Lib types declare `subtle` non-optional; insecure browser origins omit it at runtime.
+  const { subtle } = globalThis.crypto as { subtle?: SubtleCrypto };
+  const digest = subtle ? new Uint8Array(await subtle.digest('SHA-256', data)) : sha256(data);
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /** Compute lowercase hexadecimal SHA-256 for UTF-8 text. @public */

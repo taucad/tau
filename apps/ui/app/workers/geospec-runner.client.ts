@@ -3,6 +3,7 @@ import { rpcClientErrorCode } from '@taucad/chat';
 import { rpcExecutionTimeout } from '@taucad/chat/constants';
 import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
+import { randomUuid } from '@taucad/utils/id';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type { GeoSpecRunnerWorkerRequest, GeoSpecRunnerWorkerResponse } from '#workers/geospec-runner.types.js';
 
@@ -61,9 +62,7 @@ const createDefaultGeoSpecWorker = (): Worker =>
     name: 'tau-geospec-runner-worker',
   });
 
-const createRequestId = (): string => {
-  return globalThis.crypto.randomUUID();
-};
+const createRequestId = (): string => randomUuid();
 
 const errorResult = (message: string): RunGeoSpecTestsRpcResult => ({
   success: false,

@@ -108,7 +108,7 @@ describe.skipIf(requiresEnv('ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_VERTE
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(
-          buildThinkingThenAskPayload({ first: 'anthropic-claude-haiku-4.5', second: 'openai-gpt-5.3-codex' }),
+          buildThinkingThenAskPayload({ first: 'anthropic-claude-haiku-4.5', second: 'openai-gpt-5.6-terra' }),
         ),
       });
 

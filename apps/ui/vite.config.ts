@@ -138,6 +138,7 @@ export default defineConfig(({ mode }) => {
       // Fumadocs
       mdx(MdxConfig, {
         configPath: path.resolve(__dirname, './app/lib/fumadocs/source.config.ts'),
+        outDir: path.resolve(__dirname, '../../node_modules/.cache/fumadocs/apps/ui'),
       }), // Fumadocs
 
       // Browser DevTools JSON plugin.

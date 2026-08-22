@@ -124,8 +124,8 @@ function getAdditionalInputPatterns(workspaceRoot: string, projectRoot: string):
     patterns.push('{projectRoot}/.react-router/types/**/*');
   }
 
-  if (directoryExists(workspaceRoot, projectRoot, '.source')) {
-    patterns.push('{projectRoot}/.source/**/*');
+  if (projectRoot === 'apps/ui') {
+    patterns.push('{workspaceRoot}/node_modules/.cache/fumadocs/apps/ui/**/*');
   }
 
   if (fileExists(workspaceRoot, projectRoot, 'react-router.config.ts')) {

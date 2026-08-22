@@ -10,7 +10,7 @@
     "vite-environment.d.ts",
     "types/**/*.d.ts",
     ".react-router/types/**/*",
-    ".source/**/*", // Fumadocs collections
+    "../../node_modules/.cache/fumadocs/apps/ui/**/*", // Fumadocs collections
     "package.json"
   ],
   "compilerOptions": {
@@ -26,7 +26,7 @@
     "paths": {
       "package.json": ["./package.json"],
       "#*": ["./app/*"],
-      "fumadocs-mdx:collections/*": ["./.source/*"]
+      "fumadocs-mdx:collections/*": ["../../node_modules/.cache/fumadocs/apps/ui/*"]
     }
   },
   "exclude": [

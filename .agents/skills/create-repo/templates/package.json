@@ -1,0 +1,93 @@
+{
+  "name": "@@CREATE_REPO_npm-name@@",
+  "version": "0.0.0",
+  "description": "@@CREATE_REPO_description@@",
+  "keywords": [
+    "@@CREATE_REPO_keyword-1@@",
+    "@@CREATE_REPO_keyword-2@@",
+    "@@CREATE_REPO_keyword-3@@"
+  ],
+  "author": "Richard Fontein",
+  "license": "@@CREATE_REPO_license-id@@",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=@@CREATE_REPO_node-floor@@"
+  },
+  "packageManager": "pnpm@@@CREATE_REPO_pnpm-version@@",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/@@CREATE_REPO_slug@@.git"
+  },
+  "homepage": "https://@@CREATE_REPO_docs-domain@@",
+  "bugs": {
+    "url": "https://github.com/taucad/@@CREATE_REPO_slug@@/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "compatibility.md",
+    "CHANGELOG.md",
+    "BREAKING_CHANGES.md",
+    "NOTICE",
+    "license"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "nx run @@CREATE_REPO_slug@@:build",
+    "check:dead-code": "knip",
+    "check:size": "size-limit",
+    "check": "nx run @@CREATE_REPO_slug@@:quality",
+    "docs:build": "pnpm --filter @@CREATE_REPO_slug@@-docs build",
+    "docs:test": "pnpm --filter @@CREATE_REPO_slug@@-docs test",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint --deny-warnings --type-aware && eslint .",
+    "pkgcheck": "pnpm run validate-pack && publint && attw --pack . --profile esm-only --entrypoints .",
+    "prose": "./scripts/check-prose.sh",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "validate-pack": "node scripts/validate-pack.mjs",
+    "workflows": "./scripts/check-workflows.sh",
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "prepublishOnly": "nx run @@CREATE_REPO_slug@@:validate-pack"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "@@CREATE_REPO_attw-version@@",
+    "@eslint/js": "@@CREATE_REPO_eslint-version@@",
+    "@nx/js": "@@CREATE_REPO_nx-version@@",
+    "@size-limit/file": "@@CREATE_REPO_size-limit-version@@",
+    "@types/mdx": "@@CREATE_REPO_types-mdx-version@@",
+    "@types/node": "@@CREATE_REPO_types-node-version@@",
+    "@vitest/browser-playwright": "@@CREATE_REPO_vitest-version@@",
+    "@vitest/coverage-v8": "@@CREATE_REPO_vitest-version@@",
+    "eslint": "@@CREATE_REPO_eslint-version@@",
+    "globals": "@@CREATE_REPO_globals-version@@",
+    "knip": "@@CREATE_REPO_knip-version@@",
+    "nx": "@@CREATE_REPO_nx-version@@",
+    "oxfmt": "@@CREATE_REPO_oxfmt-version@@",
+    "oxlint": "@@CREATE_REPO_oxlint-version@@",
+    "oxlint-tsgolint": "@@CREATE_REPO_oxlint-tsgolint-version@@",
+    "playwright": "@@CREATE_REPO_playwright-version@@",
+    "publint": "@@CREATE_REPO_publint-version@@",
+    "semver": "@@CREATE_REPO_semver-version@@",
+    "size-limit": "@@CREATE_REPO_size-limit-version@@",
+    "tsdown": "@@CREATE_REPO_tsdown-version@@",
+    "typescript": "@@CREATE_REPO_typescript-version@@",
+    "typescript-eslint": "@@CREATE_REPO_typescript-eslint-version@@",
+    "vitest": "@@CREATE_REPO_vitest-version@@"
+  }
+}

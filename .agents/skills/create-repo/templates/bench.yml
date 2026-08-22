@@ -1,0 +1,36 @@
+name: Benchmark drift
+
+on:
+  schedule:
+    - cron: '17 4 1 * *' # Origin: monthly exploratory cadence from picovoxel.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: '@@CREATE_REPO_node-latest@@'
+      - id: benchmark
+        continue-on-error: true # Origin: exploratory drift opens an issue; PR gate remains fail-closed in ci.yml.
+        run: '@@CREATE_REPO_exploratory-benchmark-command@@'
+      - if: steps.benchmark.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create claude \
+            --color 5319E7 \
+            --description 'Picked up by Claude automation' \
+            --force
+          gh issue create \
+            --title 'Benchmark drift detected' \
+            --body "Monthly benchmark drift failed in ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}." \
+            --label claude

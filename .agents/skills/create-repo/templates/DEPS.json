@@ -1,0 +1,69 @@
+{
+  "$schema": "deps-lock-v1",
+  "description": "Checksum-pinned standalone binaries used by repository quality gates.",
+  "ci_tools": {
+    "actionlint": {
+      "version": "1.7.12",
+      "base_url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12",
+      "platforms": {
+        "darwin-arm64": {
+          "filename": "actionlint_1.7.12_darwin_arm64.tar.gz",
+          "sha256": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f",
+          "binary_sha256": "8db11704dc296f096216db4db65d86cd7f0ebfdf4c38453a1da276b137b88388"
+        },
+        "linux-amd64": {
+          "filename": "actionlint_1.7.12_linux_amd64.tar.gz",
+          "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+          "binary_sha256": "c872d6db8c6bf83a8eaa704fc93999f027d55dffbc63b8a6abdccb47df5f4cd4"
+        },
+        "linux-arm64": {
+          "filename": "actionlint_1.7.12_linux_arm64.tar.gz",
+          "sha256": "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6",
+          "binary_sha256": "ac0323433c2853ec3fb978c611430c5b3dc5d43c58d1a1ec031b00ab572beb60"
+        }
+      }
+    },
+    "shellcheck": {
+      "version": "0.10.0",
+      "base_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0",
+      "platforms": {
+        "darwin-arm64": {
+          "filename": "shellcheck-v0.10.0.darwin.aarch64.tar.xz",
+          "sha256": "bbd2f14826328eee7679da7221f2bc3afb011f6a928b848c80c321f6046ddf81",
+          "binary_sha256": "b9e420df8c78ec7d261d66277d5767cbd4cf6da4e4a9f8b02ea4811cd4cc1109"
+        },
+        "linux-amd64": {
+          "filename": "shellcheck-v0.10.0.linux.x86_64.tar.xz",
+          "sha256": "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87",
+          "binary_sha256": "f35ae15a4677945428bdfe61ccc297490d89dd1e544cc06317102637638c6deb"
+        },
+        "linux-arm64": {
+          "filename": "shellcheck-v0.10.0.linux.aarch64.tar.xz",
+          "sha256": "324a7e89de8fa2aed0d0c28f3dab59cf84c6d74264022c00c22af665ed1a09bb",
+          "binary_sha256": "4111c09318d10b93653a42179381273f31061b34987978346fbd19a6e81a74c3"
+        }
+      }
+    },
+    "vale": {
+      "version": "3.9.1",
+      "base_url": "https://github.com/errata-ai/vale/releases/download/v3.9.1",
+      "platforms": {
+        "darwin-arm64": {
+          "filename": "vale_3.9.1_macOS_arm64.tar.gz",
+          "sha256": "3d4b5038332784d9828cc6c31b55277603c9e210cc503979bbf4e6e2659aeaa9",
+          "binary_sha256": "6734446a0b792eb6f6e3995659aba59b2838aaeef0e3637a7fd2229480a1247f"
+        },
+        "linux-amd64": {
+          "filename": "vale_3.9.1_Linux_64-bit.tar.gz",
+          "sha256": "fbc2eb47d0b8c50220ed1a2c5c611fbe0904ed567d638143d482016a18fd2db0",
+          "binary_sha256": "efeb3a025c7364db8a3d3651be9689e8e54fd2fba4481a9b8870ce64b0def4a8"
+        },
+        "linux-arm64": {
+          "filename": "vale_3.9.1_Linux_arm64.tar.gz",
+          "sha256": "82facb1c73d65dbfeb40d2c04dcad6d40415a25deaeaf38bb296a9c04c23b86c",
+          "binary_sha256": "0c53b79c413df49b5c25610510e2fbb8e387ab041ce96c17a46e25b59e4b1415"
+        }
+      }
+    }
+  }
+}

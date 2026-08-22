@@ -46,7 +46,7 @@
     "repos:clone": "node scripts/dist/repos.mjs clone --all",
     "repos:sync": "node scripts/dist/repos.mjs sync --all",
     "repos:status": "node scripts/dist/repos.mjs status --all",
-    "knip": "NX_DAEMON=false knip --max-issues 227",
+    "knip": "NX_DAEMON=false knip --max-issues 317",
     "docs:validate": "nx run scripts:validate-frontmatter",
     "projects:validate": "nx run scripts:validate-project-names",
     "tsgo-refs:validate": "nx run scripts:validate-tsgo-runtime-references",

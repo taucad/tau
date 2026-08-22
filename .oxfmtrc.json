@@ -16,6 +16,8 @@
     "/.nx/cache",
     "/.nx/workspace-data",
     ".cursor/plans/**",
+    ".agents/skills/create-repo/templates/**",
+    "/tarballs/**",
     "/experiments/**",
     "/packages/runtime/occt-reports/**",
     "/packages/kernels/openrscad/benchmarks/**",

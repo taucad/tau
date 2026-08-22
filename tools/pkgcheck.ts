@@ -599,7 +599,9 @@ function validateStrictConsumerTypes(): CheckResult {
     return { name: 'tau-strict-consumer-types', status: 'skip', details: ['no published export subpaths'] };
   }
 
-  const directory = mkdtempSync(join(workspaceRoot, '.pkgcheck-consumer-'));
+  const pkgcheckRoot = join(workspaceRoot, 'node_modules', '.cache', 'tau-pkgcheck');
+  mkdirSync(pkgcheckRoot, { recursive: true });
+  const directory = mkdtempSync(join(pkgcheckRoot, 'consumer-'));
   const failures: string[] = [];
 
   try {

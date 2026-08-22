@@ -10,6 +10,11 @@
       "schema": "./src/generators/plugin/schema.json",
       "description": "Create a @taucad/* toolkit package under packages/plugins/"
     },
+    "core": {
+      "factory": "./src/generators/core/generator",
+      "schema": "./src/generators/core/schema.json",
+      "description": "Create a @taucad/*-core support package under packages/core/"
+    },
     "lint-rule": {
       "factory": "./src/generators/lint-rule/generator",
       "schema": "./src/generators/lint-rule/schema.json",

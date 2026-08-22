@@ -1,0 +1,22 @@
+import { builtinModules } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+import * as entry from '#index.js';
+
+describe('<%= importPath %>', () => {
+  it('has a lightweight non-plugin root', () => {
+    expect(entry).not.toHaveProperty('plugin');
+    const source = readFileSync(new URL('index.ts', import.meta.url), 'utf8');
+    const nodeBuiltins = new Set([...builtinModules, ...builtinModules.map((name) => `node:${name}`)]);
+    const specifiers = [...source.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)["']([^"']+)["']/g)].map(
+      (match) => match[1]!,
+    );
+
+    expect(
+      specifiers.filter(
+        (specifier) => nodeBuiltins.has(specifier) || specifier.includes('-native') || specifier.includes('-python'),
+      ),
+    ).toEqual([]);
+  });
+});

@@ -1,0 +1,5 @@
+# <%= importPath %>
+
+<%= description %>
+
+This package exports shared implementation helpers. It is not a Tau runtime plugin and does not initialize a backend at module scope.

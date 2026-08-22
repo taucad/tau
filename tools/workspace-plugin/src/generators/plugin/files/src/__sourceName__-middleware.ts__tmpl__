@@ -1,0 +1,8 @@
+import { defineMiddleware } from '@taucad/runtime/middleware';
+
+/** `<%= name %>` middleware capability. @public */
+export const <%= alias %>Middleware = defineMiddleware({
+  id: '<%= name %>',
+  name: '<%= alias %>Middleware',
+  version: '0.1.0-beta.0',
+});

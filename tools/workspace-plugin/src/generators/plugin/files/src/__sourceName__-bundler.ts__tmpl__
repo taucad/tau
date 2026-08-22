@@ -1,0 +1,29 @@
+import { defineBundler } from '@taucad/runtime/bundler';
+
+const issue = {
+  message: 'TODO: implement <%= name %> bundling',
+  code: 'RUNTIME',
+  type: 'runtime',
+  severity: 'error',
+};
+
+/** `<%= name %>` bundler capability. @public */
+export const <%= alias %>Bundler = defineBundler({
+  id: '<%= name %>',
+  extensions: [],
+  name: '<%= alias %>Bundler',
+  version: '0.1.0-beta.0',
+  async initialize() {
+    return {};
+  },
+  async detectImports() {
+    return { detectedModules: [], dependencies: [] };
+  },
+  async bundle() {
+    return { code: '', issues: [issue], success: false, dependencies: [], unresolvedPaths: [] };
+  },
+  async execute() {
+    return { success: false, issues: [issue] };
+  },
+  registerModule() {},
+});

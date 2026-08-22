@@ -3,21 +3,32 @@
   "version": "0.1.0-beta.0",
   "description": "<%= description %>",
   "type": "module",
+  "sideEffects": false,
   "private": false,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "<%= scope %>/<%= name %>"
   },
+  "homepage": "https://github.com/taucad/tau/tree/main/<%= scope %>/<%= name %>#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
-  "files": ["dist", "README.md"],
-  "keywords": ["cad", "kernel", "<%= name %>"],
+  "files": ["dist", "LICENSE", "README.md", "CHANGELOG.md"],
+  "keywords": ["cad", "plugin", "<%= name %>"],
   "author": "Richard Fontein",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "prepublishOnly": "pnpm --workspace-root nx run <%= name %>:pkgcheck"
+  },
   "exports": {
     ".": "./src/index.ts",
-    "./kernel": "./src/<%= name %>.kernel.ts"
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
@@ -27,19 +38,21 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./kernel": {
-        "types": "./dist/<%= name %>.kernel.d.mts",
-        "import": "./dist/<%= name %>.kernel.mjs",
-        "default": "./dist/<%= name %>.kernel.mjs"
-      }
-    }
+      "./package.json": "./package.json"
+    },
+    "imports": {}
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
-  "dependencies": {
-    "@taucad/runtime": "workspace:*",
-    "zod": "catalog:"
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*"
+  },
+  "taucad": {
+    "hostTarget": "<%= hostTarget %>"
   }
 }

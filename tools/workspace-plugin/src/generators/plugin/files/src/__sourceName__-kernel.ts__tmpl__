@@ -1,0 +1,30 @@
+import { createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
+
+/** `<%= name %>` kernel capability. @public */
+export const <%= alias %>Kernel = defineKernel({
+  id: '<%= name %>',
+  extensions: [],
+  name: '<%= alias %>Kernel',
+  version: '0.1.0-beta.0',
+  exportFormats: {},
+  async initialize() {
+    return {};
+  },
+  async getDependencies() {
+    return { resolved: [], unresolved: [] };
+  },
+  async getParameters() {
+    return createKernelSuccess({
+      defaultParameters: {},
+      jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+    });
+  },
+  async createGeometry() {
+    return { nativeHandle: undefined };
+  },
+  async exportGeometry() {
+    return createKernelError([
+      { message: 'TODO: implement <%= name %> export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+    ]);
+  },
+});

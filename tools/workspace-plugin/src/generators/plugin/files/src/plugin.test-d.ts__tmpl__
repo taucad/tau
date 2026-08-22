@@ -1,0 +1,27 @@
+import { expectTypeOf } from 'vitest';
+import type {
+<% if (capabilities.some(({ role }) => role === 'bundler')) { %>
+  ExpandPluginBundlers,
+<% } %>
+<% if (capabilities.some(({ role }) => role === 'kernel')) { %>
+  ExpandPluginKernels,
+<% } %>
+<% if (capabilities.some(({ role }) => role === 'middleware')) { %>
+  ExpandPluginMiddleware,
+<% } %>
+<% if (capabilities.some(({ role }) => role === 'transcoder')) { %>
+  ExpandPluginTranscoders,
+<% } %>
+} from '@taucad/runtime/plugin';
+
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
+import { plugin } from '#index.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
+import type {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
+
+const selected = plugin();
+<% for (const capability of capabilities) { const projection = capability.role === 'kernel' ? 'ExpandPluginKernels' : capability.role === 'middleware' ? 'ExpandPluginMiddleware' : capability.role === 'bundler' ? 'ExpandPluginBundlers' : 'ExpandPluginTranscoders'; %>
+expectTypeOf<<%= projection %><readonly [typeof selected]>>().toEqualTypeOf<
+  readonly [ReturnType<typeof <%= capability.factoryName %>>]
+>();
+<% } %>

@@ -5,10 +5,10 @@
       "schema": "./src/generators/package/schema.json",
       "description": "Create a @taucad/* publishable package with Tau conventions"
     },
-    "kernel": {
-      "factory": "./src/generators/kernel/generator",
-      "schema": "./src/generators/kernel/schema.json",
-      "description": "Create a @taucad/* CAD kernel package under packages/kernels/ with a defineKernel stub"
+    "plugin": {
+      "factory": "./src/generators/plugin/generator",
+      "schema": "./src/generators/plugin/schema.json",
+      "description": "Create a @taucad/* toolkit package under packages/plugins/"
     },
     "lint-rule": {
       "factory": "./src/generators/lint-rule/generator",

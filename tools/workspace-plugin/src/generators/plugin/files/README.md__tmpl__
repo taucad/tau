@@ -1,0 +1,14 @@
+# <%= importPath %>
+
+<%= description %>
+
+```typescript
+import { plugin<% for (const capability of capabilities) { %>, <%= capability.factoryName %><% } %> } from '<%= importPath %>';
+
+const selected = plugin();
+<% for (const capability of capabilities) { %>
+const direct<%= capability.role[0].toUpperCase() + capability.role.slice(1) %> = <%= capability.factoryName %>();
+<% } %>
+```
+
+The package exports the named callable toolkit factory `plugin` plus role-named direct factories. `plugin()` options select a preset only. Backend payloads belong in capability `initialize()` methods and returned context, never in module-level caches.

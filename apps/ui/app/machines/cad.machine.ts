@@ -21,12 +21,17 @@ import type { FileContentService } from '@taucad/fs-client/file-content-service'
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import type { AppRuntimeClient, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
+export type LatestGeometryOutcome = 'success' | 'failure' | undefined;
+
 export type CadContext = {
   entryPath: string | undefined;
   screenshot: string | undefined;
   parameters: Record<string, unknown>;
   units: { length: LengthSymbol };
   defaultParameters: Record<string, unknown>;
+  /** Outcome of the latest selected runtime geometry event. */
+  latestGeometryOutcome: LatestGeometryOutcome;
+  /** Last successful artifact retained for display across later render failures. */
   geometry: Geometry | undefined;
   kernelIssues: Map<string, KernelIssue[]>;
   codeIssues: CodeIssue[];
@@ -54,7 +59,7 @@ export type CadContext = {
   lastRequestedRenderId: number;
   /**
    * Highest render identifier that has been observed as settled via a
-   * `geometryComputed` event. Always less-than-or-equal to
+   * `geometryComputed` or `geometryFailed` event. Always less-than-or-equal to
    * `lastRequestedRenderId`.
    */
   lastSettledRenderId: number;
@@ -76,6 +81,7 @@ type CadEvent =
   | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
+  | { type: 'geometryFailed'; issues: KernelIssue[] }
   | { type: 'parametersParsed'; defaultParameters: Record<string, unknown>; jsonSchema: JSONSchema7 }
   | { type: 'kernelIssue'; errors: KernelIssue[] }
   | { type: 'kernelProgress'; phase: RenderPhase }
@@ -186,7 +192,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
           issues: result.issues,
         });
       } else {
-        machineRef.send({ type: 'kernelIssue', errors: result.issues });
+        machineRef.send({ type: 'geometryFailed', issues: result.issues });
       }
     }),
     client.on('state', (state: WorkerState) => {
@@ -272,7 +278,9 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
 });
 
 const hasExportAvailability = (context: CadContext): boolean =>
-  Boolean(context.geometry) && deriveAvailableFormats(context.kernelClient, context.activeKernelId).length > 0;
+  context.latestGeometryOutcome === 'success' &&
+  Boolean(context.geometry) &&
+  deriveAvailableFormats(context.kernelClient, context.activeKernelId).length > 0;
 
 /**
  * CAD Machine -- Autonomous Kernel Topology
@@ -341,6 +349,7 @@ export const cadMachine = setup({
         assertEvent(event, 'setEntryPath');
         return event.entryPath;
       },
+      latestGeometryOutcome: () => undefined,
       codeIssues: () => [],
       kernelIssues({ context, event }) {
         assertEvent(event, 'setEntryPath');
@@ -354,12 +363,14 @@ export const cadMachine = setup({
         assertEvent(event, 'setParameters');
         return event.parameters;
       },
+      latestGeometryOutcome: () => undefined,
     }),
     setGeometry: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       const currentEntryPath = context.entryPath;
       enqueue.assign({
         geometry: event.geometry,
+        latestGeometryOutcome: 'success',
         kernelIssues({ context }) {
           if (!currentEntryPath) {
             return context.kernelIssues;
@@ -374,6 +385,19 @@ export const cadMachine = setup({
         },
       });
       enqueue.emit({ type: 'geometryEvaluated', geometry: event.geometry });
+    }),
+    setGeometryFailure: assign({
+      latestGeometryOutcome: () => 'failure',
+      kernelIssues({ context, event }) {
+        assertEvent(event, 'geometryFailed');
+        const currentEntryPath = context.entryPath;
+        if (!currentEntryPath) {
+          return context.kernelIssues;
+        }
+        const newIssues = new Map(context.kernelIssues);
+        newIssues.set(currentEntryPath, event.issues);
+        return newIssues;
+      },
     }),
     setKernelIssue: assign({
       kernelIssues({ context, event }) {
@@ -412,7 +436,7 @@ export const cadMachine = setup({
         entryPath: event.entryPath,
         parameters: event.parameters ?? {},
         codeIssues: [],
-        geometry: undefined,
+        latestGeometryOutcome: undefined,
         jsonSchema: undefined,
       });
     }),
@@ -476,6 +500,7 @@ export const cadMachine = setup({
     units: { length: 'mm' },
     parameters: {},
     defaultParameters: {},
+    latestGeometryOutcome: undefined,
     geometry: undefined,
     kernelIssues: new Map(),
     codeIssues: [],
@@ -555,7 +580,7 @@ export const cadMachine = setup({
         ],
         initializeModel: { actions: ['bumpRequestedRenderId', 'initializeModel', 'notifyExportAvailability'] },
         setEntryPath: { actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'] },
-        setParameters: { actions: ['bumpRequestedRenderId', 'setParameters'] },
+        setParameters: { actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'] },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
@@ -575,10 +600,11 @@ export const cadMachine = setup({
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
         setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters'],
+          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
+        geometryFailed: { actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
@@ -605,10 +631,11 @@ export const cadMachine = setup({
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
         setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters'],
+          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
+        geometryFailed: { actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
@@ -680,10 +707,11 @@ export const cadMachine = setup({
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
         setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters'],
+          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
+        geometryFailed: { actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
@@ -710,10 +738,11 @@ export const cadMachine = setup({
           actions: ['destroyKernel', 'bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
         setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters'],
+          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: { actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'] },
+        geometryFailed: { actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'] },
         parametersParsed: { actions: 'setDefaultParameters' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },

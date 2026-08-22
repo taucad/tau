@@ -20,6 +20,12 @@ const workspaceRoot = new URL('../../../../', import.meta.url);
 const readRuntime = (path: string): string => readFileSync(fileURLToPath(new URL(path, runtimeRoot)), 'utf8');
 const readWorkspace = (path: string): string => readFileSync(fileURLToPath(new URL(path, workspaceRoot)), 'utf8');
 
+const createBrowserImportGraphProject = (prefix: string): string => {
+  const parent = join(fileURLToPath(workspaceRoot), 'node_modules', '.cache', 'tau-runtime', 'browser-import-graph');
+  mkdirSync(parent, { recursive: true });
+  return mkdtempSync(join(parent, prefix));
+};
+
 const collectRuntimeSourceFiles = (directoryUrl: URL): string[] => {
   const files: string[] = [];
 
@@ -76,9 +82,7 @@ describe('runtime browser import graph guards', () => {
   });
 
   it('should exclude utility-host and esbuild code from an Electron renderer build', async () => {
-    const temporaryParent = join(fileURLToPath(workspaceRoot), 'tmp');
-    mkdirSync(temporaryParent, { recursive: true });
-    const temporaryRoot = mkdtempSync(join(temporaryParent, 'runtime-electron-renderer-vite-'));
+    const temporaryRoot = createBrowserImportGraphProject('electron-renderer-vite-');
     const entryPath = join(temporaryRoot, 'entry.ts');
     const htmlPath = join(temporaryRoot, 'index.html');
     const outputDirectory = join(temporaryRoot, 'dist');
@@ -125,9 +129,7 @@ describe('runtime browser import graph guards', () => {
   });
 
   it('should keep `ws` and Node builtins out of a browser build of the WebSocket client subpath', async () => {
-    const temporaryParent = join(fileURLToPath(workspaceRoot), 'tmp');
-    mkdirSync(temporaryParent, { recursive: true });
-    const temporaryRoot = mkdtempSync(join(temporaryParent, 'runtime-websocket-client-vite-'));
+    const temporaryRoot = createBrowserImportGraphProject('websocket-client-vite-');
     const entryPath = join(temporaryRoot, 'entry.ts');
     const htmlPath = join(temporaryRoot, 'index.html');
     const outputDirectory = join(temporaryRoot, 'dist');
@@ -183,9 +185,7 @@ describe('runtime browser import graph guards', () => {
      * fallback, but a dynamic import is still a bundler edge, so browser
      * builds plan `fromNodeFs` and every `node:fs` import it names has to
      * exist on the stub. A missing named export fails the build outright. */
-    const temporaryParent = join(fileURLToPath(workspaceRoot), 'tmp');
-    mkdirSync(temporaryParent, { recursive: true });
-    const temporaryRoot = mkdtempSync(join(temporaryParent, 'runtime-node-fs-stub-vite-'));
+    const temporaryRoot = createBrowserImportGraphProject('node-fs-stub-vite-');
     const entryPath = join(temporaryRoot, 'entry.ts');
     const htmlPath = join(temporaryRoot, 'index.html');
     const outputDirectory = join(temporaryRoot, 'dist');

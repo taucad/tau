@@ -83,10 +83,14 @@ async function startAndConnect(options?: Parameters<typeof createTestActor>[0]) 
 // ---------------------------------------------------------------------------
 
 const stubFile: GeometryFile = { path: '/projects/test', filename: 'main.ts' };
+const stubEntryPath = 'main.ts';
 
 const stubGeometry: Geometry = { format: 'gltf', content: new Uint8Array(0), hash: 'stub' };
 
 const stubIssues: KernelIssue[] = [{ message: 'test issue', code: 'RUNTIME', type: 'runtime', severity: 'warning' }];
+const stubFailureIssues: KernelIssue[] = [
+  { message: 'radius must be positive', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+];
 
 const stubExportRoute: ExportRoute = {
   targetFormat: 'glb',
@@ -348,6 +352,27 @@ describe('cadMachine', () => {
         issues: [],
       });
       expect(actor.getSnapshot().context.geometry).toEqual(stubGeometry);
+      expect(actor.getSnapshot().context.latestGeometryOutcome).toBe('success');
+      actor.stop();
+    });
+
+    it('should settle failed geometry while retaining the last viewable artifact', async () => {
+      const { actor } = await startAndConnect();
+
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      actor.send({ type: 'setParameters', parameters: { radius: -1 } });
+      const requestedRenderId = actor.getSnapshot().context.lastRequestedRenderId;
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
+      expect(actor.getSnapshot().context.latestGeometryOutcome).toBeUndefined();
+
+      actor.send({ type: 'geometryFailed', issues: stubFailureIssues });
+
+      const { context } = actor.getSnapshot();
+      expect(context.geometry).toBe(stubGeometry);
+      expect(context.latestGeometryOutcome).toBe('failure');
+      expect(context.kernelIssues.get(stubEntryPath)).toBe(stubFailureIssues);
+      expect(context.lastSettledRenderId).toBe(requestedRenderId);
       actor.stop();
     });
 
@@ -466,7 +491,7 @@ describe('cadMachine', () => {
       parentRef.stop();
     });
 
-    it('should notify the parentRef when initializeModel clears export availability', async () => {
+    it('should retain viewable geometry but disable export while initializeModel is pending', async () => {
       const parentRef = createParentActor();
       const mockClient = createExportableRuntimeClient();
       const { actor } = await startAndConnect({
@@ -478,7 +503,7 @@ describe('cadMachine', () => {
       actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
       await waitFor(parentRef, (state) => state.context.events.some((event) => event.available));
 
-      actor.send({ type: 'initializeModel', file: stubFile });
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
 
       await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === false);
       expect(parentRef.getSnapshot().context.events.at(-1)).toEqual({
@@ -486,7 +511,31 @@ describe('cadMachine', () => {
         actorId: actor.id,
         available: false,
       });
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
+      expect(actor.getSnapshot().context.latestGeometryOutcome).toBeUndefined();
 
+      actor.stop();
+      parentRef.stop();
+    });
+
+    it('should disable export after failure without clearing viewable geometry', async () => {
+      const parentRef = createParentActor();
+      const mockClient = createExportableRuntimeClient();
+      const { actor } = await startAndConnect({
+        parentRef,
+        connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [] }),
+      });
+
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === true);
+
+      actor.send({ type: 'geometryFailed', issues: stubFailureIssues });
+
+      await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === false);
+      expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
+      expect(parentRef.getSnapshot().context.events.at(-1)?.available).toBe(false);
       actor.stop();
       parentRef.stop();
     });
@@ -891,6 +940,7 @@ describe('cadMachine', () => {
       expect(context.screenshot).toBeUndefined();
       expect(context.parameters).toEqual({});
       expect(context.defaultParameters).toEqual({});
+      expect(context.latestGeometryOutcome).toBeUndefined();
       expect(context.geometry).toBeUndefined();
       expect(context.kernelIssues.size).toBe(0);
       expect(context.codeIssues).toEqual([]);

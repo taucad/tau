@@ -85,6 +85,8 @@ describe('WorkspaceSelector', () => {
 
     const trigger = screen.getByRole('button', { name: 'Create in Home' });
     expect(trigger).toHaveClass('h-7', 'rounded-full');
+    expect(trigger).not.toHaveClass('border');
+    expect(trigger).not.toHaveClass('bg-background');
     expect(trigger.querySelector('svg')).toHaveClass('size-3.5');
     expect(trigger).toHaveTextContent('Home');
     expect(trigger).not.toHaveTextContent('in this browser');
@@ -123,7 +125,7 @@ describe('WorkspaceSelector', () => {
     render(<WorkspaceSelector state={readyState()} variant='field' />);
 
     const trigger = screen.getByRole('button', { name: 'Create in Home' });
-    expect(trigger).toHaveClass('justify-start');
+    expect(trigger).toHaveClass('justify-start', 'border', 'bg-background', 'shadow-xs');
     expect(screen.getByText('Home')).toHaveClass('min-w-0', 'flex-1', 'text-left');
     expect(trigger).not.toHaveTextContent('in this browser');
     expect(trigger.lastElementChild).toHaveClass('ml-auto');
@@ -147,8 +149,8 @@ describe('WorkspaceSelector', () => {
     expect(options[1]).not.toHaveTextContent('·');
     expect(screen.getByText('in this browser')).toHaveClass('text-xs');
     expect(screen.getByText('on your disk')).toHaveClass('text-xs');
-    expect(screen.getByTitle('Home in this browser')).toHaveClass('gap-2');
-    expect(screen.getByTitle('A very long workshop folder name on your disk')).toHaveClass('gap-2');
+    expect(options[0]!.querySelector('[title]')).toBeNull();
+    expect(options[1]!.querySelector('[title]')).toBeNull();
     expect(options[0]!.querySelector('[aria-label="Selected location"]')).toBeInTheDocument();
     expect(options[1]!.querySelector('[aria-label="Selected location"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect a folder…' })).toBeVisible();

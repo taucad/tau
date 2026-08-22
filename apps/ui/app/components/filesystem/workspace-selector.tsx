@@ -12,7 +12,6 @@ import type { ProjectCreationLocation } from '#types/project-creation-location.t
 import {
   projectCreationLocationAccessibleName,
   projectCreationLocationsEqual,
-  projectLocationFullLabel,
 } from '#utils/project-creation-location.utils.js';
 import { cn } from '#utils/ui.utils.js';
 
@@ -52,7 +51,7 @@ export function WorkspaceSelector({
     return (
       <Button
         type='button'
-        variant='ghost'
+        variant={variant === 'field' ? 'outline' : 'ghost'}
         size='sm'
         className={cn(
           variant === 'toolbar' && 'h-7 max-w-48 rounded-full',
@@ -111,7 +110,7 @@ export function WorkspaceSelector({
   const trigger = (
     <Button
       type='button'
-      variant='ghost'
+      variant={variant === 'field' ? 'outline' : 'ghost'}
       size='sm'
       className={cn(
         'min-w-0',
@@ -142,10 +141,7 @@ export function WorkspaceSelector({
           <span className='-mx-3 -my-1 flex min-h-0 w-[calc(100%+1.5rem)] shrink-0 items-center justify-between gap-2 px-3 py-1'>
             <span className='flex min-w-0 flex-1 items-center gap-2'>
               {option.location.kind === 'home' ? <House /> : <FolderOpen />}
-              <span
-                className='flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden'
-                title={projectLocationFullLabel(option)}
-              >
+              <span className='flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden'>
                 <span className='truncate'>{option.label}</span>
                 <span className='shrink-0 text-xs text-muted-foreground'>{option.detail}</span>
               </span>

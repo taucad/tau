@@ -2,7 +2,7 @@
 
 /**
  * Canonical MIME types for 3D file formats.
- * Single source of truth consumed by @taucad/runtime, @taucad/converter, and apps.
+ * Single source of truth consumed by runtime plugins and apps.
  * Keyed by file extension so any package can look up MIME types without
  * depending on a specific format union type.
  *

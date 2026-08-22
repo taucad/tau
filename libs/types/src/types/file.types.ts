@@ -112,7 +112,7 @@ export type FileInput = {
 
 /**
  * Named binary export artifact with a resolved MIME type.
- * Used by runtime export results and the converter package.
+ * Used by runtime export results and format plugins.
  *
  * @public
  */

@@ -30,7 +30,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/packages/geospec-engine',
+      reportsDirectory: '../../out/reports/coverage/packages/geospec-engine',
       ...engineCoverageSourcePolicy,
       thresholds: {
         statements: 100,

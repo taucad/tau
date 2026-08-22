@@ -15,7 +15,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/libs/chat',
+      reportsDirectory: '../../out/reports/coverage/libs/chat',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec}.ts'],
     },

@@ -225,7 +225,7 @@ export default defineConfig(({ mode }) => {
       setupFiles: ['./vitest.setup.ts'],
       reporters: ['verbose'],
       coverage: {
-        reportsDirectory: '../../coverage/apps/ui',
+        reportsDirectory: '../../out/reports/coverage/apps/ui',
         provider: 'v8',
         include: ['app/**/*'],
         exclude: ['app/**/*.{test,spec}.{ts,tsx}', 'app/**/index.ts'],

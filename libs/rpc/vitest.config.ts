@@ -20,7 +20,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/libs/rpc',
+      reportsDirectory: '../../out/reports/coverage/libs/rpc',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec,test-d}.ts', 'src/index.ts'],
       // V8: optional chains and branch coverage on the wire handler; keep a high floor.

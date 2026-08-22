@@ -14,7 +14,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/libs/telemetry',
+      reportsDirectory: '../../out/reports/coverage/libs/telemetry',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec,test-d}.ts'],
       thresholds: {

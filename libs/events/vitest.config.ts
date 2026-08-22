@@ -14,7 +14,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/libs/events',
+      reportsDirectory: '../../out/reports/coverage/libs/events',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec,test-d}.ts'],
       thresholds: {

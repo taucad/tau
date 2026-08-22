@@ -22,7 +22,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/packages/cli',
+      reportsDirectory: '../../out/reports/coverage/packages/cli',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec,test-d}.ts', 'src/cli-dist.test.ts'],
       thresholds: {

@@ -100,7 +100,7 @@ export default defineConfig(({ command, mode }) => {
       reporter: ['verbose'], // Ensure detailed test output
       coverage: {
         provider: 'v8',
-        reportsDirectory: '../../coverage/apps/api',
+        reportsDirectory: '../../out/reports/coverage/apps/api',
         include: ['app/**/*'],
         exclude: ['app/**/*.{test,spec}.ts', 'app/main.ts'],
       },

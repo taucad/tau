@@ -12,7 +12,7 @@
   "sortPackageJson": false,
   "ignorePatterns": [
     "**/dist/**",
-    "/coverage",
+    "/out",
     "/.nx/cache",
     "/.nx/workspace-data",
     ".cursor/plans/**",

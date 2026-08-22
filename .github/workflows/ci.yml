@@ -129,6 +129,10 @@ jobs:
       - name: Run affected tasks
         run: pnpm nx affected -t lint test build typecheck size
 
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
   size-report:
     name: Bundle size report
     if: github.event_name == 'pull_request'
@@ -149,6 +153,10 @@ jobs:
           build_script: 'size:build'
           script: cd node_modules/.cache/size-limit && ../../.bin/size-limit --json
           package_manager: pnpm
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
 
   # Check what changed to determine what to deploy
   changes:

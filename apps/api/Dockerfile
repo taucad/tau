@@ -5,7 +5,7 @@
 # Stages: base -> deps -> build -> pruned -> runtime
 #   base    : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
 #   deps    : workspace skeleton only (lockfile + every workspace package.json
-#             + patches + tarballs); cache key independent of source edits.
+#             + patches); cache key independent of source edits.
 #   build   : full source + `pnpm nx build api`; reuses deps layer cache.
 #   pruned  : `pnpm deploy --prod` to materialise a self-contained app dir.
 #   runtime : minimal `node:24-slim` running as non-root `nestjs` (uid 1001).
@@ -41,9 +41,6 @@ WORKDIR /app
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY patches/ ./patches/
-# tarballs/ is ~27 MB of lockfile-referenced .tgz files after .dockerignore
-# strips experiments/comparisons/package/active subdirectories.
-COPY tarballs/ ./tarballs/
 # `--parents` (BuildKit syntax 1.20+) preserves directory tree so each
 # workspace package.json lands at its real path. Matches pnpm-workspace.yaml
 # globs apps/*, libs/*, packages/*, packages/kernels/*, tools/*. The nested

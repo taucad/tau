@@ -6,7 +6,7 @@ the root `geospec` runtime so importing `geospec` never initializes WASM.
 
 The build is declared in `libcascade.config.ts` and driven by
 [`@libcascade/toolchain`](https://www.npmjs.com/package/@libcascade/toolchain)
-(a geospec devDependency, installed from `tarballs/libcascade-toolchain/`).
+(a GeoSpec dev dependency installed from the npm registry).
 Artifacts and the generated `./init` factory land in `dist/`, which is
 committed.
 

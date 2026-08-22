@@ -49,10 +49,8 @@
   // Keep repos visible in Explorer; exclude them only from Tailwind IntelliSense.
   "tailwindCSS.files.exclude": [
     "repos/**",
-    "tarballs/**",
     "experiments/**",
     "**/repos/**",
-    "**/tarballs/**",
     "**/experiments/**",
     "**/node_modules/**",
     "**/.git/**",

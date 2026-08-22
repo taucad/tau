@@ -42,7 +42,6 @@ const config: KnipConfig = {
   workspaces: {
     '.': {
       project: ['**/*.{ts,tsx,mts}'],
-      ignore: ['tarballs/**'],
       ignoreDependencies: [
         'replicad-opencascadejs',
         'libcascade',

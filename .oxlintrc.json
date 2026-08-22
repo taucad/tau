@@ -25,7 +25,6 @@
     "**/*.prompt.example-multifile/**",
     "**/public/**",
     "**/content/docs/**",
-    "tarballs/**",
     "experiments/**",
     "**/*.jscad.js",
     "**/fixtures/scripts/**"

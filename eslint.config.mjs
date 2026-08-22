@@ -235,7 +235,6 @@ const config = [
       '**/*.jscad.js',
       '**/content/docs/**/props/**',
       '**/vitest.integration.config.ts',
-      'tarballs/**',
       'experiments/**',
       '**/wasm/**',
       'repos/**',

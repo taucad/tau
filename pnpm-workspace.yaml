@@ -313,7 +313,7 @@ patchedDependencies:
   '@kittycad/lib@2.0.48': patches/@kittycad__lib@2.0.48.patch
   vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
 overrides:
-  '@langchain/google-common': file:tarballs/langchain-fork/langchain-google-common-2.2.0-beta.0.tgz
+  '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@types/express': 'catalog:'
   replicad: 'catalog:'
   replicad-opencascadejs: 'catalog:'

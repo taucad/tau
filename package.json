@@ -263,7 +263,7 @@
     "tailwind-merge": "^3.6.0",
     "three": "^0.184.0",
     "three-mesh-bvh": "^0.9.10",
-    "three-viewport-gizmo": "file:tarballs/three-viewport-gizmo-fork/three-viewport-gizmo-2.2.2-tau.2.tgz",
+    "three-viewport-gizmo": "npm:@taulabs/three-viewport-gizmo@2.2.2-beta.0",
     "tslib": "catalog:",
     "turndown": "catalog:",
     "typescript-eslint": "catalog:",

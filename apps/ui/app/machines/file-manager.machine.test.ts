@@ -13,6 +13,7 @@ const workerTestState = vi.hoisted(() => {
     terminate: ReturnType<typeof vi.fn>;
     postMessage: ReturnType<typeof vi.fn>;
     dispatchEvent: (event: Event) => void;
+    options: { name?: string } | undefined;
   }> = [];
   return { instances };
 });
@@ -30,7 +31,9 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
       this.listeners.get(type)?.delete(handler);
     });
     private readonly listeners = new Map<string, Set<(event: Event) => void>>();
-    public constructor() {
+    public readonly options: { name?: string } | undefined;
+    public constructor(options?: { name?: string }) {
+      this.options = options;
       workerTestState.instances.push(this);
     }
     public dispatchEvent(event: Event): boolean {
@@ -94,10 +97,11 @@ const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
 const mockSetProjectFileSystemConfig =
   vi.fn<(config: { projectId: string; backend: 'webaccess'; workspaceId: string }) => Promise<void>>();
 const mockGetProjectRootConfigs = vi.fn<() => Promise<ProjectRootConfiguration>>();
+const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs'>>();
 
 vi.mock('#filesystem/handle-store.js', () => ({
-  getDefaultWorkspace: vi.fn(async () => undefined),
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
+  getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
   checkHandlePermission: async () => mockCheckHandlePermission(),
@@ -117,7 +121,49 @@ describe('fileManagerMachine', () => {
     mockCheckHandlePermission.mockResolvedValue('granted');
     mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    mockGetHomeStorageBackend.mockResolvedValue('indexeddb');
     mockConfigureProjectRoots.mockResolvedValue(undefined);
+  });
+
+  // R3 — the worker installs its `/` composition mount during module
+  // evaluation, so the pinned engine has to reach it through the one
+  // constructor option Vite's worker wrapper forwards.
+  it('should name the worker after the pinned Home engine', async () => {
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    const actor = createActor(fileManagerMachine, {
+      input: { rootDirectory: '/', shouldInitializeOnStart: true },
+    });
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+
+    expect(workerTestState.instances).toHaveLength(1);
+    expect(workerTestState.instances[0]?.options?.name).toBe('fm-root:opfs');
+
+    actor.stop();
+  });
+
+  it('should reuse an inherited worker without resolving the Home pin again', async () => {
+    const sharedWorker = { addEventListener: vi.fn(), removeEventListener: vi.fn(), postMessage: vi.fn() };
+    const actor = createActor(fileManagerMachine, {
+      input: {
+        rootDirectory: '/projects/proj_000000000000000000001',
+        shouldInitializeOnStart: true,
+        sharedWorker: sharedWorker as unknown as Worker,
+      },
+    });
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+
+    expect(workerTestState.instances).toHaveLength(0);
+    expect(mockGetHomeStorageBackend).not.toHaveBeenCalled();
+
+    actor.stop();
   });
 
   it('should start in initializing state when shouldInitializeOnStart is false', () => {
@@ -507,7 +553,7 @@ describe('fileManagerMachine', () => {
           {
             projectId: 'test-id',
             backend: 'indexeddb',
-            providerBasePath: '/projects/test-id',
+            providerBasePath: '/test-id',
           },
         ],
         roots: [{ backend: 'indexeddb' }],
@@ -1450,7 +1496,7 @@ describe('fileManagerMachine', () => {
       const bridge = actualModule.createFileSystemBridge(fakeWorker);
 
       expect(() => {
-        actualModule.createFileSystemBridgeProxy<Record<string, never>>(bridge);
+        actualModule.createFileSystemBridgeProxy(bridge);
       }).not.toThrow();
     });
   });

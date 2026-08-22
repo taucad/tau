@@ -8,7 +8,8 @@ import { toast } from 'sonner';
 import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
 import { useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
-import { getEnvironment } from '#environment.config.js';
+import type { ClientEnvironment } from '#environment.config.js';
+import { getClientEnvironment } from '#environment.config.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { Page } from '#components/layout/page.js';
 import { themeSessionResolver } from '#sessions.server.js';
@@ -24,13 +25,15 @@ import { globalStylesLinks } from '#styles/global.styles.js';
 import type { Handle } from '#types/matches.types.js';
 import { RootCommandPaletteItems } from '#root-command-items.js';
 import { ProjectManagerProvider } from '#hooks/use-project-manager.js';
-import { FileManagerProvider } from '#hooks/use-file-manager.js';
+import { HomeFileManagerProvider } from '#hooks/use-file-manager.js';
 import { AnalyticsProvider } from '#hooks/use-analytics.js';
 import { KeyboardProvider } from '#hooks/use-keyboard.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
 import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
+import { AuthedHintSync } from '#components/authed-hint-sync.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
+import { BuildSkewBanner } from '#components/build-skew-banner.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
 
 export const links: LinksFunction = () => [...globalStylesLinks, ...webManifestLinks];
@@ -66,7 +69,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return {
     theme: getTheme(),
     cookie,
-    env: await getEnvironment(),
+    // Allowlisted subset only — this value is serialised into page source both
+    // by the `window.ENV` script below and React Router's `<Scripts />` payload.
+    env: await getClientEnvironment(new URL(request.url)),
   };
 }
 
@@ -130,28 +135,29 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
     <AuthConfigProvider>
       <QueryClientProvider client={queryClient}>
         <AnalyticsProvider>
-          <FileManagerProvider rootDirectory='/' initialBackend='indexeddb'>
-            <HeadlessImageProvider>
-              <ProjectManagerProvider>
-                <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
-                  <ColorProvider>
-                    <TooltipProvider>
-                      <KeyboardProvider>
-                        <UnloadProvider>
-                          <ChatSessionStoreProvider>
-                            <GlobalChatFlushGuard />
-                            <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
+          <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
+            <ColorProvider>
+              <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
+                <HomeFileManagerProvider rootDirectory='/'>
+                  <HeadlessImageProvider>
+                    <ProjectManagerProvider>
+                      <TooltipProvider>
+                        <KeyboardProvider>
+                          <UnloadProvider>
+                            <ChatSessionStoreProvider>
+                              <GlobalChatFlushGuard />
+                              <AuthedHintSync />
                               {children}
-                            </LayoutDocument>
-                          </ChatSessionStoreProvider>
-                        </UnloadProvider>
-                      </KeyboardProvider>
-                    </TooltipProvider>
-                  </ColorProvider>
-                </ThemeProvider>
-              </ProjectManagerProvider>
-            </HeadlessImageProvider>
-          </FileManagerProvider>
+                            </ChatSessionStoreProvider>
+                          </UnloadProvider>
+                        </KeyboardProvider>
+                      </TooltipProvider>
+                    </ProjectManagerProvider>
+                  </HeadlessImageProvider>
+                </HomeFileManagerProvider>
+              </LayoutDocument>
+            </ColorProvider>
+          </ThemeProvider>
         </AnalyticsProvider>
       </QueryClientProvider>
     </AuthConfigProvider>
@@ -164,7 +170,7 @@ function LayoutDocument({
   ssrTheme,
 }: {
   readonly children: ReactNode;
-  readonly env: Record<string, string | boolean | undefined>;
+  readonly env: Partial<ClientEnvironment>;
   readonly ssrTheme: ThemeWithSystem;
 }): React.JSX.Element {
   // Use ssrTheme (the raw resolved theme) for the HTML className.
@@ -205,6 +211,7 @@ function LayoutDocument({
           }}
         />
         <SvgSpriteMount />
+        <BuildSkewBanner />
         {children}
         <ScrollRestoration />
         <Scripts />

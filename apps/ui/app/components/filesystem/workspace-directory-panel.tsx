@@ -2,7 +2,7 @@
  * Shared workspace-directory panel.
  *
  * Three rendering variants share the same status model + copy so every
- * surface (Settings, /files, /projects/new, FM recovery overlay) speaks
+ * surface (Settings, /files, creation, and FM recovery) speaks
  * with one voice (Audit R6).
  *
  * - `inline` — large card-like component used as an empty-state CTA.
@@ -13,8 +13,7 @@
  * picker, the permission request, or persistence. Each call site supplies
  * the action callbacks because picker invocation has to live within a
  * user-gesture-bearing event handler (browser security requirement) and
- * the persistence target (default workspace vs. workspace-specific row)
- * varies by surface.
+ * the persistence target varies by surface.
  */
 
 import { FolderOpen, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
@@ -48,8 +47,8 @@ export type WorkspaceDirectoryPanelProps = {
   /**
    * Optional right-aligned metadata node rendered in the `row` variant
    * between the description block and the action group. Lets callers
-   * compose status-agnostic affordances (project count, "Default"
-   * badge, "Set as default" button) without bolting on a sub-row.
+   * compose status-agnostic affordances such as a project count without
+   * bolting on a sub-row.
    */
   readonly meta?: React.ReactNode;
 };
@@ -65,7 +64,9 @@ export function WorkspaceDirectoryPanel({
   meta,
 }: WorkspaceDirectoryPanelProps): React.JSX.Element {
   const copy = workspaceDirectoryCopy[status];
-  const showConnect = (status === 'missing' || status === 'connected' || status === 'permission') && onConnect;
+  const showConnect =
+    (status === 'missing' || status === 'disconnected' || status === 'connected' || status === 'permission') &&
+    onConnect;
   const showGrantAccess = status === 'permission' && onGrantAccess;
   const showForget = status !== 'unsupported' && variant === 'row' && onForget;
 
@@ -81,10 +82,10 @@ export function WorkspaceDirectoryPanel({
   if (variant === 'banner') {
     return (
       <div
-        role={status === 'permission' || status === 'missing' ? 'alert' : undefined}
+        role={status === 'permission' || status === 'disconnected' || status === 'missing' ? 'alert' : undefined}
         className={cn(
           'flex items-center justify-between gap-4 rounded-md border px-3 py-2 text-sm',
-          status === 'permission' || status === 'missing'
+          status === 'permission' || status === 'disconnected' || status === 'missing'
             ? 'border-amber-500/40 bg-amber-500/10'
             : 'border-border bg-muted/40',
         )}

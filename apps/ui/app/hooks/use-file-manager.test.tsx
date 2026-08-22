@@ -103,13 +103,14 @@ const mockGetProjectFileSystemConfig =
 const mockSetProjectFileSystemConfig =
   vi.fn<(config: { projectId: string; backend: 'webaccess'; workspaceId: string }) => Promise<void>>();
 const mockGetProjectRootConfigs = vi.fn<() => Promise<ProjectRootConfiguration>>();
+const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs'>>();
 const handleStoreTestState = vi.hoisted(() => ({
   updateWorkspaceHandle: vi.fn(async () => undefined),
   forgetWorkspace: vi.fn(async () => undefined),
 }));
 
 vi.mock('#filesystem/handle-store.js', () => ({
-  getDefaultWorkspace: vi.fn(async () => undefined),
+  getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
   getWorkspace: vi.fn(async () => undefined),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
@@ -135,7 +136,13 @@ vi.mock('#utils/workspace-telemetry.utils.js', async (importOriginal) => {
   };
 });
 
-const { waitForFileManagerServices, FileManagerProvider, useFileManager } = await import('#hooks/use-file-manager.js');
+const {
+  waitForFileManagerServices,
+  FileManagerProvider,
+  HomeFileManagerProvider,
+  useFileManager,
+  useHomeStorageBackend,
+} = await import('#hooks/use-file-manager.js');
 
 describe('waitForFileManagerServices', () => {
   beforeEach(() => {
@@ -144,6 +151,7 @@ describe('waitForFileManagerServices', () => {
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
     mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
     mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
     mockConfigureProjectRoots.mockResolvedValue(undefined);
   });
@@ -240,6 +248,29 @@ describe('waitForFileManagerServices', () => {
   });
 });
 
+describe('HomeFileManagerProvider', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+  });
+
+  it('resolves Home once and shares the selected engine with nested mounts', async () => {
+    const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <HomeFileManagerProvider rootDirectory='/' shouldInitializeOnStart={false}>
+        <HomeFileManagerProvider rootDirectory='/nested' shouldInitializeOnStart={false}>
+          {children}
+        </HomeFileManagerProvider>
+      </HomeFileManagerProvider>
+    );
+    const { result } = renderHook(() => useHomeStorageBackend(), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current).toBe('opfs');
+    });
+    expect(mockGetHomeStorageBackend).toHaveBeenCalledOnce();
+  });
+});
+
 describe('FileManagerProvider — bindProjectToWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -261,7 +292,7 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
             backend: 'webaccess',
             workspaceId,
             storageRootKey: `webaccess:${workspaceId}`,
-            relativeDirectory: `/projects/${projectId}`,
+            relativeDirectory: `/${projectId}`,
           },
         },
       ],
@@ -302,7 +333,7 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
       projectId: 'proj-bind',
       backend: 'webaccess',
       workspaceId: 'wsp_target',
-      providerBasePath: '/projects/proj-bind',
+      providerBasePath: '/proj-bind',
     });
     // The IDB write completes before the event reaches the actor — call
     // order is the binding-transaction contract.

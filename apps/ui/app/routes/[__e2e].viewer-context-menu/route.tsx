@@ -4,6 +4,8 @@ import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { projectUrl } from '#utils/project-url.utils.js';
+import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 
 const encoder = new TextEncoder();
 
@@ -57,13 +59,18 @@ const ViewerContextMenuDebugRoute = (): React.JSX.Element => {
   const { createProject } = useProjectManager();
   const navigate = useNavigate();
   const [error, setError] = React.useState<string | undefined>(undefined);
+  const seedStarted = React.useRef(false);
 
   React.useEffect(() => {
-    let cancelled = false;
+    if (seedStarted.current) {
+      return;
+    }
+    seedStarted.current = true;
 
     const seed = async (): Promise<void> => {
       try {
         const project = await createProject({
+          location: homeProjectCreationLocation,
           project: createSeedProject(),
           activeKernel: 'replicad',
           files: seedFiles,
@@ -83,21 +90,13 @@ const ViewerContextMenuDebugRoute = (): React.JSX.Element => {
           },
         });
 
-        if (!cancelled) {
-          void navigate(`/projects/${project.id}`);
-        }
+        void navigate(projectUrl(project.slugs));
       } catch (seedError) {
-        if (!cancelled) {
-          setError(seedError instanceof Error ? seedError.message : String(seedError));
-        }
+        setError(seedError instanceof Error ? seedError.message : String(seedError));
       }
     };
 
     void seed();
-
-    return () => {
-      cancelled = true;
-    };
   }, [createProject, navigate]);
 
   if (error) {

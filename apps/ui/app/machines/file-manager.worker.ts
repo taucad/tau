@@ -25,6 +25,8 @@ import { kernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
+import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
+import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
 
 const providerRegistry = new ProviderRegistry({ databasePrefix: metaConfig.databasePrefix });
@@ -137,15 +139,31 @@ const fileService = new WorkspaceFileService({
 const t0 = performance.now();
 console.debug(`[FM-Worker] module evaluated in ${t0.toFixed(1)}ms`);
 
+/**
+ * Physical engine of the system-owned Home workspace, pinned per browser
+ * profile and handed over by the FM machine as this worker's name (see
+ * `file-manager-worker-name.ts`). The pin itself is owned by main-thread-only
+ * `handle-store.ts`, and the root mount below runs during module evaluation,
+ * so the name is the only channel that is both authoritative and readable in
+ * time.
+ */
+const homeStorageBackend = homeBackendFromWorkerName(self.name);
+
+// `/` is Home's workspace root: everything the app persists outside a
+// configured mount (`/projects/<id>` routes, `/previews/<instance>`,
+// `/node_modules`) lands here, so it must follow the same engine pin that
+// project discovery scans — otherwise an OPFS-pinned profile would keep
+// writing Home-level state (`/.agents/…`) into IndexedDB where nothing looks
+// for it.
 try {
-  const rootScope = { backend: 'indexeddb' } as const;
+  const rootScope = { backend: homeStorageBackend } as const;
   const rootProvider = await providerRegistry.getProvider(rootScope);
   mountTable.mount('/', rootProvider, {
-    backend: 'indexeddb',
+    backend: homeStorageBackend,
     storageRootKey: providerRegistry.resolveStorageRootKey(rootScope),
   });
 } catch (error) {
-  postWorkerInitError('mount root IndexedDB provider', error);
+  postWorkerInitError(`mount root ${homeStorageBackend} provider`, error);
   throw error;
 }
 
@@ -157,8 +175,11 @@ try {
 }
 
 try {
-  await populateBundledTypesMount(fileService, buildBundledTypesPayload());
-  console.debug(`[FM-Worker] bundled types populated +${(performance.now() - t0).toFixed(1)}ms`);
+  const outcome = await ensureBundledTypesMount(fileService, buildBundledTypesPayload(), async (payload) =>
+    populateBundledTypesMount(fileService, payload),
+  );
+  const populationLabel = outcome === 'skipped' ? 'bundled types current, skipped' : 'bundled types populated';
+  console.debug(`[FM-Worker] ${populationLabel} +${(performance.now() - t0).toFixed(1)}ms`);
 } catch (error) {
   postWorkerInitError('populateBundledTypesMount', error);
   throw error;

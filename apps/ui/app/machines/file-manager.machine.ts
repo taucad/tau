@@ -7,8 +7,11 @@ import {
   getProjectFileSystemConfig,
   getWorkspace,
   checkHandlePermission,
+  getHomeStorageBackend,
   getProjectRootConfigs,
 } from '#filesystem/handle-store.js';
+import { fileManagerWorkerName } from '#machines/file-manager-worker-name.js';
+import type { WorkspaceRootSkip } from '#filesystem/handle-store.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { normalizePath } from '@taucad/utils/path';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -20,7 +23,7 @@ import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
 import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
-import type { FileManagerProxy, FileManagerProtocol } from '#machines/file-manager.machine.types.js';
+import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import {
   formatWorkerError,
   formatWorkerErrorEnvelope,
@@ -90,6 +93,7 @@ type FileManagerContext = {
   projectId: string | undefined;
   sharedWorker: Worker | undefined;
   onExternalPollTelemetry: ((aggregate: ExternalPollTelemetry) => void) | undefined;
+  onRootSkipped: ((skip: WorkspaceRootSkip) => void) | undefined;
 };
 
 // ============ Lifecycle Actors ============
@@ -148,7 +152,13 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
       safeDispose(() => context.worker?.terminate());
     }
 
-    const worker = context.sharedWorker ?? new FileManagerWorker({ name: `fm-root` });
+    // The worker mounts `/` on Home's pinned engine while its module
+    // evaluates, and the name is the only value that reaches it that early —
+    // resolved here because `handle-store` owns the pin and runs on the main
+    // thread only. Inherited workers already carry the mount, so nested file
+    // managers never pay for the lookup.
+    const worker =
+      context.sharedWorker ?? new FileManagerWorker({ name: fileManagerWorkerName(await getHomeStorageBackend()) });
 
     // Crash-aware error/messageerror/envelope listeners. Listeners are
     // installed before any await so a synchronous load failure (404 served as
@@ -236,8 +246,8 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
 
     const bridge = createFileSystemBridge(worker);
     const { dispose: bridgeDispose } = bridge;
-    const proxy = createFileSystemBridgeProxy<FileManagerProtocol>(bridge);
-    await proxy.configureProjectRoots(await getProjectRootConfigs());
+    const proxy = createFileSystemBridgeProxy(bridge);
+    await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
     const openBridge = (root: string): FileSystemBridgeConnection => openFileSystemBridge(worker, { root });
 
     return { type: 'workerConnected', worker, proxy, bridgeDispose, openFileSystemBridge: openBridge, filePoolBuffer };
@@ -450,6 +460,8 @@ type FileManagerInput = {
    */
   sharedFilePoolBuffer?: SharedArrayBuffer;
   onExternalPollTelemetry?: (aggregate: ExternalPollTelemetry) => void;
+  /** Telemetry sink for workspaces the route snapshot had to skip (R13). */
+  onRootSkipped?: (skip: WorkspaceRootSkip) => void;
 };
 
 export const fileManagerMachine = setup({
@@ -612,7 +624,7 @@ export const fileManagerMachine = setup({
       // workspaces even when its own mounted backend is IndexedDB.
       void (async () => {
         try {
-          const configuration = await getProjectRootConfigs();
+          const configuration = await getProjectRootConfigs(context.onRootSkipped);
           const snapshot = self.getSnapshot();
           if (
             snapshot.matches('ready') &&
@@ -667,6 +679,7 @@ export const fileManagerMachine = setup({
     projectId: input.projectId,
     sharedWorker: input.sharedWorker,
     onExternalPollTelemetry: input.onExternalPollTelemetry,
+    onRootSkipped: input.onRootSkipped,
   }),
   initial: 'initializing',
   exit: ['stopPolling', 'destroyWorkerAndServices'],

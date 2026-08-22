@@ -21,6 +21,7 @@ import {
 } from '#components/ui/sidebar.js';
 import { Skeleton } from '#components/ui/skeleton.js';
 import { useProjects } from '#hooks/use-projects.js';
+import { projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
 import { toast } from '#components/ui/sonner.js';
 import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
 import { SearchInput } from '#components/search-input.js';
@@ -116,7 +117,7 @@ export function NavHistory(): ReactNode {
         action: {
           label: 'Open',
           onClick() {
-            void navigate(`/projects/${newProject.id}`);
+            void navigate(projectUrl(newProject.slugs));
           },
         },
       });
@@ -383,7 +384,7 @@ function NavHistoryItem({
           </span>
         </SidebarMenuButton>
       ) : (
-        <NavLink to={`/projects/${project.id}`}>
+        <NavLink to={projectUrlOr(project.slugs)}>
           {({ isActive, isPending }) => (
             <SidebarMenuButton asChild isActive={isActive}>
               <span>

@@ -4,15 +4,17 @@ import { Download, Check, ChevronDown, ArrowUpRight } from 'lucide-react';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { openrscad } from '@taucad/openrscad';
-import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
-import { esbuild } from '@taucad/runtime/bundler';
-import { converterTranscoder } from '@taucad/runtime/transcoder';
+import { plugin as openrscad } from '@taucad/openrscad';
+import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/middleware';
+import { plugin as esbuild } from '@taucad/esbuild';
+import { plugin as assimp } from '@taucad/assimp';
+import { parameterEntryPath } from '@taucad/types';
 import { deriveExportFormatOptions } from '#routes/_index/hero-viewer.utils.js';
 import type { ExportFormatOption } from '#routes/_index/hero-viewer.utils.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useRuntime } from '@taucad/react';
 import { Button } from '#components/ui/button.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
@@ -23,8 +25,9 @@ import { Loader } from '#components/ui/loader.js';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 import qrcodeScad from '#routes/_index/qrcode.scad?raw';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
+import { createParameterEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
+import { projectUrl } from '#utils/project-url.utils.js';
 
-const heroProjectId = 'hero-qrcode-v2';
 const heroMainFile = 'main.scad';
 
 const heroCode = { [heroMainFile]: qrcodeScad };
@@ -32,10 +35,8 @@ const heroCode = { [heroMainFile]: qrcodeScad };
 const heroUnits: Units = { length: { symbol: 'mm', factor: 1 } };
 
 const heroRuntime = defineRuntime({
-  kernels: [openrscad()],
+  plugins: [assimp(), openrscad(), esbuild()],
   middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
-  bundlers: [esbuild()],
-  transcoders: [converterTranscoder()],
 });
 const heroKernelClientOptions = {
   runtime: heroRuntime,
@@ -45,6 +46,7 @@ const heroKernelClientOptions = {
 export function HeroViewer(): React.JSX.Element {
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const presentLocationError = useProjectCreationLocationError();
 
   const [currentParams, setCurrentParams] = useState<Record<string, unknown>>({});
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -126,30 +128,30 @@ export function HeroViewer(): React.JSX.Element {
         project: {
           name: 'QR Code Generator',
           description: 'A parametric QR code generator built with OpenSCAD',
-          thumbnail: '/tau-desktop.jpg',
-          author: {
-            name: 'Community',
-            avatar: '/avatar-sample.png',
-          },
           tags: ['openscad', 'parametric', 'qr-code'],
           assets: {
-            mechanical: {
-              main: heroMainFile,
-              parameters: currentParams,
+            main: {
+              entryPath: heroMainFile,
             },
           },
-          forkedFrom: heroProjectId,
         },
-        files: { [heroMainFile]: { content: encodeTextFile(qrcodeScad) } },
+        files: {
+          [heroMainFile]: { content: encodeTextFile(qrcodeScad) },
+          [parameterEntryPath(heroMainFile)]: {
+            content: encodeTextFile(serializeParameterEntry(createParameterEntry(currentParams))),
+          },
+        },
       });
 
-      await navigate(`/projects/${createProject.id}`);
+      await navigate(projectUrl(createProject.slugs));
     } catch (error) {
       console.error('Failed to create project:', error);
-      toast.error('Failed to create project');
+      if (!presentLocationError(error)) {
+        toast.error('Failed to create project');
+      }
       setIsCreatingProject(false);
     }
-  }, [isCreatingProject, currentParams, projectManager, navigate]);
+  }, [isCreatingProject, currentParams, projectManager, navigate, presentLocationError]);
 
   return (
     <div className='space-y-6'>
@@ -176,12 +178,7 @@ export function HeroViewer(): React.JSX.Element {
             {isCreatingProject ? <Loader className='size-4' /> : <ArrowUpRight className='size-4' />}
           </Button>
 
-          <ModelViewer
-            geometry={geometry}
-            enablePan
-            graphicsOptions={{ enableGrid: true, enableAxes: true }}
-            stageOptions={{ zoomLevel: 1.2 }}
-          />
+          <ModelViewer geometry={geometry} enablePan graphicsOptions={{ enableGrid: true, enableAxes: true }} />
         </div>
 
         {hasParameters ? (

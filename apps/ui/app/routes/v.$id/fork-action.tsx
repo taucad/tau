@@ -7,9 +7,11 @@ import { parameterEntryPath } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { toast } from '#components/ui/sonner.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { createParameterEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
+import { projectUrl } from '#utils/project-url.utils.js';
 
 export type PublicationForkSource = {
   readonly id: string;
@@ -26,6 +28,7 @@ type ForkActionProps = {
 export function ForkAction({ publication, files }: ForkActionProps): React.JSX.Element {
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const presentLocationError = useProjectCreationLocationError();
   const { cadRef, defaultParameters } = useCadPreview();
   const parameterOverrides = useSelector(cadRef, (snapshot) => snapshot.context.parameters);
 
@@ -62,10 +65,12 @@ export function ForkAction({ publication, files }: ForkActionProps): React.JSX.E
       });
 
       toast.success('Forked to your projects');
-      void navigate(`/projects/${newProject.id}`);
+      void navigate(projectUrl(newProject.slugs));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Fork failed';
-      toast.error(message);
+      if (!presentLocationError(error)) {
+        const message = error instanceof Error ? error.message : 'Fork failed';
+        toast.error(message);
+      }
     } finally {
       setBusy(false);
     }
@@ -75,6 +80,7 @@ export function ForkAction({ publication, files }: ForkActionProps): React.JSX.E
     mergedParameters,
     navigate,
     projectManager,
+    presentLocationError,
     publication.description,
     publication.entryPath,
     publication.title,

@@ -6,7 +6,7 @@ import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
 import { getEnvironment } from '#environment.config.js';
 import { cacheTag, cdnBackedSsrRouteHeaders } from '#lib/react-router.lib.js';
-import { FileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
+import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { Loader } from '#components/ui/loader.js';
 import { ErrorPage } from '#components/error-page.js';
@@ -321,14 +321,13 @@ export default function PublicationViewRoute(): React.JSX.Element {
 
   return (
     <SharedWorkerGate>
-      <FileManagerProvider
+      <HomeFileManagerProvider
         key={viewProjectId}
         projectId={viewProjectId}
         rootDirectory={`/projects/${viewProjectId}`}
-        initialBackend='indexeddb'
       >
         <PublicationInteractiveSurface data={loaderData} publication={publication} viewProjectId={viewProjectId} />
-      </FileManagerProvider>
+      </HomeFileManagerProvider>
     </SharedWorkerGate>
   );
 }

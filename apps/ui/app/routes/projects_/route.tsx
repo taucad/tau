@@ -1,7 +1,11 @@
-import { Link, Outlet, redirect, useLocation, useNavigate } from 'react-router';
-import { useEffect } from 'react';
-import type { LoaderFunction } from 'react-router';
+/**
+ * `/projects` — the project library (blueprint L3). It used to redirect to `/`
+ * and host the library one level down under a `library` child; the page grammar
+ * collapsed onto this route and `/projects/new` is the only child left.
+ */
+import { Link, Outlet, useLocation } from 'react-router';
 import { Button } from '#components/ui/button.js';
+import { ProjectLibrary } from '#components/project-library/project-library.js';
 import type { Handle } from '#types/matches.types.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -13,7 +17,7 @@ export const handle: Handle = {
       <Tooltip>
         <TooltipTrigger asChild>
           <Button asChild variant='ghost'>
-            <Link to='/projects/library'>Projects</Link>
+            <Link to='/projects'>Projects</Link>
           </Button>
         </TooltipTrigger>
         <TooltipContent className='flex items-center gap-2 align-baseline'>
@@ -23,27 +27,10 @@ export const handle: Handle = {
       </Tooltip>
     );
   },
+  enableOverflowY: true,
 };
 
-export const loader: LoaderFunction = async ({ request }) => {
-  const url = new URL(request.url);
-  if (url.pathname === '/projects') {
-    return redirect('/');
-  }
-
-  return null;
-};
-
-// We want to redirect to the new project page if the user navigates to the projects route
 export default function Projects(): React.JSX.Element {
-  const navigate = useNavigate();
   const location = useLocation();
-
-  useEffect(() => {
-    if (location.pathname === '/projects') {
-      void navigate('/');
-    }
-  }, [navigate, location.pathname]);
-
-  return <Outlet />;
+  return location.pathname === '/projects' ? <ProjectLibrary /> : <Outlet />;
 }

@@ -1,9 +1,11 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router';
-import type { Project } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { projectUrl } from '#utils/project-url.utils.js';
+import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 
 const encoder = new TextEncoder();
 
@@ -32,19 +34,13 @@ const seedFiles = Object.fromEntries([
   ['src/readme.md', { content: encode('# File tree e2e fixture\n') }],
 ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
-const createSeedProject = (): Omit<Project, 'id' | 'createdAt' | 'updatedAt'> => ({
+const createSeedProject = (): Omit<ProjectManifest, '$schema' | 'id'> => ({
   name: 'sgenoud/models file-tree e2e',
   description: 'Deterministic local seed for the project file tree e2e surface.',
-  author: {
-    name: 'Tau E2E',
-    avatar: '/avatar-sample.png',
-  },
   tags: ['e2e', 'replicad'],
-  thumbnail: '',
   assets: {
-    mechanical: {
-      main: 'public/models/honeycomb.js',
-      parameters: {},
+    main: {
+      entryPath: 'public/models/honeycomb.js',
     },
   },
 });
@@ -64,13 +60,18 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
   const { createProject } = useProjectManager();
   const navigate = useNavigate();
   const [error, setError] = React.useState<string | undefined>(undefined);
+  const seedStarted = React.useRef(false);
 
   React.useEffect(() => {
-    let cancelled = false;
+    if (seedStarted.current) {
+      return;
+    }
+    seedStarted.current = true;
 
     const seed = async (): Promise<void> => {
       try {
         const project = await createProject({
+          location: homeProjectCreationLocation,
           project: createSeedProject(),
           activeKernel: 'replicad',
           files: seedFiles,
@@ -90,21 +91,13 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
           },
         });
 
-        if (!cancelled) {
-          void navigate(`/projects/${project.id}`);
-        }
+        void navigate(projectUrl(project.slugs));
       } catch (seedError) {
-        if (!cancelled) {
-          setError(seedError instanceof Error ? seedError.message : String(seedError));
-        }
+        setError(seedError instanceof Error ? seedError.message : String(seedError));
       }
     };
 
     void seed();
-
-    return () => {
-      cancelled = true;
-    };
   }, [createProject, navigate]);
 
   if (error) {
@@ -119,7 +112,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
 
   return (
     <main className='flex min-h-screen items-center justify-center bg-background'>
-      <Loader label='Preparing file tree e2e project' />
+      <Loader />
     </main>
   );
 };

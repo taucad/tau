@@ -1,58 +1,192 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
-import type { Project } from '@taucad/types';
+import type { Chat } from '@taucad/chat';
+import type { ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
+import { projectToManifest, serializeProjectManifest } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
+import { defaultPanelState } from '#constants/editor.constants.js';
+import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
+import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
+import type { ProjectLibraryState } from '#types/project.types.js';
+import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 
-// ── Mock fns ──────────────────────────────────────────────────────────────────
+const fakeProject: ProjectManifest = projectToManifest({
+  id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+  name: 'Test Project',
+  description: '',
+  tags: [],
+  assets: { main: { entryPath: 'main.ts' } },
+});
+const fakeLocator: ProjectLocator = {
+  backend: 'opfs',
+  storageRootKey: 'opfs:origin',
+  relativeDirectory: '/test-project',
+};
+const unrelatedProject: ProjectManifest = projectToManifest({
+  id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
+  name: 'Unrelated Project',
+  description: '',
+  tags: [],
+  assets: { main: { entryPath: 'main.ts' } },
+});
+const unrelatedLocator: ProjectLocator = {
+  backend: 'opfs',
+  storageRootKey: 'opfs:origin',
+  relativeDirectory: '/unrelated-project',
+};
+const validProjectDiscovery: ProjectDiscoveryResult = {
+  roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+  entries: [
+    {
+      status: 'valid',
+      manifest: fakeProject,
+      locator: fakeLocator,
+    },
+  ],
+};
+const liveWorkspaceRoot = {
+  backend: 'webaccess',
+  workspaceId: 'wsp_live',
+  directoryHandle: { kind: 'directory', name: 'tau-workspace' } as unknown as FileSystemDirectoryHandle,
+} as const;
+const liveWorkspaceLocator: ProjectLocator = {
+  backend: 'webaccess',
+  storageRootKey: 'webaccess:wsp_live',
+  relativeDirectory: '/test-project',
+  workspaceId: 'wsp_live',
+};
+const liveWorkspaceDiscovery: ProjectDiscoveryResult = {
+  roots: [{ status: 'complete', root: liveWorkspaceRoot }],
+  entries: [{ status: 'valid', manifest: fakeProject, locator: liveWorkspaceLocator }],
+};
+const operationId = 'req_aaaaaaaaaaaaaaaaaaaaa';
+const phaseOrder: string[] = [];
+let manifestBytes = serializeProjectManifest(projectToManifest(fakeProject));
 
-const mockWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>>();
-const mockClientWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>>();
-const mockMount = vi.fn<(prefix: string, backend: string, options?: unknown) => Promise<void>>();
-const mockUnmount = vi.fn<(prefix: string) => void>();
-let mockBackendType = 'indexeddb';
+const mockWriteFiles = vi.fn(async () => {
+  phaseOrder.push('files');
+});
+const mockWriteFile = vi.fn(async (_path: string, bytes: Uint8Array<ArrayBuffer>) => {
+  phaseOrder.push('manifest');
+  manifestBytes = bytes;
+});
+/** Contents of `<project>/.tau/library.json`; `undefined` means the file is absent. */
+let libraryFileContent: string | undefined;
+const libraryFilePath = `/projects/${fakeProject.id}/.tau/library.json`;
+const mockReadFile = vi.fn(async (path: string) => {
+  if (path.endsWith('/.tau/library.json')) {
+    if (libraryFileContent === undefined) {
+      throw new Error(`ENOENT: ${path}`);
+    }
+    return libraryFileContent;
+  }
+  return manifestBytes;
+});
+const mockStat = vi.fn(async () => ({ type: 'file', size: 12, mtimeMs: 1_700_000_000_000 }) as const);
+const mockSyncProjectRoots = vi.fn(async () => {
+  phaseOrder.push('roots');
+});
+const mockPermanentlyDeleteProjectDirectory = vi.fn<FileManagerProxy['permanentlyDeleteProjectDirectory']>(
+  async (): Promise<{ status: 'deleted' }> => ({
+    status: 'deleted',
+  }),
+);
+const mockCommitPendingProjectDirectory = vi.fn<FileManagerProxy['commitPendingProjectDirectory']>(async () => {
+  phaseOrder.push('commit');
+  return { status: 'committed' } as const;
+});
+const mockListProjectManifests = vi.fn<() => Promise<ProjectDiscoveryResult>>(async () => ({ roots: [], entries: [] }));
+
+/** Worker change-channel double: one live subscription per event channel. */
+type WorkerChangeSubscription = { readonly interestedIn: (path: string) => boolean; readonly handler: () => void };
+const workerChangeSubscriptions = new Map<string, WorkerChangeSubscription>();
+const subscribeWorkerChannel = (channel: string) =>
+  vi.fn((subscription: WorkerChangeSubscription) => {
+    workerChangeSubscriptions.set(channel, subscription);
+    return () => workerChangeSubscriptions.delete(channel);
+  });
+const mockWorkerChangeChannel = {
+  onFileWritten: subscribeWorkerChannel('fileWritten'),
+  onFileDeleted: subscribeWorkerChannel('fileDeleted'),
+  onFileRenamed: subscribeWorkerChannel('fileRenamed'),
+  onDirectoryCreated: subscribeWorkerChannel('directoryCreated'),
+  onDirectoryDeleted: subscribeWorkerChannel('directoryDeleted'),
+  onDirectoryRenamed: subscribeWorkerChannel('directoryRenamed'),
+  onDirectoryChanged: subscribeWorkerChannel('directoryChanged'),
+};
+const emitWorkerChange = (channel: string, path: string): void => {
+  const subscription = workerChangeSubscriptions.get(channel);
+  if (subscription?.interestedIn(path)) {
+    subscription.handler();
+  }
+};
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    backendType: mockBackendType,
-    writeFiles: mockWriteFiles,
+    workerChangeChannel: mockWorkerChangeChannel,
     client: {
-      writeFiles: mockClientWriteFiles,
+      writeFiles: mockWriteFiles,
+      writeFile: mockWriteFile,
+      readFile: mockReadFile,
+      stat: mockStat,
+      exists: vi.fn(async () => false),
+      rmdir: vi.fn(async () => undefined),
+      getDirectoryContents: vi.fn(async () => ({})),
+      listProjectManifests: mockListProjectManifests,
+      permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
+      commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },
-    workspace: {
-      mount: mockMount,
-      unmount: mockUnmount,
-      invalidateStandaloneProvider: vi.fn(async () => undefined),
-    },
-    copyDirectory: vi.fn(),
-    fileManagerRef: { getSnapshot: () => ({ matches: () => true }) },
+    workspace: { syncProjectRoots: mockSyncProjectRoots },
   }),
 }));
 
-type ProjectFsConfigInput =
-  | { projectId: string; backend: 'indexeddb' | 'opfs' | 'memory' }
-  | { projectId: string; backend: 'webaccess'; workspaceId: string };
-
-const mockSetProjectFileSystemConfig = vi.fn<(config: ProjectFsConfigInput) => Promise<void>>();
-const mockGetDefaultWorkspace =
-  vi.fn<
-    () => Promise<{ workspace: { workspaceId: string; name: string }; handle: FileSystemDirectoryHandle } | undefined>
-  >();
-const mockGetWorkspace =
-  vi.fn<
-    (
-      workspaceId: string,
-    ) => Promise<{ workspace: { workspaceId: string; name: string }; handle: FileSystemDirectoryHandle } | undefined>
-  >();
-const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
+const recordConfigWrite = async (_config: ProjectFileSystemConfig): Promise<void> => {
+  phaseOrder.push('locator');
+};
+const mockSetProjectFileSystemConfig = vi.fn(recordConfigWrite);
+const mockGetProjectFileSystemConfig = vi.fn();
+const mockDeleteProjectFileSystemConfig = vi.fn(async () => {
+  phaseOrder.push('locator-cleanup');
+});
+const mockGetWorkspace = vi.fn();
+const mockCheckHandlePermission = vi.fn(async () => 'granted');
+const mockGetHomeStorageBackend = vi.fn(async (): Promise<'indexeddb' | 'opfs'> => 'opfs');
+const mockGetProjectCreationLocation = vi.fn<() => Promise<{ location: ProjectCreationLocation; repaired: undefined }>>(
+  async () => ({
+    location: { kind: 'home' } as const,
+    repaired: undefined,
+  }),
+);
+const mockSetProjectCreationLocation = vi.fn(async () => {
+  phaseOrder.push('preference');
+});
+let projectRootConfigurationListener: (() => void) | undefined;
+const mockSubscribeProjectRootConfigurationChanges = vi.fn((listener: () => void) => {
+  projectRootConfigurationListener = listener;
+  return vi.fn();
+});
+const mockGetAllProjectFileSystemConfigs = vi.fn<() => Promise<ProjectFileSystemConfig[]>>(async () => []);
+const mockListWorkspaces = vi.fn<() => Promise<Array<{ workspaceId: string }>>>(async () => []);
+const mockPinHomeStorageBackend = vi.fn(async (backend: 'indexeddb' | 'opfs') => backend);
 
 vi.mock('#filesystem/handle-store.js', () => ({
-  setProjectFileSystemConfig: async (...args: unknown[]) =>
-    mockSetProjectFileSystemConfig(...(args as [ProjectFsConfigInput])),
-  getDefaultWorkspace: async () => mockGetDefaultWorkspace(),
-  getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),
-  checkHandlePermission: async () => mockCheckHandlePermission(),
+  listWorkspaces: mockListWorkspaces,
+  setProjectFileSystemConfig: mockSetProjectFileSystemConfig,
+  getProjectFileSystemConfig: mockGetProjectFileSystemConfig,
+  getHomeStorageBackend: mockGetHomeStorageBackend,
+  getProjectCreationLocation: mockGetProjectCreationLocation,
+  setProjectCreationLocation: mockSetProjectCreationLocation,
+  getWorkspace: mockGetWorkspace,
+  checkHandlePermission: mockCheckHandlePermission,
+  deleteProjectFileSystemConfig: mockDeleteProjectFileSystemConfig,
+  getAllProjectFileSystemConfigs: mockGetAllProjectFileSystemConfigs,
+  pinHomeStorageBackend: mockPinHomeStorageBackend,
+  subscribeProjectRootConfigurationChanges: mockSubscribeProjectRootConfigurationChanges,
 }));
 
 let mockIsFileSystemAccessSupported = false;
@@ -62,31 +196,91 @@ vi.mock('#constants/browser.constants.js', () => ({
   },
 }));
 
-const mainFile = 'main.ts';
+let mockBuildSuperseded = false;
+vi.mock('#filesystem/build-skew.js', () => ({
+  buildId: 1,
+  isBuildSuperseded: () => mockBuildSuperseded,
+  subscribeBuildSkew: () => () => undefined,
+}));
 
-const stubProjectData = {
-  name: 'Test',
-  description: '',
-  author: { name: '', avatar: '' },
-  tags: [] as string[],
-  thumbnail: '',
-  assets: {},
-} as const;
-
-const fakeProject: Project = {
-  id: 'test-project-id',
-  name: 'Test Project',
-  description: '',
-  author: { name: '', avatar: '' },
-  tags: [],
-  thumbnail: '',
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
-  assets: {},
+const pendingCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
+  operationId,
+  kind: 'create',
+  backend: 'opfs',
+  providerBasePath: '/test-project',
+  manifest: fakeProject,
+  library: { projectId: fakeProject.id, lastActivityAt: 10 },
+  files: { 'main.ts': { content: new Uint8Array([1, 2, 3]) } },
+  chat: {
+    id: 'cht_create',
+    resourceId: fakeProject.id,
+    name: 'Initial chat',
+    messages: [],
+    createdAt: 10,
+    updatedAt: 10,
+  },
+  editorState: {
+    projectId: fakeProject.id,
+    openFiles: [],
+    activePaneId: undefined,
+    focusedChatId: 'cht_create',
+    panelState: defaultPanelState,
+    editorLayout: undefined,
+    viewerLayout: undefined,
+    viewSettings: {},
+    updatedAt: 10,
+  },
+};
+const pendingPermanentDelete: Extract<PendingProjectOperation, { kind: 'permanent-delete' }> = {
+  operationId: 'req_bbbbbbbbbbbbbbbbbbbbb',
+  kind: 'permanent-delete',
+  projectId: fakeProject.id,
+  storage: {
+    backend: 'opfs',
+    providerBasePath: '/test-project',
+  },
 };
 
-const mockCreateProjectWithResources = vi.fn().mockResolvedValue({ project: fakeProject });
-const mockGenerateProjectName = vi.fn(async () => 'Tall Birdhouse');
+type PrepareProjectCreationInput = {
+  readonly manifest: ProjectManifest;
+  readonly chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>;
+  readonly editorState?: unknown;
+  readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
+  readonly storage: PendingProjectStorage;
+};
+
+const mockPrepareProjectCreation = vi.fn<
+  (input: PrepareProjectCreationInput) => Promise<Extract<PendingProjectOperation, { kind: 'create' }>>
+>(async () => {
+  phaseOrder.push('pending');
+  return pendingCreate;
+});
+const mockResumeResources = vi.fn(async () => {
+  phaseOrder.push('resources');
+});
+const mockCompletePending = vi.fn(async () => {
+  phaseOrder.push('complete');
+});
+const mockGetPendingProjectOperations = vi.fn(async (): Promise<PendingProjectOperation[]> => []);
+const mockBeginPermanentDeleteProject = vi.fn(async () => pendingPermanentDelete.operationId);
+const mockDeleteProjectResources = vi.fn(async () => {
+  phaseOrder.push('resources-cleanup');
+});
+const mockGenerateProjectName = vi.fn(async () => {
+  phaseOrder.push('name');
+  return 'Tall Birdhouse';
+});
+const mockGetProjectLibraryState = vi.fn<() => Promise<ProjectLibraryState | undefined>>(async () => ({
+  projectId: fakeProject.id,
+  lastActivityAt: 10,
+}));
+const mockCreateProjectLibraryState = vi.fn(async (state: ProjectLibraryState) => state);
+const mockTrashProject = vi.fn<(projectId: string) => Promise<ProjectLibraryState | undefined>>(
+  async (projectId: string) => ({ projectId, lastActivityAt: 10, deletedAt: 55 }),
+);
+const mockRestoreProject = vi.fn<(projectId: string) => Promise<ProjectLibraryState | undefined>>(
+  async (projectId: string) => ({ projectId, lastActivityAt: 10 }),
+);
 
 vi.mock('#chat-clients/use-project-name-client.js', () => ({
   useProjectNameClient: () => ({ generate: mockGenerateProjectName }),
@@ -94,21 +288,13 @@ vi.mock('#chat-clients/use-project-name-client.js', () => ({
 
 vi.mock('#hooks/project-manager.machine.js', async () => {
   const xstate = await import('xstate');
-  const machine = xstate.setup({}).createMachine({
-    id: 'projectManager',
-    initial: 'ready',
-    context: {
-      worker: undefined as Worker | undefined,
-      wrappedWorker: undefined as unknown,
-      error: undefined as Error | undefined,
-    },
-    states: {
-      ready: {},
-    },
-  });
-
   return {
-    projectManagerMachine: machine,
+    projectManagerMachine: xstate.setup({}).createMachine({
+      id: 'projectManager',
+      initial: 'ready',
+      context: { worker: undefined, wrappedWorker: undefined, error: undefined },
+      states: { ready: {} },
+    }),
   };
 });
 
@@ -116,53 +302,37 @@ vi.mock('xstate', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    waitFor: vi.fn().mockResolvedValue({
+    waitFor: vi.fn(async () => ({
       matches: (state: string) => state === 'ready',
       context: {
         wrappedWorker: {
-          createProjectWithResources: mockCreateProjectWithResources,
+          prepareProjectCreation: mockPrepareProjectCreation,
+          resumePendingProjectOperationResources: mockResumeResources,
+          completePendingProjectOperation: mockCompletePending,
+          getPendingProjectOperations: mockGetPendingProjectOperations,
+          getProjectLibraryState: mockGetProjectLibraryState,
+          createProjectLibraryState: mockCreateProjectLibraryState,
+          trashProject: mockTrashProject,
+          restoreProject: mockRestoreProject,
+          beginPermanentDeleteProject: mockBeginPermanentDeleteProject,
+          deleteProjectResources: mockDeleteProjectResources,
         },
       },
-    }),
+    })),
   };
 });
 
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (_name: string, defaultValue: string) => [defaultValue, vi.fn()],
 }));
-
-const mockCreateInitialProject = vi.fn((input: { projectName: string }) => ({
-  projectData: { name: input.projectName },
-  files: { [mainFile]: { content: new Uint8Array([1, 2, 3]) } },
-}));
-
-vi.mock('#constants/project.constants.js', () => ({
-  createInitialProject: (input: { projectName: string }) => mockCreateInitialProject(input),
-}));
-
-vi.mock('#utils/kernel.utils.js', () => ({
-  getMainFile: () => mainFile,
-  getEmptyCode: () => 'export default {};',
-}));
-
-vi.mock('#utils/filesystem.utils.js', () => ({
-  encodeTextFile: (text: string) => new TextEncoder().encode(text),
-}));
-
 vi.mock('#utils/chat.utils.js', () => ({
   createMessage: (options: Record<string, unknown>) => ({ id: 'msg-1', ...options }),
 }));
 
-// eslint-disable-next-line @typescript-eslint/naming-convention -- React component export
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
 
-// ── Test wrapper ──────────────────────────────────────────────────────────────
-
-function createWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React component export
+const createWrapper = () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return createElement(
       QueryClientProvider,
@@ -170,636 +340,1321 @@ function createWrapper() {
       createElement(ProjectManagerProvider, undefined, children),
     );
   };
-}
+};
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+/** Same wrapper, plus a per-instance count of `['projects']` invalidations. */
+const createCountingWrapper = () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+  const projectsInvalidations = (): number =>
+    invalidateQueries.mock.calls.filter(([filters]) => filters?.queryKey?.[0] === 'projects').length;
+  const wrapper = function Wrapper({ children }: { readonly children: ReactNode }) {
+    return createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      createElement(ProjectManagerProvider, undefined, children),
+    );
+  };
+  return { wrapper, projectsInvalidations };
+};
 
-function makeFiles(entries: Record<string, number[]>): Record<string, { content: Uint8Array<ArrayBuffer> }> {
-  const result: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};
-  for (const [key, bytes] of Object.entries(entries)) {
-    result[key] = { content: new Uint8Array(bytes) };
-  }
-  return result;
-}
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-describe('useProjectManager', () => {
+describe('useProjectManager.createProject', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockBackendType = 'indexeddb';
-    mockWriteFiles.mockResolvedValue(undefined);
-    mockClientWriteFiles.mockResolvedValue(undefined);
-    mockMount.mockResolvedValue(undefined);
-    mockUnmount.mockReturnValue(undefined);
-    mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
-    mockGetDefaultWorkspace.mockResolvedValue(undefined);
+    phaseOrder.length = 0;
+    manifestBytes = serializeProjectManifest(projectToManifest(fakeProject));
+    mockIsFileSystemAccessSupported = false;
+    mockBuildSuperseded = false;
+    mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockGetPendingProjectOperations.mockResolvedValue([]);
+    mockGetProjectLibraryState.mockResolvedValue({
+      projectId: fakeProject.id,
+      lastActivityAt: 10,
+      deletedAt: undefined,
+    });
+    // `mockClear` leaves queued one-shot values behind; reset so a test never
+    // inherits an unconsumed `mockResolvedValueOnce` from the previous one.
+    for (const mock of [
+      mockListProjectManifests,
+      mockGetPendingProjectOperations,
+      mockGetProjectLibraryState,
+      mockCommitPendingProjectDirectory,
+      mockPermanentlyDeleteProjectDirectory,
+      mockPrepareProjectCreation,
+      mockGenerateProjectName,
+      mockSyncProjectRoots,
+      mockTrashProject,
+      mockStat,
+      mockWriteFile,
+      mockGetHomeStorageBackend,
+      mockGetProjectCreationLocation,
+      mockSetProjectCreationLocation,
+      mockGetWorkspace,
+      mockCheckHandlePermission,
+    ]) {
+      mock.mockReset();
+    }
+    mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    mockCommitPendingProjectDirectory.mockImplementation(async () => {
+      phaseOrder.push('commit');
+      return { status: 'committed' };
+    });
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([]);
+    mockSetProjectFileSystemConfig.mockImplementation(recordConfigWrite);
+    mockListWorkspaces.mockResolvedValue([]);
     mockGetWorkspace.mockResolvedValue(undefined);
     mockCheckHandlePermission.mockResolvedValue('granted');
-    mockIsFileSystemAccessSupported = false;
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    mockGetProjectCreationLocation.mockResolvedValue({ location: { kind: 'home' }, repaired: undefined });
+    mockSetProjectCreationLocation.mockImplementation(async () => {
+      phaseOrder.push('preference');
+    });
+    libraryFileContent = undefined;
+    projectRootConfigurationListener = undefined;
+    workerChangeSubscriptions.clear();
   });
 
-  describe('createProject mount-based backend wiring', () => {
-    it('resolves a semantic multimodal name before creating durable project resources', async () => {
-      const imageUrl = 'data:image/png;base64,iVBORw0KGgo=';
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+  it('synchronizes worker roots when another browser context changes project root configuration', async () => {
+    renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-      await act(async () => {
-        await result.current.createProject({
-          kernel: 'openscad',
-          initialMessage: { content: '', imageUrls: [imageUrl] },
-          backend: 'opfs',
-        });
+    await act(async () => {
+      projectRootConfigurationListener?.();
+      await Promise.resolve();
+    });
+
+    expect(mockSyncProjectRoots).toHaveBeenCalledOnce();
+  });
+
+  it('replays journaled storage without consulting or changing creation preference', async () => {
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+
+    await vi.waitFor(() => {
+      expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+    });
+    expect(mockGetProjectCreationLocation).not.toHaveBeenCalled();
+    expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
+  });
+
+  it('uses fresh discovery for route access after bootstrap completes', async () => {
+    mockListProjectManifests.mockResolvedValueOnce({ roots: [], entries: [] }).mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+      status: 'ready',
+      project: fakeProject,
+    });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
+
+    expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+  });
+
+  it('classifies duplicate project identities as conflicts', async () => {
+    const duplicateLocator: ProjectLocator = {
+      ...fakeLocator,
+      relativeDirectory: '/test-project-copy',
+    };
+    mockListProjectManifests.mockResolvedValue({
+      roots: [],
+      entries: [
+        {
+          status: 'duplicate-id',
+          manifest: fakeProject,
+          locator: fakeLocator,
+        },
+        {
+          status: 'duplicate-id',
+          manifest: fakeProject,
+          locator: duplicateLocator,
+        },
+      ],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'conflict' });
+  });
+
+  it('classifies a configured project on an inaccessible root as unavailable', async () => {
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: '/test-project',
+    });
+    mockListProjectManifests.mockResolvedValue({
+      entries: [],
+      roots: [
+        {
+          status: 'inaccessible',
+          root: { backend: 'opfs' },
+          reason: 'permission denied',
+        },
+      ],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'unavailable' });
+  });
+
+  it('blocks an alternate occurrence when the configured root of a known workspace was omitted from discovery', async () => {
+    const configured = {
+      projectId: fakeProject.id,
+      backend: 'webaccess',
+      workspaceId: 'wsp_unavailable',
+      providerBasePath: '/original',
+    } as const;
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_unavailable' }]);
+    mockGetProjectFileSystemConfig.mockResolvedValue(configured);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([configured]);
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [],
+      conflicts: [{ status: 'route-blocked', manifest: fakeProject, locator: fakeLocator }],
+    });
+    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
+
+  it('blocks re-pointing a project whose known workspace root is inaccessible', async () => {
+    const configured = {
+      projectId: fakeProject.id,
+      backend: 'webaccess',
+      workspaceId: 'wsp_live',
+      providerBasePath: '/original',
+    } as const;
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_live' }]);
+    mockGetProjectFileSystemConfig.mockResolvedValue(configured);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([configured]);
+    mockListProjectManifests.mockResolvedValue({
+      roots: [
+        { status: 'inaccessible', root: liveWorkspaceRoot, reason: 'permission denied' },
+        ...validProjectDiscovery.roots,
+      ],
+      entries: validProjectDiscovery.entries,
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [],
+      conflicts: [{ status: 'route-blocked', manifest: fakeProject }],
+    });
+    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
+
+  it('restores a library whose configs cite a workspace that no longer exists (eviction incident repro)', async () => {
+    const dangling = {
+      projectId: fakeProject.id,
+      backend: 'webaccess',
+      workspaceId: 'wsp_evicted',
+      providerBasePath: liveWorkspaceLocator.relativeDirectory,
+    } as const;
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_live' }]);
+    mockGetProjectFileSystemConfig.mockResolvedValue(dangling);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([dangling]);
+    mockListProjectManifests.mockResolvedValue(liveWorkspaceDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [{ manifest: fakeProject }],
+      conflicts: [],
+    });
+    expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
+      projectId: fakeProject.id,
+      backend: 'webaccess',
+      workspaceId: 'wsp_live',
+      providerBasePath: liveWorkspaceLocator.relativeDirectory,
+    });
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
+
+  it('keeps duplicate-id for genuinely duplicated identities while a blocked route stays route-blocked', async () => {
+    const configured = {
+      projectId: unrelatedProject.id,
+      backend: 'webaccess',
+      workspaceId: 'wsp_unavailable',
+      providerBasePath: '/original-1',
+    } as const;
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_unavailable' }]);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([configured]);
+    mockGetProjectFileSystemConfig.mockImplementation(async (projectId: string) =>
+      projectId === unrelatedProject.id ? configured : undefined,
+    );
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [
+        { status: 'valid', manifest: fakeProject, locator: fakeLocator },
+        {
+          status: 'valid',
+          manifest: fakeProject,
+          locator: { ...fakeLocator, relativeDirectory: '/copy' },
+        },
+        { status: 'valid', manifest: unrelatedProject, locator: unrelatedLocator },
+      ],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const listing = await result.current.getProjectListing();
+    expect(listing.conflicts.map((conflict) => conflict.status)).toEqual([
+      'duplicate-id',
+      'duplicate-id',
+      'route-blocked',
+    ]);
+  });
+
+  it('keeps a config whose directory is discovered but unreadable', async () => {
+    const configured = {
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    } as const;
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([configured]);
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [
+        { status: 'invalid', locator: fakeLocator, issue: { code: 'manifest-unreadable', message: 'storage error' } },
+      ],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await result.current.getProjectListing();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+  });
+
+  it('deletes a config with no discovered directory under a complete root', async () => {
+    const configured = {
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    } as const;
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([configured]);
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await result.current.getProjectListing();
+    expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledWith(fakeProject.id);
+    // Keyed rows (chats/editor/library) must not outlive the config they belong to.
+    expect(mockDeleteProjectResources).toHaveBeenCalledWith(fakeProject.id);
+  });
+
+  it('coalesces a burst of worker filesystem events into one library invalidation', async () => {
+    const { wrapper, projectsInvalidations } = createCountingWrapper();
+    renderHook(() => useProjectManager(), { wrapper });
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        for (let index = 0; index < 12; index++) {
+          emitWorkerChange('fileWritten', `/project-${index}/tau.json`);
+        }
+        emitWorkerChange('directoryCreated', '/test-project');
       });
+      expect(projectsInvalidations()).toBe(0);
 
-      expect(mockGenerateProjectName).toHaveBeenCalledWith({ text: '', imageUrls: [imageUrl] });
-      expect(mockCreateInitialProject).toHaveBeenCalledWith(expect.objectContaining({ projectName: 'Tall Birdhouse' }));
-      expect(mockCreateProjectWithResources).toHaveBeenCalledWith(
-        expect.objectContaining({ project: expect.objectContaining({ name: 'Tall Birdhouse' }) }),
-      );
-      expect(mockGenerateProjectName.mock.invocationCallOrder[0]).toBeLessThan(
-        mockCreateProjectWithResources.mock.invocationCallOrder[0]!,
-      );
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(projectsInvalidations()).toBe(1);
+
+      // A later burst is a separate write, not the tail of the first one.
+      act(() => {
+        emitWorkerChange('fileDeleted', '/test-project/tau.json');
+        vi.advanceTimersByTime(300);
+      });
+      expect(projectsInvalidations()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores workspace and project app-state writes so `.tau/**` cannot storm discovery', async () => {
+    const { wrapper, projectsInvalidations } = createCountingWrapper();
+    renderHook(() => useProjectManager(), { wrapper });
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        emitWorkerChange('fileWritten', '/.tau/workspace.json');
+        emitWorkerChange('fileWritten', '/.tau/cache/blobs/abc');
+        emitWorkerChange('fileWritten', '/test-project/.tau/library.json');
+        emitWorkerChange('fileWritten', `/projects/${fakeProject.id}/.tau/transcripts/1.json`);
+        emitWorkerChange('fileWritten', '/test-project/main.ts');
+        vi.advanceTimersByTime(300);
+      });
+      expect(projectsInvalidations()).toBe(0);
+
+      // …but a project directory appearing at the workspace root does.
+      act(() => {
+        emitWorkerChange('directoryCreated', '/externally-added-project');
+        vi.advanceTimersByTime(300);
+      });
+      expect(projectsInvalidations()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a pending library invalidation when the provider unmounts', async () => {
+    const { wrapper, projectsInvalidations } = createCountingWrapper();
+    const { unmount } = renderHook(() => useProjectManager(), { wrapper });
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        emitWorkerChange('fileWritten', '/test-project/tau.json');
+      });
+      unmount();
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(projectsInvalidations()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('applies cross-tab route changes immediately and debounces only the refetch', async () => {
+    const { wrapper, projectsInvalidations } = createCountingWrapper();
+    renderHook(() => useProjectManager(), { wrapper });
+
+    await act(async () => {
+      projectRootConfigurationListener?.();
+      await Promise.resolve();
     });
+    expect(mockSyncProjectRoots).toHaveBeenCalledOnce();
+    expect(projectsInvalidations()).toBe(0);
 
-    it('creates no durable project resources when semantic naming fails', async () => {
-      mockGenerateProjectName.mockRejectedValueOnce(new Error('naming unavailable'));
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await expect(
-        act(async () =>
-          result.current.createProject({
-            kernel: 'openscad',
-            initialMessage: { content: 'Build the object in this image' },
-            backend: 'opfs',
-          }),
-        ),
-      ).rejects.toThrow('naming unavailable');
-
-      expect(mockCreateInitialProject).not.toHaveBeenCalled();
-      expect(mockCreateProjectWithResources).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(projectsInvalidations()).toBe(1);
+      });
     });
+  });
 
-    it.each([
-      { generatedName: 'New Project', expectedName: 'New Project', outputKind: 'generic output' },
-      { generatedName: '   ', expectedName: 'New Project', outputKind: 'blank output' },
-    ])('should create with $expectedName when naming returns $outputKind', async ({ generatedName, expectedName }) => {
-      mockGenerateProjectName.mockResolvedValueOnce(generatedName);
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+  it('reads every project route config with one cursor pass per discovery', async () => {
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [
+        { status: 'valid', manifest: fakeProject, locator: fakeLocator },
+        { status: 'valid', manifest: unrelatedProject, locator: unrelatedLocator },
+      ],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-      await act(async () =>
+    await result.current.getProjectListing();
+
+    expect(mockGetProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockGetAllProjectFileSystemConfigs.mock.calls.length).toBe(mockListProjectManifests.mock.calls.length);
+  });
+
+  it('collects orphans against the configs written earlier in the same pass', async () => {
+    // The project moved from OPFS to a live workspace: the pass re-points the
+    // config, and the sweep must judge the new route, not the pre-pass one.
+    const configs = new Map<string, ProjectFileSystemConfig>([
+      [fakeProject.id, { projectId: fakeProject.id, backend: 'opfs', providerBasePath: fakeLocator.relativeDirectory }],
+    ]);
+    mockGetAllProjectFileSystemConfigs.mockImplementation(async () => [...configs.values()]);
+    mockSetProjectFileSystemConfig.mockImplementation(async (config: ProjectFileSystemConfig) => {
+      configs.set(config.projectId, config);
+    });
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_live' }]);
+    mockListProjectManifests.mockResolvedValue({
+      roots: [
+        { status: 'complete', root: { backend: 'opfs' } },
+        { status: 'complete', root: liveWorkspaceRoot },
+      ],
+      entries: [{ status: 'valid', manifest: fakeProject, locator: liveWorkspaceLocator }],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await result.current.getProjectListing();
+
+    expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: fakeProject.id, backend: 'webaccess', workspaceId: 'wsp_live' }),
+    );
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+  });
+
+  it('shares one discovery pass between concurrent callers', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectLibraryState(fakeProject.id);
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockListProjectManifests.mockClear();
+    mockListProjectManifests.mockImplementation(async () => {
+      await gate;
+      return validProjectDiscovery;
+    });
+    const listing = result.current.getProjectListing();
+    const access = result.current.getProjectRouteAccess(fakeProject.id);
+    // Let both callers reach the discovery join point before the pass settles.
+    for (let index = 0; index < 50; index++) {
+      // oxlint-disable-next-line no-await-in-loop -- draining the microtask queue is inherently sequential
+      await Promise.resolve();
+    }
+    release();
+    await Promise.all([listing, access]);
+
+    expect(mockListProjectManifests).toHaveBeenCalledOnce();
+  });
+
+  it('skips orphan collection when the durable route configuration changed mid-pass', async () => {
+    const configured = {
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    } as const;
+    mockGetAllProjectFileSystemConfigs.mockImplementation(async () => {
+      projectRootConfigurationListener?.();
+      return [configured];
+    });
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await result.current.getProjectListing();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+  });
+
+  it('classifies discovered projects using library trash state', async () => {
+    mockGetProjectLibraryState.mockResolvedValue({
+      projectId: fakeProject.id,
+      lastActivityAt: 10,
+      deletedAt: 11,
+    });
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+      status: 'trashed',
+      project: fakeProject,
+    });
+  });
+
+  it('keeps an evicted library row trashed by reading the disk tombstone (eviction resurrection repro)', async () => {
+    mockGetProjectLibraryState.mockResolvedValue(undefined);
+    libraryFileContent = JSON.stringify({ deletedAt: 55 });
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({ projects: [], conflicts: [] });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'trashed' });
+    expect(mockReadFile).toHaveBeenCalledWith(libraryFilePath, 'utf8');
+    expect(mockCreateProjectLibraryState).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: fakeProject.id, deletedAt: 55 }),
+    );
+  });
+
+  it('seeds re-minted activity from the manifest mtime instead of the current time', async () => {
+    mockGetProjectLibraryState.mockResolvedValue(undefined);
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [{ library: { projectId: fakeProject.id, lastActivityAt: 1_700_000_000_000 } }],
+    });
+    expect(mockStat).toHaveBeenCalledWith(`/projects/${fakeProject.id}/tau.json`);
+    expect(mockCreateProjectLibraryState).toHaveBeenCalledWith({
+      projectId: fakeProject.id,
+      lastActivityAt: 1_700_000_000_000,
+    });
+  });
+
+  it('falls back to the current time when the manifest cannot be stat-ed', async () => {
+    const before = Date.now();
+    mockGetProjectLibraryState.mockResolvedValue(undefined);
+    mockStat.mockRejectedValueOnce(new Error('ENOENT'));
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const listing = await result.current.getProjectListing();
+    expect(listing.projects[0]?.library.lastActivityAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it('writes a disk tombstone when a project is trashed', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await result.current.deleteProject(fakeProject.id);
+
+    expect(mockTrashProject).toHaveBeenCalledWith(fakeProject.id);
+    expect(mockWriteFile).toHaveBeenCalledWith(libraryFilePath, JSON.stringify({ deletedAt: 55 }));
+  });
+
+  it('clears the disk tombstone when a project is restored', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await result.current.restoreProject(fakeProject.id);
+
+    expect(mockRestoreProject).toHaveBeenCalledWith(fakeProject.id);
+    expect(mockWriteFile).toHaveBeenCalledWith(libraryFilePath, '{}');
+  });
+
+  it('keeps trashing when the tombstone cannot be written', async () => {
+    mockWriteFile.mockRejectedValueOnce(new Error('workspace disconnected'));
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    // The tombstone is best-effort; the library row is what the toast reports.
+    await expect(result.current.deleteProject(fakeProject.id)).resolves.toBe(true);
+  });
+
+  it('classifies an undiscovered and unconfigured project as missing', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'missing' });
+  });
+
+  it('uses one discovery authority for listings and route access', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [{ manifest: fakeProject }],
+      conflicts: [],
+    });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+      status: 'ready',
+      project: fakeProject,
+    });
+  });
+
+  it('does not replay bootstrap work after project root configuration changes', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectRouteAccess(fakeProject.id);
+
+    await act(async () => {
+      projectRootConfigurationListener?.();
+      await Promise.resolve();
+    });
+    await result.current.getProjectRouteAccess(fakeProject.id);
+
+    expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();
+    expect(mockSyncProjectRoots).toHaveBeenCalledOnce();
+  });
+
+  it('publishes discovery while a quarantined pending project is still recovering', async () => {
+    let resolveCommit!: () => void;
+    mockGetPendingProjectOperations.mockResolvedValue([
+      {
+        ...pendingCreate,
+        files: {
+          ...pendingCreate.files,
+          'tau.json': { content: serializeProjectManifest(fakeProject) },
+        },
+      },
+    ]);
+    mockListProjectManifests.mockResolvedValue({
+      roots: [],
+      entries: [
+        ...validProjectDiscovery.entries,
+        {
+          status: 'valid',
+          manifest: unrelatedProject,
+          locator: unrelatedLocator,
+        },
+      ],
+    });
+    mockCommitPendingProjectDirectory.mockImplementationOnce(
+      async () =>
+        new Promise<{ status: 'committed' }>((resolve) => {
+          resolveCommit = () => {
+            resolve({ status: 'committed' });
+          };
+        }),
+    );
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [{ manifest: unrelatedProject }],
+      conflicts: [],
+      recoveries: [{ projectId: fakeProject.id, status: 'recovering' }],
+    });
+    await expect(result.current.getProjectRouteAccess(unrelatedProject.id)).resolves.toMatchObject({
+      status: 'ready',
+      project: unrelatedProject,
+    });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+      status: 'recovering',
+    });
+    expect(mockCommitPendingProjectDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({ files: pendingCreate.files }),
+    );
+
+    resolveCommit();
+    await vi.waitFor(() => {
+      expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+    });
+  });
+
+  it('classifies one failed recovery without rejecting unrelated discovery', async () => {
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockCommitPendingProjectDirectory.mockRejectedValueOnce(new Error('write failed'));
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [],
+      conflicts: [],
+    });
+    await vi.waitFor(async () => {
+      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+        status: 'recovery-failed',
+        recovery: { reason: 'filesystem-error' },
+      });
+    });
+    expect(mockCompletePending).not.toHaveBeenCalled();
+  });
+
+  it('propagates systemic discovery failure instead of presenting an empty library', async () => {
+    mockListProjectManifests.mockRejectedValue(new Error('discovery failed'));
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).rejects.toThrow('discovery failed');
+  });
+
+  it('uses the filesystem authority commit before restoring local resources and clearing the journal', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await act(async () =>
+      result.current.createProject({
+        project: {
+          name: fakeProject.name,
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: 'main.ts' } },
+        },
+        files: pendingCreate.files,
+        location: { kind: 'home' },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(prepared?.files).toBe(pendingCreate.files);
+    expect(prepared?.storage).toMatchObject({ backend: 'opfs' });
+    expect(mockPinHomeStorageBackend).toHaveBeenCalledWith('opfs');
+    expect(mockCommitPendingProjectDirectory).toHaveBeenCalledWith({
+      providerBasePath: pendingCreate.providerBasePath,
+      scope: { backend: 'opfs' },
+      files: pendingCreate.files,
+      manifest: serializeProjectManifest(fakeProject),
+    });
+    expect(phaseOrder).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete', 'preference']);
+    expect(mockGetProjectCreationLocation).not.toHaveBeenCalled();
+    expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({ kind: 'home' });
+  });
+
+  it('resolves an omitted location from durable preference immediately before allocation', async () => {
+    mockIsFileSystemAccessSupported = true;
+    mockGetProjectCreationLocation.mockResolvedValue({
+      location: { kind: 'workspace', workspaceId: 'wsp_preferred' },
+      repaired: undefined,
+    });
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_preferred' }]);
+    const handle = { kind: 'directory', name: 'Preferred' };
+    mockGetWorkspace.mockResolvedValue({
+      workspace: { workspaceId: 'wsp_preferred', name: 'Preferred', slug: 'preferred' },
+      handle,
+    });
+    mockPrepareProjectCreation.mockResolvedValueOnce({
+      ...pendingCreate,
+      backend: 'webaccess',
+      workspaceId: 'wsp_preferred',
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        project: fakeProject,
+        files: pendingCreate.files,
+      }),
+    );
+
+    expect(mockGetProjectCreationLocation).toHaveBeenCalledWith({ webAccessSupported: true });
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].storage).toMatchObject({
+      backend: 'webaccess',
+      workspaceId: 'wsp_preferred',
+    });
+    expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({
+      kind: 'workspace',
+      workspaceId: 'wsp_preferred',
+    });
+  });
+
+  it('uses repaired Home for an omitted location without folder capability', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        project: fakeProject,
+        files: pendingCreate.files,
+      }),
+    );
+
+    expect(mockGetProjectCreationLocation).toHaveBeenCalledWith({ webAccessSupported: false });
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].storage).toMatchObject({ backend: 'opfs' });
+    expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({ kind: 'home' });
+  });
+
+  it('never falls back when an explicit workspace is unsupported', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(
+      result.current.createProject({
+        project: fakeProject,
+        files: pendingCreate.files,
+        location: { kind: 'workspace', workspaceId: 'wsp_exact' },
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported', workspaceId: 'wsp_exact' });
+    expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+    expect(mockGetHomeStorageBackend).not.toHaveBeenCalled();
+    expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
+  });
+
+  it('allocates a slug-only directory at the workspace root, incrementing past what discovery already sees', async () => {
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [
+        { status: 'valid', manifest: fakeProject, locator: { ...fakeLocator, relativeDirectory: '/Test-Project' } },
+        {
+          status: 'valid',
+          manifest: unrelatedProject,
+          locator: { ...fakeLocator, relativeDirectory: '/test-project-1' },
+        },
+        // A directory in another storage root cannot collide.
+        {
+          status: 'valid',
+          manifest: fakeProject,
+          locator: { ...liveWorkspaceLocator, relativeDirectory: '/test-project-2' },
+        },
+      ],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        project: {
+          name: 'Test Project',
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: 'main.ts' } },
+        },
+        files: pendingCreate.files,
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].storage).toMatchObject({
+      backend: 'opfs',
+      providerBasePath: '/test-project-2',
+    });
+  });
+
+  it('resolves a semantic multimodal name before allocating durable project work', async () => {
+    const imageUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        kernel: 'openscad',
+        initialMessage: { content: '', imageUrls: [imageUrl] },
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(mockGenerateProjectName).toHaveBeenCalledWith({ text: '', imageUrls: [imageUrl] });
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(prepared?.manifest.name).toBe('Tall Birdhouse');
+    expect(phaseOrder.indexOf('name')).toBeLessThan(phaseOrder.indexOf('pending'));
+  });
+
+  it.each([
+    { generatedName: 'New Project', expectedName: 'New Project', outputKind: 'generic output' },
+    { generatedName: '   ', expectedName: 'New Project', outputKind: 'blank output' },
+  ])('should create with $expectedName when naming returns $outputKind', async ({ generatedName, expectedName }) => {
+    mockGenerateProjectName.mockResolvedValueOnce(generatedName);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        kernel: 'openscad',
+        initialMessage: { content: 'Make a cube' },
+        location: { kind: 'home' },
+      }),
+    );
+
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(prepared?.manifest.name).toBe(expectedName);
+  });
+
+  it('creates no durable operation when the project naming request fails', async () => {
+    mockGenerateProjectName.mockRejectedValueOnce(new Error('naming unavailable'));
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(
+      act(async () =>
         result.current.createProject({
           kernel: 'openscad',
-          initialMessage: { content: 'Make a cube' },
-          backend: 'opfs',
+          initialMessage: { content: 'Please make the object in this image' },
+          location: { kind: 'home' },
         }),
-      );
+      ),
+    ).rejects.toThrow('naming unavailable');
 
-      expect(mockCreateInitialProject).toHaveBeenCalledWith(expect.objectContaining({ projectName: expectedName }));
-      expect(mockCreateProjectWithResources).toHaveBeenCalled();
-    });
+    expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockCommitPendingProjectDirectory).not.toHaveBeenCalled();
+  });
 
-    it('should call mount with resolvedBackend and project prefix', async () => {
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+  it('leaves the pending row intact when the manifest commit fails', async () => {
+    mockCommitPendingProjectDirectory.mockRejectedValueOnce(new Error('manifest write failed'));
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'opfs',
-        });
-      });
-
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
-        backend: 'opfs',
-        preservePath: true,
-      });
-    });
-
-    it('should call unmount in finally block after writeFiles', async () => {
-      const callOrder: string[] = [];
-
-      mockMount.mockImplementation(async () => {
-        callOrder.push('mount');
-      });
-      mockClientWriteFiles.mockImplementation(async () => {
-        callOrder.push('writeFiles');
-      });
-      mockUnmount.mockImplementation(() => {
-        callOrder.push('unmount');
-      });
-
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'opfs',
-        });
-      });
-
-      expect(callOrder).toEqual(['mount', 'writeFiles', 'unmount']);
-    });
-
-    it('should call unmount even when writeFiles throws', async () => {
-      mockClientWriteFiles.mockRejectedValueOnce(new Error('write failed'));
-
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await expect(
-        act(async () => {
-          await result.current.createProject({
-            project: stubProjectData,
-            files: makeFiles({ [mainFile]: [1] }),
-            backend: 'opfs',
-          });
+    await expect(
+      act(async () =>
+        result.current.createProject({
+          project: {
+            name: fakeProject.name,
+            description: '',
+            tags: [],
+            assets: { main: { entryPath: 'main.ts' } },
+          },
+          files: pendingCreate.files,
+          location: { kind: 'home' },
         }),
-      ).rejects.toThrow('write failed');
+      ),
+    ).rejects.toMatchObject({ name: 'PendingProjectRecoveryError', reason: 'filesystem-error' });
 
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
-        backend: 'opfs',
-        preservePath: true,
-      });
-      expect(mockUnmount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`);
+    expect(mockResumeResources).not.toHaveBeenCalled();
+    expect(mockCompletePending).not.toHaveBeenCalled();
+    expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
+  });
+
+  it('returns a committed project when preference persistence fails', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const preferenceError = new Error('preference write failed');
+    mockSetProjectCreationLocation.mockRejectedValueOnce(preferenceError);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const created = await result.current.createProject({
+      project: fakeProject,
+      files: pendingCreate.files,
+      location: { kind: 'home' },
     });
 
-    it('should use mount for backend wiring during project creation', async () => {
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    expect(created.id).toBe(fakeProject.id);
+    expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+    expect(warning).toHaveBeenCalledWith(
+      '[ProjectManager] failed to persist project creation location',
+      preferenceError,
+    );
+  });
 
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'opfs',
-        });
-      });
-
-      expect(mockMount).toHaveBeenCalledOnce();
+  it('persists the location whose concurrent creation completes last', async () => {
+    mockIsFileSystemAccessSupported = true;
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_race' }]);
+    mockGetWorkspace.mockResolvedValue({
+      workspace: { workspaceId: 'wsp_race', name: 'Race', slug: 'race' },
+      handle: { kind: 'directory', name: 'Race' },
     });
+    mockPrepareProjectCreation.mockImplementation(async (input) => ({
+      ...pendingCreate,
+      operationId: input.storage.backend === 'webaccess' ? 'req_disk' : 'req_home',
+      ...input.storage,
+    }));
 
-    it('should still call setProjectFileSystemConfig with resolvedBackend', async () => {
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'opfs',
-        });
-      });
-
-      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({ projectId: fakeProject.id, backend: 'opfs' });
-    });
-
-    it('should mount with default indexeddb when no backend specified', async () => {
-      mockBackendType = 'indexeddb';
-
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-        });
-      });
-
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
-        backend: 'indexeddb',
-        preservePath: true,
-      });
-      expect(mockUnmount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`);
-    });
-
-    it('should throw WorkspaceDirectoryRequiredError when webaccess cannot resolve a workspace', async () => {
-      // In jsdom `isFileSystemAccessSupported === false`, so this exercises
-      // the `'unsupported'` branch. Either way `createProject` MUST refuse
-      // to silently downgrade to indexeddb (Audit R3).
-      mockGetDefaultWorkspace.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await expect(
-        act(async () => {
-          await result.current.createProject({
-            project: stubProjectData,
-            files: makeFiles({ [mainFile]: [1] }),
-            backend: 'webaccess',
-          });
-        }),
-      ).rejects.toMatchObject({ name: 'WorkspaceDirectoryRequiredError' });
-
-      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
-      expect(mockMount).not.toHaveBeenCalled();
-    });
-
-    // Audit R15 happy-path regression: webaccess with a resolved + permitted
-    // default workspace MUST bind the project to that workspaceId in
-    // `configs[projectId]` and mount with `'webaccess'`. Silent downgrade
-    // is forbidden (`docs/policy/filesystem-authority-policy.md` Rule 10).
-    it('should bind webaccess project to the default workspaceId and mount webaccess', async () => {
-      mockIsFileSystemAccessSupported = true;
-      const defaultEntry = {
-        workspace: { workspaceId: 'wsp_default', name: 'Default Workspace' },
-        handle: { kind: 'directory', name: 'Default' } as unknown as FileSystemDirectoryHandle,
-      };
-      mockGetDefaultWorkspace.mockResolvedValue(defaultEntry);
-      mockCheckHandlePermission.mockResolvedValue('granted');
-
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'webaccess',
-        });
-      });
-
-      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
-        projectId: fakeProject.id,
-        backend: 'webaccess',
-        workspaceId: 'wsp_default',
-      });
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
-        backend: 'webaccess',
-        directoryHandle: defaultEntry.handle,
-        workspaceId: 'wsp_default',
-        preservePath: true,
-      });
-    });
-
-    // Audit R15 explicit-workspace regression: when callers (e.g. the
-    // `/projects/new` workspace picker) pass an explicit `workspaceId`, the
-    // project must bind to that workspace, NOT the default. This is the
-    // foundation for Finding 15 — projects are pinned to the workspace
-    // chosen at creation time and never re-point to the current default.
-    it('should bind webaccess project to the explicit workspaceId option, ignoring the default', async () => {
-      mockIsFileSystemAccessSupported = true;
-      const defaultEntry = {
-        workspace: { workspaceId: 'wsp_default', name: 'Default Workspace' },
-        handle: { kind: 'directory', name: 'Default' } as unknown as FileSystemDirectoryHandle,
-      };
-      const explicitEntry = {
-        workspace: { workspaceId: 'wsp_explicit', name: 'Explicit Workspace' },
-        handle: { kind: 'directory', name: 'Explicit' } as unknown as FileSystemDirectoryHandle,
-      };
-      mockGetDefaultWorkspace.mockResolvedValue(defaultEntry);
-      mockGetWorkspace.mockResolvedValue(explicitEntry);
-      mockCheckHandlePermission.mockResolvedValue('granted');
-
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'webaccess',
-          workspaceId: 'wsp_explicit',
-        });
-      });
-
-      expect(mockGetWorkspace).toHaveBeenCalledWith('wsp_explicit');
-      expect(mockGetDefaultWorkspace).not.toHaveBeenCalled();
-      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
-        projectId: fakeProject.id,
-        backend: 'webaccess',
-        workspaceId: 'wsp_explicit',
-      });
-    });
-
-    // Audit R15 permission-denied regression: a resolved workspace with
-    // `permission !== 'granted'` must surface as a structured
-    // `WorkspaceDirectoryRequiredError({ code: 'permission' })` and NOT
-    // partially bind the project. The route layer translates this into
-    // the inline `WorkspaceDirectoryPanel` recovery UX.
-    it('should throw permission-coded error when webaccess workspace has revoked permission', async () => {
-      mockIsFileSystemAccessSupported = true;
-      mockGetDefaultWorkspace.mockResolvedValue({
-        workspace: { workspaceId: 'wsp_revoked', name: 'Revoked' },
-        handle: { kind: 'directory', name: 'Revoked' } as unknown as FileSystemDirectoryHandle,
-      });
-      mockCheckHandlePermission.mockResolvedValue('prompt');
-
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await expect(
-        act(async () => {
-          await result.current.createProject({
-            project: stubProjectData,
-            files: makeFiles({ [mainFile]: [1] }),
-            backend: 'webaccess',
-          });
-        }),
-      ).rejects.toMatchObject({ name: 'WorkspaceDirectoryRequiredError', code: 'permission' });
-
-      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
-      expect(mockMount).not.toHaveBeenCalled();
-    });
-
-    // Audit R15 missing-workspace regression: an explicit `workspaceId`
-    // that no longer exists in IDB must surface as
-    // `code: 'missing'` so the UI can prompt the user to re-pick the
-    // workspace (rather than silently falling back to the default).
-    it('should throw missing-coded error when explicit workspaceId is not in the store', async () => {
-      mockIsFileSystemAccessSupported = true;
-      mockGetWorkspace.mockResolvedValue(undefined);
-
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await expect(
-        act(async () => {
-          await result.current.createProject({
-            project: stubProjectData,
-            files: makeFiles({ [mainFile]: [1] }),
-            backend: 'webaccess',
-            workspaceId: 'wsp_gone',
-          });
-        }),
-      ).rejects.toMatchObject({ name: 'WorkspaceDirectoryRequiredError', code: 'missing' });
-
-      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
-    });
-
-    it('should seed activeKernel from the kernel template and leave activeModel unset when not supplied', async () => {
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          kernel: 'openscad',
-          projectName: 'Seeded',
-          initialMessage: { content: 'hello' },
-        });
-      });
-
-      const callArgs = mockCreateProjectWithResources.mock.calls.at(-1)?.[0] as
-        | { chat: { activeModel?: string; activeKernel?: string } }
-        | undefined;
-      expect(callArgs?.chat.activeModel).toBeUndefined();
-      expect(callArgs?.chat.activeKernel).toBe('openscad');
-    });
-
-    it('should leave activeModel undefined when no initialMessage and no explicit override', async () => {
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          kernel: 'openscad',
-        });
-      });
-
-      const callArgs = mockCreateProjectWithResources.mock.calls.at(-1)?.[0] as
-        | { chat: { activeModel?: string; activeKernel?: string } }
-        | undefined;
-      expect(callArgs?.chat.activeModel).toBeUndefined();
-      expect(callArgs?.chat.activeKernel).toBe('openscad');
-    });
-
-    it('should honor explicit activeModel/activeKernel overrides over derived defaults', async () => {
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          kernel: 'openscad',
-          activeModel: 'override-model',
-          activeKernel: 'manifold',
-          initialMessage: { content: 'hello' },
-        });
-      });
-
-      const callArgs = mockCreateProjectWithResources.mock.calls.at(-1)?.[0] as
-        | { chat: { activeModel?: string; activeKernel?: string } }
-        | undefined;
-      expect(callArgs?.chat.activeModel).toBe('override-model');
-      expect(callArgs?.chat.activeKernel).toBe('manifold');
-    });
-
-    // Wire-format invariant for the chat-metadata-first-class-architecture
-    // refactor: the pending-user-message seeded onto a brand-new chat must
-    // carry only `status: pending`. The per-request `agent` payload (kernel,
-    // model, mode, toolChoice, testingEnabled, snapshot, contextPayload)
-    // is composed by the chat-client at regenerate time, not stamped onto
-    // the seed message. Regression coverage for the previous failure mode
-    // where the seed message stamped kernel/model and the seed mode drifted
-    // from the chat row's activeKernel.
-    it('should seed the initial pending user message with one-shot startup intent', async () => {
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-      await act(async () => {
-        await result.current.createProject({
-          kernel: 'openscad',
-          initialMessage: { content: 'first turn' },
-        });
-      });
-
-      const callArgs = mockCreateProjectWithResources.mock.calls.at(-1)?.[0] as
-        | {
-            chat: {
-              messages: Array<{ id: string; metadata?: Record<string, unknown> }>;
-              startupRequest?: { id: string; kind: string; messageId: string; source: string; createdAt: number };
-            };
+    let completeHome!: () => void;
+    let completeDisk!: () => void;
+    mockCommitPendingProjectDirectory.mockImplementation(
+      async ({ scope }) =>
+        new Promise<{ readonly status: 'committed' }>((resolve) => {
+          const complete = () => {
+            resolve({ status: 'committed' });
+          };
+          if (scope.backend === 'webaccess') {
+            completeDisk = complete;
+          } else {
+            completeHome = complete;
           }
-        | undefined;
-      const seedMetadata = callArgs?.chat.messages[0]?.metadata;
-      expect(seedMetadata?.['status']).toBe('pending');
-      expect(seedMetadata?.['kernel']).toBeUndefined();
-      expect(seedMetadata?.['model']).toBeUndefined();
-      expect(seedMetadata?.['mode']).toBeUndefined();
-      expect(seedMetadata?.['toolChoice']).toBeUndefined();
-      expect(seedMetadata?.['testingEnabled']).toBeUndefined();
-      const { startupRequest } = callArgs?.chat ?? {};
-      expect(startupRequest?.id).toMatch(/^req_/);
-      expect(startupRequest?.kind).toBe('regenerate-tail');
-      expect(startupRequest?.messageId).toBe(callArgs?.chat.messages[0]?.id);
-      expect(startupRequest?.source).toBe('homepage-initial-message');
-      expect(typeof startupRequest?.createdAt).toBe('number');
+        }),
+    );
+
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const homeCreation = result.current.createProject({
+      project: fakeProject,
+      files: pendingCreate.files,
+      location: { kind: 'home' },
+    });
+    const diskCreation = result.current.createProject({
+      project: fakeProject,
+      files: pendingCreate.files,
+      location: { kind: 'workspace', workspaceId: 'wsp_race' },
+    });
+    await vi.waitFor(() => {
+      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledTimes(2);
     });
 
-    it('should write files with correct project paths', async () => {
-      const sourceFile = 'src/main.ts';
-      const packageFile = 'package.json';
+    completeDisk();
+    await diskCreation;
+    completeHome();
+    await homeCreation;
 
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    expect(mockSetProjectCreationLocation.mock.calls).toEqual([
+      [{ kind: 'workspace', workspaceId: 'wsp_race' }],
+      [{ kind: 'home' }],
+    ]);
+  });
 
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [sourceFile]: [1], [packageFile]: [2] }),
-        });
-      });
-
-      const writtenFiles = mockClientWriteFiles.mock.calls[0]![0];
-      const paths = Object.keys(writtenFiles);
-      expect(paths).toContain(`/projects/${fakeProject.id}/${sourceFile}`);
-      expect(paths).toContain(`/projects/${fakeProject.id}/${packageFile}`);
+  it('persists the resolved webaccess workspace identity in the pending operation', async () => {
+    mockIsFileSystemAccessSupported = true;
+    const handle = { kind: 'directory', name: 'Workspace' };
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_default' }]);
+    mockGetWorkspace.mockResolvedValue({
+      workspace: { workspaceId: 'wsp_default', name: 'Workspace', slug: 'workspace' },
+      handle,
     });
 
-    it('should write cloned bootstrap bytes so repeated shared inputs survive transfer', async () => {
-      const sharedMain = new Uint8Array([1, 2, 3]);
-      const sharedPackageJson = new Uint8Array([4, 5, 6]);
-      const sharedFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = Object.fromEntries([
-        [mainFile, { content: sharedMain }],
-        ['package.json', { content: sharedPackageJson }],
-      ]);
+    const webaccessPending: Extract<PendingProjectOperation, { kind: 'create'; backend: 'webaccess' }> = {
+      ...pendingCreate,
+      backend: 'webaccess',
+      workspaceId: 'wsp_default',
+    };
+    mockPrepareProjectCreation.mockResolvedValueOnce(webaccessPending);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await act(async () =>
+      result.current.createProject({
+        project: {
+          name: fakeProject.name,
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: 'main.ts' } },
+        },
+        files: {},
+        location: { kind: 'workspace', workspaceId: 'wsp_default' },
+      }),
+    );
 
-      mockClientWriteFiles.mockImplementation(async (files) => {
-        const transfer = Object.values(files).map((file) => file.content.buffer);
-        structuredClone(files, { transfer });
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(prepared?.storage).toMatchObject({
+      backend: 'webaccess',
+      workspaceId: 'wsp_default',
+    });
+    expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({
+      kind: 'workspace',
+      workspaceId: 'wsp_default',
+    });
+  });
+
+  it('journals permanent deletion before deleting the exact observed directory and local records', async () => {
+    mockGetProjectLibraryState.mockResolvedValueOnce({
+      projectId: fakeProject.id,
+      lastActivityAt: 10,
+      deletedAt: 11,
+    });
+    const configured = {
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+    } as const;
+    mockGetProjectFileSystemConfig.mockResolvedValue(configured);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([configured]);
+    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
+
+    expect(mockBeginPermanentDeleteProject).toHaveBeenCalledWith(fakeProject.id, pendingPermanentDelete.storage);
+    expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledWith({
+      projectId: fakeProject.id,
+      providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+      scope: { backend: 'opfs' },
+    });
+    expect(phaseOrder).toEqual(['resources-cleanup', 'locator-cleanup', 'roots', 'complete']);
+  });
+
+  it('journals the freshly discovered locator instead of stale persisted configuration', async () => {
+    const movedLocator: ProjectLocator = {
+      ...fakeLocator,
+      relativeDirectory: '/moved-project',
+    };
+    const movedStorage: PendingProjectStorage = {
+      backend: 'opfs',
+      providerBasePath: movedLocator.relativeDirectory,
+    };
+    const movedPending: Extract<PendingProjectOperation, { kind: 'permanent-delete' }> = {
+      ...pendingPermanentDelete,
+      storage: movedStorage,
+    };
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: '/stale-location',
+    });
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [{ status: 'valid', manifest: fakeProject, locator: movedLocator }],
+    });
+    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([movedPending]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
+
+    expect(mockBeginPermanentDeleteProject).toHaveBeenCalledWith(fakeProject.id, movedStorage);
+    expect(mockPermanentlyDeleteProjectDirectory).toHaveBeenCalledWith({
+      projectId: fakeProject.id,
+      providerBasePath: movedLocator.relativeDirectory,
+      scope: { backend: 'opfs' },
+    });
+  });
+
+  it('refuses permanent-delete admission while discovery is incomplete', async () => {
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    });
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'inaccessible', root: { backend: 'opfs' }, reason: 'permission denied' }],
+      entries: [],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.permanentlyDeleteProject(fakeProject.id)).rejects.toThrow(
+      'Project storage is not completely observable',
+    );
+    expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
+  });
+
+  it('refuses permanent-delete admission when the project identity is duplicated', async () => {
+    const duplicateLocator: ProjectLocator = {
+      ...fakeLocator,
+      relativeDirectory: '/duplicate',
+    };
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    });
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [
+        { status: 'valid', manifest: fakeProject, locator: fakeLocator },
+        { status: 'duplicate-id', manifest: fakeProject, locator: duplicateLocator },
+      ],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.permanentlyDeleteProject(fakeProject.id)).rejects.toThrow(
+      'Project must have exactly one current occurrence',
+    );
+    expect(mockBeginPermanentDeleteProject).not.toHaveBeenCalled();
+  });
+
+  it('retains local state and the journal when an absent result reveals a moved occurrence', async () => {
+    const movedLocator: ProjectLocator = {
+      ...fakeLocator,
+      relativeDirectory: '/reappeared',
+    };
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    });
+    mockListProjectManifests
+      .mockResolvedValueOnce(validProjectDiscovery)
+      .mockResolvedValueOnce(validProjectDiscovery)
+      .mockResolvedValueOnce({
+        roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+        entries: [{ status: 'valid', manifest: fakeProject, locator: movedLocator }],
       });
+    mockPermanentlyDeleteProjectDirectory.mockResolvedValueOnce({ status: 'absent' });
+    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.permanentlyDeleteProject(fakeProject.id)).rejects.toThrow('identity-conflict');
+    expect(mockDeleteProjectResources).not.toHaveBeenCalled();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockCompletePending).not.toHaveBeenCalled();
+  });
+  // =========================================================================
+  // Phase 4 — hardening (DF3, DF4, DF10–DF12, DF20)
+  // =========================================================================
 
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: sharedFiles,
-          backend: 'opfs',
-        });
-      });
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: sharedFiles,
-          backend: 'opfs',
-        });
-      });
+  it('suspends durable reconciliation while a newer build is running', async () => {
+    mockBuildSuperseded = true;
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: '/gone' },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-      expect(mockClientWriteFiles).toHaveBeenCalledTimes(2);
-      expect(sharedMain).toEqual(new Uint8Array([1, 2, 3]));
-      expect(sharedPackageJson).toEqual(new Uint8Array([4, 5, 6]));
-
-      const firstCallFiles = mockClientWriteFiles.mock.calls[0]![0];
-      const writtenMain = firstCallFiles[`/projects/${fakeProject.id}/${mainFile}`]?.content;
-      const writtenPackageJson = firstCallFiles[`/projects/${fakeProject.id}/package.json`]?.content;
-      expect(Object.is(writtenMain, sharedMain)).toBe(false);
-      expect(writtenMain?.buffer === sharedMain.buffer).toBe(false);
-      expect(Object.is(writtenPackageJson, sharedPackageJson)).toBe(false);
-      expect(writtenPackageJson?.buffer === sharedPackageJson.buffer).toBe(false);
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [{ manifest: fakeProject }],
     });
 
-    // Regression: project bootstrap writes /projects/<id>/... keys that are
-    // foreign to the root FM's workspace ('/'). Going through
-    // `fileManager.writeFiles` (the scoped FileContentService) used to spam
-    // `WorkspacePathEscapeError` ~100 ms after every homepage submit because
-    // `batchWritten` carried those foreign keys to the root FM's
-    // FileTreeService. The cross-workspace bootstrap MUST route through
-    // `fileManager.client.writeFiles` (worker namespace, no resolver,
-    // dispatched by the mount table) for backend dispatch to land in the
-    // correct provider without tripping the workspace contract.
-    //
-    // See also: `use-cad-preview.test.tsx` — the same cross-workspace
-    // bootstrap pattern applies to `CadPreviewProvider` when its surrounding
-    // FM doesn't already own the preview's `/projects/<id>` mount (root-FM
-    // thumbnails on the homepage, import-route Review previews, cross-scope
-    // previews). Both bootstrap sites are discoverable as one class.
-    it('should route bootstrap writes through fileManager.client.writeFiles, not fileManager.writeFiles', async () => {
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
 
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'opfs',
-        });
-      });
+  it('reconciles and garbage-collects normally when this build is current', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: '/gone' },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-      expect(mockClientWriteFiles).toHaveBeenCalledOnce();
-      expect(mockWriteFiles).not.toHaveBeenCalled();
+    await result.current.getProjectListing();
+
+    expect(mockSetProjectFileSystemConfig).toHaveBeenCalled();
+    expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledWith('proj_ccccccccccccccccccccc');
+  });
+
+  it('logs a failed cross-tab root sync instead of leaking a rejection', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockSyncProjectRoots.mockRejectedValueOnce(new Error('sync failed'));
+    renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => {
+      projectRootConfigurationListener?.();
+      await Promise.resolve();
     });
 
-    it('should invoke client.writeFiles between workspace.mount and workspace.unmount for indexeddb', async () => {
-      const callOrder: string[] = [];
-      mockMount.mockImplementation(async () => {
-        callOrder.push('mount');
-      });
-      mockClientWriteFiles.mockImplementation(async () => {
-        callOrder.push('client.writeFiles');
-      });
-      mockUnmount.mockImplementation(() => {
-        callOrder.push('unmount');
-      });
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalled();
+    });
+  });
 
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+  it('keeps a live different project visible at a quarantined locator', async () => {
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockCommitPendingProjectDirectory.mockImplementationOnce(
+      async () =>
+        new Promise(() => {
+          // Never settles: the operation stays pending for the whole test.
+        }),
+    );
+    // The pending operation's directory already holds a different project.
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [{ status: 'valid', manifest: unrelatedProject, locator: { ...fakeLocator } }],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'indexeddb',
-        });
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [{ manifest: unrelatedProject }],
+    });
+  });
+
+  it('does not retry a terminally failed recovery when routes change', async () => {
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockCommitPendingProjectDirectory.mockRejectedValue(new Error('write failed'));
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    await vi.waitFor(async () => {
+      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+        status: 'recovery-failed',
       });
+    });
+    const attempts = mockCommitPendingProjectDirectory.mock.calls.length;
 
-      expect(callOrder).toEqual(['mount', 'client.writeFiles', 'unmount']);
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
-        backend: 'indexeddb',
-        preservePath: true,
+    await act(async () => {
+      projectRootConfigurationListener?.();
+      await Promise.resolve();
+    });
+
+    expect(mockCommitPendingProjectDirectory).toHaveBeenCalledTimes(attempts);
+  });
+
+  it('settles a recovery once its workspace is reconnected', async () => {
+    mockIsFileSystemAccessSupported = true;
+    const deadWorkspaceOperation: PendingProjectOperation = {
+      ...pendingCreate,
+      backend: 'webaccess',
+      workspaceId: 'wsp_dead',
+    };
+    mockGetPendingProjectOperations.mockResolvedValue([deadWorkspaceOperation]);
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_dead' }]);
+    mockGetWorkspace.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    await vi.waitFor(async () => {
+      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+        status: 'recovery-failed',
+        recovery: { reason: 'workspace-unavailable' },
       });
     });
 
-    it('should invoke client.writeFiles between workspace.mount and workspace.unmount for opfs', async () => {
-      const callOrder: string[] = [];
-      mockMount.mockImplementation(async () => {
-        callOrder.push('mount');
-      });
-      mockClientWriteFiles.mockImplementation(async () => {
-        callOrder.push('client.writeFiles');
-      });
-      mockUnmount.mockImplementation(() => {
-        callOrder.push('unmount');
-      });
+    // Re-picking the marked folder resurrects the same workspace id.
+    mockGetWorkspace.mockResolvedValue({
+      workspace: { workspaceId: 'wsp_dead', name: 'Workspace' },
+      handle: { kind: 'directory', name: 'tau-workspace' },
+    });
+    await act(async () => {
+      projectRootConfigurationListener?.();
+      await Promise.resolve();
+    });
 
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await vi.waitFor(() => {
+      expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+    });
+  });
 
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'opfs',
-        });
-      });
-
-      expect(callOrder).toEqual(['mount', 'client.writeFiles', 'unmount']);
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
-        backend: 'opfs',
-        preservePath: true,
+  it('discards a failed recovery on request', async () => {
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockCommitPendingProjectDirectory.mockRejectedValue(new Error('write failed'));
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    await vi.waitFor(async () => {
+      await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
+        status: 'recovery-failed',
       });
     });
 
-    it('should invoke client.writeFiles between workspace.mount and workspace.unmount for webaccess (with handle + workspaceId)', async () => {
-      mockIsFileSystemAccessSupported = true;
-      const entry = {
-        workspace: { workspaceId: 'wsp_test', name: 'Test' },
-        handle: { kind: 'directory', name: 'Test' } as unknown as FileSystemDirectoryHandle,
-      };
-      mockGetDefaultWorkspace.mockResolvedValue(entry);
-      const callOrder: string[] = [];
-      mockMount.mockImplementation(async () => {
-        callOrder.push('mount');
-      });
-      mockClientWriteFiles.mockImplementation(async () => {
-        callOrder.push('client.writeFiles');
-      });
-      mockUnmount.mockImplementation(() => {
-        callOrder.push('unmount');
+    await act(async () => result.current.discardRecovery(operationId));
+
+    expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({ recoveries: [] });
+  });
+
+  it('reports whether the trash mutation actually happened', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.deleteProject(fakeProject.id)).resolves.toBe(true);
+
+    mockTrashProject.mockResolvedValue(undefined);
+    await expect(result.current.deleteProject(fakeProject.id)).resolves.toBe(false);
+  });
+
+  it('distinguishes a disconnected workspace from having none at all', async () => {
+    mockIsFileSystemAccessSupported = true;
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_stale' }]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const create = async () =>
+      result.current.createProject({
+        project: { name: fakeProject.name, description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } },
+        files: {},
+        location: { kind: 'workspace', workspaceId: 'wsp_stale' },
       });
 
-      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(create()).rejects.toMatchObject({ code: 'disconnected', workspaceId: 'wsp_stale' });
 
-      await act(async () => {
-        await result.current.createProject({
-          project: stubProjectData,
-          files: makeFiles({ [mainFile]: [1] }),
-          backend: 'webaccess',
-        });
-      });
+    mockListWorkspaces.mockResolvedValue([]);
+    await expect(create()).rejects.toMatchObject({ code: 'missing', workspaceId: 'wsp_stale' });
 
-      expect(callOrder).toEqual(['mount', 'client.writeFiles', 'unmount']);
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
-        backend: 'webaccess',
-        directoryHandle: entry.handle,
-        workspaceId: 'wsp_test',
-        preservePath: true,
-      });
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_stale' }]);
+    mockGetWorkspace.mockResolvedValue({
+      workspace: { workspaceId: 'wsp_stale', name: 'Stale', slug: 'stale' },
+      handle: { kind: 'directory', name: 'Stale' },
     });
+    mockCheckHandlePermission.mockResolvedValueOnce('prompt');
+    await expect(create()).rejects.toMatchObject({ code: 'permission', workspaceId: 'wsp_stale' });
   });
 });

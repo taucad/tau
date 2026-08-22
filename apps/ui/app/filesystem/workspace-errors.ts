@@ -18,13 +18,16 @@
  *
  * - `missing` — no workspace has been connected at all. The user must
  *   pick a directory (showDirectoryPicker) before retrying.
+ * - `disconnected` — workspaces exist but none of them still holds a
+ *   directory handle (evicted or forgotten handle rows). Re-picking the
+ *   folder restores the binding; telling the user they have no workspace
+ *   would be false (DF4).
  * - `permission` — the workspace exists but its handle has been
  *   revoked. The user can recover with a single-gesture re-grant.
- * - `unsupported` — the browser doesn't expose the File System Access
- *   API (Safari, Firefox without the flag). The user must switch to a
- *   different backend (indexeddb / opfs).
+ * - `unsupported` — this browser boot cannot connect folders; Home remains
+ *   available for ordinary creation.
  */
-export type WorkspaceDirectoryRequiredCode = 'missing' | 'permission' | 'unsupported';
+export type WorkspaceDirectoryRequiredCode = 'missing' | 'disconnected' | 'permission' | 'unsupported';
 
 /**
  * Thrown when an operation requires a webaccess workspace but no usable
@@ -40,9 +43,8 @@ export class WorkspaceDirectoryRequiredError extends Error {
    */
   public readonly code: WorkspaceDirectoryRequiredCode;
   /**
-   * Optional workspace id whose handle is the offender. Set on
-   * `'permission'` (we know which workspace lost access) and `undefined`
-   * on `'missing'` / `'unsupported'`.
+   * Exact workspace id when the failed request named one, including missing,
+   * disconnected, permission, and unsupported failures.
    */
   public readonly workspaceId: string | undefined;
 
@@ -62,13 +64,16 @@ export class WorkspaceDirectoryRequiredError extends Error {
 function messageFor(code: WorkspaceDirectoryRequiredCode): string {
   switch (code) {
     case 'missing': {
-      return 'A workspace directory is required to use the File System backend.';
+      return 'This project location is no longer connected.';
+    }
+    case 'disconnected': {
+      return 'This project location is no longer connected.';
     }
     case 'permission': {
-      return 'Workspace permission was revoked. Re-grant access to continue.';
+      return 'Access to this folder is required before continuing.';
     }
     case 'unsupported': {
-      return 'This browser does not support the File System Access API.';
+      return 'Home is the only project location available in this browser.';
     }
   }
 }
@@ -76,6 +81,33 @@ function messageFor(code: WorkspaceDirectoryRequiredCode): string {
 /** Type guard used by toast handlers + recovery overlays. */
 export function isWorkspaceDirectoryRequiredError(error: unknown): error is WorkspaceDirectoryRequiredError {
   return error instanceof WorkspaceDirectoryRequiredError;
+}
+
+/**
+ * Thrown when a durable write fails because the origin is out of quota.
+ * Distinguishes "the browser refused to store this" from generic IndexedDB
+ * failures so the UI can point at storage pressure instead of a stack trace.
+ *
+ * @see `docs/research/offline-first-storage-durability-blueprint.md` R6
+ */
+export class StorageQuotaExceededError extends Error {
+  public constructor(options?: { cause?: unknown }) {
+    super('Browser storage is full. Free up space or remove unused projects to continue.');
+    this.name = 'StorageQuotaExceededError';
+    if (options?.cause !== undefined) {
+      (this as { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+/**
+ * Map a rejected durable write to {@link StorageQuotaExceededError} when the
+ * browser reported a quota failure; every other error passes through unchanged.
+ */
+export function toStorageWriteError(error: unknown): unknown {
+  return error instanceof DOMException && error.name === 'QuotaExceededError'
+    ? new StorageQuotaExceededError({ cause: error })
+    : error;
 }
 
 /**
@@ -127,7 +159,7 @@ export function isFileManagerNotReadyError(error: unknown): error is FileManager
 
 /**
  * Mirror of the worker-side `WorkspaceMutationErrorCode` discriminated
- * union. Keep in lockstep with `packages/filesystem/src/workspace-errors.ts`.
+ * union. Keep in lockstep with `libs/filesystem/src/workspace-errors.ts`.
  * Surfaced via {@link workspaceMutationErrorCopy} so toast/banner UIs
  * never re-parse `error.message`.
  */
@@ -137,7 +169,8 @@ export type WorkspaceMutationErrorCode =
   | 'READ_ONLY_MOUNT'
   | 'BUNDLED_TYPES_WORKSPACE'
   | 'MISSING_WORKSPACE_HANDLE'
-  | 'NOT_FOUND';
+  | 'NOT_FOUND'
+  | 'OPERATION_FAILED';
 
 /**
  * Copy registry for the worker-side mutation-error codes. Used by
@@ -162,6 +195,7 @@ export const workspaceMutationErrorCopy: Record<
   BUNDLED_TYPES_WORKSPACE: ({ path }) => `'${path}' is inside the bundled @types workspace, which is read-only.`,
   MISSING_WORKSPACE_HANDLE: () => 'Connect a workspace folder before changing files.',
   NOT_FOUND: ({ path }) => `'${path}' no longer exists.`,
+  OPERATION_FAILED: ({ path }) => `The filesystem operation for '${path}' failed.`,
 };
 /* eslint-enable @typescript-eslint/naming-convention -- restore default naming rule for the rest of the file. */
 

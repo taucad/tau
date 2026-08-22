@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
@@ -11,10 +11,12 @@ import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.ma
 import type { MountConfig, WorkspaceMutationError } from '@taucad/filesystem';
 import {
   forgetWorkspace as forgetStoredWorkspace,
+  getHomeStorageBackend,
   getProjectRootConfigs,
   setProjectFileSystemConfig,
   updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
+import type { HomeStorageBackend } from '#filesystem/handle-store.js';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -175,6 +177,7 @@ export type FileSystemClientFacade = Pick<
   | 'listProjectManifests'
   | 'commitPendingProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
+  | 'adoptProjectDirectory'
 >;
 
 /**
@@ -330,6 +333,17 @@ const SharedWorkerContext = createContext<Worker | undefined>(undefined);
  */
 const SharedFilePoolBufferContext = createContext<SharedArrayBuffer | undefined>(undefined);
 
+const HomeStorageBackendContext = createContext<HomeStorageBackend | undefined>(undefined);
+
+/** Physical engine selected for the system-owned Home workspace. */
+export function useHomeStorageBackend(): HomeStorageBackend {
+  const backend = useContext(HomeStorageBackendContext);
+  if (!backend) {
+    throw new Error('useHomeStorageBackend must be used within HomeFileManagerProvider');
+  }
+  return backend;
+}
+
 /**
  * Gate component that defers rendering until the parent FileManagerProvider's
  * worker is available via SharedWorkerContext. Prevents nested
@@ -350,9 +364,8 @@ export function SharedWorkerGate({ children }: { readonly children: ReactNode })
  * Common props shared by every {@link FileManagerProvider} mount.
  * `initialBackend` is required (Audit R4 / Finding 7) — the call site
  * must commit to a backend explicitly so the FM machine can bootstrap
- * deterministically. The cookie used to be consulted inside the hook;
- * that read now lives in `apps/ui/app/root.tsx` where the policy
- * decision is centralized.
+ * deterministically. Product mount sites use {@link HomeFileManagerProvider}
+ * so the profile's pinned Home engine is resolved once at the app root.
  */
 type FileManagerProviderCommonProps = {
   readonly children: ReactNode;
@@ -376,6 +389,60 @@ export type FileManagerProviderProps = FileManagerProviderCommonProps &
       }
   );
 
+export type HomeFileManagerProviderProps = FileManagerProviderCommonProps & {
+  readonly projectId?: string;
+};
+
+/** Resolve Home once at the app root and reuse that engine at every nested mount. */
+export function HomeFileManagerProvider({
+  children,
+  rootDirectory,
+  projectId,
+  shouldInitializeOnStart,
+}: HomeFileManagerProviderProps): React.JSX.Element {
+  const inheritedBackend = useContext(HomeStorageBackendContext);
+  const [resolvedBackend, setResolvedBackend] = useState<HomeStorageBackend>();
+  const backend = inheritedBackend ?? resolvedBackend;
+
+  useEffect(() => {
+    if (inheritedBackend) {
+      return;
+    }
+    const controller = new AbortController();
+    // async-iife: bootstrap
+    void (async () => {
+      const backend = await getHomeStorageBackend();
+      if (!controller.signal.aborted) {
+        setResolvedBackend(backend);
+      }
+    })();
+    return () => {
+      controller.abort();
+    };
+  }, [inheritedBackend]);
+
+  if (!backend) {
+    return <div role='status' aria-label='Opening Home' />;
+  }
+
+  const fileManager = (
+    <FileManagerProvider
+      rootDirectory={rootDirectory}
+      initialBackend={backend}
+      {...(projectId === undefined ? {} : { projectId })}
+      {...(shouldInitializeOnStart === undefined ? {} : { shouldInitializeOnStart })}
+    >
+      {children}
+    </FileManagerProvider>
+  );
+
+  return inheritedBackend ? (
+    fileManager
+  ) : (
+    <HomeStorageBackendContext.Provider value={backend}>{fileManager}</HomeStorageBackendContext.Provider>
+  );
+}
+
 export function FileManagerProvider({
   children,
   rootDirectory,
@@ -397,6 +464,7 @@ export function FileManagerProvider({
       sharedWorker: parentWorker,
       sharedFilePoolBuffer: parentFilePoolBuffer,
       onExternalPollTelemetry: workspaceTelemetry.workspaceExternalPoll,
+      onRootSkipped: workspaceTelemetry.workspaceRootSkipped,
     },
   });
 
@@ -733,6 +801,7 @@ export function FileManagerProvider({
       listProjectManifests: gated('listProjectManifests'),
       commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
       permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
+      adoptProjectDirectory: gated('adoptProjectDirectory'),
     };
   }, [getReadiedProxy]);
 

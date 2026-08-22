@@ -37,7 +37,7 @@ const runGeoSpecSuite = async (
 ): Promise<GeoSpecRunReport> => {
   const environment: Record<string, string | undefined> = { ...process.env };
   // R16: persistent V8 compile cache shaves the per-invocation tsx boot floor.
-  environment['NODE_COMPILE_CACHE'] = resolve(repoRoot, 'node_modules/.cache/geospec-compile-cache');
+  environment['NODE_COMPILE_CACHE'] = resolve(repoRoot, 'node_modules/.cache/geospec');
   // R10: control the CLI's pool explicitly so vitest-level parallelism never
   // multiplies worker pools (oversubscription, A10). These e2e cases run
   // serially in this file; 'auto' hands sizing to the CLI's R15 logic.

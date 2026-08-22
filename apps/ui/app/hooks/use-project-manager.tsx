@@ -1241,12 +1241,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const workspaces = await listWorkspaces();
       const projects: ProjectLibraryEntry[] = await Promise.all(
         validEntries.map(async (entry) => {
-          const slugs = projectSlugsOf(entry.locator, workspaces);
+          const { locator } = entry;
+          const slugs = projectSlugsOf(locator, workspaces);
+          const workspaceName =
+            locator.backend === 'webaccess'
+              ? workspaces.find((workspace) => workspace.workspaceId === locator.workspaceId)?.name
+              : undefined;
           return {
             manifest: entry.manifest,
             library: await ensureProjectLibraryState(worker, entry.manifest.id),
-            locator: entry.locator,
+            locator,
             ...(slugs === undefined ? {} : { slugs }),
+            ...(workspaceName === undefined ? {} : { workspaceName }),
           };
         }),
       );

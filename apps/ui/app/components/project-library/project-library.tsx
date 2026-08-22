@@ -1,5 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Grid, ArrowRight, Table as TableIcon, Cog, Trash, AlertCircle, PackageX } from 'lucide-react';
+import {
+  Grid,
+  ArrowRight,
+  Table as TableIcon,
+  Cog,
+  Trash,
+  AlertCircle,
+  PackageX,
+  FolderOpen,
+  House,
+} from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router';
 import {
   getCoreRowModel,
@@ -49,6 +59,7 @@ import {
 import { useCookie } from '#hooks/use-cookie.js';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import { Checkbox } from '#components/ui/checkbox.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -60,6 +71,7 @@ import { InteractiveHoverButton } from '#components/magicui/interactive-hover-bu
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
+import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 
 // Note: useCookie is still used for projectViewMode (user preference, not per-build state)
 
@@ -516,6 +528,14 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
   }
 
   const columns = createColumns(actions);
+  const seenProjectNames = new Set<string>();
+  const duplicateProjectNames = new Set<string>();
+  for (const project of projects) {
+    if (seenProjectNames.has(project.name)) {
+      duplicateProjectNames.add(project.name);
+    }
+    seenProjectNames.add(project.name);
+  }
 
   return (
     <div className='space-y-4'>
@@ -542,6 +562,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
               key={row.original.id}
               project={row.original}
               actions={actions}
+              shouldShowProjectSlug={duplicateProjectNames.has(row.original.name)}
               isSelected={row.getIsSelected()}
               onSelect={() => {
                 row.toggleSelected();
@@ -563,6 +584,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
 type ProjectLibraryCardProps = {
   readonly project: ProjectListItem;
   readonly actions: ProjectActions;
+  readonly shouldShowProjectSlug?: boolean;
   readonly isSelected?: boolean;
   readonly onSelect?: () => void;
 };
@@ -570,6 +592,7 @@ type ProjectLibraryCardProps = {
 export function ProjectLibraryCard({
   project,
   actions,
+  shouldShowProjectSlug = false,
   isSelected,
   onSelect,
 }: ProjectLibraryCardProps): React.JSX.Element {
@@ -577,6 +600,13 @@ export function ProjectLibraryCard({
   const thumbnailSource = useProjectThumbnail(project.id);
 
   const mainFile = project.assets.main.entryPath;
+  const location = projectLocationDescriptor(
+    project.locator.backend === 'webaccess'
+      ? { kind: 'workspace', workspaceName: project.workspaceName }
+      : { kind: 'home' },
+  );
+  const LocationIcon = project.locator.backend === 'webaccess' ? FolderOpen : House;
+  const fullLocationLabel = projectLocationFullLabel(location);
 
   return (
     <ProjectCard
@@ -615,11 +645,23 @@ export function ProjectLibraryCard({
             className='h-7 w-full [&_[data-slot=button]]:w-full [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:text-base [&_[data-slot=button]]:font-semibold'
             onSave={async (value) => actions.handleRename(project.id, value)}
           />
-          {/* Same display name, different directory: the slug is the only
-              distinguishing label the library can show (blueprint F5). */}
-          <div className='w-full truncate px-2 font-mono text-xs text-muted-foreground'>
-            {projectSlugOf(project.locator)}
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className='flex w-fit max-w-full items-center gap-1.5 px-2 text-xs text-muted-foreground'
+                aria-label={`Location: ${fullLocationLabel}`}
+              >
+                <LocationIcon className='size-3.5 shrink-0' />
+                <span className='truncate'>{location.label}</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side='right'>{fullLocationLabel}</TooltipContent>
+          </Tooltip>
+          {shouldShowProjectSlug ? (
+            <div className='w-full truncate px-2 font-mono text-xs text-muted-foreground'>
+              {projectSlugOf(project.locator)}
+            </div>
+          ) : null}
         </div>
       </CardHeader>
       <CardFooter className='mt-auto flex items-center justify-between'>

@@ -171,7 +171,9 @@ const mockSubscribeProjectRootConfigurationChanges = vi.fn((listener: () => void
   return vi.fn();
 });
 const mockGetAllProjectFileSystemConfigs = vi.fn<() => Promise<ProjectFileSystemConfig[]>>(async () => []);
-const mockListWorkspaces = vi.fn<() => Promise<Array<{ workspaceId: string }>>>(async () => []);
+const mockListWorkspaces = vi.fn<() => Promise<Array<{ workspaceId: string; name?: string; slug?: string }>>>(
+  async () => [],
+);
 const mockPinHomeStorageBackend = vi.fn(async (backend: 'indexeddb' | 'opfs') => backend);
 
 vi.mock('#filesystem/handle-store.js', () => ({
@@ -569,6 +571,22 @@ describe('useProjectManager.createProject', () => {
       providerBasePath: liveWorkspaceLocator.relativeDirectory,
     });
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
+
+  it('carries the workspace display name into project listings', async () => {
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_live', name: 'Workshop', slug: 'workshop' }]);
+    mockListProjectManifests.mockResolvedValue(liveWorkspaceDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(result.current.getProjectListing()).resolves.toMatchObject({
+      projects: [
+        {
+          manifest: fakeProject,
+          workspaceName: 'Workshop',
+          slugs: { workspaceSlug: 'workshop', projectSlug: 'test-project' },
+        },
+      ],
+    });
   });
 
   it('keeps duplicate-id for genuinely duplicated identities while a blocked route stays route-blocked', async () => {

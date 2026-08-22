@@ -116,11 +116,19 @@ function LocationProbe(): React.JSX.Element {
   return <output data-testid='location'>{location.pathname}</output>;
 }
 
-function renderCard(properties: { readonly isSelected?: boolean; readonly onSelect?: () => void } = {}): RenderResult {
+function renderCard(
+  properties: {
+    readonly project?: ProjectListItem;
+    readonly shouldShowProjectSlug?: boolean;
+    readonly isSelected?: boolean;
+    readonly onSelect?: () => void;
+  } = {},
+): RenderResult {
+  const { project = mockProject, ...cardProperties } = properties;
   return render(
     <MemoryRouter initialEntries={['/projects']}>
       <TooltipProvider>
-        <ProjectLibraryCard project={mockProject} actions={mockActions} {...properties} />
+        <ProjectLibraryCard project={project} actions={mockActions} {...cardProperties} />
       </TooltipProvider>
       <LocationProbe />
     </MemoryRouter>,
@@ -147,6 +155,38 @@ describe('ProjectLibraryCard live preview', () => {
     expect(screen.queryByTestId('shared-worker-gate')).not.toBeInTheDocument();
     expect(screen.queryByTestId('file-manager-provider')).not.toBeInTheDocument();
     expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
+  });
+
+  it('uses the existing metadata line for Home instead of repeating the project slug', () => {
+    renderCard();
+
+    const location = screen.getByLabelText('Location: Home in this browser');
+    expect(location).toHaveTextContent('Home');
+    expect(location).toHaveClass('w-fit', 'max-w-full');
+    expect(location.querySelector('svg')).toHaveClass('size-3.5');
+    expect(screen.queryByText('library')).not.toBeInTheDocument();
+  });
+
+  it('shows the connected workspace name and keeps an explicitly requested disambiguating slug', () => {
+    renderCard({
+      project: {
+        ...mockProject,
+        locator: {
+          backend: 'webaccess',
+          storageRootKey: 'webaccess:wsp_workshop',
+          relativeDirectory: '/library',
+          workspaceId: 'wsp_workshop',
+        },
+        slugs: { workspaceSlug: 'workshop', projectSlug: 'library' },
+        workspaceName: 'Workshop',
+      },
+      shouldShowProjectSlug: true,
+    });
+
+    const location = screen.getByLabelText('Location: Workshop on your disk');
+    expect(location).toHaveTextContent('Workshop');
+    expect(location.querySelector('svg')).toHaveClass('size-3.5');
+    expect(screen.getByText('library')).toBeInTheDocument();
   });
 
   it('should mount project-scoped FM and Case A CadPreviewProvider when preview is toggled on', async () => {

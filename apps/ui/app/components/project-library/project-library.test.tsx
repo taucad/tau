@@ -143,6 +143,9 @@ describe('ProjectLibrary', () => {
     expect(screen.getByRole('heading', { name: 'Projects' })).toBeInTheDocument();
     expect(screen.getByText('Gearbox Alpha')).toBeInTheDocument();
     expect(screen.getByText('Bracket Beta')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Location: Home in this browser')).toHaveLength(2);
+    expect(screen.queryByText('gearbox-alpha')).not.toBeInTheDocument();
+    expect(screen.queryByText('bracket-beta')).not.toBeInTheDocument();
   });
 
   it('labels same-named projects with their directory slug', () => {

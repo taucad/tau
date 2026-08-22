@@ -13,22 +13,23 @@ export const filesystemBackends = ['indexeddb', 'opfs', 'webaccess', 'memory'] a
 
 /**
  * Filesystem backend metadata.
- * Descriptions are used in UI for user-facing backend selection.
+ * Product-level location vocabulary. The two browser engines intentionally
+ * share one label because they implement the same Home workspace.
  *
  * @public
  */
 export const filesystemBackendMeta = {
   indexeddb: {
-    label: 'IndexedDB',
-    description: 'Persistent browser storage using IndexedDB. Most compatible across browsers.',
+    label: 'Home',
+    description: 'In this browser.',
   },
   opfs: {
-    label: 'OPFS',
-    description: 'Origin Private File System. Faster performance, requires modern browser.',
+    label: 'Home',
+    description: 'In this browser.',
   },
   webaccess: {
-    label: 'File System',
-    description: 'Access a local folder directly. Files are visible in your OS file explorer.',
+    label: 'Connected workspace',
+    description: 'On your disk.',
   },
   memory: {
     label: 'Memory',

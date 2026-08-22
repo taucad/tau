@@ -1,8 +1,16 @@
 import type { UserConfig } from 'vite';
 import mkcert from 'vite-plugin-mkcert';
 
-import { httpsCertPemFilename, httpsCertsSavePath, httpsKeyPemFilename } from '#lib/certificates/https-certs-path.js';
-import { ensureMkcertCacheWritableForRegeneration } from '#lib/certificates/mkcert-cache-writable.js';
+import {
+  httpsCertPemFilename,
+  httpsCertsSavePath,
+  httpsKeyPemFilename,
+  legacyHttpsCertsSavePath,
+} from '#lib/certificates/https-certs-path.js';
+import {
+  ensureMkcertStorageWritableForRegeneration,
+  migrateLegacyMkcertStorage,
+} from '#lib/certificates/mkcert-storage.js';
 
 type MkcertPluginShape = {
   config?: (userConfig: UserConfig) => Promise<unknown>;
@@ -20,5 +28,6 @@ if (typeof plugin.config !== 'function') {
 }
 
 /** Headless contract: same host selection + cert files as `nx dev ui` (Vite plugin `config` hook). */
-ensureMkcertCacheWritableForRegeneration(httpsCertsSavePath);
+migrateLegacyMkcertStorage(legacyHttpsCertsSavePath, httpsCertsSavePath);
+ensureMkcertStorageWritableForRegeneration(httpsCertsSavePath);
 await plugin.config({ server: {} });

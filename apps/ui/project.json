@@ -107,16 +107,15 @@
     },
     "bootstrap-https-certs": {
       "executor": "nx:run-commands",
-      "cache": true,
+      "cache": false,
       "inputs": [
         "{projectRoot}/scripts/bootstrap-https-certs.ts",
         "{projectRoot}/app/lib/certificates/https-certs-path.ts",
-        "{projectRoot}/app/lib/certificates/mkcert-cache-writable.ts",
+        "{projectRoot}/app/lib/certificates/mkcert-storage.ts",
         {
           "runtime": "node {workspaceRoot}/tools/runtime-lan-ips.mjs"
         }
       ],
-      "outputs": ["{workspaceRoot}/node_modules/.cache/vite-plugin-mkcert"],
       "options": {
         "cwd": "{projectRoot}",
         "command": "node --import @oxc-node/core/register scripts/bootstrap-https-certs.ts",

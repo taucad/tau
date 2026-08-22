@@ -123,7 +123,6 @@ describe('createTestModelTool', () => {
       passes: Array<{ requirement: string; targetFile: string }>;
       passed: number;
       total: number;
-      geometryArtifactPaths?: Record<string, string>;
     };
 
     expect(result.failures).toEqual([]);
@@ -212,7 +211,7 @@ describe('createTestModelTool', () => {
 
   describe.each(allKernels)('%s', (kernel) => {
     describe('browser runner delegation', () => {
-      it('should not fetch geometry or read project tests in the API process', async () => {
+      it('should delegate only to the browser GeoSpec runner', async () => {
         const cfg = buildConfigurable();
 
         vi.mocked(cfg.chatRpcService.sendRpcRequest).mockResolvedValue({

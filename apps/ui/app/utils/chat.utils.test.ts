@@ -443,12 +443,6 @@ describe('serializeMessage', () => {
                 targetFile: 'lib/bracket.scad',
               },
             ],
-            geometryArtifactPaths: {
-              /* eslint-disable @typescript-eslint/naming-convention -- file-path keys can't be camelCase */
-              'main.scad': '.tau/artifacts/c1__main.scad.glb',
-              'lib/bracket.scad': '.tau/artifacts/c1__lib_bracket.scad.glb',
-              /* eslint-enable @typescript-eslint/naming-convention -- end file-path key allowance */
-            },
           },
         },
       ]);

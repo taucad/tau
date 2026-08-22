@@ -11,8 +11,6 @@ import type {
   CaptureImagesRpcResult,
   CaptureImagesRpcInput,
   ExportGeometryRpcInput,
-  FetchGeometryRpcInput,
-  FetchGeometryRpcResult,
   GetKernelResultRpcResult,
   RpcClientErrorCode,
   RunGeoSpecTestsRpcInput,
@@ -125,14 +123,13 @@ export type RpcGraphicsExportGeometryResult =
     };
 
 /**
- * Geometry fetch and export client independent of image capture.
+ * Geometry export client independent of image capture.
  *
  * Every method takes an explicit `targetFile` so the agent must name the
  * geometry unit it is acting on; there is no project-level fallback.
  * @public
  */
 export type RpcGraphicsClient = {
-  fetchGeometry(args: Pick<FetchGeometryRpcInput, 'targetFile' | 'parameters'>): Promise<FetchGeometryRpcResult>;
   exportGeometry(args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format'>): Promise<RpcGraphicsExportGeometryResult>;
 };
 

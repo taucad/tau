@@ -21,7 +21,6 @@ export const rpcName = {
   getKernelResult: 'get_kernel_result',
   captureImages: 'capture_images',
   runGeoSpecTests: 'run_geospec_tests',
-  fetchGeometry: 'fetch_geometry',
   exportGeometry: 'export_geometry',
   appendFile: 'append_file',
   editFile: 'edit_file',
@@ -73,7 +72,6 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.getKernelResult,
   rpcName.captureImages,
   rpcName.runGeoSpecTests,
-  rpcName.fetchGeometry,
   rpcName.exportGeometry,
   rpcName.resolveSkill,
 ]);

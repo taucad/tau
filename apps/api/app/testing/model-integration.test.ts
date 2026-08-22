@@ -705,73 +705,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     expect(joinAttempts).toBe(2);
   });
 
-  it('should complete RPC round-trip with large geometry payload over real Socket.IO', async () => {
-    const { serverIo, listen } = createTestServer({ maxHttpBufferSize: 10e6 });
-
-    const chatRpcService = new ChatRpcService(new MetricsService());
-    const chatId = 'chat_rpc_test_001';
-
-    serverIo.on('connection', (socket) => {
-      socket.on('join', () => {
-        chatRpcService.registerConnection(chatId, socket, 'test_user');
-      });
-
-      socket.on('disconnect', () => {
-        chatRpcService.handleSocketDisconnect(socket);
-      });
-
-      // EmitWithAck handles responses via ack callback — no rpc_response handler needed
-    });
-
-    const port = await listen();
-    const client = createTestClient(port);
-
-    const connected = new Promise<void>((resolve) => {
-      client.on('connect', () => {
-        client.emit('join', { chatId });
-        resolve();
-      });
-    });
-
-    const twoMegabytes = 2 * 1024 * 1024;
-    const largeGlb = new Uint8Array(twoMegabytes);
-
-    client.on('rpc_request', (request: { requestId: string }, ack: (response: unknown) => void) => {
-      ack({
-        type: 'rpc_response',
-        rpcName: 'fetch_geometry',
-        requestId: request.requestId,
-        toolCallId: 'tool_001',
-        result: { success: true, glb: largeGlb },
-      });
-    });
-
-    client.connect();
-    await connected;
-
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, 100);
-    });
-
-    expect(chatRpcService.isConnected(chatId)).toBe(true);
-
-    const rpcResult = await chatRpcService.sendRpcRequest({
-      chatId,
-      toolCallId: 'tool_fetch_geometry_001',
-      rpcName: 'fetch_geometry',
-      args: { targetFile: 'main.ts' },
-    });
-
-    expect(rpcResult, 'RPC failed — the response payload may have exceeded maxHttpBufferSize').toMatchObject({
-      success: true,
-    });
-    expect(rpcResult).toHaveProperty('glb');
-    expect((rpcResult as { glb: unknown }).glb).toBeInstanceOf(Uint8Array);
-  });
-
-  it('should complete emitWithAck round-trip with geometry payload', async () => {
+  it('should complete emitWithAck RPC round-trip', async () => {
     const { serverIo, listen } = createTestServer({ maxHttpBufferSize: 10e6 });
 
     const chatRpcService = new ChatRpcService(new MetricsService());
@@ -796,15 +730,13 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
       });
     });
 
-    const glbPayload = new Uint8Array(1024);
-
     client.on('rpc_request', (request: { requestId: string; toolCallId: string }, ack: (response: unknown) => void) => {
       ack({
         type: 'rpc_response',
-        rpcName: 'fetch_geometry',
+        rpcName: 'read_file',
         requestId: request.requestId,
         toolCallId: request.toolCallId,
-        result: { success: true, glb: glbPayload },
+        result: { success: true, content: 'ok', size: 2, contentKind: 'text', totalLines: 1 },
       });
     });
 
@@ -818,12 +750,11 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     const result = await chatRpcService.sendRpcRequest({
       chatId,
       toolCallId: 'tool_001',
-      rpcName: 'fetch_geometry',
+      rpcName: 'read_file',
       args: { targetFile: 'main.ts' },
     });
 
-    expect(result).toMatchObject({ success: true });
-    expect(result).toHaveProperty('glb');
+    expect(result).toMatchObject({ success: true, content: 'ok' });
     chatRpcService.onModuleDestroy();
   });
 
@@ -863,7 +794,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     const result = await chatRpcService.sendRpcRequest({
       chatId,
       toolCallId: 'tool_timeout',
-      rpcName: 'fetch_geometry',
+      rpcName: 'read_file',
       args: { targetFile: 'main.ts' },
     });
 
@@ -910,7 +841,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     const result = await chatRpcService.sendRpcRequest({
       chatId,
       toolCallId: 'tool_disconnect',
-      rpcName: 'fetch_geometry',
+      rpcName: 'read_file',
       args: { targetFile: 'main.ts' },
     });
 

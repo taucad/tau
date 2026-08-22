@@ -50,7 +50,6 @@ const fileMetadataObjectSchema = zod.union([textFileMetadataObjectSchema, binary
  */
 export const rpcClientErrorCodeSchema = zod.enum([
   'FILE_NOT_FOUND',
-  'NO_TOP_LEVEL_GEOMETRY',
   'PERMISSION_DENIED',
   'IO_ERROR',
   'PARSE_ERROR',
@@ -275,18 +274,6 @@ const exportGeometryRpc = defineRpc({
   }),
 });
 
-const fetchGeometryRpc = defineRpc({
-  input: zod.object({
-    artifactId: zod.string().optional(),
-    targetFile: zod.string(),
-    parameters: zod.record(zod.string(), zod.unknown()).optional(),
-  }),
-  success: zod.object({
-    glb: zod.instanceof(Uint8Array),
-    artifactPath: zod.string().optional(),
-  }),
-});
-
 const captureImagesRpc = defineRpc({
   input: zod
     .object({
@@ -381,7 +368,6 @@ export type RpcSchemasRegistry = {
   [rpcName.getKernelResult]: RpcSchemaEntry<GetKernelResultRpcInput, GetKernelResultRpcResult>;
   [rpcName.captureImages]: RpcSchemaEntry<CaptureImagesRpcInput, CaptureImagesRpcResult>;
   [rpcName.runGeoSpecTests]: RpcSchemaEntry<RunGeoSpecTestsRpcInput, RunGeoSpecTestsRpcResult>;
-  [rpcName.fetchGeometry]: RpcSchemaEntry<FetchGeometryRpcInput, FetchGeometryRpcResult>;
   [rpcName.exportGeometry]: RpcSchemaEntry<ExportGeometryRpcInput, ExportGeometryRpcResult>;
   [rpcName.appendFile]: RpcSchemaEntry<AppendFileRpcInput, AppendFileRpcResult>;
   [rpcName.editFile]: RpcSchemaEntry<EditFileRpcInput, EditFileRpcResult>;
@@ -429,10 +415,6 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   [rpcName.runGeoSpecTests]: {
     inputSchema: runGeoSpecTestsRpc.inputSchema,
     resultSchema: runGeoSpecTestsRpc.resultSchema,
-  },
-  [rpcName.fetchGeometry]: {
-    inputSchema: fetchGeometryRpc.inputSchema,
-    resultSchema: fetchGeometryRpc.resultSchema,
   },
   [rpcName.exportGeometry]: {
     inputSchema: exportGeometryRpc.inputSchema,
@@ -511,7 +493,6 @@ export type RpcClientError = z.infer<typeof rpcClientErrorSchema>;
  */
 export const rpcClientErrorCode = {
   fileNotFound: 'FILE_NOT_FOUND',
-  noTopLevelGeometry: 'NO_TOP_LEVEL_GEOMETRY',
   permissionDenied: 'PERMISSION_DENIED',
   ioError: 'IO_ERROR',
   parseError: 'PARSE_ERROR',
@@ -593,14 +574,6 @@ export type ExportGeometryRpcSuccess = z.infer<typeof exportGeometryRpc.successS
 /** @public */
 export type ExportGeometryRpcResult = z.infer<typeof exportGeometryRpc.resultSchema>;
 
-/** @public */
-export type FetchGeometryRpcInput = z.infer<typeof fetchGeometryRpc.inputSchema>;
-/** @public */
-export type FetchGeometryRpcSuccess = z.infer<typeof fetchGeometryRpc.successSchema>;
-/** @public */
-export type FetchGeometryRpcResult = z.infer<typeof fetchGeometryRpc.resultSchema>;
-
-/** @public */
 /** @public */
 export type AppendFileRpcInput = z.infer<typeof appendFileRpc.inputSchema>;
 /** @public */

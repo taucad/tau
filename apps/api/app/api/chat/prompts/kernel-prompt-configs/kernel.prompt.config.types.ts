@@ -77,8 +77,7 @@ export type KernelConfig = {
    * Single-line snippet demonstrating the minimal top-level construct that
    * makes a file render standalone (e.g. a default `main` export, an OpenSCAD
    * top-level invocation, a KCL `extrude` pipeline). Consumed by the
-   * `test_model` tool description, its `FILE_NOT_FOUND`/`NO_TOP_LEVEL_GEOMETRY`
-   * error messages, and the `<test_requirements>` system-prompt block.
+   * `<test_requirements>` system-prompt block.
    *
    * Snippets must carry the kernel's return-type vocabulary inline (e.g.
    * `: Shape3D`, `: Manifold`) so the agent receives the type contract from

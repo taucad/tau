@@ -7,10 +7,6 @@ describe('rpcClientErrorCodeSchema', () => {
     expect(rpcClientErrorCodeSchema.parse('FILE_NOT_FOUND')).toBe('FILE_NOT_FOUND');
   });
 
-  it('should parse NO_TOP_LEVEL_GEOMETRY', () => {
-    expect(rpcClientErrorCodeSchema.parse('NO_TOP_LEVEL_GEOMETRY')).toBe('NO_TOP_LEVEL_GEOMETRY');
-  });
-
   it('should parse RENDER_TIMEOUT for runtime render-timeout failures', () => {
     expect(rpcClientErrorCodeSchema.parse('RENDER_TIMEOUT')).toBe('RENDER_TIMEOUT');
   });

@@ -32,7 +32,6 @@ function createTestModelOutput(failures: TestFailure[], passed: number): TestMod
     })),
     passed,
     total: failures.length + passed,
-    geometryArtifactPaths: { [defaultTargetFile]: `.tau/artifacts/call_default__${defaultTargetFile}.glb` },
   };
 }
 
@@ -406,31 +405,6 @@ describe('createToolResultTrimmerMiddleware', () => {
       expect(parsed.failures.map((f) => f.targetFile)).toEqual(['main.scad', 'lib/bracket.scad']);
     });
 
-    it('should drop geometryArtifactPaths from trimmed test_model output', async () => {
-      const failures: TestFailure[] = [
-        {
-          id: 'req_1',
-          requirement: 'Width = 100mm',
-          reason: 'Width is 80mm',
-          suggestion: 'Adjust',
-          targetFile: 'main.scad',
-        },
-      ];
-      const toolMessage = createTestModelToolMessage(failures, 1);
-
-      await callWrapModelCall({ messages: [toolMessage] }, handler);
-
-      const [request] = handler.mock.calls[0] as [TestRequest];
-      const trimmedMessage = request.messages[0] as ToolMessage;
-      const parsed = JSON.parse(trimmedMessage.content as string) as Record<string, unknown>;
-
-      expect(parsed['geometryArtifactPaths']).toBeUndefined();
-      expect(parsed['passes']).toBeUndefined();
-      expect(parsed['passed']).toBeUndefined();
-      expect(parsed['failures']).toBeDefined();
-      expect(parsed['total']).toBe(2);
-    });
-
     it('should still detect test_model shape via isTestModelShape on multi-file output', async () => {
       const failures: TestFailure[] = [
         {
@@ -453,7 +427,6 @@ describe('createToolResultTrimmerMiddleware', () => {
       // If detection failed the message would pass through unchanged with passed/passes still present.
       expect(parsed['passed']).toBeUndefined();
       expect(parsed['passes']).toBeUndefined();
-      expect(parsed['geometryArtifactPaths']).toBeUndefined();
     });
   });
 

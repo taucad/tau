@@ -54,10 +54,10 @@ const innerTimeoutSlop = 1000;
  * Awaits the next settled state on `cadActor` whose `lastSettledRenderId`
  * is greater-than-or-equal to the baseline captured at call-time.
  *
- * This is the freshness oracle for RPC flows like `fetch_geometry` and
- * `get_kernel_result` — guarantees the geometry returned reflects the most
- * recent UI intent, eliminating staleness windows where the machine settled
- * on an older render after the agent issued a new request.
+ * This is the freshness oracle for RPC flows like `get_kernel_result`,
+ * `export_geometry`, and `capture_images` — guarantees the geometry returned
+ * reflects the most recent UI intent, eliminating staleness windows where the
+ * machine settled on an older render after the agent issued a new request.
  *
  * Resolves when:
  * 1. `lastSettledRenderId >= baselineRenderId`, AND

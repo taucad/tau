@@ -1,10 +1,7 @@
 import type { KernelProvider } from '@taucad/runtime';
 import { jscadModelingTypes, replicadTypes } from '@taucad/api-extractor/kernel-types';
 import { describe, expect, it } from 'vitest';
-import {
-  formatAddTopLevelExportRecovery,
-  getKernelConfig,
-} from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
+import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
 
 const allKernels: readonly KernelProvider[] = ['openscad', 'replicad', 'jscad', 'manifold', 'opencascadejs', 'zoo'];
 
@@ -40,9 +37,8 @@ describe('KernelConfig.topLevelExportExample', () => {
     });
 
     it('should never instruct the agent to remove a file or skip the test', () => {
-      const corpus = [config.topLevelExportExample, formatAddTopLevelExportRecovery(config)].join('\n');
-      expect(corpus).not.toMatch(/remove .* from test\.json/i);
-      expect(corpus).not.toMatch(/skip(?:ping)? the test/i);
+      expect(config.topLevelExportExample).not.toMatch(/remove .* from test\.json/i);
+      expect(config.topLevelExportExample).not.toMatch(/skip(?:ping)? the test/i);
     });
   });
 
@@ -348,24 +344,5 @@ describe('KernelConfig.testingProfile', () => {
     for (const kernel of ['openscad', 'jscad', 'manifold', 'zoo'] as const) {
       expect(getKernelConfig(kernel).testingProfile.includeBrepFeatureExamples).toBe(false);
     }
-  });
-});
-
-describe('formatAddTopLevelExportRecovery', () => {
-  describe.each(allKernels)('%s', (kernel) => {
-    const config = getKernelConfig(kernel);
-    const recovery = formatAddTopLevelExportRecovery(config);
-
-    it('should produce a non-empty recovery sentence', () => {
-      expect(recovery.trim().length).toBeGreaterThan(0);
-    });
-
-    it('should embed the kernel topLevelExportExample verbatim', () => {
-      expect(recovery).toContain(config.topLevelExportExample);
-    });
-
-    it('should tell the agent the file should render standalone', () => {
-      expect(recovery).toMatch(/renders standalone/);
-    });
   });
 });

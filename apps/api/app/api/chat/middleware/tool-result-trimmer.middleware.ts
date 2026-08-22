@@ -295,10 +295,8 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
    *   from the GeoSpec runner so the LLM can attribute each failure to its test
    *   file).
    * - `total` is preserved.
-   * - `passes`, `passed`, and `geometryArtifactPaths` are dropped: pass count
-   *   is inferable as `total - failures.length`, and the artifact-path map is
-   *   only useful at the moment of capture (the UI/UX layer reads it before
-   *   trimming).
+   * - `passes` and `passed` are dropped because the pass count is inferable as
+   *   `total - failures.length`.
    */
   [toolName.testModel]: createTrimmer(toolName.testModel, (result) => {
     // Guard: return unchanged if expected structure is missing (error/malformed response)

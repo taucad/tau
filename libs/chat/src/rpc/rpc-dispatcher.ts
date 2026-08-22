@@ -11,7 +11,6 @@ import { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
 import { handleGetKernelResult } from '#rpc/handlers/handle-get-kernel-result.js';
 import { handleCaptureImages } from '#rpc/handlers/handle-capture-images.js';
 import { handleRunGeoSpecTests } from '#rpc/handlers/handle-run-geospec-tests.js';
-import { handleFetchGeometry } from '#rpc/handlers/handle-fetch-geometry.js';
 import { handleExportGeometry } from '#rpc/handlers/handle-export-geometry.js';
 import { handleAppendFile } from '#rpc/handlers/handle-append-file.js';
 import { handleEditFile } from '#rpc/handlers/handle-edit-file.js';
@@ -48,7 +47,6 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.getKernelResult]: async (args) => handleGetKernelResult(args, deps.kernelClient),
     [rpcName.captureImages]: async (args) => handleCaptureImages(args, deps.images),
     [rpcName.runGeoSpecTests]: async (args) => handleRunGeoSpecTests(args, deps.geospec),
-    [rpcName.fetchGeometry]: async (args) => handleFetchGeometry(args, deps.graphics, deps.fileSystem),
     [rpcName.exportGeometry]: async (args) => handleExportGeometry(args, deps.graphics, deps.fileSystem),
     [rpcName.appendFile]: async (args) => handleAppendFile(args, deps.fileSystem),
     [rpcName.editFile]: async (args) => handleEditFile(args, deps.fileSystem),

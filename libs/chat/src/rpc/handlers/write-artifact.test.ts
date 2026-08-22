@@ -10,7 +10,7 @@ const file = (name: string, bytes: number[]): ExportFile => ({
   bytes: new Uint8Array(bytes),
 });
 
-describe('writeArtifact helpers', () => {
+describe('writeArtifactSet helpers', () => {
   it('should slugify path separators and disallowed chars', () => {
     expect(slugifyTargetFile('lib/sub/PEN.ts')).toBe('lib_sub_PEN.ts');
     expect(slugifyTargetFile('unicode-名前.ts')).toBe('unicode-__.ts');

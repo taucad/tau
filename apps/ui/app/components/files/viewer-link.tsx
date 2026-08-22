@@ -54,9 +54,9 @@ type ViewerLinkProps = {
  *    `SlotPrimitive.Slottable`. Slot finds the `<Slottable>` among ViewerLink's
  *    rendered children, treats its children as the consumer's element, and
  *    splices the other (non-Slottable) children into the consumer's element as
- *    siblings of the consumer's original content. Net effect: a chip wrapper
- *    like `GeometryArtifactBadge` no longer needs to render its own `<Box />`
- *    — it cannot accidentally duplicate the icon either.
+ *    siblings of the consumer's original content. Net effect: an `asChild`
+ *    consumer does not need to render its own `<Box />` and cannot duplicate
+ *    the icon accidentally.
  *
  * @example <caption>basic usage — renders as an inline span with cube + button semantics</caption>
  * ```tsx

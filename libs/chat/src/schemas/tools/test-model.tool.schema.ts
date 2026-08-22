@@ -140,8 +140,6 @@ export type TestPass = z.infer<typeof testPassSchema>;
 /**
  * Output schema for test_model tool.
  * Includes both failures (with detailed feedback) and passes (for UI display).
- * `geometryArtifactPaths` maps each tested source file to the captured GLB
- * artifact written for that geometry unit.
  * @public
  */
 export const testModelOutputSchema = z.object({
@@ -149,10 +147,6 @@ export const testModelOutputSchema = z.object({
   passes: z.array(testPassSchema).describe('Array of passed tests'),
   passed: z.number().describe('Number of tests that passed'),
   total: z.number().describe('Total number of tests run'),
-  geometryArtifactPaths: z
-    .record(z.string(), z.string())
-    .optional()
-    .describe('Map of source file path → captured GLB artifact path'),
 });
 /**
  * Inferred aggregate output from `test_model` / GeoSpec evaluation runs.

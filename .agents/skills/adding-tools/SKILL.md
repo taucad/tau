@@ -294,11 +294,11 @@ await fileManager.writeFile(path, content, { source: 'external' });
 
 `useFileManager().readFile` returns **`Uint8Array`** (binary-safe); pair with **`downloadBlob`** from `@taucad/utils/file` for user downloads.
 
-### Chat artifacts — `.tau/artifacts` + `writeArtifact`
+### Chat artifacts — `.tau/artifacts` + `writeArtifactSet`
 
-When an RPC persists bytes for later UI download (e.g. fetched GLB snapshots, interchange exports):
+When an RPC persists an interchange export for later UI download:
 
-1. Prefer **`libs/chat/src/rpc/handlers/write-artifact.ts`** **`writeArtifact({ toolCallId, targetFile, extension, bytes }, fileSystem)`** — canonical path **``.tau/artifacts/${toolCallId}__${slugifyTargetFile(targetFile)}.${ext}`**.
-2. Return **`artifactPath`**, **`mimeType`**, and **`byteLength`** (or analogous) in the RPC success payload so the chat card can render size + type without re-reading disk.
+1. Prefer **`libs/chat/src/rpc/handlers/write-artifact.ts`** **`writeArtifactSet({ toolCallId, targetFile, format, files }, fileSystem)`** — it validates the file set and writes it under one canonical export directory.
+2. Return its **`artifactPath`**, **`mimeType`**, and **`byteLength`** metadata in the RPC success payload so the chat card can render size + type without re-reading disk.
 3. On **Download**, the UI reads **`artifactPath`** via **`fileManager.readFile`**, wraps a **`Blob`**, and calls **`downloadBlob(blob, basename)`**.
-4. Passing **`toolCallId`** into RPC args alongside LLM-visible fields keeps filenames deterministic across retries (mirror **`fetch_geometry`**’s `artifactId` pattern where applicable).
+4. Pass **`toolCallId`** into RPC args alongside LLM-visible fields to keep export directories deterministic across retries.

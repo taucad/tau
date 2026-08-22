@@ -1,20 +1,17 @@
-import { test } from '@playwright/test';
+import { test } from 'vitest';
 import { expectCylinderRender, openBrowserRuntime } from '../support/browser-runtime-suite';
+import { currentReactTarget, expectTargetInspection } from '../support/external-target';
 import { expectPublicRuntimeExample } from '../support/public-example-suite';
 
-test('should render non-empty geometry through the framework development server', async ({ page }, testInfo) => {
-  const { name } = testInfo.project;
+test('should render non-empty geometry through the framework development server', async () => {
+  expectTargetInspection();
+  const { metadata } = currentReactTarget();
 
-  if (name === 'react-router-development' || name === 'nextjs-development') {
-    await openBrowserRuntime(page, testInfo);
-    await expectCylinderRender(page);
+  if (!metadata.example) {
+    await openBrowserRuntime();
+    await expectCylinderRender();
     return;
   }
 
-  const successMessage =
-    name === 'react-router-example-development'
-      ? 'Replicad rendered through @taucad/runtime in a React Router Vite worker.'
-      : 'Replicad rendered through @taucad/runtime in a Next.js Turbopack worker.';
-
-  await expectPublicRuntimeExample(page, { successMessage });
+  await expectPublicRuntimeExample({ successMessage: metadata.successMessage ?? '' });
 });

@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import { expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import * as target from '#support/external-target.js';
 
 type LayoutMetrics = {
   readonly clientHeight: number;
@@ -22,8 +23,8 @@ type LayoutMetrics = {
   readonly viewportBottom: number;
 };
 
-const readLayoutMetrics = async (page: Page): Promise<LayoutMetrics> =>
-  page.evaluate(() => {
+const readLayoutMetrics = async (): Promise<LayoutMetrics> =>
+  target.evaluate(() => {
     const root = [...document.querySelectorAll<HTMLElement>('.split-view')].find((element) =>
       element.querySelector('.rs-center'),
     );
@@ -74,37 +75,36 @@ const expectConstrainedLayout = (metrics: LayoutMetrics): void => {
   expect.soft(Math.abs(metrics.sashRight - metrics.rootRight)).toBeLessThanOrEqual(0.5);
 };
 
-test('focusing the chat composer cannot scroll the desktop editor beneath the header', async ({ page }) => {
-  test.setTimeout(120_000);
-  await page.goto('/__e2e/project-navigation?singleProject');
-  await expect(page).toHaveURL(/\/w\/[^/]+\/[^/]+$/u, { timeout: 60_000 });
+test('focusing the chat composer cannot scroll the desktop editor beneath the header', async () => {
+  await target.navigate('/__e2e/project-navigation');
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
 
-  const composer = page.getByRole('textbox', { name: 'Ask Tau to build anything...' });
-  const sidebarTrigger = page.locator('[data-slot="sidebar-trigger"]');
-  await expect(page.getByTestId('cad-viewer-canvas-region').locator('canvas').first()).toBeVisible({ timeout: 60_000 });
-  await expect(composer).toBeVisible({ timeout: 60_000 });
-  await expect(sidebarTrigger).toBeVisible();
+  const composer = selectors.getByCss('.tiptap[contenteditable="true"]').first();
+  const sidebarTrigger = selectors.getByCss('[data-slot="sidebar-trigger"]');
+  await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  await target.expectVisible(composer, 60_000);
+  await target.expectVisible(sidebarTrigger);
 
-  const beforeFocus = await readLayoutMetrics(page);
-  await composer.focus();
-  await expect(composer).toBeFocused();
-  const afterFocus = await readLayoutMetrics(page);
+  const beforeFocus = await readLayoutMetrics();
+  await target.focus(composer);
+  await target.expectFocused(composer);
+  const afterFocus = await readLayoutMetrics();
 
-  const sidebarWasOpen = (await sidebarTrigger.getAttribute('data-open')) === 'true';
-  await sidebarTrigger.click();
-  await expect(sidebarTrigger).toHaveAttribute('data-open', String(!sidebarWasOpen));
-  await composer.focus();
-  await expect(composer).toBeFocused();
+  const sidebarWasOpen = (await target.getAttribute(sidebarTrigger, 'data-open')) === 'true';
+  await target.click(sidebarTrigger);
+  await target.expectAttribute(sidebarTrigger, 'data-open', String(!sidebarWasOpen));
+  await target.focus(composer);
+  await target.expectFocused(composer);
   await expect
     .poll(async () => {
-      const metrics = await readLayoutMetrics(page);
+      const metrics = await readLayoutMetrics();
       return {
         horizontalOverflow: metrics.scrollWidth - metrics.clientWidth,
         verticalOverflow: metrics.scrollHeight - metrics.clientHeight,
       };
     })
     .toEqual({ horizontalOverflow: 0, verticalOverflow: 0 });
-  const afterSidebarTransition = await readLayoutMetrics(page);
+  const afterSidebarTransition = await readLayoutMetrics();
 
   expectConstrainedLayout(beforeFocus);
   expectConstrainedLayout(afterFocus);

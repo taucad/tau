@@ -1,19 +1,19 @@
-import { expect } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import { page as selectors } from 'vitest/browser';
+import { expectTargetCount, expectTargetVisible, navigateTarget } from './external-target.js';
 
 type PublicRuntimeExampleOptions = {
   readonly navigate?: boolean;
   readonly successMessage: string;
 };
 
-export const expectPublicRuntimeExample = async (
-  page: Page,
-  { navigate = true, successMessage }: PublicRuntimeExampleOptions,
-): Promise<void> => {
+export const expectPublicRuntimeExample = async ({
+  navigate = true,
+  successMessage,
+}: PublicRuntimeExampleOptions): Promise<void> => {
   if (navigate) {
-    await page.goto('/');
+    await navigateTarget('/');
   }
-  await expect(page.getByRole('heading', { name: 'Tau Runtime Example' })).toBeVisible();
-  await expect(page.getByText(successMessage)).toBeVisible({ timeout: 120_000 });
-  await expect(page.locator('canvas')).toHaveCount(1);
+  await expectTargetVisible(selectors.getByRole('heading', { name: 'Tau Runtime Example' }));
+  await expectTargetVisible(selectors.getByText(successMessage));
+  await expectTargetCount('canvas', 1);
 };

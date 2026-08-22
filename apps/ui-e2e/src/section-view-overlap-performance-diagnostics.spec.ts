@@ -1,6 +1,6 @@
-import { writeFileSync } from 'node:fs';
-import type { ConsoleMessage, Page, TestInfo } from '@playwright/test';
-import { expect, test } from '@playwright/test';
+import { expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import * as target from '#support/external-target.js';
 
 type SectionCapPerformanceFrame = Readonly<{
   sequence: number;
@@ -131,40 +131,21 @@ const webgpuValidationPatterns: readonly RegExp[] = [
   /depth-stencil format mismatch/,
 ];
 
-const attachWebGpuValidationListener = (
-  page: Page,
-): {
-  failuresRef: { lines: string[] };
-  detach(): void;
-} => {
-  const failuresRef: { lines: string[] } = { lines: [] };
-
-  const listener = (message: ConsoleMessage): void => {
-    const text = message.text();
-    for (const pattern of webgpuValidationPatterns) {
-      if (pattern.test(text)) {
-        failuresRef.lines.push(`[${message.type()}] ${text}`);
-        break;
-      }
-    }
-  };
-
-  page.on('console', listener);
-
-  return {
-    failuresRef,
-    detach: () => {
-      page.off('console', listener);
-    },
-  };
+const consoleMessageCount = async (): Promise<number> => {
+  const events = await target.events();
+  return events.consoleMessages.length;
 };
 
-const driveSectionView = async (
-  page: Page,
-  fixture: SectionCapDiagnosticsFixture,
-  translation: number,
-): Promise<void> => {
-  await page.evaluate(
+const webGpuValidationFailures = async (from: number): Promise<string[]> => {
+  const events = await target.events();
+  return events.consoleMessages
+    .slice(from)
+    .filter(({ text }) => webgpuValidationPatterns.some((pattern) => pattern.test(text)))
+    .map(({ text, type }) => `[${type}] ${text}`);
+};
+
+const driveSectionView = async (fixture: SectionCapDiagnosticsFixture, translation: number): Promise<void> => {
+  await target.evaluate(
     ({ nextFixture, nextTranslation }) => {
       const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
       if (!bridge) {
@@ -189,8 +170,8 @@ const driveSectionView = async (
   );
 };
 
-const getPerformanceDiagnostics = async (page: Page): Promise<SectionCapPerformanceDiagnostics | undefined> =>
-  page.evaluate(() => {
+const getPerformanceDiagnostics = async (): Promise<SectionCapPerformanceDiagnostics | undefined> =>
+  target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
@@ -200,17 +181,16 @@ const getPerformanceDiagnostics = async (page: Page): Promise<SectionCapPerforma
   });
 
 const driveAndReadPerformance = async (
-  page: Page,
   fixture: SectionCapDiagnosticsFixture,
   translation: number,
 ): Promise<SectionCapPerformanceDiagnostics> => {
-  const previousSequence = await page.evaluate(() => {
+  const previousSequence = await target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     return bridge?.getSectionCapPerformanceDiagnostics()?.latestFrame.sequence ?? 0;
   });
 
-  await driveSectionView(page, fixture, translation);
-  await page.waitForFunction(
+  await driveSectionView(fixture, translation);
+  await target.waitFor(
     (sequence) => {
       const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
       const latestFrame = bridge?.getSectionCapPerformanceDiagnostics()?.latestFrame;
@@ -220,7 +200,7 @@ const driveAndReadPerformance = async (
     { timeout: 30_000 },
   );
 
-  const diagnostics = await getPerformanceDiagnostics(page);
+  const diagnostics = await getPerformanceDiagnostics();
   expect(diagnostics, `expected performance diagnostics after translation ${translation}`).toBeDefined();
   return diagnostics!;
 };
@@ -264,12 +244,11 @@ type WriteDiagnosticsOptions = Readonly<{
     noOverlap: readonly SectionCapPerformanceDiagnostics[];
   }>;
   fixture: SectionCapDiagnosticsFixture;
-  testInfo: TestInfo;
 }>;
 
-const writeDiagnostics = ({ backend, diagnostics, fixture, testInfo }: WriteDiagnosticsOptions): void => {
-  writeFileSync(
-    testInfo.outputPath(`section-cap-performance-diagnostics-${fixture.id}-${backend}.json`),
+const writeDiagnostics = async ({ backend, diagnostics, fixture }: WriteDiagnosticsOptions): Promise<void> => {
+  await target.writeArtifact(
+    `section-cap-performance-diagnostics-${fixture.id}-${backend}.json`,
     `${JSON.stringify(diagnostics, null, 2)}\n`,
   );
 };
@@ -278,7 +257,6 @@ type PerformanceSweepOptions = Readonly<{
   diagnostics?: readonly SectionCapPerformanceDiagnostics[];
   fixture: SectionCapDiagnosticsFixture;
   index?: number;
-  page: Page;
   translations: readonly number[];
 }>;
 
@@ -286,7 +264,6 @@ const collectPerformanceSweep = async ({
   diagnostics = [],
   fixture,
   index = 0,
-  page,
   translations,
 }: PerformanceSweepOptions): Promise<SectionCapPerformanceDiagnostics[]> => {
   const translation = translations[index];
@@ -295,10 +272,9 @@ const collectPerformanceSweep = async ({
   }
 
   return collectPerformanceSweep({
-    diagnostics: [...diagnostics, await driveAndReadPerformance(page, fixture, translation)],
+    diagnostics: [...diagnostics, await driveAndReadPerformance(fixture, translation)],
     fixture,
     index: index + 1,
-    page,
     translations,
   });
 };
@@ -306,35 +282,24 @@ const collectPerformanceSweep = async ({
 type FixtureDiagnosticsOptions = Readonly<{
   backend: string;
   fixture: SectionCapDiagnosticsFixture;
-  page: Page;
-  testInfo: TestInfo;
 }>;
 
-const collectFixtureDiagnostics = async ({
-  backend,
-  fixture,
-  page,
-  testInfo,
-}: FixtureDiagnosticsOptions): Promise<void> => {
-  await page.goto(`/examples/${fixture.projectId}?graphicsBackend=${backend}`);
-  await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
-  await page.waitForFunction(() =>
-    Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__),
-  );
+const collectFixtureDiagnostics = async ({ backend, fixture }: FixtureDiagnosticsOptions): Promise<void> => {
+  await target.navigate(`/examples/${fixture.projectId}?graphicsBackend=${backend}`);
+  await target.expectVisible(selectors.getByRole('img', { name: /3d model preview/i }), 60_000);
+  await target.expectVisible(selectors.getByTestId('bbox-viewer'), 60_000);
+  await target.waitFor(() => Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__));
 
   const overlap = await collectPerformanceSweep({
     fixture,
-    page,
     translations: fixture.overlapTranslations,
   });
   const noOverlap = await collectPerformanceSweep({
     fixture,
-    page,
     translations: fixture.noOverlapTranslations,
   });
 
-  writeDiagnostics({ backend, diagnostics: { overlap, noOverlap }, fixture, testInfo });
+  await writeDiagnostics({ backend, diagnostics: { overlap, noOverlap }, fixture });
 
   for (const [index, diagnostics] of overlap.entries()) {
     expectPerformanceShape(diagnostics, `${backend}.${fixture.id}.overlap[${index}]`);
@@ -372,45 +337,30 @@ const collectFixtureDiagnostics = async ({
 type FixturesDiagnosticsOptions = Readonly<{
   backend: string;
   index?: number;
-  page: Page;
-  testInfo: TestInfo;
 }>;
 
-const collectFixturesDiagnostics = async ({
-  backend,
-  index = 0,
-  page,
-  testInfo,
-}: FixturesDiagnosticsOptions): Promise<void> => {
+const collectFixturesDiagnostics = async ({ backend, index = 0 }: FixturesDiagnosticsOptions): Promise<void> => {
   const fixture = diagnosticsFixtures[index];
   if (!fixture) {
     return;
   }
 
-  await collectFixtureDiagnostics({ backend, fixture, page, testInfo });
-  await collectFixturesDiagnostics({ backend, index: index + 1, page, testInfo });
+  await collectFixtureDiagnostics({ backend, fixture });
+  await collectFixturesDiagnostics({ backend, index: index + 1 });
 };
 
 test.describe('Section view overlap performance diagnostics', () => {
   for (const backend of ['webgl', 'webgpu'] as const) {
-    test(`captures overlap and no-overlap diagnostics in ${backend}`, async ({ page }, testInfo) => {
+    test(`captures overlap and no-overlap diagnostics in ${backend}`, async ({ skip }) => {
       if (backend === 'webgpu') {
-        const hasWebGpu = await page.evaluate(() => 'gpu' in navigator);
-        test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
+        const hasWebGpu = await target.evaluate(() => 'gpu' in navigator);
+        skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
       }
 
-      const listener = backend === 'webgpu' ? attachWebGpuValidationListener(page) : undefined;
-
-      try {
-        await collectFixturesDiagnostics({ backend, page, testInfo });
-
-        expect(
-          listener?.failuresRef.lines ?? [],
-          `WebGPU validation errors leaked to the console:\n${listener?.failuresRef.lines.join('\n') ?? ''}`,
-        ).toEqual([]);
-      } finally {
-        listener?.detach();
-      }
+      const messageStart = await consoleMessageCount();
+      await collectFixturesDiagnostics({ backend });
+      const failures = backend === 'webgpu' ? await webGpuValidationFailures(messageStart) : [];
+      expect(failures, `WebGPU validation errors leaked to the console:\n${failures.join('\n')}`).toEqual([]);
     });
   }
 });

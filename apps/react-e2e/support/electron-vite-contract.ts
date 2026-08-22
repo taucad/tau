@@ -1,6 +1,5 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { expect } from '@playwright/test';
 
 type ElectronViteApi = {
   resolveConfig(
@@ -37,11 +36,11 @@ const matchesExternal = async (rule: unknown, id: string): Promise<boolean> => {
   return false;
 };
 
-const expectProcessExternalization = async (
+const externalizationReport = async (
   processConfig: Record<string, unknown> | undefined,
   processName: string,
   vite: ViteApi,
-): Promise<void> => {
+): Promise<Readonly<Record<string, boolean>>> => {
   if (!processConfig) {
     throw new TypeError(`${processName} config was not resolved`);
   }
@@ -52,18 +51,27 @@ const expectProcessExternalization = async (
   );
   const external = viteConfig.build.rolldownOptions?.external ?? viteConfig.build.rollupOptions?.external;
 
-  await Promise.all([
-    expect(matchesExternal(external, '@taucad/runtime')).resolves.toBe(false),
-    expect(matchesExternal(external, '@taucad/runtime/electron/main')).resolves.toBe(false),
-    expect(matchesExternal(external, '@taucad/openrscad')).resolves.toBe(true),
-    expect(matchesExternal(external, 'react')).resolves.toBe(true),
-    expect(matchesExternal(external, 'react/jsx-runtime')).resolves.toBe(true),
-    expect(matchesExternal(external, 'electron')).resolves.toBe(true),
-    expect(matchesExternal(external, 'node:fs')).resolves.toBe(true),
-  ]);
+  const modules = [
+    '@taucad/esbuild',
+    '@taucad/middleware',
+    '@taucad/replicad',
+    '@taucad/runtime',
+    '@taucad/runtime/electron/main',
+    '@taucad/openrscad',
+    'replicad-opencascadejs',
+    'react',
+    'react/jsx-runtime',
+    'electron',
+    'node:fs',
+  ] as const;
+  return Object.fromEntries(
+    await Promise.all(modules.map(async (module) => [module, await matchesExternal(external, module)] as const)),
+  );
 };
 
-export const expectResolvedElectronExternalization = async (appRoot: string): Promise<void> => {
+export const resolvedElectronExternalization = async (
+  appRoot: string,
+): Promise<Readonly<Record<string, Readonly<Record<string, boolean>>>>> => {
   const electronVite = (await import(
     pathToFileURL(join(appRoot, 'node_modules/electron-vite/dist/index.js')).href
   )) as ElectronViteApi;
@@ -78,9 +86,12 @@ export const expectResolvedElectronExternalization = async (appRoot: string): Pr
       'build',
       'production',
     );
-    await Promise.all(
-      ['main', 'preload'].map(async (processName) =>
-        expectProcessExternalization(resolved.config?.[processName], processName, vite),
+    return Object.fromEntries(
+      await Promise.all(
+        ['main', 'preload'].map(
+          async (processName) =>
+            [processName, await externalizationReport(resolved.config?.[processName], processName, vite)] as const,
+        ),
       ),
     );
   } finally {

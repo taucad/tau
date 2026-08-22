@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-08-19'
+updated: '2026-08-22'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -298,7 +298,7 @@ import { webWorkerTransport } from '@taucad/runtime/transport'; // broad barrel;
 
 ### Examples are quickstarts, not test harnesses
 
-First-class framework examples should stay copyable and test-agnostic. Do not put Playwright configs, Vitest configs, repository-only GLB inspection helpers, `data-testid` assertions, query-string test branches, or `window.__tau*` geometry probes in public example apps. Keep those artifacts in a dedicated e2e project such as `apps/react-e2e`, where maintainers can preserve framework transport coverage without making the example code look like CI scaffolding.
+First-class framework examples should stay copyable and test-agnostic. Do not put runner-specific configs, repository-only GLB inspection helpers, `data-testid` assertions, query-string test branches, or `window.__tau*` geometry probes in public example apps. Keep those artifacts in a dedicated e2e project such as `apps/react-e2e`, where maintainers can preserve framework transport coverage without making the example code look like CI scaffolding.
 
 **Why**: A consumer opening an example should see the runtime integration topology, not Tau's regression-test strategy. Keeping test machinery out of examples makes the happy path easier to copy while preserving mature coverage in a purpose-built test surface.
 
@@ -1003,7 +1003,7 @@ When specs are declared at module scope, every multi-instance render path automa
 
 Public examples must teach the shortest truthful consumer path. They should show the meaningful integration boundary — selected plugin subpaths, runtime definition, transport/client options, `useRuntime`, a viewer, and schema-backed parameters — without carrying repository-specific regression scaffolding.
 
-Example apps must not contain Playwright/Vitest configs, test-only globals, GLB bounds inspectors, `data-testid`-only DOM, `?e2e` behavior branches, or debug controls whose purpose is assertion targeting. Those details make examples look like private CI harnesses instead of copyable quickstarts, and they couple consumers to Tau's test stack.
+Example apps must not contain runner-specific configs, test-only globals, GLB bounds inspectors, `data-testid`-only DOM, `?e2e` behavior branches, or debug controls whose purpose is assertion targeting. Those details make examples look like private CI harnesses instead of copyable quickstarts, and they couple consumers to Tau's test stack.
 
 Package-owned maintainer e2e fixtures are the correct place for integrated framework coverage. For React consumer flows, this means fixture apps under `@taucad/react` can publish raw GLB bytes, parse bounds, expose compact test state, and assert framework transport behavior because they are explicitly not consumer examples. Runtime-owned tests keep lower-level protocol, transport, host, and adapter conformance coverage.
 

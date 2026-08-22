@@ -1,85 +1,88 @@
-import { test, expect } from '@playwright/test';
-import type { BrowserContext, Locator, Page } from '@playwright/test';
+import { expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import type { Locator } from 'vitest/browser';
+import * as target from '#support/external-target.js';
 
-test.use({ colorScheme: 'dark' });
+const getThemeToggle = (): Locator => selectors.getByRole('button', { name: /toggle theme/i });
+const getHtml = (): Locator => selectors.getByCss('html');
 
-const getThemeToggle = (page: Page): Locator => page.getByRole('button', { name: /toggle theme/i });
-const getHtml = (page: Page): Locator => page.locator('html');
-
-async function waitForThemeCookie(context: BrowserContext, expected: 'present' | 'absent'): Promise<void> {
+async function waitForThemeCookie(expected: 'present' | 'absent'): Promise<void> {
   await expect
     .poll(async () => {
-      const cookies = await context.cookies();
+      const cookies = await target.cookies();
       return cookies.some((cookie) => cookie.name === 'tau-theme');
     })
     .toBe(expected === 'present');
 }
 
-async function expectNoLegacyThemeCookie(context: BrowserContext): Promise<void> {
-  const cookies = await context.cookies();
+async function expectNoLegacyThemeCookie(): Promise<void> {
+  const cookies = await target.cookies();
   expect(cookies.some((cookie) => cookie.name === 'tau-color-theme')).toBe(false);
 }
 
 test.describe('theme persistence', () => {
-  test('should persist explicit light theme across refresh on a dark system preference', async ({ page, context }) => {
-    await page.goto('/');
+  test('should persist explicit light theme across refresh on a dark system preference', async () => {
+    await target.emulateColorScheme('dark');
+    await target.navigate('/');
 
-    const themeToggle = getThemeToggle(page);
-    await expect(themeToggle).toHaveAttribute('data-theme', 'system');
+    const themeToggle = getThemeToggle();
+    await target.expectAttribute(themeToggle, 'data-theme', 'system');
 
-    await themeToggle.click();
-    await expect(themeToggle).toHaveAttribute('data-theme', 'light');
-    await expect(getHtml(page)).toHaveClass(/\blight\b/);
-    await waitForThemeCookie(context, 'present');
+    await target.click(themeToggle);
+    await target.expectAttribute(themeToggle, 'data-theme', 'light');
+    await target.expectClass(getHtml(), /\blight\b/);
+    await waitForThemeCookie('present');
 
-    await page.reload();
+    await target.reload();
 
-    await expect(themeToggle).toHaveAttribute('data-theme', 'light');
-    await expect(getHtml(page)).toHaveClass(/\blight\b/);
-    await expectNoLegacyThemeCookie(context);
+    await target.expectAttribute(themeToggle, 'data-theme', 'light');
+    await target.expectClass(getHtml(), /\blight\b/);
+    await expectNoLegacyThemeCookie();
   });
 
-  test('should return to system theme and follow dark system preference across refresh', async ({ page, context }) => {
-    await page.goto('/');
+  test('should return to system theme and follow dark system preference across refresh', async () => {
+    await target.emulateColorScheme('dark');
+    await target.navigate('/');
 
-    const themeToggle = getThemeToggle(page);
-    await expect(themeToggle).toHaveAttribute('data-theme', 'system');
+    const themeToggle = getThemeToggle();
+    await target.expectAttribute(themeToggle, 'data-theme', 'system');
 
-    await themeToggle.click();
-    await expect(themeToggle).toHaveAttribute('data-theme', 'light');
-    await waitForThemeCookie(context, 'present');
+    await target.click(themeToggle);
+    await target.expectAttribute(themeToggle, 'data-theme', 'light');
+    await waitForThemeCookie('present');
 
-    await themeToggle.click();
-    await expect(themeToggle).toHaveAttribute('data-theme', 'dark');
+    await target.click(themeToggle);
+    await target.expectAttribute(themeToggle, 'data-theme', 'dark');
 
-    await themeToggle.click();
-    await expect(themeToggle).toHaveAttribute('data-theme', 'system');
-    await expect(getHtml(page)).toHaveClass(/\bdark\b/);
-    await waitForThemeCookie(context, 'absent');
+    await target.click(themeToggle);
+    await target.expectAttribute(themeToggle, 'data-theme', 'system');
+    await target.expectClass(getHtml(), /\bdark\b/);
+    await waitForThemeCookie('absent');
 
-    await page.reload();
+    await target.reload();
 
-    await expect(themeToggle).toHaveAttribute('data-theme', 'system');
-    await expect(getHtml(page)).toHaveClass(/\bdark\b/);
-    await expectNoLegacyThemeCookie(context);
+    await target.expectAttribute(themeToggle, 'data-theme', 'system');
+    await target.expectClass(getHtml(), /\bdark\b/);
+    await expectNoLegacyThemeCookie();
   });
 
-  test('should ignore a stale legacy tau-color-theme cookie without tau-theme', async ({ page, context, baseURL }) => {
-    await context.addCookies([
+  test('should ignore a stale legacy tau-color-theme cookie without tau-theme', async () => {
+    await target.emulateColorScheme('dark');
+    await target.navigate('/');
+    await target.addCookies([
       {
         name: 'tau-color-theme',
         value: '"light"',
-        url: baseURL ?? 'http://localhost:3000',
+        url: await target.currentUrl(),
       },
     ]);
+    await target.reload();
 
-    await page.goto('/');
+    const themeToggle = getThemeToggle();
+    await target.expectAttribute(themeToggle, 'data-theme', 'system');
+    await target.expectClass(getHtml(), /\bdark\b/);
 
-    const themeToggle = getThemeToggle(page);
-    await expect(themeToggle).toHaveAttribute('data-theme', 'system');
-    await expect(getHtml(page)).toHaveClass(/\bdark\b/);
-
-    const cookies = await context.cookies();
+    const cookies = await target.cookies();
     expect(cookies.some((cookie) => cookie.name === 'tau-theme')).toBe(false);
   });
 });

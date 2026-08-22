@@ -123,7 +123,7 @@ describe('isFeatureEnabled', () => {
 
 // Gates the e2e-only `SectionViewTestBridge` mount in stage.tsx. Off by
 // default ⇒ the bridge is never mounted/executed in prod; the e2e suite turns
-// it on via `TAU_DEBUG=true` (apps/ui-e2e/playwright.config.ts).
+// it on via `TAU_DEBUG=true` (apps/ui-e2e/global-setup.ts).
 describe('tauDebug gate for SectionViewTestBridge', () => {
   it('should be disabled by default so the test bridge is not mounted in prod', () => {
     const storage = createMockStorage();

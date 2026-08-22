@@ -5,8 +5,8 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { chromium } from '@playwright/test';
-import type { Browser } from '@playwright/test';
+import { chromium } from 'playwright';
+import type { Browser } from 'playwright';
 import { PDFParse } from 'pdf-parse';
 import { afterEach, describe, expect, it } from 'vitest';
 

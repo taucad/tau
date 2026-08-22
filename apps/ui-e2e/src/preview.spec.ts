@@ -1,48 +1,19 @@
-import { test, expect } from '@playwright/test';
+import { describe, expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import * as target from '#support/external-target.js';
 
-test.describe('Build Preview', () => {
-  test('renders a 3D model for the Hollow Box project', async ({ page }) => {
-    const canvas = page.getByRole('img', { name: /3d model preview/i });
-    const attempts = test.info().project.metadata['mode'] === 'development' ? 3 : 1;
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const outdatedDependency = page
-        .waitForResponse((response) => response.status() === 504 && response.url().includes('/node_modules/.vite/'), {
-          timeout: 15_000,
-        })
-        /* oxlint-disable-next-line promise/prefer-await-to-then -- start the response waiter before navigation. */
-        .then(
-          () => true,
-          () => false,
-        );
-      /* oxlint-disable-next-line eslint/no-await-in-loop -- retries must navigate sequentially. */
-      await page.goto('/examples/proj_hollow_box');
-      if (
-        attempts === 1 ||
-        /* oxlint-disable-next-line eslint/no-await-in-loop -- each navigation races its own response/render waiters. */
-        !(await Promise.race([
-          outdatedDependency,
-          canvas.waitFor({ state: 'visible', timeout: 15_000 }).then(
-            () => false,
-            () => false,
-          ),
-        ]))
-      ) {
-        break;
-      }
-    }
+describe('Build Preview', () => {
+  test('renders a 3D model for the Hollow Box project', async () => {
+    const canvas = selectors.getByRole('img', { name: /3d model preview/i });
+    await target.navigate('/examples/proj_hollow_box');
 
-    await expect(canvas).toBeVisible({ timeout: 45_000 });
+    await target.expectVisible(canvas, 45_000);
+    await target.expectHidden(selectors.getByRole('alert'));
 
-    await expect(page.getByRole('alert')).not.toBeVisible();
+    const bboxViewer = selectors.getByTestId('bbox-viewer');
+    await target.expectVisible(bboxViewer, 60_000);
 
-    /* Assert real geometry was emitted via the `TAU_DEBUG`-gated
-     * bbox-viewer rather than pixel-matching the WebGL canvas — screenshot
-     * baselines of WebGL output are flaky across GPU/driver/headless modes
-     * and don't catch empty-geometry regressions. */
-    const bboxViewer = page.getByTestId('bbox-viewer');
-    await expect(bboxViewer).toBeVisible({ timeout: 60_000 });
-
-    const sizeText = (await page.getByTestId('bbox-size').textContent()) ?? '';
+    const sizeText = (await target.textContent(selectors.getByTestId('bbox-size'))) ?? '';
     const sizeMatch = /\[\s*([\d+.-]+)\s*,\s*([\d+.-]+)\s*,\s*([\d+.-]+)\s*]/.exec(sizeText);
     expect(sizeMatch, `bbox-size should match "[x, y, z]" but got "${sizeText}"`).not.toBeNull();
     const dims = sizeMatch!.slice(1, 4).map(Number);
@@ -51,7 +22,7 @@ test.describe('Build Preview', () => {
     }
 
     const positiveInt = async (testId: string): Promise<number> => {
-      const text = (await page.getByTestId(testId).textContent()) ?? '0';
+      const text = (await target.textContent(selectors.getByTestId(testId))) ?? '0';
       return Number.parseInt(text, 10);
     };
     expect(await positiveInt('count-meshes')).toBeGreaterThan(0);
@@ -59,20 +30,15 @@ test.describe('Build Preview', () => {
     expect(await positiveInt('count-triangles')).toBeGreaterThan(0);
   });
 
-  test('shows loading state before model is ready', async ({ page }) => {
-    await page.goto('/examples/proj_hollow_box');
-
-    const loading = page.getByRole('status', { name: /loading preview/i });
-    const canvas = page.getByRole('img', { name: /3d model preview/i });
-
-    // One of these must be visible immediately after navigation
-    await expect(loading.or(canvas)).toBeVisible({ timeout: 10_000 });
+  test('shows loading state before model is ready', async () => {
+    await target.navigate('/examples/proj_hollow_box');
+    const loading = selectors.getByRole('status', { name: /loading preview/i });
+    const canvas = selectors.getByRole('img', { name: /3d model preview/i });
+    await target.expectVisible(loading.or(canvas));
   });
 
-  test('displays an error for a non-existent project', async ({ page }) => {
-    await page.goto('/examples/proj_does_not_exist');
-
-    const alert = page.getByRole('alert', { name: /preview error/i });
-    await expect(alert).toBeVisible({ timeout: 45_000 });
+  test('displays an error for a non-existent project', async () => {
+    await target.navigate('/examples/proj_does_not_exist');
+    await target.expectVisible(selectors.getByRole('alert', { name: /preview error/i }), 45_000);
   });
 });

@@ -1,33 +1,33 @@
-import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import { expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import * as target from '#support/external-target.js';
 
 const projectNames = {
   a: 'Project Navigation A',
   b: 'Project Navigation B',
 } as const;
 
-async function expectProject(page: Page, options: { name: string; entryPath: string }): Promise<void> {
-  await expect(page.getByText(options.name, { exact: true }).first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.locator(`[data-testid="file-tree-item"][data-file-tree-path="${options.entryPath}"]`)).toBeVisible({
-    timeout: 60_000,
-  });
-  await expect(page.getByTestId('cad-viewer-canvas-region').locator('canvas').first()).toBeVisible({
-    timeout: 60_000,
-  });
-  await expect(page.locator('.tiptap[contenteditable="true"]').first()).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText(/doesn't exist|may have been deleted|project not found/i)).toHaveCount(0);
+async function expectProject(options: { name: string; entryPath: string }): Promise<void> {
+  await target.expectVisible(selectors.getByText(options.name, { exact: true }).first(), 60_000);
+  await target.expectVisible(
+    selectors.getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${options.entryPath}"]`),
+    60_000,
+  );
+  await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  await target.expectVisible(selectors.getByCss('.tiptap[contenteditable="true"]').first(), 60_000);
+  await target.expectCount(selectors.getByText(/doesn't exist|may have been deleted|project not found/i), 0);
 }
 
-async function openRecentProject(page: Page, name: string): Promise<void> {
-  const link = page.getByRole('link', { name }).first();
-  await expect(link).toBeVisible({ timeout: 60_000 });
-  await link.click();
-  await expect(page).toHaveURL(/\/w\/[^/]+\/[^/]+$/u, { timeout: 60_000 });
+async function openRecentProject(name: string): Promise<void> {
+  const link = selectors.getByRole('link', { name }).first();
+  await target.expectVisible(link, 60_000);
+  await target.click(link);
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
 }
 
-async function observeProjectShellContinuity(page: Page): Promise<void> {
-  await expect(page.locator('[data-slot="sidebar-wrapper"]')).toBeVisible();
-  await page.evaluate(() => {
+async function observeProjectShellContinuity(): Promise<void> {
+  await target.expectVisible(selectors.getByCss('[data-slot="sidebar-wrapper"]'));
+  await target.evaluate(() => {
     const scope = globalThis as typeof globalThis & {
       __tauProjectShellObserver?: MutationObserver;
     };
@@ -42,8 +42,8 @@ async function observeProjectShellContinuity(page: Page): Promise<void> {
   });
 }
 
-async function stopObservingProjectShell(page: Page): Promise<string | undefined> {
-  return page.evaluate(() => {
+async function stopObservingProjectShell(): Promise<string | undefined> {
+  return target.evaluate(() => {
     const scope = globalThis as typeof globalThis & {
       __tauProjectShellObserver?: MutationObserver;
     };
@@ -53,47 +53,45 @@ async function stopObservingProjectShell(page: Page): Promise<string | undefined
   });
 }
 
-test('client navigation keeps every project-scoped resource on one logical project ID', async ({ page }) => {
-  test.setTimeout(240_000);
-  const lifecycleFailures: string[] = [];
-  page.on('pageerror', (error) => {
-    if (/modelInteraction actor is not available|null.*addEventListener/iu.test(error.message)) {
-      lifecycleFailures.push(error.message);
-    }
-  });
-  page.on('console', (message) => {
-    const text = message.text();
-    if (/modelInteraction actor is not available|null.*addEventListener/iu.test(text)) {
-      lifecycleFailures.push(text);
-    }
-  });
-  await page.addInitScript(() => {
+test('client navigation keeps every project-scoped resource on one logical project ID', async () => {
+  await target.addInitScript(() => {
     (globalThis as typeof globalThis & { __tauDocumentIdentity?: string }).__tauDocumentIdentity = crypto.randomUUID();
   });
 
-  await page.goto('/__e2e/project-navigation');
-  await expect(page).toHaveURL(/\/w\/[^/]+\/[^/]+$/u, { timeout: 60_000 });
-  const documentIdentity = await page.evaluate(
+  await target.navigate('/__e2e/project-navigation');
+  await target.delay(5000);
+  const initialState = await target.evaluate(() => ({ href: location.href, text: document.body.textContent }));
+  if (!/\/w\/[^/]+\/[^/]+$/u.test(new URL(initialState.href).pathname)) {
+    const diagnostics = await target.events();
+    throw new Error(`Project-navigation seed did not open: ${JSON.stringify({ ...initialState, diagnostics })}`);
+  }
+  const documentIdentity = await target.evaluate(
     () => (globalThis as typeof globalThis & { __tauDocumentIdentity?: string }).__tauDocumentIdentity,
   );
-  await expectProject(page, { name: projectNames.a, entryPath: 'alpha.ts' });
-  await observeProjectShellContinuity(page);
+  await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
+  await observeProjectShellContinuity();
 
   try {
-    await openRecentProject(page, projectNames.b);
-    await expectProject(page, { name: projectNames.b, entryPath: 'beta.ts' });
-    await openRecentProject(page, projectNames.a);
-    await expectProject(page, { name: projectNames.a, entryPath: 'alpha.ts' });
-    await openRecentProject(page, projectNames.b);
-    await expectProject(page, { name: projectNames.b, entryPath: 'beta.ts' });
+    await openRecentProject(projectNames.b);
+    await expectProject({ name: projectNames.b, entryPath: 'beta.ts' });
+    await openRecentProject(projectNames.a);
+    await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
+    await openRecentProject(projectNames.b);
+    await expectProject({ name: projectNames.b, entryPath: 'beta.ts' });
   } finally {
-    expect(await stopObservingProjectShell(page)).toBeUndefined();
+    expect(await stopObservingProjectShell()).toBeUndefined();
   }
 
   await expect
     .poll(async () =>
-      page.evaluate(() => (globalThis as typeof globalThis & { __tauDocumentIdentity?: string }).__tauDocumentIdentity),
+      target.evaluate(
+        () => (globalThis as typeof globalThis & { __tauDocumentIdentity?: string }).__tauDocumentIdentity,
+      ),
     )
     .toBe(documentIdentity);
+  const events = await target.events();
+  const lifecycleFailures = [...events.pageErrors, ...events.consoleMessages.map(({ text }) => text)].filter(
+    (message) => /modelInteraction actor is not available|null.*addEventListener/iu.test(message),
+  );
   expect(lifecycleFailures).toEqual([]);
 });

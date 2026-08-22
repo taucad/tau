@@ -79,7 +79,7 @@ describe('@taucad/geospec-engine package metadata', () => {
     }
 
     const { default: build } = (await import('../native/opencascade/libcascade.config.js')) as {
-      default: { variants: Array<{ name: string }> };
+      default: { variants: ReadonlyArray<{ name: string }> };
     };
     expect(build.variants.map(({ name }) => name)).toStrictEqual(['single']);
 

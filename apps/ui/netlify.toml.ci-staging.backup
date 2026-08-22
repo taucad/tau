@@ -35,7 +35,7 @@
 #
 # NX_PREFER_NODE_STRIP_TYPES: NODE_ENV=production causes pnpm to skip
 # devDependencies (including @swc/core). Nx needs a TS transpiler to load
-# plugin config files (e.g. playwright.config.ts) during project graph
+# plugin config files (e.g. vitest.config.ts) during project graph
 # construction. This env var tells Nx to use Node's native type stripping
 # instead of SWC/ts-node, which requires no additional packages.
 

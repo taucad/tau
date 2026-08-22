@@ -2,13 +2,16 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
     "module": "preserve",
     "moduleResolution": "bundler",
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node", "vitest", "vitest/browser"]
   },
   "include": [
-    "playwright.config.ts",
+    "vitest.config.ts",
+    "global-setup.ts",
+    "browser-command.ts",
     "specs/**/*.ts",
     "support/**/*.ts",
     "support/**/*.tsx",

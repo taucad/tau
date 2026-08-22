@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js stacks, TSL materials, snapshots, and e2e parity'
 status: active
 created: '2026-05-07'
-updated: '2026-07-21'
+updated: '2026-08-21'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -62,11 +62,11 @@ For each **`NodeMaterial` factory**, add **`// @vitest-environment node`** tests
 
 **Why**: Deterministic graphs catch regressions without a GPU in CI.
 
-### 5. Playwright parity for viewport-visible differences
+### 5. Vitest Browser parity for viewport-visible differences
 
-Structural parity between WebGL and WebGPU for parity-sensitive visuals is enforced with **`apps/ui-e2e/src/graphics-backend.spec.ts`** loading **`/e2e/graphics-backend`** with **`?graphicsBackend=`** and named **`toHaveScreenshot`** assets. Prefer **`maxDiffPixelRatio: 0.02`** for general scenes and **`0.05`** where algorithms differ materially (e.g. N8AO vs GTAO-family nodes).
+Structural parity between WebGL and WebGPU for parity-sensitive visuals is enforced with **`apps/ui-e2e/src/graphics-backend.spec.ts`** loading **`/e2e/graphics-backend`** with **`?graphicsBackend=`**, capturing the remote canvas with **`locator.screenshot()`**, and asserting deterministic pixel characteristics for the named scene and backend.
 
-**Why**: WGSL/driver variance is real; named screenshots isolate failures per backend and scene.
+**Why**: WGSL/driver variance is real; scoped screenshot evidence isolates failures per backend and scene without confusing the Vitest controller page with the tested viewport.
 
 ### 6. Offscreen and screenshot paths honor backend semantics
 
@@ -334,7 +334,7 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 
 - [ ] New material: WebGL sibling + WebGPU **`NodeMaterial`**, factory branches on **`resolvedGraphicsBackend`**
 - [ ] **`__shader-snapshots__`** + node env Vitest **`await`** snapshot
-- [ ] If user-visible parity matters: harness query + Playwright **`toHaveScreenshot`** with explicit **`name`**
+- [ ] If user-visible parity matters: harness query + Vitest Browser remote-canvas screenshot/pixel assertion
 - [ ] Renderer construction routed through **`createTauRenderer`** unless a sanctioned exception lands in **`tau-renderer.ts`**
 - [ ] Custom WebGL **`ShaderMaterial`**: **`#include <colorspace_fragment>`** on manual **`gl_FragColor`** writes (§9)
 - [ ] Dual-stack alpha overlay: **`transparent: true`** declared on **both** backends (CB-1)

@@ -111,7 +111,7 @@ const run = async (): Promise<BrowserEngineReport> => {
 const report = document.querySelector('#report');
 
 /**
- * Handshake key the Playwright spec reads back off the page.
+ * Handshake key the Vitest Browser spec reads back off the page.
  *
  * Named rather than inlined so the access stays bracketed: the property lives
  * on an index signature, which `noPropertyAccessFromIndexSignature` requires be

@@ -426,7 +426,7 @@
     "geist": "catalog:",
     "next": "catalog:next16",
     "vite": "catalog:electron-vite7",
-    "vitest": "4.1.5",
+    "vitest": "catalog:",
     "vitest-mock-extended": "catalog:"
   }
 }

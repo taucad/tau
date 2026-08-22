@@ -6,11 +6,26 @@
   "tags": ["scope:ui", "type:e2e"],
   "implicitDependencies": ["ui"],
   "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run apps/ui-e2e/src/global-setup-preflight.spec.ts --environment=node"
+      }
+    },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/ui-e2e/vitest.config.ts"
+      }
+    },
     "test:e2e:development": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/ui-e2e/playwright.development.config.ts"
+        "command": "vitest run --config apps/ui-e2e/vitest.config.ts src/preview.spec.ts src/geospec-runner.spec.ts"
       }
     }
   }

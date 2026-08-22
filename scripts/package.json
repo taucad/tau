@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@inkjs/ui": "catalog:",
-    "@playwright/test": "catalog:",
+    "playwright": "catalog:",
     "@taucad/openrscad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",

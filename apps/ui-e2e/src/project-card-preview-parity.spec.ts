@@ -1,5 +1,7 @@
-import { expect, test } from '@playwright/test';
-import type { Locator, Page } from '@playwright/test';
+import { expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import type { Locator } from 'vitest/browser';
+import * as target from '#support/external-target.js';
 
 type ForegroundBounds = {
   readonly centerX: number;
@@ -9,9 +11,9 @@ type ForegroundBounds = {
   readonly pixels: number;
 };
 
-const measureForeground = async (page: Page, media: Locator): Promise<ForegroundBounds | undefined> => {
-  const screenshot = await media.screenshot({ animations: 'disabled' });
-  return page.evaluate(async (pngBase64) => {
+const measureForeground = async (media: Locator | string): Promise<ForegroundBounds | undefined> => {
+  const screenshot = await target.screenshot(media);
+  return target.evaluate(async (pngBase64) => {
     const image = new Image();
     await new Promise<void>((resolve, reject) => {
       image.addEventListener(
@@ -181,34 +183,40 @@ const measureForeground = async (page: Page, media: Locator): Promise<Foreground
       height: bestComponent.maxY - bestComponent.minY + 1,
       pixels: bestComponent.pixels,
     };
-  }, screenshot.toString('base64'));
+  }, screenshot);
 };
 
-test('project card thumbnail and preview parity', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto('/community');
-  await page.getByPlaceholder('Search projects...').fill('Involute Gear');
+test('project card thumbnail and preview parity', async () => {
+  await target.setViewport({ width: 1440, height: 1000 });
+  await target.navigate('/community');
+  await target.fill(selectors.getByPlaceholder('Search projects...'), 'Involute Gear');
 
-  const card = page.getByRole('link', { name: 'Preview Involute Gear' }).locator('..');
-  const thumbnail = card.getByRole('img', { name: 'Involute Gear' });
-  await expect(thumbnail).toBeVisible();
+  const card = '[data-slot="card"]:has(img[alt="Involute Gear"])';
+  const thumbnail = selectors.getByRole('img', { name: 'Involute Gear' });
+  await target.expectVisible(thumbnail);
   await expect
-    .poll(async () => thumbnail.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth))
+    .poll(async () =>
+      target.evaluateLocator(thumbnail, (element) => {
+        const image = element as HTMLImageElement;
+        return image.complete && image.naturalWidth;
+      }),
+    )
     .toBe(768);
 
-  const toggle = card.getByRole('button', { name: 'Preview model' });
-  const media = toggle.locator('..');
-  const thumbnailBounds = await measureForeground(page, media);
+  const toggle = `${card} button[aria-label="Preview model"]`;
+  const media = `${card} div:has(> button[aria-label="Preview model"])`;
+  const thumbnailBounds = await measureForeground(media);
   expect(thumbnailBounds?.pixels).toBeGreaterThan(100);
 
-  await toggle.click();
-  await expect(card.locator('canvas')).toBeVisible({ timeout: 60_000 });
+  await target.click(toggle);
+  const activeMedia = 'div:has(> button[aria-label="Preview model"][aria-pressed="true"])';
+  await target.expectVisible(`${activeMedia} canvas`, 60_000);
 
   let previewBounds: ForegroundBounds | undefined;
   await expect
     .poll(
       async () => {
-        previewBounds = await measureForeground(page, media);
+        previewBounds = await measureForeground(activeMedia);
         return previewBounds?.pixels ?? 0;
       },
       { timeout: 60_000 },

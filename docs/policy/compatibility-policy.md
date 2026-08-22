@@ -3,7 +3,7 @@ title: 'Platform Compatibility Policy'
 description: 'Canonical capability matrix for Tau browsers, runtime hosts, WebAssembly artifacts, filesystems, workers, and graphics.'
 status: active
 created: '2026-07-21'
-updated: '2026-08-04'
+updated: '2026-08-21'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -55,7 +55,7 @@ Capability tables use these columns:
 | Surfaces           | The Tau products, packages, or hosts to which the row applies.                                          |
 | Chromium           | Current Chromium evidence for the tier.                                                                 |
 | Firefox            | Current Firefox evidence for the tier.                                                                  |
-| Safari / WebKit    | Current Safari evidence; beta Safari and Playwright WebKit are identified explicitly.                   |
+| Safari / WebKit    | Current Safari evidence; beta Safari and automated WebKit providers are identified explicitly.          |
 | Node / Electron    | Evidence at Tau's declared host floor, not only the newest release.                                     |
 | Probe or proof     | Runtime operation, response inspection, static artifact validation, real-browser test, or package test. |
 | Fallback / failure | Required fallback or typed failure.                                                                     |
@@ -194,7 +194,7 @@ Published subpaths that target different runtimes must continue to satisfy the e
 | Safari blob workers can resolve relative sourcemaps through a malformed null origin          | Do not ship relative `sourceMappingURL` values in blob-worker payloads                 | `docs/research/safari-blob-worker-sourcemap-null-origin.md`                                                                                      | 2026-07-21 |
 | Safari/Firefox differ on CSS path morphing and external filtered SVG `<use>`                 | Use SMIL path animation and same-document symbols                                      | `docs/research/safari-svg-rendering-compatibility.md`                                                                                            | 2026-07-21 |
 | Chromium File System Access can create `.crswap` artifacts                                   | Filter them at the WebAccess provider boundary                                         | `docs/research/webaccess-crswap-leak-and-listing-race.md`                                                                                        | 2026-07-21 |
-| Playwright WebKit is not branded Safari                                                      | A WebKit automation pass cannot satisfy a Safari release gate                          | `docs/research/revision-git-engine-phase0-supplement.md`; [Playwright browsers](https://playwright.dev/docs/browsers)                            | 2026-07-21 |
+| Vitest Browser's WebKit provider is not branded Safari                                       | An automated WebKit pass cannot satisfy a Safari release gate                          | `docs/research/revision-git-engine-phase0-supplement.md`; [Vitest Browser providers](https://vitest.dev/guide/browser/)                          | 2026-08-21 |
 | OPFS can fail despite API presence                                                           | Perform the required operation and surface its DOMException as a typed provider result | [MDN `StorageManager.getDirectory()`](https://developer.mozilla.org/en-US/docs/Web/API/StorageManager/getDirectory); Tau OPFS investigations     | 2026-07-21 |
 | Apple Quick Look is not WebXR                                                                | Detect the `rel="ar"` capability and retain non-AR viewing/export                      | [Apple Quick Look](https://developer.apple.com/augmented-reality/quick-look/)                                                                    | 2026-07-21 |
 
@@ -242,7 +242,7 @@ Create the adapter, device, context, handle, or storage root when constructor pr
 
 ### 11. Qualify Real Browser Products
 
-Test current stable Chromium, Firefox, and branded Safari where applicable. Never label Playwright WebKit as Safari evidence.
+Test current stable Chromium, Firefox, and branded Safari where applicable. Never label an automated WebKit-provider pass as Safari evidence.
 
 ### 12. Test the Declared Host Floor
 
@@ -289,7 +289,7 @@ Demote with the same atomicity: change the matrix, restore or add the fallback, 
 
 - [ ] The feature is in scope because Tau requires, emits, uses, or has incident evidence for it.
 - [ ] The row names a Tau tier and every affected surface.
-- [ ] Browser evidence distinguishes Safari stable, beta Safari, and Playwright WebKit.
+- [ ] Browser evidence distinguishes Safari stable, beta Safari, and automated WebKit-provider coverage.
 - [ ] The probe proves the required operation or artifact, not only constructor presence.
 - [ ] Every Conditional row names a fallback or typed failure.
 - [ ] Universal Wasm works on Node 24 and branded Safari stable.

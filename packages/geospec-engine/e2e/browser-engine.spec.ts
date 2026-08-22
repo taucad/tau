@@ -1,13 +1,5 @@
-import { expect, test } from '@playwright/test';
-
-type BrowserEngineReport = {
-  engine: string;
-  capabilities: string[];
-  triangles: number;
-  watertight: boolean;
-  tests: Array<{ name: string; status: string }>;
-  error?: string;
-};
+import { describe, expect, test } from 'vitest';
+import { server } from 'vitest/browser';
 
 /**
  * The engine's browser contract, exercised the way `apps/ui`'s GeoSpec worker
@@ -15,18 +7,25 @@ type BrowserEngineReport = {
  * matchers execute against real geometry — in a real browser, from a real Vite
  * production build.
  */
-test.describe('@taucad/geospec-engine in the browser', () => {
-  test('registers and proves a watertight box without a Node runtime', async ({ page }) => {
-    const consoleErrors: string[] = [];
-    page.on('pageerror', (error) => consoleErrors.push(error.message));
+describe('@taucad/geospec-engine in the browser', () => {
+  test('registers and proves a watertight box without a Node runtime', async ({ annotate }) => {
+    const result = await server.commands.runGeospecPreview();
+    const { report } = result;
 
-    await page.goto('/');
-    await expect(page.getByTestId('report')).not.toBeEmpty({ timeout: 120_000 });
+    if (result.serverLog) {
+      await annotate('GeoSpec preview server output', {
+        body: result.serverLog,
+        // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Vitest's annotation API accepts this spelling.
+        bodyEncoding: 'utf-8',
+        contentType: 'text/plain',
+      });
+    }
 
-    const report = await page.evaluate<BrowserEngineReport>(
-      () => (globalThis as typeof globalThis & { __geospecBrowserReport: BrowserEngineReport }).__geospecBrowserReport,
-    );
-
+    expect(result.headers['cross-origin-opener-policy']).toBe('same-origin');
+    expect(result.headers['cross-origin-embedder-policy']).toBe('require-corp');
+    expect(result.headers['cross-origin-resource-policy']).toBe('same-origin');
+    expect(result.crossOriginIsolated).toBe(true);
+    expect(result.sharedArrayBuffer).toBe(true);
     expect(report.error, `fixture threw: ${report.error ?? ''}`).toBeUndefined();
     expect(report.engine).toBe('@taucad/geospec-engine');
     // Capability discovery is Contract B: it reports the 23 matchers and four
@@ -39,6 +38,7 @@ test.describe('@taucad/geospec-engine in the browser', () => {
     expect(report.triangles).toBe(12);
     expect(report.watertight).toBe(true);
     expect(report.tests).toEqual([{ name: 'proves the box mesh is watertight', status: 'passed' }]);
-    expect(consoleErrors).toEqual([]);
+    expect(result.consoleErrors).toEqual([]);
+    expect(result.pageErrors).toEqual([]);
   });
 });

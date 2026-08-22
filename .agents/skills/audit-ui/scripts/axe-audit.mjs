@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Drive @axe-core/playwright across Tau target routes × viewports.
+// Drive axe-core across Tau target routes × viewports.
 // Usage: node axe-audit.mjs [host]
 // host defaults to https://taucad.dev — pass https://tau.new for production runs.
 //
@@ -7,8 +7,8 @@
 //   axe-violations.json — full node list per rule, per URL, per viewport
 //   axe-summary.json    — counts per rule/severity, per URL/viewport
 import { writeFileSync } from 'node:fs';
-import { chromium } from '@playwright/test';
-import AxeBuilder from '@axe-core/playwright';
+import axe from 'axe-core';
+import { chromium } from 'playwright';
 
 const HOST = process.argv[2] ?? 'https://taucad.dev';
 
@@ -37,7 +37,11 @@ for (const vp of VIEWPORTS) {
     let result = { route: route.name, viewport: vp.name, url, violations: [], error: null };
     try {
       await page.goto(url, { waitUntil: 'networkidle', timeout: 90_000 });
-      const axeResults = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+      await page.addScriptTag({ content: axe.source });
+      const axeResults = await page.evaluate(
+        async (tags) => globalThis.axe.run(document, { runOnly: { type: 'tag', values: tags } }),
+        TAGS,
+      );
       result.violations = axeResults.violations;
     } catch (e) {
       result.error = e.message;

@@ -1,5 +1,6 @@
-import type { Page, TestInfo } from '@playwright/test';
-import { expect, test } from '@playwright/test';
+import { expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import * as target from '#support/external-target.js';
 
 type SectionViewBridgeWindow = Window & {
   __TAU_SECTION_VIEW_TEST__?: {
@@ -44,18 +45,16 @@ const sectionControlFixtureRoute = (backend: 'webgl' | 'webgpu'): string =>
   `/examples/jscad_cube_cylinder_section_fixture?graphicsBackend=${backend}`;
 const expectedFaceSelectorLabels = ['Back', 'Bottom', 'Front', 'Left', 'Right', 'Top'];
 
-async function openSectionControlFixture(page: Page, backend: 'webgl' | 'webgpu' = 'webgl'): Promise<void> {
-  await page.setViewportSize({ width: 960, height: 720 });
-  await page.goto(sectionControlFixtureRoute(backend));
-  await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
-  await page.waitForFunction(() =>
-    Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__),
-  );
+async function openSectionControlFixture(backend: 'webgl' | 'webgpu' = 'webgl'): Promise<void> {
+  await target.setViewport({ width: 960, height: 720 });
+  await target.navigate(sectionControlFixtureRoute(backend));
+  await target.expectVisible(selectors.getByRole('img', { name: /3d model preview/i }), 60_000);
+  await target.expectVisible(selectors.getByTestId('bbox-viewer'), 60_000);
+  await target.waitFor(() => Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__));
 }
 
-async function driveObliqueTransformControls(page: Page): Promise<void> {
-  await page.evaluate(() => {
+async function driveObliqueTransformControls(): Promise<void> {
+  await target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
@@ -77,10 +76,10 @@ async function driveObliqueTransformControls(page: Page): Promise<void> {
   });
 }
 
-async function driveStackedPlaneSelectors(page: Page, side: 'front' | 'reverse' = 'front'): Promise<void> {
+async function driveStackedPlaneSelectors(side: 'front' | 'reverse' = 'front'): Promise<void> {
   const position = side === 'front' ? ([5.2, -6.8, 4.8] as const) : ([-5.2, 6.8, -4.8] as const);
 
-  await page.evaluate((nextPosition) => {
+  await target.evaluate((nextPosition) => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
@@ -96,10 +95,10 @@ async function driveStackedPlaneSelectors(page: Page, side: 'front' | 'reverse' 
   }, position);
 }
 
-async function expectAllFaceSelectorLabelsMounted(page: Page): Promise<void> {
+async function expectAllFaceSelectorLabelsMounted(): Promise<void> {
   await expect
     .poll(async () =>
-      page.evaluate(() => {
+      target.evaluate(() => {
         const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
         if (!bridge) {
           throw new Error('Section view e2e bridge is not installed.');
@@ -111,20 +110,14 @@ async function expectAllFaceSelectorLabelsMounted(page: Page): Promise<void> {
     .toEqual(expectedFaceSelectorLabels);
 }
 
-async function captureSectionCanvas(
-  page: Page,
-  testInfo: TestInfo,
-  fileName: string,
-): Promise<Uint8Array<ArrayBuffer>> {
-  const canvas = page.locator(previewCanvasSelector);
-  await expect(canvas).toBeVisible({ timeout: 60_000 });
-  const screenshot = await canvas.screenshot({ animations: 'disabled', path: testInfo.outputPath(fileName) });
-
-  return new Uint8Array(screenshot);
+async function captureSectionCanvas(fileName: string): Promise<string> {
+  const canvas = selectors.getByCss(previewCanvasSelector);
+  await target.expectVisible(canvas, 60_000);
+  return target.screenshot(canvas, fileName);
 }
 
-async function samplePng(page: Page, png: Uint8Array<ArrayBuffer>, region: CanvasSampleRegion): Promise<PixelStats> {
-  return page.evaluate(
+async function samplePng(pngBase64: string, region: CanvasSampleRegion): Promise<PixelStats> {
+  return target.evaluate(
     async ({ pngBase64, sampleRegion }) => {
       const sampleWidth = 160;
       const sampleHeight = 160;
@@ -198,18 +191,18 @@ async function samplePng(page: Page, png: Uint8Array<ArrayBuffer>, region: Canva
         softTextEdge,
       };
     },
-    { pngBase64: Buffer.from(png).toString('base64'), sampleRegion: region },
+    { pngBase64, sampleRegion: region },
   );
 }
 
 test.describe('Section view control restyle regressions', () => {
-  test('renders solid bordered transform arrows without interior seam walls', async ({ page }, testInfo) => {
-    await openSectionControlFixture(page);
-    await driveObliqueTransformControls(page);
-    await page.waitForTimeout(900);
+  test('renders solid bordered transform arrows without interior seam walls', async () => {
+    await openSectionControlFixture();
+    await driveObliqueTransformControls();
+    await target.delay(900);
 
-    const png = await captureSectionCanvas(page, testInfo, 'section-control-transform-arrows-webgl.png');
-    const stats = await samplePng(page, png, { x: 0.2, y: 0.2, width: 0.62, height: 0.65 });
+    const png = await captureSectionCanvas('section-control-transform-arrows-webgl.png');
+    const stats = await samplePng(png, { x: 0.2, y: 0.2, width: 0.62, height: 0.65 });
     const borderPixels = stats.reddish + stats.greenish + stats.blueish;
 
     expect(stats.distinctBuckets, 'transform arrow view should contain varied rendered pixels').toBeGreaterThan(18);
@@ -228,20 +221,20 @@ test.describe('Section view control restyle regressions', () => {
 
   for (const backend of ['webgl', 'webgpu'] as const) {
     test(`renders half-width bordered selector bodies with labels occluded by nearer selector bodies in ${backend}`, async ({
-      page,
-    }, testInfo) => {
+      skip,
+    }) => {
       if (backend === 'webgpu') {
-        const hasWebGpu = await page.evaluate(() => 'gpu' in navigator);
-        test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
+        const hasWebGpu = await target.evaluate(() => 'gpu' in navigator);
+        skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
       }
 
-      await openSectionControlFixture(page, backend);
-      await driveStackedPlaneSelectors(page);
-      await page.waitForTimeout(900);
-      await expectAllFaceSelectorLabelsMounted(page);
+      await openSectionControlFixture(backend);
+      await driveStackedPlaneSelectors();
+      await target.delay(900);
+      await expectAllFaceSelectorLabelsMounted();
 
-      const png = await captureSectionCanvas(page, testInfo, `section-control-plane-selectors-${backend}.png`);
-      const stats = await samplePng(page, png, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
+      const png = await captureSectionCanvas(`section-control-plane-selectors-${backend}.png`);
+      const stats = await samplePng(png, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
       const borderPixels = stats.reddish + stats.greenish + stats.blueish;
 
       expect(stats.distinctBuckets, 'selector stack view should contain varied rendered pixels').toBeGreaterThan(20);
@@ -264,16 +257,12 @@ test.describe('Section view control restyle regressions', () => {
         `hidden labels should not overdraw every stacked body: ${JSON.stringify(stats)}`,
       ).toBeLessThan(stats.whiteish * 0.24);
 
-      await driveStackedPlaneSelectors(page, 'reverse');
-      await page.waitForTimeout(900);
-      await expectAllFaceSelectorLabelsMounted(page);
+      await driveStackedPlaneSelectors('reverse');
+      await target.delay(900);
+      await expectAllFaceSelectorLabelsMounted();
 
-      const reversePng = await captureSectionCanvas(
-        page,
-        testInfo,
-        `section-control-plane-selectors-reverse-${backend}.png`,
-      );
-      const reverseStats = await samplePng(page, reversePng, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
+      const reversePng = await captureSectionCanvas(`section-control-plane-selectors-reverse-${backend}.png`);
+      const reverseStats = await samplePng(reversePng, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
       expect(
         reverseStats.darkTextish,
         `reverse selector labels should be visible on the opposite selector caps: ${JSON.stringify(reverseStats)}`,
@@ -283,7 +272,7 @@ test.describe('Section view control restyle regressions', () => {
         `reverse selector labels should preserve blended antialias edges: ${JSON.stringify(reverseStats)}`,
       ).toBeGreaterThan(35);
 
-      await page.evaluate(() => {
+      await target.evaluate(() => {
         const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
         if (!bridge) {
           throw new Error('Section view e2e bridge is not installed.');
@@ -291,17 +280,13 @@ test.describe('Section view control restyle regressions', () => {
 
         bridge.setSectionView({ plane: 'xy', direction: 1, pivot: [0, 0, 0] });
       });
-      await page.waitForTimeout(300);
-      await driveStackedPlaneSelectors(page);
-      await page.waitForTimeout(900);
-      await expectAllFaceSelectorLabelsMounted(page);
+      await target.delay(300);
+      await driveStackedPlaneSelectors();
+      await target.delay(900);
+      await expectAllFaceSelectorLabelsMounted();
 
-      const afterChangePng = await captureSectionCanvas(
-        page,
-        testInfo,
-        `section-control-plane-selectors-after-change-${backend}.png`,
-      );
-      const afterChangeStats = await samplePng(page, afterChangePng, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
+      const afterChangePng = await captureSectionCanvas(`section-control-plane-selectors-after-change-${backend}.png`);
+      const afterChangeStats = await samplePng(afterChangePng, { x: 0.32, y: 0.26, width: 0.38, height: 0.44 });
       expect(
         afterChangeStats.darkTextish,
         `selector labels should remain visible after selecting a plane and reopening selector choices: ${JSON.stringify(

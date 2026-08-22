@@ -75,6 +75,7 @@
     "imports": {}
   },
   "imports": {
+    "#e2e/*.js": "./e2e/*.ts",
     "#experiments/*.js": "./experiments/*.ts",
     "#cache/node-evidence-store.js": {
       "browser": "./src/cache/browser-evidence-store.ts",
@@ -91,7 +92,6 @@
   },
   "devDependencies": {
     "@libcascade/toolchain": "catalog:",
-    "@playwright/test": "catalog:",
     "@taucad/chat": "workspace:*",
     "@taucad/openrscad": "workspace:*",
     "@taucad/tau-examples": "workspace:*"

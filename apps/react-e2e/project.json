@@ -6,6 +6,23 @@
   "tags": ["scope:shared", "type:e2e"],
   "implicitDependencies": ["react", "runtime"],
   "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
+        ]
+      }
+    },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
@@ -25,14 +42,14 @@
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=electron",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=electron-example",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-isolated",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-non-isolated",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-example",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-isolated",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-non-isolated",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-example"
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
         ]
       }
     },
@@ -42,10 +59,10 @@
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-development",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-example-development",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-development",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-example-development"
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-development",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example-development",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-development",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example-development"
         ]
       }
     },
@@ -55,8 +72,8 @@
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=electron-development",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=electron-example-development"
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-development",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example-development"
         ]
       }
     },
@@ -66,9 +83,9 @@
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-isolated",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-non-isolated",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-example"
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
         ]
       }
     },
@@ -76,21 +93,21 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-isolated"
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated"
       }
     },
     "test:e2e:nextjs:non-isolated": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-non-isolated"
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated"
       }
     },
     "test:e2e:nextjs:example": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=nextjs-example"
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
       }
     },
     "test:e2e:react-router": {
@@ -99,9 +116,9 @@
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-isolated",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-non-isolated",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-example"
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example"
         ]
       }
     },
@@ -109,21 +126,21 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-isolated"
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated"
       }
     },
     "test:e2e:react-router:non-isolated": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-non-isolated"
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated"
       }
     },
     "test:e2e:react-router:example": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=react-router-example"
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example"
       }
     },
     "test:e2e:electron": {
@@ -132,8 +149,8 @@
         "cwd": "{workspaceRoot}",
         "parallel": false,
         "commands": [
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=electron",
-          "playwright test --config apps/react-e2e/playwright.config.ts --project=electron-example"
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example"
         ]
       }
     },
@@ -141,14 +158,14 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=electron"
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=electron"
       }
     },
     "test:e2e:electron-example": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "playwright test --config apps/react-e2e/playwright.config.ts --project=electron-example"
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example"
       }
     }
   }

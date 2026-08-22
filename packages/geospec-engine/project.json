@@ -20,8 +20,8 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "cwd": "{projectRoot}/e2e",
-        "command": "pnpm exec playwright test"
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config packages/geospec-engine/e2e/vitest.config.ts"
       }
     },
     "build-wasm": {

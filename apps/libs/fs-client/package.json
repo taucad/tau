@@ -124,6 +124,6 @@
     "@testing-library/react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "vitest": "4.1.5"
+    "vitest": "catalog:"
   }
 }

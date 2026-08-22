@@ -84,7 +84,7 @@ export function Stage({
 
   // Gate the e2e test bridge behind the debug flag so it is never mounted or
   // executed in prod. The e2e suite runs with `TAU_DEBUG=true` (see
-  // apps/ui-e2e/playwright.config.ts), which resolves this flag on.
+  // apps/ui-e2e/global-setup.ts), which resolves this flag on.
   const isTauDebugEnabled = useFeature('tauDebug');
 
   const sectionView = useSectionView();

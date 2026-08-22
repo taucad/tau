@@ -1,6 +1,5 @@
 import { readdirSync } from 'node:fs';
 import { basename } from 'node:path';
-import { expect } from '@playwright/test';
 
 const runtimeAssets = [
   ['replicad_single', '.js'],
@@ -17,16 +16,22 @@ const artifactNames = (root: string): string[] =>
 const matchingAssets = (names: readonly string[], stem: string, extension: string): string[] =>
   names.filter((name) => name.startsWith(stem) && name.endsWith(extension));
 
-export const expectRuntimeBuildArtifacts = (assetRoot: string, excludedRoot?: string): void => {
+export type RuntimeBuildArtifactReport = Readonly<
+  Record<string, { readonly emitted: number; readonly excluded: number }>
+>;
+
+export const runtimeBuildArtifactReport = (assetRoot: string, excludedRoot?: string): RuntimeBuildArtifactReport => {
   const emitted = artifactNames(assetRoot);
   const excluded = excludedRoot ? artifactNames(excludedRoot) : [];
-
-  for (const [stem, extension] of runtimeAssets) {
-    expect(matchingAssets(emitted, stem, extension), `${stem}${extension} in ${assetRoot}`).toHaveLength(1);
-    expect(matchingAssets(excluded, stem, extension), `${stem}${extension} absent from ${excludedRoot}`).toHaveLength(
-      0,
-    );
-  }
+  return Object.fromEntries(
+    runtimeAssets.map(([stem, extension]) => [
+      `${stem}${extension}`,
+      {
+        emitted: matchingAssets(emitted, stem, extension).length,
+        excluded: matchingAssets(excluded, stem, extension).length,
+      },
+    ]),
+  );
 };
 
 export const buildArtifactNames = artifactNames;

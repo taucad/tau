@@ -1,5 +1,4 @@
-import { resolve } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { test } from 'vitest';
 import {
   expectCooperativeTimeoutRecovery,
   expectCylinderRender,
@@ -8,38 +7,28 @@ import {
   getBrowserDeployment,
   openBrowserRuntime,
 } from '../support/browser-runtime-suite';
-import { packageVersion } from '../support/package-version';
-import { expectRuntimeBuildArtifacts } from '../support/runtime-build-artifacts';
+import { currentReactTarget, expectTargetInspection } from '../support/external-target';
 
-const appRoot = resolve(import.meta.dirname, '../apps/react-router');
-
-test.beforeAll(({ browserName: _browserName }, workerInfo) => {
-  expect(packageVersion(appRoot, 'react-router')).toBe('7.18.2');
-  expect(packageVersion(appRoot, '@react-router/dev')).toBe('7.18.2');
-  expect(packageVersion(appRoot, 'vite')).toBe('7.3.6');
-  const output = workerInfo.project.name === 'react-router-isolated' ? 'build-isolated' : 'build-non-isolated';
-  expectRuntimeBuildArtifacts(resolve(appRoot, `${output}/client/assets`));
+test('should publish the latest Replicad cylinder through React Router and Vite', async () => {
+  expectTargetInspection();
+  await openBrowserRuntime();
+  await expectCylinderRender();
+  await expectRapidParameterChangesPublishLatestGeometry();
 });
 
-test('should publish the latest Replicad cylinder through React Router and Vite', async ({ page }, testInfo) => {
-  await openBrowserRuntime(page, testInfo);
-  await expectCylinderRender(page);
-  await expectRapidParameterChangesPublishLatestGeometry(page);
+test('should recover the same browser runtime after a cooperative wire timeout', async ({ skip }) => {
+  skip(getBrowserDeployment() !== 'non-isolated', 'Wire-notify is owned by non-isolated deployments.');
+  await openBrowserRuntime();
+  await expectCooperativeTimeoutRecovery();
 });
 
-test('should recover the same browser runtime after a cooperative wire timeout', async ({ page }, testInfo) => {
-  test.skip(getBrowserDeployment(testInfo) !== 'non-isolated', 'Wire-notify is owned by non-isolated deployments.');
-  await openBrowserRuntime(page, testInfo);
-  await expectCooperativeTimeoutRecovery(page);
-});
-
-test('should terminate a blocking browser runtime without affecting its sibling', async ({ page }, testInfo) => {
-  test.skip(
-    testInfo.project.name !== 'react-router-non-isolated',
+test('should terminate a blocking browser runtime without affecting its sibling', async ({ skip }) => {
+  skip(
+    currentReactTarget().id !== 'react-router-non-isolated',
     'The browser Worker termination contract has one canonical framework owner.',
   );
-  await openBrowserRuntime(page, testInfo);
-  await expectCylinderRender(page);
-  await expectHardTimeoutTermination(page);
-  await expectRapidParameterChangesPublishLatestGeometry(page);
+  await openBrowserRuntime();
+  await expectCylinderRender();
+  await expectHardTimeoutTermination();
+  await expectRapidParameterChangesPublishLatestGeometry();
 });

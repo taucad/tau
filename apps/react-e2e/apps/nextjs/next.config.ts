@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { withTauRuntime } from '@taucad/runtime/nextjs/config';
+import type { NextRuntimeConfig } from '@taucad/runtime/nextjs/config';
 import type { NextConfig } from 'next';
 
 const deployment = process.env['TAU_REACT_E2E_DEPLOYMENT'] ?? 'isolated';
@@ -9,7 +10,7 @@ if (deployment !== 'isolated' && deployment !== 'non-isolated') {
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 
-export default withTauRuntime(
+const config: NextRuntimeConfig = withTauRuntime(
   {
     distDir: deployment === 'isolated' ? '.next-isolated' : '.next-non-isolated',
     outputFileTracingRoot: workspaceRoot,
@@ -17,3 +18,5 @@ export default withTauRuntime(
   } satisfies NextConfig,
   deployment === 'isolated' ? {} : { document: [] },
 );
+
+export default config;

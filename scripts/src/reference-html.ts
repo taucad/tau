@@ -13,16 +13,8 @@ import {
 import type { IncomingMessage, OutgoingHttpHeaders } from 'node:http';
 import { basename, dirname, join } from 'node:path';
 
-import { chromium } from '@playwright/test';
-import type {
-  Browser,
-  BrowserContext,
-  Locator,
-  Page,
-  Request,
-  Route,
-  Worker as PlaywrightWorker,
-} from '@playwright/test';
+import { chromium } from 'playwright';
+import type { Browser, BrowserContext, Locator, Page, Request, Route, Worker as PlaywrightWorker } from 'playwright';
 import { JSDOM } from 'jsdom';
 
 import { validatePdfArtifact } from '#pdf-to-md.js';

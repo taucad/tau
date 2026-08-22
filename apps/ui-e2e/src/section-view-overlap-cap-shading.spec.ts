@@ -1,5 +1,6 @@
-import type { ConsoleMessage, Page, TestInfo } from '@playwright/test';
-import { expect, test } from '@playwright/test';
+import { expect, test } from 'vitest';
+import { page as selectors } from 'vitest/browser';
+import * as target from '#support/external-target.js';
 
 type SectionViewBridgeWindow = Window & {
   __TAU_SECTION_VIEW_TEST__?: {
@@ -70,7 +71,6 @@ type CanvasRegion = Readonly<{
 type CaptureCanvasOptions = Readonly<{
   fileName: string;
   region: CanvasRegion;
-  testInfo: TestInfo;
 }>;
 
 const webgpuValidationPatterns: readonly RegExp[] = [
@@ -79,36 +79,21 @@ const webgpuValidationPatterns: readonly RegExp[] = [
   /depth-stencil format mismatch/,
 ];
 
-const attachWebGpuValidationListener = (
-  page: Page,
-): {
-  failuresRef: { lines: string[] };
-  detach(): void;
-} => {
-  const failuresRef: { lines: string[] } = { lines: [] };
-
-  const listener = (message: ConsoleMessage): void => {
-    const text = message.text();
-    for (const pattern of webgpuValidationPatterns) {
-      if (pattern.test(text)) {
-        failuresRef.lines.push(`[${message.type()}] ${text}`);
-        break;
-      }
-    }
-  };
-
-  page.on('console', listener);
-
-  return {
-    failuresRef,
-    detach: () => {
-      page.off('console', listener);
-    },
-  };
+const consoleMessageCount = async (): Promise<number> => {
+  const events = await target.events();
+  return events.consoleMessages.length;
 };
 
-const driveOverlapSectionView = async (page: Page, translation: number): Promise<void> => {
-  await page.evaluate((nextTranslation) => {
+const webGpuValidationFailures = async (from: number): Promise<string[]> => {
+  const events = await target.events();
+  return events.consoleMessages
+    .slice(from)
+    .filter(({ text }) => webgpuValidationPatterns.some((pattern) => pattern.test(text)))
+    .map(({ text, type }) => `[${type}] ${text}`);
+};
+
+const driveOverlapSectionView = async (translation: number): Promise<void> => {
+  await target.evaluate((nextTranslation) => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
@@ -130,15 +115,15 @@ const driveOverlapSectionView = async (page: Page, translation: number): Promise
   }, translation);
 };
 
-const overlapRegionForCanvas = async (page: Page): Promise<CanvasRegion> => {
-  const canvas = page.locator('[role="img"][aria-label*="3D model preview" i] canvas');
-  await expect(canvas).toBeVisible({ timeout: 60_000 });
-  const box = await canvas.boundingBox();
+const overlapRegionForCanvas = async (): Promise<CanvasRegion> => {
+  const canvas = selectors.getByCss('[role="img"][aria-label*="3D model preview" i] canvas');
+  await target.expectVisible(canvas, 60_000);
+  const box = await target.boundingBox(canvas);
   if (!box) {
     throw new Error('3D preview canvas bounding box is unavailable.');
   }
 
-  const projected = await page.evaluate(() => {
+  const projected = await target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
@@ -162,16 +147,14 @@ const overlapRegionForCanvas = async (page: Page): Promise<CanvasRegion> => {
   };
 };
 
-const getOverlapDiagnostics = async (
-  page: Page,
-): Promise<
+const getOverlapDiagnostics = async (): Promise<
   NonNullable<SectionViewBridgeWindow['__TAU_SECTION_VIEW_TEST__']> extends infer Bridge
     ? Bridge extends { getSectionCapOverlapDiagnostics(): infer Result }
       ? Result
       : never
     : never
 > =>
-  page.evaluate(() => {
+  target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
@@ -180,9 +163,7 @@ const getOverlapDiagnostics = async (
     return bridge.getSectionCapOverlapDiagnostics();
   });
 
-const getPerformanceDiagnostics = async (
-  page: Page,
-): Promise<
+const getPerformanceDiagnostics = async (): Promise<
   | {
       latestFrame: {
         topologyKey?: string;
@@ -196,7 +177,7 @@ const getPerformanceDiagnostics = async (
     }
   | undefined
 > =>
-  page.evaluate(() => {
+  target.evaluate(() => {
     const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
     if (!bridge) {
       throw new Error('Section view e2e bridge is not installed.');
@@ -205,8 +186,8 @@ const getPerformanceDiagnostics = async (
     return bridge.getSectionCapPerformanceDiagnostics?.();
   });
 
-const waitForExactOverlapDiagnostics = async (page: Page): Promise<void> => {
-  await page.waitForFunction(
+const waitForExactOverlapDiagnostics = async (): Promise<void> => {
+  await target.waitFor(
     () => {
       const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
       const diagnostics = bridge?.getSectionCapOverlapDiagnostics();
@@ -222,20 +203,17 @@ const waitForExactOverlapDiagnostics = async (page: Page): Promise<void> => {
   );
 };
 
-const captureAndSampleCanvas = async (page: Page, options: CaptureCanvasOptions): Promise<CanvasSample> => {
-  const canvas = page.locator('[role="img"][aria-label*="3D model preview" i] canvas');
-  await expect(canvas).toBeVisible({ timeout: 60_000 });
-  const box = await canvas.boundingBox();
+const captureAndSampleCanvas = async (options: CaptureCanvasOptions): Promise<CanvasSample> => {
+  const canvas = selectors.getByCss('[role="img"][aria-label*="3D model preview" i] canvas');
+  await target.expectVisible(canvas, 60_000);
+  const box = await target.boundingBox(canvas);
   if (!box) {
     throw new Error('3D preview canvas bounding box is unavailable.');
   }
 
-  const screenshot = await canvas.screenshot({
-    animations: 'disabled',
-    path: options.testInfo.outputPath(options.fileName),
-  });
+  const screenshot = await target.screenshot(canvas, options.fileName);
 
-  return page.evaluate(
+  return target.evaluate(
     async ({ canvasBox, pngBase64, sampleRegion }) => {
       const sampleWidth = 128;
       const sampleHeight = 128;
@@ -389,169 +367,158 @@ const captureAndSampleCanvas = async (page: Page, options: CaptureCanvasOptions)
         distinctBuckets: histogram.size,
       };
     },
-    { canvasBox: box, pngBase64: screenshot.toString('base64'), sampleRegion: options.region },
+    { canvasBox: box, pngBase64: screenshot, sampleRegion: options.region },
   );
 };
 
 test.describe('Section view overlap cap shading', () => {
   for (const backend of ['webgl', 'webgpu'] as const) {
-    test(`renders red overlap caps only for positive-area overlaps in ${backend}`, async ({ page }, testInfo) => {
+    test(`renders red overlap caps only for positive-area overlaps in ${backend}`, async ({ skip }) => {
       if (backend === 'webgpu') {
-        const hasWebGpu = await page.evaluate(() => 'gpu' in navigator);
-        test.skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
+        const hasWebGpu = await target.evaluate(() => 'gpu' in navigator);
+        skip(!hasWebGpu, 'WebGPU is not available in this browser runtime.');
       }
 
-      const listener = backend === 'webgpu' ? attachWebGpuValidationListener(page) : undefined;
+      const messageStart = await consoleMessageCount();
 
-      try {
-        await page.goto(`/examples/jscad_section_overlap_fixture?graphicsBackend=${backend}`);
-        await expect(page.getByRole('img', { name: /3d model preview/i })).toBeVisible({ timeout: 60_000 });
-        await expect(page.getByTestId('bbox-viewer')).toBeVisible({ timeout: 60_000 });
-        await page.waitForFunction(() =>
-          Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__),
-        );
+      await target.navigate(`/examples/jscad_section_overlap_fixture?graphicsBackend=${backend}`);
+      await target.expectVisible(selectors.getByRole('img', { name: /3d model preview/i }), 60_000);
+      await target.expectVisible(selectors.getByTestId('bbox-viewer'), 60_000);
+      await target.waitFor(() => Boolean((globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__));
 
-        await driveOverlapSectionView(page, 0);
-        await waitForExactOverlapDiagnostics(page);
-        await page.waitForTimeout(250);
-        const region = await overlapRegionForCanvas(page);
-        const overlapDiagnostics = await getOverlapDiagnostics(page);
-        expect(overlapDiagnostics, `${backend}: exact overlap diagnostics should be published`).toBeDefined();
-        expect(overlapDiagnostics?.splitFailed, `${backend}: exact source splitting should succeed`).toBe(false);
-        expect(
-          overlapDiagnostics?.exactIntersectionPairCount,
-          `${backend}: every broadphase candidate should run exact intersection`,
-        ).toBe(overlapDiagnostics?.broadphaseCandidatePairCount);
-        expect(overlapDiagnostics?.positiveAreaPairCount).toBeGreaterThan(0);
-        expect(overlapDiagnostics?.renderedOverlapArea).toBeGreaterThan(0);
-        expect(Object.keys(overlapDiagnostics ?? {}).sort()).toEqual([
-          'broadphaseCandidatePairCount',
-          'diagnostics',
-          'exactIntersectionPairCount',
-          'positiveAreaPairCount',
-          'renderedOverlapArea',
-          'sourceCount',
-          'sourcePairCount',
-          'splitFailed',
-        ]);
-        const overlap = await captureAndSampleCanvas(page, {
-          fileName: `section-overlap-cap-${backend}.png`,
-          region,
-          testInfo,
-        });
+      await driveOverlapSectionView(0);
+      await waitForExactOverlapDiagnostics();
+      await target.delay(250);
+      const region = await overlapRegionForCanvas();
+      const overlapDiagnostics = await getOverlapDiagnostics();
+      expect(overlapDiagnostics, `${backend}: exact overlap diagnostics should be published`).toBeDefined();
+      expect(overlapDiagnostics?.splitFailed, `${backend}: exact source splitting should succeed`).toBe(false);
+      expect(
+        overlapDiagnostics?.exactIntersectionPairCount,
+        `${backend}: every broadphase candidate should run exact intersection`,
+      ).toBe(overlapDiagnostics?.broadphaseCandidatePairCount);
+      expect(overlapDiagnostics?.positiveAreaPairCount).toBeGreaterThan(0);
+      expect(overlapDiagnostics?.renderedOverlapArea).toBeGreaterThan(0);
+      expect(Object.keys(overlapDiagnostics ?? {}).sort()).toEqual([
+        'broadphaseCandidatePairCount',
+        'diagnostics',
+        'exactIntersectionPairCount',
+        'positiveAreaPairCount',
+        'renderedOverlapArea',
+        'sourceCount',
+        'sourcePairCount',
+        'splitFailed',
+      ]);
+      const overlap = await captureAndSampleCanvas({
+        fileName: `section-overlap-cap-${backend}.png`,
+        region,
+      });
 
-        expect(
-          overlap.distinctBuckets,
-          `${backend}: sampled overlap region should contain shaded geometry`,
-        ).toBeGreaterThan(8);
-        expect(
-          overlap.darkRedDiagnostic,
-          `${backend}: positive-area overlap should render a dark-red cap diagnostic`,
-        ).toBeGreaterThan(18);
-        expect(
-          overlap.yellowDiagnostic,
-          `${backend}: positive-area overlap should render yellow diagnostic stripes`,
-        ).toBeGreaterThan(8);
-        expect(
-          overlap.blackContour,
-          `${backend}: generated cap outlines should remain visible alongside overlap diagnostics`,
-        ).toBeGreaterThan(8);
-        expect(
-          Math.max(overlap.yellowTransitionsAlongNormalAxis, overlap.yellowTransitionsAlongOverlapAxis),
-          `${backend}: yellow diagnostic stripes should produce directional variation`,
-        ).toBeGreaterThan(4);
-        expect(
-          Math.abs(overlap.yellowTransitionsAlongNormalAxis - overlap.yellowTransitionsAlongOverlapAxis),
-          `${backend}: yellow diagnostic stripe variation should be anisotropic`,
-        ).toBeGreaterThan(2);
-        expect(
-          overlap.greenSource + overlap.blueSource,
-          `${backend}: normal/tangent source cap colors should remain visible around diagnostics`,
-        ).toBeGreaterThan(12);
+      expect(
+        overlap.distinctBuckets,
+        `${backend}: sampled overlap region should contain shaded geometry`,
+      ).toBeGreaterThan(8);
+      expect(
+        overlap.darkRedDiagnostic,
+        `${backend}: positive-area overlap should render a dark-red cap diagnostic`,
+      ).toBeGreaterThan(18);
+      expect(
+        overlap.yellowDiagnostic,
+        `${backend}: positive-area overlap should render yellow diagnostic stripes`,
+      ).toBeGreaterThan(8);
+      expect(
+        overlap.blackContour,
+        `${backend}: generated cap outlines should remain visible alongside overlap diagnostics`,
+      ).toBeGreaterThan(8);
+      expect(
+        Math.max(overlap.yellowTransitionsAlongNormalAxis, overlap.yellowTransitionsAlongOverlapAxis),
+        `${backend}: yellow diagnostic stripes should produce directional variation`,
+      ).toBeGreaterThan(4);
+      expect(
+        Math.abs(overlap.yellowTransitionsAlongNormalAxis - overlap.yellowTransitionsAlongOverlapAxis),
+        `${backend}: yellow diagnostic stripe variation should be anisotropic`,
+      ).toBeGreaterThan(2);
+      expect(
+        overlap.greenSource + overlap.blueSource,
+        `${backend}: normal/tangent source cap colors should remain visible around diagnostics`,
+      ).toBeGreaterThan(12);
 
-        const canvas = page.locator('[role="img"][aria-label*="3D model preview" i] canvas');
-        const canvasBox = await canvas.boundingBox();
-        if (!canvasBox) {
-          throw new Error('3D preview canvas bounding box is unavailable.');
-        }
-        const beforeHoverPerformance = await getPerformanceDiagnostics(page);
-        await page.mouse.move(
-          canvasBox.x + canvasBox.width * (region.x + region.width / 2),
-          canvasBox.y + canvasBox.height * (region.y + region.height / 2),
-        );
-        const hoverFrames = [0, 1, 2] as const;
-        const assertHoverFrame = async (frameIndex: number): Promise<void> => {
-          const frame = hoverFrames[frameIndex];
-          if (frame === undefined) {
-            return;
-          }
-
-          await page.waitForTimeout(80);
-          const hover = await captureAndSampleCanvas(page, {
-            fileName: `section-overlap-cap-hover-${backend}-${frame}.png`,
-            region,
-            testInfo,
-          });
-          expect(
-            hover.darkRedDiagnostic,
-            `${backend}: hover frame ${frame} should not flash red diagnostics invisible`,
-          ).toBeGreaterThan(Math.max(10, Math.floor(overlap.darkRedDiagnostic * 0.5)));
-          expect(
-            hover.yellowDiagnostic,
-            `${backend}: hover frame ${frame} should not flash yellow diagnostics invisible`,
-          ).toBeGreaterThan(Math.max(5, Math.floor(overlap.yellowDiagnostic * 0.5)));
-          await assertHoverFrame(frameIndex + 1);
-        };
-        await assertHoverFrame(0);
-        const afterHoverPerformance = await getPerformanceDiagnostics(page);
-        if (beforeHoverPerformance && afterHoverPerformance) {
-          expect(afterHoverPerformance.latestFrame.pendingReason).not.toBe('style-change');
-          expect(afterHoverPerformance.latestFrame.counters['styleInvalidatedWorkerRequestCount'] ?? 0).toBe(0);
-          expect(afterHoverPerformance.latestFrame.topologyKey).toBeTruthy();
-          expect(afterHoverPerformance.latestFrame.styleKey).toBeTruthy();
-        }
-
-        await driveOverlapSectionView(page, 14);
-        await page.waitForTimeout(80);
-        const pendingMovePerformance = await getPerformanceDiagnostics(page);
-        expect(
-          pendingMovePerformance?.latestFrame.baseCapIsCurrent,
-          `${backend}: base caps should stay current immediately after a topology-changing plane move`,
-        ).toBe(true);
-        expect(
-          pendingMovePerformance?.latestFrame.counters['baseFillVertexCount'] ?? 0,
-          `${backend}: pending exact diagnostics should not prevent current base cap uploads`,
-        ).toBeGreaterThan(0);
-        expect(
-          pendingMovePerformance?.latestFrame.counters['baseBoundarySegmentCount'] ?? 0,
-          `${backend}: pending exact diagnostics should not prevent current cap outlines`,
-        ).toBeGreaterThan(0);
-        await page.waitForTimeout(750);
-        const disjointDiagnostics = await getOverlapDiagnostics(page);
-        expect(disjointDiagnostics?.positiveAreaPairCount).toBe(0);
-        expect(disjointDiagnostics?.renderedOverlapArea).toBe(0);
-        const disjoint = await captureAndSampleCanvas(page, {
-          fileName: `section-overlap-cap-disjoint-${backend}.png`,
-          region,
-          testInfo,
-        });
-
-        expect(
-          disjoint.darkRedDiagnostic,
-          `${backend}: moving the section plane outside true cuts should remove overlap diagnostics`,
-        ).toBeLessThan(Math.max(6, Math.floor(overlap.darkRedDiagnostic * 0.25)));
-        expect(
-          disjoint.yellowDiagnostic,
-          `${backend}: moving the section plane outside true cuts should remove overlap stripe diagnostics`,
-        ).toBeLessThan(Math.max(4, Math.floor(overlap.yellowDiagnostic * 0.25)));
-
-        expect(
-          listener?.failuresRef.lines ?? [],
-          `WebGPU validation errors leaked to the console:\n${listener?.failuresRef.lines.join('\n') ?? ''}`,
-        ).toEqual([]);
-      } finally {
-        listener?.detach();
+      const canvas = selectors.getByCss('[role="img"][aria-label*="3D model preview" i] canvas');
+      const canvasBox = await target.boundingBox(canvas);
+      if (!canvasBox) {
+        throw new Error('3D preview canvas bounding box is unavailable.');
       }
+      const beforeHoverPerformance = await getPerformanceDiagnostics();
+      await target.mouseMove(
+        canvasBox.x + canvasBox.width * (region.x + region.width / 2),
+        canvasBox.y + canvasBox.height * (region.y + region.height / 2),
+      );
+      const hoverFrames = [0, 1, 2] as const;
+      const assertHoverFrame = async (frameIndex: number): Promise<void> => {
+        const frame = hoverFrames[frameIndex];
+        if (frame === undefined) {
+          return;
+        }
+
+        await target.delay(80);
+        const hover = await captureAndSampleCanvas({
+          fileName: `section-overlap-cap-hover-${backend}-${frame}.png`,
+          region,
+        });
+        expect(
+          hover.darkRedDiagnostic,
+          `${backend}: hover frame ${frame} should not flash red diagnostics invisible`,
+        ).toBeGreaterThan(Math.max(10, Math.floor(overlap.darkRedDiagnostic * 0.5)));
+        expect(
+          hover.yellowDiagnostic,
+          `${backend}: hover frame ${frame} should not flash yellow diagnostics invisible`,
+        ).toBeGreaterThan(Math.max(5, Math.floor(overlap.yellowDiagnostic * 0.5)));
+        await assertHoverFrame(frameIndex + 1);
+      };
+      await assertHoverFrame(0);
+      const afterHoverPerformance = await getPerformanceDiagnostics();
+      if (beforeHoverPerformance && afterHoverPerformance) {
+        expect(afterHoverPerformance.latestFrame.pendingReason).not.toBe('style-change');
+        expect(afterHoverPerformance.latestFrame.counters['styleInvalidatedWorkerRequestCount'] ?? 0).toBe(0);
+        expect(afterHoverPerformance.latestFrame.topologyKey).toBeTruthy();
+        expect(afterHoverPerformance.latestFrame.styleKey).toBeTruthy();
+      }
+
+      await driveOverlapSectionView(14);
+      await target.delay(80);
+      const pendingMovePerformance = await getPerformanceDiagnostics();
+      expect(
+        pendingMovePerformance?.latestFrame.baseCapIsCurrent,
+        `${backend}: base caps should stay current immediately after a topology-changing plane move`,
+      ).toBe(true);
+      expect(
+        pendingMovePerformance?.latestFrame.counters['baseFillVertexCount'] ?? 0,
+        `${backend}: pending exact diagnostics should not prevent current base cap uploads`,
+      ).toBeGreaterThan(0);
+      expect(
+        pendingMovePerformance?.latestFrame.counters['baseBoundarySegmentCount'] ?? 0,
+        `${backend}: pending exact diagnostics should not prevent current cap outlines`,
+      ).toBeGreaterThan(0);
+      await target.delay(750);
+      const disjointDiagnostics = await getOverlapDiagnostics();
+      expect(disjointDiagnostics?.positiveAreaPairCount).toBe(0);
+      expect(disjointDiagnostics?.renderedOverlapArea).toBe(0);
+      const disjoint = await captureAndSampleCanvas({
+        fileName: `section-overlap-cap-disjoint-${backend}.png`,
+        region,
+      });
+
+      expect(
+        disjoint.darkRedDiagnostic,
+        `${backend}: moving the section plane outside true cuts should remove overlap diagnostics`,
+      ).toBeLessThan(Math.max(6, Math.floor(overlap.darkRedDiagnostic * 0.25)));
+      expect(
+        disjoint.yellowDiagnostic,
+        `${backend}: moving the section plane outside true cuts should remove overlap stripe diagnostics`,
+      ).toBeLessThan(Math.max(4, Math.floor(overlap.yellowDiagnostic * 0.25)));
+
+      const failures = backend === 'webgpu' ? await webGpuValidationFailures(messageStart) : [];
+      expect(failures, `WebGPU validation errors leaked to the console:\n${failures.join('\n')}`).toEqual([]);
     });
   }
 });

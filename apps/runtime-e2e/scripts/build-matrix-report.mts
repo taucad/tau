@@ -6,9 +6,9 @@
  * per-benchmark heatmaps, and size breakdown charts.
  *
  * Usage:
- *   pnpm nx build-matrix runtime -- --experiments ../../tarballs/experiments/
- *   pnpm nx build-matrix runtime -- --experiments ../../tarballs/experiments/ --baseline ../../tarballs/baselines/v8-rc4-O2-single
- *   pnpm nx build-matrix runtime -- --compare ../../tarballs/experiments/exp1 ../../tarballs/experiments/exp2
+ *   pnpm nx build-matrix runtime -- --experiments ../../out/artifacts/wasm/experiments/
+ *   pnpm nx build-matrix runtime -- --experiments ../../out/artifacts/wasm/experiments/ --baseline ../../out/artifacts/wasm/baselines/v8-rc4-O2-single
+ *   pnpm nx build-matrix runtime -- --compare ../../out/artifacts/wasm/experiments/exp1 ../../out/artifacts/wasm/experiments/exp2
  */
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, statSync } from 'node:fs';
@@ -26,7 +26,7 @@ const { values } = parseArgs({
     output: {
       type: 'string',
       short: 'o',
-      default: '../../tarballs/comparisons',
+      default: '../../out/artifacts/wasm/comparisons',
     },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -45,7 +45,7 @@ Options:
   -e, --experiments <dir>   Directory containing experiment subdirectories
   -c, --compare <dirs>      Compare specific experiment directories (multiple)
   -b, --baseline <dir>      Baseline experiment directory for delta calculation
-  -o, --output <dir>        Output directory (default: ../../tarballs/comparisons)
+  -o, --output <dir>        Output directory (default: ../../out/artifacts/wasm/comparisons)
   -h, --help                Show this help message
 `);
   process.exit(0);

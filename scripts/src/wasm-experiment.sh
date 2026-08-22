@@ -17,7 +17,7 @@ set -euo pipefail
 #
 # Examples:
 #   ./scripts/src/wasm-experiment.sh scripts/experiments/O2-noLTO-single.yml
-#   ./scripts/src/wasm-experiment.sh scripts/experiments/O3-noLTO-single.yml --baseline tarballs/baselines/v8-rc4-O2-single
+#   ./scripts/src/wasm-experiment.sh scripts/experiments/O3-noLTO-single.yml --baseline out/artifacts/wasm/baselines/v8-rc4-O2-single
 #   ./scripts/src/wasm-experiment.sh scripts/experiments/Os-noLTO-single.yml --skip-benchmark
 # ─────────────────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ if [ $# -eq 0 ]; then
   echo ""
   echo "Commands:"
   echo "  <experiment.yml>   Run a full build→pack→benchmark cycle from a YAML config"
-  echo "  benchmark-all      Re-run benchmarks for experiments in tarballs/experiments/"
+  echo "  benchmark-all      Re-run benchmarks for experiments in out/artifacts/wasm/experiments/"
   echo ""
   echo "benchmark-all options:"
   echo "  --iterations N     Number of benchmark iterations (default: 10)"
@@ -86,7 +86,7 @@ if [ "$1" = "benchmark-all" ]; then
     esac
   done
 
-  EXPERIMENTS_DIR="$TAU_ROOT/tarballs/experiments"
+  EXPERIMENTS_DIR="$TAU_ROOT/out/artifacts/wasm/experiments"
   if [ ! -d "$EXPERIMENTS_DIR" ]; then
     echo "ERROR: Experiments directory not found: $EXPERIMENTS_DIR" >&2
     exit 1
@@ -201,13 +201,13 @@ print(exc)
     if [ ${#BENCH_ALL_FILTERS[@]} -gt 0 ]; then
       COMPARE_ARGS=()
       for dir in "${EXP_DIRS[@]}"; do
-        COMPARE_ARGS+=(--compare "../../tarballs/experiments/$(basename "$dir")")
+        COMPARE_ARGS+=(--compare "../../out/artifacts/wasm/experiments/$(basename "$dir")")
       done
       pnpm nx build-matrix runtime -- "${COMPARE_ARGS[@]}"
       pnpm nx compare-benchmarks runtime -- "${COMPARE_ARGS[@]}"
     else
-      pnpm nx build-matrix runtime -- --experiments ../../tarballs/experiments/
-      pnpm nx compare-benchmarks runtime -- --experiments ../../tarballs/experiments/
+      pnpm nx build-matrix runtime -- --experiments ../../out/artifacts/wasm/experiments/
+      pnpm nx compare-benchmarks runtime -- --experiments ../../out/artifacts/wasm/experiments/
     fi
   fi
 
@@ -392,8 +392,8 @@ echo ""
 # ── Step 3: Create experiment directory ──────────────────────────────
 
 echo "═══ Step 3: Create experiment directory ═══"
-TARBALLS_DIR="$TAU_ROOT/tarballs"
-EXP_DIR="$TARBALLS_DIR/experiments/$EXPERIMENT_SLUG"
+ARTIFACTS_DIR="$TAU_ROOT/out/artifacts/wasm"
+EXP_DIR="$ARTIFACTS_DIR/experiments/$EXPERIMENT_SLUG"
 mkdir -p "$EXP_DIR/unpacked"
 
 cp "$EXPERIMENT_FILE" "$EXP_DIR/config.yml"
@@ -537,7 +537,7 @@ else
     CURRENT_JSON=$(find "$EXP_DIR" -name "benchmark-*.json" -not -name "*comparison*" | head -1)
 
     if [ -n "$BASELINE_JSON" ] && [ -n "$CURRENT_JSON" ]; then
-      COMP_DIR="$TARBALLS_DIR/comparisons"
+      COMP_DIR="$ARTIFACTS_DIR/comparisons"
       mkdir -p "$COMP_DIR"
       pnpm nx benchmark runtime -- --compare "$BASELINE_JSON" "$CURRENT_JSON" --output "$COMP_DIR" || true
     else
@@ -550,7 +550,7 @@ fi
 
 echo ""
 echo "═══ Step 9: Update active symlink ═══"
-ACTIVE_LINK="$TARBALLS_DIR/active"
+ACTIVE_LINK="$ARTIFACTS_DIR/active"
 rm -f "$ACTIVE_LINK"
 ln -s "experiments/$EXPERIMENT_SLUG" "$ACTIVE_LINK"
 echo "  Active: $ACTIVE_LINK -> experiments/$EXPERIMENT_SLUG"

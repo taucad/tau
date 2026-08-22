@@ -5,7 +5,7 @@
  * benchmark run from each experiment directory.
  *
  * Usage:
- *   pnpm nx compare-benchmarks runtime -- --experiments ../../tarballs/experiments
+ *   pnpm nx compare-benchmarks runtime -- --experiments ../../out/artifacts/wasm/experiments
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
@@ -140,7 +140,7 @@ function main(): void {
       }
     }
   } else {
-    const experimentDirectory = resolve(values.experiments ?? '../../tarballs/experiments');
+    const experimentDirectory = resolve(values.experiments ?? '../../out/artifacts/wasm/experiments');
     if (!existsSync(experimentDirectory)) {
       console.error(`Experiments directory not found: ${experimentDirectory}`);
       process.exit(1);

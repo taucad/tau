@@ -6,8 +6,8 @@
  * Usage:
  *   pnpm nx benchmark runtime
  *   pnpm nx benchmark runtime -- --iterations 10 --filter "primitives,booleans"
- *   pnpm nx benchmark runtime -- --compare reports/benchmark-before.json reports/benchmark-after.json
- *   pnpm nx benchmark runtime -- --output ./my-reports
+ *   pnpm nx benchmark runtime -- --compare ../../out/reports/benchmarks/runtime-e2e/benchmark-before.json ../../out/reports/benchmarks/runtime-e2e/benchmark-after.json
+ *   pnpm nx benchmark runtime -- --output ../../out/reports/benchmarks/runtime-e2e
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
@@ -63,7 +63,7 @@ const { values } = parseArgs({
     iterations: { type: 'string', short: 'n', default: '5' },
     filter: { type: 'string', short: 'f' },
     compare: { type: 'string', short: 'c', multiple: true },
-    output: { type: 'string', short: 'o', default: 'reports' },
+    output: { type: 'string', short: 'o', default: '../../out/reports/benchmarks/runtime-e2e' },
     provenance: { type: 'string', short: 'p' },
     'wasm-dir': { type: 'string' },
     'wasm-variant': { type: 'string', default: 'auto' },
@@ -95,7 +95,7 @@ ${c.dim}Options:${c.reset}
   ${c.cyan}-f${c.reset}, ${c.cyan}--filter${c.reset} <items>    Comma-separated categories or benchmark names.
                                       Categories: ${benchmarkCategories.join(', ')}
   ${c.cyan}-c${c.reset}, ${c.cyan}--compare${c.reset} <files>   Compare two JSON report files (provide two paths)
-  ${c.cyan}-o${c.reset}, ${c.cyan}--output${c.reset} <dir>      Output directory (default: reports)
+  ${c.cyan}-o${c.reset}, ${c.cyan}--output${c.reset} <dir>      Output directory (default: ../../out/reports/benchmarks/runtime-e2e)
   ${c.cyan}-p${c.reset}, ${c.cyan}--provenance${c.reset} <file> Attach build provenance JSON to results
       ${c.cyan}--wasm-dir${c.reset} <path>   Inject custom WASM from directory (contains .wasm + .js files)
       ${c.cyan}--wasm-variant${c.reset} <v>  WASM variant: auto (default) | single | multi

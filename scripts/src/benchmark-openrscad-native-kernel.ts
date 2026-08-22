@@ -5,7 +5,7 @@
 /* oxlint-disable typescript/no-unsafe-assignment -- Dynamic kernel definitions erase handle/context types. */
 /* eslint-disable @nx/enforce-module-boundaries -- This workspace benchmark measures packages together. */
 
-import { glob, readFile, writeFile } from 'node:fs/promises';
+import { glob, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { cpus, platform, release } from 'node:os';
 import { dirname, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
@@ -16,7 +16,7 @@ import type { AnyKernelDefinition, KernelRuntime } from '@taucad/runtime/kernel'
 const parseArgs = (args: string[]) => {
   const result = {
     corpus: undefined as string | undefined,
-    report: resolve('packages/kernels/openrscad/benchmarks/native-kernel-results.json'),
+    report: resolve('out/reports/benchmarks/openrscad-native-kernel/native-kernel-results.json'),
     samples: 30,
   };
   for (let index = 0; index < args.length; index += 1) {
@@ -140,6 +140,7 @@ const inspectGlb = (bytes: Uint8Array<ArrayBuffer>): { lineSegments: number; nod
 };
 
 const main = async () => {
+  await mkdir(dirname(reportPath), { recursive: true });
   const plugin = openrscad();
   const load = (plugin as unknown as Record<symbol, () => AnyKernelDefinition | Promise<AnyKernelDefinition>>)[
     Symbol.for('@taucad/runtime/plugin-definition')

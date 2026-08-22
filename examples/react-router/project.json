@@ -42,7 +42,9 @@
     },
     "typecheck": {
       "executor": "nx:run-commands",
+      "cache": true,
       "dependsOn": ["typegen"],
+      "outputs": ["{workspaceRoot}/node_modules/.cache/tsbuildinfo/examples/react-router/tsconfig.tsbuildinfo"],
       "options": {
         "cwd": "{projectRoot}",
         "command": "tsc -p tsconfig.json --noEmit"

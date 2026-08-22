@@ -6,8 +6,8 @@
     "module": "preserve",
     "moduleResolution": "bundler",
     "noEmit": true,
-    "outDir": "../../dist/out-tsc/examples/react-router",
     "rootDir": ".",
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/examples/react-router/tsconfig.tsbuildinfo",
     "types": ["vite/client", "node"]
   },
   "include": ["app/**/*.ts", "app/**/*.tsx", "tau/**/*.ts", "e2e/**/*.ts", "*.ts"]

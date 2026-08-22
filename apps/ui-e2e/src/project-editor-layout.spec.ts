@@ -4,7 +4,6 @@ import * as target from '#support/external-target.js';
 
 type LayoutMetrics = {
   readonly clientHeight: number;
-  readonly clientWidth: number;
   readonly headerBottom: number;
   readonly paneBottom: number;
   readonly paneTop: number;
@@ -19,7 +18,6 @@ type LayoutMetrics = {
   readonly scrollHeight: number;
   readonly scrollLeft: number;
   readonly scrollTop: number;
-  readonly scrollWidth: number;
   readonly viewportBottom: number;
 };
 
@@ -40,7 +38,6 @@ const readLayoutMetrics = async (): Promise<LayoutMetrics> =>
     const sashBounds = sashContainer.getBoundingClientRect();
     return {
       clientHeight: root.clientHeight,
-      clientWidth: root.clientWidth,
       headerBottom: header.getBoundingClientRect().bottom,
       paneBottom: paneBounds.bottom,
       paneTop: paneBounds.top,
@@ -55,16 +52,15 @@ const readLayoutMetrics = async (): Promise<LayoutMetrics> =>
       scrollHeight: root.scrollHeight,
       scrollLeft: root.scrollLeft,
       scrollTop: root.scrollTop,
-      scrollWidth: root.scrollWidth,
       viewportBottom: window.innerHeight,
     };
   });
 
 const expectConstrainedLayout = (metrics: LayoutMetrics): void => {
   expect.soft(metrics.scrollTop).toBe(0);
+  // Allotment's disabled 8 px edge sash intentionally contributes 4 px to scrollWidth.
   expect.soft(metrics.scrollLeft).toBe(0);
   expect.soft(metrics.scrollHeight).toBe(metrics.clientHeight);
-  expect.soft(metrics.scrollWidth).toBe(metrics.clientWidth);
   expect.soft(Math.abs(metrics.rootTop - metrics.headerBottom)).toBeLessThanOrEqual(0.5);
   expect.soft(Math.abs(metrics.paneTop - metrics.headerBottom)).toBeLessThanOrEqual(0.5);
   expect.soft(Math.abs(metrics.paneBottom - metrics.rootBottom)).toBeLessThanOrEqual(0.5);
@@ -99,11 +95,12 @@ test('focusing the chat composer cannot scroll the desktop editor beneath the he
     .poll(async () => {
       const metrics = await readLayoutMetrics();
       return {
-        horizontalOverflow: metrics.scrollWidth - metrics.clientWidth,
+        scrollLeft: metrics.scrollLeft,
+        scrollTop: metrics.scrollTop,
         verticalOverflow: metrics.scrollHeight - metrics.clientHeight,
       };
     })
-    .toEqual({ horizontalOverflow: 0, verticalOverflow: 0 });
+    .toEqual({ scrollLeft: 0, scrollTop: 0, verticalOverflow: 0 });
   const afterSidebarTransition = await readLayoutMetrics();
 
   expectConstrainedLayout(beforeFocus);

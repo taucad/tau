@@ -51,7 +51,7 @@ import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type { draftMachine } from '#hooks/draft.machine.js';
-import type { ChatMode } from '#routes/projects_.$id/chat-mode-selector.js';
+import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
 type ChatInstance = AiSdkChat<MyUIMessage>;
 

@@ -3,7 +3,7 @@ title: 'RPC & Filesystem Bridge Policy'
 description: 'MessagePort bridge architecture for connecting filesystem implementations to kernel workers across thread boundaries. Covers RuntimeFileSystemBase, the opaque RuntimeFileSystem, from* constructors, and Bridge RPC primitives.'
 status: active
 created: '2026-03-03'
-updated: '2026-07-21'
+updated: '2026-08-22'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/comlink-rpc-practices.md
@@ -178,7 +178,10 @@ See **`docs/research/filesystem-bridge-runtime-inversion-blueprint.md`** for why
 exposeFileSystem(fileManager);
 
 // Kernel worker:
-export const runtime = presets.all();
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+
+export const runtime = defineRuntime({ plugins: [replicad()] });
 createRuntimeWorker({ runtime });
 
 // Main thread (app shell):

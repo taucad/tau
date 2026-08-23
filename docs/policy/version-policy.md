@@ -79,6 +79,7 @@ Experimental APIs use the `unstable_` prefix in both code and configuration. The
 
 ```typescript
 import { unstable_streamingExport } from '@taucad/runtime';
+import { replicad } from '@taucad/replicad';
 
 const runtime = defineRuntime({
   kernels: [replicad()],
@@ -119,6 +120,8 @@ The deprecated alias is kept for one major cycle, then removed. A codemod handle
 Future flags are **stabilized breaking changes** that consumers opt into before the next major release. They allow gradual migration instead of big-bang upgrades.
 
 ```typescript
+import { replicad } from '@taucad/replicad';
+
 const runtime = defineRuntime({
   kernels: [replicad()],
 });

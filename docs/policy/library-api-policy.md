@@ -61,6 +61,8 @@ Do not create a second public wrapper helper for the same concern. A split betwe
 Prefer flat option objects over deeply nested configuration. Use optional fields with defaults, not required nested objects.
 
 ```typescript
+import { replicad } from '@taucad/replicad';
+
 // CORRECT: flat, obvious defaults
 replicad({ wasm: 'single-exceptions', linearTolerance: 0.1 });
 
@@ -261,36 +263,55 @@ protected abstract onCreateGeometry(input, runtime): Promise<Result>;
 
 **Why**: Consistent naming prefixes let developers predict API shape without reading docs. When every factory starts with `create`_, every type guard starts with `is_`, and every hook starts with `on\*`, the API becomes self-documenting.
 
+### Filenames name the role
+
+A module that defines a capability names its role in the filename, separated by a dot: `{name}.{role}.ts`, with `{name}.{role}.test.ts` and `{name}.{role}.test-d.ts` siblings. The plugin factory of package `@taucad/<p>` lives in `<p>.plugin.ts`.
+
+```text
+CORRECT                        INCORRECT
+zoo.kernel.ts                  zoo-kernel.ts
+image.transcoder.ts            image-transcoder.ts
+esbuild.bundler.ts             esbuild-bundler.ts
+geometry-cache.middleware.ts   geometry-cache-middleware.ts
+replicad.plugin.ts             plugin.ts
+replicad.plugin.test.ts        plugin.test.ts
+```
+
+Hyphens stay legal inside the name segment (`opencascade-native.kernel.ts`); only the role separator is a dot. Roles are `plugin`, `kernel`, `transcoder`, `middleware`, and `bundler`. Helper, schema, and scenario modules carry no role marker (`assimp-backend.ts`, `replicad.schemas.ts`, `image-import-failure.test.ts`) and are not governed. `tau-lint/plugin-capability-filename` enforces this for flat modules under `packages/plugins/*/src`.
+
+**Why**: A capability is locatable by filename, and a test always sits next to the subject it covers instead of drifting one convention away from it.
+
 ## 6. Subpath Exports
 
 Organize `package.json` exports by what each audience needs, not by internal file structure.
 
 ```text
 @taucad/runtime                         -- createRuntimeClient, types (consumer)
-@taucad/runtime/kernels/replicad        -- selected Replicad kernel factory (consumer)
-@taucad/runtime/bundler/esbuild         -- selected esbuild bundler factory (consumer)
-@taucad/runtime/middleware/geometry-cache -- selected middleware factory (consumer)
+@taucad/runtime/plugin                  -- definePlugin and derivation helpers (author)
+@taucad/replicad                        -- Replicad toolkit and kernel factory (consumer)
+@taucad/esbuild                         -- esbuild toolkit and bundler factory (consumer)
+@taucad/middleware                      -- middleware toolkit and role factories (consumer)
 @taucad/runtime/transport/web           -- selected browser worker transport (consumer)
 @taucad/runtime/testing                 -- test utilities (testing)
 ```
 
 ### Capability subpaths are dependency-graph boundaries
 
-Runtime plugins, transports, and framework adapters must expose concrete selected-capability subpaths and examples should prefer those concrete subpaths. A consumer choosing Replicad should import `@taucad/runtime/kernels/replicad`, not a broad kernel barrel, because broad barrels can pull unrelated kernels, `new URL(...)` assets, WASM loaders, or framework-sensitive branches into the dependency graph.
+Runtime capability packages, transports, and framework adapters must expose selected dependency-graph boundaries. A consumer choosing Replicad imports its package, not a runtime-owned concrete barrel. Capability package roots stay descriptor-light and load heavy backends from capability `initialize()`.
 
 CORRECT:
 
 ```typescript
-import { replicad } from '@taucad/runtime/kernels/replicad';
-import { esbuild } from '@taucad/runtime/bundler/esbuild';
-import { geometryCache } from '@taucad/runtime/middleware/geometry-cache';
+import { replicadKernel } from '@taucad/replicad';
+import { esbuildBundler } from '@taucad/esbuild';
+import { geometryCache } from '@taucad/middleware';
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
 ```
 
 INCORRECT for first-class examples:
 
 ```typescript
-import { replicad } from '@taucad/runtime/kernels'; // broad barrel; may load unrelated kernels/assets
+import { replicadKernel } from '@taucad/runtime/<concrete-kernel-barrel>'; // runtime does not own concrete capabilities
 import { webWorkerTransport } from '@taucad/runtime/transport'; // broad barrel; may load unrelated transports
 ```
 
@@ -306,27 +327,27 @@ First-class framework examples should stay copyable and test-agnostic. Do not pu
 
 For new packages, use **singular nouns** for subpath export segments. Subpaths are module namespaces that a developer imports from, not REST-style collection endpoints. The package name itself may be plural (it scopes a collection of modules), but every new subpath within it should be singular unless preserving an existing public contract.
 
-**Why**: Singular subpaths eliminate the doubled-name stutter (`@taucad/runtime/kernels`), align sibling categories so developers can predict paths by analogy, and match the convention used by tRPC, Effect-TS, Drizzle ORM, and TanStack Router.
+**Why**: Singular authoring subpaths eliminate doubled-name stutter, while concrete capabilities use their own package identities.
 
 CORRECT for new packages:
 
 ```typescript
-import { replicad } from '@taucad/runtime/kernel';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineKernel } from '@taucad/runtime/kernel';
+import { defineBundler } from '@taucad/runtime/bundler';
 import { defineMiddleware } from '@taucad/runtime/middleware';
 ```
 
 INCORRECT:
 
 ```typescript
-import { replicad } from '@taucad/runtime/kernels'; // stutters package name
-import { esbuild } from '@taucad/runtime/bundlers'; // inconsistent with ./middleware
+import { replicadKernel } from '@taucad/runtime/<concrete-kernel-barrel>'; // concrete runtime barrel is forbidden
+import { esbuildBundler } from '@taucad/runtime/bundlers'; // concrete runtime barrel is forbidden
 ```
 
 | Segment type              | Convention    | Examples                                   |
 | ------------------------- | ------------- | ------------------------------------------ |
 | Category barrel           | Singular      | `./kernel`, `./bundler`, `./middleware`    |
-| Individual implementation | Singular      | `./kernel/replicad`, `./bundler/esbuild`   |
+| Individual implementation | Own package   | `@taucad/replicad`, `@taucad/esbuild`      |
 | Standalone module         | Singular      | `./transport`, `./filesystem`, `./testing` |
 | Package name              | May be plural | `@taucad/runtime` (scopes a collection)    |
 
@@ -370,6 +391,9 @@ off();
 Plugin selection functions return plain metadata objects, not class instances. Executable implementations belong to worker-owned runtime definitions; client-facing plugin objects must not expose loader URLs or implementation handles. In `@taucad/runtime`, the same `define*` call that authors an executable capability returns the public plugin factory, so there is no separate `create*Plugin` public layer.
 
 ```typescript
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+
 export const runtime = defineRuntime({
   kernels: [replicad({ wasm: 'auto' })],
   bundlers: [esbuild()],
@@ -457,16 +481,18 @@ Use `package.json` export conditions for environment-specific code:
 }
 ```
 
-## 15. Presets for Zero-Config
+## 15. Toolkit Presets for Common Configurations
 
-Provide preset configurations that cover common use cases. Let advanced users compose their own.
+Let each plugin toolkit provide a default preset and any backend-coherent variants. Applications still compose their runtime explicitly; runtime exposes no global preset.
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime }),
 });
@@ -480,6 +506,7 @@ Use TypeScript's native `satisfies` operator for standalone options constants. D
 import type { RuntimeClientOptions } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { replicad } from '@taucad/replicad';
 
 const runtime = defineRuntime({ kernels: [replicad()] });
 const transport = inProcessTransport({ runtime });
@@ -899,7 +926,7 @@ export const fromFsLike: (fsLike: FsLike) => RuntimeFileSystem;
 export const fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => RuntimeFileSystem;
 
 // The wired transport callable is the only surface that binds wire primitives from options.
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
     createWorker,
@@ -943,10 +970,11 @@ This applies equally to React-facing client options and async provider specs use
 // CORRECT: module-scope spec, multi-client safe
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const replicadReferenceClientOptions = {
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 };

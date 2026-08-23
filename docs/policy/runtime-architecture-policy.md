@@ -1,27 +1,33 @@
 ---
-title: 'Kernel Architecture Policy'
-description: 'CAD runtime worker architecture from editor to geometry computation. Covers ProjectMachine, CadMachine, RuntimeClient, plugin model, transport, and lifecycle.'
+title: 'Runtime Architecture Policy'
+description: 'CAD runtime worker architecture from editor to geometry computation. Covers runtime engine boundaries, plugin toolkits, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-08-19'
+updated: '2026-08-22'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
   - docs/policy/filesystem-authority-policy.md
   - docs/policy/runtime-api-policy.md
+  - docs/policy/npm-policy.md
+  - docs/research/runtime-plugin-toolkit-charter.md
+  - docs/research/runtime-plugin-toolkit-architecture-blueprint.md
+  - docs/research/runtime-plugin-runtime-slimming-migration-blueprint.md
+  - docs/research/runtime-plugin-consumer-migration-blueprint.md
+  - docs/research/runtime-converter-dissolution-blueprint.md
   - docs/research/headless-thumbnail-rendering-architecture-v4.md
   - docs/research/runtime-model-load-project-root-regression-v3.md
   - docs/research/runtime-rooted-filesystem-residual-migration.md
   - docs/research/language-kernel-selection-architecture.md
 ---
 
-# Kernel Architecture Policy
+# Runtime Architecture Policy
 
 Internal reference for the CAD runtime worker architecture: from editor to geometry computation.
 
 ## Rationale
 
-A layered kernel API (Client, Transport, Protocol) separates consumer convenience from framework primitives. The plugin model (kernels, bundlers, middleware) keeps the framework generic while enabling CAD-specific capabilities. Single-worker-per-compilation-unit and lazy kernel loading minimize memory footprint.
+A layered runtime API (Client, Transport, Protocol) separates consumer convenience from framework primitives. The runtime package owns engine orchestration, contracts, filesystem, transport, route planning, and lifecycle; concrete CAD toolchains live in package-owned plugin toolkits. Single-worker-per-compilation-unit and lazy capability loading minimize memory footprint without forcing browser consumers to install native, Python, or daemon payloads.
 
 ## Architecture Overview
 
@@ -37,7 +43,9 @@ Route (projects_.$id)
                  └─ KernelMachine (1 per CadMachine)
                       └─ RuntimeClient → RuntimeTransport → Worker
                            └─ KernelRuntimeWorker (1 Web Worker per KernelMachine)
+                                ├─ Plugin toolkits (via definePlugin)
                                 ├─ Loaded kernel modules (via defineKernel)
+                                ├─ Loaded transcoder modules (via defineTranscoder)
                                 ├─ Loaded bundler modules (via defineBundler, routed by extension)
                                 └─ Middleware chain (via defineMiddleware)
 ```
@@ -77,41 +85,63 @@ For persisted browser projects, trusted application composition selects the auth
 
 ## Entity Model
 
-| Entity                     | Purpose                                                                                                                                                                                                                                                                                                                                   | Layer         |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| **RuntimeClient**          | High-level facade. Lazy, Promise-based, event-subscribable. Supports inline code rendering (`RuntimeSource`) and filesystem rendering (filesystem `RuntimeSource`). Emits `geometry` event on render completion. Auto-cancels superseded renders. Created by `createRuntimeClient()`.                                                     | Consumer      |
-| **RuntimeTransportPlugin** | Legacy name — superseded by **`TransportPlugin`** callable (`webWorkerTransport({...})`). Bundled implementations: `inProcessTransport`, `webWorkerTransport`, `nodeWorkerTransport`. Standalone **`webWorkerHost` / `nodeWorkerHost` / `electronUtilityHost`** furnish worker/host entries — no `.host` accessor on the plugin callable. | Framework     |
-| **RuntimeTransportClient** | Fat consumer-facing transport handle. Owns SAB, abort, geometry pool, FS bridge. `client.connect()` takes no arguments — every wire concern is closed over by the transport at construction.                                                                                                                                              | Framework     |
-| **RuntimeWorkerClient**    | Protocol client wrapping a `RuntimeTransportClient` with request/response correlation and typed callbacks.                                                                                                                                                                                                                                | Framework     |
-| **KernelRuntimeWorker**    | Worker-side orchestrator. Manages kernel selection, middleware chain, bundler routing.                                                                                                                                                                                                                                                    | Worker        |
-| **RuntimeFileSystem**      | Opaque consumer-facing filesystem value produced by `fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLike`, or `fromFileSystemBridge`. Passed into **`webWorkerTransport({ fileSystem })`** / **`inProcessTransport({ runtime, fileSystem })`**. Internal handle representation lives under `transport/_internal`.                   | Consumer      |
-| **KernelDefinition**       | Kernel plugin contract (author API, via `defineKernel`). Runs in worker.                                                                                                                                                                                                                                                                  | Plugin Author |
-| **BundlerDefinition**      | Bundler plugin contract (author API, via `defineBundler`). Declares supported `extensions`.                                                                                                                                                                                                                                               | Plugin Author |
-| **KernelMiddleware**       | Middleware plugin contract (author API, via `defineMiddleware`). Wraps kernel operations.                                                                                                                                                                                                                                                 | Plugin Author |
-| **KernelPlugin**           | Registration object returned by consumer factory functions like `replicad()`. Runs on main thread.                                                                                                                                                                                                                                        | Consumer      |
-| **MiddlewarePlugin**       | Registration object returned by consumer factory functions like `parameterCache()`.                                                                                                                                                                                                                                                       | Consumer      |
-| **BundlerPlugin**          | Registration object returned by consumer factory functions like `esbuild()`.                                                                                                                                                                                                                                                              | Consumer      |
-| **KernelRuntime**          | Services injected into kernel methods: filesystem, logger, bundler, tracer.                                                                                                                                                                                                                                                               | Plugin Author |
-| **Realm**                  | Execution environment: main thread, Web Worker, Node.js `worker_threads`, remote server.                                                                                                                                                                                                                                                  | Conceptual    |
+| Entity                     | Purpose                                                                                                                                                                                                                                                                                                                                   | Layer          |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| **RuntimeClient**          | High-level facade. Lazy, Promise-based, event-subscribable. Supports inline code rendering (`RuntimeSource`) and filesystem rendering (filesystem `RuntimeSource`). Emits `geometry` event on render completion. Auto-cancels superseded renders. Created by `createRuntimeClient()`.                                                     | Consumer       |
+| **RuntimeTransportPlugin** | Legacy name — superseded by **`TransportPlugin`** callable (`webWorkerTransport({...})`). Bundled implementations: `inProcessTransport`, `webWorkerTransport`, `nodeWorkerTransport`. Standalone **`webWorkerHost` / `nodeWorkerHost` / `electronUtilityHost`** furnish worker/host entries — no `.host` accessor on the plugin callable. | Framework      |
+| **RuntimeTransportClient** | Fat consumer-facing transport handle. Owns SAB, abort, geometry pool, FS bridge. `client.connect()` takes no arguments — every wire concern is closed over by the transport at construction.                                                                                                                                              | Framework      |
+| **RuntimeWorkerClient**    | Protocol client wrapping a `RuntimeTransportClient` with request/response correlation and typed callbacks.                                                                                                                                                                                                                                | Framework      |
+| **KernelRuntimeWorker**    | Worker-side orchestrator. Manages plugin expansion, kernel selection, middleware chain, bundler routing, transcoders, and export route planning.                                                                                                                                                                                          | Worker         |
+| **RuntimeFileSystem**      | Opaque consumer-facing filesystem value produced by `fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLike`, or `fromFileSystemBridge`. Passed into **`webWorkerTransport({ fileSystem })`** / **`inProcessTransport({ runtime, fileSystem })`**. Internal handle representation lives under `transport/_internal`.                   | Consumer       |
+| **PluginDefinition**       | Package-level toolkit contract (author API, via `definePlugin`). Expands to one or more kernels, transcoders, middleware, bundlers, or future runtime capabilities. Root package exports it as named `plugin`.                                                                                                                            | Plugin Author  |
+| **KernelDefinition**       | Kernel capability contract (author API, via `defineKernel`). Runs in worker or an explicitly configured host/runner.                                                                                                                                                                                                                      | Plugin Author  |
+| **TranscoderDefinition**   | Artifact transcoder capability contract (author API, via `defineTranscoder`). Converts exported artifacts such as glTF to image formats without becoming a kernel.                                                                                                                                                                        | Plugin Author  |
+| **BundlerDefinition**      | Bundler capability contract (author API, via `defineBundler`). Declares supported `extensions`.                                                                                                                                                                                                                                           | Plugin Author  |
+| **KernelMiddleware**       | Middleware capability contract (author API, via `defineMiddleware`). Wraps kernel operations.                                                                                                                                                                                                                                             | Plugin Author  |
+| **Plugin Factory**         | Consumer-callable named export such as `replicad()`, `image()`, or `middleware()`. Configures and returns a package toolkit plugin without requiring a default export.                                                                                                                                                                    | Consumer       |
+| **Core Package**           | Shared implementation helper package named `@taucad/*-core`. Exposes reusable logic to plugin packages but never exports `plugin` or initializes concrete backends at root import.                                                                                                                                                        | Implementation |
+| **KernelRuntime**          | Services injected into kernel methods: filesystem, logger, bundler, tracer.                                                                                                                                                                                                                                                               | Plugin Author  |
+| **Realm**                  | Execution environment: main thread, Web Worker, Node.js `worker_threads`, remote server.                                                                                                                                                                                                                                                  | Conceptual     |
 
 ## API Audiences
 
-Two distinct "define" patterns serve different audiences:
+Runtime authoring APIs serve three distinct audiences:
 
-| Audience          | Pattern                                                   | Example                      | Runs In      |
-| ----------------- | --------------------------------------------------------- | ---------------------------- | ------------ |
-| **Plugin author** | `defineKernel()`, `defineBundler()`, `defineMiddleware()` | Implement a new CAD kernel   | Worker realm |
-| **Consumer**      | `replicad()`, `esbuild()`, `parameterCache()`             | Select and configure plugins | Main thread  |
+| Audience                  | Pattern                                                                                  | Example                                      | Runs In                    |
+| ------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------- |
+| **Capability author**     | `defineKernel()`, `defineTranscoder()`, `defineBundler()`, middleware                    | Implement one kernel, transcoder, or bundler | Worker or configured host  |
+| **Plugin package author** | `definePlugin()`                                                                         | Group Assimp import/export capabilities      | Package root / worker load |
+| **Consumer or host**      | Package-named alias, canonical named `plugin`, or role-named direct capability factories | `assimp()`, `plugin()`, `assimpKernel()`     | Main thread or host setup  |
 
-## Three-Pillar Plugin Model
+## Plugin Toolkit Model
 
-All non-generic capabilities are provided by injectable plugins, not hardcoded in the framework:
+All concrete CAD capabilities are provided by plugin packages, not hardcoded in `@taucad/runtime`:
 
-| Plugin Type | Author API                              | Consumer API                            | Purpose                                                          | Example                                        |
-| ----------- | --------------------------------------- | --------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------- |
-| Kernel      | `defineKernel` → `KernelDefinition`     | `replicad()` → `KernelPlugin`           | Geometry computation, parameter extraction, export               | replicad, manifold, jscad, openrscad, zoo, tau |
-| Bundler     | `defineBundler` → `BundlerDefinition`   | `esbuild()` → `BundlerPlugin`           | File bundling, code execution, module registry, import detection | esbuild bundler                                |
-| Middleware  | `defineMiddleware` → `KernelMiddleware` | `parameterCache()` → `MiddlewarePlugin` | Operation wrapping (caching, transforms, edge detection)         | geometry-cache, parameter-cache                |
+| Capability role | Author API                                  | Package export                       | Purpose                                                          | Example package                   |
+| --------------- | ------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------- | --------------------------------- |
+| Kernel          | `defineKernel` → `KernelDefinition`         | Toolkit `plugin`, role-named factory | Geometry computation, parameter extraction, export               | `@taucad/replicad`                |
+| Transcoder      | `defineTranscoder` → `TranscoderDefinition` | Toolkit `plugin`, role-named factory | Artifact-to-artifact conversion after source export              | `@taucad/image`, `@taucad/assimp` |
+| Bundler         | `defineBundler` → `BundlerDefinition`       | Toolkit `plugin`, role-named factory | File bundling, code execution, module registry, import detection | `@taucad/esbuild`                 |
+| Middleware      | `defineMiddleware` → `KernelMiddleware`     | Toolkit `plugin`, role-named factory | Operation wrapping, caching, transforms, content contributors    | `@taucad/middleware`              |
+| Runner          | Future runner/host adapter contract         | Explicit implementation package      | Native, Python, daemon, or remote execution                      | `@taucad/build123d`               |
+
+A plugin package is a toolkit. It may contain several roles when one backend naturally owns them together: `@taucad/assimp` may expose both Assimp import-kernel and transcoder capabilities; `@taucad/replicad` may later expose a Replicad kernel plus a STEP transcoder over its own OCCT-backed import path. This mirrors established plugin ecosystems where one package owns a collection of related rules, loaders, transforms, or commands.
+
+Capability ids stay flat and author-declared (`replicad`, `geometry-cache`); `meta.namespace` is the plugin's short explicit runtime namespace for diagnostics, preset paths, cache keys, config keys, and telemetry — it never prefixes or rewrites capability ids. Plugin factory options select a preset only; a capability that needs host configuration registers through the direct capability buckets, which append after plugin-expanded capabilities. A host that needs an outer position for its own middleware lists that whole kind directly.
+
+### Package Ownership Boundaries
+
+`@taucad/runtime` owns only the generic engine: contracts, authoring helpers, route planning, worker/client/transport/filesystem infrastructure, diagnostics, and testing helpers. Concrete kernels, middleware, bundlers, transcoders, toolchain assets, and backend lifecycle code live outside runtime.
+
+Plugin packages live under `packages/plugins/*` and publish as `@taucad/<toolkit>`. They export the canonical named callable factory `plugin`, a package-named camelCase alias bound to the same factory (`export { plugin, plugin as replicad }`), role-named direct factories, and no default export. Plugin and core packages declare `@taucad/runtime` as a required peer dependency, never a hard dependency, so one runtime instance serves the install (see `docs/policy/npm-policy.md`).
+
+Shared helper packages live under `packages/core/*` and publish as `@taucad/<name>-core`. Core packages are not plugins: they expose reusable implementation functions and types, have no root `plugin` export, and must not initialize WASM, native, Python, or daemon backends at root import.
+
+### Payload Isolation
+
+Tree shaking is not an install-boundary guarantee. A browser/WASM-safe plugin package must not hard-depend on native, Python, or daemon implementation packages even if those imports appear unreachable to bundlers. Split incompatible host payloads into explicit packages such as `@taucad/opencascade-native` or `@taucad/build123d`, then let UI, CLI, desktop, or daemon recipes opt into them deliberately.
+
+`@taucad/opencascade` is the browser/WASM-safe OpenCascade package. Native OpenCascade uses an explicit implementation package; Python-backed Build123d uses its own package and runner/daemon requirements.
 
 ### Multi-Bundler Support
 
@@ -136,16 +166,16 @@ Multiple bundlers can be registered simultaneously. Each bundler declares the fi
 
 ### Memory Impact
 
-With the single-worker-per-geometry-unit architecture, only the WASM runtime for the selected kernel is loaded:
+With the single-worker-per-geometry-unit architecture, only the backend for the selected plugin capability is loaded. After plugin extraction, these weights are plugin-package measurements rather than `@taucad/runtime` dependencies:
 
 - replicad file: ~55-66 MB (OpenCASCADE WASM)
 - manifold file: ~14 MB (Manifold WASM)
 - openrscad file: ~14 MB (Manifold WASM)
 - jscad file: ~5 MB
 - kcl file: ~3 MB (KCL WASM)
-- STEP/STL file: ~5 MB (converter)
+- STEP/STL/3DM/glTF file: package-owned import-kernel backend (`@taucad/brep`, `@taucad/assimp`, `@taucad/rhino`, `@taucad/gltf` after the converter dissolution)
 
-Previously, all 5 kernels were loaded eagerly (~90 MB per CadMachine).
+Runtime itself must not import these concrete backends from its root or engine subpaths. Previously, all five kernels were loaded eagerly (~90 MB per CadMachine).
 
 ## RuntimeClient Lifecycle
 
@@ -302,23 +332,18 @@ Hard `terminate()` and non-draining `shutdown()` reject pending work and close t
    - Select highest-priority match; initialize ALL matching kernels (multi-module)
 
 4. Pass 3: Catch-all fallback
-   - Try any extensions: ['*'] config (tau converter)
+   - Try any registered extension `'*'` import/converter kernel
 ```
 
 ### Detection Priority
 
-```
-Priority: openrscad → zoo → replicad → manifold → jscad → tau
-```
+Kernel detection priority comes from the registered kernel capabilities in the selected runtime definition. Product recipes may choose different priorities; the browser editor recipe currently prefers extension-owned kernels first, import-detected JavaScript kernels next, and catch-all import/converter kernels last. After the converter dissolution, first-party import kernels declare explicit disjoint extension sets and no first-party kernel registers `'*'`; the catch-all pass remains framework capability for third-party kernels.
 
-| Kernel    | Detection Method              | Scope                   |
-| --------- | ----------------------------- | ----------------------- |
-| OpenRSCAD | Extension: `.scad`            | Immediate               |
-| Zoo       | Extension: `.kcl`             | Immediate               |
-| Replicad  | Regex + bundler detectImports | Entry path + transitive |
-| Manifold  | Regex + bundler detectImports | Entry path + transitive |
-| Jscad     | Regex + bundler detectImports | Entry path + transitive |
-| Tau       | Extension: `*` (catch-all)    | Fallback                |
+| Kernel class               | Detection Method              | Scope                   |
+| -------------------------- | ----------------------------- | ----------------------- |
+| Extension-owned kernels    | Declared extension            | Immediate               |
+| Import-detected JS kernels | Regex + bundler detectImports | Entry path + transitive |
+| Catch-all import/converter | Extension: `*`                | Fallback                |
 
 ### Multi-Module Registration
 
@@ -337,7 +362,7 @@ The selection cache is invalidated by worker-owned filesystem watch events, sinc
 
 ### `defineBundler`
 
-Bundler plugins handle file bundling, code execution, and module registry. The esbuild bundler (`esbuild.bundler.ts`) is the default implementation.
+Bundler plugins handle file bundling, code execution, and module registry. The esbuild toolkit package is the default product recipe implementation, not a runtime-owned backend.
 
 Each bundler declares which file extensions it handles via `extensions: string[]`:
 
@@ -367,6 +392,12 @@ Kernel modules define geometry computation logic. Each kernel is an ES module lo
 - `meshGeometry(input, runtime, ctx)` _(optional)_ — nativeHandle → display artifact (`GeometryResponse`) at preview tessellation or display packing. Runs **only on the display path**, at the kernel boundary; export-only requests never call it. Contract invariant: a kernel provides a display path either via inline `geometry` or via `meshGeometry` — the orchestrator rejects display renders when neither exists
 - `exportGeometry(input, runtime, ctx)` — export using the framework-materialized nativeHandle. Mesh formats tessellate internally at export quality; BRep formats (STEP/IGES) never tessellate
 
+### `defineTranscoder`
+
+Transcoders convert framework-produced artifacts after a source route materializes. They do not select or initialize kernels, and they consume artifact `files` rather than unresolved model `source` or an evaluation `entryPath`.
+
+Image routes are the canonical example: a kernel exports glTF, then the selected image transcoder converts that artifact to PNG, JPEG, or WebP. Heavy transcoder backends such as Assimp, browser canvas renderers, native encoders, or WASM codecs belong to plugin packages. Load them inside the capability's `initialize(options, runtime)` and carry them in the returned context — the framework guarantees once-per-worker initialization — never per request, and never through module-level promise caches inside capability code (those are reserved for code outside a capability lifecycle).
+
 ### MessagePort Protocol
 
 The kernel machine communicates with the worker via typed MessagePort events through the `RuntimeTransport` interface:
@@ -394,17 +425,30 @@ During detection, bare specifiers appear as external imports in `metafile.output
 
 ## Package Exports
 
-```
-@taucad/runtime          → createRuntimeClient, types, presets, fromMemoryFs, fromFsLike, fromFileSystemBridge
-@taucad/runtime/transport → defineRuntimeTransport, inProcessTransport, webWorkerTransport, nodeWorkerTransport
-@taucad/runtime/kernels  → replicad(), manifold(), opencascade(), zoo(), jscad(), tau()
-@taucad/runtime/middleware → parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()
-@taucad/runtime/bundler  → esbuild()
-@taucad/runtime/transport → RuntimeTransport, createWorkerTransport()
-@taucad/runtime/testing  → Testing utilities (createTestFilesystem, mocks)
+Target runtime exports are engine and authoring surfaces only:
+
+```text
+@taucad/runtime             → createRuntimeClient, filesystem constructors, public engine types
+@taucad/runtime/worker      → defineRuntime and worker/runtime definition helpers
+@taucad/runtime/plugin      → definePlugin and plugin toolkit types
+@taucad/runtime/kernel      → defineKernel and kernel authoring types
+@taucad/runtime/transcoder  → defineTranscoder and transcoder authoring types
+@taucad/runtime/middleware  → defineMiddleware and middleware authoring types
+@taucad/runtime/bundler     → defineBundler and bundler authoring types
+@taucad/runtime/transport   → defineRuntimeTransport and transport implementations
+@taucad/runtime/testing     → testing utilities for runtime and plugin authors
 ```
 
-Individual plugin subpaths are also maintained for direct imports (e.g., `@taucad/runtime/kernels/replicad`).
+Runtime package exports must not include legacy preset or concrete-capability barrels. Concrete kernels, middleware, transcoders, and bundlers live in plugin packages:
+
+```text
+@taucad/assimp        → named plugin export plus assimpKernel and assimpTranscoder
+@taucad/image         → named plugin export plus imageTranscoder
+@taucad/middleware    → named plugin export plus individual middleware factories
+@taucad/opencascade   → browser/WASM-safe OpenCascade plugin toolkit
+@taucad/occt-core     → shared OCCT helper package, no plugin export
+@taucad/geometry-core → shared geometry helper package, no plugin export
+```
 
 ## Tessellation
 
@@ -539,7 +583,7 @@ One project filesystem serves **N runtime clients**: the interactive worker, one
 flowchart LR
     IW[Interactive worker\nRuntimeClient] --> L2[(L2 geometry cache\n.tau/cache/geometry)]
     HW[Headless image worker\nthumbnails + captures] --> L2
-    CLI[CLI / headless agent\ncreateNodeClient + presets] --> L2
+    CLI[CLI / headless agent\ncreateNodeClient + explicit plugins] --> L2
     L2 --- FS[(Project filesystem\nsingle authority)]
 ```
 

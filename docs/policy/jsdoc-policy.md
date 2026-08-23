@@ -3,7 +3,7 @@ title: 'JSDoc Policy'
 description: 'Standards for JSDoc documentation: @public/@internal visibility, compilable examples, real-world usage, language tags, and @example <caption> requirements.'
 status: active
 created: '2026-03-11'
-updated: '2026-08-17'
+updated: '2026-08-22'
 related:
   - docs/policy/documentation-policy.md
   - docs/policy/library-api-policy.md
@@ -70,9 +70,9 @@ Using `text` instead of `ts` for internal TypeScript examples sacrifices DX: dev
 
 ### 1. Examples Must Show Real-World Usage
 
-Write the code a developer would actually write. If a function is always composed inside another (e.g., `replicad()` inside `defineRuntime`), the example must show that composition.
+Write the code a developer would actually write. If a function is always composed inside another (e.g., `replicad()` from `@taucad/replicad` inside `defineRuntime`), the example must show that composition.
 
-**Why**: An example of `replicad()` called in isolation is never how it is used — it appears inside a worker- or host-owned `defineRuntime({ kernels: [replicad()] })`.
+**Why**: An example of `replicad()` called in isolation is never how it is used — it appears inside a worker- or host-owned `defineRuntime({ kernels: [replicad()] })` after `import { replicad } from '@taucad/replicad'`.
 
 ### 2. No Synthetic Stubs
 
@@ -156,9 +156,9 @@ CORRECT:
  *
  * @example <caption>Browser setup</caption>
  * ```typescript
- * import { defineRuntime } from '@taucad/runtime';
- * import { replicad } from '@taucad/runtime/kernels';
- * export const runtime = defineRuntime({ kernels: [replicad()] });
+ * import { defineRuntime } from '@taucad/runtime/worker';
+ * import { replicadKernel } from '@taucad/replicad';
+ * export const runtime = defineRuntime({ kernels: [replicadKernel()] });
  * ```
  */
 ````

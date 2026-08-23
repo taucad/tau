@@ -3,7 +3,7 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-08-16'
+updated: '2026-08-22'
 related:
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
   - docs/research/project-card-thumbnail-preview-parity.md
@@ -32,14 +32,13 @@ These values are defined in `libs/types/src/constants/material.constants.ts` as 
 
 ### Pipelines Covered
 
-| Pipeline              | Source                       | File                                                                |
-| --------------------- | ---------------------------- | ------------------------------------------------------------------- |
-| OCCT (STEP/IGES/BREP) | `libs/converter`             | `libs/converter/src/loaders/occt.loader.ts`                         |
-| Replicad Kernel       | `packages/runtime`           | `packages/runtime/src/kernels/replicad/utils/replicad-to-gltf.ts`   |
-| JSCAD Kernel          | `packages/runtime`           | `packages/runtime/src/kernels/jscad/jscad-to-gltf.ts`               |
-| OpenRSCAD Kernel      | `packages/kernels/openrscad` | Native `openrscad-engine` GLB writer                                |
-| Shared OFF mesh       | `packages/runtime`           | `packages/runtime/src/utils/export-glb.ts`                          |
-| Fallback edge overlay | Runtime glTF middleware      | `packages/runtime/src/middleware/gltf-edge-detection.middleware.ts` |
+| Pipeline              | Source               | File                                                                |
+| --------------------- | -------------------- | ------------------------------------------------------------------- |
+| OCCT (STEP/IGES/BREP) | `@taucad/brep`       | `packages/plugins/brep/src/occt-loader.ts`                          |
+| Replicad Kernel       | `@taucad/replicad`   | `packages/plugins/replicad/src/utils/replicad-to-gltf.ts`           |
+| JSCAD Kernel          | `@taucad/jscad`      | `packages/plugins/jscad/src/jscad-to-gltf.ts`                       |
+| OpenRSCAD Kernel      | `@taucad/openrscad`  | Native `openrscad-engine` GLB writer                                |
+| Fallback edge overlay | `@taucad/middleware` | `packages/plugins/middleware/src/gltf-edge-detection.middleware.ts` |
 
 Tau-generated auxiliary edge overlays use `cadEdgeOverlayMaterialDefaults`: linear `baseColorFactor: [0, 0, 0, 1]`, `metallicFactor: 0`, `roughnessFactor: 1`, `doubleSided: true`, `alphaMode: "OPAQUE"`, and explicit `KHR_materials_unlit`. Direct writers list the extension in `extensionsUsed` only when line primitives exist and do not add it to `extensionsRequired`.
 
@@ -147,15 +146,15 @@ Source color (sRGB) --> GLTF baseColorFactor (linear via spec) --> Three.js line
 
 Current defaults per kernel:
 
-| Kernel            | Linear Tolerance | Angular Tolerance | Notes                                          |
-| ----------------- | ---------------- | ----------------- | ---------------------------------------------- |
-| Replicad          | 0.02mm           | 20deg             | Locked by `occt-tessellation-defaults.test.ts` |
-| Replicad (export) | 0.01mm           | 20deg             | Higher quality for file export                 |
-| JSCAD             | N/A              | N/A               | Fan triangulation of CSG output polygons       |
-| OpenRSCAD         | Engine defaults  | Engine defaults   | Native tessellation options                    |
-| OCCT (converter)  | OCCT defaults    | OCCT defaults     | `undefined` passed to `ReadStepFile`           |
+| Kernel             | Linear Tolerance | Angular Tolerance | Notes                                          |
+| ------------------ | ---------------- | ----------------- | ---------------------------------------------- |
+| Replicad           | 0.02mm           | 20deg             | Locked by `occt-tessellation-defaults.test.ts` |
+| Replicad (export)  | 0.01mm           | 20deg             | Higher quality for file export                 |
+| JSCAD              | N/A              | N/A               | Fan triangulation of CSG output polygons       |
+| OpenRSCAD          | Engine defaults  | Engine defaults   | Native tessellation options                    |
+| BRep import kernel | OCCT defaults    | OCCT defaults     | `undefined` passed to `ReadStepFile`           |
 
-**Known limitation**: The OCCT converter does not expose tessellation quality parameters. This means curved surfaces may appear faceted on high-detail models. Future work: expose `linearDeflection` and `angularDeflection` options.
+**Known limitation**: The BRep import kernel does not expose tessellation quality parameters. This means curved surfaces may appear faceted on high-detail models. Future work: expose `linearDeflection` and `angularDeflection` options.
 
 ## Camera Framing Policy
 
@@ -224,5 +223,5 @@ The `GltfMesh` component separates GLTF binary parsing (expensive) from material
 
 - **No per-material metalness heuristics**: STEP files do not carry metal/non-metal metadata. All surfaces default to non-metallic. Future work could infer metalness from part names or colour patterns.
 - **No normal map generation**: The pipeline relies on vertex normals from tessellation. No tangent-space normal maps are generated for surface detail enhancement.
-- **Fixed tessellation quality for OCCT**: The converter passes `undefined` to `ReadStepFile`, using OCCT library defaults. Curved surfaces may appear faceted.
+- **Fixed tessellation quality for BRep imports**: The BRep kernel passes `undefined` to `ReadStepFile`, using OCCT library defaults. Curved surfaces may appear faceted.
 - **Matcap ignores environment**: When matcap is enabled, the environment map is skipped. The matcap texture provides its own baked lighting.

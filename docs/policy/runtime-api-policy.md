@@ -3,12 +3,14 @@ title: 'Runtime API Policy'
 description: 'Naming and ownership rules for runtime consumer, plugin-author, transport, filesystem, and artifact APIs.'
 status: active
 created: '2026-07-20'
-updated: '2026-08-17'
+updated: '2026-08-22'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-architecture-policy.md
   - docs/policy/filesystem-authority-policy.md
   - docs/policy/filesystem-policy.md
+  - docs/research/runtime-plugin-toolkit-charter.md
+  - docs/research/runtime-plugin-toolkit-architecture-blueprint.md
   - docs/research/runtime-source-api-unification-blueprint.md
   - docs/research/nested-geometry-unit-runtime-source-contract-regression.md
   - docs/research/runtime-path-namespace-documentation-contract.md
@@ -317,6 +319,48 @@ type CompatibleCreateGeometryInput = {
 };
 ```
 
+### 10. Name Plugin Toolkit APIs Consistently
+
+Use `definePlugin` for package-level Tau plugin toolkits. Do not use `defineTauPlugin`: the import path already supplies the Tau namespace, and the runtime authoring APIs are named `defineRuntime`, `defineKernel`, `defineTranscoder`, `defineBundler`, and `defineMiddleware`.
+
+Plugin packages export the canonical named callable factory `plugin` from the root, a package-named camelCase alias bound to the same factory (`export { plugin, plugin as image }`), and no default export. Mechanical loaders read `plugin`; humans read the alias. Also expose role-named direct factories such as `assimpKernel`, `imageTranscoder`, or `geometryCache`.
+
+Name presets by what they select: every package offers `default`, and role-named presets (`import`, `export`) only where a package carries more than one capability.
+
+Use `meta.name` for the package/toolkit identity. Use `meta.namespace` for the mandatory short stable runtime namespace (`image`, `assimp`) that scopes diagnostics, preset capability paths, cache keys, config keys, and telemetry labels; write it explicitly in source so package renames, forks, or aliases never silently change runtime identity. The namespace must be the short form — never a duplicate of the full package name. `meta.namespace` does not rewrite capability ids: kernel, transcoder, middleware, and bundler ids stay the flat author-declared ids from their `define*` calls.
+
+Name grouped items `kernels`, `transcoders`, `middleware`, or `bundlers` by their runtime role, as records keyed by capability name so presets can reference entries such as `transcoders.export`; do not call them `contributions`.
+
+**Why**: A stable named export gives CLIs and agents a one-shot loader contract, an explicit short namespace keeps persisted identity stable across package renames, and role names are more obvious than a generic collection term.
+
+CORRECT:
+
+```typescript
+import { definePlugin } from '@taucad/runtime/plugin';
+
+export const plugin = definePlugin({
+  meta: { name: '@taucad/image', namespace: 'image', version: '0.1.0' },
+  transcoders: { export: imageTranscoder },
+  presets: { default: ['transcoders.export'] },
+});
+
+// src/index.ts
+export { plugin, plugin as image } from '#image.plugin.js';
+export { imageTranscoder } from '#image.transcoder.js';
+```
+
+INCORRECT:
+
+```typescript
+export default defineTauPlugin({
+  meta: {
+    name: '@taucad/image',
+    namespace: '@taucad/image',
+  },
+  contributions: [imageTranscoder],
+});
+```
+
 ## Anti-Patterns
 
 - Do not use `filePath` for a kernel or middleware entry merely because the value is a path.
@@ -328,6 +372,8 @@ type CompatibleCreateGeometryInput = {
 - Do not infer semantic role from whether a path is relative or absolute; the owning boundary defines the role.
 - Do not call a runtime path an unqualified “absolute path”; define the supplied runtime filesystem root instead.
 - Do not expose authority-global `/projects/<id>` paths or host filesystem paths to kernels, bundlers, or middleware.
+- Do not document default plugin imports; import the package-named alias, the canonical named `plugin` export, or a role-named direct factory.
+- Do not call plugin-owned kernels, transcoders, middleware, or bundlers `contributions`.
 
 ## Summary Checklist
 
@@ -340,6 +386,8 @@ type CompatibleCreateGeometryInput = {
 - [ ] Normalized protocol locators remain runtime-owned.
 - [ ] Shared types and positive type tests enforce the vocabulary.
 - [ ] No compatibility alias or semantic-name lint rule was added.
+- [ ] Plugin toolkit packages expose named `plugin` plus a package-named alias bound to the identical factory; no default plugin export appears in source, docs, or generator output.
+- [ ] Plugin metadata carries an explicit short `meta.namespace` distinct from the full package name; capability ids stay flat and author-declared.
 - [ ] Runtime `/` is documented as the supplied runtime filesystem root, never the host OS root.
 - [ ] Authority-global, host, runtime, project-relative, and engine-private paths remain qualified at their owning boundaries.
 
@@ -349,6 +397,8 @@ type CompatibleCreateGeometryInput = {
 - Related: `docs/policy/runtime-architecture-policy.md`
 - Related: `docs/policy/filesystem-authority-policy.md`
 - Related: `docs/policy/filesystem-policy.md`
+- Research: `docs/research/runtime-plugin-toolkit-charter.md`
+- Research: `docs/research/runtime-plugin-toolkit-architecture-blueprint.md`
 - Research: `docs/research/runtime-source-api-unification-blueprint.md`
 - Research: `docs/research/nested-geometry-unit-runtime-source-contract-regression.md`
 - Research: `docs/research/runtime-path-namespace-documentation-contract.md`

@@ -3,7 +3,7 @@ title: 'Documentation Policy'
 description: 'Standards for writing and maintaining Tau documentation: content types, templates, AI discoverability, API reference, sidebar navigation, and cross-linking. Applies to apps/ui/content/docs/ and docs/.'
 status: active
 created: '2026-02-23'
-updated: '2026-07-14'
+updated: '2026-08-22'
 ---
 
 # Documentation Policy
@@ -302,7 +302,7 @@ Individual pages are available as raw markdown at `*.mdx` endpoints via the `llm
 
 - Use clear H2/H3 headings to structure content.
 - Use fenced code blocks with language tags (`typescript`, `bash`, `json`).
-- Include explicit package import paths in code examples (`@taucad/runtime`, `@taucad/runtime/kernels`, etc.).
+- Include explicit package import paths in code examples (`@taucad/runtime`, `@taucad/runtime/plugin`, `@taucad/replicad`, etc.).
 
 ### Structured Metadata
 

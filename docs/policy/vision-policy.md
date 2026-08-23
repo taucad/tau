@@ -3,7 +3,7 @@ title: 'Vision Policy'
 description: "Tau's long-term vision for connecting hardware engineering through code, AI agents, and verification as the reward function."
 status: active
 created: '2026-03-04'
-updated: '2026-08-17'
+updated: '2026-08-23'
 ---
 
 # Vision Policy
@@ -46,7 +46,7 @@ Solve code-first mechanical CAD. Tau today is an AI-native, multi-kernel CAD pla
 
 - **Multi-kernel runtime** (`@taucad/runtime`) — Replicad, JSCAD, Manifold, OpenRSCAD, KCL, any CAD kernel behind a unified `defineKernel()` API. BRep and mesh geometry, parametric models as TypeScript/OpenSCAD/KCL functions.
 - **AI agent** — LangGraph agent with file editing, kernel execution, TDD via GeoSpec, screenshot verification. The agent writes geometry code, runs it, measures the result, iterates.
-- **Converter** (`@taucad/converter`) — 41 input formats, 11 output formats. STEP, STL, glTF, USDZ, IFC, and more. Convert any file format to another.
+- **Format interchange** — Import kernels in `@taucad/assimp`, `@taucad/brep`, `@taucad/gltf`, and `@taucad/rhino` plus the transcoders that write export targets. STEP, IGES, STL, glTF, USDZ, IFC, 3DM, and more, composed as plugins in the same runtime rather than a separate converter package.
 - **Browser-native** — No install. Web Workers for computation, WebGL for rendering. Embeddable components for third-party apps.
 - **Open source** — Published `@taucad/*` packages on npm. Apache-2.0 licensed (the GeoSpec engine is fair source, per `LICENSING.md`).
 - **Files are the interface** — Everything is a file. Geometry, tests, metadata. Agent skills, subagents, scripts. A single data plane makes computational engineering precise, reproducible, with provenance by design. No lock-in on the _artifact_: designs, tests, and history stay portable and runnable outside Tau. What is monetized is high-assurance verification at scale — never access to your own files.

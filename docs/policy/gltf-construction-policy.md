@@ -220,7 +220,7 @@ For the canonical Z-up/millimetres to Y-up/metres conversion:
 (x, y, z) -> (x / 1000, z / 1000, -y / 1000)
 ```
 
-Apply the matching rotation without scale to normals so they remain unit length and preserve handedness. Kernel mapping and export-boundary code use `transformVertexArray()` and `transformNormalArray()` from `packages/runtime/src/framework/common.ts` for this conversion.
+Apply the matching rotation without scale to normals so they remain unit length and preserve handedness. Kernel mapping and export-boundary code use `transformVertexArray()` and `transformNormalArray()` from `packages/core/geometry/src/geometry-transform.utils.ts` for this conversion.
 
 Do not apply coordinate transforms inside the GLB writer itself. The writer serializes already-prepared data and is unaware of kernel-native conventions. In particular, a kernel must not pre-rotate geometry and then ask its mapping/writer boundary to perform the same conversion again.
 
@@ -233,7 +233,6 @@ Each kernel maps its geometry output to `GlbInput` before calling `writeGlb()`. 
 | Replicad       | `GeometryReplicad` (faces, edges, colors) | `replicad-to-gltf.ts` | Pre-transformed positions/normals, indices, optional edge lines                                                             |
 | JSCAD          | Named `geom3` part descriptors            | `jscad-to-gltf.ts`    | One named node/mesh per part, fresh export-only retessellation, triangle normalization, and owner-local topology edge lines |
 | OpenRSCAD      | Native OpenRSCAD geometry                 | `openrscad-engine`    | Native GLB (out of scope — OpenRSCAD owns construction)                                                                     |
-| Shared OFF     | `IndexedPolyhedron` (via OFF parser)      | `export-glb.ts`       | Color-grouped, triangulated, transformed geometry                                                                           |
 | Manifold       | `manifold-3d` GLTF nodes                  | `manifold.kernel.ts`  | Uses `@gltf-transform/core` (out of scope — manifold-3d owns the Document)                                                  |
 | OpenCASCADE    | `TopoDS_Shape`                            | `opencascade-mesh.ts` | Native `RWGltf_CafWriter` (out of scope — OCCT produces GLB directly)                                                       |
 

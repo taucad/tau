@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-08-18'
+updated: '2026-08-22'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -28,8 +28,10 @@ Nx Release with version plans provides native monorepo integration and decouples
 | `geospec`                | GeoSpec authoring contract and CLI-facing specification |
 | `@taucad/geospec-engine` | Fair-source GeoSpec execution/proof engine and CLI      |
 | `@taucad/openrscad`      | OpenRSCAD runtime plugin                                |
+| `packages/plugins/*`     | Publishable runtime capability toolkits                 |
+| `packages/core/*`        | Publishable shared implementation packages              |
 
-The following internal libraries remain in the fixed Nx version group so a change forces a runtime version, but `private: true` and the publish workflow prevent publishing them independently: `@taucad/converter`, `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/gltf-extensions`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, `@taucad/units`, `@taucad/utils`, and `@taucad/vm`. All twelve live under `libs/*`. Their code and declarations ship inside `@taucad/runtime`, which resolves no first-party workspace package at install time (`npm-policy.md` Rule 4). Externally-published artifacts such as `@taucad/kcl-wasm-lib` and `libcascade`, and ordinary third-party packages, remain external dependencies and are outside that invariant.
+The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, `@taucad/units`, and `@taucad/utils`. Runtime bundles all nine. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public plugin and core packages remain external dependencies and publish in the same fixed train.
 
 `@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference and units remain implementation libraries with no public runtime veneer or subpath.
 
@@ -41,7 +43,7 @@ The following internal libraries remain in the fixed Nx version group so a chang
 
 All packages in the release group share a single version number. When any member changes, Nx aligns the group to the same version. This includes the versioned-but-not-published bundled libraries so their changes cannot ship without a corresponding runtime version.
 
-**Rationale**: The packages are tightly coupled, and `@taucad/runtime` bundles its twelve private implementation libraries. Independent versioning would create a combinatorial compatibility matrix that is difficult to test and communicate.
+**Rationale**: The packages are tightly coupled, and `@taucad/runtime` bundles nine private implementation libraries. Independent versioning would create a combinatorial compatibility matrix that is difficult to test and communicate.
 
 ### Semantic Versioning
 
@@ -101,7 +103,7 @@ All packages are built with [tsdown](https://tsdown.dev/) (Rolldown-based bundle
 
 Nx Release is configured with a `preVersionCommand` that builds all packages before versioning. This ensures the `dist/` directories exist with correct content before `package.json` versions are updated, so the published tarball contains the built artifacts at the correct version.
 
-The build respects Nx's dependency graph. Bundled libraries build before `@taucad/runtime`; `packages/kernels/*` participates in the same release build.
+The build respects Nx's dependency graph. Bundled libraries build before `@taucad/runtime`; `packages/plugins/*` and `packages/core/*` participate in the same release build.
 
 ### Package Validation
 
@@ -170,16 +172,17 @@ Developer                          CI (GitHub Actions)
    ├─ Commit + tag (v{version})
    └─ Push tag
                                    5. Tag triggers publish workflow
-                                      ├─ Run every candidate-only gate
-                                      ├─ Verify live registry dependencies
-                                      ├─ Pack, npm-install, and execute runtime in OS temp
-                                      ├─ Dry-run every publish batch
-                                      ├─ Publish runtime
-                                      ├─ Publish consumers, kernels, and geospec
-                                      └─ Publish geospec-engine
+                                      ├─ nx run scripts:release-gate (validators,
+                                      │  release checks, pkgcheck/test/typecheck/
+                                      │  lint by tag, surface audit, quick start)
+                                      ├─ Assert pnpm is the publisher
+                                      ├─ nx release publish --dry-run
+                                      └─ nx release publish
 ```
 
-Nx 22 does not permit `nx release publish -p` to select a subset of a fixed release group. The workflow therefore invokes the Nx-generated `nx-release-publish` targets in explicit dependency batches after the fixed group has been versioned. Those targets use the same `@nx/js:release-publish` executor, npm Trusted Publishing identity, and provenance settings; `--excludeTaskDependencies` prevents a batch from publishing an unverified downstream project.
+Nx synthesises an `nx-release-publish` target for every publishable project with `dependsOn: ['^nx-release-publish']`, so Nx already orders the whole fixed group by dependency and marks the dependents of a failed publish `skipped`. `nx.json` `targetDefaults` adds `pkgcheck` to that `dependsOn`, so each package's gate runs as a native dependency of its own publish. The workflow therefore runs a single `nx release publish` over the whole fixed group. Subset selection of a fixed group is still not permitted (`nx release publish -p` rejects it) and is no longer needed.
+
+This supersedes the earlier "explicit dependency batches" approach (2026-08-22, `docs/research/github-workflows-autopilot-blueprint.md`).
 
 ### Prerelease Strategy
 
@@ -197,9 +200,9 @@ This section specifies the operator-owned release procedure. It does not authori
 
 The closeout Decision Register has settled the former C1/C5/C6 and OQ2/OQ4/OQ7 branches:
 
-1. Runtime bundles exactly twelve private implementation libraries: converter, events, filesystem, fs-bridge, gltf-extensions, JSON Schema, memory, RPC, types, units, utils, and VM. None publishes independently.
+1. Runtime bundles exactly nine private implementation libraries: events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, units, and utils. None publishes independently.
 2. `@taucad/runtime/types` is the public runtime-contract type surface. JSON Schema inference and units have no public veneer or runtime subpath.
-3. Runtime consumes `replicad` and `replicad-opencascadejs` through registry aliases to the published `@taulabs/*` forks.
+3. Concrete backend dependencies are owned by their plugin packages; runtime does not depend on them.
 4. `@taucad/geospec-engine` publishes after runtime and `geospec`.
 5. `nanoraster@0.2.0` and its three platform packages replace the deleted `@taucad/render` package.
 6. Telemetry is private application infrastructure and does not participate in the train.
@@ -221,7 +224,7 @@ pnpm nx release --skip-publish --first-release
 git push origin main --follow-tags
 ```
 
-The pushed release tag triggers `.github/workflows/publish.yml`; CI dry-runs and then executes the explicit dependency batches. After verifying the train, the operator may promote each approved package:
+The pushed release tag triggers `.github/workflows/publish.yml`; CI runs the release gate, dry-runs, then publishes the fixed group in one `nx release publish`. After verifying the train, the operator may promote each approved package:
 
 ```bash
 npm dist-tag add '<package>@<released-version>' latest
@@ -234,7 +237,7 @@ The first successful train publication claims the decided names `geospec` and `@
 Only after the replacement train is installed and verified, deprecate the exact superseded ranges with replacement pointers:
 
 ```bash
-npm deprecate '@taucad/converter@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
+npm deprecate '@taucad/converter@0.1.0-beta.0' 'Use @taucad/assimp, @taucad/brep, @taucad/gltf, or @taucad/rhino.'
 npm deprecate '@taucad/events@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/filesystem@0.1.0-beta.0' 'Use @taucad/runtime/filesystem.'
 npm deprecate '@taucad/memory@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
@@ -269,3 +272,4 @@ npm deprecate '@taucad/telemetry@0.1.0-beta.0' 'Internal Tau application package
 | 2026-08 | Include `@taucad/geospec-engine` in the train           | The settled package split keeps authoring in `geospec` and publishes execution/proof plus the CLI from the fair-source engine package                     |
 | 2026-08 | Close C1/C5/C6 and OQ2/OQ4/OQ7                          | Bundle RPC/converter, use scoped Replicad aliases, publish GeoSpec engine, replace render with nanoraster, and internalize telemetry                      |
 | 2026-08 | Batch fixed-group publication through generated targets | Nx rejects project-filtered publication within a fixed group; explicit generated-target batches preserve fixed versioning and registry-dependent ordering |
+| 2026-08 | Supersede the batches with one `nx release publish`     | `nx-release-publish` already depends on `^nx-release-publish` (+ `pkgcheck` via `targetDefaults`), so Nx orders and fail-stops the fixed group natively   |

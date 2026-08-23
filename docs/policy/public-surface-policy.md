@@ -3,12 +3,13 @@ title: 'Public Surface Policy'
 description: 'Freeze register and admission rules for published Tau package exports, subpaths, declarations, and unstable internal escape hatches.'
 status: active
 created: '2026-08-15'
-updated: '2026-08-16'
+updated: '2026-08-22'
 related:
   - docs/policy/version-policy.md
   - docs/policy/library-api-policy.md
   - docs/policy/release-policy.md
   - docs/research/runtime-prepublish-gate-blueprint.md
+  - docs/research/runtime-plugin-toolkit-charter.md
 ---
 
 # Public Surface Policy
@@ -95,13 +96,23 @@ Add a register section for every later published version that adds, removes, ren
 
 ## Current Pre-Publish Topology
 
-The next runtime prerelease has one published implementation owner, `@taucad/runtime`. It bundles exactly twelve private workspace libraries: converter, events, filesystem, fs-bridge, gltf-extensions, JSON Schema, memory, RPC, types, units, utils, and VM. `@taucad/runtime/types` is the sole public runtime-contract type surface; JSON Schema inference and units have no public veneer or runtime subpath. Nanoraster and the two registry-aliased `@taulabs/*` Replicad forks remain external implementations. Telemetry is private application infrastructure and is neither a runtime bundle member nor a published surface.
+The next runtime prerelease is the framework owner only. It bundles exactly nine private workspace libraries: events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, units, and utils. Each has `@taucad/runtime` as its only published bundle owner. Converter, glTF-extensions, and the private VM library were dissolved; the VM's sources now live inside `@taucad/esbuild`, which publishes them under its own `./vm` subpath. `@taucad/geometry-core` and `@taucad/occt-core` are independently published shared implementation packages.
 
-The next prerelease adds two export keys beyond the published `0.1.0-beta.1` set: `./transport/websocket` (`webSocketTransport`, the browser-safe client for a remote kernel host) and `./transport/websocket-host` (`webSocketHost`, the Node `ws` server serving one kernel per connection). They follow the existing topology-tagged transport split, are size-limited in both size-limit configurations, and are named in the `runtime-websocket-transport` version plan.
+The as-built runtime export map contains the root plus these public subpaths:
+
+- framework and authoring: `./client`, `./worker`, `./plugin`, `./kernel`, `./middleware`, `./bundler`, `./transcoder`, `./types`, `./metadata`, and `./testing`;
+- transports: `./transport`, `./transport/in-process`, `./transport/web`, `./transport/node`, `./transport/websocket`, and `./transport/websocket-host`;
+- filesystems: `./filesystem`, `./filesystem/node`, and `./filesystem/browser`;
+- framework adapters: `./worker/web`, `./electron/main`, `./electron/preload`, `./electron/renderer`, `./electron/utility`, `./electron/vite`, `./node`, `./cross-origin-isolation`, `./cross-origin-isolation/express`, `./react-router`, `./vite`, `./nextjs`, `./nextjs/config`, and `./nextjs/browser-node-builtins`;
+- package metadata: `./package.json`.
+
+The migration removes `./presets`, `./kernels`, every `./kernels/*` key, every concrete `./middleware/*` key, `./bundler/esbuild`, `./vm`, and `./worker/node`. It adds `./plugin`. The websocket subpaths remain the topology-specific remote transport surfaces.
 
 Kernel, middleware, and transcoder phantom carriers use module-private `unique symbol` keys. The public guarantee is structural opacity: consumers can use the exported plugin types and preserve exact inference, but cannot name or forge a phantom property. The symbol declarations, their local identifiers, and their computed property names are implementation details and must not be added to the freeze register as public symbol names.
 
 This section records the admitted candidate topology, not a publication event. After the candidate is published, add its version and registry integrity to the Freeze Register without replacing the historical `0.1.0-beta.1` entry.
+
+Concrete capabilities are owned by the publishable packages under `packages/plugins/*`; shared public implementation code is owned by `packages/core/*`. Every toolkit root exports the named callable factory `plugin` and no default export. `@taucad/runtime` has never been published under `latest`, so this is a pre-freeze atomic replacement, not a deprecation event. Leave the historical `0.1.0-beta.1` entry untouched.
 
 ## Admitting a New Subpath
 
@@ -135,10 +146,7 @@ Do not suppress the rule to land a new surface. Either document the declaration 
 
 ## Grandfathered Plural Subpaths
 
-The following plural segments are grandfathered and may remain:
-
-- `./types`
-- `./kernels`
+The `./types` segment is grandfathered and may remain.
 
 New subpath segments follow Library API Policy's singular-noun rule. Grandfathering does not authorize a second broad barrel or a plural alias for a new singular subpath.
 

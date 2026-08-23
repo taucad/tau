@@ -32,12 +32,13 @@ import { noSceneOverrideMaterialRule } from './rules/no-scene-override-material.
 import { staticImportMetaUrlRule } from './rules/static-import-meta-url.js';
 import { requireUsingOnDisposableRule } from './rules/require-using-on-disposable.js';
 import { noImplInIndexRule } from './rules/no-impl-in-index.js';
+import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.18.0',
+    version: '1.19.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -65,6 +66,7 @@ const plugin = {
     'static-import-meta-url': staticImportMetaUrlRule,
     'require-using-on-disposable': requireUsingOnDisposableRule,
     'no-impl-in-index': noImplInIndexRule,
+    'plugin-capability-filename': pluginCapabilityFilenameRule,
   },
 };
 

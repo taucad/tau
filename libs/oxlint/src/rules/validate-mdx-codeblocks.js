@@ -10,12 +10,11 @@
 
 import path from 'node:path';
 import ts from 'typescript';
-import { runtimeBundledPackages } from '../../../../packages/runtime/scripts/runtime-bundled-packages.mts';
+import { privateRuntimeDocumentPackages } from '../private-runtime-packages.js';
 import { resolveTsgolintBinary, runTsgolint } from '../tsgolint-utils.js';
 
 // oxlint-disable-next-line unicorn-js/better-regex -- multiline flag + named groups require this form
 const MDX_CODEBLOCK_REGEX = /^```typescript(?<meta>[^\n]*)?\n(?<code>[\s\S]*?)^```$/gm;
-const privateRuntimeDocumentPackages = runtimeBundledPackages.map((name) => `@taucad/${name}`);
 
 /**
  * @param {string} code

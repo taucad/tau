@@ -1,5 +1,6 @@
-import { describe, it, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RuleTester } from 'eslint';
+import { bundledLibraries, workspace } from '@taucad/nx';
 
 vi.mock('../tsgolint-utils.js', () => ({
   resolveTsgolintBinary: vi.fn(),
@@ -7,8 +8,20 @@ vi.mock('../tsgolint-utils.js', () => ({
 }));
 
 const { resolveTsgolintBinary, runTsgolint } = await import('../tsgolint-utils.js');
+const { privateRuntimeDocumentPackages } = await import('../private-runtime-packages.js');
 const { validateMdxCodeblocksRule } = await import('./validate-mdx-codeblocks.js');
 const mdxParser = await import('../mdx-parser.js');
+
+/** The authority the rule's synchronous restatement is reconciled against. */
+const bundledPrivatePackages = bundledLibraries(await workspace(), 'runtime');
+
+/*
+ * The boundary cases below exercise specifier *shapes* — bare, subpath,
+ * `export … from`, `import()`, `import('…').T` — not membership, so they name
+ * whichever private libraries the graph currently classifies. Five distinct
+ * ones suffice; the pin test keeps the well-known names in the derived set.
+ */
+const [barePackage, subpathPackage, reexportPackage, dynamicPackage, importTypePackage] = bundledPrivatePackages;
 
 const ruleTester = new RuleTester({
   languageOptions: { parser: mdxParser },
@@ -61,23 +74,22 @@ describe('validate-mdx-codeblocks', () => {
   });
 
   describe('runtime documentation package boundary', () => {
+    it('should derive a non-empty bundled set from the project graph', () => {
+      expect(bundledPrivatePackages.length).toBeGreaterThan(0);
+    });
+
+    it("should match the rule's synchronous restatement to the Nx-derived bundle set exactly", () => {
+      expect([...privateRuntimeDocumentPackages].sort()).toEqual([...bundledPrivatePackages].sort());
+    });
+
+    it('should exercise specifier shapes with packages the graph still classifies as private', () => {
+      expect(bundledPrivatePackages).toEqual(
+        expect.arrayContaining(['@taucad/events', '@taucad/fs-bridge', '@taucad/rpc', '@taucad/types']),
+      );
+    });
+
     it('should reject private bundled-package imports from runtime examples', () => {
-      const privateImports = [
-        '@taucad/converter',
-        '@taucad/events',
-        '@taucad/filesystem',
-        '@taucad/fs-bridge',
-        '@taucad/gltf-extensions',
-        '@taucad/json-schema',
-        '@taucad/memory',
-        '@taucad/rpc',
-        '@taucad/types',
-        '@taucad/units',
-        '@taucad/utils',
-        '@taucad/vm',
-      ]
-        .map((packageName) => `import '${packageName}';`)
-        .join('\n');
+      const privateImports = bundledPrivatePackages.map((packageName) => `import '${packageName}';`).join('\n');
 
       ruleTester.run('validate-mdx-codeblocks', validateMdxCodeblocksRule, {
         valid: [
@@ -89,65 +101,53 @@ describe('validate-mdx-codeblocks', () => {
           {
             name: 'non-runtime internal documentation may describe private packages',
             filename: '/project/apps/ui/content/docs/internal/test.mdx',
-            code: "```typescript\nimport { openFileSystemBridge } from '@taucad/fs-bridge';\n```",
+            code: `\`\`\`typescript\nimport { openFileSystemBridge } from '${barePackage}';\n\`\`\``,
           },
           {
             name: 'comments and ordinary strings are not imports',
             filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
-            code: "```typescript\n// import '@taucad/events';\nconst example = '@taucad/types';\n```",
+            code: `\`\`\`typescript\n// import '${reexportPackage}';\nconst example = '${subpathPackage}';\n\`\`\``,
           },
           {
             name: 'longer package prefix is not a private package',
             filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
-            code: "```typescript\nimport '@taucad/types-extra';\n```",
+            code: `\`\`\`typescript\nimport '${subpathPackage}-extra';\n\`\`\``,
           },
         ],
         invalid: [
           {
-            name: 'runtime example imports private fs-bridge package',
+            name: 'runtime example imports a private bundled package',
             filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
-            code: "```typescript\nimport { openFileSystemBridge } from '@taucad/fs-bridge';\n```",
+            code: `\`\`\`typescript\nimport { openFileSystemBridge } from '${barePackage}';\n\`\`\``,
             errors: [
               {
                 messageId: 'privatePackageImport',
-                data: { packageName: '@taucad/fs-bridge' },
+                data: { packageName: barePackage },
               },
             ],
           },
           {
-            name: 'all canonical bundled packages are private documentation imports',
+            name: 'every bundled private library is a private documentation import',
             filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
             code: `\`\`\`typescript\n${privateImports}\n\`\`\``,
-            errors: [
-              '@taucad/converter',
-              '@taucad/events',
-              '@taucad/filesystem',
-              '@taucad/fs-bridge',
-              '@taucad/gltf-extensions',
-              '@taucad/json-schema',
-              '@taucad/memory',
-              '@taucad/rpc',
-              '@taucad/types',
-              '@taucad/units',
-              '@taucad/utils',
-              '@taucad/vm',
-            ].map((packageName) => ({ messageId: 'privatePackageImport', data: { packageName } })),
+            errors: bundledPrivatePackages.map((packageName) => ({
+              messageId: 'privatePackageImport',
+              data: { packageName },
+            })),
           },
           {
             name: 'subpaths, exports, dynamic imports, and import types are checked even with ts-nocheck',
             filename: '/project/apps/ui/content/docs/runtime/guides/test.mdx',
             code: `\`\`\`typescript @ts-nocheck
-import type { FileStat } from '@taucad/types/constants';
-export { Topic } from '@taucad/events';
-const rpc = import('@taucad/rpc/channel');
-type Memory = import('@taucad/memory').SharedPool;
+import type { FileStat } from '${subpathPackage}/constants';
+export { Topic } from '${reexportPackage}';
+const channel = import('${dynamicPackage}/channel');
+type Pool = import('${importTypePackage}').SharedPool;
 \`\`\``,
-            errors: [
-              { messageId: 'privatePackageImport', data: { packageName: '@taucad/types' } },
-              { messageId: 'privatePackageImport', data: { packageName: '@taucad/events' } },
-              { messageId: 'privatePackageImport', data: { packageName: '@taucad/rpc' } },
-              { messageId: 'privatePackageImport', data: { packageName: '@taucad/memory' } },
-            ],
+            errors: [subpathPackage, reexportPackage, dynamicPackage, importTypePackage].map((packageName) => ({
+              messageId: 'privatePackageImport',
+              data: { packageName },
+            })),
           },
         ],
       });

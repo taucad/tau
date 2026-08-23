@@ -8,10 +8,17 @@
   "dependencies": {
     "typescript": "catalog:"
   },
+  "devDependencies": {
+    "@taucad/nx": "workspace:*"
+  },
   "exports": {
     "./tau-lint": {
       "import": "./src/tau-lint.js",
       "default": "./src/tau-lint.js"
+    },
+    "./private-runtime-packages": {
+      "import": "./src/private-runtime-packages.js",
+      "default": "./src/private-runtime-packages.js"
     },
     "./mdx-parser": {
       "import": "./src/mdx-parser.js",

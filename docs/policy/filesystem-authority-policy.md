@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-07-22'
+updated: '2026-08-21'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/runtime-api-policy.md
@@ -14,6 +14,7 @@ related:
   - docs/research/tau-json-project-library-state-boundary.md
   - docs/research/pending-project-import-recovery-bootstrap-isolation.md
   - docs/research/filesystem-post-implementation-congruency-audit.md
+  - docs/research/workspace-naming-and-storage-backend-abstraction.md
 ---
 
 # Filesystem Authority Policy
@@ -124,15 +125,20 @@ The `webaccess` backend is multi-workspace: every `FileSystemDirectoryHandle` li
 - Permission must be re-requested from a user gesture after page reload. The FM machine surfaces a structured `unavailableReason` (`'missing' | 'permission'`) — silent downgrade to IndexedDB is forbidden (Rule 10).
 - Cross-workspace project access is forbidden. If a project's bound `workspaceId` does not match the currently active workspace, the FM machine must refuse to open and route through the `webAccessUnavailable` state (no implicit re-binding).
 
-### 10. No silent backend downgrade
+### 10. Product location selection never silently downgrades
 
-Every code path that fails to resolve a webaccess workspace (handle missing from IDB, permission revoked, `showDirectoryPicker` unsupported, picker aborted) must throw `WorkspaceDirectoryRequiredError` with one of the typed `code`s (`'missing' | 'permission' | 'unsupported'`). Call sites translate the error to actionable UI:
+Direct project creation accepts a product location (`Home` or one exact connected-folder `workspaceId`), never a caller-selected physical backend. Omitted locations resolve the latest successful direct-creation preference. Explicit locations win over that preference. A successful create updates the advisory preference only after its filesystem commit, config, local resources, and pending journal have completed; journal replay and duplication never consult or change it.
 
-- `/projects/new`: `toast.error` with a "Manage Workspaces" action, plus an inline `WorkspaceDirectoryPanel` that prevents submission until the workspace is connected.
+When File System Access capability is absent, Home is the only modeled location and the location picker is not mounted. When capability exists, creation surfaces list Home plus every known workspace, including permission-required and disconnected rows, and retain a Connect-folder action even when no workspace exists.
+
+Every code path that fails to resolve an explicitly or implicitly selected webaccess workspace must throw `WorkspaceDirectoryRequiredError` with one of the typed `code`s (`'missing' | 'disconnected' | 'permission' | 'unsupported'`). A cancelled picker is not a failed project request: it preserves selection and draft, emits aborted telemetry, and shows no error. Call sites translate typed creation errors to actionable UI:
+
+- `/projects/new` and chat creation block while the selected location is unavailable; a submission-time access race retains the form/draft and presents the exact Grant access or Manage locations recovery.
+- Implicit Remix/import/demo actions use the remembered preference and the same typed presenter. Manage locations opens separately so source-route state remains mounted, and recovery never retries automatically.
 - `/projects/$id`: the `ProjectUnavailableOverlay` indirection renders `WorkspaceUnavailableRecovery` (full-shell overlay, not a banner — the dockview underneath must be fully covered).
-- Settings + `/files`: the relevant workspace row renders `WorkspaceDirectoryPanel` (row / banner variant) with `[Connect]` / `[Grant Access]` / `[Change Folder]` controls scoped to that workspace.
+- Settings and `/files` retain workspace management independently of creation preference.
 
-It is forbidden to catch a `WorkspaceDirectoryRequiredError` and fall back to `indexeddb` — a project's backend binding is immutable once written to `configs[projectId]`.
+It is forbidden to catch a `WorkspaceDirectoryRequiredError` and fall back to Home or another workspace — a project's backend binding is immutable once written to `configs[projectId]`, and an uncommitted create must honor the selected product location.
 
 ### 11. Workspace IDs are generated; project bindings live in one place
 
@@ -154,11 +160,13 @@ Direct create and duplicate calls await their own commit. Startup replay follows
 
 The transaction is the only legitimate way to write seed files. UI surfaces (`/projects/new`, duplicate, remix-from-publication, and import) MUST go through the project manager; ad-hoc mount/write flows are forbidden because they omit journal ownership, locks, route synchronization, or manifest verification.
 
-### 13. Root FM is pinned to `indexeddb`; `initialBackend` is required
+### 13. Home resolves one pinned engine; `initialBackend` is required
 
-The root `<FileManagerProvider rootDirectory='/'>` MUST be instantiated with `initialBackend='indexeddb'`. `initialBackend` is a required prop; the provider's TypeScript surface compile-time-rejects `webaccess` without an accompanying `projectId` so a workspace-bound FM can only be mounted inside a project route.
+Mount product filesystem providers through `HomeFileManagerProvider`. The root wrapper resolves Home's profile-local engine once, and nested wrappers inherit the same result. `initialBackend` remains a required prop on the lower-level `FileManagerProvider`; its TypeScript surface compile-time-rejects `webaccess` without an accompanying `projectId` so a workspace-bound FM can only be mounted inside a project route.
 
-The root provider MUST NOT consume the `filesystem-backend` cookie at mount time. The cookie is a _project-creation default_ read by `/projects/new` and `/files`, never the seed for the root machine. Cross-tab cookie flips therefore cannot break the root FM, and a stale `memory` cookie value is coerced back to `indexeddb` via `coerceFilesystemBackendCookie` at every selector read site.
+For an unpinned profile, prefer OPFS only when a worker probe confirms synchronous access handles; otherwise select IndexedDB. Persist that choice atomically immediately before Home's first materializing write, and never re-probe a pinned profile. Configure exactly one built-in discovery root from that selection. Never expose, persist, or infer a user-selectable backend default.
+
+The authority worker's private `/` fallback remains IndexedDB; it is infrastructure, not a second product workspace. Home project paths route through the selected discovery root installed by `ProjectRootConfiguration`.
 
 ### 14. Provider disposal is keyed by canonical `storageRootKey`
 
@@ -202,7 +210,7 @@ Code and docs citing the old numbers resolve here:
 | Rule 13a — No silent backend downgrade     | Rule 10                          |
 | Rule 13b — Workspace IDs / binding         | Rule 11                          |
 | Rule 13c — Creation transaction            | Rule 12                          |
-| Rule 13d — Root FM pinned to indexeddb     | Rule 13                          |
+| Rule 13d — Root FM backend selection       | Rule 13                          |
 | Rule 13e — Standalone cache keying         | Rule 14                          |
 
 ## References
@@ -210,4 +218,5 @@ Code and docs citing the old numbers resolve here:
 - Implementation: `libs/filesystem/src/{mount-table.ts,provider-registry.ts,cross-tab-coordinator.ts,workspace-file-service.ts}`, `libs/filesystem/src/backend/direct-idb-provider.ts`, `apps/ui/app/filesystem/{handle-store.ts,workspace-errors.ts}`, `apps/ui/app/machines/file-manager.{machine,worker}.ts`
 - Research: `docs/research/headless-thumbnail-rendering-architecture-v4.md` (Finding 5, R3)
 - Research: `docs/research/runtime-model-load-project-root-regression-v3.md` (rooted runtime filesystem boundary)
+- Research: `docs/research/workspace-naming-and-storage-backend-abstraction.md` (Home identity and engine pinning)
 - Related: `docs/policy/filesystem-policy.md` (read/write/watch/RPC rules), `docs/policy/project-manifest-policy.md` (discovery contract)

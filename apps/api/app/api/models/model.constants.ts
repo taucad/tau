@@ -502,17 +502,18 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         thinkingLevel: 'HIGH',
       },
     },
-    'gemini-3.6-flash': {
-      id: 'google-gemini-3.6-flash',
-      name: 'Gemini 3.6 Flash',
-      slug: 'gemini-3.6-flash',
+    'gemini-3.7-flash': {
+      id: 'google-gemini-3.7-flash',
+      name: 'Gemini 3.7 Flash',
+      slug: 'gemini-3.7-flash',
       recommended: true,
-      description: 'Efficient multimodal coding model for complex agentic CAD iterations and spatial reasoning.',
+      description:
+        "Google's most capable Flash model for complex agentic CAD workflows, coding, and spatial reasoning.",
       provider: {
         id: 'vertexai',
         name: 'Google',
       },
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.7-flash',
       support: {
         modalities: imageInputModalities,
       },

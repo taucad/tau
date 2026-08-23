@@ -55,10 +55,10 @@ pnpm nx release --printConfig
 Mirror the current CI validation gates before publishing:
 
 ```bash
-pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
-pnpm nx run-many -t pkgcheck --projects=packages/*,packages/kernels/*
+pnpm nx run scripts:release-gate
 ```
+
+`release-gate` (`scripts/project.json`) fans out to every `scripts:validate-*` and `scripts:check-*` target plus `pkgcheck` on `tag:type:package` and `test`/`typecheck`/`lint` on `tag:type:package` and `tag:type:lib`, then `audit-public-surface` and `readme-quickstart` workspace-wide. Selectors are Nx targets and tags — never project path globs.
 
 ## Normal Release Workflow
 
@@ -110,11 +110,12 @@ Do not publish manually from a developer machine unless the operator explicitly 
 The publish workflow lives in `.github/workflows/publish.yml` and currently runs:
 
 ```bash
-pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
-pnpm nx run-many -t pkgcheck --projects=packages/*,packages/kernels/*
-pnpm nx release publish --exclude=events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
+pnpm nx run scripts:release-gate
+pnpm nx release publish --dry-run --tag=beta
+pnpm nx release publish --tag=beta
 ```
+
+There is no `--exclude` list. Nx synthesises `nx-release-publish` for every publishable project with `dependsOn: ['^nx-release-publish', 'pkgcheck']` (the second from `nx.json` `targetDefaults`), so one command orders the whole fixed group, gates each package on its own `pkgcheck`, and skips the dependents of a failed publish. The workflow also asserts pnpm is the publisher, because only pnpm applies `publishConfig` field overrides.
 
 The job uses npm Trusted Publishing through GitHub OIDC and sets `NPM_CONFIG_PROVENANCE=true`.
 
@@ -122,12 +123,10 @@ If the command list above disagrees with `.github/workflows/publish.yml`, the wo
 
 ## Validation And Tarball Inspection
 
-Before publishing, run the same release gates as CI:
+Before publishing, run the same release gate as CI:
 
 ```bash
-pnpm registry:check
-pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,events,filesystem,fs-bridge,gltf-extensions,memory,utils,vm
-pnpm nx run-many -t pkgcheck --projects=packages/*,packages/kernels/*
+pnpm nx run scripts:release-gate
 ```
 
 For a local tarball spot-check, inspect the exact filename returned by `pnpm pack`:
@@ -157,16 +156,16 @@ Read the live package list from the release policy at execution time. Do not mai
 
 ## Troubleshooting
 
-| Problem                                             | Solution                                                                                                                |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `pnpm registry:check` fails                         | A runtime production dependency does not resolve from npm. Publish or replace that dependency before continuing.        |
-| Publish tries to publish a bundled internal library | Check `.github/workflows/publish.yml` publish exclusions and `docs/policy/release-policy.md` bundled-library list.      |
-| Release config looks stale                          | Run `pnpm nx release --printConfig`, then compare with `nx.json`; update this skill only after the source files change. |
-| `npm ERR! 403` on publish                           | Trusted Publisher is missing for the package, or the npm workflow filename/repository does not match exactly.           |
-| Package validation fails                            | Run the failing package's `pkgcheck` target and fix the npm-policy violation before release.                            |
-| Build fails before version                          | Run the build command from `.github/workflows/publish.yml` locally and fix the first failing project.                   |
-| Provenance not generated                            | Ensure the workflow has `id-token: write` and `NPM_CONFIG_PROVENANCE=true`.                                             |
-| Stale lockfile after version                        | Run `pnpm install --no-frozen-lockfile` and commit the lockfile update.                                                 |
+| Problem                                             | Solution                                                                                                                                  |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm registry:check` fails                         | A runtime production dependency does not resolve from npm. Publish or replace that dependency before continuing.                          |
+| Publish tries to publish a bundled internal library | The project is publishable by placement. Check `nx.json` release `projects` and the `docs/policy/release-policy.md` bundled-library list. |
+| Release config looks stale                          | Run `pnpm nx release --printConfig`, then compare with `nx.json`; update this skill only after the source files change.                   |
+| `npm ERR! 403` on publish                           | Trusted Publisher is missing for the package, or the npm workflow filename/repository does not match exactly.                             |
+| Package validation fails                            | Run the failing package's `pkgcheck` target and fix the npm-policy violation before release.                                              |
+| Build fails before version                          | Run `pnpm nx run scripts:release-gate` locally and fix the first failing project.                                                         |
+| Provenance not generated                            | Ensure the workflow has `id-token: write` and `NPM_CONFIG_PROVENANCE=true`.                                                               |
+| Stale lockfile after version                        | Run `pnpm install --no-frozen-lockfile` and commit the lockfile update.                                                                   |
 
 ## References
 

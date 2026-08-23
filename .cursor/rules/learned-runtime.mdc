@@ -2,7 +2,8 @@
 description: Auto-curated learned facts and preferences for the `runtime` package (packages/runtime) and OCJS/replicad/assimpjs forks
 globs:
   - "packages/runtime/**"
-  - "packages/kernels/**"
+  - "packages/plugins/**"
+  - "packages/core/**"
   - "repos/opencascade.js/**"
   - "repos/replicad/**"
   - "repos/assimpjs/**"

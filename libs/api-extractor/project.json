@@ -84,7 +84,7 @@
       "cache": true,
       "inputs": [
         "{projectRoot}/src/extract-opencascade-types.ts",
-        "{workspaceRoot}/packages/runtime/src/kernels/opencascade/wasm/opencascade_full.d.ts",
+        "{workspaceRoot}/node_modules/libcascade/dist/types.d.ts",
         "sharedGlobals"
       ],
       "outputs": ["{projectRoot}/src/generated/opencascade"]

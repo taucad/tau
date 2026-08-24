@@ -7249,32 +7249,12 @@ declare class TDocStd_Application extends CDF_Application {
    */
   GetDocument(index: number): TDocStd_Document;
   /**
-   * Returns the document at the given 1-based index. The index is any integer between 1 and `NbDocuments()`.
-   * @param index 1-based document index
-   * @returns handle to the document
-   */
-  GetDocument_1(index: number): TDocStd_Document;
-  /**
-   * @returns A result object with fields:
-   * - `aDoc`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  GetDocument_2(index: number): { aDoc: TDocStd_Document; [Symbol.dispose](): void };
-  /**
    * Constructs the empty new document aDoc. This document will have the format format. If InitDocument is redefined for a specific application, the new document is handled by the applicative session.
    * @returns A result object with fields:
    * - `theDoc`: owned by the returned envelope.
    * Dispose the returned envelope to release owned Handle fields.
    */
   NewDocument(theFormat: TCollection_ExtendedString): { theDoc: CDM_Document; [Symbol.dispose](): void };
-  /**
-   * A non-virtual method taking a TDocStd_Documment object as an input. Internally it calls a virtual method `NewDocument()` with {@link CDM_Document | `CDM_Document`} object.
-   * @returns A result object with fields:
-   * - `theDoc`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   */
-  NewDocument(format: TCollection_ExtendedString): { theDoc: TDocStd_Document; [Symbol.dispose](): void };
   /**
    * Initialize the document aDoc for the applicative session. This virtual function is called by NewDocument and is to be redefined for each specific application.
    *
@@ -61388,37 +61368,13 @@ declare class XCAFDoc_LayerTool extends TDataStd_GenericEmpty {
    */
   GetLayers(L: TDF_Label): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
   /**
-   * Return sequence of strings <aLayerS> that associated with label <L>.
-   * @returns A result object with fields:
-   * - `returnValue`: the C++ return value
-   * - `aLayerS`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   */
-  GetLayers_1(L: TDF_Label): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-  /**
-   * Return sequence of strings that associated with shape <Sh>.
-   */
-  GetLayers_3(L: TDF_Label): NCollection_HSequence_TCollection_ExtendedString;
-  /**
-   * Return sequence of strings <aLayerS> that associated with shape <Sh>.
+   * Return sequence of labels <aLayerSL> that associated with label <L>.
    * @returns A result object with fields:
    * - `returnValue`: the C++ return value
    * - `aLayerS`: owned by the returned envelope.
    * Dispose the returned envelope to release owned Handle fields.
    */
   GetLayers(Sh: TopoDS_Shape): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-  /**
-   * Return sequence of strings <aLayerS> that associated with shape <Sh>.
-   * @returns A result object with fields:
-   * - `returnValue`: the C++ return value
-   * - `aLayerS`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   */
-  GetLayers_4(Sh: TopoDS_Shape): { returnValue: boolean; aLayerS: NCollection_HSequence_TCollection_ExtendedString; [Symbol.dispose](): void };
-  /**
-   * Return sequence of strings that associated with shape <Sh>.
-   */
-  GetLayers_6(Sh: TopoDS_Shape): NCollection_HSequence_TCollection_ExtendedString;
   /**
    * Return sequence of strings <aLayerS> that associated with label <L>.
    * @param aLayerLS Mutated in place; read the updated value from this argument after the call.
@@ -74560,11 +74516,6 @@ declare class BSplSLib {
    */
   static PolesCoefficients(Poles: NCollection_Array2_gp_Pnt, CachePoles: NCollection_Array2_gp_Pnt): void;
   /**
-   * Encapsulation of BuildCache to perform the evaluation of the Taylor expansion for beziersurfaces at parameters 0.,0.; Warning: To be used for BezierSurfaces ONLY!!!
-   * @param CachePoles Mutated in place; read the updated value from this argument after the call.
-   */
-  static PolesCoefficients(Poles: NCollection_Array2_gp_Pnt, Weights: NCollection_Array2_double, CachePoles: NCollection_Array2_gp_Pnt, CacheWeights: NCollection_Array2_double): void;
-  /**
    * Given a tolerance in 3D space returns two tolerances, one in U one in V such that for all (u1,v1) and (u0,v0) in the domain of the surface f(u,v) we have : | u1 - u0 | < UTolerance and | v1 - v0 | < VTolerance we have |f (u1,v1) - f (u0,v0)| < Tolerance3D.
    * @returns A result object with fields:
    * - `UTolerance`: updated value from the call.
@@ -76328,18 +76279,6 @@ declare class Convert_CompPolynomialToPoles {
    */
   Poles(): NCollection_Array2_double;
   /**
-   * Returns the poles of the n-dimensional BSpline in the following format: [1..NumPoles][1..Dimension].
-   */
-  Poles_1(): NCollection_Array2_double;
-  /**
-   * Returns the poles of the n-dimensional BSpline via output parameter.
-   * @returns A result object with fields:
-   * - `thePoles`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  Poles_2(): { thePoles: NCollection_HArray2_double; [Symbol.dispose](): void };
-  /**
    * Returns the degree of the n-dimensional BSpline.
    */
   Degree(): number;
@@ -76352,33 +76291,9 @@ declare class Convert_CompPolynomialToPoles {
    */
   Knots(): NCollection_Array1_double;
   /**
-   * Returns the knots of the n-dimensional BSpline.
-   */
-  Knots_1(): NCollection_Array1_double;
-  /**
-   * Returns the knots of the n-dimensional BSpline via output parameter.
-   * @returns A result object with fields:
-   * - `theKnots`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  Knots_2(): { theKnots: NCollection_HArray1_double; [Symbol.dispose](): void };
-  /**
    * Returns the multiplicities of the knots in the BSpline.
    */
   Multiplicities(): NCollection_Array1_int;
-  /**
-   * Returns the multiplicities of the knots in the BSpline.
-   */
-  Multiplicities_1(): NCollection_Array1_int;
-  /**
-   * Returns the multiplicities of the knots via output parameter.
-   * @returns A result object with fields:
-   * - `theMults`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  Multiplicities_2(): { theMults: NCollection_HArray1_int; [Symbol.dispose](): void };
   /**
    * Returns true if the conversion was successful.
    */
@@ -112470,20 +112385,6 @@ declare class FilletSurf_Builder {
    */
   Section(IndexSurf: number, IndexSec: number): Geom_TrimmedCurve;
   /**
-   * Returns the arc of the section of index IndexSec of surface of index IndexSurf. The basis curve of the trimmed curve is a {@link Geom_Circle | `Geom_Circle`}.
-   * @param IndexSurf 1-based surface index
-   * @param IndexSec 1-based section index
-   * @returns the section as a trimmed circular arc
-   */
-  Section_1(IndexSurf: number, IndexSec: number): Geom_TrimmedCurve;
-  /**
-   * @returns A result object with fields:
-   * - `Circ`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  Section_2(IndexSurf: number, IndexSec: number): { Circ: Geom_TrimmedCurve; [Symbol.dispose](): void };
-  /**
    * gives the NUBS surface of index Index.
    */
   SurfaceFillet(Index: number): Geom_Surface;
@@ -112632,20 +112533,6 @@ declare class FilletSurf_InternalBuilder extends ChFi3d_FilBuilder {
    * @returns the section as a trimmed circular arc
    */
   Section(IndexSurf: number, IndexSec: number): Geom_TrimmedCurve;
-  /**
-   * Returns the arc of the section of index IndexSec of surface of index IndexSurf. The basis curve of the trimmed curve is a {@link Geom_Circle | `Geom_Circle`}.
-   * @param IndexSurf 1-based surface index
-   * @param IndexSec 1-based section index
-   * @returns the section as a trimmed circular arc
-   */
-  Section_1(IndexSurf: number, IndexSec: number): Geom_TrimmedCurve;
-  /**
-   * @returns A result object with fields:
-   * - `Circ`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  Section_2(IndexSurf: number, IndexSec: number): { Circ: Geom_TrimmedCurve; [Symbol.dispose](): void };
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -123548,23 +123435,6 @@ declare class IntCurveSurface_TheHCurveTool {
    * @returns array of sample parameter values
    */
   static SamplePars(C: Adaptor3d_Curve, U0: number, U1: number, Defl: number, NbMin: number): NCollection_HArray1_double;
-  /**
-   * Returns sample parameters for the curve within [U0, U1] range, computed based on deflection and minimum number of points.
-   * @param C the curve adaptor
-   * @param U0 start parameter
-   * @param U1 end parameter
-   * @param Defl deflection tolerance
-   * @param NbMin minimum number of sample points
-   * @returns array of sample parameter values
-   */
-  static SamplePars_1(C: Adaptor3d_Curve, U0: number, U1: number, Defl: number, NbMin: number): NCollection_HArray1_double;
-  /**
-   * @returns A result object with fields:
-   * - `Pars`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  static SamplePars_2(C: Adaptor3d_Curve, U0: number, U1: number, Defl: number, NbMin: number): { Pars: NCollection_HArray1_double; [Symbol.dispose](): void };
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -128205,10 +128075,6 @@ declare class Law_Interpolate {
    */
   Load(Tangents: NCollection_Array1_double, TangentFlags: NCollection_HArray1_bool): void;
   /**
-   * Clears the tangents if any.
-   */
-  ClearTangents(): void;
-  /**
    * Makes the interpolation.
    */
   Perform(): void;
@@ -128887,18 +128753,6 @@ declare class Plate_Plate {
    * @returns 2D array of polynomial coefficients as XYZ values
    */
   CoefPol(): NCollection_HArray2_gp_XYZ;
-  /**
-   * Returns the coefficients of the polynomial part of the Plate function.
-   * @returns 2D array of polynomial coefficients as XYZ values
-   */
-  CoefPol_1(): NCollection_HArray2_gp_XYZ;
-  /**
-   * @returns A result object with fields:
-   * - `Coefs`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  CoefPol_2(): { Coefs: NCollection_HArray2_gp_XYZ; [Symbol.dispose](): void };
   SetPolynomialPartOnly(PPOnly?: boolean): void;
   Continuity(): number;
   UVBox(UMin?: number, UMax?: number, VMin?: number, VMax?: number): { UMin: number; UMax: number; VMin: number; VMax: number };
@@ -131495,23 +131349,6 @@ declare class HLRBRep_LineTool {
    * @returns array of 3 sample parameter values
    */
   static SamplePars(C: gp_Lin, U0: number, U1: number, Defl: number, NbMin: number): NCollection_HArray1_double;
-  /**
-   * Returns sample parameters for the line within [U0, U1] range.
-   * @param C the line
-   * @param U0 start parameter
-   * @param U1 end parameter
-   * @param Defl deflection tolerance (unused for lines)
-   * @param NbMin minimum number of sample points (unused for lines)
-   * @returns array of 3 sample parameter values
-   */
-  static SamplePars_1(C: gp_Lin, U0: number, U1: number, Defl: number, NbMin: number): NCollection_HArray1_double;
-  /**
-   * @returns A result object with fields:
-   * - `Pars`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  static SamplePars_2(C: gp_Lin, U0: number, U1: number, Defl: number, NbMin: number): { Pars: NCollection_HArray1_double; [Symbol.dispose](): void };
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -140597,23 +140434,6 @@ declare class ShapeAnalysis_FreeBounds {
    */
   static ConnectEdgesToWires(edges: NCollection_HSequence_TopoDS_Shape, toler: number, shared: boolean): NCollection_HSequence_TopoDS_Shape;
   /**
-   * Builds sequence of <wires> out of sequence of not sorted <edges>. Tries to build wires of maximum length. Building a wire is stopped when no edges can be connected to it at its head or at its tail.
-   *
-   * Orientation of the edge can change when connecting. Edges having INTERNAL or EXTERNAL orientation are ignored. If <shared> is True connection is performed only when adjacent edges share the same vertex. If <shared> is False connection is performed only when ends of adjacent edges are at distance less than <toler>. Connects edges from the given sequence into wires.
-   * @param edges the sequence of edges to connect
-   * @param toler distance tolerance for connection
-   * @param shared if true, connection uses shared vertices only
-   * @returns sequence of resulting wires
-   */
-  static ConnectEdgesToWires_1(edges: NCollection_HSequence_TopoDS_Shape, toler: number, shared: boolean): NCollection_HSequence_TopoDS_Shape;
-  /**
-   * @returns A result object with fields:
-   * - `wires`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  static ConnectEdgesToWires_2(edges: NCollection_HSequence_TopoDS_Shape, toler: number, shared: boolean): { wires: NCollection_HSequence_TopoDS_Shape; [Symbol.dispose](): void };
-  /**
    * Connects wires from the given sequence into longer wires.
    * @param iwires the sequence of input wires
    * @param toler distance tolerance for connection
@@ -140621,26 +140441,6 @@ declare class ShapeAnalysis_FreeBounds {
    * @returns sequence of resulting wires
    */
   static ConnectWiresToWires(iwires: NCollection_HSequence_TopoDS_Shape, toler: number, shared: boolean): NCollection_HSequence_TopoDS_Shape;
-  /**
-   * Connects wires from the given sequence into longer wires.
-   * @param iwires the sequence of input wires
-   * @param toler distance tolerance for connection
-   * @param shared if true, connection uses shared vertices only
-   * @returns sequence of resulting wires
-   */
-  static ConnectWiresToWires_1(iwires: NCollection_HSequence_TopoDS_Shape, toler: number, shared: boolean): NCollection_HSequence_TopoDS_Shape;
-  /**
-   * Builds sequence of <owires> out of sequence of not sorted <iwires>. Tries to build wires of maximum length. Building a wire is stopped when no wires can be connected to it at its head or at its tail.
-   *
-   * Orientation of the wire can change when connecting. If <shared> is True connection is performed only when adjacent wires share the same vertex. If <shared> is False connection is performed only when ends of adjacent wires are at distance less than <toler>. Map <vertices> stores the correspondence between original end vertices of the wires and new connecting vertices. Connects wires from the given sequence into longer wires. Also fills the map of original to new connecting vertices.
-   * @param iwires the sequence of input wires
-   * @param toler distance tolerance for connection
-   * @param shared if true, connection uses shared vertices only
-   * @returns A result object with fields:
-   * - `owires`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   */
-  static ConnectWiresToWires_2(iwires: NCollection_HSequence_TopoDS_Shape, toler: number, shared: boolean): { owires: NCollection_HSequence_TopoDS_Shape; [Symbol.dispose](): void };
   /**
    * Builds sequence of <owires> out of sequence of not sorted <iwires>. Tries to build wires of maximum length. Building a wire is stopped when no wires can be connected to it at its head or at its tail.
    *
@@ -140652,14 +140452,6 @@ declare class ShapeAnalysis_FreeBounds {
    * @returns sequence of resulting wires
    */
   static ConnectWiresToWires(iwires: NCollection_HSequence_TopoDS_Shape, toler: number, shared: boolean, vertices: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): NCollection_HSequence_TopoDS_Shape;
-  /**
-   * @param vertices Mutated in place; read the updated value from this argument after the call.
-   * @returns A result object with fields:
-   * - `owires`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  static ConnectWiresToWires(iwires: NCollection_HSequence_TopoDS_Shape, toler: number, shared: boolean, vertices: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): { owires: NCollection_HSequence_TopoDS_Shape; [Symbol.dispose](): void };
   /**
    * Extracts closed sub-wires out of <wires> and adds them to <closed>, open wires remained after extraction are put into <open>. If <shared> is True extraction is performed only when edges share the same vertex. If <shared> is False connection is performed only when ends of the edges are at distance less than <toler>.
    * @returns A result object with fields:
@@ -140768,7 +140560,6 @@ declare class ShapeAnalysis_FreeBoundsProperties {
   OpenFreeBound(index: number): ShapeAnalysis_FreeBoundData;
   DispatchBounds(): boolean;
   CheckContours(prec?: number): boolean;
-  CheckNotches(prec: number): boolean;
   CheckNotches(prec: number): { returnValue: boolean; fbData: ShapeAnalysis_FreeBoundData; [Symbol.dispose](): void };
   CheckNotches(freebound: TopoDS_Wire, num: number, notch: TopoDS_Wire, distMax: number, prec: number): { returnValue: boolean; distMax: number };
   FillProperties(prec: number): { returnValue: boolean; fbData: ShapeAnalysis_FreeBoundData; [Symbol.dispose](): void };
@@ -151365,40 +151156,12 @@ declare class BRepGProp_Face {
    */
   GetUKnots(theUMin: number, theUMax: number): NCollection_HArray1_double;
   /**
-   * Returns an array of U knots of the face. The first and last elements of the array will be theUMin and theUMax. The middle elements will be the U Knots of the face greater then theUMin and lower then theUMax in increasing order. If the face is not a BSpline, the array initialized with theUMin and theUMax only.
-   * @param theUMin lower U bound
-   * @param theUMax upper U bound
-   * @returns array of U knot values
-   */
-  GetUKnots_1(theUMin: number, theUMax: number): NCollection_HArray1_double;
-  /**
-   * @returns A result object with fields:
-   * - `theUKnots`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  GetUKnots_2(theUMin: number, theUMax: number): { theUKnots: NCollection_HArray1_double; [Symbol.dispose](): void };
-  /**
    * Returns an array of combination of T knots of the arc and V knots of the face. The first and last elements of the array will be theTMin and theTMax. The middle elements will be the Knots of the arc and the values of parameters of arc on which the value points have V coordinates close to V knots of face. All the parameter will be greater then theTMin and lower then theTMax in increasing order. If the face is not a BSpline, the array initialized with theTMin and theTMax only.
    * @param theTMin lower T bound
    * @param theTMax upper T bound
    * @returns array of T knot values
    */
   GetTKnots(theTMin: number, theTMax: number): NCollection_HArray1_double;
-  /**
-   * Returns an array of combination of T knots of the arc and V knots of the face. The first and last elements of the array will be theTMin and theTMax. The middle elements will be the Knots of the arc and the values of parameters of arc on which the value points have V coordinates close to V knots of face. All the parameter will be greater then theTMin and lower then theTMax in increasing order. If the face is not a BSpline, the array initialized with theTMin and theTMax only.
-   * @param theTMin lower T bound
-   * @param theTMax upper T bound
-   * @returns array of T knot values
-   */
-  GetTKnots_1(theTMin: number, theTMax: number): NCollection_HArray1_double;
-  /**
-   * @returns A result object with fields:
-   * - `theTKnots`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  GetTKnots_2(theTMin: number, theTMax: number): { theTKnots: NCollection_HArray1_double; [Symbol.dispose](): void };
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;
@@ -151420,19 +151183,6 @@ declare class BRepGProp_MeshCinert extends GProp_GProps {
    * @returns array of 3D points, or null handle if edge has no polygons
    */
   static PreparePolygon(theE: TopoDS_Edge): NCollection_HArray1_gp_Pnt;
-  /**
-   * Prepares set of 3d points on base of any available edge polygons: 3D polygon, polygon on triangulation, 2d polygon on surface.
-   * @param theE the edge to extract polygon from
-   * @returns array of 3D points, or null handle if edge has no polygons
-   */
-  static PreparePolygon_1(theE: TopoDS_Edge): NCollection_HArray1_gp_Pnt;
-  /**
-   * @returns A result object with fields:
-   * - `thePolyg`: owned by the returned envelope.
-   * Dispose the returned envelope to release owned Handle fields.
-   * @deprecated
-   */
-  static PreparePolygon_2(theE: TopoDS_Edge): { thePolyg: NCollection_HArray1_gp_Pnt; [Symbol.dispose](): void };
   /** Releases the C++ object. The caller must ensure no further access. */
   delete(): void;
   [Symbol.dispose](): void;

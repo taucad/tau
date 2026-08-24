@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 
+import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import process from 'node:process';
 
 /**
  * Bundle libcascade type declarations as raw `.d.ts` for Monaco's
  * `addExtraLib`.
  *
- * Reads the generated `opencascade_full.d.ts` (produced by the libcascade
- * build pipeline in `buildFromYaml.py`) and outputs a raw module `.d.ts`
+ * Reads `libcascade`'s own `dist/types.d.ts` (emitted by `libcascade
+ * assemble`) from the installed package and outputs a raw module `.d.ts`
  * (no `declare module` wrapper).
  *
  * The package's shared declaration file already distinguishes actual runtime
@@ -25,9 +26,11 @@ import process from 'node:process';
 // Configuration
 // =============================================================================
 
+// Resolved, not path-joined: `libcascade` is a workspace dependency, so its
+// install location is the package manager's business, not this script's.
 const opencascadeDtsPath = join(
-  import.meta.dirname,
-  '../../../packages/runtime/src/kernels/opencascade/wasm/opencascade_full.d.ts',
+  dirname(createRequire(import.meta.url).resolve('libcascade/package.json')),
+  'dist/types.d.ts',
 );
 
 // =============================================================================
@@ -35,7 +38,7 @@ const opencascadeDtsPath = join(
 // =============================================================================
 
 /**
- * Read the raw `opencascade_full.d.ts` and return its trimmed content.
+ * Read the raw `libcascade` `types.d.ts` and return its trimmed content.
  *
  * @returns The type declarations as a raw module `.d.ts`.
  */

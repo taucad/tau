@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/api-extractor",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"],
+  "tags": ["scope:shared", "type:tool"],
   "targets": {
     "extract-replicad": {
       "executor": "nx:run-commands",

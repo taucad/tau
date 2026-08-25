@@ -10,6 +10,7 @@ vi.mock('@taucad/runtime/node', async (importOriginal) => ({
   ...(await importOriginal<typeof RuntimeNode>()),
   createNodeClient: vi.fn(),
 }));
+vi.mock('#cli-runtime.js', () => ({ createCliRuntime: vi.fn(async () => ({ plugins: [] })) }));
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
 const terminate = vi.fn<() => void>();
@@ -71,7 +72,17 @@ describe('exportCommand', () => {
   it('should expose only structural arguments and opaque runtime envelopes', async () => {
     const command = await importExportCommand();
 
-    expect(Object.keys(command.args ?? {})).toEqual(['file', 'ext', 'output', 'params', 'exportOptions', 'content']);
+    expect(Object.keys(command.args ?? {})).toEqual([
+      'file',
+      'ext',
+      'output',
+      'params',
+      'exportOptions',
+      'content',
+      'plugin',
+      'config',
+      'telemetry',
+    ]);
   });
 
   it('should reject an unrecognized target extension without invoking the runtime', async () => {
@@ -126,6 +137,52 @@ describe('exportCommand', () => {
     const written = await readFile(outputPath);
     expect(new Uint8Array(written)).toEqual(bytes);
     expect(terminate).toHaveBeenCalledOnce();
+  });
+
+  it('should write a gap-free CLI ledger and normalized runtime telemetry profile', async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const telemetryPath = join(workspace, 'profile.json');
+    exportFunction.mockImplementationOnce(async () => {
+      const telemetryListener = onFunction.mock.calls.find(([event]) => event === 'telemetry')?.[1];
+      telemetryListener?.([
+        {
+          name: 'kernel.export-model',
+          startTime: performance.now(),
+          duration: 0,
+          workerTimeOrigin: performance.timeOrigin,
+          detail: { spanId: 'root', format: 'glb' },
+        },
+      ]);
+      return buildSuccessResult(bytes);
+    });
+    const command = await importExportCommand();
+
+    await runCommand(command, {
+      rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'profiled.glb')}`, `--telemetry=${telemetryPath}`],
+    });
+
+    const profile = JSON.parse(await readFile(telemetryPath, 'utf8')) as {
+      schema: string;
+      accounting: { profiledDuration: number; phaseDurationSum: number; unaccounted: number };
+      runtime: { spans: Array<{ name: string; selfDuration: number }> };
+    };
+    expect(profile.schema).toBe('taucad.cli-export-profile.v1');
+    expect(profile.accounting.phaseDurationSum).toBeCloseTo(profile.accounting.profiledDuration, 10);
+    expect(profile.accounting.unaccounted).toBe(0);
+    expect(profile.runtime.spans).toEqual([expect.objectContaining({ name: 'kernel.export-model', selfDuration: 0 })]);
+    expect(onFunction).toHaveBeenCalledWith('telemetry', expect.any(Function));
+  });
+
+  it('loads an explicit named plugin from the invoking project', async () => {
+    exportFunction.mockResolvedValueOnce(buildSuccessResult(new Uint8Array([1])));
+    const command = await importExportCommand();
+
+    await runCommand(command, {
+      rawArgs: [inputPath, '--ext=webp', `--output=${join(workspace, 'out.webp')}`, '--plugin=@taucad/zoo'],
+    });
+
+    const runtime = await importedRuntime();
+    expect(runtime.createNodeClient).toHaveBeenCalledOnce();
   });
 
   it('should preserve opaque parameters, export options, and content as separate JSON objects', async () => {
@@ -248,13 +305,13 @@ describe('exportCommand', () => {
   });
 
   it('should leave recognized but unroutable targets to the runtime', async () => {
-    exportFunction.mockResolvedValueOnce(buildFailureResult(['No export route found for format "3ds"']));
+    exportFunction.mockResolvedValueOnce(buildFailureResult(['No export route found for format "usda"']));
     const command = await importExportCommand();
 
-    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=3ds'] })).rejects.toThrow(
-      'No export route found for format "3ds"',
+    await expect(runCommand(command, { rawArgs: [inputPath, '--ext=usda'] })).rejects.toThrow(
+      'No export route found for format "usda"',
     );
-    expect(exportFunction).toHaveBeenCalledWith('3ds', {
+    expect(exportFunction).toHaveBeenCalledWith('usda', {
       source: { path: 'model.ts' },
       parameters: {},
     });

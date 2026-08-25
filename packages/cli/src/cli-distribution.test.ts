@@ -12,6 +12,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
 const cliBinPath = resolve(repoRoot, 'packages/cli/dist/bin/taucad.mjs');
 const birdhouse = resolve(repoRoot, 'libs/tau-examples/src/kernels/replicad/birdhouse/main.ts');
+const openrscadKitchenSink = resolve(repoRoot, 'libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad');
 
 const gltfMagicBytes = 0x46_54_6c_67;
 
@@ -80,6 +81,17 @@ describe('taucad CLI dist (real binary)', () => {
 
     const bytes = await readFile(outputPath);
     expect(bytes.byteLength).toBeGreaterThan(0);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    expect(view.getUint32(0, true)).toBe(gltfMagicBytes);
+  }, 120_000);
+
+  it('should export OpenRSCAD source through the built-in plugin', async () => {
+    const outputPath = join(workspace, 'openrscad.glb');
+
+    const result = await runCli(['export', openrscadKitchenSink, '--ext=glb', `--output=${outputPath}`]);
+
+    expect(result.exitCode, `stderr: ${result.stderr}`).toBe(0);
+    const bytes = await readFile(outputPath);
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     expect(view.getUint32(0, true)).toBe(gltfMagicBytes);
   }, 120_000);

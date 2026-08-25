@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/cli",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package-veneer"],
+  "tags": ["scope:shared", "type:package"],
   "targets": {
     "tau": {
       "executor": "nx:run-commands",

@@ -2712,8 +2712,8 @@ importers:
         specifier: workspace:*
         version: link:../../core/geometry
       libassimp:
-        specifier: link:../../../repos/libassimp
-        version: link:../../../repos/libassimp
+        specifier: ^0.1.0
+        version: 0.1.0
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
@@ -18771,6 +18771,10 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libassimp@0.1.0:
+    resolution: {integrity: sha512-GIDm56REeQxfAL8PrZrUuUjifDqeGnQ80Cfwn98zdswved4Bb+1bCleatEJDX9GYTaNbsx7+TG5zVio8ZLrxmg==}
+    engines: {node: '>=22.14.0'}
 
   libcascade@3.0.2:
     resolution: {integrity: sha512-btp/dg/YHO6jhkDmgXNqFyLtWXhL8LlrJwZ0aPw5FD4+kCys0Qfc//dNUlYitZIm+kBym4ZA63/cFrBVhR4yPQ==}
@@ -42300,6 +42304,8 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libassimp@0.1.0: {}
 
   libcascade@3.0.2: {}
 

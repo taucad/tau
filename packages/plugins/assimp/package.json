@@ -58,7 +58,7 @@
   },
   "dependencies": {
     "@taucad/geometry-core": "workspace:*",
-    "libassimp": "link:../../../repos/libassimp"
+    "libassimp": "^0.1.0"
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*",

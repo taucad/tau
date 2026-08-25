@@ -37,7 +37,7 @@ const noop = (): void => {};
 /*
  * Gate the polyfill to actual worker scopes. When `KernelRuntimeWorker` is
  * imported from a Node test harness (apps/api/app/testing/headless-runtime-client.ts
- * pulls in `@taucad/runtime/testing` -> `kernel-testing.utils.ts` -> this module),
+ * pulls in `@taucad/runtime-testing` -> `@taucad/runtime` -> this module),
  * we must NOT define `window`/`document` on the Node global — `gaxios`'s lazy
  * fetch resolver checks `typeof window !== 'undefined' && !!window` and would
  * pick `window.fetch` (undefined) over `node-fetch`'s default, which then

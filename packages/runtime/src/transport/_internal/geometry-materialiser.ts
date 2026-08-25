@@ -3,7 +3,7 @@
 import type { Geometry } from '@taucad/types';
 import type { SharedPool } from '@taucad/memory';
 import type { GeometryTransport } from '#types/runtime-protocol.types.js';
-import { SharedPoolEntryNotFoundError } from '#transport/_internal/shared-pool-errors.js';
+import { SharedPoolEntryNotFoundError } from '#transport/shared-pool-errors.js';
 
 /**
  * Resolve a single wire-level {@link GeometryTransport} into a fully
@@ -18,7 +18,11 @@ import { SharedPoolEntryNotFoundError } from '#transport/_internal/shared-pool-e
  *
  * @public
  */
-export async function materialiseGeometry(payload: GeometryTransport, pool: SharedPool | undefined): Promise<Geometry> {
+export async function materialiseGeometry(
+  payload: GeometryTransport,
+  pool: SharedPool | undefined,
+  acknowledge?: (key: string) => void,
+): Promise<Geometry> {
   if (payload.format !== 'gltf') {
     return payload;
   }
@@ -30,5 +34,6 @@ export async function materialiseGeometry(payload: GeometryTransport, pool: Shar
   if (!view) {
     throw new SharedPoolEntryNotFoundError(content.key);
   }
+  acknowledge?.(content.key);
   return { format: 'gltf', content: view, hash };
 }

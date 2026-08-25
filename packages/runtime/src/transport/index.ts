@@ -65,6 +65,7 @@ export type {
   RuntimeTransportHost,
   RuntimeInitializePayload,
   RuntimeInitializeMemoryHandle,
+  EncodedBinary,
   EncodedGeometry,
   HostInitializeBindings,
   HostInitializeBindingsCore,

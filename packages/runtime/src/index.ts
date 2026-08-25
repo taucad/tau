@@ -7,10 +7,7 @@ export {
   RenderAbortedError,
   isRenderAbortedError,
 } from '#framework/runtime-worker-client.js';
-export {
-  SharedPoolEntryNotFoundError,
-  isSharedPoolEntryNotFoundError,
-} from '#transport/_internal/shared-pool-errors.js';
+export { SharedPoolEntryNotFoundError, isSharedPoolEntryNotFoundError } from '#transport/shared-pool-errors.js';
 export {
   NoRenderOutcomeError,
   isNoRenderOutcomeError,
@@ -62,10 +59,21 @@ export type {
   RenderContentFor,
   RuntimePluginDeclaration,
   RuntimePluginPermissions,
-  RuntimePluginVersionMismatchDiagnostic,
 } from '#plugins/plugin-types.js';
 
 // Plugin authoring helpers
+export { definePlugin } from '#plugins/plugin.js';
+export type {
+  AnyPluginInstance,
+  ExpandPluginBundlers,
+  ExpandPluginKernels,
+  ExpandPluginMiddleware,
+  ExpandPluginTranscoders,
+  PluginCapabilities,
+  PluginFactory,
+  PluginInstance,
+  PluginMeta,
+} from '#plugins/plugin.js';
 export { defineKernel } from '#types/runtime-kernel.types.js';
 export { defineMiddleware } from '#middleware/runtime-middleware.js';
 export { defineBundler } from '#types/runtime-bundler.types.js';
@@ -114,5 +122,3 @@ export { defineRuntimeTransport } from '#transport/index.js';
 
 // Core types (runtime, kernel, bundler, middleware, protocol)
 export * from '#types/index.js';
-
-// File content cache (TR11)

@@ -1,0 +1,23 @@
+[package]
+name = "taucad-opencascade-native"
+description = "N-API shell over taucad-occt-facade."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["modeling", "step"]
+modeling = ["taucad-occt-facade/modeling"]
+step = ["taucad-occt-facade/step"]
+
+[dependencies]
+taucad-occt-facade = { path = "../facade", default-features = false }
+napi = { version = "3", default-features = false, features = ["napi8"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"

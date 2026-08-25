@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@taucad/runtime-testing",
+    "path": "dist/index.mjs",
+    "limit": "20 kB"
+  }
+]

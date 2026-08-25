@@ -7,37 +7,34 @@ import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-const pluginImplementationFiles = [
-  'packages/runtime/src/bundler/esbuild.bundler.ts',
-  'packages/runtime/src/transcoders/converter/converter.transcoder.ts',
-  'packages/runtime/src/kernels/replicad/replicad.kernel.ts',
-  'packages/runtime/src/kernels/jscad/jscad.kernel.ts',
-  'packages/runtime/src/kernels/manifold/manifold.kernel.ts',
-  'packages/runtime/src/kernels/opencascade/opencascade.kernel.ts',
-  'packages/runtime/src/kernels/tau/tau.kernel.ts',
-  'packages/runtime/src/kernels/zoo/zoo.kernel.ts',
-  'packages/kernels/openrscad/src/openrscad.kernel.ts',
-] as const;
+const pluginPackages = readdirSync(resolve(repositoryRoot, 'packages/plugins'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => ({
+    name: JSON.parse(readFileSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json'), 'utf8'))
+      .name as string,
+    sourceRoot: `packages/plugins/${entry.name}/src`,
+  }))
+  .sort((left, right) => left.sourceRoot.localeCompare(right.sourceRoot));
+
+const pluginSourceRoots = pluginPackages.map(({ sourceRoot }) => sourceRoot);
 
 /*
  * Package-owned roots only. The application side runs the same guard over its
- * own source in `apps/ui/app/runtime/plugin-default-export-surface.test.ts`; a
+ * own source in `apps/ui/app/runtime/plugin-source-surface.test.ts`; a
  * published package must not read `apps/**` (see
  * `docs/research/workspace-license-boundary-migration.md`, Finding 2).
  */
-const sourceRoots = ['packages/runtime/src', 'packages/kernels/openrscad/src'] as const;
+const sourceRoots = ['packages/runtime/src', ...pluginSourceRoots] as const;
 
 const pluginImportPrefixes = [
   '#bundler/',
   '#kernels/',
   '#middleware/',
-  '#transcoders/',
   '@taucad/runtime/bundler',
-  '@taucad/runtime/kernels',
   '@taucad/runtime/middleware',
   '@taucad/runtime/transcoder',
-  '@taucad/openrscad',
-] as const;
+  ...pluginPackages.map(({ name }) => name),
+];
 
 const readSourceFile = (relativePath: string): ts.SourceFile => {
   const absolutePath = resolve(repositoryRoot, relativePath);
@@ -86,7 +83,11 @@ const collectSourceFiles = (relativeRoot: string): readonly string[] => {
         visit(child);
         continue;
       }
-      if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))) {
+      if (
+        entry.isFile() &&
+        !entry.name.endsWith('.d.ts') &&
+        (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))
+      ) {
         files.push(relative(repositoryRoot, child));
       }
     }
@@ -119,9 +120,9 @@ const collectDefaultPluginImportLocations = (sourceFile: ts.SourceFile): readonl
 
 describe('Tau-owned plugin export surface', () => {
   it('should keep first-party plugin implementation modules named-only', () => {
-    const defaultExports = pluginImplementationFiles.flatMap((path) =>
-      collectDefaultExportLocations(readSourceFile(path)),
-    );
+    const defaultExports = pluginSourceRoots
+      .flatMap((root) => collectSourceFiles(root))
+      .flatMap((path) => collectDefaultExportLocations(readSourceFile(path)));
 
     expect(defaultExports).toEqual([]);
   });
@@ -146,5 +147,110 @@ describe('Tau-owned plugin export surface', () => {
     );
 
     expect(collectDefaultExportLocations(cadSource)).toEqual(['main.ts:2:1']);
+  });
+});
+
+const aliasOf = (packageName: string): string =>
+  packageName.replaceAll(/-([a-z0-9])/gu, (_match, character: string) => character.toUpperCase());
+
+const packageNameOf = (sourceRoot: string): string => sourceRoot.split('/')[2] ?? sourceRoot;
+
+/**
+ * `[localName, exportedName, moduleSpecifier]` for every named re-export clause
+ * in a root barrel.
+ */
+const collectReExports = (sourceFile: ts.SourceFile): ReadonlyArray<readonly [string, string, string]> =>
+  sourceFile.statements.flatMap((statement) => {
+    if (
+      !ts.isExportDeclaration(statement) ||
+      statement.exportClause === undefined ||
+      !ts.isNamedExports(statement.exportClause) ||
+      statement.moduleSpecifier === undefined ||
+      !ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      return [];
+    }
+    const specifier = statement.moduleSpecifier.text;
+    return statement.exportClause.elements.map(
+      (element) => [element.propertyName?.text ?? element.name.text, element.name.text, specifier] as const,
+    );
+  });
+
+const collectDefinePluginBindings = (sourceFile: ts.SourceFile): readonly string[] =>
+  sourceFile.statements.flatMap((statement) => {
+    if (!ts.isVariableStatement(statement) || !hasModifier(statement, ts.SyntaxKind.ExportKeyword)) {
+      return [];
+    }
+    return statement.declarationList.declarations.flatMap((declaration) => {
+      if (
+        !ts.isIdentifier(declaration.name) ||
+        !declaration.initializer ||
+        !ts.isCallExpression(declaration.initializer) ||
+        !ts.isIdentifier(declaration.initializer.expression) ||
+        declaration.initializer.expression.text !== 'definePlugin'
+      ) {
+        return [];
+      }
+      return [declaration.name.text];
+    });
+  });
+
+const collectNonLiteralKernelAssertions = (sourceFile: ts.SourceFile): readonly string[] => {
+  const assertions: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isAsExpression(node) && node.type.getText(sourceFile) !== 'const') {
+      assertions.push(`${sourceFile.fileName}: ${node.getText(sourceFile)}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return assertions;
+};
+
+describe('Tau-owned plugin alias surface', () => {
+  it('should declare the package-named binding at definePlugin in every implementation module', () => {
+    const actual = pluginSourceRoots.map((root) => {
+      const name = packageNameOf(root);
+      return `${name}: ${collectDefinePluginBindings(readSourceFile(`${root}/${name}.plugin.ts`)).join(', ')}`;
+    });
+    const expected = pluginSourceRoots.map((root) => {
+      const name = packageNameOf(root);
+      return `${name}: ${aliasOf(name)}`;
+    });
+
+    expect(actual).toEqual(expected);
+  });
+
+  it('should re-export each package-named binding under the dynamic plugin contract', () => {
+    const actual = pluginSourceRoots.map((root) => {
+      const name = packageNameOf(root);
+      const alias = aliasOf(name);
+      const bindings = collectReExports(readSourceFile(`${root}/index.ts`))
+        .filter(([local]) => local === alias)
+        .map(([, exported, specifier]) => `${exported}@${specifier}`);
+      return `${name}: ${bindings.join(', ')}`;
+    });
+
+    const expected = pluginSourceRoots.map((root) => {
+      const name = packageNameOf(root);
+      const alias = aliasOf(name);
+      return `${name}: ${alias}@#${name}.plugin.js, plugin@#${name}.plugin.js`;
+    });
+
+    expect(actual).toEqual(expected);
+  });
+});
+
+describe('Tau-owned kernel assertion surface', () => {
+  it('should keep only the documented rhino3dm declaration adapter', () => {
+    const assertions = pluginSourceRoots
+      .map((root) => `${root}/${packageNameOf(root)}.kernel.ts`)
+      .filter((path) => collectSourceFiles(path.slice(0, path.lastIndexOf('/'))).includes(path))
+      .flatMap((path) => collectNonLiteralKernelAssertions(readSourceFile(path)));
+
+    expect(assertions).toEqual([
+      'packages/plugins/rhino/src/rhino.kernel.ts: importedFactory as unknown as RhinoFactory',
+      'packages/plugins/rhino/src/rhino.kernel.ts: importedFactory as unknown',
+    ]);
   });
 });

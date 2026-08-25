@@ -45,15 +45,20 @@ export type {
   TextFileContentMetadata,
   WorkerLog,
 } from '@taucad/types';
+export { fileParameterEntrySchema, getActiveGroupValues, parametersDirectory } from '@taucad/types';
 export {
   createExportFile,
+  cadEdgeOverlayMaterialDefaults,
+  cadMaterialDefaults,
   exportFidelities,
   fileExtensions,
   fileExtensionSet,
+  kittyCadBoundaryRepresentationExtension,
   logLevels,
   lookupExportFidelity,
   lookupMimeType,
   mimeTypes,
+  tauCadTopologyExtension,
 } from '@taucad/types/constants';
 export { isKernelIssueCode, kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 export type { KernelIssueCode } from '#types/kernel-issue-codes.js';
@@ -97,6 +102,7 @@ export type {
   GetDependenciesInput,
   InitializeInput,
   ExportGeometryInput,
+  ExportGeometryRequest,
   CreateGeometryOutput,
   MeshGeometryInput,
   MeshGeometryOutput,

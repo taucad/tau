@@ -14,7 +14,8 @@ import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 import { resolveVirtualPath } from '@taucad/utils/path';
 
-// eslint-disable-next-line @typescript-eslint/naming-convention -- module-level constant
+/** @public */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- protocol global key mirrors its host name
 export const KERNEL_MODULES_KEY = '__KERNEL_MODULES__';
 
 /**
@@ -56,12 +57,16 @@ export function getModuleRegistry(): Map<string, Record<string, unknown>> {
   return registry;
 }
 
+/**
+ */
 export type KernelModuleShimOptions = {
   moduleExpression: string;
   exports: Record<string, unknown>;
   exportPrefix?: string;
 };
 
+/**
+ */
 export type RegisterKernelModuleOptions = {
   name: string;
   exports: Record<string, unknown>;
@@ -70,7 +75,7 @@ export type RegisterKernelModuleOptions = {
   exportPrefix?: string;
 };
 
-/** Builds an ESM shim that exposes a registry-backed built-in kernel module. */
+/** Builds an ESM shim that exposes a registry-backed built-in kernel module. @public */
 export function createKernelModuleShim({
   moduleExpression,
   exports,
@@ -88,12 +93,12 @@ export function createKernelModuleShim({
   return `const __mod = ${moduleExpression};\n${namedExports}\nexport default __mod;\n`;
 }
 
-/** Builds the JavaScript expression used by shims to read a module from the global registry. */
+/** Builds the JavaScript expression used by shims to read a module from the global registry. @public */
 export function createKernelModuleRegistryExpression(name: string): string {
   return `globalThis.${KERNEL_MODULES_KEY}.get(${JSON.stringify(name)})`;
 }
 
-/** Registers a registry-backed built-in module with the runtime bundler. */
+/** Registers a registry-backed built-in module with the runtime bundler. @public */
 export function registerKernelModule(runtime: KernelRuntime, options: RegisterKernelModuleOptions): void {
   const registry = getModuleRegistry();
   registry.set(options.name, options.exports);
@@ -184,6 +189,7 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
 /**
  * Convert a canonical project-local file path to the leading-slash-free entry
  * spelling required by the JavaScript VM adapter.
+ * @public
  */
 export const toVmEntryPath = (absolutePath: string): string => resolveVirtualPath(absolutePath).slice(1);
 

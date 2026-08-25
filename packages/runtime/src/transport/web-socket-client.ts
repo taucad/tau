@@ -25,7 +25,12 @@ import { createFileSystemBridgeHello, fileSystemBridgeSchemas } from '@taucad/fs
 import type { Geometry } from '@taucad/types';
 
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
-import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type {
+  GeometryTransport,
+  RuntimeExportResultTransport,
+  RuntimeInitializeResult,
+  RuntimeProtocol,
+} from '#types/runtime-protocol.types.js';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
@@ -37,6 +42,7 @@ import type { TransportDescriptor } from '#transport/runtime-transport-descripto
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
+import { materialiseExportResult } from '#transport/_internal/export-materialiser.js';
 import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import {
@@ -279,6 +285,9 @@ export const webSocketClient = (
     },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
       return materialiseGeometry(transport, undefined);
+    },
+    async resolveExport(transport: RuntimeExportResultTransport) {
+      return materialiseExportResult(transport, undefined);
     },
     async close(): Promise<void> {
       await finish({ cause: 'requested' });

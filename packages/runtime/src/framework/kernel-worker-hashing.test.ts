@@ -10,7 +10,8 @@ import type { CreateGeometryResult } from '#types/runtime.types.js';
 import type { GetDependenciesInput, KernelRuntime, RuntimeImplementationAsset } from '#types/runtime-kernel.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { WrapCreateGeometryHook } from '#types/runtime-middleware.types.js';
-import { MockKernelWorker, createMockFileSystem } from '#testing/kernel-testing.utils.js';
+// oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
+import { MockKernelWorker, createMockFileSystem } from '../../test/support/kernel-worker.fixture.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 import type { MaterializedRender } from '#framework/render-artifact.js';

@@ -1,0 +1,7 @@
+{
+  "name": "middleware",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/middleware",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

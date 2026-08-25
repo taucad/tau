@@ -1,6 +1,21 @@
 import { ZodError } from 'zod';
 import type { z } from 'zod';
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
+import {
+  expandedPluginCapabilities,
+  isPluginFactory,
+  isPluginInstance,
+  runtimePluginAbiVersionOf,
+} from '#plugins/plugin.js';
+import { runtimePluginAbiVersion } from '#plugins/plugin-runtime-definition.js';
+import type {
+  AnyPluginInstance,
+  ExpandPluginBundlers,
+  ExpandPluginKernels,
+  ExpandPluginMiddleware,
+  ExpandPluginTranscoders,
+  ExpandedPluginCapability,
+} from '#plugins/plugin.js';
 
 type MaybePromise<T> = T | Promise<T>;
 type AnyKernelPlugin = KernelPlugin<Record<string, unknown>, unknown>;
@@ -21,8 +36,15 @@ type RuntimePluginOptions<
 type AwaitedRuntimeOptions<Runtime> = Awaited<Runtime>;
 
 type PublicKernelPlugin<Plugin> =
-  Plugin extends KernelPlugin<infer FormatMap, infer RenderOptions, infer Id, infer RenderContent, infer ExportContent>
-    ? KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent>
+  Plugin extends KernelPlugin<
+    infer FormatMap,
+    infer RenderOptions,
+    infer Id,
+    infer RenderContent,
+    infer ExportContent,
+    infer Extensions
+  >
+    ? KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent, Extensions>
     : never;
 
 type PublicMiddlewarePlugin<Plugin> =
@@ -53,14 +75,17 @@ type PublicTranscoderTuple<Plugins extends readonly AnyTranscoderPlugin[]> = {
   readonly [Index in keyof Plugins]: PublicTranscoderPlugin<Plugins[Index]>;
 };
 
+type Concat<Left extends readonly unknown[], Right extends readonly unknown[]> = readonly [...Left, ...Right];
+
 type RuntimeOptionsKernels<Options> =
   AwaitedRuntimeOptions<Options> extends RuntimeDefinitionOptions<
     infer Kernels,
     readonly MiddlewarePlugin[],
     readonly BundlerPlugin[],
-    readonly AnyTranscoderPlugin[]
+    readonly AnyTranscoderPlugin[],
+    infer Plugins
   >
-    ? Kernels
+    ? PublicKernelTuple<Concat<ExpandPluginKernels<Plugins>, Kernels>>
     : readonly never[];
 
 type RuntimeOptionsMiddleware<Options> =
@@ -68,9 +93,10 @@ type RuntimeOptionsMiddleware<Options> =
     readonly AnyKernelPlugin[],
     infer Middleware,
     readonly BundlerPlugin[],
-    readonly AnyTranscoderPlugin[]
+    readonly AnyTranscoderPlugin[],
+    infer Plugins
   >
-    ? Middleware
+    ? PublicMiddlewareTuple<Concat<ExpandPluginMiddleware<Plugins>, Middleware>>
     : readonly never[];
 
 type RuntimeOptionsBundlers<Options> =
@@ -78,9 +104,10 @@ type RuntimeOptionsBundlers<Options> =
     readonly AnyKernelPlugin[],
     readonly MiddlewarePlugin[],
     infer Bundlers,
-    readonly AnyTranscoderPlugin[]
+    readonly AnyTranscoderPlugin[],
+    infer Plugins
   >
-    ? Bundlers
+    ? PublicBundlerTuple<Concat<ExpandPluginBundlers<Plugins>, Bundlers>>
     : readonly never[];
 
 type RuntimeOptionsTranscoders<Options> =
@@ -88,9 +115,10 @@ type RuntimeOptionsTranscoders<Options> =
     readonly AnyKernelPlugin[],
     readonly MiddlewarePlugin[],
     readonly BundlerPlugin[],
-    infer Transcoders
+    infer Transcoders,
+    infer Plugins
   >
-    ? Transcoders
+    ? PublicTranscoderTuple<Concat<ExpandPluginTranscoders<Plugins>, Transcoders>>
     : readonly never[];
 
 type ConfiguredRuntimeCreateResult<
@@ -98,7 +126,8 @@ type ConfiguredRuntimeCreateResult<
   Middleware extends readonly MiddlewarePlugin[] = readonly MiddlewarePlugin[],
   Bundlers extends readonly BundlerPlugin[] = readonly BundlerPlugin[],
   Transcoders extends readonly AnyTranscoderPlugin[] = readonly AnyTranscoderPlugin[],
-> = MaybePromise<RuntimeDefinitionOptions<Kernels, Middleware, Bundlers, Transcoders>>;
+  Plugins extends readonly AnyPluginInstance[] = readonly AnyPluginInstance[],
+> = MaybePromise<RuntimeDefinitionOptions<Kernels, Middleware, Bundlers, Transcoders, Plugins>>;
 
 /** @public */
 export type RuntimeDefinition<
@@ -111,6 +140,7 @@ export type RuntimeDefinition<
   ? ConfiguredRuntimeDefinition<RuntimeDefinitionOptions<Kernels, Middleware, Bundlers, Transcoders>, ConfigSchema>
   : RuntimePluginOptions<Kernels, Middleware, Bundlers, Transcoders>;
 
+/** Runtime definition whose capabilities are derived from validated host configuration. @public */
 export type ConfiguredRuntimeDefinition<
   Options extends ConfiguredRuntimeCreateResult,
   ConfigSchema extends z.ZodType,
@@ -130,12 +160,22 @@ export type RuntimeDefinitionOptions<
   Middleware extends readonly MiddlewarePlugin[] = readonly never[],
   Bundlers extends readonly BundlerPlugin[] = readonly never[],
   Transcoders extends readonly AnyTranscoderPlugin[] = readonly never[],
+  Plugins extends readonly AnyPluginInstance[] = readonly never[],
 > = {
+  readonly plugins?: Plugins;
   readonly kernels?: Kernels;
   readonly middleware?: Middleware;
   readonly bundlers?: Bundlers;
   readonly transcoders?: Transcoders;
 };
+
+type AnyRuntimeDefinitionOptions = RuntimeDefinitionOptions<
+  readonly AnyKernelPlugin[],
+  readonly MiddlewarePlugin[],
+  readonly BundlerPlugin[],
+  readonly AnyTranscoderPlugin[],
+  readonly AnyPluginInstance[]
+>;
 
 /** @public */
 export type RuntimeKernels<Runtime> =
@@ -201,6 +241,7 @@ export class RuntimeConfigError extends Error {
     this.cause = cause;
   }
 
+  /** Stable machine-readable diagnostic code for invalid runtime configuration. */
   public get code(): 'RUNTIME_CONFIG_INVALID' {
     return 'RUNTIME_CONFIG_INVALID';
   }
@@ -262,19 +303,79 @@ export function isRuntimeDefinition(runtime: unknown): runtime is AnyRuntimeDefi
   );
 }
 
-function normalizeRuntimeDefinition<
-  const Kernels extends readonly AnyKernelPlugin[] = readonly never[],
-  const Middleware extends readonly MiddlewarePlugin[] = readonly never[],
-  const Bundlers extends readonly BundlerPlugin[] = readonly never[],
-  const Transcoders extends readonly AnyTranscoderPlugin[] = readonly never[],
->(
-  options: RuntimeDefinitionOptions<Kernels, Middleware, Bundlers, Transcoders>,
-): RuntimePluginOptions<Kernels, Middleware, Bundlers, Transcoders> {
+type CapabilityWithId = { readonly id: string };
+
+type CapabilityOrigin = {
+  readonly packageName: string;
+  readonly path: string;
+};
+
+type NormalizeCapabilityBucketOptions<Capability extends CapabilityWithId> = {
+  readonly kind: ExpandedPluginCapability['kind'];
+  readonly expanded: readonly ExpandedPluginCapability[];
+  readonly direct: readonly Capability[];
+};
+
+const describeCapabilityOrigin = (origin: CapabilityOrigin): string => `${origin.packageName} (path "${origin.path}")`;
+
+const normalizeCapabilityBucket = <Capability extends CapabilityWithId>(
+  options: NormalizeCapabilityBucketOptions<Capability>,
+): readonly Capability[] => {
+  const capabilities: Capability[] = [];
+  const origins = new Map<string, CapabilityOrigin>();
+  const append = (capability: Capability, origin: CapabilityOrigin): void => {
+    const firstOrigin = origins.get(capability.id);
+    if (firstOrigin) {
+      throw new Error(
+        `Duplicate runtime ${options.kind} id "${capability.id}": first supplied by ${describeCapabilityOrigin(firstOrigin)}; second supplied by ${describeCapabilityOrigin(origin)}.`,
+      );
+    }
+    origins.set(capability.id, origin);
+    capabilities.push(capability);
+  };
+
+  for (const entry of options.expanded) {
+    if (entry.kind === options.kind) {
+      append(entry.capability as Capability, entry);
+    }
+  }
+  for (const capability of options.direct) {
+    append(capability, {
+      packageName: '<host>',
+      path: `direct.${options.kind}`,
+    });
+  }
+
+  return capabilities;
+};
+
+function normalizeRuntimeDefinition(options: AnyRuntimeDefinitionOptions): RuntimePluginOptions {
+  const expanded: ExpandedPluginCapability[] = [];
+  for (const plugin of options.plugins ?? []) {
+    if (isPluginFactory(plugin)) {
+      throw new TypeError(
+        `Tau plugin factory "${plugin.meta.name}" was passed to defineRuntime({ plugins }); invoke it as plugin().`,
+      );
+    }
+    const abiVersion = runtimePluginAbiVersionOf(plugin);
+    if (abiVersion !== undefined && abiVersion !== runtimePluginAbiVersion) {
+      throw new TypeError(
+        `Tau plugin ABI mismatch: received ${abiVersion}, but this runtime requires ${runtimePluginAbiVersion}. Align @taucad/runtime versions.`,
+      );
+    }
+    if (!isPluginInstance(plugin)) {
+      throw new TypeError(
+        'defineRuntime({ plugins }) accepts invoked Tau plugin factories such as plugin(), not individual capabilities; put invoked capability factories in kernels, middleware, bundlers, or transcoders.',
+      );
+    }
+    expanded.push(...expandedPluginCapabilities(plugin));
+  }
+
   return {
-    kernels: (options.kernels ?? []) as unknown as Kernels,
-    middleware: (options.middleware ?? []) as unknown as Middleware,
-    bundlers: (options.bundlers ?? []) as unknown as Bundlers,
-    transcoders: (options.transcoders ?? []) as unknown as Transcoders,
+    kernels: normalizeCapabilityBucket({ kind: 'kernels', expanded, direct: options.kernels ?? [] }),
+    middleware: normalizeCapabilityBucket({ kind: 'middleware', expanded, direct: options.middleware ?? [] }),
+    bundlers: normalizeCapabilityBucket({ kind: 'bundlers', expanded, direct: options.bundlers ?? [] }),
+    transcoders: normalizeCapabilityBucket({ kind: 'transcoders', expanded, direct: options.transcoders ?? [] }),
   };
 }
 
@@ -321,13 +422,38 @@ export function defineRuntime<
   const Middleware extends readonly MiddlewarePlugin[] = readonly never[],
   const Bundlers extends readonly BundlerPlugin[] = readonly never[],
   const Transcoders extends readonly AnyTranscoderPlugin[] = readonly never[],
+  const Plugins extends readonly AnyPluginInstance[] = readonly never[],
 >(
-  options: RuntimeDefinitionOptions<Kernels, Middleware, Bundlers, Transcoders>,
+  options: RuntimeDefinitionOptions<Kernels, Middleware, Bundlers, Transcoders, Plugins>,
 ): RuntimeDefinition<
-  PublicKernelTuple<Kernels>,
-  PublicMiddlewareTuple<Middleware>,
-  PublicBundlerTuple<Bundlers>,
-  PublicTranscoderTuple<Transcoders>
+  PublicKernelTuple<Concat<ExpandPluginKernels<Plugins>, Kernels>>,
+  PublicMiddlewareTuple<Concat<ExpandPluginMiddleware<Plugins>, Middleware>>,
+  PublicBundlerTuple<Concat<ExpandPluginBundlers<Plugins>, Bundlers>>,
+  PublicTranscoderTuple<Concat<ExpandPluginTranscoders<Plugins>, Transcoders>>
+>;
+
+export function defineRuntime<
+  const ConfigSchema extends z.ZodType,
+  const Plugins extends readonly AnyPluginInstance[],
+  const Kernels extends readonly AnyKernelPlugin[] = readonly never[],
+  const Middleware extends readonly MiddlewarePlugin[] = readonly never[],
+  const Bundlers extends readonly BundlerPlugin[] = readonly never[],
+  const Transcoders extends readonly AnyTranscoderPlugin[] = readonly never[],
+>(options: {
+  readonly configSchema: ConfigSchema;
+  readonly createRuntime: (config: z.output<ConfigSchema>) => MaybePromise<{
+    readonly plugins: readonly [...Plugins];
+    readonly kernels?: Kernels;
+    readonly middleware?: Middleware;
+    readonly bundlers?: Bundlers;
+    readonly transcoders?: Transcoders;
+  }>;
+}): RuntimeDefinition<
+  PublicKernelTuple<Concat<ExpandPluginKernels<Plugins>, Kernels>>,
+  PublicMiddlewareTuple<Concat<ExpandPluginMiddleware<Plugins>, Middleware>>,
+  PublicBundlerTuple<Concat<ExpandPluginBundlers<Plugins>, Bundlers>>,
+  PublicTranscoderTuple<Concat<ExpandPluginTranscoders<Plugins>, Transcoders>>,
+  ConfigSchema
 >;
 
 export function defineRuntime<
@@ -351,7 +477,7 @@ export function defineRuntime<
 
 /** @public */
 export function defineRuntime(
-  options: RuntimeDefinitionOptions | ConfiguredRuntimeDefinition<ConfiguredRuntimeCreateResult, z.ZodType>,
+  options: AnyRuntimeDefinitionOptions | ConfiguredRuntimeDefinition<ConfiguredRuntimeCreateResult, z.ZodType>,
 ): AnyRuntimeDefinition {
   if (isConfiguredRuntimeDefinition(options)) {
     return options;

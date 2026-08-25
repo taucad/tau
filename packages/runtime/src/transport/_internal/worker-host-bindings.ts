@@ -15,11 +15,11 @@
 import type { Geometry } from '@taucad/types';
 import { SharedPool } from '@taucad/memory';
 import type {
+  EncodedBinary,
   EncodedGeometry,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
 } from '#transport/runtime-transport.types.js';
-import { encodeGeometryAsOwnedTransfer } from '#transport/_internal/owned-transfer-bytes.js';
 
 /**
  * Construct {@link HostInitializeBindings} from an inbound memory
@@ -39,30 +39,32 @@ export const createWorkerHostBindings = (handle: RuntimeInitializeMemoryHandle):
   }
   const geomTier: 'pool' | 'transfer' = geometryPool ? 'pool' : 'transfer';
 
+  const publishBytes = (key: string, source: Uint8Array<ArrayBuffer>): EncodedBinary => {
+    if (geometryPool?.publish(key, source)) {
+      return { value: { delivery: 'pooled', key }, transferables: [], tier: 'pool' };
+    }
+    const bytes = new Uint8Array(source);
+    return { value: { delivery: 'inline', bytes }, transferables: [bytes.buffer], tier: 'transfer' };
+  };
+
   const publishGeometry = (geometry: Geometry): EncodedGeometry => {
     if (geometry.format !== 'gltf') {
       return { value: geometry, transferables: [], tier: 'copy' };
     }
-    if (geometryPool) {
-      if (!geometryPool.has(geometry.hash)) {
-        geometryPool.store(geometry.hash, geometry.content);
-      }
-      if (geometryPool.has(geometry.hash)) {
-        return {
-          value: {
-            format: 'gltf',
-            content: { delivery: 'pooled', key: geometry.hash },
-            hash: geometry.hash,
-          },
-          transferables: [],
-          tier: 'pool',
-        };
-      }
-    }
-    return encodeGeometryAsOwnedTransfer(geometry);
+    const encoded = publishBytes(geometry.hash, geometry.content);
+    return {
+      value: { format: 'gltf', content: encoded.value, hash: geometry.hash },
+      transferables: encoded.transferables,
+      tier: encoded.tier,
+    };
   };
 
   return {
-    geometryDelivery: { publish: publishGeometry, tier: geomTier },
+    geometryDelivery: {
+      publish: publishGeometry,
+      publishBytes,
+      acknowledge: (key) => geometryPool?.acknowledge(key),
+      tier: geomTier,
+    },
   };
 };

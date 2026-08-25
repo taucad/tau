@@ -7,13 +7,13 @@
 import { z } from 'zod';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
+import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
 
 const workerCtorSchema = z.custom<unknown>((value) => typeof value === 'function');
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(
   (value) => value === undefined || isRuntimeFileSystem(value),
 );
-
 export const nodeWorkerClientOptionsSchema = z
   .object({
     /**
@@ -41,5 +41,11 @@ export const nodeWorkerClientOptionsSchema = z
      * Optional filesystem handle produced by a `fromX` factory.
      */
     fileSystem: runtimeFileSystemSchema.optional(),
+    /** Explicit Chrome DevTools Performance Timeline mirroring. */
+    devtoolsTelemetry: z.boolean().optional(),
+    compiledWasmModules: z
+      .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).strict())
+      .readonly()
+      .optional(),
   })
   .strict();

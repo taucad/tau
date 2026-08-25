@@ -411,8 +411,7 @@ describe.each(rows)('$name adapter conformance', (row) => {
   /**
    * **No ordering is promised.** `fs.readdir` returns platform order while the
    * content-backed adapters return insertion order, so the contract is set
-   * membership. The one consumer that needs an order sorts for itself
-   * (`kernels/tau/tau.kernel.ts` — `[...(await filesystem.readdir(dir))].sort()`).
+   * membership. Consumers that need deterministic order sort their own result.
    */
   it('lists exactly the directory members, in no promised order', async () => {
     const fileSystem = await row.create();

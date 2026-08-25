@@ -1,6 +1,7 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- Next.js config-safe subpath */
 
 import type { NextConfig } from 'next';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Minimal shape accepted by Next.js `headers()`.
@@ -31,6 +32,9 @@ export type NextRuntimeHeadersOptions = {
 };
 
 type NextRuntimeWebpackConfig = {
+  module?: {
+    rules?: unknown[];
+  };
   plugins?: unknown[];
   resolve?: {
     alias?: Record<string, unknown>;
@@ -58,7 +62,8 @@ type InstalledWebpackHook = (
   context: NextRuntimeWebpackContext,
 ) => NextRuntimeWebpackConfig;
 
-type NextRuntimeConfig = Omit<NextConfig, 'headers' | 'turbopack' | 'webpack'> & {
+/** Next.js configuration returned by {@link withTauRuntime}. @public */
+export type NextRuntimeConfig = Omit<NextConfig, 'headers' | 'turbopack' | 'webpack'> & {
   headers: NonNullable<NextConfig['headers']>;
   turbopack: NonNullable<NextConfig['turbopack']>;
   webpack: InstalledWebpackHook;
@@ -81,7 +86,8 @@ const subresourceHeaders: Readonly<Record<string, string>> = Object.freeze({
 });
 
 const browserNodeBuiltinsModule = '@taucad/runtime/nextjs/browser-node-builtins';
-const nodeBuiltinSpecifier = /^node:(?:fs(?:\/promises)?|url)$/;
+const nodeBuiltinSpecifier = /^node:(?:crypto|fs(?:\/promises)?|path|url)$/;
+const packageAssetsLoader = fileURLToPath(new URL('package-assets-loader.mjs', import.meta.url));
 
 const isWebpackHook = (value: unknown): value is NarrowNextRuntimeWebpackHook => typeof value === 'function';
 
@@ -99,6 +105,17 @@ const configureWebpack = (
 
   return {
     ...config,
+    module: {
+      ...config.module,
+      rules: [
+        ...(config.module?.rules ?? []),
+        {
+          enforce: 'pre',
+          test: /\.[cm]?[jt]sx?$/,
+          use: [packageAssetsLoader],
+        },
+      ],
+    },
     plugins: [...(config.plugins ?? []), replacementPlugin],
     resolve: {
       ...config.resolve,
@@ -107,6 +124,8 @@ const configureWebpack = (
         fs$: browserNodeBuiltinsModule,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
         'fs/promises$': browserNodeBuiltinsModule,
+        path$: browserNodeBuiltinsModule,
+        crypto$: browserNodeBuiltinsModule,
         url$: browserNodeBuiltinsModule,
       },
     },
@@ -165,10 +184,15 @@ export const withTauRuntime = (config: NextConfig = {}, options: NextRuntimeHead
       resolveAlias: {
         ...config.turbopack?.resolveAlias,
         fs: browserNodeBuiltinsModule,
+        path: browserNodeBuiltinsModule,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
         'node:fs': browserNodeBuiltinsModule,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
         'node:fs/promises': browserNodeBuiltinsModule,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
+        'node:path': browserNodeBuiltinsModule,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
+        'node:crypto': browserNodeBuiltinsModule,
         // eslint-disable-next-line @typescript-eslint/naming-convention -- Node.js module name
         'node:url': browserNodeBuiltinsModule,
       },

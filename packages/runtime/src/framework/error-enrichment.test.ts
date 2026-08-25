@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { SourceMapGenerator } from 'source-map-js';
 import {
   parseStackTrace,
   preserveExportNames,
@@ -22,6 +23,33 @@ import {
 import { named } from '#framework/named.js';
 
 describe('Minification-resilient function naming', () => {
+  it('source-maps Node stack paths when the executor reports a file URL', () => {
+    const sourceMap = new SourceMapGenerator();
+    sourceMap.addMapping({
+      generated: { line: 10, column: 2 },
+      original: { line: 6, column: 4 },
+      source: 'vfs:main.ts',
+      name: 'main',
+    });
+    const error = new Error('test');
+    error.stack = 'Error: test\n    at main (/tmp/taucad-exec.mjs:10:3)';
+
+    expect(
+      parseStackTrace(error, {
+        sourceMap: sourceMap.toString(),
+        lastEntryName: 'file:///tmp/taucad-exec.mjs',
+      }),
+    ).toEqual([
+      {
+        functionName: 'main',
+        fileName: 'main.ts',
+        lineNumber: 6,
+        columnNumber: 5,
+        context: 'user',
+      },
+    ]);
+  });
+
   describe('named() preserves .name for anonymous expressions', () => {
     it('should use the annotated name in stack traces for anonymous function expressions', () => {
       const a = named('runMainRaw', function () {
@@ -534,6 +562,19 @@ describe('Minification-resilient function naming', () => {
       expect(frames[0]!.functionName).toBe('runMainRaw');
       expect(frames[1]!.functionName).toBe('runMain');
       expect(frames[2]!.functionName).toBe('Object.createGeometry');
+    });
+
+    it('should keep V8 property aliases out of parenthesized file paths', () => {
+      const error = new Error('test');
+      error.stack = `Error: test
+    at Object.get [as badKey] (/tmp/runtime-entry.mjs:10:5)`;
+
+      expect(parseStackTrace(error)[0]).toMatchObject({
+        functionName: 'Object.get [as badKey]',
+        fileName: '/tmp/runtime-entry.mjs',
+        lineNumber: 10,
+        columnNumber: 5,
+      });
     });
 
     it('should classify frames deterministically using URL scheme', () => {

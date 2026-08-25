@@ -30,11 +30,14 @@ import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
  * @example <caption>Spin up an in-process kernel for tests</caption>
  * ```typescript
  * import { createRuntimeClient } from '@taucad/runtime';
- * import { presets } from '@taucad/runtime/presets';
+ * import { defineRuntime } from '@taucad/runtime/worker';
+ * import type { AnyPluginInstance } from '@taucad/runtime/plugin';
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
  * import { fromMemoryFs } from '@taucad/runtime/filesystem';
  *
- * const runtime = presets.all();
+ * declare const kernelPlugin: AnyPluginInstance;
+ * declare const bundlerPlugin: AnyPluginInstance;
+ * const runtime = defineRuntime({ plugins: [kernelPlugin, bundlerPlugin] });
  * const client = createRuntimeClient({
  *   transport: inProcessTransport({
  *     runtime,

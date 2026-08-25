@@ -2,6 +2,17 @@ import { asBuffer } from '@taucad/utils/file';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 
+const compiledModules = new Map<string, Promise<WebAssembly.Module>>();
+
+const canonicalizeUrl = (url: string): string => {
+  try {
+    const { location } = globalThis as { location?: { href: string } };
+    return new URL(url, location?.href).href;
+  } catch {
+    return url;
+  }
+};
+
 /**
  * Compile a WASM module from a URL using streaming compilation when possible.
  * Tries `WebAssembly.compileStreaming` first (enables V8 code caching), falls back
@@ -14,8 +25,28 @@ import { isNode, resolveFileUrl } from '#framework/environment.js';
  * @param tracer - Optional span tracer for hierarchy-aware telemetry
  * @returns A promise that resolves to a compiled WebAssembly module
  * @throws Error if the WASM binary cannot be loaded or compiled
+ * @public
  */
 export async function compileWasmStreaming(url: string, tracer?: RuntimeSpanTracer): Promise<WebAssembly.Module> {
+  const canonicalUrl = canonicalizeUrl(url);
+  const cached = compiledModules.get(canonicalUrl);
+  if (cached) {
+    return cached;
+  }
+
+  const pending = compileWasm(canonicalUrl, tracer);
+  compiledModules.set(canonicalUrl, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    if (compiledModules.get(canonicalUrl) === pending) {
+      compiledModules.delete(canonicalUrl);
+    }
+    throw error;
+  }
+}
+
+const compileWasm = async (url: string, tracer?: RuntimeSpanTracer): Promise<WebAssembly.Module> => {
   const span = tracer?.startSpan('wasm.compile', { url });
   try {
     if (shouldLoadFromFileSystem(url)) {
@@ -40,7 +71,7 @@ export async function compileWasmStreaming(url: string, tracer?: RuntimeSpanTrac
   } finally {
     span?.end();
   }
-}
+};
 
 /**
  * Load WASM binary using feature detection (try/catch) rather than environment checks.
@@ -53,6 +84,7 @@ export async function compileWasmStreaming(url: string, tracer?: RuntimeSpanTrac
  * @returns A promise that resolves to the WASM binary as an ArrayBuffer
  * @throws Error if the WASM binary cannot be loaded
  * @see https://www.zachleat.com/web/dynamic-import/ - similar pattern to import-module-string
+ * @public
  */
 export async function loadWasmBinary(url: string): Promise<ArrayBuffer> {
   if (shouldLoadFromFileSystem(url)) {

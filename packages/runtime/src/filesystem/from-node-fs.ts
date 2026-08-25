@@ -25,12 +25,13 @@ import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem
  * @example <caption>Server-side Node.js filesystem</caption>
  * ```typescript
  * import { createRuntimeClient, defineRuntime } from '@taucad/runtime';
+ * import type { AnyPluginInstance } from '@taucad/runtime/plugin';
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
  * import { fromNodeFs } from '@taucad/runtime/filesystem/node';
- * import { replicad } from '@taucad/runtime/kernels/replicad';
- * import { esbuild } from '@taucad/runtime/bundler/esbuild';
  *
- * const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
+ * declare const kernelPlugin: AnyPluginInstance;
+ * declare const bundlerPlugin: AnyPluginInstance;
+ * const runtime = defineRuntime({ plugins: [kernelPlugin, bundlerPlugin] });
  * const client = createRuntimeClient({
  *   transport: inProcessTransport({
  *     runtime,

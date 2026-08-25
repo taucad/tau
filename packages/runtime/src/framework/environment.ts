@@ -44,6 +44,7 @@ export function getEnvironment(): RuntimeEnvironment {
  * Convenience: `true` when running in Node.js (main thread or worker_threads).
  *
  * @returns `true` in a Node.js environment
+ * @public
  */
 export function isNode(): boolean {
   return getEnvironment() === 'node';
@@ -76,6 +77,7 @@ export function isWebWorker(): boolean {
  *
  * @param url - the URL to resolve (string or URL object)
  * @returns filesystem path in Node.js, or the original URL string in browsers
+ * @public
  */
 export async function resolveFileUrl(url: string | URL): Promise<string> {
   const urlString = typeof url === 'string' ? url : url.href;

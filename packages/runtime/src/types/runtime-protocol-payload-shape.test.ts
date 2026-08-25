@@ -17,6 +17,12 @@ const renderId = '550e8400-e29b-41d4-a716-446655440000';
 const stagePath = '/main.ts';
 
 describe('runtime-protocol payload-shape coverage (C18)', () => {
+  it('accepts pooled-binary materialisation acknowledgements', () => {
+    expect(runtimeProtocolSchemas.notifies.binaryMaterialised.parse({ key: 'geometry-hash' })).toEqual({
+      key: 'geometry-hash',
+    });
+  });
+
   describe('hello', () => {
     it('accepts additive fields while rejecting malformed known fields', () => {
       expect(
@@ -63,6 +69,78 @@ describe('runtime-protocol payload-shape coverage (C18)', () => {
         }),
       ).toMatchObject({ sessionId: 'session-1', resumeToken: 'resume-1' });
       expect(runtimeProtocolSchemas.calls.initialize.args.safeParse({}).success).toBe(true);
+    });
+  });
+
+  describe('capabilities manifest', () => {
+    const capabilities = {
+      registrations: [
+        {
+          kind: 'kernel',
+          id: 'fixture',
+          extensions: ['ts'],
+          permissions: { network: ['https://plugins.example.test'], futurePermission: true },
+          futureRegistration: true,
+        },
+      ],
+      routes: [
+        {
+          targetFormat: 'glb',
+          kernelId: 'fixture',
+          sourceFormat: 'glb',
+          fidelity: 'mesh',
+          exportOptions: { schema: {}, defaults: {}, futureExportOption: true },
+          content: { schema: {}, defaults: { includeEdges: false }, futureContent: true },
+          futureRoute: true,
+        },
+      ],
+      renderCapabilities: {
+        fixture: {
+          renderOptions: { schema: {}, defaults: {}, futureRenderOption: true },
+          content: { schema: {}, defaults: { includeTopology: true }, futureContent: true },
+          futureRenderCapability: true,
+        },
+      },
+      futureManifest: true,
+    } as const;
+
+    it('round-trips every additive manifest sub-object', () => {
+      expect(runtimeProtocolSchemas.calls.initialize.result.parse({ capabilities })).toEqual({ capabilities });
+    });
+
+    it('tolerates registrations from a newer capability kind', () => {
+      const next = {
+        ...capabilities,
+        registrations: [{ kind: 'simulation', id: 'solver', payload: { iterations: 10 } }],
+      };
+
+      expect(runtimeProtocolSchemas.notifies.capabilitiesUpdated.parse({ capabilities: next })).toEqual({
+        capabilities: next,
+      });
+    });
+
+    it('rejects malformed fields that consumers branch on', () => {
+      expect(
+        runtimeProtocolSchemas.calls.initialize.result.safeParse({
+          capabilities: {
+            ...capabilities,
+            registrations: [{ kind: 'kernel', id: 'fixture' }],
+          },
+        }).success,
+      ).toBe(false);
+      expect(
+        runtimeProtocolSchemas.calls.initialize.result.safeParse({
+          capabilities: {
+            ...capabilities,
+            routes: [{ ...capabilities.routes[0], fidelity: 'lossless' }],
+          },
+        }).success,
+      ).toBe(false);
+      expect(
+        runtimeProtocolSchemas.calls.initialize.result.safeParse({
+          capabilities: { ...capabilities, renderCapabilities: { fixture: {} } },
+        }).success,
+      ).toBe(false);
     });
   });
 

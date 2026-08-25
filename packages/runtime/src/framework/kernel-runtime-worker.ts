@@ -37,7 +37,7 @@ import { KernelWorker } from '#framework/kernel-worker.js';
 import type { KernelBinding, NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
 import { isRenderAbortedError } from '#framework/runtime-worker-client.js';
 import { preserveMethodNames } from '#framework/named.js';
-import { isWebAssemblyException } from '#kernels/occt/wasm-exception.js';
+import { isWebAssemblyException } from '#framework/wasm-exception.js';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
@@ -81,6 +81,25 @@ type KernelSelection = {
   method: SelectionMethod;
 };
 
+/** Maximum registered extensions named in an unhandled-extension diagnostic before eliding. */
+const listedExtensionLimit = 12;
+
+/**
+ * Describe why an entry matched no kernel: its extension and the ones the runtime does handle.
+ *
+ * @param entryPath - Canonical path of the entry that matched no kernel.
+ * @param kernels - Kernel registrations composing the runtime.
+ * @returns A diagnostic naming the unhandled extension and the registered ones.
+ */
+const describeUnhandledExtension = (entryPath: string, kernels: readonly KernelPluginEntry[]): string => {
+  const dotIndex = entryPath.lastIndexOf('.');
+  const extension = dotIndex > 0 ? entryPath.slice(dotIndex) : entryPath.slice(entryPath.lastIndexOf('/') + 1);
+  const handled = [...new Set(kernels.flatMap((kernel) => kernel.extensions))].filter((candidate) => candidate !== '*');
+  const listed = handled.slice(0, listedExtensionLimit).join(', ');
+  const registered = handled.length > listedExtensionLimit ? `${listed}, …` : `${listed || 'none'}.`;
+  return `No kernel handles "${extension}". Registered kernels handle: ${registered} Install a plugin that declares this extension and add it to the runtime definition.`;
+};
+
 /** Multi-kernel runtime worker that dynamically selects and delegates to loaded kernel definitions. */
 class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   protected override readonly name = 'KernelRuntimeWorker';
@@ -99,6 +118,8 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.runtime = options.runtime;
   }
 
+  /**
+   */
   public override async initialize(input: {
     callbacks: Parameters<KernelWorker<RuntimeWorkerOptions>['initialize']>[0]['callbacks'];
     transferables: Parameters<KernelWorker<RuntimeWorkerOptions>['initialize']>[0]['transferables'];
@@ -195,9 +216,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
-      runtime.logger.warn('getParameters returning empty: kernel-not-selected', {
-        data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] },
-      });
+      runtime.logger.warn(
+        `getParameters returning empty: ${describeUnhandledExtension(input.entryPath, this.kernelPlugins)}`,
+        { data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] } },
+      );
       return {
         success: true,
         data: { defaultParameters: {}, jsonSchema: {} },
@@ -234,7 +256,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       });
       return createKernelError([
         {
-          message: 'No runtime kernel selected for render.',
+          message: describeUnhandledExtension(input.entryPath, this.kernelPlugins),
           code: 'KERNEL_CAPABILITY_MISSING',
           type: 'kernel',
           severity: 'error',
@@ -493,6 +515,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return this.activeKernelId ? this.getActiveKernel().definition.version : undefined;
   }
 
+  protected override describeUnselectedKernel(owner: OperationOwner): string {
+    return describeUnhandledExtension(owner.file.filename, this.kernelPlugins);
+  }
+
   protected override onFileChanged(_changedPaths: readonly string[]): void {
     this.clearFileDerivedKernelState();
   }
@@ -560,7 +586,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       id: config.id,
     });
     this.logger.debug(`Loading kernel module: ${config.id}`);
-    this.warnOnRuntimeVersionMismatch('kernel', config);
     const definition = await resolveRuntimePluginDefinition<KernelDefinition>('kernel', config);
     importSpan.end();
 

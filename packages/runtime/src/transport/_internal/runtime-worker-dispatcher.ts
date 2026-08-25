@@ -60,6 +60,7 @@ import { createErrorTrap } from '#framework/worker-error-trap.js';
 import { packageVersion } from '#utils/package-info.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
 import type {
+  EncodedBinary,
   EncodedGeometry,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
@@ -80,6 +81,8 @@ export const runtimeChannelSessionKey = 'tau.runtime/v1';
  * @public
  */
 export type GeometryEncoder = (geometry: Geometry) => EncodedGeometry;
+/** Encode one owned binary payload for its selected delivery tier. @public */
+export type BinaryEncoder = (key: string, bytes: Uint8Array<ArrayBuffer>) => EncodedBinary;
 
 function applyGeometryEncoder(
   geometry: Geometry,
@@ -116,16 +119,19 @@ function normaliseIssueForWire<T extends { code?: unknown }>(issue: T): T & { co
   return isKernelIssueCode(issue.code) ? (issue as T & { code: KernelIssueCode }) : { ...issue, code: 'UNKNOWN' };
 }
 
-function prepareExportTransfer(result: ExportGeometryResult, outTransferables: Transferable[]): ExportGeometryResult {
+function prepareExportTransfer(
+  result: ExportGeometryResult,
+  options: { encode: BinaryEncoder; publicationId: number; transferables: Transferable[] },
+): unknown {
   const issues = result.issues.map(normaliseIssueForWire);
   if (!result.success) {
     return { ...result, issues };
   }
 
-  const data = result.data.map((file) => {
-    const bytes = new Uint8Array(file.bytes);
-    outTransferables.push(bytes.buffer);
-    return { ...file, bytes };
+  const data = result.data.map((file, index) => {
+    const encoded = options.encode(`export:${options.publicationId}:${index}`, file.bytes);
+    options.transferables.push(...encoded.transferables);
+    return { ...file, bytes: encoded.value };
   });
   return { ...result, data, issues };
 }
@@ -155,6 +161,10 @@ export type WorkerDispatcherOptions = {
    * falls back to inline / copy delivery (no transferables, no pool).
    */
   readonly encodeGeometry?: GeometryEncoder;
+  /** Transport-supplied pooled/transfer encoder for export file bytes. */
+  readonly encodeBinary?: BinaryEncoder;
+  /** Transport-owned pooled-delivery acknowledgement handler. */
+  readonly acknowledgeBinary?: (key: string) => void;
   /**
    * Late-bound host bindings factory invoked when the dispatcher
    * receives the `initialize` RPC. The factory inspects the inbound
@@ -182,6 +192,11 @@ const inlineGeometryEncoder: GeometryEncoder = (geometry) => {
     transferables: [],
     tier: 'copy',
   };
+};
+
+const inlineBinaryEncoder: BinaryEncoder = (_key, source) => {
+  const bytes = new Uint8Array(source);
+  return { value: { delivery: 'inline', bytes }, transferables: [bytes.buffer], tier: 'transfer' };
 };
 
 /**
@@ -217,6 +232,9 @@ export function createWorkerDispatcher(
    * the bindings' SAB-aware variants the moment `initialize` lands.
    * The dispatcher never reads `port.capabilities` directly. */
   let encodeGeometry: GeometryEncoder = dispatcherOptions?.encodeGeometry ?? inlineGeometryEncoder;
+  let encodeBinary: BinaryEncoder = dispatcherOptions?.encodeBinary ?? inlineBinaryEncoder;
+  let acknowledgeBinary = dispatcherOptions?.acknowledgeBinary ?? (() => undefined);
+  let exportPublicationId = 0;
 
   const pendingLogs: LogEntry[] = [];
   let logFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -311,11 +329,10 @@ export function createWorkerDispatcher(
       wireWorkerCallbacks();
 
       const { memoryHandle } = args;
+      worker.setDevtoolsTelemetryEnabled(memoryHandle?.devtoolsTelemetry === true);
+      worker.setCompiledWasmModules(memoryHandle?.compiledWasmModules ?? []);
       if (memoryHandle?.signalBuffer) {
         worker.setSignalBuffer(memoryHandle.signalBuffer);
-      }
-      if (memoryHandle?.geometryPoolBuffer) {
-        worker.setGeometryPoolBuffer(memoryHandle.geometryPoolBuffer);
       }
       /* Late-bind the host bindings now that we have the inbound
        * `memoryHandle`. The bindings' geometry encoder wins
@@ -326,6 +343,8 @@ export function createWorkerDispatcher(
       if (dispatcherOptions?.bindingsFactory && memoryHandle) {
         const bindings = dispatcherOptions.bindingsFactory(memoryHandle);
         encodeGeometry = bindings.geometryDelivery.publish;
+        encodeBinary = bindings.geometryDelivery.publishBytes;
+        acknowledgeBinary = bindings.geometryDelivery.acknowledge;
       }
 
       await Promise.race([
@@ -387,7 +406,11 @@ export function createWorkerDispatcher(
         case 'export': {
           const result = await handleExport(args as RuntimeProtocol['calls']['export']['args'], signal);
           const transferables: Transferable[] = [];
-          const value = prepareExportTransfer(result, transferables);
+          const value = prepareExportTransfer(result, {
+            encode: encodeBinary,
+            publicationId: ++exportPublicationId,
+            transferables,
+          });
           const envelope: WithTransferables<unknown> = {
             value,
             transferables,
@@ -397,7 +420,11 @@ export function createWorkerDispatcher(
         case 'exportModel': {
           const result = await handleExportModel(args as RuntimeProtocol['calls']['exportModel']['args'], signal);
           const transferables: Transferable[] = [];
-          const value = prepareExportTransfer(result, transferables);
+          const value = prepareExportTransfer(result, {
+            encode: encodeBinary,
+            publicationId: ++exportPublicationId,
+            transferables,
+          });
           const envelope: WithTransferables<unknown> = {
             value,
             transferables,
@@ -463,6 +490,11 @@ export function createWorkerDispatcher(
         case 'abort': {
           const a = args as RuntimeProtocol['notifies']['abort']['args'];
           worker.handleWireAbort(a);
+          break;
+        }
+        case 'binaryMaterialised': {
+          const a = args as RuntimeProtocol['notifies']['binaryMaterialised']['args'];
+          acknowledgeBinary(a.key);
           break;
         }
         case 'kernelCommand': {

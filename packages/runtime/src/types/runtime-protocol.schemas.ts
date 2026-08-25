@@ -16,11 +16,13 @@
  */
 
 import { z } from 'zod';
+import { runtimeCapabilityKinds } from '#plugins/plugin-types.js';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
-import { fileExtensions } from '@taucad/types/constants';
-import type { FileExtension } from '@taucad/types';
+import { exportFidelityValues, fileExtensions } from '@taucad/types/constants';
+import type { FileExtension, MimeType } from '@taucad/types';
 import type { MessagePortLike, WireProtocolSchemas } from '@taucad/rpc';
 import { isMessagePortLike } from '#transport/_internal/wire-transferables.js';
+import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 
@@ -68,11 +70,21 @@ const kernelResultSchema = z.union([
     .catchall(z.unknown()),
 ]);
 
+const binaryContentDeliverySchema = z.discriminatedUnion('delivery', [
+  z.object({ delivery: z.literal('inline'), bytes: z.instanceof(Uint8Array) }).strict(),
+  z.object({ delivery: z.literal('pooled'), key: z.string() }).strict(),
+]);
+
+const mimeTypeSchema = z.custom<MimeType>(
+  (value) => typeof value === 'string' && value.trim().length > 0,
+  'Expected a non-empty MIME type',
+);
+
 const exportFileSchema = z
   .object({
     name: z.string(),
-    bytes: z.instanceof(Uint8Array),
-    mimeType: z.string().refine((mimeType) => mimeType.trim().length > 0),
+    bytes: binaryContentDeliverySchema,
+    mimeType: mimeTypeSchema,
   })
   .catchall(z.unknown());
 
@@ -93,6 +105,7 @@ const exportGeometryResultSchema = z.discriminatedUnion('success', [
     .catchall(z.unknown()),
 ]);
 
+/** @public */
 export const getParametersResultSchema = z.union([
   z
     .object({
@@ -124,7 +137,103 @@ const previewCommandIdentityShape = {
   abortGeneration: abortGenerationSchema.optional(),
 } as const;
 const wireAbortReasonCodeSchema = z.literal(2);
-const capabilitiesManifestSchema = z.unknown();
+
+const runtimePluginPermissionsSchema = z
+  .object({
+    network: z.array(z.string()).optional(),
+    filesystemWrite: z.boolean().optional(),
+  })
+  .catchall(z.unknown());
+
+const runtimeRegistrationCommonShape = {
+  id: z.string(),
+  permissions: runtimePluginPermissionsSchema.optional(),
+} as const;
+
+const knownRuntimeCapabilityRegistrationSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      ...runtimeRegistrationCommonShape,
+      kind: z.literal('kernel'),
+      extensions: z.array(z.string()),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      ...runtimeRegistrationCommonShape,
+      kind: z.literal('middleware'),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      ...runtimeRegistrationCommonShape,
+      kind: z.literal('bundler'),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      ...runtimeRegistrationCommonShape,
+      kind: z.literal('transcoder'),
+    })
+    .catchall(z.unknown()),
+]);
+
+const unknownRuntimeCapabilityRegistrationSchema = z
+  .object({
+    kind: z.string(),
+    id: z.string(),
+  })
+  .catchall(z.unknown())
+  .refine(({ kind }) => !runtimeCapabilityKinds.includes(kind as (typeof runtimeCapabilityKinds)[number]));
+
+const runtimeCapabilityRegistrationSchema = z.union([
+  knownRuntimeCapabilityRegistrationSchema,
+  unknownRuntimeCapabilityRegistrationSchema,
+]);
+
+const contentCapabilitySchema = z
+  .object({
+    schema: z.unknown(),
+    defaults: runtimeContentSchema,
+  })
+  .catchall(z.unknown());
+
+const exportRouteSchema = z
+  .object({
+    targetFormat: fileExtensionSchema,
+    kernelId: z.string(),
+    sourceFormat: fileExtensionSchema,
+    transcoderId: z.string().optional(),
+    fidelity: z.enum(exportFidelityValues),
+    exportOptions: z
+      .object({
+        schema: z.unknown(),
+        defaults: z.unknown(),
+      })
+      .catchall(z.unknown()),
+    content: contentCapabilitySchema.optional(),
+  })
+  .catchall(z.unknown());
+
+const renderCapabilitySchema = z
+  .object({
+    renderOptions: z
+      .object({
+        schema: z.unknown(),
+        defaults: z.unknown(),
+      })
+      .catchall(z.unknown()),
+    content: contentCapabilitySchema.optional(),
+  })
+  .catchall(z.unknown());
+
+export const capabilitiesManifestSchema = z
+  .object({
+    registrations: z.array(runtimeCapabilityRegistrationSchema),
+    routes: z.array(exportRouteSchema),
+    renderCapabilities: z.record(z.string(), renderCapabilitySchema),
+  })
+  .catchall(z.unknown());
 
 const logEntrySchema = z.unknown();
 const telemetryEntrySchema = z
@@ -147,12 +256,16 @@ const sharedArrayBufferSchema = z.custom<SharedArrayBuffer>(
  * `MessagePort`, a `node:worker_threads` port, or an in-process structural
  * port (X7). Reuses the transport's single port sniff. */
 const messagePortSchema = z.custom<MessagePortLike>(isMessagePortLike);
-
 export const runtimeInitializeMemoryHandleSchema = z
   .object({
     signalBuffer: sharedArrayBufferSchema.optional(),
     geometryPoolBuffer: sharedArrayBufferSchema.optional(),
     fileSystemPort: messagePortSchema.optional(),
+    devtoolsTelemetry: z.boolean().optional(),
+    compiledWasmModules: z
+      .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).strict())
+      .readonly()
+      .optional(),
   })
   .catchall(z.unknown());
 
@@ -259,6 +372,8 @@ export const runtimeAbortArgsSchema = z
       });
     }
   });
+
+export const runtimeBinaryMaterialisedArgsSchema = z.object({ key: z.string() }).strict();
 
 const runtimeKernelMessageArgsSchema = z
   .object({
@@ -383,6 +498,7 @@ export const runtimeProtocolSchemas = {
     updateParameters: runtimeUpdateParametersArgsSchema,
     setOptions: runtimeSetOptionsArgsSchema,
     abort: runtimeAbortArgsSchema,
+    binaryMaterialised: runtimeBinaryMaterialisedArgsSchema,
     kernelCommand: runtimeKernelCommandArgsSchema,
 
     // Host → consumer

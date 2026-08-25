@@ -141,7 +141,7 @@ export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;
 // =============================================================================
 
 /**
- * Identifier for a first-party CAD kernel shipped alongside `@taucad/runtime` (replicad, jscad, manifold, zoo, and standalone `@taucad/openrscad`).
+ * Application-recognized first-party CAD kernel identifier.
  * @public
  */
 export type KernelProvider = (typeof kernelProviders)[number];
@@ -152,10 +152,10 @@ export type KernelProvider = (typeof kernelProviders)[number];
 export type BackendProvider = (typeof backendProviders)[number];
 
 /**
- * All first-party kernel IDs including internal-only kernels.
+ * All recognized first-party kernel IDs.
  * @public
  */
-export type KnownKernelProvider = KernelProvider | 'tau';
+export type KnownKernelProvider = KernelProvider;
 
 /**
  * Kernel provider identifier.
@@ -186,7 +186,7 @@ export type KernelRegistration = {
    */
   builtinModuleNames?: string[];
   /**
-   * URL of the defineKernel module for this kernel (e.g. replicad.kernel.js).
+   * URL of the defineKernel module for this kernel.
    * The runtime worker dynamically imports this module to load the kernel.
    */
   kernelModuleUrl: string;
@@ -304,13 +304,31 @@ export type ExportGeometryResult = KernelResult<ExportFile[]>;
 // Capabilities Manifest Types
 // =============================================================================
 
-/** One plugin declaration surfaced through the capabilities manifest. @public */
-export type RuntimePluginCapability = {
-  readonly kind: 'kernel' | 'middleware' | 'bundler' | 'transcoder';
+type RuntimeCapabilityRegistrationCommon = {
   readonly id: string;
-  readonly peerRuntimeVersion?: string;
   readonly permissions?: RuntimePluginPermissions;
 };
+
+type RuntimeKernelRegistration<Kernel> = Kernel extends {
+  readonly id: infer Id extends string;
+  readonly extensions: infer Extensions extends readonly string[];
+}
+  ? RuntimeCapabilityRegistrationCommon & {
+      readonly kind: 'kernel';
+      readonly id: Id;
+      readonly extensions: Extensions;
+    }
+  : never;
+
+/** One capability registration surfaced through the capabilities manifest. @public */
+export type RuntimeCapabilityRegistration<
+  // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- variance over concrete kernel registrations
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any, any>> = KernelPlugin[],
+> =
+  | RuntimeKernelRegistration<Kernels[number]>
+  | (RuntimeCapabilityRegistrationCommon & {
+      readonly kind: 'middleware' | 'bundler' | 'transcoder';
+    });
 
 /**
  * A single export route exposed by the worker. Represents either a direct
@@ -336,7 +354,7 @@ export type RuntimePluginCapability = {
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type ExportRoute<
-  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any>> = KernelPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any, any>> = KernelPlugin[],
   Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
   Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any, any, any>> = TranscoderPlugin[],
   Format extends KnownTargetFormats<Kernels, Transcoders> = KnownTargetFormats<Kernels, Transcoders>,
@@ -379,7 +397,7 @@ export type ExportRoute<
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type RenderCapability<
-  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any>> = KernelPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any, any>> = KernelPlugin[],
   Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
   Kernel extends CollectKernelIds<Kernels> = CollectKernelIds<Kernels>,
 > = {
@@ -411,11 +429,11 @@ export type RenderCapability<
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type CapabilitiesManifest<
-  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any>> = KernelPlugin[],
+  Kernels extends ReadonlyArray<KernelPlugin<any, any, any, any, any, any>> = KernelPlugin[],
   Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
   Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any, any, any>> = TranscoderPlugin[],
 > = {
-  plugins: readonly RuntimePluginCapability[];
+  registrations: ReadonlyArray<RuntimeCapabilityRegistration<Kernels>>;
   routes: ReadonlyArray<ExportRoute<Kernels, Middleware, Transcoders>>;
   // Inline the per-kernel schema shape (rather than referencing
   // `RenderCapability<Kernels, K>`) so the mapped-type expansion does not

@@ -56,9 +56,9 @@ describe('runtime-protocol schema coverage (C15)', () => {
     }
   });
 
-  it('should expose exactly the protocol inventory: 4 calls and 17 notifies (T18)', () => {
+  it('should expose exactly the protocol inventory: 4 calls and 18 notifies (T18)', () => {
     expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(4);
-    expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(17);
+    expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(18);
   });
 
   it('validates kernel issue codes from the canonical registry', () => {
@@ -87,27 +87,35 @@ describe('runtime-protocol schema coverage (C15)', () => {
     const valid = {
       success: true,
       data: [
-        { name: 'model.gltf', mimeType: 'model/gltf+json', bytes: new Uint8Array([1]) },
-        { name: 'buffer.bin', mimeType: 'application/octet-stream', bytes: new Uint8Array([2]) },
+        {
+          name: 'model.gltf',
+          mimeType: 'model/gltf+json',
+          bytes: { delivery: 'inline', bytes: new Uint8Array([1]) },
+        },
+        {
+          name: 'buffer.bin',
+          mimeType: 'application/octet-stream',
+          bytes: { delivery: 'pooled', key: 'buffer-key' },
+        },
       ],
       issues: [],
     };
 
     expect(schema.safeParse(valid).success).toBe(true);
     expect(schema.safeParse({ ...valid, data: [] }).success).toBe(false);
-    expect(schema.safeParse({ ...valid, data: [{ name: 'model.glb', bytes: new Uint8Array([1]) }] }).success).toBe(
+    expect(schema.safeParse({ ...valid, data: [{ name: 'model.glb', bytes: valid.data[0]!.bytes }] }).success).toBe(
       false,
     );
     expect(
       schema.safeParse({
         ...valid,
-        data: [{ name: 'model.glb', mimeType: '', bytes: new Uint8Array([1]) }],
+        data: [{ name: 'model.glb', mimeType: '', bytes: valid.data[0]!.bytes }],
       }).success,
     ).toBe(false);
     expect(
       schema.safeParse({
         ...valid,
-        data: [{ name: 'model.glb', mimeType: '   ', bytes: new Uint8Array([1]) }],
+        data: [{ name: 'model.glb', mimeType: '   ', bytes: valid.data[0]!.bytes }],
       }).success,
     ).toBe(false);
     expect(

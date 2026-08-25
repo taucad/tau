@@ -14,8 +14,14 @@ import type { Channel } from '@taucad/rpc';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import type { Geometry } from '@taucad/types';
 import type { inProcessClientOptionsSchema } from '#transport/in-process-transport.schemas.js';
-import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import type {
+  GeometryTransport,
+  RuntimeExportResultTransport,
+  RuntimeInitializeResult,
+  RuntimeProtocol,
+} from '#types/runtime-protocol.types.js';
+import type {
+  EncodedBinary,
   EncodedGeometry,
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
@@ -29,6 +35,7 @@ import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
+import { materialiseExportResult } from '#transport/_internal/export-materialiser.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import type { AllocatedPools } from '#transport/_internal/sab-pools.js';
 import { reservePreview } from '#transport/_internal/abort-channel.js';
@@ -37,9 +44,7 @@ import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 /** Canonical id literal for bundled in-process transport. */
 export const inProcessId = 'in-process';
 
-/**
- *
- */
+/** Schema-derived transport options shared by the callable and descriptor. */
 type InProcessClientSchemaOptions = z.input<typeof inProcessClientOptionsSchema>;
 
 /**
@@ -128,35 +133,24 @@ export const inProcessClient = (
     };
   };
 
-  const encodeGeometry: (geometry: Geometry) => EncodedGeometry = (geometry) => {
+  const encodeBinary = (key: string, source: Uint8Array<ArrayBuffer>): EncodedBinary => {
     const { geometryPool } = ensurePoolsAndPorts();
+    if (geometryPool?.publish(key, source)) {
+      return { value: { delivery: 'pooled', key }, transferables: [], tier: 'pool' };
+    }
+    const bytes = new Uint8Array(source);
+    return { value: { delivery: 'inline', bytes }, transferables: [bytes.buffer], tier: 'transfer' };
+  };
+
+  const encodeGeometry: (geometry: Geometry) => EncodedGeometry = (geometry) => {
     if (geometry.format !== 'gltf') {
       return { value: geometry, transferables: [], tier: 'copy' };
     }
-    if (geometryPool) {
-      if (!geometryPool.has(geometry.hash)) {
-        geometryPool.store(geometry.hash, geometry.content);
-      }
-      if (geometryPool.has(geometry.hash)) {
-        return {
-          value: {
-            format: 'gltf',
-            content: { delivery: 'pooled', key: geometry.hash },
-            hash: geometry.hash,
-          },
-          transferables: [],
-          tier: 'pool',
-        };
-      }
-    }
+    const encoded = encodeBinary(geometry.hash, geometry.content);
     return {
-      value: {
-        format: 'gltf',
-        content: { delivery: 'inline', bytes: geometry.content },
-        hash: geometry.hash,
-      },
-      transferables: [],
-      tier: 'copy',
+      value: { format: 'gltf', content: encoded.value, hash: geometry.hash },
+      transferables: encoded.transferables,
+      tier: encoded.tier,
     };
   };
 
@@ -182,6 +176,8 @@ export const inProcessClient = (
       createWorkerDispatcher(worker, hostPort, {
         inlineFileSystem,
         encodeGeometry,
+        encodeBinary,
+        acknowledgeBinary: (key) => ensurePoolsAndPorts().geometryPool?.acknowledge(key),
       });
       channel = createChannelClient<RuntimeProtocol>({
         port: ensurePoolsAndPorts().clientPort,
@@ -218,6 +214,8 @@ export const inProcessClient = (
         ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
         ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
         ...(bridge ? { fileSystemPort: bridge.port } : {}),
+        ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
+        ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
       };
       const args = { ...input, memoryHandle };
       try {
@@ -234,7 +232,14 @@ export const inProcessClient = (
       }
     },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      return materialiseGeometry(transport, pooled?.geometryPool);
+      return materialiseGeometry(transport, pooled?.geometryPool, (key) => {
+        channel?.notify('binaryMaterialised', { key });
+      });
+    },
+    async resolveExport(transport: RuntimeExportResultTransport) {
+      return materialiseExportResult(transport, pooled?.geometryPool, (key) => {
+        channel?.notify('binaryMaterialised', { key });
+      });
     },
     async close(): Promise<void> {
       if (isClosed) {

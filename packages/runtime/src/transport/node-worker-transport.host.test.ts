@@ -4,8 +4,7 @@
  * Mirrors `web-worker-transport.host.test.ts` for the Node side: the
  * host owns `parentPort` acquisition from `node:worker_threads`, the
  * dispatcher wiring, and the crash trap. Consumers compose the worker
- * entry by importing `@taucad/runtime/worker/node` and never touch
- * `parentPort` directly.
+ * entry with `nodeWorkerHost()` and never touch `parentPort` directly.
  *
  * The test runs in the default Node vitest env (no jsdom) so we have a
  * real Worker scope. We use a `MessageChannel.port1` as a parentPort
@@ -42,9 +41,10 @@ const createMockKernelWorker = (): KernelWorker => {
     handleSetOptions: vi.fn(),
     ensureLoadedBundler: vi.fn().mockResolvedValue(undefined),
     setTelemetrySend: vi.fn(),
+    setDevtoolsTelemetryEnabled: vi.fn(),
+    setCompiledWasmModules: vi.fn(),
     flushTelemetry: vi.fn(),
     setSignalBuffer: vi.fn(),
-    setGeometryPoolBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
     capabilitiesManifest: { routes: [], renderCapabilities: {} },
   };

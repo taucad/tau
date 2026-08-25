@@ -49,7 +49,7 @@ describe('worker-preload-polyfill', () => {
      * Simulate worker scope so the polyfill installs the stubs. The polyfill
      * is gated on `WorkerGlobalScope`/`importScripts` to avoid corrupting the
      * Node global namespace when test harnesses pull this module in via
-     * `@taucad/runtime/testing` (see worker-preload-polyfill.ts).
+     * `@taucad/runtime-testing` (see worker-preload-polyfill.ts).
      */
     (globalThis as Record<string, unknown>)['importScripts'] = function importScriptsStub(): void {
       /* No-op — presence-only marker for `inWorkerScope` detection */
@@ -241,7 +241,7 @@ describe('worker-preload-polyfill', () => {
 
   /*
    * Regression: when Node-side test harnesses (apps/api integration tests)
-   * import `@taucad/runtime/testing`, this module loads under Node — NOT a
+   * import `@taucad/runtime-testing`, this module loads under Node — NOT a
    * Web Worker. The polyfill must NOT define `window`/`document` on the Node
    * global namespace, otherwise `gaxios` (used by `google-auth-library`) sees
    * `typeof window !== 'undefined'` and tries `window.fetch` (undefined),

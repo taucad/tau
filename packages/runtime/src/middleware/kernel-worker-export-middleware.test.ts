@@ -9,29 +9,44 @@
  * 4. Short-circuiting works correctly
  */
 
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { OnWorkerLog } from '@taucad/types';
 import { z } from 'zod';
 import type { ExportGeometryResult } from '#types/runtime.types.js';
 import type { ExportGeometryRequest } from '#types/runtime-kernel.types.js';
 import type { ExportGeometryHandler, KernelMiddlewareRuntime } from '#types/runtime-middleware.types.js';
 import type { Dependency, ExportDependency } from '#types/runtime-dependency.types.js';
-import { exportMemoryCache, geometryCache } from '#middleware/geometry-cache.middleware.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
-import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
-import { createGeometryFile, MockKernelWorker } from '#testing/kernel-testing.utils.js';
-import { imageEdgeSchemas } from '#transcoders/image/image-export-options.js';
-import type { MaterializedRender } from '#framework/render-artifact.js';
+// oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
+import { createGeometryFile, MockKernelWorker } from '../../test/support/kernel-worker.fixture.js';
+
+const imageViewSchema = z.object({ id: z.string(), label: z.string().optional(), phi: z.number(), theta: z.number() });
+const imageEdgeSchemas = {
+  webp: z.union([
+    z
+      .object({
+        mode: z.literal('single').default('single'),
+        projection: z.enum(['perspective', 'orthographic']).default('perspective'),
+        includeAxes: z.boolean().default(false),
+        includeLabel: z.boolean().default(false),
+        includeScale: z.boolean().default(false),
+      })
+      .strict(),
+    z
+      .object({
+        mode: z.literal('batch'),
+        projection: z.enum(['perspective', 'orthographic']).default('perspective'),
+        includeAxes: z.boolean().default(false),
+        includeLabel: z.boolean().default(false),
+        includeScale: z.boolean().default(false),
+        views: z.array(imageViewSchema).min(1),
+      })
+      .strict(),
+  ]),
+} as const;
 
 describe('kernel-worker wrapExportGeometry middleware', () => {
-  const resolveGeometryCacheMiddleware = async () => resolveRuntimePluginDefinition('middleware', geometryCache());
-  let geometryCacheMiddleware: Awaited<ReturnType<typeof resolveGeometryCacheMiddleware>>;
-
-  beforeAll(async () => {
-    geometryCacheMiddleware = await resolveGeometryCacheMiddleware();
-  });
-
   function spyOnExportGeometry(worker: MockKernelWorker) {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- keyof MockKernelWorker not assignable to vi.spyOn; use as unknown as to spy on protected method
     return vi.spyOn(
@@ -56,7 +71,6 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
 
   beforeEach(() => {
     onLog = vi.fn();
-    exportMemoryCache.clear();
   });
 
   it('should call wrapExportGeometry hook when middleware is registered', async () => {
@@ -655,80 +669,6 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       { type: 'middleware', id: 'Create', version: '1', index: 0, options: {} },
       { type: 'middleware', id: 'Export', version: '1', index: 1, options: {} },
     ]);
-  });
-
-  it('should cache repeated exports for the same settled render', async () => {
-    const worker = new MockKernelWorker({
-      middleware: [geometryCacheMiddleware],
-      exportResult: defaultExportResult,
-      exportZodSchemas: { step: z.object({}) },
-      onLog: onLog as OnWorkerLog,
-    });
-
-    await worker.runCreateGeometry('main.ts', { height: 10 });
-    await worker.runExportGeometry('step');
-    await worker.runExportGeometry('step');
-
-    expect(worker.exportGeometrySpy).toHaveBeenCalledOnce();
-  });
-
-  it('should fail current-state export middleware clearly without a settled render identity', async () => {
-    const worker = new MockKernelWorker({
-      middleware: [geometryCacheMiddleware],
-      exportResult: defaultExportResult,
-      exportZodSchemas: { step: z.object({}) },
-      onLog: onLog as OnWorkerLog,
-    });
-
-    const result = await worker.exportGeometry('step');
-
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.issues[0]).toMatchObject({
-        code: 'RUNTIME_EXPORT_RENDER_IDENTITY_MISSING',
-        severity: 'error',
-      });
-    }
-  });
-
-  it('should serve export cache hits before native handle restoration', async () => {
-    const worker = new MockKernelWorker({
-      middleware: [geometryCacheMiddleware],
-      exportResult: defaultExportResult,
-      exportZodSchemas: { step: z.object({}) },
-      onLog: onLog as OnWorkerLog,
-    });
-
-    await worker.runCreateGeometry('main.ts', { height: 10 });
-    await worker.runExportGeometry('step');
-    const createCallsAfterCacheWrite = worker.createGeometryCalls;
-    const artifact = (worker as unknown as { currentPublishedRender?: MaterializedRender }).currentPublishedRender;
-    expect(artifact).toBeDefined();
-    artifact!.liveNativeHandleSlot = undefined;
-    artifact!.serializedNativeHandleSlot = undefined;
-
-    await worker.runExportGeometry('step');
-
-    expect(worker.createGeometryCalls).toBe(createCallsAfterCacheWrite);
-    expect(worker.exportGeometrySpy).toHaveBeenCalledOnce();
-  });
-
-  it('should miss export cache when parameters change and hit again when parameters return', async () => {
-    const worker = new MockKernelWorker({
-      middleware: [geometryCacheMiddleware],
-      exportResult: defaultExportResult,
-      exportZodSchemas: { step: z.object({}) },
-      onLog: onLog as OnWorkerLog,
-    });
-
-    await worker.runCreateGeometry('main.ts', { height: 10 });
-    await worker.runExportGeometry('step');
-    await worker.runCreateGeometry('main.ts', { height: 20 });
-    await worker.runExportGeometry('step');
-    await worker.runCreateGeometry('main.ts', { height: 10 });
-    await worker.runExportGeometry('step');
-
-    expect(worker.exportGeometrySpy).toHaveBeenCalledTimes(2);
   });
 
   it('should not invoke export middleware when export options fail validation', async () => {

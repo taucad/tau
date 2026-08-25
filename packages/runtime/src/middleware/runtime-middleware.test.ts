@@ -14,7 +14,8 @@ import {
   createMiddlewareRuntime,
 } from '#middleware/runtime-middleware.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
-import { createMockFileSystem } from '#testing/kernel-testing.utils.js';
+// oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
+import { createMockFileSystem } from '../../test/support/kernel-worker.fixture.js';
 
 // Mock dependencies for testing
 const mockDependencies: readonly Dependency[] = [

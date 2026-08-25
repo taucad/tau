@@ -19,7 +19,10 @@ import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { ExecuteResult, KernelBundler } from '#types/runtime-bundler-service.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { KernelPlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
-import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import {
+  attachRuntimePluginDefinition,
+  attachRuntimePluginFactoryOptions,
+} from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type {
   ContentHookInputFor,
@@ -153,6 +156,8 @@ export type KernelRuntime = {
   bundler: KernelBundler;
   /** Span tracer for kernel-authored performance instrumentation */
   tracer: RuntimeSpanTracer;
+  /** Resolve a host-compiled WASM module by its absolute asset URL. */
+  getCompiledWasmModule(url: string): WebAssembly.Module | undefined;
   /** Emit a namespaced kernel event to the runtime client. */
   emitEvent(type: string, payload: unknown): void;
   /**
@@ -520,11 +525,11 @@ export type KernelDefinition<
   cleanup?(context: Context): Promise<void>;
 } & NativeHandleSnapshotHooks<Context, NativeHandle, SerializedNativeHandle>;
 
-type KernelPluginMetadata<Id extends string> = {
+type KernelPluginMetadata<Id extends string, Extensions extends readonly string[]> = {
   /** Unique identifier for this kernel. */
   id: Id;
   /** File extensions this kernel handles (e.g. ['scad'], ['ts', 'js']). '*' is a catch-all. */
-  extensions: string[];
+  extensions: Extensions;
   /** Regex to match against file content for kernel selection. */
   detectImport?: RegExp;
   /** Bare-specifier module names this kernel provides for bundler-assisted detection. */
@@ -539,6 +544,7 @@ type RenderContentMeshRequirement<Render extends KernelRenderDefinition | undefi
 
 type KernelDefinitionConfig<
   Id extends string,
+  Extensions extends readonly string[],
   Context,
   NativeHandle,
   SerializedNativeHandle,
@@ -546,7 +552,7 @@ type KernelDefinitionConfig<
   ExportFormats extends KernelExportFormats,
   Render extends KernelRenderDefinition | undefined,
   CreateSchema extends z.ZodObject<z.ZodRawShape> | undefined,
-> = KernelPluginMetadata<Id> &
+> = KernelPluginMetadata<Id, Extensions> &
   RuntimePluginDeclaration & {
     /** Human-readable kernel name, used in logs and error messages */
     name: string;
@@ -652,6 +658,7 @@ export interface KernelPluginFactory<
   Definition = AnyKernelDefinition,
   RenderContent extends RuntimeContentKey = RuntimeContentKey,
   ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
+  Extensions extends readonly string[] = readonly string[],
 > {
   (
     ...options: Options extends undefined
@@ -659,7 +666,7 @@ export interface KernelPluginFactory<
       : Partial<Options> extends Options
         ? [options?: Options]
         : [options: Options]
-  ): KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent> &
+  ): KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent, Extensions> &
     RuntimePluginDefinitionCarrier<Definition>;
 }
 /* oxlint-enable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types */
@@ -711,6 +718,7 @@ export interface KernelPluginFactory<
  */
 export function defineKernel<
   const Id extends string,
+  const Extensions extends readonly string[],
   Context,
   NativeHandle,
   SerializedNativeHandle = unknown,
@@ -722,6 +730,7 @@ export function defineKernel<
 >(
   definition: KernelDefinitionConfig<
     Id,
+    Extensions,
     Context,
     NativeHandle,
     SerializedNativeHandle,
@@ -746,10 +755,12 @@ export function defineKernel<
     CreateSchema
   >,
   ContentKeysOf<Render extends KernelRenderDefinition ? Render['content'] : undefined>,
-  InferKernelExportContentMap<ExportFormats>
+  InferKernelExportContentMap<ExportFormats>,
+  Extensions
 >;
 export function defineKernel<
   const Id extends string,
+  const Extensions extends readonly string[],
   Context,
   NativeHandle,
   SerializedNativeHandle = unknown,
@@ -760,6 +771,7 @@ export function defineKernel<
 >(
   definition: KernelDefinitionConfig<
     Id,
+    Extensions,
     Context,
     NativeHandle,
     SerializedNativeHandle,
@@ -784,12 +796,14 @@ export function defineKernel<
     CreateSchema
   >,
   ContentKeysOf<Render extends KernelRenderDefinition ? Render['content'] : undefined>,
-  InferKernelExportContentMap<ExportFormats>
+  InferKernelExportContentMap<ExportFormats>,
+  Extensions
 >;
 /** @public */
 export function defineKernel(
   definition: KernelDefinitionConfig<
     string,
+    readonly string[],
     unknown,
     unknown,
     unknown,
@@ -799,8 +813,9 @@ export function defineKernel(
     z.ZodObject<z.ZodRawShape> | undefined
   >,
 ): KernelPluginFactory<string, Record<string, unknown>, unknown, unknown> {
-  const { id, extensions, detectImport, builtinModuleNames, peerRuntimeVersion, permissions, ...kernelDefinition } =
-    definition;
+  const acceptsOptions =
+    Object.hasOwn(definition, 'optionsSchema') && Reflect.get(definition, 'optionsSchema') !== undefined;
+  const { id, extensions, detectImport, builtinModuleNames, permissions, ...kernelDefinition } = definition;
   validateRuntimeContentDeclarations(id, [
     ['render.content', kernelDefinition.render?.content],
     ...Object.entries(kernelDefinition.exportFormats).map(
@@ -822,18 +837,22 @@ export function defineKernel(
     throw new Error('Kernel native-handle snapshots require both serializeNativeHandle and deserializeNativeHandle.');
   }
 
-  const factory = ((options?: unknown) =>
-    attachRuntimePluginDefinition(
+  const factory = ((options?: unknown) => {
+    if (options !== undefined && !acceptsOptions) {
+      throw new TypeError(`Kernel "${id}" does not accept options.`);
+    }
+    return attachRuntimePluginDefinition(
       {
         id,
         extensions,
+        exportFormats: Object.keys(kernelDefinition.exportFormats),
         ...(detectImport ? { detectImport } : {}),
         ...(builtinModuleNames ? { builtinModuleNames } : {}),
-        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
         ...(permissions === undefined ? {} : { permissions }),
         options: options as Record<string, unknown>,
       },
       () => kernelDefinition,
-    )) as KernelPluginFactory<string, Record<string, unknown>, unknown, unknown>;
-  return factory;
+    );
+  }) as KernelPluginFactory<string, Record<string, unknown>, unknown, unknown>;
+  return attachRuntimePluginFactoryOptions(factory, acceptsOptions);
 }

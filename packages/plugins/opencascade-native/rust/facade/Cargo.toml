@@ -1,0 +1,19 @@
+[package]
+name = "taucad-occt-facade"
+description = "Curated OpenCASCADE facade over cadrum: primitives, DNF booleans, features, mesh, GLB, STEP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# STEP/BRep interchange pulls in OCCT's DataExchange module: 88% of the addon's
+# size growth (S2 F6.4). Split so a mesh-only host can ship the core payload.
+default = ["modeling", "step"]
+# Local features and profile-driven constructions (fillet/chamfer/shell,
+# extrude/loft/sweep) pull in TKFillet + TKOffset + TKPrim's builder API.
+modeling = []
+step = []
+
+[dependencies]
+cadrum.workspace = true

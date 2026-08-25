@@ -1,8 +1,9 @@
+import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { bundledLibraryProjects, workspace } from '@taucad/nx';
+import type { Workspace, WorkspaceProject } from '@taucad/nx';
 import ts from 'typescript';
-// oxlint-disable-next-line no-restricted-imports -- Build script consumes adjacent private bundle metadata.
-import { runtimeBundledPackages } from './runtime-bundled-packages.mts';
 
 const declarationPattern = /\.d\.[cm]?ts$/;
 const pluginPhantomNames = [
@@ -144,6 +145,44 @@ type RuntimePackageManifest = {
   publishConfig?: { exports?: Record<string, { types?: string }> };
 };
 
+/**
+ * Resolve the private-library declaration closure shipped by a bundle owner.
+ *
+ * JavaScript bundling follows source imports, but declaration-only imports can
+ * introduce an additional private dependency. Those declarations must ship in
+ * the owning package too, without pretending the transitive library is a
+ * direct development dependency of the package.
+ */
+export const bundledDeclarationProjects = (
+  workspaceValue: Workspace,
+  projectName: string,
+): Array<{ packageName: string; project: WorkspaceProject }> => {
+  const byPackageName = new Map(
+    workspaceValue.projects.flatMap((project) =>
+      project.manifest?.name ? [[project.manifest.name, project] as const] : [],
+    ),
+  );
+  const closure = new Map(
+    bundledLibraryProjects(workspaceValue, projectName).map((entry) => [entry.packageName, entry] as const),
+  );
+
+  for (const { project } of closure.values()) {
+    const dependencies = {
+      ...project.manifest?.dependencies,
+      ...project.manifest?.optionalDependencies,
+    };
+    for (const packageName of Object.keys(dependencies)) {
+      const dependency = byPackageName.get(packageName);
+      if (closure.has(packageName) || dependency?.manifest?.private !== true || !dependency.tags.includes('type:lib')) {
+        continue;
+      }
+      closure.set(packageName, { packageName, project: dependency });
+    }
+  }
+
+  return [...closure.values()].sort((a, b) => a.packageName.localeCompare(b.packageName));
+};
+
 export const assembleBundledDeclarations = async (runtimeDirectory: string, outDirectory: string): Promise<void> => {
   const workspaceRoot = resolve(runtimeDirectory, '../..');
   const runtimeDistribution = resolve(runtimeDirectory, outDirectory);
@@ -156,10 +195,16 @@ export const assembleBundledDeclarations = async (runtimeDirectory: string, outD
   );
 
   await Promise.all(
-    runtimeBundledPackages.map(async (packageDirectoryName) => {
-      const packageDirectory = join(workspaceRoot, 'libs', packageDirectoryName);
+    bundledDeclarationProjects(await workspace(), 'runtime').map(async ({ project }) => {
+      const packageDirectory = join(workspaceRoot, project.root);
+      // The bundle rule over-approximates: a candidate that emitted no mirror
+      // is simply not bundled here.
+      if (!existsSync(join(packageDirectory, 'dist'))) {
+        return;
+      }
+
       const manifest = JSON.parse(await readFile(join(packageDirectory, 'package.json'), 'utf8')) as PackageManifest;
-      const destination = join(runtimeDistribution, 'libs', packageDirectoryName, 'src');
+      const destination = join(runtimeDistribution, project.root, 'src');
       const sources = await declarationFiles(join(packageDirectory, 'dist'));
       await Promise.all(
         sources.map(async (source) => {

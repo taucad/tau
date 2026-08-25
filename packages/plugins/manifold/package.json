@@ -1,0 +1,73 @@
+{
+  "name": "@taucad/manifold",
+  "version": "0.1.0-beta.0",
+  "description": "Manifold kernel plugin for Tau",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/plugins/manifold"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/plugins/manifold#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "cad",
+    "plugin",
+    "manifold"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@taucad/geometry-core": "workspace:*",
+    "manifold-3d": "catalog:"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "zod": "catalog:"
+  },
+  "taucad": {
+    "hostTarget": "browser"
+  }
+}

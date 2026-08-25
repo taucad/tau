@@ -31,7 +31,7 @@ let abortGeneration = 0;
 let localAbortSignal: AbortSignal | undefined;
 let onSharedAbort: ((reason: number) => void) | undefined;
 
-/** Render-owned cooperative abort context. @internal */
+/** Render-owned cooperative abort context. @internal @public */
 export type AbortContext = {
   readonly signal: AbortSignal;
   readonly signalView?: Int32Array;
@@ -44,6 +44,7 @@ export type AbortContext = {
  * The proxy checks this before every OC call (~1ns overhead per call).
  *
  * @internal
+ * @public
  * @param context - Render-owned signal, generation, and optional shared-memory polling context.
  */
 export function setAbortContext(context: AbortContext): void {
@@ -56,6 +57,7 @@ export function setAbortContext(context: AbortContext): void {
 /**
  * Clear the abort context after a render cycle completes or is aborted.
  * @internal
+ * @public
  */
 export function clearAbortContext(): void {
   abortSignalView = undefined;
@@ -69,6 +71,7 @@ export function clearAbortContext(): void {
  * Throws {@link RenderAbortedError} when the SAB abort generation no longer
  * matches the generation stored by `setAbortContext`.
  * @internal
+ * @public
  */
 export function checkAbort(): void {
   localAbortSignal?.throwIfAborted();

@@ -1,0 +1,30 @@
+# Cargo workspace for the `@taucad/opencascade-native` native payload.
+#
+# Two crates, per the S2 brief:
+#   * `facade` — pure Rust over cadrum. Unit-testable with `cargo test`; this is
+#     the code that becomes the Tau-owned `extern "C"` waist later.
+#   * `napi`   — a thin `#[napi]` shell. Disposable; no geometry logic.
+[workspace]
+members = ["facade", "napi"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+# OCCT 8.0.1 is supplied out of band via `OCCT_ROOT` (cadrum build.rs:46).
+# `default-features = false` drops cadrum's `color` (XCAF) and `png` (tiny-skia)
+# payloads: 8.61 MiB vs 15.31 MiB measured in T8 F6.4.
+cadrum = { version = "0.8.16", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+# N-API requires unwinding: a `panic = "abort"` addon kills the Node process
+# instead of surfacing a JS exception (napi policy / T1 N1).
+panic = "unwind"

@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
+import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
 
 describe('RuntimeTracer', () => {
-  let measureSpy: MockInstance;
+  let measureSpy: MockInstance<typeof performance.measure>;
 
   beforeEach(() => {
     performance.clearMarks();
@@ -15,205 +16,87 @@ describe('RuntimeTracer', () => {
     measureSpy.mockRestore();
   });
 
-  describe('normal span lifecycle', () => {
-    it('should create a performance mark and measure on start/end', () => {
-      const tracer = new RuntimeTracer();
-      const span = tracer.startSpan('test.operation');
+  it('emits completed spans directly without touching the Performance Timeline by default', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
 
-      const marks = performance.getEntriesByType('mark');
-      expect(marks.some((m) => m.name === 'tau:span:0:0')).toBe(true);
+    tracer.startSpan('test.operation').end();
 
-      span.end();
-
-      expect(measureSpy).toHaveBeenCalledOnce();
-      expect(measureSpy).toHaveBeenCalledWith('test.operation', expect.objectContaining({ start: 'tau:span:0:0' }));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      name: 'test.operation',
+      detail: { spanId: '0', parentSpanId: undefined },
+      workerTimeOrigin: performance.timeOrigin,
     });
+    expect(entries[0]!.duration).toBeGreaterThanOrEqual(0);
+    expect(performance.getEntriesByType('mark')).toHaveLength(0);
+    expect(measureSpy).not.toHaveBeenCalled();
+  });
 
-    it('should support nested spans with parent-child detail', () => {
-      const tracer = new RuntimeTracer();
-      const outer = tracer.startSpan('outer');
-      const inner = tracer.startSpan('inner');
+  it('preserves parent-child IDs and merged attributes', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
+    const outer = tracer.startSpan('outer', { file: 'main.ts', count: 42 });
+    const inner = tracer.startSpan('inner');
 
-      inner.end();
-      outer.end();
+    inner.end();
+    outer.end({ count: 43, result: 'ok' });
 
-      expect(measureSpy).toHaveBeenCalledTimes(2);
-      expect(measureSpy).toHaveBeenCalledWith(
-        'inner',
-        expect.objectContaining({
-          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
-          detail: expect.objectContaining({ spanId: '1', parentSpanId: '0' }),
-        }),
-      );
-      expect(measureSpy).toHaveBeenCalledWith(
-        'outer',
-        expect.objectContaining({
-          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
-          detail: expect.objectContaining({
-            spanId: '0',
-            parentSpanId: undefined,
-          }),
-        }),
-      );
-    });
-
-    it('should include attributes and devtools metadata in measure detail', () => {
-      const tracer = new RuntimeTracer();
-      const span = tracer.startSpan('op', { file: 'main.ts', count: 42 });
-      span.end();
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        'op',
-        expect.objectContaining({
-          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
-          detail: expect.objectContaining({
-            file: 'main.ts',
-            count: 42,
-            devtools: {
-              dataType: 'track-entry',
-              track: 'Kernel Pipeline',
-              trackGroup: 'Tau',
-              properties: [
-                ['file', 'main.ts'],
-                ['count', '42'],
-              ],
-            },
-          }),
-        }),
-      );
-    });
-
-    it('should merge end-time attributes into measure detail', () => {
-      const tracer = new RuntimeTracer();
-      const span = tracer.startSpan('op', { file: 'main.ts', count: 42 });
-      span.end({ count: 43, result: 'ok' });
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        'op',
-        expect.objectContaining({
-          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
-          detail: expect.objectContaining({
-            file: 'main.ts',
-            count: 43,
-            result: 'ok',
-            // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
-            devtools: expect.objectContaining({
-              properties: [
-                ['file', 'main.ts'],
-                ['count', '43'],
-                ['result', 'ok'],
-              ],
-            }),
-          }),
-        }),
-      );
-    });
-
-    it('should work across multiple reset cycles', () => {
-      const tracer = new RuntimeTracer();
-
-      const span1 = tracer.startSpan('cycle-1');
-      span1.end();
-      tracer.reset();
-
-      const span2 = tracer.startSpan('cycle-2');
-      span2.end();
-
-      expect(measureSpy).toHaveBeenLastCalledWith('cycle-2', expect.anything());
+    expect(entries[0]).toMatchObject({ name: 'inner', detail: { spanId: '1', parentSpanId: '0' } });
+    expect(entries[1]).toMatchObject({
+      name: 'outer',
+      detail: {
+        spanId: '0',
+        parentSpanId: undefined,
+        file: 'main.ts',
+        count: 43,
+        result: 'ok',
+        devtools: {
+          properties: [
+            ['file', 'main.ts'],
+            ['count', '43'],
+            ['result', 'ok'],
+          ],
+        },
+      },
     });
   });
 
-  describe('epoch scoping', () => {
-    it('should not throw when span.end() is called after reset()', () => {
-      const tracer = new RuntimeTracer();
-      const span = tracer.startSpan('stale.operation');
+  it('mirrors uniquely named measures only when DevTools telemetry is enabled', () => {
+    const tracer = new RuntimeTracer();
+    tracer.setDevtoolsTimelineEnabled(true);
 
-      tracer.reset();
+    tracer.startSpan('kernel.render').end();
 
-      expect(() => {
-        span.end();
-      }).not.toThrow();
-    });
+    expect(measureSpy).toHaveBeenCalledOnce();
+    const [name, options] = measureSpy.mock.calls[0]!;
+    expect(name).toBe('tau:kernel.render:0:0');
+    if (options === undefined || typeof options === 'string') {
+      throw new TypeError('Expected PerformanceMeasureOptions');
+    }
+    expect(typeof options.start).toBe('number');
+    expect(typeof options.duration).toBe('number');
+    expect(options.detail).toMatchObject({ spanId: '0' });
+  });
 
-    it('should not emit a performance.measure() for a stale span', () => {
-      const tracer = new RuntimeTracer();
-      const span = tracer.startSpan('stale.operation');
+  it('drops stale spans after reset without clearing unrelated timeline entries', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
+    const stale = tracer.startSpan('stale');
+    const clearMarksSpy = vi.spyOn(performance, 'clearMarks');
+    const clearMeasuresSpy = vi.spyOn(performance, 'clearMeasures');
 
-      tracer.reset();
-      measureSpy.mockClear();
-      span.end();
+    tracer.reset();
+    stale.end();
+    tracer.startSpan('fresh').end();
 
-      expect(measureSpy).not.toHaveBeenCalled();
-    });
-
-    it('should not corrupt activeSpanId when a stale span ends', () => {
-      const tracer = new RuntimeTracer();
-      const staleSpan = tracer.startSpan('stale');
-
-      tracer.reset();
-
-      const freshOuter = tracer.startSpan('fresh.outer');
-      const freshInner = tracer.startSpan('fresh.inner');
-
-      staleSpan.end();
-
-      freshInner.end();
-      freshOuter.end();
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        'fresh.inner',
-        expect.objectContaining({
-          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
-          detail: expect.objectContaining({ parentSpanId: expect.any(String) }),
-        }),
-      );
-    });
-
-    it('should use different mark names across epochs (no collision)', () => {
-      const tracer = new RuntimeTracer();
-
-      const span1 = tracer.startSpan('epoch-0-span');
-      span1.end();
-
-      tracer.reset();
-
-      const span2 = tracer.startSpan('epoch-1-span');
-      span2.end();
-
-      expect(measureSpy).toHaveBeenCalledWith(
-        'epoch-0-span',
-        expect.objectContaining({
-          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.stringMatching returns any
-          start: expect.stringMatching(/^tau:span:0:/),
-        }),
-      );
-      expect(measureSpy).toHaveBeenCalledWith(
-        'epoch-1-span',
-        expect.objectContaining({
-          // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.stringMatching returns any
-          start: expect.stringMatching(/^tau:span:1:/),
-        }),
-      );
-    });
-
-    it('should handle multiple resets with stale spans from different epochs', () => {
-      const tracer = new RuntimeTracer();
-
-      const spanEpoch0 = tracer.startSpan('epoch-0');
-      tracer.reset();
-      const spanEpoch1 = tracer.startSpan('epoch-1');
-      tracer.reset();
-
-      const spanEpoch2 = tracer.startSpan('epoch-2');
-      spanEpoch2.end();
-
-      expect(() => {
-        spanEpoch0.end();
-        spanEpoch1.end();
-      }).not.toThrow();
-
-      expect(measureSpy).toHaveBeenCalledOnce();
-      expect(measureSpy).toHaveBeenCalledWith('epoch-2', expect.anything());
-    });
+    expect(entries.map((entry) => entry.name)).toEqual(['fresh']);
+    expect(clearMarksSpy).not.toHaveBeenCalled();
+    expect(clearMeasuresSpy).not.toHaveBeenCalled();
+    clearMarksSpy.mockRestore();
+    clearMeasuresSpy.mockRestore();
   });
 });

@@ -41,12 +41,12 @@ const resolvePluginConfig = (plugin: Plugin): Record<string, unknown> => {
 };
 
 describe('tauRuntime (Vite plugin)', () => {
-  it('should return cross-origin isolation, SSR assets, and invariants plugins in order', () => {
+  it('should return cross-origin isolation, assets, and invariants plugins in order', () => {
     const plugins = tauRuntime();
 
     expect(plugins.map((plugin) => plugin.name)).toEqual([
       'taucad-runtime:cross-origin-isolation',
-      'taucad-runtime:ssr-assets',
+      'taucad-runtime:assets',
       'taucad-runtime:invariants',
     ]);
   });
@@ -54,19 +54,13 @@ describe('tauRuntime (Vite plugin)', () => {
   it('should omit the cross-origin-isolation plugin when crossOriginIsolation: false', () => {
     const plugins = tauRuntime({ crossOriginIsolation: false });
 
-    expect(plugins.map((plugin) => plugin.name)).toEqual(['taucad-runtime:ssr-assets', 'taucad-runtime:invariants']);
+    expect(plugins.map((plugin) => plugin.name)).toEqual(['taucad-runtime:assets', 'taucad-runtime:invariants']);
   });
 
   it('should mark the invariants plugin with enforce: "pre" so it runs before user plugins', () => {
     const invariants = findInvariants(tauRuntime());
 
     expect(invariants.enforce).toBe('pre');
-  });
-
-  it('should not configure optimizeDeps (runtime invariants intentionally avoid externalizing WASM-bearing deps)', () => {
-    const config = resolvePluginConfig(findInvariants(tauRuntime()));
-
-    expect(config['optimizeDeps']).toBeUndefined();
   });
 
   it('should force worker.format to "es" so workers preserve import.meta.url', () => {
@@ -79,14 +73,24 @@ describe('tauRuntime (Vite plugin)', () => {
     const config = resolvePluginConfig(findInvariants(tauRuntime()));
     const worker = config['worker'] as { plugins?: () => Plugin[] };
 
-    expect(worker.plugins?.().map((plugin) => plugin.name)).toEqual(['taucad-runtime:browser-node-builtins']);
+    expect(worker.plugins?.().map((plugin) => plugin.name)).toEqual([
+      'taucad-runtime:assets',
+      'taucad-runtime:browser-node-builtins',
+    ]);
     expect(worker.plugins?.()[0]).not.toBe(worker.plugins?.()[0]);
   });
 
-  it('should keep native Node runtime dependencies external in SSR and Electron utility builds', () => {
-    const config = resolvePluginConfig(findInvariants(tauRuntime()));
+  it('should leave Node builtins available to Vitest while stubbing browser builds', () => {
+    const invariants = findInvariants(tauRuntime());
+    const resolveId = invariants.resolveId as unknown as (
+      this: { environment: { config: { consumer: string; mode: string } } },
+      source: string,
+    ) => unknown;
 
-    expect(config['ssr']).toEqual({ external: ['esbuild', 'esbuild-wasm'] });
+    expect(resolveId.call({ environment: { config: { consumer: 'client', mode: 'test' } } }, 'node:fs')).toBeNull();
+    expect(resolveId.call({ environment: { config: { consumer: 'client', mode: 'production' } } }, 'node:fs')).toBe(
+      '\0taucad-runtime:browser-node-builtins',
+    );
   });
 
   it('should compose the WASM invariant with a resolved numeric asset limit', async () => {

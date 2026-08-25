@@ -110,9 +110,7 @@ export class RuntimeContentUnsupportedError extends Error {
   public readonly property: string;
   public readonly supported: readonly RuntimeContentKey[];
 
-  /**
-   *
-   */
+  /** Stable diagnostic code for unsupported content requests. */
   public get code(): 'RUNTIME_CONTENT_UNSUPPORTED' {
     return 'RUNTIME_CONTENT_UNSUPPORTED';
   }

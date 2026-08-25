@@ -93,8 +93,9 @@ describe('compileWasmStreaming', () => {
     vi.spyOn(WebAssembly, 'compileStreaming').mockResolvedValue(mockModule);
 
     try {
-      const result = await compileWasmStreaming('https://example.com/module.wasm');
+      const result = await compileWasmStreaming('https://example.com/streaming.wasm');
       expect(result).toBe(mockModule);
+      expect(WebAssembly.compileStreaming).toHaveBeenCalledOnce();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -115,7 +116,7 @@ describe('compileWasmStreaming', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
 
     try {
-      const result = await compileWasmStreaming('https://example.com/module.wasm');
+      const result = await compileWasmStreaming('https://example.com/fallback.wasm');
       expect(result).toBe(mockModule);
     } finally {
       vi.unstubAllGlobals();
@@ -164,8 +165,8 @@ describe('compileWasmStreaming', () => {
 
     try {
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- tracer mock only implements startSpan
-      await compileWasmStreaming('https://example.com/module.wasm', tracer as unknown as RuntimeSpanTracer);
-      expect(tracer.startSpan).toHaveBeenCalledWith('wasm.compile', { url: 'https://example.com/module.wasm' });
+      await compileWasmStreaming('https://example.com/traced.wasm', tracer as unknown as RuntimeSpanTracer);
+      expect(tracer.startSpan).toHaveBeenCalledWith('wasm.compile', { url: 'https://example.com/traced.wasm' });
       expect(endSpy).toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
@@ -190,6 +191,44 @@ describe('compileWasmStreaming', () => {
       await expect(compileWasmStreaming('https://example.com/broken.wasm')).rejects.toThrow(
         /Failed to compile WASM module/,
       );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('coalesces concurrent compilation by canonical URL', async () => {
+    // oxlint-disable-next-line consistent-type-assertions -- WebAssembly.Module is opaque; empty object suffices for mock
+    const mockModule = {} as WebAssembly.Module;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response()));
+    const compileSpy = vi.spyOn(WebAssembly, 'compileStreaming').mockResolvedValue(mockModule);
+
+    try {
+      const [first, second] = await Promise.all([
+        compileWasmStreaming('https://example.com/shared.wasm'),
+        compileWasmStreaming('https://example.com/./shared.wasm'),
+      ]);
+
+      expect(first).toBe(mockModule);
+      expect(second).toBe(mockModule);
+      expect(compileSpy).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('evicts rejected compilation so the same URL can be retried', async () => {
+    // oxlint-disable-next-line consistent-type-assertions -- WebAssembly.Module is opaque; empty object suffices for mock
+    const mockModule = {} as WebAssembly.Module;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, statusText: 'Server Error' }));
+    const streamingSpy = vi
+      .spyOn(WebAssembly, 'compileStreaming')
+      .mockRejectedValueOnce(new Error('compile failed'))
+      .mockResolvedValueOnce(mockModule);
+
+    try {
+      await expect(compileWasmStreaming('https://example.com/retry.wasm')).rejects.toThrow(/Failed to compile/u);
+      await expect(compileWasmStreaming('https://example.com/retry.wasm')).resolves.toBe(mockModule);
+      expect(streamingSpy).toHaveBeenCalledTimes(2);
     } finally {
       vi.unstubAllGlobals();
     }

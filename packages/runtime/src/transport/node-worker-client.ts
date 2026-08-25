@@ -29,7 +29,13 @@ import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-di
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import { materialiseExportResult } from '#transport/_internal/export-materialiser.js';
+import type {
+  GeometryTransport,
+  RuntimeExportResultTransport,
+  RuntimeInitializeResult,
+  RuntimeProtocol,
+} from '#types/runtime-protocol.types.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
 import { reservePreview, triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
@@ -62,6 +68,10 @@ export type NodeWorkerClientOptions = {
   readonly workerCtor?: unknown;
   readonly sharedMemory?: { readonly geometry?: { readonly bytes: number } };
   readonly fileSystem?: RuntimeFileSystem;
+  /** Mirror runtime spans into the worker Performance Timeline for DevTools. */
+  readonly devtoolsTelemetry?: boolean;
+  /** Host-compiled WASM modules cloned into the worker during initialization. */
+  readonly compiledWasmModules?: RuntimeInitializeMemoryHandle['compiledWasmModules'];
 };
 
 const wrapNodeWorkerAsPort = (worker: NodeWorkerLike): Port<unknown> => {
@@ -271,6 +281,8 @@ export const nodeWorkerClient = (
         ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
         ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
         ...(bridge ? { fileSystemPort: bridge.port } : {}),
+        ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
+        ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
       };
       const transferables: Transferable[] = bridge ? [bridge.port] : [];
       const args = { ...input, memoryHandle };
@@ -292,7 +304,14 @@ export const nodeWorkerClient = (
       }
     },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      return materialiseGeometry(transport, ensurePools().geometryPool);
+      return materialiseGeometry(transport, ensurePools().geometryPool, (key) => {
+        channel?.notify('binaryMaterialised', { key });
+      });
+    },
+    async resolveExport(transport: RuntimeExportResultTransport) {
+      return materialiseExportResult(transport, ensurePools().geometryPool, (key) => {
+        channel?.notify('binaryMaterialised', { key });
+      });
     },
     async close(): Promise<void> {
       await finish({ cause: 'requested' });

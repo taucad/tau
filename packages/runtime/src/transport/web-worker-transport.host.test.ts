@@ -48,9 +48,10 @@ const createMockKernelWorker = (): KernelWorker => {
     handleSetOptions: vi.fn(),
     ensureLoadedBundler: vi.fn().mockResolvedValue(undefined),
     setTelemetrySend: vi.fn(),
+    setDevtoolsTelemetryEnabled: vi.fn(),
+    setCompiledWasmModules: vi.fn(),
     flushTelemetry: vi.fn(),
     setSignalBuffer: vi.fn(),
-    setGeometryPoolBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
     capabilitiesManifest: { routes: [], renderCapabilities: {} },
   };

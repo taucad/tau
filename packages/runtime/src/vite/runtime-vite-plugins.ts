@@ -16,7 +16,7 @@
  */
 
 import type { Plugin, PreviewServer, ResolvedConfig, ViteDevServer } from 'vite';
-import { runtimeSsrAssetsPlugin } from '#vite/runtime-ssr-assets.vite-plugin.js';
+import { runtimeAssetsPlugin } from '#vite/runtime-ssr-assets.vite-plugin.js';
 
 /**
  * Version-neutral public shape of a Vite plugin returned by Tau factories.
@@ -47,28 +47,32 @@ const withWasmInlineInvariant =
     }
     return !isGitLfsPlaceholder(content) && content.length < Number(consumerLimit);
   };
-const nodeRuntimeExternals = ['esbuild', 'esbuild-wasm'] as const;
-const browserNodeBuiltinSources = new Set(['fs', 'node:fs', 'node:fs/promises', 'node:url']);
+const browserNodeBuiltinSources = new Set(['fs', 'node:crypto', 'node:fs', 'node:fs/promises', 'node:url']);
 const browserNodeBuiltinId = '\0taucad-runtime:browser-node-builtins';
 const browserNodeBuiltinModule = `
 const unavailable = (name) => () => {
   throw new Error('Node ' + name + '() is unavailable in a browser runtime. A Node-only code path was executed in the client graph.');
 };
 export const fileURLToPath = unavailable('url.fileURLToPath');
+export const randomUUID = unavailable('crypto.randomUUID');
 export const readFile = unavailable('fs.readFile');
 export const readFileSync = unavailable('fs.readFileSync');
 export const writeFileSync = unavailable('fs.writeFileSync');
 export const statSync = unavailable('fs.statSync');
 export const watch = unavailable('fs.watch');
 export const promises = { readFile };
-export default { promises, readFile, readFileSync, statSync, watch, writeFileSync };
+export default { promises, randomUUID, readFile, readFileSync, statSync, watch, writeFileSync };
 `;
 
 const browserNodeBuiltins = (): Plugin => ({
   name: 'taucad-runtime:browser-node-builtins',
   enforce: 'pre',
   resolveId(source) {
-    if (this.environment.config.consumer === 'client' && browserNodeBuiltinSources.has(source)) {
+    if (
+      this.environment.config.mode !== 'test' &&
+      this.environment.config.consumer === 'client' &&
+      browserNodeBuiltinSources.has(source)
+    ) {
       return browserNodeBuiltinId;
     }
     return null;
@@ -151,9 +155,7 @@ export type RuntimePluginOptions = {
  * - prevents `.wasm` assets from being inlined as base64 (kills V8 caching
  *   and breaks Worker bootstrap)
  * - forces `worker.format: 'es'` so workers preserve `import.meta.url`
- * - emits runtime-owned static assets in SSR/Electron builds
- * - keeps native Node runtime helpers such as `esbuild` external in SSR /
- *   Electron utility builds so they can resolve their package-owned binaries
+ * - emits package-owned static assets in browser, SSR, and Electron builds
  *
  * Any consumer that needs to override these invariants should compose their
  * own plugin set; this helper exists to remove the gap between "install
@@ -184,10 +186,7 @@ export function tauRuntime(options: RuntimePluginOptions = {}): RuntimeVitePlugi
     config: () => ({
       worker: {
         format: 'es',
-        plugins: () => [browserNodeBuiltins()],
-      },
-      ssr: {
-        external: [...nodeRuntimeExternals],
+        plugins: () => [runtimeAssetsPlugin(), browserNodeBuiltins()],
       },
     }),
     configResolved(config) {
@@ -195,6 +194,6 @@ export function tauRuntime(options: RuntimePluginOptions = {}): RuntimeVitePlugi
     },
   };
 
-  const plugins = [runtimeSsrAssetsPlugin(), invariants];
+  const plugins = [runtimeAssetsPlugin(), invariants];
   return includeCoi ? [crossOriginIsolation(), ...plugins] : plugins;
 }

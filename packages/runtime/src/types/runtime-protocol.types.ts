@@ -9,7 +9,7 @@
  */
 
 import type { MessagePortLike, WithTransferables } from '@taucad/rpc';
-import type { FileExtension, GeometrySvg, GeometryWebRtc, LogEntry } from '@taucad/types';
+import type { ExportFile, FileExtension, GeometrySvg, GeometryWebRtc, LogEntry } from '@taucad/types';
 import type {
   GetParametersResult,
   ExportGeometryResult,
@@ -31,9 +31,12 @@ import type { RuntimeContentInput } from '#types/runtime-content.types.js';
  * from SharedPool for zero-copy access.
  * @public
  */
-export type GltfContentDelivery =
+export type BinaryContentDelivery =
   | { readonly delivery: 'inline'; readonly bytes: Uint8Array<ArrayBuffer> }
   | { readonly delivery: 'pooled'; readonly key: string };
+
+/** GLTF uses the runtime's common binary-delivery descriptor. @public */
+export type GltfContentDelivery = BinaryContentDelivery;
 
 /**
  * GLTF geometry in transit — content delivered inline or via shared pool.
@@ -79,6 +82,12 @@ export type GeometryPoolHandle = SharedArrayBuffer;
  */
 export type SignalBufferHandle = SharedArrayBuffer;
 
+/** Host-compiled WASM module shared with a runtime worker by structured clone. @public */
+export type CompiledWasmModuleHandle = {
+  readonly url: string;
+  readonly module: WebAssembly.Module;
+};
+
 /**
  * Opaque payload assembled by the transport's `initialize` implementation so
  * the worker side can wire up signal/geometry pools without the runtime
@@ -102,6 +111,10 @@ export type InitializeMemoryHandle = {
   signalBuffer?: SignalBufferHandle;
   geometryPoolBuffer?: GeometryPoolHandle;
   fileSystemPort?: MessagePortLike;
+  /** Explicitly mirror runtime spans into the worker Performance Timeline. */
+  devtoolsTelemetry?: boolean;
+  /** Host-compiled modules available to kernel initializers by absolute URL. */
+  compiledWasmModules?: readonly CompiledWasmModuleHandle[];
 };
 
 /** Numeric timeout reason accepted by the targeted wire abort command. @public */
@@ -117,7 +130,7 @@ export type RuntimePreviewIdentity = {
 };
 
 /**
- * Telemetry entry data collected via PerformanceObserver in the worker.
+ * Completed telemetry span emitted by the runtime worker.
  * @public
  */
 export type TelemetryEntry = {
@@ -224,12 +237,15 @@ export type RuntimeHelloPayload = {
 };
 
 type RuntimeInitializeResultWire = { readonly capabilities: unknown };
-type RuntimeExportFileWire = {
+/** One export file encoded for inline or pooled wire delivery. @public */
+export type RuntimeExportFileTransport = {
   readonly name: string;
-  readonly bytes: Uint8Array<ArrayBuffer>;
-  readonly mimeType: string;
+  readonly bytes: BinaryContentDelivery;
+  readonly mimeType: ExportFile['mimeType'];
 };
-type RuntimeExportResultWire = KernelResult<RuntimeExportFileWire[]>;
+/** Export result whose successful files retain transport delivery descriptors. @public */
+export type RuntimeExportResultTransport = KernelResult<RuntimeExportFileTransport[]>;
+type RuntimeExportResultWire = RuntimeExportResultTransport;
 type RuntimeGeometryComputedArgsWire = {
   readonly result: KernelResult<unknown>;
   readonly renderId: RenderId;
@@ -308,6 +324,9 @@ export type RuntimeSetOptionsArgs = RuntimePreviewIdentity & {
   readonly options: Record<string, unknown>;
 };
 
+/** Reader acknowledgement that a pooled binary has been copied into owned memory. @public */
+export type RuntimeBinaryMaterialisedArgs = { readonly key: string };
+
 /**
  * Args for the autonomous `progress` notify. The opaque `renderId` gates
  * downstream consumers so frames from superseded renders can be discarded.
@@ -377,7 +396,7 @@ export type RuntimeKernelMessageArgs = {
 };
 
 /**
- * Client → worker fire-and-forget command names. These 6 command names
+ * Client → worker fire-and-forget command names. These 7 command names
  * drive every C→W interaction in the kernel runtime protocol. A
  * companion type-level guard in `runtime-protocol.runtime.test.ts`
  * fails closed if a command is added/removed without updating both
@@ -390,6 +409,7 @@ export const runtimeProtocolClientNotifyNames = [
   'updateParameters',
   'setOptions',
   'abort',
+  'binaryMaterialised',
   'kernelCommand',
 ] as const;
 
@@ -417,7 +437,7 @@ export const runtimeProtocolWorkerNotifyNames = [
 ] as const;
 
 /**
- * Combined notify name inventory — exactly 17 keys (6 C→W + 11 W→C).
+ * Combined notify name inventory — exactly 18 keys (7 C→W + 11 W→C).
  * @public
  */
 export const runtimeProtocolNotifyNames = [
@@ -445,9 +465,9 @@ export const runtimeProtocolCallNames = ['initialize', 'export', 'exportModel', 
  *   drives renders autonomously via the `openFile` notify and consumes
  *   `geometryComputed` notifies correlated by `renderId` (R18, mirrors LSP
  *   `didOpen` + diagnostics).
- * - `notifies`: bidirectional fire-and-forget — exactly 17 keys total.
- *   6 client→worker commands (`openFile`, `stage-and-render`,
- *   `updateParameters`, `setOptions`, `abort`, `kernelCommand`)
+ * - `notifies`: bidirectional fire-and-forget — exactly 18 keys total.
+ *   7 client→worker commands (`openFile`, `stage-and-render`,
+ *   `updateParameters`, `setOptions`, `abort`, `binaryMaterialised`, `kernelCommand`)
  *   plus 11 worker→client
  *   autonomous events (`parametersResolved`, `geometryComputed`,
  *   `errorEvent`, `progress`, `activeKernelChanged`, `stateChanged`,
@@ -500,6 +520,7 @@ export type RuntimeProtocol = {
     readonly abort: {
       readonly args: { readonly renderId: RenderId; readonly reason: WireAbortReasonCode };
     };
+    readonly binaryMaterialised: { readonly args: RuntimeBinaryMaterialisedArgs };
     readonly kernelCommand: { readonly args: RuntimeKernelMessageArgs };
 
     readonly parametersResolved: {

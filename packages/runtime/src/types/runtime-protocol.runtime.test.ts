@@ -27,13 +27,14 @@ describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
     expect([...runtimeProtocolCallNames]).toEqual(['initialize', 'export', 'exportModel', 'cleanup']);
   });
 
-  it('exposes exactly 6 client → worker notify commands (T18)', () => {
+  it('exposes exactly 7 client → worker notify commands (T18)', () => {
     expect([...runtimeProtocolClientNotifyNames]).toEqual([
       'openFile',
       'stage-and-render',
       'updateParameters',
       'setOptions',
       'abort',
+      'binaryMaterialised',
       'kernelCommand',
     ]);
   });
@@ -54,8 +55,8 @@ describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
     ]);
   });
 
-  it('exposes exactly 17 notify keys (6 client commands + 11 worker events)', () => {
-    expect(runtimeProtocolNotifyNames).toHaveLength(17);
+  it('exposes exactly 18 notify keys (7 client commands + 11 worker events)', () => {
+    expect(runtimeProtocolNotifyNames).toHaveLength(18);
     expect(runtimeProtocolNotifyNames).toHaveLength(
       runtimeProtocolClientNotifyNames.length + runtimeProtocolWorkerNotifyNames.length,
     );

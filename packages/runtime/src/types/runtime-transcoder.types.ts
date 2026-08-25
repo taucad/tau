@@ -14,7 +14,10 @@ import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeImplementationAsset, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { RuntimePluginDeclaration, TranscoderPlugin } from '#plugins/plugin-types.js';
-import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import {
+  attachRuntimePluginDefinition,
+  attachRuntimePluginFactoryOptions,
+} from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type { ContentKeysOf, RuntimeContentDeclaration, RuntimeContentKey } from '#types/runtime-content.types.js';
 import { validateRuntimeContentDeclarations } from '#types/runtime-content.types.js';
@@ -286,20 +289,26 @@ export function defineTranscoder<
 export function defineTranscoder(
   definition: TranscoderDefinitionConfig<string, unknown, Record<string, unknown>, readonly TranscoderEdge[]>,
 ): TranscoderPluginFactory<string, Record<string, unknown>, string, Record<string, unknown>> {
-  const { id, peerRuntimeVersion, permissions, ...transcoderDefinition } = definition;
+  const acceptsOptions =
+    Object.hasOwn(definition, 'optionsSchema') && Reflect.get(definition, 'optionsSchema') !== undefined;
+  const { id, permissions, ...transcoderDefinition } = definition;
   validateRuntimeContentDeclarations(
     id,
     transcoderDefinition.edges.map((edge, index) => [`edges.${index}.content`, edge.content] as const),
   );
-  const factory = ((options?: Record<string, unknown>) =>
-    attachRuntimePluginDefinition(
+  const factory = ((options?: Record<string, unknown>) => {
+    if (options !== undefined && !acceptsOptions) {
+      throw new TypeError(`Transcoder "${id}" does not accept options.`);
+    }
+    return attachRuntimePluginDefinition(
       {
         id,
-        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
+        edges: transcoderDefinition.edges.map(({ from, to }) => ({ from, to })),
         ...(permissions === undefined ? {} : { permissions }),
         options,
       },
       () => transcoderDefinition,
-    )) as TranscoderPluginFactory<string, Record<string, unknown>, string, Record<string, unknown>>;
-  return factory;
+    );
+  }) as TranscoderPluginFactory<string, Record<string, unknown>, string, Record<string, unknown>>;
+  return attachRuntimePluginFactoryOptions(factory, acceptsOptions);
 }

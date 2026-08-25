@@ -1,0 +1,86 @@
+{
+  "name": "@taucad/replicad",
+  "version": "0.1.0-beta.0",
+  "description": "Replicad kernel plugin for Tau",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/plugins/replicad"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/plugins/replicad#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "cad",
+    "plugin",
+    "replicad"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./annotations": "./src/annotations/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./annotations": {
+        "types": "./dist/annotations/index.d.mts",
+        "import": "./dist/annotations/index.mjs",
+        "default": "./dist/annotations/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@gltf-transform/extensions": "catalog:",
+    "@taucad/geometry-core": "workspace:*",
+    "@taucad/occt-core": "workspace:*",
+    "culori": "catalog:",
+    "replicad": "catalog:",
+    "replicad-opencascadejs": "catalog:",
+    "source-map-js": "catalog:"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "geist": "catalog:",
+    "type-fest": "catalog:",
+    "zod": "catalog:"
+  },
+  "taucad": {
+    "hostTarget": "browser"
+  }
+}

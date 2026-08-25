@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { GeometrySvg } from '@taucad/types';
+import type { GeometryGltf, GeometrySvg } from '@taucad/types';
 import { finalizeRenderOutput, RenderArtifactFinalizationError } from '#framework/render-artifact-finalizer.js';
-import { createEmptyGltfGeometry } from '#utils/glb-writer.js';
 
 const expectFinalizationError = ({
   operation,
@@ -34,11 +33,13 @@ const createSvgArtifact = (): GeometrySvg => ({
   content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0"/></svg>',
 });
 
+const createGltfArtifact = (): GeometryGltf => ({ format: 'gltf', content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) });
+
 describe('finalizeRenderOutput', () => {
-  it('accepts canonical empty GLB geometry artifacts', () => {
+  it('accepts glTF geometry artifacts', () => {
     const nativeHandle = { kind: 'empty-render' };
     const result = finalizeRenderOutput({
-      artifacts: [createEmptyGltfGeometry()],
+      artifacts: [createGltfArtifact()],
       nativeHandle,
     });
 
@@ -68,7 +69,7 @@ describe('finalizeRenderOutput', () => {
     const svg = createSvgArtifact();
 
     expectFinalizationError({
-      operation: () => finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry(), svg], nativeHandle: null }),
+      operation: () => finalizeRenderOutput({ artifacts: [createGltfArtifact(), svg], nativeHandle: null }),
       code: 'MIXED_RENDER_OUTPUT_UNSUPPORTED',
       message: 'Kernel render produced mixed public geometry formats.',
     });

@@ -23,11 +23,14 @@
 
 import type { Channel, ChannelServerHandle, RpcProtocol } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
+import type { ExportGeometryResult } from '#types/runtime.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type {
   GeometryGltfTransport,
   GeometryTransport,
+  BinaryContentDelivery,
+  RuntimeExportResultTransport,
   InitializeMemoryHandle,
   RuntimeInitializeArgs,
   RuntimeInitializeResult,
@@ -189,6 +192,13 @@ export type EncodedGeometry = {
   readonly tier: 'pool' | 'transfer' | 'copy';
 };
 
+/** Transport-owned binary-delivery descriptor and wire transfer list. @public */
+export type EncodedBinary = {
+  readonly value: BinaryContentDelivery;
+  readonly transferables: readonly Transferable[];
+  readonly tier: 'pool' | 'transfer' | 'copy';
+};
+
 /* ============================================================ *
  * Host-initialize bindings                                      *
  * ============================================================ */
@@ -203,6 +213,8 @@ export type EncodedGeometry = {
 export type HostGeometryDeliveryBinding = {
   readonly tier: 'pool' | 'transfer' | 'copy';
   publish(geometry: Geometry): EncodedGeometry;
+  publishBytes(key: string, bytes: Uint8Array<ArrayBuffer>): EncodedBinary;
+  acknowledge(key: string): void;
 };
 
 /**
@@ -338,6 +350,9 @@ export type RuntimeTransportClient<
    * the pool wiring; the consumer never sees `SharedArrayBuffer`.
    */
   resolveGeometry(transport: GeometryTransport): Promise<Geometry>;
+
+  /** Materialise pooled/inline export files into owned consumer bytes. */
+  resolveExport?(transport: RuntimeExportResultTransport): Promise<ExportGeometryResult>;
 
   /**
    * Close the wire, terminate the host. After `close()` resolves the

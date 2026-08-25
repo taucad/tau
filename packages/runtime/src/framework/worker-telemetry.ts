@@ -1,8 +1,7 @@
 /**
  * Worker Telemetry System
  *
- * Collects performance.mark()/measure() entries from within a worker using
- * PerformanceObserver and flushes them on demand via explicit flush() calls.
+ * Collects completed runtime spans directly and flushes them on demand.
  * The main thread aggregates data from all workers with timestamp correlation.
  *
  * Flushing is explicit only -- the dispatcher calls flush() after each render
@@ -26,15 +25,14 @@
 import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
 
 /**
- * Collects performance measure entries in a worker and flushes them in batches.
- * Zero overhead when no measures are recorded (observer is passive).
+ * Collects runtime telemetry entries in a worker and flushes them in batches.
  * No timers -- flush is called explicitly by the framework after each operation.
  */
 export class WorkerTelemetryCollector {
   // oxlint-disable-next-line @typescript-eslint/parameter-properties -- erasableSyntaxOnly forbids parameter properties
   private readonly send: (entries: TelemetryEntry[]) => void;
   private readonly pending: TelemetryEntry[] = [];
-  private readonly observer: PerformanceObserver;
+  private disposed = false;
 
   /**
    * Create a new telemetry collector wired to the given send callback.
@@ -43,15 +41,17 @@ export class WorkerTelemetryCollector {
    */
   public constructor(send: (entries: TelemetryEntry[]) => void) {
     this.send = send;
-    this.observer = new PerformanceObserver((list) => {
-      this.collectEntries(list.getEntries());
-    });
-    this.observer.observe({ type: 'measure', buffered: true });
+  }
+
+  /** Add one completed span to the next explicit batch. */
+  public collect(entry: TelemetryEntry): void {
+    if (!this.disposed) {
+      this.pending.push(entry);
+    }
   }
 
   /** Send all pending entries to the main thread. No-op when empty. */
   public flush(): void {
-    this.collectEntries(this.observer.takeRecords());
     if (this.pending.length === 0) {
       return;
     }
@@ -60,22 +60,13 @@ export class WorkerTelemetryCollector {
     this.send(batch);
   }
 
-  /** Disconnect the observer and flush any remaining entries. */
+  /** Flush remaining entries and reject subsequent collection. */
   public dispose(): void {
-    this.observer.disconnect();
-    this.flush();
-  }
-
-  private collectEntries(entries: PerformanceEntryList): void {
-    for (const entry of entries) {
-      this.pending.push({
-        name: entry.name,
-        startTime: entry.startTime,
-        duration: entry.duration,
-        detail: (entry as PerformanceMeasure).detail as Record<string, unknown> | undefined,
-        workerTimeOrigin: performance.timeOrigin,
-      });
+    if (this.disposed) {
+      return;
     }
+    this.flush();
+    this.disposed = true;
   }
 }
 

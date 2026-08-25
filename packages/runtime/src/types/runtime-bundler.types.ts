@@ -9,7 +9,10 @@ import type { z } from 'zod';
 import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
 import type { BuiltinModule, BundleResult, ExecuteResult } from '#types/runtime-bundler-service.types.js';
 import type { BundlerPlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
-import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import {
+  attachRuntimePluginDefinition,
+  attachRuntimePluginFactoryOptions,
+} from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 
 // =============================================================================
@@ -112,6 +115,9 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
   /** Register a builtin module for resolution during bundle(). */
   registerModule(input: { name: string; module: BuiltinModule }, context: Context): void;
 
+  /** Invalidate cached execution results after source changes. */
+  clearExecutionCache?(code: string | undefined, context: Context): void;
+
   /** Clean up bundler resources (e.g., esbuild.stop()). */
   cleanup?(context: Context): Promise<void>;
 };
@@ -141,16 +147,24 @@ type BundlerDefinitionConfig<
   execute(input: { code: string }, runtime: BundlerRuntime, context: Context): Promise<ExecuteResult>;
   /** Register a builtin module for resolution during bundle(). */
   registerModule(input: { name: string; module: BuiltinModule }, context: Context): void;
+  /** Invalidate cached execution results after source changes. */
+  clearExecutionCache?(code: string | undefined, context: Context): void;
   /** Clean up bundler resources (e.g., esbuild.stop()). */
   cleanup?(context: Context): Promise<void>;
 };
 
+/* oxlint-disable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types -- Named callable type keeps private unique-symbol carriers nameable in emitted declarations; [] is the exact no-options tuple. */
 /** @public */
-export type BundlerPluginFactory<Id extends string, Options = undefined> = Options extends undefined
-  ? () => BundlerPlugin<Id> & RuntimePluginDefinitionCarrier<BundlerDefinition>
-  : Partial<Options> extends Options
-    ? (options?: Options) => BundlerPlugin<Id> & RuntimePluginDefinitionCarrier<BundlerDefinition>
-    : (options: Options) => BundlerPlugin<Id> & RuntimePluginDefinitionCarrier<BundlerDefinition>;
+export interface BundlerPluginFactory<Id extends string, Options = undefined> {
+  (
+    ...options: Options extends undefined
+      ? []
+      : Partial<Options> extends Options
+        ? [options?: Options]
+        : [options: Options]
+  ): BundlerPlugin<Id> & RuntimePluginDefinitionCarrier<BundlerDefinition>;
+}
+/* oxlint-enable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types */
 
 /**
  * Define a bundler module with full type inference.
@@ -201,14 +215,18 @@ export function defineBundler<const Id extends string, Context>(
 export function defineBundler(
   definition: BundlerDefinitionConfig<string, unknown, Record<string, unknown>>,
 ): BundlerPluginFactory<string, Record<string, unknown>> {
-  const { id, extensions, peerRuntimeVersion, permissions, ...bundlerDefinition } = definition;
+  const acceptsOptions =
+    Object.hasOwn(definition, 'optionsSchema') && Reflect.get(definition, 'optionsSchema') !== undefined;
+  const { id, extensions, permissions, ...bundlerDefinition } = definition;
   const factory = ((options?: Record<string, unknown>) => {
+    if (options !== undefined && !acceptsOptions) {
+      throw new TypeError(`Bundler "${id}" does not accept options.`);
+    }
     const resolvedExtensions = typeof extensions === 'function' ? extensions(options) : extensions;
     return attachRuntimePluginDefinition(
       {
         id,
         extensions: resolvedExtensions,
-        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
         ...(permissions === undefined ? {} : { permissions }),
         options,
       },
@@ -218,5 +236,5 @@ export function defineBundler(
       }),
     );
   }) as BundlerPluginFactory<string, Record<string, unknown>>;
-  return factory;
+  return attachRuntimePluginFactoryOptions(factory, acceptsOptions);
 }

@@ -3,6 +3,7 @@
  *
  * @param error - Unknown provider error.
  * @returns `true` only for the cross-platform missing-path codes.
+ * @public
  */
 export const isNotFoundError = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null || !('code' in error)) {

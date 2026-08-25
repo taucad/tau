@@ -77,9 +77,8 @@ const withRendererRuntime = (config: ElectronRuntimeRendererConfig): ElectronRun
  * @example <caption>Compose an electron-vite config</caption>
  * ```typescript
  * import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
- * import { defineConfig } from 'electron-vite';
  *
- * export default defineConfig(electronRuntimeConfig({ main: {}, preload: {}, renderer: {} }));
+ * export default electronRuntimeConfig({ main: {}, preload: {}, renderer: {} });
  * ```
  */
 export const electronRuntimeConfig = <Config>(config: Config & ElectronRuntimeUserConfig): Config => {

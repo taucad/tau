@@ -1,7 +1,0 @@
-{
-  "name": "openrscad",
-  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/kernels/openrscad",
-  "projectType": "library",
-  "tags": ["scope:shared", "type:package-veneer"]
-}

@@ -9,7 +9,9 @@ import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
 
 const createTransportFixture = (channel: Channel<RuntimeProtocol>) => {
-  const initialize = vi.fn(async () => ({ capabilities: { plugins: [], routes: [], renderCapabilities: {} } }));
+  const initialize = vi.fn(async () => ({
+    capabilities: { registrations: [], routes: [], renderCapabilities: {} },
+  }));
   const transport: RuntimeTransportClient = {
     id: 'test',
     closed: new Promise<never>(() => {

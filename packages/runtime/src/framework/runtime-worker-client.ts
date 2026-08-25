@@ -38,6 +38,7 @@ import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   HashedGeometryResultTransport,
   RuntimeExportModelArgs,
+  RuntimeExportResultTransport,
   RuntimePreviewIdentity,
   RenderPhase,
   RuntimeProtocol,
@@ -144,6 +145,8 @@ export type RuntimeWorkerClientOptions = {
   transport: RuntimeTransportClient;
 };
 
+/**
+ */
 export type RuntimeWorkerClientInitializeOptions = {
   readonly config?: unknown;
 };
@@ -398,7 +401,7 @@ export class RuntimeWorkerClient {
   ): Promise<ExportGeometryResult> {
     this.ensureNotTerminated();
     this.ensureChannel();
-    return this.channel!.call(
+    const result = await this.channel!.call(
       'export',
       {
         format,
@@ -407,6 +410,9 @@ export class RuntimeWorkerClient {
       },
       signal,
     );
+    return this.transport.resolveExport
+      ? this.transport.resolveExport(result as unknown as RuntimeExportResultTransport)
+      : result;
   }
 
   /**
@@ -418,7 +424,10 @@ export class RuntimeWorkerClient {
   public async exportModel(request: RuntimeExportModelArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
     this.ensureNotTerminated();
     this.ensureChannel();
-    return this.channel!.call('exportModel', request, signal);
+    const result = await this.channel!.call('exportModel', request, signal);
+    return this.transport.resolveExport
+      ? this.transport.resolveExport(result as unknown as RuntimeExportResultTransport)
+      : result;
   }
 
   /** Cleanup any worker-side state without tearing down the channel. */

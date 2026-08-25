@@ -14,7 +14,8 @@ import { z } from 'zod';
 import type { GeometryGltf, OnWorkerLog } from '@taucad/types';
 import type { CreateGeometryResult } from '#types/runtime.types.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
-import { MockKernelWorker } from '#testing/kernel-testing.utils.js';
+// oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
+import { MockKernelWorker } from '../../test/support/kernel-worker.fixture.js';
 
 describe('runtime-worker middleware onion chain', () => {
   function spyOnCreateGeometry(worker: MockKernelWorker) {

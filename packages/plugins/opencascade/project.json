@@ -1,0 +1,13 @@
+{
+  "name": "opencascade",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/opencascade",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "benchmark-brep-surfaces": {
+      "command": "tsx --require ../../../tools/cjs-wasm-compat.cjs scripts/benchmark-brep-surfaces.mts",
+      "options": { "cwd": "{projectRoot}" }
+    }
+  }
+}

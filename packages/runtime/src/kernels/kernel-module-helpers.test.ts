@@ -1,7 +1,5 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { fileURLToPath } from 'node:url';
-import { resolve, join, dirname } from 'node:path';
 import {
   KERNEL_MODULES_KEY,
   isRecordObject,
@@ -186,10 +184,7 @@ describe('enrichIssueLocation', () => {
 
 describe('loadBinaryFile', () => {
   it('should load a file via file: URL in Node.js', async () => {
-    const currentDirectory = dirname(fileURLToPath(import.meta.url));
-    const fontPath = resolve(join(currentDirectory, 'replicad', 'fonts', 'Geist-Regular.ttf'));
-    const url = `file://${fontPath}`;
-    const result = await loadBinaryFile(url);
+    const result = await loadBinaryFile(new URL('kernel-module-helpers.test.ts', import.meta.url).href);
     expect(result).toBeInstanceOf(ArrayBuffer);
     expect(result!.byteLength).toBeGreaterThan(0);
   });

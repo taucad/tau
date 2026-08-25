@@ -90,6 +90,10 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
     expect(exportsMap['./package.json']).toBe('./package.json');
   });
 
+  it('keeps development and published export keys identical', () => {
+    expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual(Object.keys(exportsMap).sort());
+  });
+
   it.each(subpaths)('subpath "%s" should map to a tsdown entry', (subpath) => {
     const conditions = exportsMap[subpath];
     if (!conditions || typeof conditions === 'string') {
@@ -111,15 +115,24 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
   });
 });
 
-describe('runtime test-library dependency classification', () => {
+describe('runtime production dependency classification', () => {
   const packageJson = readJson<RuntimePackage>(resolve(packageRoot, 'package.json'));
 
-  // `./testing` ships an import of `vitest-mock-extended`, so it is an optional peer
-  // (docs/policy/npm-policy.md, Rule 10) — never a production dependency.
-  it('declares vitest-mock-extended as an optional peer, not a dependency', () => {
+  it('does not publish test-runner peers or mock dependencies', () => {
+    expect(packageJson.exports?.['./testing']).toBeUndefined();
+    expect(packageJson.publishConfig?.exports?.['./testing']).toBeUndefined();
+    expect(packageJson.peerDependencies?.['vitest']).toBeUndefined();
     expect(packageJson.dependencies?.['vitest-mock-extended']).toBeUndefined();
-    expect(packageJson.peerDependencies?.['vitest-mock-extended']).toBeDefined();
-    expect(packageJson.peerDependenciesMeta?.['vitest-mock-extended']?.optional).toBe(true);
-    expect(packageJson.devDependencies?.['vitest-mock-extended']).toBeDefined();
+    expect(packageJson.peerDependencies?.['vitest-mock-extended']).toBeUndefined();
+    expect(packageJson.devDependencies?.['vitest-mock-extended']).toBeUndefined();
+    expect(packageJson.devDependencies?.['vitest']).toBeDefined();
+  });
+
+  it('does not retain the convenience Next.js barrel or an unused electron-vite contract', () => {
+    expect(packageJson.exports?.['./nextjs']).toBeUndefined();
+    expect(packageJson.publishConfig?.exports?.['./nextjs']).toBeUndefined();
+    expect(packageJson.peerDependencies?.['electron-vite']).toBeUndefined();
+    expect(packageJson.peerDependenciesMeta?.['electron-vite']).toBeUndefined();
+    expect(packageJson.devDependencies?.['electron-vite']).toBeUndefined();
   });
 });

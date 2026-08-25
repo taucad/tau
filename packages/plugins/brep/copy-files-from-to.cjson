@@ -1,0 +1,11 @@
+{
+  "copyFiles": [
+    {
+      "from": "node_modules/occt-import-js/dist/occt-import-js.wasm",
+      "to": "src/wasm/occt-import-js.wasm"
+    }
+  ],
+  "copyFilesSettings": {
+    "whenFileExists": "overwrite"
+  }
+}

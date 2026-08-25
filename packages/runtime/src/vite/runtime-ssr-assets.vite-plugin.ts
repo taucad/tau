@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { stripLiteral } from 'strip-literal';
 import type { Plugin, ResolvedConfig } from 'vite';
-import { runtimePackages } from '#vite/runtime-invariants.js';
 
-const runtimePackageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const runtimeAssetPackages = [...runtimePackages, 'nanoraster'] as const;
-const urlPattern = /new\s+URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*,?\s*\)(\.href)?/g;
+const urlPattern = /new\s+URL\(\s*(["'`])(?<specifier>[^"'`]+)\1\s*,\s*import\.meta\.url\s*,?\s*\)(?<href>\.href)?/g;
+const packageUrlPattern =
+  /new\s+URL\(\s*import\.meta\.resolve\(\s*(["'`])(?<specifier>[^"'`]+)\1\s*\)\s*,?\s*\)(?<href>\.href)?/g;
 const stripLimit = 256 * 1024;
 const windowLookback = 4096;
 const windowLookAhead = 256;
@@ -30,21 +30,10 @@ const isTypeScriptPath = (filePath: string): boolean => /\.(?:[cm]?ts|tsx)$/.tes
 
 const toExistingFile = (filePath: string): string | undefined => {
   try {
-    return fs.statSync(filePath).isFile() ? filePath : undefined;
+    return fs.statSync(filePath).isFile() ? fs.realpathSync(filePath) : undefined;
   } catch {
     return undefined;
   }
-};
-
-const findPackageRoot = (entry: string): string | undefined => {
-  let directory = path.dirname(cleanId(entry));
-  while (directory !== path.dirname(directory)) {
-    if (toExistingFile(path.join(directory, 'package.json'))) {
-      return directory;
-    }
-    directory = path.dirname(directory);
-  }
-  return undefined;
 };
 
 const isRealCallSite = (code: string, match: RegExpExecArray): boolean => {
@@ -59,8 +48,8 @@ const isRealCallSite = (code: string, match: RegExpExecArray): boolean => {
   return stripped.startsWith('new ', matchStart - windowStart);
 };
 
-const collectMatches = (code: string): UrlMatch[] => {
-  const rawMatches = [...code.matchAll(urlPattern)];
+const collectMatches = (code: string, pattern: RegExp): UrlMatch[] => {
+  const rawMatches = [...code.matchAll(pattern)];
   if (rawMatches.length === 0) {
     return [];
   }
@@ -72,8 +61,8 @@ const collectMatches = (code: string): UrlMatch[] => {
     )
     .map((match) => ({
       full: match[0],
-      specifier: match[1]!,
-      hasHref: Boolean(match[2]),
+      specifier: match.groups?.['specifier'] ?? '',
+      hasHref: Boolean(match.groups?.['href']),
       index: match.index,
     }));
 };
@@ -92,69 +81,98 @@ const findAssetMatches = (matches: readonly UrlMatch[], importer: string): Asset
   });
 };
 
+const findPackageAssetMatches = (matches: readonly UrlMatch[], importer: string): AssetMatch[] => {
+  const require_ = createRequire(cleanId(importer));
+  return matches.map((match) => {
+    let resolved: string;
+    try {
+      resolved = require_.resolve(match.specifier);
+    } catch (error) {
+      throw new Error(`Cannot resolve package asset ${JSON.stringify(match.specifier)} from ${cleanId(importer)}`, {
+        cause: error,
+      });
+    }
+    const assetPath = toExistingFile(resolved);
+    if (!assetPath || isTypeScriptPath(assetPath)) {
+      throw new Error(`Package asset ${JSON.stringify(match.specifier)} did not resolve to a file`);
+    }
+    return { ...match, assetPath };
+  });
+};
+
 /**
- * Emit literal assets owned by the runtime package graph when Vite builds an
- * SSR/Electron environment. Vite intentionally leaves generic
- * `new URL(literal, import.meta.url)` expressions untouched in SSR builds.
+ * Emit literal assets reached through the consumer's runtime plugin graph.
+ * Vite intentionally leaves generic `new URL(literal, import.meta.url)`
+ * expressions untouched in SSR builds and does not resolve package subpaths in
+ * `new URL(import.meta.resolve(literal))` browser code.
  *
  * This is an internal invariant composed by {@link tauRuntime}; it does not
  * resolve or emit TypeScript modules and is not a consumer escape hatch.
  *
  * @internal
- * @returns A Vite plugin enforcing runtime-owned SSR asset emission.
+ * @returns A Vite plugin enforcing runtime-owned asset emission.
  */
-export const runtimeSsrAssetsPlugin = (): Plugin => {
+export const runtimeAssetsPlugin = (): Plugin => {
   let isSsrBuild = false;
-  const packageRoots = new Set([runtimePackageRoot]);
+  let isServe = false;
+  let isServerEnvironment = false;
   const emittedAssets = new Map<string, string>();
 
-  const isRuntimeModule = (id: string): boolean => {
-    const filePath = path.resolve(cleanId(id));
-    return [...packageRoots].some((root) => filePath === root || filePath.startsWith(`${root}${path.sep}`));
-  };
-
   return {
-    name: 'taucad-runtime:ssr-assets',
+    name: 'taucad-runtime:assets',
     enforce: 'pre',
-    apply: 'build',
     config: () => ({ build: { ssrEmitAssets: true } }),
     configResolved(config: ResolvedConfig) {
-      isSsrBuild = Boolean(config.build.ssr);
+      const consumer = 'consumer' in config ? config.consumer : undefined;
+      isServe = config.command === 'serve';
+      isServerEnvironment = consumer === 'server' || Boolean(config.build.ssr);
+      isSsrBuild = Boolean(config.build.ssr) && consumer !== 'client';
     },
-    async buildStart() {
+    buildStart() {
       emittedAssets.clear();
-      for (const packageName of runtimeAssetPackages) {
-        // oxlint-disable-next-line no-await-in-loop -- bounded first-party package inventory
-        const resolved = await this.resolve(packageName, undefined, { skipSelf: true });
-        const packageRoot = resolved ? findPackageRoot(resolved.id) : undefined;
-        if (packageRoot) {
-          packageRoots.add(packageRoot);
-        }
-      }
     },
     transform: {
-      filter: { code: 'import.meta.url' },
+      filter: { code: 'import.meta' },
       handler(code, id) {
-        if (!isSsrBuild || !code.includes('import.meta.url') || !isRuntimeModule(id)) {
+        if (!code.includes('import.meta')) {
           return;
         }
 
-        const matches = findAssetMatches(collectMatches(code), id);
+        const packageMatches = code.includes('import.meta.resolve')
+          ? findPackageAssetMatches(collectMatches(code, packageUrlPattern), id)
+          : [];
+        const relativeMatches = isSsrBuild ? findAssetMatches(collectMatches(code, urlPattern), id) : [];
+        const matches = [...packageMatches, ...relativeMatches];
         if (matches.length === 0) {
           return;
         }
 
         const replacements: Array<{ readonly match: UrlMatch; readonly replacement: string }> = [];
         for (const match of matches) {
-          let referenceId = emittedAssets.get(match.assetPath);
+          if (isServe) {
+            if (!isServerEnvironment) {
+              const url = `/@fs/${match.assetPath.replaceAll('\\', '/')}`;
+              replacements.push({
+                match,
+                replacement: match.hasHref
+                  ? `new URL(${JSON.stringify(url)}, import.meta.url).href`
+                  : `new URL(${JSON.stringify(url)}, import.meta.url)`,
+              });
+            }
+            continue;
+          }
+
+          const source = fs.readFileSync(match.assetPath);
+          const assetKey = `${path.basename(match.assetPath)}\0${createHash('sha256').update(source).digest('hex')}`;
+          this.addWatchFile(match.assetPath);
+          let referenceId = emittedAssets.get(assetKey);
           if (!referenceId) {
-            this.addWatchFile(match.assetPath);
             referenceId = this.emitFile({
               type: 'asset',
               name: path.basename(match.assetPath),
-              source: fs.readFileSync(match.assetPath),
+              source,
             });
-            emittedAssets.set(match.assetPath, referenceId);
+            emittedAssets.set(assetKey, referenceId);
           }
           replacements.push({
             match,

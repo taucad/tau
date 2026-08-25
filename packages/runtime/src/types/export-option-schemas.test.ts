@@ -1,9 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { jscadExportSchemas } from '#kernels/jscad/jscad.schemas.js';
-import { manifoldExportSchemas } from '#kernels/manifold/manifold.schemas.js';
-import { opencascadeExportSchemas } from '#kernels/opencascade/opencascade.schemas.js';
-import { replicadExportSchemas } from '#kernels/replicad/replicad.schemas.js';
-import { zooExportSchemas } from '#kernels/zoo/zoo.schemas.js';
 import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 
 describe('unitSchema', () => {
@@ -34,36 +29,5 @@ describe('coordinateSystemSchema', () => {
       coordinateSystem: 'z-up',
       unit: { length: 'meter' },
     });
-  });
-});
-
-describe('OpenCascade STEP export schema', () => {
-  it('should expose coordinateSystem for direct STEP routes', () => {
-    const parsed = opencascadeExportSchemas.step.parse({ coordinateSystem: 'z-up' });
-
-    expect(parsed).toEqual({ coordinateSystem: 'z-up' });
-  });
-});
-
-describe('GeoSpec-critical mesh export schemas', () => {
-  it('should expose coordinateSystem and unit on direct GLB routes', () => {
-    const schemas = [
-      jscadExportSchemas.glb,
-      manifoldExportSchemas.glb,
-      opencascadeExportSchemas.glb,
-      replicadExportSchemas.glb,
-      zooExportSchemas.glb,
-    ];
-
-    for (const schema of schemas) {
-      const parsed = schema.parse({ coordinateSystem: 'z-up', unit: { length: 'millimeter' } });
-
-      expect(parsed).toEqual(
-        expect.objectContaining({
-          coordinateSystem: 'z-up',
-          unit: { length: 'millimeter' },
-        }),
-      );
-    }
   });
 });

@@ -1,9 +1,8 @@
 /**
  * Node-worker transport — host factory.
  *
- * Bundled into the worker entry chunk via
- * `@taucad/runtime/worker/node`. Owns the `parentPort` acquisition,
- * the worker-side channel server, the crash trap, and the
+ * Imported by an application-owned worker entry. Owns the `parentPort`
+ * acquisition, the worker-side channel server, the crash trap, and the
  * `adoptInitialize` bindings the dispatcher relies on. **Must not**
  * import from `node-worker-client.ts` or `node-worker-transport.ts` so the
  * worker entry never reaches the client-side graph that spawned it.

@@ -3,38 +3,11 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/runtime",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package-root"],
+  "tags": ["scope:shared", "type:package"],
+  "implicitDependencies": ["units"],
   "targets": {
     "build": {
-      "dependsOn": ["copy-assets", "^copy-assets", "^build"]
-    },
-    "test": {
-      "dependsOn": ["copy-assets"]
-    },
-    "benchmark-replicad-tessellation": {
-      "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-replicad-tessellation.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "benchmark-opencascade-brep-surfaces": {
-      "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-opencascade-brep-surfaces.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "wasm-inspect": {
-      "command": "tsx scripts/wasm-inspect.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "size": {
-      "command": "size-limit",
-      "options": {
-        "cwd": "{projectRoot}"
-      },
-      "dependsOn": ["build"]
+      "dependsOn": ["^build"]
     },
     "audit-public-surface": {
       "command": "node --import @oxc-node/core/register scripts/audit-public-surface.mts",
@@ -48,15 +21,6 @@
         "{projectRoot}/src/client/runtime-client.ts",
         "{projectRoot}/src/vite/index.ts"
       ]
-    },
-    "readme-quickstart": {
-      "command": "node --import tsx scripts/check-readme-quick-start.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      },
-      "dependsOn": ["build"],
-      "cache": true,
-      "inputs": ["{projectRoot}/README.md", "{projectRoot}/scripts/check-readme-quick-start.mts"]
     },
     "npm-local-smoke": {
       "command": "node scripts/src/check-pack-install.ts packages/runtime",

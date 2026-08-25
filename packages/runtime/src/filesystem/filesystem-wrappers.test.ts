@@ -3,7 +3,6 @@
  */
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
 import {
   createTransferredFileSystemBridgeProxy,
   createFileSystemBridge,
@@ -200,7 +199,7 @@ describe('filesystem high-level wrappers', () => {
   describe('createFileSystemBridge', () => {
     it('should post a message with port to the worker', () => {
       const postMessageSpy = vi.fn();
-      const mockWorker = mock<Worker>({ postMessage: postMessageSpy });
+      const mockWorker = { postMessage: postMessageSpy } satisfies Pick<Worker, 'postMessage'>;
 
       const { port } = createFileSystemBridge(mockWorker);
 
@@ -220,7 +219,7 @@ describe('filesystem high-level wrappers', () => {
 
     it('should support custom messageType', () => {
       const postMessageSpy = vi.fn();
-      const mockWorker = mock<Worker>({ postMessage: postMessageSpy });
+      const mockWorker = { postMessage: postMessageSpy } satisfies Pick<Worker, 'postMessage'>;
 
       createFileSystemBridge(mockWorker, { messageType: 'customBridge' });
 
@@ -230,7 +229,7 @@ describe('filesystem high-level wrappers', () => {
 
     it('should return a different port than the one transferred', () => {
       const postMessageSpy = vi.fn();
-      const mockWorker = mock<Worker>({ postMessage: postMessageSpy });
+      const mockWorker = { postMessage: postMessageSpy } satisfies Pick<Worker, 'postMessage'>;
 
       const { port: returnedPort } = createFileSystemBridge(mockWorker);
 
@@ -240,7 +239,7 @@ describe('filesystem high-level wrappers', () => {
 
     it('should close consumer port on dispose', () => {
       const postMessageSpy = vi.fn();
-      const mockWorker = mock<Worker>({ postMessage: postMessageSpy });
+      const mockWorker = { postMessage: postMessageSpy } satisfies Pick<Worker, 'postMessage'>;
 
       const handle = createFileSystemBridge(mockWorker);
       expect(handle.port.onMessage).toBeTypeOf('function');

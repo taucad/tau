@@ -6,6 +6,12 @@
 import type { FileExtension } from '@taucad/types';
 import type { RuntimeContentKey } from '#types/runtime-content.types.js';
 
+/** Capability discriminants used by the runtime manifest. @public */
+export const runtimeCapabilityKinds = ['kernel', 'middleware', 'bundler', 'transcoder'] as const;
+
+/** Capability discriminant used by runtime registrations. @public */
+export type RuntimePluginKind = (typeof runtimeCapabilityKinds)[number];
+
 declare const __exportFormats: unique symbol;
 declare const __renderOptions: unique symbol;
 declare const __kernelId: unique symbol;
@@ -19,7 +25,11 @@ declare const __transcoderId: unique symbol;
 declare const __transcodeContent: unique symbol;
 declare const __transcodePinnedSourceOptions: unique symbol;
 
-/** Permissions declared by a runtime plugin for store and host review. @public */
+/**
+ * Permissions declared by a runtime plugin for store and host review.
+ * This metadata is declarative only; the runtime does not enforce it.
+ * @public
+ */
 export type RuntimePluginPermissions = {
   readonly network?: readonly string[];
   readonly filesystemWrite?: boolean;
@@ -27,21 +37,13 @@ export type RuntimePluginPermissions = {
 
 /** Shared declaration metadata carried by every runtime plugin registration. @public */
 export type RuntimePluginDeclaration = {
-  readonly peerRuntimeVersion?: string;
+  /** Declarative review metadata; runtime execution does not enforce these permissions. */
   readonly permissions?: RuntimePluginPermissions;
 };
 
-/** Structured warning emitted when a plugin targets another runtime version. @public */
-export type RuntimePluginVersionMismatchDiagnostic = {
-  readonly code: 'RUNTIME_PLUGIN_VERSION_MISMATCH';
-  readonly kind: 'kernel' | 'middleware' | 'bundler' | 'transcoder';
-  readonly pluginId: string;
-  readonly peerRuntimeVersion: string;
-  readonly runtimeVersion: string;
-};
-
 /**
- * Registration object for a kernel plugin. Returned by factory functions like `replicad()`.
+ * Registration object for a kernel plugin. Returned by the package-named alias such as `replicad` from
+ * `@taucad/replicad`, bound to the canonical `plugin` export.
  *
  * The `FormatMap` phantom type parameter carries compile-time type information
  * about the per-format export option schemas. The `RenderOptions` phantom carries
@@ -55,6 +57,7 @@ export type RuntimePluginVersionMismatchDiagnostic = {
  * @template FormatMap - Mapping from format strings to their inferred option types
  * @template RenderOptions - Kernel render option types inferred from render.optionsSchema
  * @template Id - Literal kernel identifier (e.g. `'replicad'`, `'jscad'`)
+ * @template Extensions - Literal source-extension tuple declared by the kernel
  * @public
  */
 export type KernelPlugin<
@@ -64,11 +67,14 @@ export type KernelPlugin<
   Id extends string = string,
   RenderContent extends RuntimeContentKey = RuntimeContentKey,
   ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
+  Extensions extends readonly string[] = readonly string[],
 > = RuntimePluginDeclaration & {
   /** Unique identifier for this kernel */
   id: Id;
   /** File extensions this kernel handles (e.g., ['scad'], ['ts', 'js']). '*' is a catch-all. */
-  extensions: string[];
+  extensions: Extensions;
+  /** Export formats declared by the kernel definition. */
+  exportFormats?: readonly string[];
   /** Regex to match against file content for kernel selection */
   detectImport?: RegExp;
   /** Bare-specifier module names this kernel provides for bundler-assisted detection */
@@ -123,20 +129,21 @@ export type MiddlewarePlugin<
 };
 
 /**
- * Registration object for a bundler plugin. Returned by factory functions like `esbuild()`.
+ * Registration object for a bundler plugin. Returned by the package-named alias such as `esbuild` from
+ * `@taucad/esbuild`, bound to the canonical `plugin` export.
  * @public
  */
 export type BundlerPlugin<Id extends string = string> = RuntimePluginDeclaration & {
   /** Unique identifier for this bundler */
   id: Id;
   /** File extensions this bundler handles */
-  extensions: string[];
+  extensions: readonly string[];
   /** Bundler-specific options */
   options?: Record<string, unknown>;
 };
 
 /**
- * Registration object for a transcoder plugin. Returned by factory functions like `converterTranscoder()`.
+ * Registration object for a transcoder plugin. Returned by `defineTranscoder(...)` factories.
  *
  * The `EdgeMap` phantom type parameter carries compile-time type information
  * about per-target-format option schemas from statically declared edges.
@@ -163,6 +170,8 @@ export type TranscoderPlugin<
 > = RuntimePluginDeclaration & {
   /** Unique identifier for this transcoder */
   id: Id;
+  /** Single-hop format edges declared by the transcoder definition. */
+  edges?: ReadonlyArray<{ readonly from: string; readonly to: string }>;
   /** Transcoder-specific options */
   options?: Record<string, unknown>;
   /**
@@ -195,7 +204,7 @@ export type TranscoderPlugin<
 };
 
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type projections intentionally accept any plugin generic instantiation
-type AnyKernelPlugin = KernelPlugin<any, any, any, any, any>;
+type AnyKernelPlugin = KernelPlugin<any, any, any, any, any, any>;
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type projections intentionally accept any plugin generic instantiation
 type AnyTranscoderPlugin = TranscoderPlugin<any, any, any, any, any>;
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type projections intentionally accept any plugin generic instantiation
@@ -206,6 +215,8 @@ type KernelFormatMapOf<P> = P extends KernelPlugin<infer FormatMap, any, any, an
 type KernelRenderOptionsOf<P> = P extends KernelPlugin<any, infer RenderOptions, any, any, any> ? RenderOptions : never;
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary kernel plugin generics
 type KernelIdOf<P> = P extends KernelPlugin<any, any, infer Id, any, any> ? Id : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary kernel plugin generics
+type KernelExtensionsOf<P> = P extends KernelPlugin<any, any, any, any, any, infer Extensions> ? Extensions : never;
 type KernelRenderContentOf<P> = P extends {
   readonly [__renderContent]?: { readonly keys: infer Content };
 }
@@ -322,9 +333,8 @@ type ContributorFor<P, K extends string> = K extends keyof KernelFormatMapOf<P>
  * every contributor is the placeholder, the per-key union collapses to `never`
  * and `UnionToIntersection<never>` falls back to `unknown`.
  *
- * Works uniformly for tuple inputs (e.g. inline plugin arrays passed directly
- * to `createRuntimeClient`) and for general array inputs (e.g.
- * `presets.all().kernels` typed as `(PluginA | PluginB | …)[]`) because the
+ * Works uniformly for tuple inputs and for widened application-owned plugin
+ * arrays typed as `(PluginA | PluginB | …)[]` because the
  * per-plugin filter is dispatched through `ContributorFor`, whose naked type
  * parameter forces the conditional to distribute over the union.
  *
@@ -400,6 +410,11 @@ export type CollectKernelIds<Plugins extends readonly AnyKernelPlugin[]> = [
 ] extends [never]
   ? string
   : FilterDefaultKernelId<KernelIdOf<Plugins[number]>>;
+
+/** Collects the source-extension literals declared by a kernel tuple. @public */
+export type CollectKernelExtensions<Plugins extends readonly AnyKernelPlugin[]> = KernelExtensionsOf<
+  Plugins[number]
+>[number];
 
 /**
  * Collapses the default `string` `Id` generic to `never` so erased plugins do
@@ -634,8 +649,8 @@ export type RenderOptionsFor<Kernels extends readonly AnyKernelPlugin[], Kernel 
     ? R
     : Record<string, unknown>;
 
-/** Content keys contributed by one concrete kernel render route. @public */
 /* oxlint-disable typescript/no-explicit-any -- Conditional extraction needs wildcard instantiations of the public plugin phantom types. */
+/** Content keys contributed by one concrete kernel render route. @public */
 export type KernelRenderContentFor<Kernels extends readonly AnyKernelPlugin[], Kernel extends string> =
   Extract<Kernels[number], KernelPlugin<any, any, Kernel, any, any>> extends infer Plugin
     ? Plugin extends AnyKernelPlugin

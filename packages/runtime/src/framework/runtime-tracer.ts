@@ -1,4 +1,5 @@
 import type { SpanHandle, RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
+import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
 
 type SpanAttributes = Record<string, string | number | boolean>;
 
@@ -6,9 +7,9 @@ type SpanAttributes = Record<string, string | number | boolean>;
  * Lightweight span tracker for the runtime worker.
  *
  * Follows the OpenTelemetry span model (parent-child via explicit IDs)
- * without any SDK dependency. Emits `performance.measure()` calls enriched
- * with `spanId`/`parentSpanId` for hierarchy reconstruction and Chrome
- * DevTools Performance Extensibility API metadata for custom track display.
+ * without any SDK dependency. Emits completed entries directly to the worker
+ * telemetry batcher. Optional Performance Timeline mirroring exists only for
+ * explicit Chrome DevTools profiling sessions.
  *
  * All heavy lifting happens here on the worker side — the client simply
  * reads `detail.spanId` / `detail.parentSpanId` to build a tree.
@@ -17,6 +18,18 @@ export class RuntimeTracer implements RuntimeSpanTracer {
   private nextId = 0;
   private epoch = 0;
   private activeSpanId: string | undefined;
+  private entrySink: ((entry: TelemetryEntry) => void) | undefined;
+  private devtoolsTimelineEnabled = false;
+
+  /** Route completed spans directly to the worker telemetry batcher. */
+  public setEntrySink(sink: ((entry: TelemetryEntry) => void) | undefined): void {
+    this.entrySink = sink;
+  }
+
+  /** Mirror spans into the Performance Timeline for explicit DevTools profiling. */
+  public setDevtoolsTimelineEnabled(enabled: boolean): void {
+    this.devtoolsTimelineEnabled = enabled;
+  }
 
   /**
    * Starts a new tracing span, optionally nested under the currently active span.
@@ -29,8 +42,7 @@ export class RuntimeTracer implements RuntimeSpanTracer {
     const id = String(this.nextId++);
     const parentId = this.activeSpanId;
     const spanEpoch = this.epoch;
-    const markName = `tau:span:${spanEpoch}:${id}`;
-    performance.mark(markName);
+    const startTime = performance.now();
     this.activeSpanId = id;
 
     return {
@@ -55,10 +67,21 @@ export class RuntimeTracer implements RuntimeSpanTracer {
           },
         };
 
-        try {
-          performance.measure(name, { start: markName, detail });
-        } catch {
-          // Mark was cleared by a concurrent reset -- safe to ignore
+        const duration = performance.now() - startTime;
+        this.entrySink?.({
+          name,
+          startTime,
+          duration,
+          detail,
+          workerTimeOrigin: performance.timeOrigin,
+        });
+
+        if (this.devtoolsTimelineEnabled) {
+          performance.measure(`tau:${name}:${spanEpoch}:${id}`, {
+            start: startTime,
+            duration,
+            detail,
+          });
         }
 
         this.activeSpanId = parentId;
@@ -66,11 +89,9 @@ export class RuntimeTracer implements RuntimeSpanTracer {
     };
   }
 
-  /** Resets all tracer state and clears associated performance marks and measures. */
+  /** Reset span ancestry without mutating the realm-wide Performance Timeline. */
   public reset(): void {
     this.epoch++;
     this.activeSpanId = undefined;
-    performance.clearMarks();
-    performance.clearMeasures();
   }
 }

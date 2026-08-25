@@ -142,7 +142,7 @@ function createStatusClientFixture(options?: {
   const abort = vi.fn<(target: RuntimeTransportRenderTarget) => void>();
   const reservePreview = vi.fn<RuntimeTransportClient['reservePreview']>(options?.reservePreview ?? (() => ({})));
   const initialize = vi.fn<RuntimeTransportClient['initialize']>(
-    options?.initialize ?? (async () => ({ capabilities: { plugins: [], routes: [], renderCapabilities: {} } })),
+    options?.initialize ?? (async () => ({ capabilities: { registrations: [], routes: [], renderCapabilities: {} } })),
   );
   const terminateHost = vi.fn(async () => {
     resolveClosed({ cause: 'render-timeout' });
@@ -279,7 +279,7 @@ describe('RuntimeClient renderStatus', () => {
         if (attempts === 1) {
           throw new Error('transport initialize failed');
         }
-        return { capabilities: { plugins: [], routes: [], renderCapabilities: {} } };
+        return { capabilities: { registrations: [], routes: [], renderCapabilities: {} } };
       },
     });
 
@@ -1272,7 +1272,7 @@ describe('RuntimeClient render timeout control plane', () => {
         if (attempts === 1) {
           throw new Error('transport initialize failed');
         }
-        return { capabilities: { plugins: [], routes: [], renderCapabilities: {} } };
+        return { capabilities: { registrations: [], routes: [], renderCapabilities: {} } };
       },
     });
     const geometryHashes: string[] = [];

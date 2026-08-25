@@ -1,0 +1,12 @@
+[
+  {
+    "name": "total (ESM JS) — measured 7441 B on 2026-08-23",
+    "path": ["dist/**/*.mjs", "!dist/**/wasm/**"],
+    "limit": "9 kB"
+  },
+  {
+    "name": "wasm assets (esbuild-wasm esbuild.wasm) — measured 2624444 B on 2026-08-23",
+    "path": "dist/**/*.wasm",
+    "limit": "3 MB"
+  }
+]

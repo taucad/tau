@@ -9,11 +9,11 @@ import { logLevels } from '@taucad/types/constants';
 import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 import type { OnWorkerLog } from '@taucad/types';
 import type { WatchEvent } from '@taucad/filesystem';
-import { SharedPool } from '@taucad/memory';
 import type {
   CapabilitiesManifest,
   CreateGeometryResult,
   ExportGeometryResult,
+  GetParametersResult,
   HashedGeometryResult,
   KernelIssue,
 } from '#types/runtime.types.js';
@@ -26,16 +26,21 @@ import type {
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { TranscoderDefinition, TranscoderEdge } from '#types/runtime-transcoder.types.js';
 import type { MaterializedRender, OperationOwner } from '#framework/render-artifact.js';
-import type { MockKernelWorkerOptions } from '#testing/kernel-testing.utils.js';
-import { MockKernelWorker, createMockFileSystem, createGeometryFile } from '#testing/kernel-testing.utils.js';
+// oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
+import type { MockKernelWorkerOptions } from '../../test/support/kernel-worker.fixture.js';
+/* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
+import {
+  MockKernelWorker,
+  createMockFileSystem,
+  createGeometryFile,
+} from '../../test/support/kernel-worker.fixture.js';
+/* oxlint-enable no-restricted-imports, import/extensions */
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import { checkAbort } from '#framework/cooperative-abort.js';
 import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
 import { signalSlot, abortReason } from '#types/runtime-protocol.types.js';
 import { signalBufferByteLength } from '#framework/runtime-framework.constants.js';
-import { imageEdgeSchemas } from '#transcoders/image/image-export-options.js';
-import { replicadExportSchemas } from '#kernels/replicad/replicad.schemas.js';
 
 const tessellationSchema = z.object({
   tessellation: z
@@ -45,6 +50,36 @@ const tessellationSchema = z.object({
     })
     .default({ linearTolerance: 0.1, angularTolerance: 15 }),
 });
+const imageViewSchema = z.object({ id: z.string(), label: z.string().optional(), phi: z.number(), theta: z.number() });
+const imageBaseSchema = z.object({
+  width: z.number().int().positive().default(1024),
+  height: z.number().int().positive().default(1024),
+  includeAxes: z.boolean().default(false),
+  includeLabel: z.boolean().default(false),
+  includeScale: z.boolean().default(false),
+  projection: z.enum(['perspective', 'orthographic']).default('perspective'),
+});
+const imageRouteSchema = z.union([
+  imageBaseSchema
+    .extend({
+      mode: z.literal('single').default('single'),
+      phi: z.number().default(60),
+      theta: z.number().default(45),
+    })
+    .strict(),
+  imageBaseSchema
+    .extend({
+      mode: z.literal('batch'),
+      views: z.array(imageViewSchema).min(1),
+    })
+    .strict(),
+]);
+const imageEdgeSchemas = {
+  png: imageRouteSchema,
+  webp: imageRouteSchema,
+  jpeg: imageRouteSchema,
+} as const;
+const strictStlExportSchema = z.object({ binary: z.boolean().default(true) }).strict();
 
 // =============================================================================
 // Test Helpers
@@ -1031,6 +1066,20 @@ describe('KernelWorker lifecycle', () => {
   // ---------------------------------------------------------------------------
 
   describe('render error cleanup', () => {
+    it('flushes the completed root render span before publishing geometry', async () => {
+      const worker = createConfiguredWorker();
+      const telemetry: Array<{ name: string }> = [];
+      let renderSpanWasPublished = false;
+      worker.setTelemetrySend((entries) => telemetry.push(...entries));
+      worker.onGeometryComputed = () => {
+        renderSpanWasPublished = telemetry.some(({ name }) => name === 'kernel.render');
+      };
+
+      await openAndWaitForRender(worker);
+
+      expect(renderSpanWasPublished).toBe(true);
+    });
+
     it('should clear the internal onProgress phase callback when render() throws', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
@@ -1186,6 +1235,120 @@ describe('KernelWorker lifecycle', () => {
       const result = await facade.resolveDependencies('/main.ts');
 
       expect(result).toEqual({ resolved: expectedDependencies, unresolved: [] });
+    });
+  });
+
+  describe('render preparation reuse', () => {
+    const parameterMiddleware = defineMiddleware({
+      id: 'parameter-reuse-test',
+      name: 'parameter-reuse-test',
+      async wrapGetParameters(input, handler) {
+        return handler(input);
+      },
+    });
+
+    class PreparationCountingWorker extends MockKernelWorker {
+      public dependencyCalls = 0;
+      public parameterCalls = 0;
+      public failParameters = false;
+      public kernelVersion = '1.0.0';
+      public middlewareRevision = 'a';
+
+      public setKernelOptions(options: Record<string, unknown>): void {
+        this.kernelInitOptionsMap.set('mock-kernel', options);
+      }
+
+      public override getMiddleware() {
+        return super.getMiddleware().map((entry) => ({ ...entry, id: `${entry.id}:${this.middlewareRevision}` }));
+      }
+
+      protected override getActiveKernelVersion(): string {
+        return this.kernelVersion;
+      }
+
+      protected override async onGetDependencies(
+        input: GetDependenciesInput,
+        runtime: KernelRuntime,
+      ): Promise<GetDependenciesResult> {
+        this.dependencyCalls += 1;
+        return super.onGetDependencies(input, runtime);
+      }
+
+      protected override async onGetParameters(
+        input: GetParametersInput,
+        runtime: KernelRuntime,
+      ): Promise<GetParametersResult> {
+        this.parameterCalls += 1;
+        if (this.failParameters) {
+          return { success: false, issues: [{ code: 'RUNTIME', message: 'failed', severity: 'error' }] };
+        }
+        return super.onGetParameters(input, runtime);
+      }
+    }
+
+    const createPreparationWorker = (): PreparationCountingWorker => {
+      const filesystem = Object.assign(createMockFileSystem(), {
+        watch: vi.fn(() => vi.fn()),
+      });
+      filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+        Object.fromEntries(paths.map((path) => [path, new Uint8Array([1, 2, 3])])),
+      );
+      const worker = new PreparationCountingWorker({ middleware: [parameterMiddleware], onLog: noopLog, filesystem });
+      // @ts-expect-error - white-box fixture installs the same watch-capable filesystem on the runtime seam.
+      worker.fileSystem = filesystem;
+      return worker;
+    };
+
+    it('reuses dependency discovery and successful parameters across parameter-only renders', async () => {
+      const worker = createPreparationWorker();
+      const file = createGeometryFile('main.ts');
+
+      await worker.render({ file, parameters: { width: 1 } });
+      await worker.render({ file, parameters: { width: 2 } });
+      await worker.render({ file, parameters: { width: 3 } });
+
+      expect(worker.dependencyCalls).toBe(1);
+      expect(worker.parameterCalls).toBe(1);
+      expect(worker.createGeometryCalls).toBe(3);
+    });
+
+    it('invalidates preparation reuse when an observed dependency changes', async () => {
+      const worker = createPreparationWorker();
+      const file = createGeometryFile('main.ts');
+      await worker.render({ file, parameters: {} });
+
+      await worker.notifyFileChanged(['/main.ts']);
+      await worker.render({ file, parameters: {} });
+
+      expect(worker.dependencyCalls).toBe(2);
+      expect(worker.parameterCalls).toBe(2);
+    });
+
+    it('misses the parameter cache when entry, kernel, options, or middleware identity changes', async () => {
+      const worker = createPreparationWorker();
+
+      await worker.render({ file: createGeometryFile('main.ts'), parameters: {} });
+      await worker.render({ file: createGeometryFile('other.ts'), parameters: {} });
+      worker.kernelVersion = '2.0.0';
+      await worker.render({ file: createGeometryFile('other.ts'), parameters: {} });
+      worker.setKernelOptions({ feature: true });
+      await worker.render({ file: createGeometryFile('other.ts'), parameters: {} });
+      worker.middlewareRevision = 'b';
+      await worker.render({ file: createGeometryFile('other.ts'), parameters: {} });
+
+      expect(worker.parameterCalls).toBe(5);
+    });
+
+    it('never caches a failed parameter extraction', async () => {
+      const worker = createPreparationWorker();
+      worker.failParameters = true;
+      const file = createGeometryFile('main.ts');
+
+      await worker.render({ file, parameters: {} });
+      worker.failParameters = false;
+      await worker.render({ file, parameters: {} });
+
+      expect(worker.parameterCalls).toBe(2);
     });
   });
 
@@ -3143,32 +3306,6 @@ describe('shared pools', () => {
 
     expect(close).toHaveBeenCalledOnce();
   });
-
-  it('should accept geometry pool buffer via setGeometryPoolBuffer', () => {
-    const worker = createConfiguredWorker();
-    const buffer = new SharedArrayBuffer(4096);
-
-    expect(() => {
-      worker.setGeometryPoolBuffer(buffer);
-    }).not.toThrow();
-  });
-
-  it('should expose geometryPool after setGeometryPoolBuffer and initialize', async () => {
-    const worker = createConfiguredWorker();
-    const buffer = new SharedArrayBuffer(256 * 1024);
-    worker.setGeometryPoolBuffer(buffer);
-
-    expect(worker.geometryPool).toBeUndefined();
-
-    await worker.initialize({
-      callbacks: { onLog: vi.fn() },
-      transferables: {},
-      options: {},
-    });
-
-    expect(worker.geometryPool).toBeDefined();
-    expect(worker.geometryPool).toBeInstanceOf(SharedPool);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -3251,6 +3388,7 @@ describe('transcoder loading', () => {
       }),
     );
     expect(threeMfRoute!.exportOptions.schema).toHaveProperty('type', 'object');
+    expect(mockModule.initialize).not.toHaveBeenCalled();
   });
 
   it('should route export through transcoder when format matches an edge', async () => {
@@ -3282,8 +3420,10 @@ describe('transcoder loading', () => {
     });
 
     const result = await worker.runExportGeometry('usdz');
+    const secondResult = await worker.runExportGeometry('usdz');
 
     expect(result.success).toBe(true);
+    expect(secondResult.success).toBe(true);
     if (result.success) {
       expect(result.data[0]!.mimeType).toBe('model/vnd.usdz+zip');
     }
@@ -3293,6 +3433,12 @@ describe('transcoder loading', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) as unknown as AbortSignal }),
       expect.any(Object),
     );
+    expect(mockModule.initialize).toHaveBeenCalledOnce();
+    expect(mockModule.transcode).toHaveBeenCalledTimes(2);
+
+    await worker.cleanup();
+    expect(mockModule.cleanup).toHaveBeenCalledOnce();
+    expect(mockModule.cleanup).toHaveBeenCalledWith({ initialized: true });
   });
 
   it('should fall through to direct kernel export when no transcoder route matches', async () => {
@@ -3331,7 +3477,7 @@ describe('transcoder loading', () => {
     expect(mockModule.transcode).not.toHaveBeenCalled();
   });
 
-  it('should clean up transcoders during cleanup', async () => {
+  it('should not initialize or clean up an unused transcoder', async () => {
     const mockModule = createMockTranscoderModule([{ from: 'glb', to: 'usdz', fidelity: 'mesh' }]);
 
     const worker = createConfiguredWorker({
@@ -3346,7 +3492,8 @@ describe('transcoder loading', () => {
 
     await worker.cleanup();
 
-    expect(mockModule.cleanup).toHaveBeenCalled();
+    expect(mockModule.initialize).not.toHaveBeenCalled();
+    expect(mockModule.cleanup).not.toHaveBeenCalled();
   });
 
   it('should propagate kernel export failure without calling transcoder', async () => {
@@ -4283,9 +4430,9 @@ describe('export schema hard-fail', () => {
     expect(result.issues[0]!.message).toContain('glb');
   });
 
-  it('should reject keys absent from the direct Replicad STL manifest schema', async () => {
+  it('should reject keys absent from a strict kernel export schema', async () => {
     const worker = createConfiguredWorker({
-      exportZodSchemas: { stl: replicadExportSchemas.stl },
+      exportZodSchemas: { stl: strictStlExportSchema },
     });
 
     await worker.initialize({ callbacks: { onLog: vi.fn() }, transferables: {}, options: {} });
@@ -4369,7 +4516,7 @@ describe('CapabilitiesManifest target shape', () => {
     });
 
     const manifest = worker.capabilitiesManifest;
-    expect(Object.keys(manifest).sort()).toEqual(['plugins', 'renderCapabilities', 'routes']);
+    expect(Object.keys(manifest).sort()).toEqual(['registrations', 'renderCapabilities', 'routes']);
     expect('kernelExports' in manifest).toBe(false);
     expect('transcodeEdges' in manifest).toBe(false);
     expect('exportRoutes' in manifest).toBe(false);

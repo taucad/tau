@@ -1,0 +1,11 @@
+{
+  "copyFiles": [
+    {
+      "from": "../../../node_modules/geist/dist/fonts/geist-sans/Geist-Regular.ttf",
+      "to": "src/fonts/Geist-Regular.ttf"
+    }
+  ],
+  "copyFilesSettings": {
+    "whenFileExists": "overwrite"
+  }
+}

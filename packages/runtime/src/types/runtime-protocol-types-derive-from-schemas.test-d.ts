@@ -33,6 +33,7 @@ import type {
   runtimeStateChangedArgsSchema,
   runtimeActiveKernelChangedArgsSchema,
   runtimeAbortArgsSchema,
+  runtimeBinaryMaterialisedArgsSchema,
   runtimeUpdateParametersArgsSchema,
   runtimeSetOptionsArgsSchema,
   runtimeLogArgsSchema,
@@ -52,6 +53,7 @@ import type {
   RuntimeProgressArgs,
   RuntimeUpdateParametersArgs,
   RuntimeSetOptionsArgs,
+  RuntimeBinaryMaterialisedArgs,
   RuntimeStateChangedArgs,
   RuntimeProtocol,
   WireAbortReasonCode,
@@ -60,6 +62,12 @@ import type {
 const branded = <T>(): T => undefined as unknown as T;
 
 describe('runtime-protocol types derive from schemas (C16)', () => {
+  it('RuntimeBinaryMaterialisedArgs derives from its strict schema', () => {
+    type Derived = z.input<typeof runtimeBinaryMaterialisedArgsSchema>;
+    assertType<RuntimeBinaryMaterialisedArgs>(branded<Derived>());
+    assertType<Derived>(branded<RuntimeBinaryMaterialisedArgs>());
+  });
+
   it('RuntimeInitializeArgs is structurally z.input<typeof runtimeInitializeArgsSchema>', () => {
     type Derived = z.input<typeof runtimeInitializeArgsSchema>;
     assertType<RuntimeInitializeArgs>(branded<Derived>());
@@ -162,10 +170,9 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
   });
 
   it('capabilitiesUpdated args agree with the schema', () => {
-    type Derived = z.input<typeof runtimeCapabilitiesUpdatedArgsSchema>;
-    type Declared = RuntimeProtocol['notifies']['capabilitiesUpdated']['args'];
+    type Derived = z.output<typeof runtimeCapabilitiesUpdatedArgsSchema>;
+    // The wire schema deliberately accepts future capability kinds that the current public union cannot name.
     assertType<{ capabilities: unknown }>(branded<Derived>());
-    assertType<Derived>(branded<Declared>());
   });
 
   it('kernelCommand args agree with the schema', () => {

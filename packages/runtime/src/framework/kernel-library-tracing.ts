@@ -3,7 +3,7 @@ import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 type SpanAttributes = Record<string, string | number | boolean>;
 type TraceableTarget = Record<PropertyKey, unknown> | ((...args: unknown[]) => unknown);
 
-/** Runtime library tracing modes. */
+/** Runtime library tracing modes. @public */
 export type KernelLibraryTraceMode = 'off' | 'summary' | 'per-call';
 
 /** Semantic execution scope for a traced library call. */
@@ -52,7 +52,7 @@ export type KernelLibraryTraceScopeOperation<T> = {
   operation: () => T;
 };
 
-/** Opaque handle returned by {@link createKernelLibraryTracer}. */
+/** Opaque handle returned by {@link createKernelLibraryTracer}. @public */
 export type KernelLibraryTraceHandle<Library> = {
   tracedLibrary: Library;
   runInScope<T>(input: KernelLibraryTraceScopeOperation<T>): T;
@@ -89,6 +89,7 @@ type SummaryRecordInput = {
  *
  * @param policy - Library trace policy to normalize.
  * @returns The policy with default span names filled in.
+ * @public
  */
 export function defineLibraryTracePolicy(policy: KernelLibraryTracePolicy): KernelLibraryTracePolicy {
   return {
@@ -103,6 +104,7 @@ export function defineLibraryTracePolicy(policy: KernelLibraryTracePolicy): Kern
  *
  * @param options - Tracer configuration and library policy.
  * @returns A trace handle containing the proxied library and internal helpers.
+ * @public
  */
 export function createKernelLibraryTracer<Library extends Record<PropertyKey, unknown>>(
   options: CreateKernelLibraryTracerOptions<Library>,

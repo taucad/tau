@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- file-system path keys (e.g. '/main.ts') are not camelCase identifiers. */
 /* oxlint-disable unicorn-js/prevent-abbreviations -- handler-callback shorthand `fn`/`telemetryFn` mirrors the runtime API surface. */
 /* oxlint-disable enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- structural cast types in `(result as { data: Array<{ bytes: Uint8Array }> })` describe wire payloads, not runtime allocations. */
 /* oxlint-disable prefer-destructuring -- `(seen[0]!.result as { data: ... }).data` casts then accesses; not a destructure-friendly pattern. */
@@ -55,8 +54,7 @@ async function flushMicrotasks(): Promise<void> {
   });
 }
 
-function createMockWorker(overrides?: Partial<KernelWorker> & { geometryPool?: SharedPool }): KernelWorker {
-  const { geometryPool, ...rest } = overrides ?? {};
+function createMockWorker(overrides?: Partial<KernelWorker>): KernelWorker {
   const base = {
     initialize: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     render: vi
@@ -76,13 +74,13 @@ function createMockWorker(overrides?: Partial<KernelWorker> & { geometryPool?: S
     handleSetOptions: vi.fn(),
     ensureLoadedBundler: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     setTelemetrySend: vi.fn(),
+    setDevtoolsTelemetryEnabled: vi.fn(),
+    setCompiledWasmModules: vi.fn(),
     flushTelemetry: vi.fn(),
     setSignalBuffer: vi.fn(),
-    setGeometryPoolBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
-    geometryPool: geometryPool ?? undefined,
     capabilitiesManifest: { routes: [], renderCapabilities: {} },
-    ...rest,
+    ...overrides,
   };
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- mock<T>() proxy not assignable to KernelWorker
   return base as unknown as KernelWorker;
@@ -109,7 +107,7 @@ describe('createWorkerDispatcher', () => {
   describe('calls', () => {
     it('settles `initialize` with the worker capabilities manifest', async () => {
       const manifest = {
-        plugins: [],
+        registrations: [],
         routes: [
           {
             targetFormat: 'usdz',
@@ -171,11 +169,15 @@ describe('createWorkerDispatcher', () => {
       const result = await fixture.client.call('export', { format: 'stl' });
 
       expect(result).toMatchObject({ success: true });
-      const data = (result as { data: Array<{ name: string; bytes: Uint8Array; mimeType: string }> }).data;
+      const data = (
+        result as unknown as {
+          data: Array<{ name: string; bytes: { delivery: 'inline'; bytes: Uint8Array }; mimeType: string }>;
+        }
+      ).data;
       // Export bytes are transferred — compare against an unrelated snapshot so the
       // detached source buffer doesn't blow up the structural equality check.
-      expect(data[0]?.bytes).toEqual(expectedSnapshot);
-      expect(data[1]?.bytes).toEqual(companionSnapshot);
+      expect(data[0]?.bytes.bytes).toEqual(expectedSnapshot);
+      expect(data[1]?.bytes.bytes).toEqual(companionSnapshot);
       expect(data.map(({ name, mimeType }) => ({ name, mimeType }))).toEqual([
         { name: 'model.obj', mimeType: 'model/obj' },
         { name: 'model.mtl', mimeType: 'model/mtl' },
@@ -218,9 +220,13 @@ describe('createWorkerDispatcher', () => {
         expect.any(AbortSignal),
       );
       expect(result).toMatchObject({ success: true });
-      const data = (result as { data: Array<{ name: string; bytes: Uint8Array; mimeType: string }> }).data;
-      expect(data[0]?.bytes).toEqual(expectedSnapshot);
-      expect(data[1]?.bytes).toEqual(companionSnapshot);
+      const data = (
+        result as unknown as {
+          data: Array<{ name: string; bytes: { delivery: 'inline'; bytes: Uint8Array }; mimeType: string }>;
+        }
+      ).data;
+      expect(data[0]?.bytes.bytes).toEqual(expectedSnapshot);
+      expect(data[1]?.bytes.bytes).toEqual(companionSnapshot);
       expect(data.map(({ name }) => name)).toEqual(['model.gltf', 'buffer.bin']);
       expect(worker.flushTelemetry).toHaveBeenCalledOnce();
     });
@@ -307,25 +313,41 @@ describe('createWorkerDispatcher', () => {
       expect(observed?.aborted).toBe(true);
     });
 
-    it('forwards memoryHandle SABs to the worker setters', async () => {
+    it('forwards worker-owned memory handles to the worker setters', async () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
 
       const signalBuffer = new SharedArrayBuffer(8, { maxByteLength: 16 });
       const geometryBuffer = new SharedArrayBuffer(4096);
+      const compiledModule = await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      const compiledWasmModules = [{ url: 'https://example.com/kernel.wasm', module: compiledModule }];
       await fixture.client.call('initialize', {
         memoryHandle: {
           signalBuffer,
           geometryPoolBuffer: geometryBuffer,
+          devtoolsTelemetry: true,
+          compiledWasmModules,
         },
       });
 
       expect(worker.setSignalBuffer).toHaveBeenCalledTimes(1);
-      expect(worker.setGeometryPoolBuffer).toHaveBeenCalledTimes(1);
+      expect(worker.setDevtoolsTelemetryEnabled).toHaveBeenCalledWith(true);
+      expect(worker.setCompiledWasmModules).toHaveBeenCalledWith(compiledWasmModules);
     });
   });
 
   describe('client → worker notifies', () => {
+    it('routes pooled-binary materialisation acknowledgements to the transport owner', async () => {
+      const acknowledgeBinary = vi.fn();
+      fixture = await buildFixture(createMockWorker(), { acknowledgeBinary });
+      await fixture.client.call('initialize', {});
+
+      fixture.client.notify('binaryMaterialised', { key: 'geometry-hash' });
+      await flushMicrotasks();
+
+      expect(acknowledgeBinary).toHaveBeenCalledWith('geometry-hash');
+    });
+
     it('routes `openFile` notify to worker.handleOpenFile', async () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
@@ -664,12 +686,12 @@ describe('createWorkerDispatcher', () => {
 
       onStateChanged!({ state: 'rendering', renderId, abortGeneration: 1 });
       onActiveKernelChanged!({ kernelId: 'replicad', renderId });
-      onCapabilitiesUpdated!({ plugins: [], routes: [], renderCapabilities: {} });
+      onCapabilitiesUpdated!({ registrations: [], routes: [], renderCapabilities: {} });
       await flushMicrotasks();
 
       expect(state).toEqual([{ state: 'rendering', renderId, abortGeneration: 1 }]);
       expect(kernels).toEqual([{ kernelId: 'replicad', renderId }]);
-      expect(caps).toEqual([{ capabilities: { plugins: [], routes: [], renderCapabilities: {} } }]);
+      expect(caps).toEqual([{ capabilities: { registrations: [], routes: [], renderCapabilities: {} } }]);
     });
 
     it('emits `errorEvent` from worker.onError', async () => {
@@ -747,8 +769,7 @@ describe('createWorkerDispatcher', () => {
       return (geometry): EncodedGeometry => {
         if (geometry.format !== 'gltf') return { value: geometry, transferables: [], tier: 'copy' };
         try {
-          if (!pool.has(geometry.hash)) pool.store(geometry.hash, geometry.content);
-          if (pool.has(geometry.hash)) {
+          if (pool.publish(geometry.hash, geometry.content)) {
             return {
               value: {
                 format: 'gltf',

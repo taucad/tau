@@ -8,7 +8,22 @@
 import { SourceMapConsumer } from 'source-map-js';
 import type { KernelStackFrame, FrameContext, ErrorLocation } from '#types/runtime.types.js';
 import { named } from '#framework/named.js';
-import { nodeExecFilePrefix, vfsNamespacePrefix } from '#bundler/esbuild.constants.js';
+
+const virtualSourcePrefix = 'vfs:';
+
+const normalizeEntryName = (name: string): string => {
+  if (!name.startsWith('file:')) {
+    return name.replaceAll('\\', '/');
+  }
+
+  try {
+    return decodeURIComponent(new URL(name).pathname)
+      .replace(/^\/(?=[A-Za-z]:\/)/, '')
+      .replaceAll('\\', '/');
+  } catch {
+    return name;
+  }
+};
 
 // =============================================================================
 // Stack Trace Parsing
@@ -22,6 +37,7 @@ type LibraryPattern = { pattern: string; moduleName: string };
  * @param error - the thrown value (only Error instances with `.stack` are processed)
  * @param options - optional configuration for frame classification, source mapping, and path resolution
  * @returns array of parsed stack frames, source-mapped when a source map is provided
+ * @public
  */
 export function parseStackTrace(
   error: unknown,
@@ -41,14 +57,18 @@ export function parseStackTrace(
   const lines = error.stack.split('\n');
 
   for (const line of lines) {
-    // Chrome: "    at functionName (file:line:column)"
+    // Chrome: "    at functionName (file:line:column)" or "    at file:line:column"
     // Firefox: "functionName@file:line:column"
-    const chromeMatch = /^\s*at\s+(?:(.+?)\s+)?\(?(.+):(\d+):(\d+)\)?$/.exec(line);
+    const chromeFunctionMatch = /^\s*at\s+(.+?)\s+\((.+):(\d+):(\d+)\)$/.exec(line);
+    const chromeBareMatch = /^\s*at\s+(.+):(\d+):(\d+)$/.exec(line);
     const firefoxMatch = /^(.*)@(.+):(\d+):(\d+)$/.exec(line);
 
-    const match = chromeMatch ?? firefoxMatch;
-    if (match) {
-      const [, rawFunctionName, fileName, lineNumber, columnNumber] = match;
+    const match = chromeFunctionMatch ?? firefoxMatch;
+    if (match ?? chromeBareMatch) {
+      const rawFunctionName = match?.[1];
+      const fileName = match?.[2] ?? chromeBareMatch?.[1];
+      const lineNumber = match?.[3] ?? chromeBareMatch?.[2];
+      const columnNumber = match?.[4] ?? chromeBareMatch?.[3];
       const functionName = rawFunctionName?.replace(/^Proxy\./, '') ?? '<anonymous>';
 
       frames.push({
@@ -121,10 +141,11 @@ function defaultClassifyFrame(fileName: string): FrameContext {
  * using the ES module export name table, which works identically in dev and prod.
  *
  * @returns classifier function that assigns a {@link FrameContext} to a given file name
+ * @public
  */
 export function createFrameClassifier(): (fileName: string) => FrameContext {
   return (fileName: string): FrameContext => {
-    if (fileName.startsWith('blob:') || fileName.startsWith('data:') || fileName.includes(nodeExecFilePrefix)) {
+    if (fileName.startsWith('blob:') || fileName.startsWith('data:')) {
       return 'user';
     }
 
@@ -146,10 +167,11 @@ export function createFrameClassifier(): (fileName: string) => FrameContext {
  *
  * @param sourcePath - raw source path from the source map
  * @returns cleaned project-local path for user presentation
+ * @public
  */
 export function resolveSourcePath(sourcePath: string): string {
-  const cleanPath = sourcePath.startsWith(vfsNamespacePrefix)
-    ? sourcePath.slice(vfsNamespacePrefix.length)
+  const cleanPath = sourcePath.startsWith(virtualSourcePrefix)
+    ? sourcePath.slice(virtualSourcePrefix.length)
     : sourcePath;
 
   return cleanPath.startsWith('/') ? cleanPath.slice(1) : cleanPath;
@@ -185,8 +207,7 @@ function applySourceMapToFrames(options: {
       const isBundledFrame =
         name.startsWith('blob:') ||
         name.startsWith('data:') ||
-        name.includes(nodeExecFilePrefix) ||
-        name === lastEntryName;
+        (lastEntryName !== undefined && normalizeEntryName(name) === normalizeEntryName(lastEntryName));
 
       if (!isBundledFrame || !frame.lineNumber) {
         return frame;
@@ -274,6 +295,7 @@ export function resolveLibrarySourcePath(moduleName: string, rawSource: string, 
  * @param libraryPatterns - patterns identifying which frames belong to known libraries
  * @param getSourceMapConsumer - factory that returns a cached SourceMapConsumer for a given module name
  * @returns frames with library entries resolved to original source positions
+ * @public
  */
 export function applyLibrarySourceMaps(
   frames: KernelStackFrame[],
@@ -353,6 +375,7 @@ export type ExportNameInfo = {
  *
  * @param moduleExports - the module's exports (from `import * as mod from '...'`)
  * @returns export name info for demangling and library classification
+ * @public
  */
 export function preserveExportNames(moduleExports: Record<string, unknown>): ExportNameInfo {
   const mangledToOriginal = new Map<string, string>();
@@ -382,6 +405,7 @@ export function preserveExportNames(moduleExports: Record<string, unknown>): Exp
  * @param frames - parsed stack frames to demangle
  * @param mangledToOriginal - mapping from mangled names to original export names
  * @returns frames with mangled names replaced by their original export names
+ * @public
  */
 export function demangleStackFrames(
   frames: KernelStackFrame[],
@@ -436,6 +460,7 @@ export function demangleStackFrames(
  * @param frames - parsed and demangled stack frames
  * @param libraryExportNames - set of all function/class export names from the library
  * @returns frames with matching entries reclassified from `framework` to `library`
+ * @public
  */
 export function classifyLibraryFrames(frames: KernelStackFrame[], libraryExportNames: Set<string>): KernelStackFrame[] {
   if (libraryExportNames.size === 0) {
@@ -470,6 +495,7 @@ export function classifyLibraryFrames(frames: KernelStackFrame[], libraryExportN
  * @param sourceMapJson - optional raw source map JSON for expression extent computation
  * @param resolveSourcePathFunction - optional path resolver override
  * @returns location of the first user-authored frame, or `undefined` if none found
+ * @public
  */
 export function deriveLocationFromFrames(
   frames: KernelStackFrame[],

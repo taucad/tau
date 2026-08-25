@@ -244,6 +244,14 @@ export const electronUtilityHost = (
           publish(geometry): EncodedGeometry {
             return encodeGeometry(geometry);
           },
+          publishBytes(_key, source) {
+            return {
+              value: { delivery: 'inline', bytes: new Uint8Array(source) },
+              transferables: [],
+              tier: 'copy',
+            };
+          },
+          acknowledge: () => undefined,
           tier: 'copy',
         },
       };

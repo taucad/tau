@@ -53,15 +53,48 @@ export {
 } from '#framework/render-artifact-finalizer.js';
 export type { MeshArtifactFinalizerInput, RenderArtifactFinalizerInput } from '#framework/render-artifact-finalizer.js';
 export { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
-export { loadBinaryFile } from '#kernels/kernel-module-helpers.js';
-export { createEmptyGlb, createEmptyGltf, createEmptyGltfGeometry } from '#utils/glb-writer.js';
-export { formatShapeName } from '#utils/shape-names.js';
-export { convertOffToGltf } from '#utils/off-to-gltf.js';
-export { canonicalizeOffWithManifold, convertOffToManifoldGltf } from '#utils/off-manifold-canonicalizer.js';
-export type { ConvertOffToManifoldGltfOptions } from '#utils/off-manifold-canonicalizer.js';
+export {
+  convertRawIssuesToKernelIssues,
+  createKernelModuleRegistryExpression,
+  createKernelModuleShim,
+  enrichIssueLocation,
+  extractDefaultParameters,
+  getModuleRegistry,
+  isRecordObject,
+  KERNEL_MODULES_KEY,
+  loadBinaryFile,
+  registerKernelModule,
+  toVmEntryPath,
+} from '#kernels/kernel-module-helpers.js';
+export type { RuntimeModuleExports } from '#kernels/kernel-module-helpers.js';
+export { checkAbort } from '#framework/cooperative-abort.js';
+export { named } from '#framework/named.js';
+export { getWebAssemblyExceptionConstructor, isWebAssemblyException } from '#framework/wasm-exception.js';
+export type { WebAssemblyException } from '#framework/wasm-exception.js';
+export {
+  createFrameClassifier,
+  classifyLibraryFrames,
+  demangleStackFrames,
+  deriveLocationFromFrames,
+  applyLibrarySourceMaps,
+  parseStackTrace,
+  preserveExportNames,
+  resolveSourcePath,
+} from '#framework/error-enrichment.js';
+export { createKernelLibraryTracer, defineLibraryTracePolicy } from '#framework/kernel-library-tracing.js';
+export type { KernelLibraryTraceHandle, KernelLibraryTraceMode } from '#framework/kernel-library-tracing.js';
+export { isNode, resolveFileUrl } from '#framework/environment.js';
+export { withoutEmscriptenProcessListeners } from '#framework/emscripten-listeners.js';
+export { compileWasmStreaming } from '#framework/wasm-loader.js';
+export { resolveWasmUrl } from '#framework/wasm-url.js';
+export type { MaterializedRender } from '#framework/render-artifact.js';
+export { isNotFoundError } from '#filesystem/filesystem-errors.js';
 export { asBuffer } from '@taucad/utils/file';
 export { hashString, sha256Bytes, sha256String } from '@taucad/utils/hash';
 export { resolveImportPath } from '@taucad/utils/import';
 export { joinPath, resolveVirtualPath } from '@taucad/utils/path';
+export { jsonSchemaFromJson } from '@taucad/utils/schema';
+export { Topic } from '@taucad/events';
+export type { TopicOptions, TopicSubscribeOptions, TopicSubscription } from '@taucad/events';
 export { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 export type { CoordinateSystemOptions, UnitOptions } from '#types/export-option-schemas.js';

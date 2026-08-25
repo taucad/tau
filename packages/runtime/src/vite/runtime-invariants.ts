@@ -18,22 +18,3 @@
  * @internal
  */
 export const runtimePackages = ['@taucad/runtime'] as const;
-
-/**
- * `build.assetsInlineLimit` callback that prevents `.wasm` files from being
- * inlined as base64 data URLs. Inlining breaks worker-side V8 bytecode caching
- * — workers must fetch each WASM file as its own response so the browser/Node
- * can cache the compiled module.
- *
- * Returning `undefined` for non-WASM assets defers to Vite's default (4 KB)
- * threshold, leaving consumer overrides intact.
- *
- * @internal
- *
- * @param filePath - The asset path Vite is asking us to classify.
- *
- * @returns `false` for `.wasm` (forces emission as a separate file), or
- *   `undefined` to defer to the default threshold for any other asset.
- */
-export const wasmAssetsInlineLimit = (filePath: string): false | undefined =>
-  filePath.endsWith('.wasm') ? false : undefined;

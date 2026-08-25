@@ -18,6 +18,7 @@ import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { isRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
+import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(
   (value) => value === undefined || isRuntimeFileSystem(value),
@@ -25,7 +26,6 @@ const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(
 const runtimeDefinitionSchema = z.custom<AnyRuntimeDefinition>(
   (value) => value === undefined || isRuntimeDefinition(value),
 );
-
 export const inProcessClientOptionsSchema = z
   .object({
     /**
@@ -49,6 +49,12 @@ export const inProcessClientOptionsSchema = z
         maxEntries: z.number().int().positive().optional(),
         maxEntryBytes: z.number().int().positive().optional(),
       })
+      .optional(),
+    /** Explicit Chrome DevTools Performance Timeline mirroring. */
+    devtoolsTelemetry: z.boolean().optional(),
+    compiledWasmModules: z
+      .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).strict())
+      .readonly()
       .optional(),
   })
   .strict();

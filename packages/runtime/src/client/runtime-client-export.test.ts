@@ -105,7 +105,7 @@ function createFakeTransport(options?: { deferExports?: boolean }) {
     open: vi.fn(async () => ({ channel })),
     initialize: vi.fn(async () => ({
       capabilities: {
-        plugins: [],
+        registrations: [],
         routes: [],
         renderCapabilities: {},
       },

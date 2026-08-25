@@ -5,6 +5,8 @@ import type { FileSystemBridge } from '@taucad/fs-bridge';
 import type { MessagePortLike } from '@taucad/rpc';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
+/**
+ */
 export type WorkerFileSystemProxy = RuntimeFileSystemBase & {
   watchReady?(
     request: WatchRequest,

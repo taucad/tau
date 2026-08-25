@@ -1,73 +1,85 @@
-/* eslint-disable @typescript-eslint/naming-convention -- file map keys are filesystem paths, not identifiers */
 import { describe, expectTypeOf, it } from 'vitest';
+import { z } from 'zod';
 import type { RuntimeClient } from '#index.js';
 import type { FileExtension } from '#types/index.js';
 import { createNodeClient } from '#node.js';
+import { defineKernel } from '#types/runtime-kernel.types.js';
+import { defineTranscoder } from '#types/runtime-transcoder.types.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
+
+const kernel = defineKernel({
+  id: 'typed-kernel',
+  extensions: ['typed'],
+  name: 'TypedKernel',
+  version: '1.0.0',
+  exportFormats: {
+    glb: { optionsSchema: z.object({ binary: z.boolean().default(true) }), content: ['includeEdges'] },
+    stl: { optionsSchema: z.object({ tolerance: z.number().optional() }) },
+  },
+  async initialize() {
+    return {};
+  },
+  async getDependencies({ entryPath }) {
+    return { resolved: [entryPath], unresolved: [] };
+  },
+  async getParameters() {
+    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+  },
+  async createGeometry() {
+    return { geometry: { format: 'gltf', content: new Uint8Array() }, nativeHandle: {} };
+  },
+  async exportGeometry() {
+    return { success: true, data: [], issues: [] };
+  },
+});
+
+const imageTranscoder = defineTranscoder({
+  id: 'typed-image',
+  name: 'TypedImage',
+  version: '1.0.0',
+  edges: [
+    {
+      from: 'glb',
+      to: 'webp',
+      fidelity: 'mesh',
+      optionsSchema: z.object({ width: z.number().default(768), height: z.number().default(432), quality: z.number() }),
+      content: ['includeEdges'],
+    },
+  ] as const,
+  async initialize() {
+    return {};
+  },
+  async transcode(input) {
+    return { success: true, data: input.files, issues: [] };
+  },
+});
+
+const runtime = defineRuntime({ kernels: [kernel()] });
+const richRuntime = defineRuntime({ kernels: [kernel()], transcoders: [imageTranscoder()] });
 
 describe('createNodeClient configured type inference', () => {
   it('can widen to the public client contract at a dynamic consumer boundary', async () => {
-    const configuredClient = await createNodeClient();
+    const configuredClient = await createNodeClient(undefined, { runtime });
     const client: RuntimeClient = configuredClient;
-    const format = 'webp' as FileExtension;
-    const content: Record<string, unknown> = { futureSemantic: { required: false } };
-
-    void client.export(format, {
-      source: { files: { 'main.ts': 'export default () => null' } },
-      parameters: { enabled: false },
-      exportOptions: { futurePluginOption: { values: [0, '', false] } },
-      content,
-    });
+    const format = 'glb' as FileExtension;
+    void client.export(format, { source: { files: { 'main.typed': 'fixture' } } });
   });
 
-  it('preserves preset export options and content declarations', async () => {
-    const client = await createNodeClient();
+  it('keeps explicitly supplied kernel export typing', async () => {
+    const client = await createNodeClient(undefined, { runtime });
+    void client.export('glb', { source: { files: { 'main.typed': 'fixture' } } });
+    void client.export('stl', { exportOptions: { tolerance: 0.01 } });
+    // @ts-expect-error -- no image transcoder is registered.
+    void client.export('webp');
+  });
+
+  it('preserves explicitly supplied transcoder options and content declarations', async () => {
+    const client = await createNodeClient(undefined, { runtime: richRuntime });
     const result = client.export('webp', {
-      source: { files: { 'main.ts': 'export default () => null' } },
+      source: { files: { 'main.typed': 'fixture' } },
       content: { includeEdges: true },
-      exportOptions: { width: 768, height: 432 },
+      exportOptions: { width: 768, height: 432, quality: 0.8 },
     });
     expectTypeOf(result).toEqualTypeOf<ReturnType<typeof client.export>>();
-
-    void client.export('webp', {
-      source: { files: { 'main.ts': 'export default () => null' } },
-      exportOptions: { quality: 0.8 },
-    });
-    // The preset union accepts another advertised STL route's option here;
-    // the selected Replicad route rejects unknown `tolerance` at runtime.
-    void client.export('stl', { exportOptions: { tolerance: 0.01 } });
-
-    void client.export('stl', {
-      source: { files: { 'main.ts': 'export default () => null' } },
-      // @ts-expect-error -- STL routes do not advertise framework content
-      content: { includeEdges: true },
-    });
-
-    const dynamicOptions = { futurePluginOption: true };
-    for (const format of [
-      '3ds',
-      '3mf',
-      'dae',
-      'fbx',
-      'glb',
-      'gltf',
-      'jpeg',
-      'obj',
-      'ply',
-      'png',
-      'step',
-      'stl',
-      'usda',
-      'usdz',
-      'webp',
-      'x',
-      'x3d',
-    ] as const) {
-      void client.export(format, { exportOptions: dynamicOptions });
-    }
-    void client.render({
-      source: { files: { 'main.ts': 'export default () => null' } },
-      renderOptions: dynamicOptions,
-    });
-    void client.setOptions(dynamicOptions);
   });
 });

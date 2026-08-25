@@ -1,7 +1,0 @@
-{
-  "name": "vm",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "libs/vm",
-  "projectType": "library",
-  "tags": ["scope:shared", "type:lib"]
-}

@@ -7,7 +7,7 @@
   {
     "name": "@taucad/runtime",
     "path": "dist/index.mjs",
-    "limit": "1 kB"
+    "limit": "1.1 kB"
   },
   {
     "name": "@taucad/runtime/worker/web",
@@ -15,14 +15,44 @@
     "limit": "3 kB"
   },
   {
-    "name": "@taucad/runtime/worker/node",
-    "path": "dist/worker/node.mjs",
-    "limit": "3 kB"
+    "name": "@taucad/runtime/worker",
+    "path": "dist/worker/index.mjs",
+    "limit": "1 kB"
   },
   {
-    "name": "@taucad/runtime/vm",
-    "path": "dist/vm.mjs",
+    "name": "@taucad/runtime/client",
+    "path": "dist/client/index.mjs",
+    "limit": "1.5 kB"
+  },
+  {
+    "name": "@taucad/runtime/kernel",
+    "path": "dist/plugins/kernel-plugin-entry.mjs",
+    "limit": "5 kB"
+  },
+  {
+    "name": "@taucad/runtime/node",
+    "path": "dist/node.mjs",
     "limit": "1 kB"
+  },
+  {
+    "name": "@taucad/runtime/electron/utility",
+    "path": "dist/electron/utility.mjs",
+    "limit": "1 kB"
+  },
+  {
+    "name": "@taucad/runtime/transport/in-process",
+    "path": "dist/transport/in-process.mjs",
+    "limit": "500 B"
+  },
+  {
+    "name": "@taucad/runtime/transport/web",
+    "path": "dist/transport/web.mjs",
+    "limit": "1.5 kB"
+  },
+  {
+    "name": "@taucad/runtime/transport/node",
+    "path": "dist/transport/node.mjs",
+    "limit": "750 B"
   },
   {
     "name": "@taucad/runtime/transport/websocket",
@@ -33,35 +63,5 @@
     "name": "@taucad/runtime/transport/websocket-host",
     "path": "dist/transport/websocket-host.mjs",
     "limit": "2 kB"
-  },
-  {
-    "name": "kernel: replicad",
-    "path": "dist/kernels/replicad/replicad.kernel.mjs",
-    "limit": "5 kB"
-  },
-  {
-    "name": "kernel: zoo",
-    "path": "dist/kernels/zoo/zoo.kernel.mjs",
-    "limit": "3 kB"
-  },
-  {
-    "name": "kernel: manifold",
-    "path": "dist/kernels/manifold/manifold.kernel.mjs",
-    "limit": "3 kB"
-  },
-  {
-    "name": "kernel: opencascade",
-    "path": "dist/kernels/opencascade/opencascade.kernel.mjs",
-    "limit": "4.25 kB"
-  },
-  {
-    "name": "kernel: jscad",
-    "path": "dist/kernels/jscad/jscad.kernel.mjs",
-    "limit": "3 kB"
-  },
-  {
-    "name": "bundler: esbuild",
-    "path": "dist/bundler/esbuild.bundler.mjs",
-    "limit": "1 kB"
   }
 ]

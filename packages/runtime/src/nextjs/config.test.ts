@@ -24,9 +24,12 @@ describe('withTauRuntime', () => {
     expect(config.turbopack).not.toHaveProperty('rules');
     expect(config.turbopack.resolveAlias).toEqual({
       fs: '@taucad/runtime/nextjs/browser-node-builtins',
+      'node:crypto': '@taucad/runtime/nextjs/browser-node-builtins',
       'node:fs': '@taucad/runtime/nextjs/browser-node-builtins',
       'node:fs/promises': '@taucad/runtime/nextjs/browser-node-builtins',
+      'node:path': '@taucad/runtime/nextjs/browser-node-builtins',
       'node:url': '@taucad/runtime/nextjs/browser-node-builtins',
+      path: '@taucad/runtime/nextjs/browser-node-builtins',
     });
   });
 
@@ -111,6 +114,7 @@ describe('withTauRuntime', () => {
 
   it('should compose the application Webpack hook before browser runtime invariants', () => {
     type TestWebpackConfig = {
+      module?: { rules?: unknown[] };
       plugins?: unknown[];
       resolve?: { alias?: Record<string, unknown> };
     };
@@ -147,18 +151,33 @@ describe('withTauRuntime', () => {
       webpack: { NormalModuleReplacementPlugin: ReplacementPlugin },
     };
 
-    const browserConfig = config.webpack({ plugins: ['next-plugin'] }, context);
+    const browserConfig = config.webpack(
+      { module: { rules: ['application-rule'] }, plugins: ['next-plugin'] },
+      context,
+    );
     const replacement = browserConfig.plugins?.at(-1) as ReplacementPlugin;
     const resource = { request: 'node:fs/promises' };
     replacement.replace(resource);
 
     expect(browserConfig.plugins).toEqual(['next-plugin', 'application-plugin', replacement]);
+    expect(browserConfig.module?.rules).toEqual([
+      'application-rule',
+      {
+        enforce: 'pre',
+        test: /\.[cm]?[jt]sx?$/,
+        use: [expect.stringMatching(/\/nextjs\/package-assets-loader\.mjs$/)],
+      },
+    ]);
     expect(browserConfig.resolve?.alias).toEqual({
       application: './application.ts',
       fs$: '@taucad/runtime/nextjs/browser-node-builtins',
       'fs/promises$': '@taucad/runtime/nextjs/browser-node-builtins',
+      path$: '@taucad/runtime/nextjs/browser-node-builtins',
+      crypto$: '@taucad/runtime/nextjs/browser-node-builtins',
       url$: '@taucad/runtime/nextjs/browser-node-builtins',
     });
+    expect(replacement.pattern.test('node:crypto')).toBe(true);
+    expect(replacement.pattern.test('node:path')).toBe(true);
     expect(replacement.pattern.test('node:url')).toBe(true);
     expect(resource.request).toBe('fs/promises');
 

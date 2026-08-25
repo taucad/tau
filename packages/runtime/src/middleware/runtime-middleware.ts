@@ -14,7 +14,10 @@ import type {
 import type { RuntimeLogger, KernelFileSystem } from '#types/runtime-kernel.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type { MiddlewarePlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
-import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+import {
+  attachRuntimePluginDefinition,
+  attachRuntimePluginFactoryOptions,
+} from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type { ContentKeysOf, RuntimeContentDeclaration, RuntimeContentKey } from '#types/runtime-content.types.js';
 import { validateRuntimeContentDeclarations } from '#types/runtime-content.types.js';
@@ -166,7 +169,8 @@ type MiddlewareDefinitionConfig<
     id: Id;
   };
 
-type MiddlewarePluginRegistration<
+/** Registration returned by a {@link MiddlewarePluginFactory}. @public */
+export type MiddlewarePluginRegistration<
   Id extends string,
   StateSchema extends z.ZodObject<z.ZodRawShape>,
   OptionsSchema extends z.ZodObject<z.ZodRawShape>,
@@ -245,7 +249,7 @@ export function defineMiddleware<
 ): MiddlewarePluginFactory<Id, z.input<OptionsSchema>, StateSchema, OptionsSchema, Content>;
 /** @public */
 export function defineMiddleware(options: unknown): unknown {
-  const { id, peerRuntimeVersion, permissions, ...middlewareDefinition } = options as MiddlewareDefinitionConfig<
+  const { id, permissions, ...middlewareDefinition } = options as MiddlewareDefinitionConfig<
     string,
     z.ZodObject<z.ZodRawShape>,
     z.ZodObject<z.ZodRawShape>,
@@ -262,11 +266,13 @@ export function defineMiddleware(options: unknown): unknown {
   if (middlewareDefinition.mutates === false && middlewareDefinition.getDependencies) {
     throw new Error(`Middleware "${id}" cannot declare getDependencies when mutates is false`);
   }
-  const factory = ((pluginOptions?: Record<string, unknown>) =>
-    attachRuntimePluginDefinition(
+  const factory = ((pluginOptions?: Record<string, unknown>) => {
+    if (pluginOptions !== undefined && middlewareDefinition.optionsSchema === undefined) {
+      throw new TypeError(`Middleware "${id}" does not accept options.`);
+    }
+    return attachRuntimePluginDefinition(
       {
         id,
-        ...(peerRuntimeVersion === undefined ? {} : { peerRuntimeVersion }),
         ...(permissions === undefined ? {} : { permissions }),
         options: pluginOptions,
       },
@@ -284,8 +290,9 @@ export function defineMiddleware(options: unknown): unknown {
         wrapExportGeometry: middlewareDefinition.wrapExportGeometry,
         wrapGetParameters: middlewareDefinition.wrapGetParameters,
       }),
-    )) as MiddlewarePluginFactory<string, unknown>;
-  return factory;
+    );
+  }) as MiddlewarePluginFactory<string, unknown>;
+  return attachRuntimePluginFactoryOptions(factory, middlewareDefinition.optionsSchema !== undefined);
 }
 
 /**

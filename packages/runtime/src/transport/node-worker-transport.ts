@@ -47,20 +47,6 @@
  *   }),
  * });
  * ```
- *
- * @example <caption>Bundled full-preset entry — no app-owned worker file</caption>
- * ```typescript
- * import { createRuntimeClient } from '@taucad/runtime';
- * import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
- *
- * // `node:worker_threads.Worker` rejects a bare `file://` string, so the
- * // resolved specifier is handed over as a URL.
- * const client = createRuntimeClient({
- *   transport: nodeWorkerTransport({
- *     url: new URL(import.meta.resolve('@taucad/runtime/worker/node')),
- *   }),
- * });
- * ```
  */
 
 import { defineRuntimeTransport } from '#transport/define-runtime-transport.js';
@@ -72,11 +58,7 @@ export type { NodeWorkerLike, NodeWorkerClientOptions } from '#transport/node-wo
 export type { NodeWorkerHostOptions } from '#transport/node-worker-host.js';
 
 /**
- * Bundled node-worker client transport plugin (`nodeWorkerTransport`).
- *
- * ponytail: `import.meta.resolve` is the platform's answer to naming the bundled
- * entry; a `nodeWorkerEntryUrl` export is a one-liner the day a bundler-hosted
- * consumer proves resolve insufficient.
+ * Node-worker client transport plugin (`nodeWorkerTransport`).
  *
  * @public
  */

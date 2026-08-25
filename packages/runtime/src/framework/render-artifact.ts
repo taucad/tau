@@ -4,16 +4,16 @@ import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 
-/** Exact content-free input passed to the terminal kernel create hook. @internal */
+/** Exact content-free input passed to the terminal kernel create hook. @public */
 export type NativeBuildInput = {
   readonly entryPath: string;
   readonly parameters: Record<string, unknown>;
 } & ({ readonly options: Record<string, unknown> } | { readonly options?: never });
 
-/** Private result carrier used to preserve exact replay input through middleware and caches. @internal */
+/** Private result carrier used to preserve exact replay input through middleware and caches. @public */
 export const nativeBuildInputSymbol: unique symbol = Symbol('nativeBuildInput');
 
-/** @internal */
+/** @public */
 export type NativeBuildInputCarrier = {
   readonly [nativeBuildInputSymbol]?: NativeBuildInput;
 };
@@ -108,9 +108,16 @@ export type MaterializedRender = {
  * Per-operation dependency-resolution scratchpad shared across parameter and geometry phases.
  * @public
  */
+export type CommonDependencySet = {
+  readonly fileDependencies: Dependency[];
+  readonly trailingDependencies: Dependency[];
+};
+
 export type DependencyResolutionContext = {
-  /** Base dependencies cached independently for each concrete middleware execution list. */
-  baseDependenciesByExecutionList?: Map<string, Dependency[]>;
+  /** Kernel/file/framework dependencies shared by parameter and geometry phases. */
+  commonDependencies?: Promise<CommonDependencySet>;
+  /** Phase-specific middleware dependencies keyed by the concrete execution list. */
+  middlewareDependenciesByExecutionList?: Map<string, Promise<Dependency[]>>;
 };
 
 /**

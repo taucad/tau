@@ -16,16 +16,16 @@ import { createExportFile } from '@taucad/types/constants';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import type { GetDependenciesInput, KernelDefinition } from '#types/runtime-kernel.types.js';
 import type { KernelIssue } from '#types/runtime.types.js';
-import { seedTestFileSystem, initializeWorkerForTesting, createGeometryFile } from '#testing/kernel-testing.utils.js';
+/* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
+import {
+  seedTestFileSystem,
+  initializeWorkerForTesting,
+  createGeometryFile,
+} from '../../test/support/kernel-worker.fixture.js';
+/* oxlint-enable no-restricted-imports, import/extensions */
 import { attachRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { MiddlewarePlugin } from '#plugins/plugin-types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
-import {
-  exportMemoryCache,
-  geometryCache,
-  geometryMemoryCache,
-  meshMemoryCache,
-} from '#middleware/geometry-cache.middleware.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type { NativeBuildInput } from '#framework/render-artifact.js';
@@ -95,9 +95,6 @@ const modelFile = () => createGeometryFile('model.mock');
 
 describe('mesh/build/export phase separation', () => {
   beforeEach(async () => {
-    geometryMemoryCache.clear();
-    meshMemoryCache.clear();
-    exportMemoryCache.clear();
     await seedTestFileSystem({ '/model.mock': 'mock-model' });
   });
 
@@ -294,49 +291,6 @@ describe('mesh/build/export phase separation', () => {
     }
     expect(counters.create).toBe(1);
     expect(counters.mesh).toBe(0);
-  });
-
-  it('geometry cache serves the build entry and the mesh cache serves the display artifact', async () => {
-    const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
-    const worker = await createWorker(createDeferredKernel(counters), [geometryCache()]);
-
-    const first = await worker.createGeometry({ file: modelFile(), parameters: {} });
-    expect(first.success).toBe(true);
-    expect(counters.create).toBe(1);
-    expect(counters.mesh).toBe(1);
-
-    // Clear the L1 memory caches so the second render exercises the L2 file
-    // entries — including the msgpack round-trip of the data-less build entry.
-    geometryMemoryCache.clear();
-    meshMemoryCache.clear();
-
-    const second = await worker.createGeometry({ file: modelFile(), parameters: {} });
-    expect(second.success).toBe(true);
-    if (second.success && second.data.format === 'gltf') {
-      expect(second.data.content).toEqual(displayBytes);
-    }
-    // Both kernel phases short-circuited by their caches.
-    expect(counters.create).toBe(1);
-    expect(counters.mesh).toBe(1);
-  });
-
-  it('display after a cold export reuses the cached build entry and meshes once', async () => {
-    const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
-    const worker = await createWorker(createDeferredKernel(counters), [geometryCache()]);
-
-    const exported = await worker.exportModel({ format: 'step', file: modelFile(), parameters: {} });
-    expect(exported.success).toBe(true);
-    expect(counters.create).toBe(1);
-    expect(counters.mesh).toBe(0);
-
-    const display = await worker.createGeometry({ file: modelFile(), parameters: {} });
-    expect(display.success).toBe(true);
-    if (display.success && display.data.format === 'gltf') {
-      expect(display.data.content).toEqual(displayBytes);
-    }
-    // Build entry came from the geometry cache; only the mesh phase ran.
-    expect(counters.create).toBe(1);
-    expect(counters.mesh).toBe(1);
   });
 
   it('runs a dual-hook content contributor only at the artifact-producing phase', async () => {

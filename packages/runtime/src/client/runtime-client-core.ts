@@ -1177,6 +1177,8 @@ export function createRuntimeClient(options: RuntimeClientOptionsWithTransport<A
    */
   let lastEmittedGeometryHashKey: string | undefined;
 
+  /**
+   */
   type ConnectionAttempt = {
     readonly promise: Promise<RuntimeWorkerClient>;
     readonly reject: (error: Error) => void;

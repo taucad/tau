@@ -15,7 +15,6 @@ describe('plugin factory public surface', () => {
     const kernel = defineKernel({
       id: 'kernel',
       extensions: ['ts'],
-      peerRuntimeVersion: '1.0.0',
       permissions,
       name: 'KernelDefinition',
       version: '1.0.0',
@@ -40,7 +39,6 @@ describe('plugin factory public surface', () => {
 
     const middleware = defineMiddleware({
       id: 'middleware',
-      peerRuntimeVersion: '1.0.0',
       permissions,
       name: 'MiddlewareDefinition',
       version: '1.0.0',
@@ -52,7 +50,6 @@ describe('plugin factory public surface', () => {
     const bundler = defineBundler({
       id: 'bundler',
       extensions: ['ts'],
-      peerRuntimeVersion: '1.0.0',
       permissions,
       name: 'BundlerDefinition',
       version: '1.0.0',
@@ -75,7 +72,6 @@ describe('plugin factory public surface', () => {
 
     const transcoder = defineTranscoder({
       id: 'transcoder',
-      peerRuntimeVersion: '1.0.0',
       permissions,
       edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh' }] as const,
       name: 'TranscoderDefinition',
@@ -104,13 +100,13 @@ describe('plugin factory public surface', () => {
       expect(Object.getOwnPropertySymbols(plugin)).toHaveLength(1);
     }
 
-    expect(Object.keys(kernelPlugin)).toEqual(['id', 'extensions', 'peerRuntimeVersion', 'permissions', 'options']);
-    expect(Object.keys(middlewarePlugin)).toEqual(['id', 'peerRuntimeVersion', 'permissions', 'options']);
-    expect(Object.keys(bundlerPlugin)).toEqual(['id', 'extensions', 'peerRuntimeVersion', 'permissions', 'options']);
-    expect(Object.keys(transcoderPlugin)).toEqual(['id', 'peerRuntimeVersion', 'permissions', 'options']);
+    expect(Object.keys(kernelPlugin)).toEqual(['id', 'extensions', 'exportFormats', 'permissions', 'options']);
+    expect(Object.keys(middlewarePlugin)).toEqual(['id', 'permissions', 'options']);
+    expect(Object.keys(bundlerPlugin)).toEqual(['id', 'extensions', 'permissions', 'options']);
+    expect(Object.keys(transcoderPlugin)).toEqual(['id', 'edges', 'permissions', 'options']);
 
     for (const plugin of plugins) {
-      expect(plugin).toMatchObject({ peerRuntimeVersion: '1.0.0', permissions });
+      expect(plugin).toMatchObject({ permissions });
     }
 
     await expect(resolveRuntimePluginDefinition('kernel', kernelPlugin)).resolves.toMatchObject({

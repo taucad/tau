@@ -27,10 +27,10 @@ Use `scope:ui` for UI-only app-libs. Use `scope:shared` only with named UI and A
 ## Usage
 
 ```bash
-pnpm nx g ./tools/workspace-plugin/generators.json:package <name> --description="..."
+pnpm nx g @taucad/workspace-plugin:package <name> --description="..."
 ```
 
-For a package that supplies runtime capabilities, use the **plugin** generator instead — it scaffolds under `packages/plugins/`, emits the `plugin` factory, the package-named alias, and one file per capability:
+For a package that supplies runtime capabilities, use the **plugin** generator instead — it scaffolds under `packages/plugins/`, declares the package-named factory, re-exports it as `plugin`, and emits one file per capability:
 
 ```bash
 pnpm nx g @taucad/workspace-plugin:plugin <name> --capabilities=kernel,transcoder --description="..."
@@ -53,9 +53,9 @@ See `.agents/skills/new-kernel/SKILL.md` for the kernel-specific walkthrough.
 ### Example
 
 ```bash
-pnpm nx g ./tools/workspace-plugin/generators.json:package react --description="React hooks for @taucad/runtime"
+pnpm nx g @taucad/workspace-plugin:package react --description="React hooks for @taucad/runtime"
 
-pnpm nx g ./tools/workspace-plugin/generators.json:package files \
+pnpm nx g @taucad/workspace-plugin:package files \
   --scope=apps/libs --scope-tag=ui --layer=feature --react
 ```
 

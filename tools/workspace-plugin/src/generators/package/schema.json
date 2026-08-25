@@ -19,9 +19,29 @@
     },
     "scope": {
       "type": "string",
-      "enum": ["packages", "libs", "apps/libs"],
+      "enum": ["packages", "libs", "apps/libs", "tools"],
       "default": "packages",
-      "description": "Placement, which derives tags, privacy, and license (packages for publishable Apache surfaces, libs for shared Apache capabilities, apps/libs for private AGPL application capabilities)"
+      "description": "Placement, which derives tags, privacy, and build defaults (packages for publishable surfaces, libs for shared capabilities, apps/libs for private application capabilities, tools for private dev-time-only tooling)"
+    },
+    "scopeTag": {
+      "type": "string",
+      "enum": ["shared", "ui", "api"],
+      "default": "shared",
+      "description": "Application scope tag"
+    },
+    "layer": {
+      "type": "string",
+      "enum": ["feature", "ui", "data-access", "util"],
+      "description": "Required architecture layer for apps/libs projects"
+    },
+    "react": {
+      "type": "boolean",
+      "default": false,
+      "description": "Configure React peers, JSX, jsdom, and Testing Library"
+    },
+    "build": {
+      "type": "boolean",
+      "description": "Emit tsdown build configuration (defaults to false for apps/libs and true otherwise)"
     }
   },
   "required": ["name"]

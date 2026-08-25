@@ -11,7 +11,12 @@ import type { Tree } from '@nx/devkit';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { canonicalLicenseText, placementMetadata } from '#generators/package/generator.js';
+import {
+  apacheLicenseId,
+  canonicalApacheLicensePath,
+  canonicalLicenseText,
+  placementMetadata,
+} from '#generators/package/generator.js';
 
 const capabilityRoles = ['kernel', 'middleware', 'bundler', 'transcoder'] as const;
 type CapabilityRole = (typeof capabilityRoles)[number];
@@ -19,7 +24,6 @@ type CapabilityRole = (typeof capabilityRoles)[number];
 type PluginGeneratorSchema = {
   name: string;
   capabilities: string | readonly string[];
-  namespace?: string;
   description?: string;
   publishable?: boolean;
   hostTarget?: 'browser' | 'node' | 'daemon' | 'python' | 'native';
@@ -63,7 +67,7 @@ const capabilityTemplate = (role: CapabilityRole, propertyName: string, sourceNa
           ? 'bundlers'
           : 'middleware',
   factoryName: `${propertyName}${role[0]?.toUpperCase() ?? ''}${role.slice(1)}`,
-  fileName: `${sourceName}-${role}`,
+  fileName: `${sourceName}.${role}`,
 });
 
 /** Scaffold a publishable multi-capability Tau plugin toolkit. */
@@ -81,8 +85,8 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     capabilityTemplate(role, propertyName, sourceName),
   );
   const selectedRoles = new Set(capabilities.map(({ role }) => role));
-  const { canonicalLicensePath, license, private: isPrivate } = placementMetadata.packages;
-  const tags = ['scope:shared', 'type:package-root'];
+  const { private: isPrivate } = placementMetadata.packages;
+  const tags = ['scope:shared', 'type:package'];
 
   addProjectConfiguration(tree, schema.name, {
     root: projectRoot,
@@ -98,12 +102,11 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
     scope,
     sourceName,
     alias: propertyName,
-    namespace: schema.namespace ?? schema.name,
     hostTarget: schema.hostTarget ?? 'browser',
     capabilities,
     tags: JSON.stringify(tags),
     private: String(isPrivate),
-    license,
+    license: apacheLicenseId,
     offset: offsetFromRoot(projectRoot),
     dot: '.',
     tmpl: '',
@@ -111,14 +114,15 @@ export const pluginGenerator = async (tree: Tree, schema: PluginGeneratorSchema)
 
   generateFiles(tree, join(currentDirectory, '../package/files'), projectRoot, substitutions);
   generateFiles(tree, join(currentDirectory, 'files'), projectRoot, substitutions);
+  tree.delete(join(projectRoot, 'vitest.setup.ts'));
 
   for (const role of capabilityRoles) {
     if (!selectedRoles.has(role)) {
-      tree.delete(join(projectRoot, 'src', `${sourceName}-${role}.ts`));
+      tree.delete(join(projectRoot, 'src', `${sourceName}.${role}.ts`));
     }
   }
 
-  tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, canonicalLicensePath));
+  tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, canonicalApacheLicensePath));
   const project = readProjectConfiguration(tree, schema.name);
   updateProjectConfiguration(tree, schema.name, { ...project, tags });
   await formatFiles(tree);

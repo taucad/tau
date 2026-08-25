@@ -4,59 +4,65 @@ import { readFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-type Placement = 'packages' | 'libs' | 'apps/libs';
+type Placement = 'packages' | 'libs' | 'apps/libs' | 'tools';
 
 type PackageGeneratorSchema = {
   name: string;
   description?: string;
   scope?: Placement;
+  scopeTag?: 'shared' | 'ui' | 'api';
+  layer?: 'feature' | 'ui' | 'data-access' | 'util';
+  react?: boolean;
+  build?: boolean;
 };
 
 type PlacementMetadata = {
   tags: string[];
   private: boolean;
-  license: string;
-  canonicalLicensePath: string;
+  layerRequired: boolean;
+  build: boolean;
 };
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(currentDirectory, '../../../../..');
+export const apacheLicenseId = 'Apache-2.0';
+export const canonicalApacheLicensePath = 'license';
 
 /*
- * Layering, publication, and license are all derived from placement, so a new
- * capability can never be created with an invalid combination. `type:app-lib`
- * is what keeps an application capability out of every published package's
- * dependency allowlist — see
- * `docs/research/workspace-license-boundary-migration.md` Finding 6.
+ * Layering, publication, and build defaults derive from placement. Licensing
+ * deliberately does not: every generated project is Apache-2.0. `type:app-lib`
+ * keeps application capabilities out of published package dependency graphs.
  */
 export const placementMetadata: Record<Placement, PlacementMetadata> = {
   packages: {
-    /*
-     * A new published package starts as a leaf: `type:package-veneer` may only
-     * depend on package roots. Promoting one to `type:package-root` is the
-     * deliberate act of letting other published packages build on it.
-     */
-    tags: ['scope:shared', 'type:package-veneer'],
+    // `type:package` is the publishable kind; nothing distinguishes roots from leaves.
+    tags: ['scope:shared', 'type:package'],
     private: false,
-    license: 'Apache-2.0',
-    canonicalLicensePath: 'LICENSE',
+    layerRequired: false,
+    build: true,
   },
   libs: {
     tags: ['scope:shared', 'type:lib'],
     private: true,
-    license: 'Apache-2.0',
-    canonicalLicensePath: 'LICENSE',
+    layerRequired: false,
+    build: true,
+  },
+  tools: {
+    tags: ['scope:shared', 'type:tool'],
+    private: true,
+    layerRequired: false,
+    build: true,
   },
   'apps/libs': {
     tags: ['scope:shared', 'type:app-lib'],
     private: true,
-    license: 'AGPL-3.0-only',
-    canonicalLicensePath: 'apps/api/LICENSE',
+    layerRequired: true,
+    build: false,
   },
 };
 
 /*
- * The canonical texts are single-sourced from the repository rather than copied
+ * The canonical text is single-sourced from the repository rather than copied
  * into templates, so `validate-license-partitions`' byte-identity check cannot
  * drift away from what the generator emits.
  */
@@ -66,15 +72,29 @@ export const canonicalLicenseText = (tree: Tree, path: string): string =>
 export const packageGenerator = async (tree: Tree, schema: PackageGeneratorSchema): Promise<void> => {
   const scope = schema.scope ?? 'packages';
   const placement = placementMetadata[scope];
+  if (placement.layerRequired && !schema.layer) {
+    throw new Error('--layer is required when --scope=apps/libs');
+  }
+  if (!placement.layerRequired && schema.layer) {
+    throw new Error('--layer is only supported when --scope=apps/libs');
+  }
+
   const projectRoot = `${scope}/${schema.name}`;
   const importPath = `@taucad/${schema.name}`;
   const description = schema.description ?? '';
+  const react = schema.react ?? false;
+  const build = schema.build ?? placement.build;
+  const tags = [
+    `scope:${schema.scopeTag ?? 'shared'}`,
+    ...placement.tags.slice(1),
+    ...(schema.layer ? [`layer:${schema.layer}`] : []),
+  ];
 
   addProjectConfiguration(tree, schema.name, {
     root: projectRoot,
     sourceRoot: projectRoot,
     projectType: 'library',
-    tags: placement.tags,
+    tags,
   });
 
   generateFiles(tree, join(currentDirectory, 'files'), projectRoot, {
@@ -82,15 +102,26 @@ export const packageGenerator = async (tree: Tree, schema: PackageGeneratorSchem
     importPath,
     description,
     scope,
-    tags: JSON.stringify(placement.tags),
+    tags: JSON.stringify(tags),
     private: String(placement.private),
-    license: placement.license,
+    license: apacheLicenseId,
+    react,
+    build,
     offset: offsetFromRoot(projectRoot),
     dot: '.',
     tmpl: '',
   });
 
-  tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, placement.canonicalLicensePath));
+  if (!build) {
+    tree.delete(join(projectRoot, '.size-limit.json'));
+    tree.delete(join(projectRoot, 'tsdown.config.ts'));
+    tree.delete(join(projectRoot, 'tsconfig.build.json'));
+  }
+  if (!react) {
+    tree.delete(join(projectRoot, 'vitest.setup.ts'));
+  }
+
+  tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, canonicalApacheLicensePath));
 
   await formatFiles(tree);
 };

@@ -24,10 +24,6 @@
       "x-prompt": "Which runtime capabilities does this package provide?",
       "x-priority": "important"
     },
-    "namespace": {
-      "type": "string",
-      "description": "Stable diagnostic namespace; defaults to the package name"
-    },
     "description": {
       "type": "string",
       "description": "One-line package description"

@@ -25,8 +25,13 @@ describe('package generator', () => {
     });
 
     const packageJson = readJson<{
+      bugs?: { url?: string };
+      engines?: { node?: string };
+      files?: string[];
+      homepage?: string;
       main?: string;
       module?: string;
+      sideEffects?: boolean;
       types?: string;
       exports?: Record<string, unknown>;
       publishConfig?: {
@@ -47,13 +52,19 @@ describe('package generator', () => {
     expect(packageJson.main).toBe('./dist/index.mjs');
     expect(packageJson.types).toBe('./dist/index.d.mts');
     expect(packageJson.module).toBeUndefined();
+    expect(packageJson.sideEffects).toBe(false);
+    expect(packageJson.engines?.node).toBe('>=24.0.0');
+    expect(packageJson.homepage).toContain('/packages/example#readme');
+    expect(packageJson.bugs?.url).toBe('https://github.com/taucad/tau/issues');
+    expect(packageJson.files).toContain('LICENSE');
     expect(packageJson.publishConfig?.exports?.['.']).toEqual({
       types: './dist/index.d.mts',
       import: './dist/index.mjs',
       default: './dist/index.mjs',
     });
-    expect(packageJson.imports?.['#*.js']).toBe('./src/*.ts');
-    expect(packageJson.imports?.['#*']).toBe('./src/*');
+    // Exactly two keys: every package-specific alias is drift the pkgcheck
+    // `tau-internal-imports-shape` rule rejects.
+    expect(packageJson.imports).toEqual({ '#*.js': './src/*.ts', '#*': './src/*' });
     expect(packageJson.exports?.['./package.json']).toBe('./package.json');
     expect(packageJson.publishConfig?.exports?.['./package.json']).toBe('./package.json');
     // The source subpath-import map must never reach the registry — see R14/R15.
@@ -67,41 +78,124 @@ describe('package generator', () => {
     expect(tsdownConfig).toContain("outDir: 'dist'");
     expect(tsdownConfig).toContain('export default defineConfig(packageConfig);');
     expect(tsdownConfig).not.toMatch(/cjsConfig|format: 'cjs'|dist\/esm|dist\/cjs|defineConfig\(\[/);
+
+    const tsconfig = readJson<{ compilerOptions: { lib?: string[] } }>(tree, 'packages/example/tsconfig.lib.json');
+    expect(tsconfig.compilerOptions.lib).toEqual(['ES2024', 'DOM', 'DOM.Iterable']);
+    expect(tree.exists('packages/example/vitest.setup.ts')).toBe(false);
+    expect(readText(tree, 'packages/example/.size-limit.json')).toContain('measure before release');
+
+    const vitestConfig = readText(tree, 'packages/example/vitest.config.ts');
+    expect(vitestConfig).toContain("exclude: ['src/**/*.{test,spec,test-d}.ts']");
+    expect(vitestConfig).not.toContain('thresholds:');
   });
 
   it.each([
     {
       scope: 'packages',
+      layer: undefined,
       isPrivate: false,
-      license: 'Apache-2.0',
-      tags: ['scope:shared', 'type:package-veneer'],
+      tags: ['scope:shared', 'type:package'],
     },
     {
       scope: 'libs',
+      layer: undefined,
       isPrivate: true,
-      license: 'Apache-2.0',
       tags: ['scope:shared', 'type:lib'],
     },
     {
       scope: 'apps/libs',
+      layer: 'feature',
       isPrivate: true,
-      license: 'AGPL-3.0-only',
-      tags: ['scope:shared', 'type:app-lib'],
+      tags: ['scope:shared', 'type:app-lib', 'layer:feature'],
     },
-  ] as const)('derives layering, privacy, and license from the $scope placement', async (placement) => {
+    {
+      scope: 'tools',
+      layer: undefined,
+      isPrivate: true,
+      tags: ['scope:shared', 'type:tool'],
+    },
+  ] as const)('derives architecture from $scope and always uses Apache-2.0', async (placement) => {
     const tree = createTreeWithEmptyWorkspace();
 
-    await packageGenerator(tree, { name: 'example', scope: placement.scope });
+    await packageGenerator(tree, { name: 'example', scope: placement.scope, layer: placement.layer });
 
     const root = `${placement.scope}/example`;
     const packageJson = readJson<{ private?: boolean; license?: string }>(tree, `${root}/package.json`);
     const projectJson = readJson<{ tags?: string[] }>(tree, `${root}/project.json`);
 
     expect(packageJson.private).toBe(placement.isPrivate);
-    expect(packageJson.license).toBe(placement.license);
+    expect(packageJson.license).toBe('Apache-2.0');
     expect(projectJson.tags).toStrictEqual(placement.tags);
-    expect(readText(tree, `${root}/LICENSE`)).toContain(
-      placement.license === 'Apache-2.0' ? 'Apache License' : 'GNU AFFERO GENERAL PUBLIC LICENSE',
-    );
+    expect(readText(tree, `${root}/LICENSE`)).toContain('Apache License');
+  });
+
+  it('scaffolds a source-consumed React app-lib', async () => {
+    const tree = createTreeWithEmptyWorkspace();
+
+    await packageGenerator(tree, {
+      name: 'example',
+      scope: 'apps/libs',
+      scopeTag: 'ui',
+      layer: 'data-access',
+      react: true,
+    });
+
+    const root = 'apps/libs/example';
+    const packageJson = readJson<{
+      main?: string;
+      types?: string;
+      publishConfig?: unknown;
+      peerDependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    }>(tree, `${root}/package.json`);
+    const projectJson = readJson<{ tags: string[] }>(tree, `${root}/project.json`);
+    const tsconfig = readJson<{
+      compilerOptions: { jsx?: string; lib?: string[] };
+      include: string[];
+    }>(tree, `${root}/tsconfig.lib.json`);
+
+    expect(projectJson.tags).toStrictEqual(['scope:ui', 'type:app-lib', 'layer:data-access']);
+    expect(tree.exists(`${root}/tsdown.config.ts`)).toBe(false);
+    expect(tree.exists(`${root}/tsconfig.build.json`)).toBe(false);
+    expect(tree.exists(`${root}/.size-limit.json`)).toBe(false);
+    expect(packageJson.main).toBeUndefined();
+    expect(packageJson.types).toBeUndefined();
+    expect(packageJson.publishConfig).toBeUndefined();
+    expect(packageJson.peerDependencies).toEqual({
+      react: '^18.0.0 || ^19.0.0',
+      'react-dom': '^18.0.0 || ^19.0.0',
+    });
+    expect(packageJson.devDependencies?.['@testing-library/react']).toBe('catalog:');
+    expect(packageJson.devDependencies?.['@testing-library/jest-dom']).toBe('catalog:');
+    const vitestConfig = readText(tree, `${root}/vitest.config.ts`);
+    expect(vitestConfig).toContain("environment: 'jsdom'");
+    expect(vitestConfig).toContain("setupFiles: ['./vitest.setup.ts']");
+    expect(vitestConfig).toContain("exclude: ['src/**/*.{test,spec,test-d}.ts']");
+    expect(vitestConfig).not.toContain('thresholds:');
+    expect(readText(tree, `${root}/vitest.setup.ts`)).toContain('@testing-library/jest-dom/vitest');
+    expect(tsconfig.compilerOptions).toMatchObject({
+      jsx: 'react-jsx',
+      lib: ['ES2024', 'DOM', 'DOM.Iterable'],
+    });
+    expect(tsconfig.include).toContain('src/**/*.tsx');
+  });
+
+  it('supports overriding the placement build default', async () => {
+    const tree = createTreeWithEmptyWorkspace();
+
+    await packageGenerator(tree, { name: 'example', scope: 'apps/libs', layer: 'util', build: true });
+
+    expect(tree.exists('apps/libs/example/tsdown.config.ts')).toBe(true);
+    expect(tree.exists('apps/libs/example/.size-limit.json')).toBe(true);
+    expect(readJson<{ publishConfig?: unknown }>(tree, 'apps/libs/example/package.json').publishConfig).toBeDefined();
+  });
+
+  it('validates layer placement', async () => {
+    await expect(
+      packageGenerator(createTreeWithEmptyWorkspace(), { name: 'example', scope: 'apps/libs' }),
+    ).rejects.toThrow('--layer is required when --scope=apps/libs');
+    await expect(
+      packageGenerator(createTreeWithEmptyWorkspace(), { name: 'example', scope: 'packages', layer: 'feature' }),
+    ).rejects.toThrow('--layer is only supported when --scope=apps/libs');
   });
 });

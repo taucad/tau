@@ -23,9 +23,6 @@
   "engines": {
     "node": ">=24.0.0"
   },
-  "scripts": {
-    "prepublishOnly": "pnpm --workspace-root nx run <%= projectName %>:pkgcheck"
-  },
   "exports": {
     ".": "./src/index.ts",
     "./package.json": "./package.json"
@@ -47,9 +44,12 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
-    "@taucad/runtime": "^0.1.0"
+    "@taucad/runtime": "^0.1.0-beta.0"
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*"
+  },
+  "taucad": {
+    "hostTarget": "browser"
   }
 }

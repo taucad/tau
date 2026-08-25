@@ -5,11 +5,9 @@ import { <%= capability.factoryName %> } from '#<%= capability.fileName %>.js';
 <% } %>
 
 /** Canonical `<%= importPath %>` plugin factory. @public */
-export const plugin = definePlugin({
+export const <%= alias %> = definePlugin({
   meta: {
     name: '<%= importPath %>',
-    namespace: '<%= namespace %>',
-    version: '0.1.0-beta.0',
   },
 <% for (const capability of capabilities) { %>
   <%= capability.bucket %>: {

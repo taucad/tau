@@ -10,7 +10,12 @@ import type { Tree } from '@nx/devkit';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { canonicalLicenseText, placementMetadata } from '#generators/package/generator.js';
+import {
+  apacheLicenseId,
+  canonicalApacheLicensePath,
+  canonicalLicenseText,
+  placementMetadata,
+} from '#generators/package/generator.js';
 
 type CoreGeneratorSchema = {
   name: string;
@@ -34,8 +39,8 @@ export const coreGenerator = async (tree: Tree, schema: CoreGeneratorSchema): Pr
   const projectRoot = `${scope}/${schema.name}`;
   const projectName = schema.packageName.slice('@taucad/'.length);
   const description = schema.description ?? `Shared implementation helpers for ${schema.packageName}`;
-  const { canonicalLicensePath, license, private: isPrivate } = placementMetadata.packages;
-  const tags = ['scope:shared', 'type:package-root'];
+  const { private: isPrivate } = placementMetadata.packages;
+  const tags = ['scope:shared', 'type:package'];
 
   addProjectConfiguration(tree, projectName, {
     root: projectRoot,
@@ -52,7 +57,7 @@ export const coreGenerator = async (tree: Tree, schema: CoreGeneratorSchema): Pr
     scope,
     tags: JSON.stringify(tags),
     private: String(isPrivate),
-    license,
+    license: apacheLicenseId,
     offset: offsetFromRoot(projectRoot),
     dot: '.',
     tmpl: '',
@@ -60,7 +65,8 @@ export const coreGenerator = async (tree: Tree, schema: CoreGeneratorSchema): Pr
 
   generateFiles(tree, join(currentDirectory, '../package/files'), projectRoot, substitutions);
   generateFiles(tree, join(currentDirectory, 'files'), projectRoot, substitutions);
-  tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, canonicalLicensePath));
+  tree.delete(join(projectRoot, 'vitest.setup.ts'));
+  tree.write(join(projectRoot, 'LICENSE'), canonicalLicenseText(tree, canonicalApacheLicensePath));
   const project = readProjectConfiguration(tree, projectName);
   updateProjectConfiguration(tree, projectName, { ...project, tags });
   await formatFiles(tree);

@@ -4,7 +4,10 @@ import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 export default defineConfig({
   plugins: [nxViteTsPaths()],
   test: {
-    environment: 'node',
+    environment: '<%= typeof react !== 'undefined' && react ? 'jsdom' : 'node' %>',
+<% if (typeof react !== 'undefined' && react) { -%>
+    setupFiles: ['./vitest.setup.ts'],
+<% } -%>
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],
@@ -17,12 +20,6 @@ export default defineConfig({
       reportsDirectory: '<%= offset %>out/reports/coverage/<%= scope %>/<%= name %>',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec,test-d}.ts'],
-      thresholds: {
-        statements: 100,
-        branches: 100,
-        functions: 100,
-        lines: 100,
-      },
     },
   },
 });

@@ -15,7 +15,7 @@ import type {
 } from '@taucad/runtime/plugin';
 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
-import { plugin } from '#index.js';
+import { plugin, <%= alias %> } from '#index.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
 import type {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
 
@@ -25,3 +25,5 @@ expectTypeOf<<%= projection %><readonly [typeof selected]>>().toEqualTypeOf<
   readonly [ReturnType<typeof <%= capability.factoryName %>>]
 >();
 <% } %>
+
+expectTypeOf(<%= alias %>).toEqualTypeOf(plugin);

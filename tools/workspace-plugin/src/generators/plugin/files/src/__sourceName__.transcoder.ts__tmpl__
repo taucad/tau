@@ -4,7 +4,7 @@ import { defineTranscoder } from '@taucad/runtime/transcoder';
 export const <%= alias %>Transcoder = defineTranscoder({
   id: '<%= name %>',
   name: '<%= alias %>Transcoder',
-  version: '0.1.0-beta.0',
+  version: '1.0.0',
   edges: [],
   async initialize() {
     return {};

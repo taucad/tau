@@ -1,75 +1,97 @@
 ---
 title: Testing Utilities
-description: Test helpers for kernel development including worker creation, filesystem seeding, and geometry validation.
+description: Public-client test harnesses, mocks, and geometry assertions for runtime plugin authors.
 icon: lucide:flask-conical
 ---
 
 # Testing Utilities
 
-Use the testing API when writing unit tests for custom kernels, middleware, or kernel integration. All utilities require Vitest as a peer dependency.
+Testing support is published separately from the production runtime in one package:
+
+- `@taucad/runtime-testing` provides a real in-process [`RuntimeClient`](./client) harness, Vitest-backed mocks, glTF inspection, and geometry assertions.
+
+Install it as a development dependency. Vitest and `@taucad/runtime` are required peers.
+
+```bash
+npm install -D @taucad/runtime-testing vitest
+```
 
 ## Types
 
 <auto-type-table path='./props/testing.ts' name='GeometryExpectation' />
 
-## Worker and Filesystem Utilities
+## Runtime Harnesses
 
-| Function                     | Description                                                                                                       |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `createTestWorker`           | Create and initialize a [`KernelRuntimeWorker`](../concepts/worker-model) with kernel definition and seeded files |
-| `initializeWorkerForTesting` | Initialize an existing worker with MessageChannel-based filesystem bridge                                         |
-| `seedTestFileSystem`         | Seed the in-memory filesystem with files; resets to clean state first                                             |
-| `clearTestFileSystem`        | Reset the in-memory filesystem to empty                                                                           |
+| Function                  | Description                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------- |
+| `createTestRuntimeClient` | Create a real client over `inProcessTransport` with an isolated in-memory filesystem         |
+| `createTestGeometry`      | Render one fixture through a temporary client and shut the client down before returning      |
+| `getTestParameters`       | Resolve one fixture's parameter schema through a temporary client and shut it down afterward |
 
-## Mock Utilities
+Callers own clients returned by `createTestRuntimeClient` and must call `shutdown()`. The two convenience helpers own and close the clients they create.
 
-| Function                          | Description                                                           |
-| --------------------------------- | --------------------------------------------------------------------- |
-| `createMockLogger`                | Create a mock logger with vitest spy methods                          |
-| `createMockFileSystem`            | Create a mock filesystem with configurable return values              |
-| `createMockRuntime`               | Create a mock `KernelMiddlewareRuntime` with stubbed services         |
-| `createMockRuntimeClient`         | Create a mock [`RuntimeClient`](./client) for transport-level testing |
-| `createMockDependencies`          | Create mock `Dependency[]` arrays for dependency hash testing         |
-| `createMockCreateGeometryHandler` | Create a mock handler for `wrapCreateGeometry` middleware tests       |
-| `createMockGetParametersHandler`  | Create a mock handler for `wrapGetParameters` middleware tests        |
-| `createMockResponse`              | Create a mock `Response` for HTTP-dependent kernel tests              |
-| `createSuccessResult`             | Create a successful `CreateGeometryResult` for middleware tests       |
-| `createErrorResult`               | Create a failed `CreateGeometryResult` for middleware tests           |
-| `createMockInput`                 | Create mock `CreateGeometryInput` for middleware tests                |
-| `MockKernelWorker`                | Mock worker class for unit testing middleware integration             |
+## Runtime Mocks and Assertions
+
+| Function                          | Description                                                       |
+| --------------------------------- | ----------------------------------------------------------------- |
+| `createMockLogger`                | Create a Vitest-backed runtime logger                             |
+| `createMockFileSystem`            | Create a configurable kernel filesystem                           |
+| `createMockKernelRuntime`         | Create a direct kernel-definition runtime                         |
+| `createMockRuntime`               | Create a middleware runtime with filesystem, state, and hashes    |
+| `createMockRuntimeClient`         | Create an explicit `RuntimeClient` mock                           |
+| `createMockDependencies`          | Create standard dependency records                                |
+| `createMockCreateGeometryHandler` | Create a middleware geometry handler                              |
+| `createMockGetParametersHandler`  | Create a middleware parameter handler                             |
+| `createSuccessResult`             | Create a successful geometry result                               |
+| `createGltfSuccessResult`         | Create a successful glTF result                                   |
+| `createErrorResult`               | Create a failed geometry result                                   |
+| `assertSuccess` / `assertFailure` | Assert and narrow a runtime result                                |
+| `createMockInput`                 | Create a middleware geometry request                              |
+| `createGeometryFile`              | Create a normalized file locator for direct definition unit tests |
 
 ## Geometry Validation
 
-| Function                      | Description                                                  |
-| ----------------------------- | ------------------------------------------------------------ |
-| `validateGlbData`             | Assert GLB data has valid header and non-zero length         |
-| `getInspectReport`            | Get gltf-transform inspect report from GLB data              |
-| `getGeometryStatsFromInspect` | Extract vertexCount, faceCount, meshCount from report        |
-| `getBoundingBoxFromInspect`   | Extract bounding box size and center from report             |
-| `extractGltfFromResult`       | Extract GLB/GLTF blob from CreateGeometryResult              |
-| `createGeometryVariant`       | Create a geometry variant for parametric test assertions     |
-| `createGeometryTestHelpers`   | Create helpers combining validation and expectation checking |
+`@taucad/runtime-testing` exports `validateGlbData`, `getInspectReport`, `getGeometryStatsFromInspect`, `getBoundingBoxFromInspect`, `extractGltfFromResult`, `extractGltfFromExportResult`, and `createGeometryTestHelpers`, plus shared color, coordinate, naming, and volume assertions.
 
 ## Usage
 
 ```typescript
-import { describe, it, expect } from 'vitest';
-import { createTestWorker, clearTestFileSystem, extractGltfFromResult, validateGlbData } from '@taucad/runtime/testing';
-import { replicad } from '@taucad/runtime/kernels/replicad';
+import { afterEach, describe, expect, it } from 'vitest';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { assertSuccess, createGeometryTestHelpers, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { defineRuntime } from '@taucad/runtime/worker';
+
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
 
 describe('kernel test', () => {
-  it('renders geometry', async () => {
-    const worker = await createTestWorker(replicad, {
-      '/main.ts': 'export default () => null',
+  const clients = new Set<ReturnType<typeof createTestRuntimeClient>>();
+
+  afterEach(async () => {
+    await Promise.all([...clients].map((client) => client.shutdown()));
+    clients.clear();
+  });
+
+  it('renders geometry through the production client path', async () => {
+    const client = createTestRuntimeClient({
+      runtime,
+      files: {
+        'main.ts': `
+          import { makeBaseBox } from 'replicad';
+          export default () => makeBaseBox(10, 20, 30);
+        `,
+      },
     });
-    const result = await worker.createGeometry({
-      file: { filename: 'main.ts', path: '/' },
-      parameters: {},
-    });
-    expect(result.success).toBe(true);
-    const glb = extractGltfFromResult(result);
-    if (glb) validateGlbData(glb);
-    await clearTestFileSystem();
+    clients.add(client);
+
+    const outcome = await client.render({ source: { path: 'main.ts' } });
+    expect(outcome.superseded).toBe(false);
+    if (outcome.superseded) return;
+
+    assertSuccess(outcome.geometry);
+    await createGeometryTestHelpers().expectValidGltf(outcome.geometry);
   });
 });
 ```

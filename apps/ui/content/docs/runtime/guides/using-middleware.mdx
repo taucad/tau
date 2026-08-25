@@ -19,31 +19,29 @@ Configure a runtime client with middleware plugins to cache geometry and paramet
 
 ## Steps
 
-### 1. Import Middleware from @taucad/runtime/middleware
+### 1. Import the Middleware Toolkit
 
-All built-in middleware is exported from the `@taucad/runtime/middleware` subpath:
+First-party middleware is exported from the `@taucad/middleware` toolkit. Use its default preset to install the standard middleware stack:
 
 ```typescript
-import { geometryCache, parameterCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
+import { middleware } from '@taucad/middleware';
 ```
 
 ### 2. Add Middleware to defineRuntime
 
-Pass the middleware array to `defineRuntime()`. Order matters: middleware runs in onion-model order (first registered = outermost layer):
+Pass the toolkit to `defineRuntime()`. Its preset fixes middleware order; middleware runs in onion-model order (first registered = outermost layer):
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { geometryCache, parameterCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
+import { middleware } from '@taucad/middleware';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
-  middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
+  plugins: [replicad(), esbuild(), middleware()],
 });
 
 const client = createRuntimeClient({
@@ -72,14 +70,12 @@ import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
-import { geometryCache, parameterCache } from '@taucad/runtime/middleware';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { middleware } from '@taucad/middleware';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
-  middleware: [parameterCache(), geometryCache()],
+  plugins: [replicad(), esbuild(), middleware({ preset: 'cache' })],
 });
 
 const client = createRuntimeClient({
@@ -96,11 +92,12 @@ worker -- nothing changes in the call site:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
@@ -129,15 +126,17 @@ For UI viewers driving the autonomous render loop, see [Live Rendering](./live-r
 
 ## Variations
 
-- **Preset with all middleware**: Use `presets.all()` from `@taucad/runtime/presets` to get a runtime definition containing all built-in kernels, middleware, bundlers, and transcoders. Add `transport` separately:
+- **Toolkit composition**: Use the middleware toolkit's default preset when all four first-party middleware roles are wanted:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { middleware } from '@taucad/middleware';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad(), middleware()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
 });

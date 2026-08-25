@@ -22,11 +22,10 @@ Implement a kernel that handles a custom file type, produces geometry, and suppo
 
 ### 1. Import defineKernel and Helpers
 
-Import `defineKernel` and result helpers from `@taucad/runtime`:
+Import `defineKernel` and result helpers from `@taucad/runtime/kernel`:
 
 ```typescript
-import { createKernelSuccess, createKernelError } from '@taucad/runtime';
-import { defineKernel, finalizeRenderOutput } from '@taucad/runtime/kernel';
+import { createKernelSuccess, createKernelError, defineKernel, finalizeRenderOutput } from '@taucad/runtime/kernel';
 ```
 
 ### 2. Implement the Kernel Definition
@@ -34,7 +33,7 @@ import { defineKernel, finalizeRenderOutput } from '@taucad/runtime/kernel';
 Use `defineKernel` with a single config object. The helper returns a callable plugin factory and keeps the executable implementation attached to that factory for worker-owned runtime definitions. You must provide `id`, `extensions`, `initialize`, `getDependencies`, `getParameters`, `createGeometry`, and `exportGeometry`. Optionally implement `cleanup` for teardown:
 
 ```typescript
-import { defineKernel, createKernelSuccess, createKernelError } from '@taucad/runtime';
+import { createKernelSuccess, createKernelError, defineKernel, finalizeRenderOutput } from '@taucad/runtime/kernel';
 import type { GeometryResponse } from '@taucad/runtime/types';
 import { z } from 'zod';
 
@@ -42,16 +41,15 @@ type MyContext = {
   engine: unknown;
 };
 
-type MyNativeHandle = unknown;
+type MyNativeHandle = null;
 
 export const myKernel = defineKernel({
   id: 'my-kernel',
   extensions: ['myformat'],
   name: 'MyKernel',
   version: '1.0.0',
-  render: { content: [] },
   exportFormats: {
-    glb: { optionsSchema: z.object({}).strict(), content: [] },
+    glb: { optionsSchema: z.object({}).strict() },
   },
 
   async initialize(_options, _runtime): Promise<MyContext> {
@@ -107,7 +105,7 @@ The `KernelRuntime` object (second parameter to lifecycle methods) provides: `fi
 Use `createKernelSuccess` for successful operations and `createKernelError` for failures:
 
 ```typescript
-import { createKernelSuccess, createKernelError } from '@taucad/runtime';
+import { createKernelSuccess, createKernelError } from '@taucad/runtime/kernel';
 
 function getParametersResult(found: boolean) {
   if (!found) {
@@ -133,14 +131,14 @@ Declare the executable runtime in the worker or host process, then connect a cli
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { esbuild } from '@taucad/runtime/bundler';
+import { esbuild } from '@taucad/esbuild';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { myKernel } from './my-kernel.kernel';
+import { myKernel } from './examples/my-kernel.kernel';
 
 const runtime = defineRuntime({
+  plugins: [esbuild()],
   kernels: [myKernel()],
-  bundlers: [esbuild()],
 });
 
 const client = createRuntimeClient({
@@ -210,7 +208,7 @@ Extract parameters and a JSON Schema for UI generation:
 ```typescript
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
 import type { JSONSchema7 } from '@taucad/runtime/types';
-import { createKernelSuccess } from '@taucad/runtime';
+import { createKernelSuccess } from '@taucad/runtime/kernel';
 
 const PARAM_RE = /^export\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*(\d+(?:\.\d+)?|true|false|"[^"]*")\s*;?/gm;
 

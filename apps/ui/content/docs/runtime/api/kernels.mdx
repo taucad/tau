@@ -1,12 +1,12 @@
 ---
-title: Kernel Factories
-description: Factory functions for Replicad, OpenCASCADE, Manifold, OpenRSCAD, JSCAD, Zoo, and Tau kernel plugins.
+title: Kernel Plugins
+description: First-party kernel toolkits and role factories.
 icon: lucide:cog
 ---
 
-# Kernel Factories
+# Kernel Plugins
 
-Use kernel factories when registering CAD engines with `defineRuntime`. Each factory returns a `KernelPlugin` that the worker uses for kernel selection and loading.
+Concrete kernels ship in their own packages. Each package declares a package-named toolkit factory, re-exports that binding as `plugin` for mechanical loading, and exposes a role-named kernel factory for direct authoring and isolated tests.
 
 ## Types
 
@@ -20,52 +20,52 @@ Use kernel factories when registering CAD engines with `defineRuntime`. Each fac
 
 <auto-type-table path='./props/kernels.ts' name='ZooOptions' />
 
-## Factories
+## Packages
 
-| Factory                 | Extensions | Purpose                                             |
-| ----------------------- | ---------- | --------------------------------------------------- |
-| `replicad(options?)`    | `ts`, `js` | OpenCASCADE-based parametric BRep via Replicad API  |
-| `opencascade(options?)` | `ts`, `js` | Direct OpenCASCADE API access                       |
-| `manifold(options?)`    | `ts`, `js` | Mesh-first manifold modeling with robust booleans   |
-| `openrscad()` \*        | `scad`     | Rust/Wasm implementation of the OpenSCAD language   |
-| `jscad()`               | `ts`, `js` | @jscad/modeling parametric CSG                      |
-| `zoo(options)`          | `kcl`      | KCL via Zoo WebSocket API                           |
-| `tau()`                 | `*`        | Catch-all converter for STEP, STL, 3MF, OBJ imports |
+| Package                      | Kernel ID            | Extensions                           | Role factory              |
+| ---------------------------- | -------------------- | ------------------------------------ | ------------------------- |
+| `@taucad/replicad`           | `replicad`           | `ts`, `js`                           | `replicadKernel`          |
+| `@taucad/opencascade`        | `opencascade`        | `ts`, `js`                           | `opencascadeKernel`       |
+| `@taucad/manifold`           | `manifold`           | `ts`, `js`                           | `manifoldKernel`          |
+| `@taucad/jscad`              | `jscad`              | `ts`, `js`                           | `jscadKernel`             |
+| `@taucad/openrscad`          | `openrscad`          | `scad`                               | `openrscadKernel`         |
+| `@taucad/zoo`                | `zoo`                | `kcl`                                | `zooKernel`               |
+| `@taucad/gltf`               | `gltf`               | `glb`, `gltf`                        | `gltfKernel`              |
+| `@taucad/brep`               | `brep`               | `step`, `stp`, `iges`, `igs`, `brep` | `brepKernel`              |
+| `@taucad/rhino`              | `rhino`              | `3dm`                                | `rhinoKernel`             |
+| `@taucad/assimp`             | `assimp`             | Explicit mesh/scene formats          | `assimpKernel`            |
+| `@taucad/opencascade-native` | `opencascade-native` | `ts`, `js`                           | `opencascadeNativeKernel` |
+| `@taucad/openrscad-native`   | `openrscad`          | `scad`                               | `openrscadNativeKernel`   |
 
-\* `openrscad()` ships from [`@taucad/openrscad`](https://github.com/matthova/openrscad) (Apache-2.0) and supports browser workers, Node, and the CLI.
+No first-party kernel uses `'*'`. Import formats are owned by explicit backend kernels.
 
-## Usage
+The two native packages target Node hosts and remain outside the first release until their platform artifacts are publishable. Register either OpenRSCAD implementation, not both: they intentionally share the `openrscad` capability ID.
+
+## Toolkit composition
 
 ```typescript
-import { createRuntimeClient } from '@taucad/runtime';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad, opencascade, manifold, jscad, zoo, tau } from '@taucad/runtime/kernels';
-import { openrscad } from '@taucad/openrscad';
-import { esbuild } from '@taucad/runtime/bundler';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
 
-const runtime = defineRuntime({
-  kernels: [
-    replicad({ withBrepEdges: true }),
-    opencascade(),
-    manifold(),
-    openrscad(),
-    jscad(),
-    zoo({ baseUrl: 'wss://example.com/v1/kernels/zoo' }),
-    tau(),
-  ],
-  bundlers: [esbuild()],
-});
+export const runtime = defineRuntime({ plugins: [esbuild(), replicad()] });
+```
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+## Configured composition
+
+Configure a packaged kernel through its toolkit. Reserve direct buckets for app-local capabilities, isolated kernel tests, or whole-role ordering outside plugin expansion:
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+
+export const runtime = defineRuntime({
+  plugins: [esbuild(), replicad({ kernels: { default: { wasm: 'auto' } } })],
 });
 ```
 
-## Kernel Entry Paths
-
-Kernel methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces) beginning with `/`. It identifies the model's evaluation root inside the filesystem supplied to the runtime, not a host operating-system path. `getDependencies` returns ordinary `path` values in the same namespace.
+Backends load in the selected kernel's `initialize()` and live in its context. Toolkit namespaces never rewrite flat capability IDs.
 
 ## Related
 

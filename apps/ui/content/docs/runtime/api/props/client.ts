@@ -5,7 +5,6 @@ export type {
   InlineRuntimeSource,
   RuntimeExportOptions,
   RuntimeRenderInput,
-  RuntimeSetOptionsInput,
   RuntimeSource,
   ExportResult,
   RuntimeFileSystem,

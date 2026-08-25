@@ -54,13 +54,15 @@ Dependencies represent what a kernel's geometry depends on. The `Dependency` uni
 
 `Dependency` is the union: `FileDependency | MiddlewareDependency | FrameworkDependency | OptionDependency | ParameterDependency | AssetDependency`.
 
+`FileDependency.path` is a normalized [runtime path](../concepts/path-namespaces) such as `/src/main.ts`. It is the same spelling used for filesystem calls, cache keys, render identity, change events, and watch ownership. Its leading slash names the supplied filesystem's root, not the host operating system's root. Authority paths such as `/projects/<id>/src/main.ts` and build-relative spellings never enter runtime dependency identity.
+
 ## Filesystem Types
 
 <auto-type-table path='./props/types.ts' name='RuntimeFileSystemBase' />
 
-<auto-type-table path='./props/types.ts' name='RuntimeFileSystem' />
-
 <auto-type-table path='./props/types.ts' name='KernelFileSystem' />
+
+<auto-type-table path='./props/types.ts' name='RuntimeFileSystem' />
 
 ## Kernel Types
 
@@ -94,17 +96,32 @@ Dependencies represent what a kernel's geometry depends on. The `Dependency` uni
 
 <auto-type-table path='./props/types.ts' name='ExportGeometryResult' />
 
+## Content and Capability Types
+
+Framework-owned content requirements remain separate from plugin-owned option schemas. A concrete export or render route advertises only the content properties it can fulfill.
+
+<auto-type-table path='./props/types.ts' name='RuntimeContentInput' />
+
+<auto-type-table path='./props/types.ts' name='ContentCapability' />
+
+<auto-type-table path='./props/types.ts' name='ExportRoute' />
+
+<auto-type-table path='./props/types.ts' name='RenderCapability' />
+
+<auto-type-table path='./props/types.ts' name='CapabilitiesManifest' />
+
 ## Usage
 
 The discriminated `KernelResult` shape arrives both from `client.export(format, input)` (Promise resolution) and from `client.on('geometry', handler)` (autonomous loop). Narrow on `result.success` and use `result.data` / `result.issues` accordingly:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });

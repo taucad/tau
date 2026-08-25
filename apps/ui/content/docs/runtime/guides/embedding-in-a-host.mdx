@@ -1,18 +1,18 @@
 ---
 title: Embedding in a Host
-description: Wire @taucad/runtime into an editor host -- opaque RuntimeFileSystem values, filePoolBuffer SABs, and the transport plugin pattern.
+description: Wire @taucad/runtime into an editor host with opaque rooted filesystems and the transport plugin pattern.
 icon: lucide:plug-zap
 ---
 
 # Embedding in a Host
 
-The `transport` option on `createRuntimeClient` is the single seam where the host hands filesystem and wire primitives to the runtime. Every wire concern — filesystem, file pool SAB, abort signalling — is closed over by the transport at construction. `client.connect()` takes no arguments in v6; it only runs the handshake for the transport that was supplied at construction.
+The `transport` option on `createRuntimeClient` is the single seam where the host supplies an opaque filesystem to the runtime. Transport-owned signalling and geometry memory are closed over at construction. `client.connect()` takes no arguments in v6; it only runs the handshake for the transport that was supplied at construction.
 
 This guide covers the three scenarios where explicit transport wiring is the right choice:
 
-1. **Worker-hosted filesystems** -- the host owns the filesystem worker, opens a filesystem bridge connection, and exposes that connection to the runtime via `fromFileSystemBridge(connection)`.
-2. **Externally allocated `filePoolBuffer` SABs** -- the host pre-allocates a `SharedArrayBuffer` for zero-copy file content sharing across workers.
-3. **Deferred client creation** -- the runtime client is constructed once the host knows which filesystem to bind to.
+1. **Worker-hosted filesystems** -- trusted host code selects a project route and exposes a fresh rooted bridge connection via `fromFileSystemBridge(() => connection)`.
+2. **Deferred client creation** -- the runtime client is constructed once the host knows which filesystem to bind to.
+3. **Electron utility-process hosts** -- the runtime executes outside the renderer behind the bundled main, preload, utility, and renderer helpers.
 
 If none of these apply, head back to the [Quick Start](../getting-started/quick-start) or [Live Rendering](./live-rendering) guides -- they are the canonical npm-consumer paths.
 
@@ -20,58 +20,53 @@ If none of these apply, head back to the [Quick Start](../getting-started/quick-
 
 A host (CAD editor, IDE, multi-user platform) typically owns the filesystem and worker explicitly:
 
-- A single shared filesystem worker serving multiple runtime clients (one per chat panel, one per render preview)
+- A single filesystem authority serving multiple independently rooted runtime clients
 - Externally managed lifecycle (the host already owns "the project filesystem"; the runtime is just a consumer)
-- Cross-worker zero-copy file content via `SharedArrayBuffer`-backed `FilePool`
 - The ability to terminate and re-create runtime clients without losing the underlying filesystem
 
-`createRuntimeClient({ ..., transport: webWorkerTransport({ fileSystem, filePoolBuffer }) })` is the seam where the host hands these primitives to the runtime.
+`createWebWorkerClientOptions({ fileSystem, ... })` is the common browser seam where the host hands that opaque filesystem to the runtime. Transport authors can use `webWorkerTransport({ fileSystem, ... })` directly.
 
 ## Opaque `RuntimeFileSystem` values
 
 The **`fileSystem`** field on `webWorkerTransport({ ... })`, `inProcessTransport({ ... })`, and friends accepts an opaque [`RuntimeFileSystem`](../api/filesystem) value. The value is produced by one of the bundled factory functions — consumers cannot inspect its internals. The transport constructs the underlying bridge primitives from it:
 
-| Factory                              | When to use                                  |
-| ------------------------------------ | -------------------------------------------- |
-| `fromMemoryFs({ 'main.ts': '...' })` | Static fixtures, tests, CLI one-shots        |
-| `fromFsLike(myFs)`                   | Wrap a custom `RuntimeFileSystemBase` impl   |
-| `fromNodeFs('/projects/widget')`     | Headless / Node.js (CLI, benchmarks, server) |
-| `fromBrowserFs(directoryHandle)`     | Browser File System Access API root          |
-| `fromFileSystemBridge(connection)`   | Editor host with a dedicated FS bridge       |
+| Factory                              | When to use                                    |
+| ------------------------------------ | ---------------------------------------------- |
+| `fromMemoryFs({ 'main.ts': '...' })` | Static fixtures, tests, CLI one-shots          |
+| `fromFsLike(myFs)`                   | Wrap a custom `RuntimeFileSystemBase` impl     |
+| `fromNodeFs('/srv/projects/widget')` | Headless / Node.js (CLI, benchmarks, server)   |
+| `fromBrowserFs(directoryHandle)`     | Browser File System Access API root            |
+| `fromFileSystemBridge(open)`         | Editor host with a fresh rooted bridge factory |
 
 ### Worker-hosted filesystems
 
-When the host owns a File Manager Worker (the canonical editor pattern), open a filesystem bridge connection with `@taucad/fs-bridge`, wrap that connection with `fromFileSystemBridge(...)`, and pass the opaque handle to `webWorkerTransport`:
+When the host owns a File Manager Worker (the canonical editor pattern), trusted composition selects an authority-global project route. Pass a connection factory to `fromFileSystemBridge(...)`; every runtime binding or initialize retry receives a fresh bridge whose virtual `/` is that project:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import type { runtime } from './runtime.worker';
-import { webWorkerTransport } from '@taucad/runtime/transport/web';
+import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
 import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
 const fileManagerWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
-const fileSystemBridge = openFileSystemBridge(fileManagerWorker);
 
-const client = createRuntimeClient<typeof runtime>({
-  transport: webWorkerTransport({
-    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
-    fileSystem: fromFileSystemBridge(fileSystemBridge),
-  }),
+const clientOptions = createWebWorkerClientOptions({
+  createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+  fileSystem: fromFileSystemBridge(() => openFileSystemBridge(fileManagerWorker, { root: '/projects/widget' })),
 });
+const client = createRuntimeClient(clientOptions);
 await client.connect();
 
-const result = await client.export('glb', { source: { path: 'main.ts' } });
+const result = await client.export('glb', { source: { path: '/main.ts' } });
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
 
 client.terminate();
-fileSystemBridge.dispose();
 ```
 
 The runtime worker entry owns `defineRuntime(...)`; the client imports only the runtime type when it needs compile-time narrowing.
 
-The host owns the filesystem bridge connection it opens and should dispose it with the runtime session that consumes it. Runtime consumes the bridge connection; it does not know whether the filesystem authority is a Worker, iframe, Electron utility process, or another port broker.
+The transport owns and disposes each connection returned by the factory. Runtime does not know whether the filesystem authority is a Worker, iframe, Electron utility process, or another port broker. It also receives no project id, authority-global path, rights object, or mount table; it simply renders local paths exposed by the filesystem.
 
-When trusted host composition roots that bridge at an authority-global route such as `/projects/widget`, the authority file `/projects/widget/main.ts` appears to runtime as `/main.ts`. Kernels and bundlers receive only the runtime path. See [Path Namespaces](../concepts/path-namespaces) for the equivalent Node, browser-handle, memory, and inline-source mappings.
+In the example, the host-owned authority path `/projects/widget/main.ts` becomes runtime `/main.ts`. Kernels and bundlers receive only the latter. See [Path Namespaces](../concepts/path-namespaces) for the equivalent Node, browser-handle, memory, and inline-source mappings.
 
 ### In-process filesystems
 
@@ -80,10 +75,11 @@ For tests, CLIs, and other same-thread scenarios, use `inProcessTransport` with 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({
     runtime,
@@ -98,35 +94,68 @@ await client.connect();
 
 The transport detects the inline arm and wires an in-process bridge that auto-propagates `watch` events when the wrapped FS exposes a `watch` method — so editor edits flow through the same dependency-invalidation pipeline as worker-hosted FSes.
 
-## Externally Allocated `filePoolBuffer` SABs
+## Why the runtime has no host file-pool option
 
-Pair `fileSystem` with `filePoolBuffer` when the host has pre-allocated a `SharedArrayBuffer` for the runtime's file pool. Sharing the buffer across the FS worker, kernel worker, and runtime client gives you zero-copy reads of file contents -- the kernel reads bytes from shared memory rather than postMessage-ing them through the bridge.
+Do not pass the filesystem authority's shared file pool to a rooted runtime. A pool hit can return authority-global bytes before the scoped bridge handles the read, bypassing the filesystem boundary. Runtime file content therefore uses the rooted bridge's transfer/copy path. Transport-owned geometry and cooperative-abort memory remain internal; a capability-local filesystem pool can be introduced later only if measurement justifies it.
 
-`filePoolBuffer` is the **only** `SharedArrayBuffer` exposed on the public runtime API. Geometry-pool and cooperative-abort SABs are owned and allocated by the active [transport](../api/client) — never by the host. The host owns this one because the file pool's lifetime is bound to the file manager (not the runtime), and crossing that boundary requires the host to allocate the buffer.
+## Electron utility-process hosts
 
-```typescript
-import { createRuntimeClient } from '@taucad/runtime';
-import type { runtime } from './runtime.worker';
-import { webWorkerTransport } from '@taucad/runtime/transport/web';
-import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
+Electron uses one utility process per materialized runtime client. The bundled main, preload, utility, and renderer helpers exchange an opaque host lease internally so normal close and hard timeout recovery terminate exactly that process.
 
-const fileManagerWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
-const fileSystemBridge = openFileSystemBridge(fileManagerWorker);
-const filePoolBuffer = new SharedArrayBuffer(64 * 1024 * 1024);
+Register the utility entry in the main process:
 
-const client = createRuntimeClient<typeof runtime>({
-  transport: webWorkerTransport({
-    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
-    fileSystem: fromFileSystemBridge(fileSystemBridge),
-    filePoolBuffer,
-  }),
+```typescript @ts-nocheck
+// main.ts
+// @ts-nocheck: the docs resolver cannot resolve electron-vite's `?modulePath` virtual specifier.
+import { app } from 'electron';
+import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
+import utilityEntry from './runtime.utility?modulePath';
+
+await app.whenReady();
+installElectronRuntimeHeaders();
+const runtimeMain = registerElectronRuntimeMain({
+  utilityEntry,
 });
-await client.connect();
+
+app.once('before-quit', () => runtimeMain.dispose());
 ```
 
-The same `filePoolBuffer` option is supported on **wire** transports such as `webWorkerTransport` and `nodeWorkerTransport`. `inProcessTransport` does not accept a host `SharedArrayBuffer`; it can size the in-isolate file pool via the `files` option instead.
+Expose the narrow bridge from preload:
 
-> Cross-origin isolation is required for any `SharedArrayBuffer` — both the host-allocated `filePoolBuffer` and the transport-owned geometry/abort SABs. See [Cross-Origin Isolation](./cross-origin-isolation) for the COOP/COEP headers your host must serve.
+```typescript
+// preload.ts
+import { exposeElectronRuntime } from '@taucad/runtime/electron/preload';
+
+exposeElectronRuntime();
+```
+
+Serve the worker-owned runtime in the utility process:
+
+```typescript
+// runtime.utility.ts
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
+import { runtime } from './examples/runtime-definition';
+
+serveElectronRuntime({
+  runtime,
+  fileSystem: fromMemoryFs(),
+});
+```
+
+Create the renderer client through the async options provider:
+
+```typescript
+// renderer/runtime-client.ts
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
+
+const provideClientOptions = createElectronClientOptions({ renderTimeout: 60_000 });
+
+export const createElectronRuntimeClient = async () => createRuntimeClient(await provideClientOptions());
+```
+
+Renderer code should never handle the host ID or call `releaseRuntimeHost` itself. The transport releases its lease through the preload bridge when `RuntimeClient.terminate()` runs or when a render timeout requires hard recovery. The config and `?modulePath` import are identical on electron-vite 5/Vite 7 and electron-vite 6 beta/Vite 8. See [Bundling](./bundling) for electron-vite configuration and [Configure Render Timeouts](./render-timeouts) for the typed restart flow.
 
 ## Deferred Client Creation
 
@@ -134,13 +163,14 @@ When the host needs a runtime client before it knows which filesystem to bind to
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 
 // ...later, once the user picks a project:
 const projectPath = '/Users/me/cad-projects/widget';
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromNodeFs(projectPath) }),
 });
@@ -156,10 +186,11 @@ Because every wire concern is closed over at construction time, the client stays
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({
     runtime,
@@ -199,7 +230,7 @@ function attachShutdown(client: { shutdown: (opts: { drain?: boolean }) => Promi
 }
 ```
 
-`shutdown({ drain: true }){:ts}` snapshots the in-flight intents, awaits each via `Promise.allSettled{:ts}`, and then runs the same teardown as `terminate(){:ts}`. A concurrent `terminate(){:ts}` cancels the drain — pending intents reject with `RuntimeTerminatedError{:ts}` and the awaiting `shutdown(){:ts}` promise still resolves. Both methods are idempotent.
+`shutdown({ drain: true }){:ts}` closes command admission, waits for already-admitted intents, awaits the worker's one idempotent cleanup call behind its serialized operation lane, and only then closes the transport and owned bridge resources. `terminate(){:ts}` and `shutdown({ drain: false }){:ts}` are hard closes: they reject promptly and make no claim that remote kernel/filesystem cleanup ran. A concurrent hard terminate unblocks a drain. All paths are idempotent.
 
 Wire this from your host after you construct the client — for example `attachShutdown(client){:ts}` where `client` is your `RuntimeClient{:ts}`.
 
@@ -208,5 +239,6 @@ Wire this from your host after you construct the client — for example `attachS
 - [API Reference: Client](../api/client) -- Full documentation for `RuntimeClient.connect` and the lifecycle taxonomy
 - [API Reference: Filesystem](../api/filesystem) -- `RuntimeFileSystem` and the `from*` factories
 - [Live Rendering](./live-rendering) -- Drive the autonomous render loop once the host wiring is in place
-- [Cross-Origin Isolation](./cross-origin-isolation) -- COOP/COEP headers required for `SharedArrayBuffer`
+- [Configure Render Timeouts](./render-timeouts) -- Electron wire cancellation and exact-host recovery
+- [Cross-Origin Isolation](./cross-origin-isolation) -- COOP/COEP headers required for transport-owned shared memory
 - [Set Up the Filesystem](./filesystem-setup) -- Built-in filesystem implementations (`fromMemoryFs`, `fromNodeFs`, etc.)

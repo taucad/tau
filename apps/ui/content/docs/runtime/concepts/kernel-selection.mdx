@@ -32,8 +32,8 @@ flowchart TD
     MatchBuiltin -->|Yes| LoadBundler["Load kernel, cache, return"]
     MatchBuiltin -->|No| Next2["Try next"]
 
-    Next2 --> CatchAll["3. Catch-all fallback"]
-    CatchAll -->|"extensions: '*'"| LoadCatchAll["Load kernel, cache, return"]
+    Next2 --> CatchAll{"Application catch-all?"}
+    CatchAll -->|"extensions: '*'"| LoadCatchAll["Load custom kernel, cache, return"]
     CatchAll -->|None| Fail["No kernel can handle"]
 ```
 
@@ -58,16 +58,16 @@ When the file extension has a registered bundler (e.g., `.ts` with esbuild):
 
 This pass handles cases where the entry path does not directly import the kernel (e.g., it imports a local module that imports `replicad`). The regex in pass 1 would miss this; the bundler traces the full import graph.
 
-### Pass 3: Catch-All Fallback
+### Pass 3: Application Catch-All
 
-If a kernel registered with `extensions: ['*']` was found in pass 1, select it now. The Tau converter kernel uses this to handle STEP, STL, 3MF, and other import formats that have no dedicated kernel.
+If an application registers its own kernel with `extensions: ['*']`, the runtime selects it now. No first-party package publishes a catch-all kernel: import formats are owned by explicit `gltf`, `brep`, `rhino`, and `assimp` kernel ids.
 
 If no kernel matches at all, selection returns `undefined`. The framework reports that no kernel can handle the file.
 
 ## Why This Layered Approach
 
 - **Performance** -- Extension and regex are cheap. Bundler detection is more expensive; it runs only when extension/regex fail or when multiple kernels share an extension.
-- **Correctness** -- Regex can only see the entry path. Transitive imports require the bundler. Catch-all ensures a fallback for unknown formats.
+- **Correctness** -- Regex can only see the entry path. Transitive imports require the bundler. An optional application catch-all remains last.
 - **Priority** -- Kernel order in `defineRuntime({ kernels: [...] })` matters. When multiple kernels match, the first wins. Put specific kernels before catch-all.
 
 ## Caching of Selection Results
@@ -85,7 +85,7 @@ In autonomous rendering mode (the default), the worker's filesystem watch subscr
 ## Implications
 
 - **Order matters** -- Register kernels in priority order. Put Replicad before JSCAD if both match `.ts` and you prefer Replicad for ambiguous cases.
-- **Catch-all last** -- The Tau kernel (`extensions: ['*']`) should typically be last so specific kernels get first chance.
+- **Catch-all last** -- If an application defines a `'*'` kernel, register it last so explicit format owners get first chance.
 - **Automatic invalidation** -- In autonomous mode, file changes trigger re-selection automatically through the worker's watch subscription.
 
 ## Further Reading

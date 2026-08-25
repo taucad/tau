@@ -15,6 +15,17 @@ That one definition lets consumers, plugin authors, and host integrators describ
 For a filesystem-backed source, `source.path` accepts either a relative path or a path beginning with `/`. The client normalizes both forms before the request reaches a kernel:
 
 ```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const runtime = defineRuntime({ plugins: [replicad()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+
 await client.render({ source: { path: 'models/main.ts' } });
 await client.render({ source: { path: '/models/main.ts' } });
 ```
@@ -24,6 +35,19 @@ Both calls identify the runtime path `/models/main.ts`.
 For inline source, `source.entry` is a key in `source.files`. It may include directory segments; it is not restricted to a basename:
 
 ```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const runtime = defineRuntime({ plugins: [replicad()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+const mainSource = 'export default () => null;';
+const partSource = 'export const part = null;';
+
 await client.render({
   source: {
     files: {
@@ -40,11 +64,15 @@ await client.render({
 Kernel and bundler methods receive `entryPath` after normalization. It begins with `/` and names the model's evaluation root within the supplied runtime filesystem:
 
 ```typescript
-async getDependencies({ entryPath }, { filesystem }) {
-  // entryPath === '/models/main.ts'
-  const source = await filesystem.readFile(entryPath, 'utf8');
-  return { resolved: [entryPath, '/lib/part.ts'], unresolved: [] };
-}
+import type { KernelDefinition } from '@taucad/runtime/kernel';
+
+const kernelMethods: Pick<KernelDefinition, 'getDependencies'> = {
+  async getDependencies({ entryPath }, { filesystem }) {
+    // entryPath === '/models/main.ts'
+    const source = await filesystem.readFile(entryPath, 'utf8');
+    return { resolved: [entryPath, '/lib/part.ts'], unresolved: source ? [] : [entryPath] };
+  },
+};
 ```
 
 Middleware receives the same normalized `entryPath`. Dependency `path` values and all `KernelFileSystem` method arguments use the same runtime-path namespace. The names differ because `entryPath` identifies the evaluation root while `path` may identify any dependency.

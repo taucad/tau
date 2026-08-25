@@ -49,11 +49,12 @@ resolves with -- the `success` branch narrows `result.data` for you:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
@@ -123,7 +124,8 @@ structured error information back to your UI or CLI:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
@@ -132,7 +134,7 @@ const userCode = `
   export default () => drawCircle(10).sketchOnPlane('XY').extrude(5);
 `;
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
@@ -166,19 +168,22 @@ the full subscription lifecycle.
 
 `render`, `updateParameters`, and `setOptions` return a `RenderOutcome`
 discriminated union. Supersession is **not** an exception — it is a benign
-outcome that indicates a newer call took ownership of the worker before this
-one settled. The newer call's settlement carries the authoritative geometry.
+outcome that indicates a newer public command or autonomous watched-filesystem
+preview took ownership before this one settled. The selected preview's
+authoritative geometry arrives over the `geometry` event; an autonomous
+successor has no public settlement of its own.
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const code =
   "import { drawCircle } from 'replicad';\nexport default () => drawCircle(10).sketchOnPlane('XY').extrude(5);";
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
@@ -186,7 +191,7 @@ const settlement = await client.render({ source: { files: { 'main.ts': code } } 
 
 if (settlement.superseded) {
   // Benign — no error; the latest geometry will arrive over `'geometry'`.
-  console.log('Superseded by a newer call');
+  console.log('Superseded by a newer selected preview');
 } else {
   // settlement.geometry is HashedGeometryResult — typed and narrowed.
   console.log(`Settled with ${settlement.geometry.success ? 'data' : 'issues'}`);
@@ -196,15 +201,15 @@ if (settlement.superseded) {
 Real failures still throw via Promise rejection. Use the realm-safe type
 guards rather than `instanceof` for cross-realm checks:
 
-| Error                          | Trigger                                                                                                                                                                                    | `code`                              | Type guard                       |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | -------------------------------- |
-| `RuntimeNotConnectedError`     | Filesystem `source.path` command issued before `connect()` resolved.                                                                                                                       | `'RUNTIME_NOT_CONNECTED'`           | `isRuntimeNotConnectedError`     |
-| `RuntimeConnectionError`       | Transport handshake failed. Carries `causeKind: 'transport-open' \| 'capabilities-resolution' \| 'kernel-binding'`.                                                                        | `'RUNTIME_CONNECTION_FAILED'`       | `isRuntimeConnectionError`       |
-| `RuntimeTerminatedError`       | Command issued after `terminate()`, or in-flight Promise rejected because `terminate()` happened mid-flight. Carries `causeKind: 'explicit' \| 'connection-failed' \| 'transport-closed'`. | `'RUNTIME_TERMINATED'`              | `isRuntimeTerminatedError`       |
-| `RenderTimeoutError`           | Render exceeded the configured `renderTimeout` (ms).                                                                                                                                       | `'RUNTIME_RENDER_TIMEOUT'`          | `isRenderTimeoutError`           |
-| `RenderAbortedError`           | Render aborted (typically because a newer command superseded it).                                                                                                                          | `'RUNTIME_RENDER_ABORTED'`          | `isRenderAbortedError`           |
-| `NoRenderOutcomeError`         | `client.export(format)` called with no prior render.                                                                                                                                       | `'RUNTIME_NO_RENDER_OUTCOME'`       | `isNoRenderOutcomeError`         |
-| `SharedPoolEntryNotFoundError` | Worker emitted a pooled geometry key the runtime client could not resolve.                                                                                                                 | `'RUNTIME_SHARED_POOL_KEY_MISSING'` | `isSharedPoolEntryNotFoundError` |
+| Error                          | Trigger                                                                                                                                      | `code`                              | Type guard                       |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | -------------------------------- |
+| `RuntimeNotConnectedError`     | Filesystem `source.path` command issued before `connect()` resolved.                                                                         | `'RUNTIME_NOT_CONNECTED'`           | `isRuntimeNotConnectedError`     |
+| `RuntimeConnectionError`       | Transport handshake failed. Carries `causeKind: 'transport-open' \| 'capabilities-resolution' \| 'kernel-binding'`.                          | `'RUNTIME_CONNECTION_FAILED'`       | `isRuntimeConnectionError`       |
+| `RuntimeTerminatedError`       | Client became terminal. `causeKind: 'render-timeout'` identifies an isolated host killed after failed timeout recovery; create a new client. | `'RUNTIME_TERMINATED'`              | `isRuntimeTerminatedError`       |
+| `RenderTimeoutError`           | Render exceeded the configured `renderTimeout`. The matching Promise rejects locally at the deadline.                                        | `'RUNTIME_RENDER_TIMEOUT'`          | `isRenderTimeoutError`           |
+| `RenderAbortedError`           | Render aborted (typically because a newer command superseded it).                                                                            | `'RUNTIME_RENDER_ABORTED'`          | `isRenderAbortedError`           |
+| `NoRenderOutcomeError`         | `client.export(format)` called with no prior render.                                                                                         | `'RUNTIME_NO_RENDER_OUTCOME'`       | `isNoRenderOutcomeError`         |
+| `SharedPoolEntryNotFoundError` | Worker emitted a pooled geometry key the runtime client could not resolve.                                                                   | `'RUNTIME_SHARED_POOL_KEY_MISSING'` | `isSharedPoolEntryNotFoundError` |
 
 Branch on `error.code` (or use the realm-safe type guard) — never `Error.message`. Messages are human prose that may change; codes are the contract.
 
@@ -215,14 +220,15 @@ Branch on `error.code` (or use the realm-safe type guard) — never `Error.messa
 
 ```typescript
 import { createRuntimeClient, isRenderTimeoutError, isRuntimeTerminatedError } from '@taucad/runtime';
-import { presets } from '@taucad/runtime/presets';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const code =
   "import { drawCircle } from 'replicad';\nexport default () => drawCircle(10).sketchOnPlane('XY').extrude(5);";
 
-const runtime = presets.all();
+const runtime = defineRuntime({ plugins: [replicad()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
@@ -245,7 +251,7 @@ try {
 Kernels enrich raw errors into `KernelIssue` with location and stack. Replicad maps OpenCASCADE exceptions; JSCAD and Zoo map their engine errors. When building custom kernels, use `createKernelError`:
 
 ```typescript
-import { createKernelError } from '@taucad/runtime';
+import { createKernelError } from '@taucad/runtime/kernel';
 
 function validateWidth(width: number) {
   if (width > 0) return undefined;
@@ -273,6 +279,8 @@ console.log(issue?.success === false ? issue.issues[0]?.message : 'ok');
 - **Autonomous mode errors**: Subscribe to `client.on('state', (state, detail) => ...)` to receive error state transitions in autonomous rendering mode.
 
 ## Related
+
+- [Configure Render Timeouts](./render-timeouts) -- Deadline settlement and host recovery
 
 - [Create a Custom Kernel](./custom-kernel) -- Return createKernelError from kernel methods
 - [Render Lifecycle](../concepts/render-lifecycle) -- How render cancellation works

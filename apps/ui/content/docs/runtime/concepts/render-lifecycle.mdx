@@ -6,7 +6,7 @@ icon: lucide:refresh-cw
 
 # Render Lifecycle
 
-The runtime worker manages its own render lifecycle autonomously. After receiving `render`, it renders immediately, discovers dependencies, watches for changes, and re-renders on file or parameter updates. Three cancellation strategies ensure that superseded renders are aborted as quickly as possible while guaranteeing correctness.
+The runtime worker manages its own render lifecycle autonomously. After receiving `render`, it renders immediately, discovers dependencies, watches for changes, and re-renders on file or parameter updates. A watched-file rerender can therefore supersede the originating public call without a second API call. Every admitted preview reaches `idle` or `error` before its successor becomes active, and selected geometry is published over the `geometry` event. Three cancellation strategies ensure that superseded renders are aborted as quickly as possible while guaranteeing correctness.
 
 ## Context and Motivation
 
@@ -178,7 +178,7 @@ Cache invalidation (`Map.delete()`) is synchronous and monotonically correct:
 - **Latency** -- Proxy-based abort provides sub-millisecond cancellation for OC-based kernels. Users see responsive updates when dragging sliders.
 - **Correctness** -- The generation counter is the universal safety net. Even if a render cannot be interrupted, stale results are never displayed.
 - **Memory** -- Only one render's geometry is ever live at a time. Superseded geometry is discarded before transfer.
-- **OpenSCAD limitation** -- OpenSCAD runs as a single synchronous `callMain()` WASM invocation with no JS/WASM boundary to intercept. The generation counter handles correctness, but the full render must complete before a new one starts.
+- **OpenRSCAD limitation** -- OpenRSCAD evaluates a model synchronously inside its worker. The generation counter handles correctness, but the current evaluation must complete before a newer render begins.
 
 ## Further Reading
 

@@ -191,14 +191,13 @@ Pass the factory to [`defineRuntime`](../api/client):
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { myCache } from './my-cache.middleware';
+import { myCache } from './examples/my-cache.middleware';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild()],
   middleware: [myCache()],
 });
 
@@ -236,6 +235,7 @@ const fullMiddleware = defineMiddleware({
 
 - **Version**: Set `version` for cache-key computation. Changing the version invalidates caches that include middleware signatures.
 - **Runtime services**: Destructure `logger`, `filesystem`, `dependencies`, `dependencyHash`, `state`, and `options` from the `KernelMiddlewareRuntime` as needed.
+- **Cancellation**: Destructure the fresh operation `signal`, pass it to cancellable APIs, and never retain it after the hook settles.
 - **Worker-owned middleware**: Put middleware factories in the worker/host module that calls `defineRuntime`. Browser clients can type-import the runtime definition, but should not value-import executable middleware modules.
 
 ## Related
@@ -243,3 +243,4 @@ const fullMiddleware = defineMiddleware({
 - [Middleware Model](../concepts/middleware-model) -- Onion model and execution order
 - [Use Middleware](./using-middleware) -- Add built-in middleware
 - [API Reference: Middleware](../api/middleware) -- defineMiddleware and types
+- [Cooperate with Cancellation](./cooperate-with-cancellation) -- AbortSignal patterns for wrap and dependency hooks

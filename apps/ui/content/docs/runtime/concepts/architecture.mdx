@@ -54,7 +54,7 @@ flowchart TB
     WatchSub -->|"file changed → invalidate + debounce"| RenderLoop
 ```
 
-**Main Thread** -- display and user input. Houses the editor, Three.js renderer, parameter UI, and progress indicators. The editor writes files to the File Manager Worker through a bridge proxy (`createFileSystemBridge` + `createBridgeProxy<FileManagerProtocol>`). The `RuntimeClient` sends `render`/`updateParameters`/`setOptions`/`export` commands to the kernel worker and subscribes to geometry, state, and progress events.
+**Main Thread** -- display and user input. Houses the editor, Three.js renderer, parameter UI, and progress indicators. The editor writes files to the File Manager Worker through a validated bridge proxy (`createFileSystemBridge` + `createFileSystemBridgeProxy`). The `RuntimeClient` sends `render`/`updateParameters`/`setOptions`/`export` commands to the kernel worker and subscribes to geometry, state, and progress events.
 
 **Kernel Worker** -- the autonomous render service. Holds the current file, parameters, watch subscriptions, debounce timers, render generation counter, all caches (file hash, file content, bundle result, kernel selection), and the render loop. Runs middleware and kernel code. Pushes results to the main thread via events.
 
@@ -191,7 +191,7 @@ Kernels are plain objects returned by `defineKernel`. They implement `getDepende
 
 ## Key Relationships
 
-- **Editor and FileSystem**: The editor writes files to the File Manager Worker through Bridge A (`createBridgeProxy<FileManagerProtocol>`). This is the write path that triggers autonomous re-renders. The main thread never writes files through the kernel worker.
+- **Editor and FileSystem**: The editor writes files to the File Manager Worker through Bridge A (`createFileSystemBridgeProxy`). This is the write path that triggers autonomous re-renders. The main thread never writes files through the kernel worker.
 - **Client and Worker**: The client creates or receives a transport and passes it to `RuntimeWorkerClient`. The transport carries `RuntimeCommand` and `RuntimeResponse` messages. Custom transports enable testing or non-browser environments.
 - **Worker and FileSystem**: The kernel worker accesses the filesystem through Bridge B. In autonomous mode, it subscribes to file change events scoped to the current file's dependency graph. Watch events flow directly from the File Manager Worker -- they never pass through the main thread. With an inline Node filesystem (`fromNodeFs`) there is no File Manager Worker: the adapter watches the host directories and delivers the same events in-isolate.
 - **Framework and Kernel**: The framework loads kernel modules by URL, initializes them, and invokes their methods. Kernels receive `KernelRuntime` (filesystem, logger, bundler, execute, tracer) and their own context.

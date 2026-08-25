@@ -1,12 +1,12 @@
 ---
 title: Filesystem API
-description: Filesystem constructors, bridge utilities, and types for connect-time handles plus kernel I/O.
+description: Filesystem constructors, bridge adapters, and types for connect-time handles plus kernel I/O.
 icon: lucide:folder
 ---
 
 # Filesystem API
 
-Use the filesystem API when configuring how kernels read and write project files. The package provides constructors for Node.js, browser directory handles, in-memory and already-confined fs-compatible backends, plus bridge utilities for cross-worker filesystem access.
+Use the filesystem API when configuring how kernels read and write project files. Runtime provides constructors for Node.js, browser directory handles, in-memory and already-confined fs-compatible backends, plus filesystem-specific bridge utilities for cross-worker access.
 
 ## Filesystem Types
 
@@ -20,14 +20,13 @@ Use the filesystem API when configuring how kernels read and write project files
 
 ## Constructors
 
-| Function                        | Import Path                          | Description                                               |
-| ------------------------------- | ------------------------------------ | --------------------------------------------------------- |
-| `fromNodeFs(basePath)`          | `@taucad/runtime/filesystem/node`    | Node.js filesystem rooted at `basePath`                   |
-| `fromBrowserFs(root)`           | `@taucad/runtime/filesystem/browser` | Browser directory handle exposed as runtime `/`           |
-| `fromMemoryFs(files?)`          | `@taucad/runtime/filesystem`         | In-memory Map-backed filesystem, optionally seeded        |
-| `fromFsLike(fs)`                | `@taucad/runtime/filesystem`         | An already-confined virtual filesystem                    |
-| `fromFileSystemBridge(open)`    | `@taucad/runtime/filesystem`         | A fresh rooted bridge connection for each runtime binding |
-| `createRuntimeFileSystem(base)` | `@taucad/runtime/filesystem`         | Wrap `RuntimeFileSystemBase` with enhanced helper methods |
+| Function                     | Import Path                          | Description                                               |
+| ---------------------------- | ------------------------------------ | --------------------------------------------------------- |
+| `fromNodeFs(basePath)`       | `@taucad/runtime/filesystem/node`    | Node.js filesystem rooted at `basePath`                   |
+| `fromBrowserFs(root)`        | `@taucad/runtime/filesystem/browser` | Browser directory handle exposed as runtime `/`           |
+| `fromMemoryFs(files?)`       | `@taucad/runtime/filesystem`         | In-memory Map-backed filesystem, optionally seeded        |
+| `fromFsLike(fs)`             | `@taucad/runtime/filesystem`         | An already-confined virtual filesystem                    |
+| `fromFileSystemBridge(open)` | `@taucad/runtime/filesystem`         | A fresh rooted bridge connection for each runtime binding |
 
 Every constructor establishes the root of the [runtime-path namespace](../concepts/path-namespaces). Filesystem method arguments such as `/main.ts` refer to that supplied root, not the host operating system's root.
 
@@ -35,29 +34,20 @@ Every constructor establishes the root of the [runtime-path namespace](../concep
 
 <auto-type-table path='./props/filesystem.ts' name='FileSystemBridge' />
 
-<auto-type-table path='./props/filesystem.ts' name='BridgePort' />
-
-<auto-type-table path='./props/filesystem.ts' name='BridgeServerHandle' />
-
 <auto-type-table path='./props/filesystem.ts' name='FileSystemBridgeOptions' />
 
 <auto-type-table path='./props/filesystem.ts' name='ExposeFileSystemHandle' />
 
 ## Bridge Utilities
 
-For cross-worker filesystem access, these utilities create MessagePort-based bridges:
+For cross-worker filesystem access, `@taucad/runtime/filesystem` provides the filesystem-specific authority boundary:
 
-| Function                                       | Description                                                                                                                                                                                 |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createBridgePort(handlers)`                   | Generic `@taucad/rpc/bridge` helper: serve handlers in-process; returns **`BridgePort`** with a raw **`MessagePort`** for `postMessage(..., [port])` transfer to a callee worker.           |
-| `createBridgeServer(handlers, port, options?)` | Serve an object's methods over a `Port` adapter (`wrapMessagePort` when using bare `MessagePort`).                                                                                          |
-| `createBridgeProxy<T>(port)`                   | Proxy client over a **`Port`** (never a bare transferred **`MessagePort`** without **`wrapMessagePort`**).                                                                                  |
-| `createBridgeCall(port, method, args)`         | Lower-level RPC triple over a **`Port`**.                                                                                                                                                   |
-| `exposeFileSystem(handlers, options?)`         | `@taucad/fs-bridge` worker-side listener for incoming filesystem bridge ports.                                                                                                              |
-| `openFileSystemBridge(worker, options?)`       | `@taucad/fs-bridge` client side: opens a **`MessageChannel`**, transfers one end to an FS-owning worker, and returns a raw filesystem bridge connection for runtime or another worker.      |
-| `createFileSystemBridge(worker, options?)`     | `@taucad/fs-bridge` client side: opens a **`MessageChannel`**, transfers one end to an FS-owning worker. Returns **`FileSystemBridge`** with a wrapped **`Port`** for same-isolate proxies. |
-| `catchMessages(port, handler)`                 | Buffer messages during initialization.                                                                                                                                                      |
-| `extractTransferables(value)`                  | Collect **`ArrayBuffer`** transferables for **`postMessage`**.                                                                                                                              |
+| Function                                   | Description                                                                                         |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `exposeFileSystem(handlers, options?)`     | Listen in the filesystem-owning worker for scoped bridge connections.                               |
+| `openFileSystemBridge(worker, options?)`   | Open a fresh scoped connection for `fromFileSystemBridge`; use this for runtime transport wiring.   |
+| `createFileSystemBridge(worker, options?)` | Open a managed filesystem bridge when the current isolate also needs to call filesystem methods.    |
+| `createFileSystemBridgeProxy(bridge)`      | Create the validated filesystem proxy from the managed bridge returned by `createFileSystemBridge`. |
 
 ## Usage
 
@@ -68,12 +58,11 @@ import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild()],
 });
 
 const client = createRuntimeClient({
@@ -88,12 +77,11 @@ import { createRuntimeClient } from '@taucad/runtime';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild()],
 });
 
 const client = createRuntimeClient({
@@ -113,6 +101,7 @@ Trusted host code selects an authority route once and supplies a connection fact
 ```typescript
 import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
 
+const fileManagerWorker = new Worker(new URL('./file-manager.worker.ts', import.meta.url), { type: 'module' });
 const fileSystem = fromFileSystemBridge(() => openFileSystemBridge(fileManagerWorker, { root: '/projects/widget' }));
 ```
 
@@ -125,3 +114,4 @@ Inside runtime, `/main.ts`, `/.tau/cache/**`, and `/node_modules/**` all belong 
 - [Path Namespaces](../concepts/path-namespaces) -- How adapters establish runtime `/`
 - [API: Client](./client) -- `createRuntimeClient` and wiring `transport` with a filesystem
 - [API: Types](./types) -- `RuntimeFileSystemBase`, `KernelFileSystem`, and the opaque `RuntimeFileSystem`
+- [RPC Wire Spec](https://github.com/taucad/tau/blob/main/docs/architecture/rpc-wire-spec.md) -- Low-level protocol reference for custom transport authors

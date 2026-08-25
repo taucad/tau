@@ -1,1 +1,1 @@
-export type { GeometryExpectation } from '@taucad/runtime/testing';
+export type { GeometryExpectation } from '@taucad/runtime-testing';

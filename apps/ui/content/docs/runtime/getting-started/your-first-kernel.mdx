@@ -27,14 +27,13 @@ Create a runtime client with the Replicad kernel and esbuild bundler:
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild()],
 });
 
 const client = createRuntimeClient({
@@ -81,8 +80,8 @@ Hand the model code, entry path, and parameters to `client.export('glb', input)`
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
@@ -94,7 +93,7 @@ const modelCode = `
   }
 `;
 
-const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
@@ -134,8 +133,8 @@ The same `export()` call swaps formats by changing the first argument -- the run
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
@@ -147,7 +146,7 @@ const modelCode = `
   }
 `;
 
-const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
@@ -176,12 +175,12 @@ Terminate the client to shut down workers and release resources:
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });

@@ -17,6 +17,10 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/geospec-engine"
   },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/geospec-engine#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
   "files": [
     "dist",
     "LICENSE",
@@ -45,6 +49,7 @@
       "types": "./native/opencascade/dist/init.d.ts",
       "default": "./native/opencascade/dist/init.js"
     },
+    "./native/opencascade/single/wasm-url": "./src/native/opencascade-wasm.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -70,6 +75,11 @@
         "import": "./dist/native/opencascade/init.js",
         "default": "./dist/native/opencascade/init.js"
       },
+      "./native/opencascade/single/wasm-url": {
+        "types": "./dist/native/opencascade-wasm.d.mts",
+        "import": "./dist/native/opencascade-wasm.mjs",
+        "default": "./dist/native/opencascade-wasm.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -86,9 +96,22 @@
   },
   "dependencies": {
     "@gltf-transform/core": "^4.4.0",
+    "@taucad/assimp": "workspace:*",
+    "@taucad/brep": "workspace:*",
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/gltf": "workspace:*",
+    "@taucad/image": "workspace:*",
+    "@taucad/jscad": "workspace:*",
+    "@taucad/manifold": "workspace:*",
+    "@taucad/middleware": "workspace:*",
+    "@taucad/occt-core": "workspace:*",
+    "@taucad/opencascade": "workspace:*",
+    "@taucad/replicad": "workspace:*",
+    "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "geospec": "workspace:*",
-    "manifold-3d": "catalog:"
+    "manifold-3d": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@libcascade/toolchain": "catalog:",

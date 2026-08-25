@@ -15,12 +15,14 @@
  */
 
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerHostOptions } from 'geospec/runner/worker';
+import type { GeoSpecModuleBundleCache } from 'geospec/runner';
 import { getGeoSpecEngineProtocol } from 'geospec/engine';
 import { forensicSpanAsync, forwardProtocolForensicMeasurement } from '#runner/forensic.js';
 import type { ForensicSink } from '#runner/forensic.js';
 import { sanitizePoolResult } from '#runner/pool/transport.js';
 import { createSerialRunContext, executeGeoSpecFile } from '#runner/serial.js';
 import type { GeoSpecRunResult } from '#runner/types.js';
+import { setOpenCascadeCompiledModule } from '#native/opencascade-module.js';
 
 /** One place where an unknown throw becomes a message the host can read. */
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -42,6 +44,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
     ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
   };
   const context = createSerialRunContext(runner);
+  const bundleCache: GeoSpecModuleBundleCache = new Map();
 
   // Shards arrive one at a time, but the host may post the next one before the
   // previous reply is observed; the chain keeps execution strictly serial
@@ -59,7 +62,19 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
   };
 
   const handle = async (message: GeoSpecPoolHostMessage): Promise<void> => {
+    if (message.type === 'initialize') {
+      try {
+        if (message.compiledWasmModule) {
+          setOpenCascadeCompiledModule(message.compiledWasmModule);
+        }
+        options.postMessage({ type: 'initialized' });
+      } catch (error) {
+        options.postMessage({ type: 'initialization-error', message: errorMessage(error) });
+      }
+      return;
+    }
     if (message.type === 'shutdown') {
+      bundleCache.clear();
       await context.resourceScope.dispose();
       await options.onShutdown?.();
       return;
@@ -72,6 +87,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
           context,
           file: message.file,
           collectOnly: true,
+          bundleCache,
           ...(message.testTimeout === undefined ? {} : { testTimeout: message.testTimeout }),
           ...(message.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: message.matcherWallBackstop }),
           ...(message.forensic === undefined ? {} : { forensic: message.forensic }),
@@ -120,6 +136,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
             runner,
             context,
             file: shard.file,
+            bundleCache,
             // A split shard's own pattern wins: it names exactly one test.
             ...(shard.testNamePattern === undefined
               ? message.testNamePattern === undefined

@@ -20,9 +20,10 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 /**
  * The VM's filesystem contract, declared here rather than imported.
  *
- * D-S3 is explicit that the engine needs no `@taucad/vm` dependency: the VM is
- * substrate machinery. The seam references this shape structurally, so an
- * engine-side declaration satisfies it without pulling the bundler in.
+ * D-S3 is explicit that the engine needs no dependency on the VM: it is substrate
+ * machinery owned by `@taucad/esbuild`. The seam references this shape
+ * structurally, so an engine-side declaration satisfies it without pulling the
+ * bundler in.
  *
  * @public
  */

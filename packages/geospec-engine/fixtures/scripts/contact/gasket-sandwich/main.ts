@@ -1,5 +1,5 @@
 import { drawRectangle, makeBaseBox } from 'replicad';
-import { face } from '@taucad/runtime/kernels/replicad/annotations';
+import { face } from '@taucad/replicad/annotations';
 
 export const defaultParams = {
   headLift: 0, // Mm - lift of the head off the gasket's upper face

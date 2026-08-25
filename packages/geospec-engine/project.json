@@ -3,8 +3,15 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/geospec-engine",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package-root"],
+  "tags": ["scope:shared", "type:package"],
   "targets": {
+    "performance-gate": {
+      "command": "vitest run src/runner/node/compiled-module-fanout.bench.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
     "generate-provenance": {
       "command": "node scripts/generate-provenance.mjs",
       "options": {

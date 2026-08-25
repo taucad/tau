@@ -7,6 +7,7 @@ import type { GeometrySubject } from '#mesh/types.js';
 import { loadMesh } from '#mesh/load-mesh.js';
 import { exposeEngineSubject } from '#engine/subject-store.js';
 import { failingSpec, memoryFileSystem, passingSpec } from '#runner/testing/memory-filesystem.js';
+import { resetOpenCascadeStepModule } from '#native/opencascade-module.js';
 
 const twoTests = `
   import { describe, it } from 'geospec';
@@ -66,6 +67,19 @@ describe('startGeoSpecPoolWorkerHost', () => {
     const host = startHost({});
 
     expect(host.posted).toStrictEqual([{ type: 'ready' }]);
+  });
+
+  it('should acknowledge a structured-cloned compiled module before running shards', async () => {
+    const host = startHost({});
+    const compiledWasmModule = await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+
+    const replies = await host.send({ type: 'initialize', compiledWasmModule }, [
+      'initialized',
+      'initialization-error',
+    ]);
+
+    expect(replies).toStrictEqual([{ type: 'initialized' }]);
+    resetOpenCascadeStepModule();
   });
 
   it('should run a shard and report its result, duration and load key', async () => {

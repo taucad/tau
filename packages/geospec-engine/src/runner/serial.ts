@@ -21,6 +21,7 @@
  */
 
 import { runGeoSpecModule } from 'geospec/runner';
+import type { GeoSpecModuleBundleCache } from 'geospec/runner';
 import { getGeoSpecEngineProtocol } from 'geospec/engine';
 import { createNoMatchingGeoSpecTestsIssue } from 'geospec/runner/worker';
 import type {
@@ -196,6 +197,7 @@ export const executeGeoSpecFile = async (options: {
   forensic?: boolean;
   forensicSink?: ForensicSink;
   collectOnly?: boolean;
+  bundleCache?: GeoSpecModuleBundleCache;
 }): Promise<GeoSpecRunResult> => {
   const { runner, context, file } = options;
   return forensicSpanAsync(
@@ -212,6 +214,7 @@ export const executeGeoSpecFile = async (options: {
         ...(runner.stepLoader ? { stepLoader: runner.stepLoader } : {}),
         ...(runner.builtinModules ? { builtinModules: runner.builtinModules } : {}),
         ...(runner.internalProfile ? { internalProfile: runner.internalProfile } : {}),
+        ...(options.bundleCache ? { bundleCache: options.bundleCache } : {}),
         ...(options.collectOnly === true ? { collectOnly: true } : {}),
       }),
     options.forensicSink,

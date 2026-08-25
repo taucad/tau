@@ -1,9 +1,10 @@
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { describe, expect, it, vi } from 'vitest';
+import ts from 'typescript';
 import { openrscad } from '@taucad/openrscad';
 import { createNodeClient } from '@taucad/runtime/node';
-import { presets } from '@taucad/runtime/presets';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { GeoSpecModelLoadError } from 'geospec/model';
 import type { GeoSpecRuntimeClient, GeoSpecRuntimeSourceAdapter, LoadModelOptions } from 'geospec/model';
@@ -53,11 +54,7 @@ const createOpenScadSourceAdapter = (): GeoSpecRuntimeSourceAdapter => ({
   id: 'openrscad',
   extensions: ['.scad'],
   async createRuntime({ projectPath }) {
-    const baseRuntime = presets.all();
-    const runtime = defineRuntime({
-      ...baseRuntime,
-      kernels: [openrscad(), ...baseRuntime.kernels],
-    });
+    const runtime = defineRuntime({ plugins: [openrscad()] });
     return (await createNodeClient(projectPath, { runtime })) as unknown as GeoSpecRuntimeClient;
   },
 });
@@ -90,6 +87,24 @@ const triangle: { format: 'mesh-buffer'; name: string; positions: number[]; indi
   positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
   indices: [0, 1, 2],
 };
+
+describe('default runtime roster', () => {
+  it('matches production @taucad package dependencies', async () => {
+    const sourceUrl = new URL('default-runtime.ts', import.meta.url);
+    const manifestUrl = new URL('../../package.json', import.meta.url);
+    const [source, manifestSource] = await Promise.all([readFile(sourceUrl, 'utf8'), readFile(manifestUrl, 'utf8')]);
+    const manifest = JSON.parse(manifestSource) as { dependencies?: Record<string, string> };
+    const expected = Object.keys(manifest.dependencies ?? {}).filter(
+      (name) => name.startsWith('@taucad/') && name !== '@taucad/runtime' && name !== '@taucad/occt-core',
+    );
+    const actual = ts
+      .preProcessFile(source, true, true)
+      .importedFiles.map(({ fileName }) => fileName)
+      .filter((specifier) => specifier.startsWith('@taucad/') && !specifier.startsWith('@taucad/runtime'));
+
+    expect(actual.toSorted()).toEqual(expected.toSorted());
+  });
+});
 
 /** A runtime whose export route advertises the canonical frame properties. */
 const fakeRuntime = (options?: {

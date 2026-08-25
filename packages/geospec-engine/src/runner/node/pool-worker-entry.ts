@@ -24,6 +24,14 @@ import { createModelLoader } from '#model/load-model.js';
 import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
+import { setOpenCascadeCompiledModule } from '#native/opencascade-module.js';
+
+type NodePoolWorkerOptions = {
+  projectPath: string;
+  cache?: boolean;
+  cacheDirectory?: string;
+  compiledWasmModule?: WebAssembly.Module;
+};
 
 /** The slice of a worker's `MessagePort` the host needs. */
 export type PoolWorkerPort = {
@@ -35,14 +43,14 @@ export type PoolWorkerPort = {
  * Serve pool shards over one worker port.
  *
  * @param port - The thread's parent port.
- * @param projectPath - Absolute project root passed as worker data.
+ * @param options - Absolute project root, cache settings, and optional host-compiled module.
  * @public
  */
-export const startNodePoolWorker = (
-  port: PoolWorkerPort,
-  options: { projectPath: string; cache?: boolean; cacheDirectory?: string },
-): void => {
+export const startNodePoolWorker = (port: PoolWorkerPort, options: NodePoolWorkerOptions): void => {
   const { projectPath } = options;
+  if (options.compiledWasmModule) {
+    setOpenCascadeCompiledModule(options.compiledWasmModule);
+  }
   installNodeEvidenceStore(options);
   startGeoSpecPoolWorkerHost({
     filesystem: createNodeVmFileSystem(projectPath),
@@ -69,6 +77,6 @@ export const startNodePoolWorker = (
 
 /* v8 ignore start -- The thread binding. `parentPort` is null outside a worker, which is what makes importing this module in a test a no-op; `startNodePoolWorker` above is what the tests drive. */
 if (parentPort !== null) {
-  startNodePoolWorker(parentPort, workerData as { projectPath: string; cache?: boolean; cacheDirectory?: string });
+  startNodePoolWorker(parentPort, workerData as NodePoolWorkerOptions);
 }
 /* v8 ignore stop */

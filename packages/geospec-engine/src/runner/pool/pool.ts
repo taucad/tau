@@ -50,6 +50,8 @@ import { filesToSplit, planShards, selectShard } from '#runner/pool/shard-planne
 export type GeoSpecPoolOptions = {
   /** Spawn one worker running `startGeoSpecPoolWorkerHost`. */
   createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>;
+  /** Optional one-time worker initialization performed after its ready signal. */
+  initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void;
   /** Worker count. Omit to let the caller's host auto-size before calling. */
   workers: number;
   /** Optional scheduling telemetry. Absent = declared order, no memory class. */
@@ -78,6 +80,7 @@ type PoolWorker = {
   loadKey?: string;
   busy: boolean;
   dead: boolean;
+  initialized: boolean;
 };
 
 /**
@@ -95,12 +98,18 @@ type ShardSettlement =
 const createWorkerChannel = (
   handle: GeoSpecPoolWorkerHandle,
   emitForensic: (event: Extract<GeoSpecPoolWorkerMessage, { type: 'forensic' }>) => void,
-): { settle: (shardId: number) => Promise<ShardSettlement>; ready: Promise<void> } => {
+): { settle: (shardId: number) => Promise<ShardSettlement>; ready: Promise<void>; initialized: Promise<void> } => {
   let pending: ((settlement: ShardSettlement) => void) | undefined;
   let exited: string | undefined;
   let resolveReady: (() => void) | undefined;
   const ready = new Promise<void>((resolve) => {
     resolveReady = resolve;
+  });
+  let resolveInitialized: (() => void) | undefined;
+  let rejectInitialized: ((error: Error) => void) | undefined;
+  const initialized = new Promise<void>((resolve, reject) => {
+    resolveInitialized = resolve;
+    rejectInitialized = reject;
   });
 
   const deliver = (settlement: ShardSettlement): void => {
@@ -113,6 +122,14 @@ const createWorkerChannel = (
     switch (message.type) {
       case 'ready': {
         resolveReady?.();
+        break;
+      }
+      case 'initialized': {
+        resolveInitialized?.();
+        break;
+      }
+      case 'initialization-error': {
+        rejectInitialized?.(new Error(message.message));
         break;
       }
       case 'shard-complete': {
@@ -147,6 +164,7 @@ const createWorkerChannel = (
 
   return {
     ready,
+    initialized,
     settle: async (_shardId: number) =>
       exited === undefined
         ? new Promise<ShardSettlement>((resolve) => {
@@ -182,7 +200,7 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
           events.emit({ type: 'forensic', shardId, name, value, unit });
         }),
       );
-      workers.push({ handle, busy: false, dead: false });
+      workers.push({ handle, busy: false, dead: false, initialized: false });
     }
   };
 
@@ -243,6 +261,19 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
 
       await spawn(Math.max(1, Math.min(options.workers, Math.max(1, files.length))));
       await Promise.all(workers.map(async (worker) => channels.get(worker.handle)!.ready));
+      if (options.initializeWorker) {
+        await Promise.all(
+          workers.map(async (worker) => {
+            if (worker.initialized) {
+              return;
+            }
+            const channel = channels.get(worker.handle)!;
+            await options.initializeWorker!(worker.handle);
+            await channel.initialized;
+            worker.initialized = true;
+          }),
+        );
+      }
 
       const totals = { passed: 0, failed: 0, selectedTests: 0 };
       const fileResults: GeoSpecRunnerResult['files'] = [];

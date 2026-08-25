@@ -26,7 +26,7 @@ const workspace = resolve(import.meta.dirname, '../../..');
 const roots = [
   'packages/geospec',
   'packages/geospec-engine',
-  'packages/runtime/src/kernels/replicad',
+  'packages/plugins/replicad/src',
   'libs/tau-examples/src/kernels/replicad/v8-engine-rev2',
   // `apps/runtime-e2e/src` is covered by an app-owned test; a package must not
   // read `apps/**` (workspace-license-boundary-migration.md, Finding 2).

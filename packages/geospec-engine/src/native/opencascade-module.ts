@@ -10,14 +10,17 @@
  */
 
 import type { GeoSpecNativeStepBackend } from '#step/types.js';
+import { initOcct } from '@taucad/occt-core';
+import type { OcctModuleFactory } from '@taucad/occt-core';
 
 const nativeEntry = '@taucad/geospec-engine/native/opencascade/single';
 
 let singleton: Promise<GeoSpecNativeStepBackend> | undefined;
+let compiledModule: WebAssembly.Module | undefined;
 
 const instantiate = async (): Promise<GeoSpecNativeStepBackend> => {
   const module_ = (await import(/* @vite-ignore */ nativeEntry)) as {
-    default: (options?: Record<string, unknown>) => Promise<GeoSpecNativeStepBackend>;
+    default: OcctModuleFactory<GeoSpecNativeStepBackend>;
   };
   // No `variant` option: the assembly is built single-only
   // (`native/opencascade/libcascade.config.ts`), so the subpath's `init.js` has
@@ -25,7 +28,19 @@ const instantiate = async (): Promise<GeoSpecNativeStepBackend> => {
   //
   // Suppress OCCT messenger chatter; structured host events own observability
   // and JSON output must remain valid.
-  return module_.default({ print: () => undefined, printErr: () => undefined });
+  return initOcct(undefined, module_.default, {
+    ...(compiledModule ? { compiledModule } : {}),
+    print: () => undefined,
+    printErr: () => undefined,
+  });
+};
+
+/** Install the host-compiled module before the worker's first STEP load. */
+export const setOpenCascadeCompiledModule = (module: WebAssembly.Module): void => {
+  if (singleton) {
+    throw new Error('The GeoSpec OCCT module is already initialized.');
+  }
+  compiledModule = module;
 };
 
 /**
@@ -47,6 +62,7 @@ export const getOpenCascadeStepModule = async (): Promise<GeoSpecNativeStepBacke
  */
 export const resetOpenCascadeStepModule = (): void => {
   singleton = undefined;
+  compiledModule = undefined;
 };
 
 /**

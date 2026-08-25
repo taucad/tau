@@ -150,6 +150,14 @@ const loadDirectSource = async (
 const resolveAdapter = (options: RuntimeOptions): GeoSpecRuntimeSourceAdapter | undefined =>
   options.sourceAdapters?.find((adapter) => adapter.extensions.some((extension) => options.file.endsWith(extension)));
 
+const createDefaultRuntimeClient = async (projectPath: string | undefined): Promise<GeoSpecRuntimeClient> => {
+  const [{ createNodeClient }, { defaultRuntime }] = await Promise.all([
+    import('@taucad/runtime/node'),
+    import('#model/default-runtime.js'),
+  ]);
+  return (await createNodeClient(projectPath, { runtime: defaultRuntime })) as unknown as GeoSpecRuntimeClient;
+};
+
 /**
  * Obtain the runtime client for a runtime-branch load.
  *
@@ -175,11 +183,7 @@ const resolveRuntime = async (options: RuntimeOptions): Promise<{ runtime: GeoSp
       owned: true,
     };
   }
-  const { createNodeClient } = await import('@taucad/runtime/node');
-  return {
-    runtime: (await createNodeClient(options.projectPath)) as unknown as GeoSpecRuntimeClient,
-    owned: true,
-  };
+  return { runtime: await createDefaultRuntimeClient(options.projectPath), owned: true };
 };
 
 type RuntimeSourceInput = { files: Record<string, string>; entry: string } | { path: string };
@@ -381,8 +385,7 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
       observe(runtime);
       return runtime;
     }
-    const { createNodeClient } = await import('@taucad/runtime/node');
-    const runtime = (await createNodeClient(defaults.projectPath)) as unknown as GeoSpecRuntimeClient;
+    const runtime = await createDefaultRuntimeClient(defaults.projectPath);
     observe(runtime);
     return runtime;
   };

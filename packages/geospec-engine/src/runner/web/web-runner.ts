@@ -24,6 +24,8 @@ import type {
 import type { GeoSpecWebPoolRunnerOptions } from 'geospec/runner/web';
 import { createGeoSpecPoolRunner } from '#runner/pool/pool.js';
 import { createSerialGeoSpecRunner } from '#runner/serial.js';
+import { compileWasmStreaming } from '@taucad/runtime/kernel';
+import { openCascadeWasmUrl } from '#native/opencascade-wasm.js';
 
 /**
  * The subset of the browser `Worker` API the pool drives.
@@ -101,11 +103,20 @@ export const webWorkerCount = (hardwareConcurrency: number | undefined): number 
  * @returns The runner lifecycle surface.
  * @public
  */
-export const createGeoSpecWebPoolRunner = (options: GeoSpecWebPoolRunnerOptions): GeoSpecRunner =>
-  createGeoSpecPoolRunner({
+export const createGeoSpecWebPoolRunner = (options: GeoSpecWebPoolRunnerOptions): GeoSpecRunner => {
+  let compiledModule: Promise<WebAssembly.Module> | undefined;
+  const prepareModule = async (): Promise<WebAssembly.Module> => {
+    compiledModule ??= compileWasmStreaming(openCascadeWasmUrl);
+    return compiledModule;
+  };
+  return createGeoSpecPoolRunner({
     createWorker: async () => createWebWorkerHandle(await options.createWorker()),
+    initializeWorker: async (worker) => {
+      worker.postMessage({ type: 'initialize', compiledWasmModule: await prepareModule() });
+    },
     workers:
       options.workers ??
       webWorkerCount((globalThis.navigator as { hardwareConcurrency?: number } | undefined)?.hardwareConcurrency),
     ...(options.shardTimeout === undefined ? {} : { shardTimeout: options.shardTimeout }),
   });
+};

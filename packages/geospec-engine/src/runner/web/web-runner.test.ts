@@ -22,6 +22,12 @@ const stubWebWorker = (): { worker: WebWorkerLike; posted: unknown[]; terminated
       postMessage(message) {
         posted.push(message);
         const typed = message as { type: string; shard?: { id: number; file: string } };
+        if (typed.type === 'initialize') {
+          queueMicrotask(() => {
+            listener?.({ data: { type: 'initialized' } });
+          });
+          return;
+        }
         if (typed.type !== 'run-shard' || !typed.shard) {
           return;
         }
@@ -132,6 +138,8 @@ describe('createGeoSpecWebPoolRunner', () => {
 
     expect(result.success).toBe(true);
     expect(result.selectedTests).toBe(1);
+    expect(stub.posted[0]).toMatchObject({ type: 'initialize' });
+    expect((stub.posted[0] as { compiledWasmModule: unknown }).compiledWasmModule).toBeInstanceOf(WebAssembly.Module);
   });
 
   it('should auto-size when the caller declares no worker count', async () => {

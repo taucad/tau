@@ -51,6 +51,10 @@ const scriptedWorker = (script: {
         exit?.({ unexpected: false });
         return;
       }
+      if (message.type === 'initialize') {
+        queueMicrotask(() => listener?.({ type: 'initialized' }));
+        return;
+      }
       if (message.type === 'list-tests') {
         const names = script.onList?.(message.file) ?? [];
         queueMicrotask(() => listener?.({ type: 'tests-listed', shardId: message.shardId, file: message.file, names }));

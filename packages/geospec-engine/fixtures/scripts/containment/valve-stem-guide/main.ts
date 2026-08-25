@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis } from '@taucad/runtime/kernels/replicad/annotations';
+import { axis } from '@taucad/replicad/annotations';
 
 // Audit row `containment.valve-stem-guide-positive`: stem r4 through a guide
 // bore r4.03 (radial clearance 0.030), insertion length 35.

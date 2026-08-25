@@ -1,5 +1,5 @@
 import { makeBaseBox, makeCylinder } from 'replicad';
-import { axis, face, group } from '@taucad/runtime/kernels/replicad/annotations';
+import { axis, face, group } from '@taucad/replicad/annotations';
 
 const BOLTS: Array<[number, number]> = [
   [-22, -22],

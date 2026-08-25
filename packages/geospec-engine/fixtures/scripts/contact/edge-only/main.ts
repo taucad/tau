@@ -1,5 +1,5 @@
 import { makeBaseBox } from 'replicad';
-import { face } from '@taucad/runtime/kernels/replicad/annotations';
+import { face } from '@taucad/replicad/annotations';
 
 // Audit row `contact.edge-only-negative`: two solids touch along a line, but
 // the tilted face is not seated and the ordinary contact proof must fail.

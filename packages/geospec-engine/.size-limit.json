@@ -1,0 +1,12 @@
+[
+  {
+    "name": "total (ESM JS) — measured 58.58 kB brotli on 2026-08-23",
+    "path": "dist/**/*.mjs",
+    "limit": "73 kB"
+  },
+  {
+    "name": "native OpenCascade payload — measured 3.18 MB brotli on 2026-08-23",
+    "path": "dist/native/**/*.{wasm,js}",
+    "limit": "4 MB"
+  }
+]

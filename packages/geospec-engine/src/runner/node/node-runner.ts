@@ -26,6 +26,8 @@ import { installNodeEvidenceStore } from '#cache/node-evidence-store.js';
 import { autoWorkerCount } from '#runner/pool/shard-planner.js';
 import { createGeoSpecPoolRunner } from '#runner/pool/pool.js';
 import { createSerialGeoSpecRunner } from '#runner/serial.js';
+import { compileWasmStreaming } from '@taucad/runtime/kernel';
+import { openCascadeWasmUrl } from '#native/opencascade-wasm.js';
 
 /**
  * Create a serial GeoSpec runner for Node.
@@ -136,14 +138,20 @@ export const createGeoSpecNodePoolRunner = (options: GeoSpecNodePoolRunnerOption
   const workers =
     options.workers ??
     autoWorkerCount({ shards: availableParallelism(), cpus: availableParallelism(), totalMemoryBytes: totalmem() });
+  let compiledModule: Promise<WebAssembly.Module> | undefined;
+  const prepareModule = async (): Promise<WebAssembly.Module> => {
+    compiledModule ??= compileWasmStreaming(openCascadeWasmUrl);
+    return compiledModule;
+  };
   return createGeoSpecPoolRunner({
-    createWorker: () =>
+    createWorker: async () =>
       createNodeWorkerHandle(
         new Worker(poolWorkerEntryUrl(), {
           workerData: {
             projectPath: options.projectPath,
             cache: options.cache ?? true,
             ...(options.cacheDirectory === undefined ? {} : { cacheDirectory: options.cacheDirectory }),
+            compiledWasmModule: await prepareModule(),
           },
         }) as NodeWorkerLike,
       ),

@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- VM paths are object keys here. */
 import { existsSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { describe, expect, it, vi } from 'vitest';
+import * as runtimeKernel from '@taucad/runtime/kernel';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 import {
   createGeoSpecNodePoolRunner,
@@ -174,6 +175,110 @@ describe('createGeoSpecNodePoolRunner', () => {
     expect(messages[1]).toMatchObject({ type: 'shard-complete', shardId: 1, file: '/a.geospec.ts' });
   });
 
+  it('should run STEP-backed GeoSpec files in four real worker isolates', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'geospec-four-worker-'));
+    const model = join(root, 'model.step');
+    await copyFile(fileURLToPath(new URL('../../../fixtures/xde/two-cube-assembly.step', import.meta.url)), model);
+    const files = await Promise.all(
+      Array.from({ length: 4 }, async (_, index) => {
+        const file = `worker-${index}.geospec.ts`;
+        await writeFile(
+          join(root, file),
+          `import { it } from 'geospec';
+           import { loadModel } from 'geospec/model';
+           it('loads-${index}', async () => {
+             await loadModel({ source: ${JSON.stringify(model)}, format: 'step', mesh: false });
+           });`,
+          'utf8',
+        );
+        return file;
+      }),
+    );
+    const runner = createGeoSpecNodePoolRunner({ projectPath: root, workers: 4, cache: false, shardTimeout: 120_000 });
+
+    const result = await runner.run({ files });
+    await runner.close();
+
+    expect(result).toMatchObject({ success: true, passed: 4, failed: 0, selectedTests: 4 });
+  }, 120_000);
+
+  it('should compile once and instantiate one copy in each of four workers', async () => {
+    const compiled = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+    const compileWasmStreaming = vi.fn(async () => compiled);
+    const receivedModules: WebAssembly.Module[] = [];
+    const instances: WebAssembly.Instance[] = [];
+    const completeWorkerMessage = (shardId: number, file: string): GeoSpecPoolWorkerMessage => ({
+      type: 'shard-complete',
+      shardId,
+      file,
+      result: {
+        success: true,
+        passed: true,
+        tests: [{ suite: [], name: 't', assertions: [], status: 'passed', diagnostics: [] }],
+        bundle: { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] },
+      },
+      durationMs: 1,
+    });
+    class FakeWorker {
+      private readonly listeners = new Map<string, Array<(value: never) => void>>();
+      public constructor(_url: URL, options: { workerData?: unknown }) {
+        const module_ = (options.workerData as { compiledWasmModule: WebAssembly.Module }).compiledWasmModule;
+        receivedModules.push(module_);
+        instances.push(new WebAssembly.Instance(module_));
+      }
+      public postMessage(message: GeoSpecPoolHostMessage): void {
+        if (message.type === 'shutdown') {
+          queueMicrotask(() => {
+            this.fire('exit', 0);
+          });
+        } else if (message.type === 'run-shard') {
+          queueMicrotask(() => {
+            this.fire('message', completeWorkerMessage(message.shard.id, message.shard.file));
+          });
+        }
+      }
+      public on(event: string, listener: (value: never) => void): void {
+        const listeners = this.listeners.get(event) ?? [];
+        listeners.push(listener);
+        this.listeners.set(event, listeners);
+        if (event === 'message') {
+          queueMicrotask(() => {
+            this.fire('message', { type: 'ready' });
+          });
+        }
+      }
+      public terminate(): number {
+        return 0;
+      }
+      private fire(event: string, value: unknown): void {
+        for (const listener of this.listeners.get(event) ?? []) {
+          (listener as (next: unknown) => void)(value);
+        }
+      }
+    }
+    vi.doMock('node:worker_threads', () => ({ Worker: FakeWorker }));
+    vi.doMock('@taucad/runtime/kernel', () => ({
+      ...runtimeKernel,
+      compileWasmStreaming,
+    }));
+    vi.resetModules();
+    try {
+      const { createGeoSpecNodePoolRunner: createMockedRunner } = await import('#runner/node/node-runner.js');
+      const runner = createMockedRunner({ projectPath: '/project', workers: 4, cache: false });
+      const result = await runner.run({ files: ['/a.ts', '/b.ts', '/c.ts', '/d.ts'] });
+      await runner.close();
+
+      expect(result.success).toBe(true);
+      expect(compileWasmStreaming).toHaveBeenCalledTimes(1);
+      expect(receivedModules).toStrictEqual([compiled, compiled, compiled, compiled]);
+      expect(new Set(instances).size).toBe(4);
+    } finally {
+      vi.doUnmock('@taucad/runtime/kernel');
+      vi.doUnmock('node:worker_threads');
+      vi.resetModules();
+    }
+  });
+
   it('should pass cache controls into the spawned pool worker', async () => {
     const received: unknown[] = [];
     class FakeWorker {
@@ -246,10 +351,21 @@ describe('createGeoSpecNodePoolRunner', () => {
       const cachedResult = await cached.run({ files: ['/b.geospec.ts'] });
       expect(cachedResult.success).toBe(true);
       await cached.close();
-      expect(received).toStrictEqual([
-        { projectPath: '/project', cache: false },
-        { projectPath: '/project', cache: true, cacheDirectory: '/tmp/geospec-node-runner-cache' },
-      ]);
+      expect(received).toHaveLength(2);
+      expect(received[0]).toMatchObject({
+        projectPath: '/project',
+        cache: false,
+      });
+      expect(received[1]).toMatchObject({
+        projectPath: '/project',
+        cache: true,
+        cacheDirectory: '/tmp/geospec-node-runner-cache',
+      });
+      expect((received[0] as { compiledWasmModule: unknown }).compiledWasmModule).toBeInstanceOf(WebAssembly.Module);
+      expect((received[1] as { compiledWasmModule: unknown }).compiledWasmModule).toBeInstanceOf(WebAssembly.Module);
+      expect((received[0] as { compiledWasmModule: WebAssembly.Module }).compiledWasmModule).toBe(
+        (received[1] as { compiledWasmModule: WebAssembly.Module }).compiledWasmModule,
+      );
     } finally {
       vi.doUnmock('node:worker_threads');
       vi.resetModules();

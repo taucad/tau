@@ -1,5 +1,5 @@
 import { makeBaseBox } from 'replicad';
-import { face } from '@taucad/runtime/kernels/replicad/annotations';
+import { face } from '@taucad/replicad/annotations';
 
 export const defaultParams = {
   gap: 0, // Mm - translation of the flange away from the head along -Y

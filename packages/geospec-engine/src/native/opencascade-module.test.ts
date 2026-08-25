@@ -1,6 +1,11 @@
 /* eslint-disable @typescript-eslint/naming-convention -- `HEAPF64` is the Emscripten module's own name. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { copyTriangleSoup, getOpenCascadeStepModule, resetOpenCascadeStepModule } from '#native/opencascade-module.js';
+import {
+  copyTriangleSoup,
+  getOpenCascadeStepModule,
+  resetOpenCascadeStepModule,
+  setOpenCascadeCompiledModule,
+} from '#native/opencascade-module.js';
 import type { GeoSpecNativeStepBackend } from '#step/types.js';
 
 afterEach(() => {
@@ -40,9 +45,9 @@ describe('OCCT module adapter', () => {
   });
 
   it('should let the single-only assembly pick its own variant', async () => {
-    let received: object | undefined;
+    let received: Record<string, unknown> | undefined;
     vi.doMock('@taucad/geospec-engine/native/opencascade/single', () => ({
-      default: async (options?: object) => {
+      default: async (options?: Record<string, unknown>) => {
         received = options;
         return { HEAPF64: new Float64Array(0) } as unknown as GeoSpecNativeStepBackend;
       },
@@ -62,6 +67,47 @@ describe('OCCT module adapter', () => {
     // so this mock is what pins the option shape.
     expect(received).toBeDefined();
     expect(Object.hasOwn(received ?? {}, 'variant')).toBe(false);
+  });
+
+  it('should instantiate a host-compiled module without recompiling it', async () => {
+    const compiled = await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+    const backend = { HEAPF64: new Float64Array(0) } as unknown as GeoSpecNativeStepBackend;
+    const compileSpy = vi.spyOn(WebAssembly, 'compile');
+    vi.doMock('@taucad/geospec-engine/native/opencascade/single', () => ({
+      default: async (options?: {
+        instantiateWasm?: (
+          imports: WebAssembly.Imports,
+          receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
+        ) => WebAssembly.Exports;
+      }) => {
+        await new Promise<void>((resolve) => {
+          options?.instantiateWasm?.({}, (_instance, module) => {
+            expect(module).toBe(compiled);
+            resolve();
+          });
+        });
+        return backend;
+      },
+    }));
+    vi.resetModules();
+    try {
+      const adapter = await import('#native/opencascade-module.js');
+      adapter.setOpenCascadeCompiledModule(compiled);
+      expect(await adapter.getOpenCascadeStepModule()).toBe(backend);
+      expect(compileSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('@taucad/geospec-engine/native/opencascade/single');
+      compileSpy.mockRestore();
+    }
+  });
+
+  it('should reject changing the prepared module after initialization starts', async () => {
+    await getOpenCascadeStepModule();
+    const compiled = await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+
+    expect(() => {
+      setOpenCascadeCompiledModule(compiled);
+    }).toThrow(/already initialized/u);
   });
 
   it('should copy a triangle soup out of the heap without aliasing it', () => {

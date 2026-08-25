@@ -27,8 +27,8 @@ const readSources = async (directory = join(import.meta.dirname, '..')): Promise
 
 const runtimeSources = async (): Promise<string> => {
   const sources = await Promise.all([
-    readFile(join(import.meta.dirname, '../../../runtime/src/kernels/replicad/replicad.kernel.ts'), 'utf8'),
-    readFile(join(import.meta.dirname, '../../../runtime/src/kernels/replicad/export/interface-export.ts'), 'utf8'),
+    readFile(join(import.meta.dirname, '../../../plugins/replicad/src/replicad.kernel.ts'), 'utf8'),
+    readFile(join(import.meta.dirname, '../../../plugins/replicad/src/export/interface-export.ts'), 'utf8'),
   ]);
   return sources.join('\n');
 };

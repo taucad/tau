@@ -7,11 +7,11 @@ import {
 } from '#api/publications/publication-runtime.utils.js';
 
 describe('publication-runtime utils', () => {
-  it('should detect jscad kernel for a project containing only main.jscad', () => {
-    expect(detectKernelIdsFromRelativePaths(['main.jscad'])).toContain('jscad');
+  it('should detect no kernel for a bare .jscad file the runtime cannot route', () => {
+    expect(detectKernelIdsFromRelativePaths(['main.jscad'])).toEqual([]);
   });
 
-  it('should detect runtime preset kernels through the dedicated presets subpath', () => {
+  it('should detect the publication runtime kernels', () => {
     expect(detectKernelIdsFromRelativePaths(['main.ts', 'helper.js', 'model.kcl'])).toEqual(
       expect.arrayContaining(['jscad', 'manifold', 'opencascade', 'replicad', 'zoo']),
     );

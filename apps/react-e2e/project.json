@@ -7,21 +7,7 @@
   "implicitDependencies": ["react", "runtime"],
   "targets": {
     "test": {
-      "executor": "nx:run-commands",
-      "options": {
-        "cwd": "{workspaceRoot}",
-        "parallel": false,
-        "commands": [
-          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron",
-          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example",
-          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated",
-          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated",
-          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example",
-          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated",
-          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated",
-          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
-        ]
-      }
+      "executor": "nx:noop"
     },
     "typecheck": {
       "executor": "nx:run-commands",

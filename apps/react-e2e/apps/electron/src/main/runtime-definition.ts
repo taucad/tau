@@ -1,8 +1,7 @@
-import { esbuild } from '@taucad/runtime/bundler/esbuild';
+import { esbuild } from '@taucad/esbuild';
+import { middleware } from '@taucad/middleware';
+import { replicad } from '@taucad/replicad';
 import { defineKernel } from '@taucad/runtime/kernel';
-import { replicad } from '@taucad/runtime/kernels/replicad';
-import { geometryCache } from '@taucad/runtime/middleware/geometry-cache';
-import { parameterCache } from '@taucad/runtime/middleware/parameter-cache';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 /** Packaged-Electron hard-recovery fixture: deliberately never yields back to the utility event loop. */
@@ -36,7 +35,6 @@ const blocking = defineKernel({
 });
 
 export const runtime = defineRuntime({
-  kernels: [replicad({ wasm: 'single' }), blocking()],
-  bundlers: [esbuild()],
-  middleware: [parameterCache(), geometryCache()],
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild(), middleware({ preset: 'cache' })],
+  kernels: [blocking()],
 });

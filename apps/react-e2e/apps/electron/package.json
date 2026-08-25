@@ -1,11 +1,20 @@
 {
+  "nx": {
+    "tags": [
+      "scope:shared",
+      "type:e2e"
+    ]
+  },
   "name": "@taucad/react-e2e-electron",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/main/index.js",
   "dependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/middleware": "workspace:*",
     "@taucad/react": "workspace:*",
+    "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "electron": "^36.9.5",
     "react": "catalog:",

@@ -1,5 +1,5 @@
-import { createEmptyGltfGeometry, defineKernel } from '@taucad/runtime/kernel';
-import type { ExportGeometryResult, GetParametersResult, KernelPluginFactory } from '@taucad/runtime/types';
+import { defineKernel } from '@taucad/runtime/kernel';
+import type { ExportGeometryResult, GetParametersResult } from '@taucad/runtime/types';
 
 const delayedRenderDuration = 250;
 const parameterResult: GetParametersResult = {
@@ -17,13 +17,7 @@ const getDependencies = async ({ entryPath }: { readonly entryPath: string }) =>
 const getParameters = async () => parameterResult;
 const exportGeometry = async () => unsupportedExportResult;
 
-export const delayedBrowserCancellation: KernelPluginFactory<
-  'delayed-browser-cancellation',
-  Record<string, never>,
-  Record<string, unknown>
-> = defineKernel({
-  // Pins `Render` for the annotation above; this kernel fulfils no native content.
-  render: {},
+export const delayedBrowserCancellation = defineKernel({
   id: 'delayed-browser-cancellation',
   extensions: ['delay'],
   name: 'DelayedBrowserCancellationKernel',
@@ -37,18 +31,13 @@ export const delayedBrowserCancellation: KernelPluginFactory<
       setTimeout(resolve, delayedRenderDuration);
     });
     runtime.signal.throwIfAborted();
-    return { geometry: createEmptyGltfGeometry(), nativeHandle: null };
+    // Ponytail: cancellation tests never inspect geometry; use a valid GLB if that changes.
+    return { geometry: { format: 'gltf', content: new Uint8Array() }, nativeHandle: null };
   },
   exportGeometry,
 });
 
-export const blockingBrowserCancellation: KernelPluginFactory<
-  'blocking-browser-cancellation',
-  Record<string, never>,
-  Record<string, unknown>
-> = defineKernel({
-  // Pins `Render` for the annotation above; this kernel fulfils no native content.
-  render: {},
+export const blockingBrowserCancellation = defineKernel({
   id: 'blocking-browser-cancellation',
   extensions: ['block'],
   name: 'BlockingBrowserCancellationKernel',

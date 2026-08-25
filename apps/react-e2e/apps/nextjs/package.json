@@ -1,10 +1,19 @@
 {
+  "nx": {
+    "tags": [
+      "scope:shared",
+      "type:e2e"
+    ]
+  },
   "name": "@taucad/react-e2e-nextjs",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/middleware": "workspace:*",
     "@taucad/react": "workspace:*",
+    "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "next": "catalog:next15",
     "react": "catalog:",

@@ -9,7 +9,7 @@ import type { RuntimeFixtureOptions } from '../../../../support/runtime-fixture'
 import { mainFile } from '../../../../support/replicad-cylinder';
 
 const clientOptions = createElectronClientOptions<typeof runtime>({ renderTimeout: 60_000 });
-const timeoutClientOptions = createElectronClientOptions<typeof runtime>({ renderTimeout: 5_000 });
+const timeoutClientOptions = createElectronClientOptions<typeof runtime>({ renderTimeout: 5000 });
 const runtimeOptions = {
   clientOptions,
   initialParameters: { radius: 10, height: 24 },

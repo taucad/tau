@@ -2,6 +2,6 @@
 /* oxlint-disable @typescript-eslint/no-unused-vars -- fixture only */
 /* eslint-disable @typescript-eslint/no-unused-vars -- fixture only */
 
-import { getTestFileSystem } from '@taucad/runtime/testing';
+import { createTestRuntimeClient, validateGlbData } from '@taucad/runtime-testing';
 
-export const leaked = (): unknown => getTestFileSystem();
+export const leaked = (): unknown => [createTestRuntimeClient, validateGlbData];

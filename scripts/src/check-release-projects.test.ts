@@ -1,76 +1,86 @@
 import { describe, expect, it } from 'vitest';
-import { expectedPublishableProjects, findReleaseScopeMismatches } from '#check-release-projects.js';
+import type { ReleaseScope } from '#check-release-projects.js';
+import { findReleaseScopeMismatches, findVersionPlanScopeMismatches } from '#check-release-projects.js';
 
-const scope = {
-  graph: ['cli', 'geospec', 'geospec-engine', 'openrscad', 'react', 'runtime', 'types'],
-  manifests: [
-    { name: 'cli', publishable: true },
-    { name: 'geospec', publishable: true },
-    { name: 'geospec-engine', publishable: true },
-    { name: 'openrscad', publishable: true },
-    { name: 'react', publishable: true },
-    { name: 'runtime', publishable: true },
+const scope: ReleaseScope = {
+  selectors: [
+    { value: 'packages/*', source: 'nx.json release.projects', release: true, matches: ['runtime', 'react'] },
+    { value: 'tag:type:lib', source: 'nx.json release.projects', release: true, matches: ['rpc'] },
+    { value: 'tag:type:package', source: 'publish.yml', release: false, matches: ['runtime', 'react'] },
   ],
-  names: [{ value: 'types', source: 'nx.json release.projects' }],
-  globs: [{ value: 'packages/*', source: 'nx.json release.projects', matches: ['runtime'] }],
+  publishable: ['react', 'runtime'],
+  releaseTrain: ['react', 'rpc', 'runtime'],
+  publishesWholeGroup: true,
 };
 
 describe('findReleaseScopeMismatches', () => {
-  it('accepts a release scope whose publishables and selectors all resolve', () => {
+  it('accepts a release scope whose selectors and train bounds line up', () => {
     expect(findReleaseScopeMismatches(scope)).toEqual([]);
   });
 
-  it('reports both directions of publishable drift', () => {
+  it('reports a selector that resolves to nothing, naming its source', () => {
     const mismatches = findReleaseScopeMismatches({
       ...scope,
-      graph: [...scope.graph, 'kernels-experiment'],
-      manifests: [
-        ...scope.manifests.filter((manifest) => manifest.name !== 'openrscad'),
-        { name: 'openrscad', publishable: false },
-        { name: 'kernels-experiment', publishable: true },
-      ],
-    });
-
-    expect(mismatches).toHaveLength(1);
-    expect(mismatches[0]).toContain('openrscad');
-    expect(mismatches[0]).toContain('kernels-experiment');
-  });
-
-  it('reports a manifest that the Nx graph does not know about', () => {
-    const mismatches = findReleaseScopeMismatches({
-      ...scope,
-      graph: scope.graph.filter((name) => name !== 'geospec-engine'),
-    });
-
-    expect(mismatches).toEqual([expect.stringContaining('geospec-engine')]);
-  });
-
-  it('reports a selector name that is absent from the graph, naming its source', () => {
-    const mismatches = findReleaseScopeMismatches({
-      ...scope,
-      names: [...scope.names, { value: 'openrscd', source: 'publish.yml' }],
+      selectors: [...scope.selectors, { value: 'openrscd', source: 'publish.yml', release: false, matches: [] }],
     });
 
     expect(mismatches).toEqual([expect.stringContaining('openrscd')]);
     expect(mismatches[0]).toContain('publish.yml');
   });
 
-  it('reports a glob selector that matches nothing, because Nx exits 0 on those', () => {
-    const mismatches = findReleaseScopeMismatches({
-      ...scope,
-      globs: [{ value: 'packages/kernel/*', source: 'publish.yml', matches: [] }],
-    });
+  it('reports a publishable package no release selector reaches', () => {
+    const mismatches = findReleaseScopeMismatches({ ...scope, publishable: ['react', 'runtime', 'cli'] });
 
-    expect(mismatches).toEqual([expect.stringContaining('packages/kernel/*')]);
+    expect(mismatches).toEqual([expect.stringContaining('cli')]);
+    expect(mismatches[0]).toContain('nx.json');
+  });
+
+  it('reports a release selector resolution that reaches outside the release train', () => {
+    const mismatches = findReleaseScopeMismatches({ ...scope, releaseTrain: ['react', 'runtime'] });
+
+    expect(mismatches).toEqual([expect.stringContaining('rpc')]);
+    expect(mismatches[0]).toContain('nx.json');
+  });
+
+  it('reports a workflow that publishes a hand-picked subset instead of the fixed group', () => {
+    const mismatches = findReleaseScopeMismatches({ ...scope, publishesWholeGroup: false });
+
+    expect(mismatches).toEqual([expect.stringContaining('whole fixed group')]);
+    expect(mismatches[0]).toContain('publish.yml');
   });
 
   it('reports an empty release scope, the widest fail-open of all', () => {
-    expect(findReleaseScopeMismatches({ ...scope, names: [], globs: [] })).toEqual([
-      expect.stringContaining('no release project selectors'),
-    ]);
+    expect(findReleaseScopeMismatches({ ...scope, selectors: [] })).toEqual(
+      expect.arrayContaining([expect.stringContaining('no release project selectors')]),
+    );
+  });
+});
+
+describe('findVersionPlanScopeMismatches', () => {
+  it('accepts projects in the release scope', () => {
+    expect(
+      findVersionPlanScopeMismatches(
+        [{ path: '.nx/version-plans/runtime.md', text: '---\nruntime: minor\n---\n\nShip runtime work.\n' }],
+        scope.releaseTrain,
+      ),
+    ).toEqual([]);
   });
 
-  it('pins the six packages the release train is allowed to publish', () => {
-    expect(expectedPublishableProjects).toEqual(['cli', 'geospec', 'geospec-engine', 'openrscad', 'react', 'runtime']);
+  it('rejects projects outside the release scope', () => {
+    expect(
+      findVersionPlanScopeMismatches(
+        [{ path: '.nx/version-plans/filesystem.md', text: '---\nfilesystem: minor\n---\n' }],
+        scope.releaseTrain,
+      ),
+    ).toEqual(['.nx/version-plans/filesystem.md: project "filesystem" is outside the release scope']);
+  });
+
+  it('rejects a file without version-plan frontmatter', () => {
+    expect(
+      findVersionPlanScopeMismatches(
+        [{ path: '.nx/version-plans/broken.md', text: 'runtime: minor\n' }],
+        scope.releaseTrain,
+      ),
+    ).toEqual(['.nx/version-plans/broken.md: missing YAML frontmatter']);
   });
 });

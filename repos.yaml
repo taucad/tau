@@ -79,7 +79,7 @@ groups:
       - three-gltf-viewer
       - Online3DViewer
       - glTF-Transform
-      - assimpjs
+      - libassimp
       - three-viewport-gizmo
       - three-mesh-bvh
       - three-cad-viewer
@@ -173,11 +173,10 @@ repos:
     fork: taucad/langgraphjs
     branch: main
     description: LangGraph.js - agent orchestration framework
-  assimpjs:
-    upstream: kovacsv/assimpjs
-    fork: taucad/assimpjs
+  libassimp:
+    upstream: taucad/libassimp
     branch: main
-    description: Assimp.js - 3D model importer compiled to WASM
+    description: Assimp compiled to WebAssembly with a unified import and export API
   opencascade.js:
     upstream: donalffons/opencascade.js
     fork: taucad/opencascade.js

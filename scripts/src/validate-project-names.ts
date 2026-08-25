@@ -1,9 +1,9 @@
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import process from 'node:process';
+import { projects as graphProjects, workspace } from '@taucad/nx';
 
 const root = resolve(import.meta.dirname, '../..');
-const projectDirectories = ['apps', 'apps/libs', 'packages', 'packages/kernels', 'libs'];
 
 type Diagnostic = { level: 'ERROR' | 'WARN'; message: string };
 type ProjectResult = { path: string; diagnostics: Diagnostic[] };
@@ -11,29 +11,6 @@ type ProjectResult = { path: string; diagnostics: Diagnostic[] };
 const readJson = <T>(filePath: string): T => JSON.parse(readFileSync(filePath, 'utf8')) as T;
 
 const stripScope = (name: string): string => name.replace(/^@[^/]+\//, '');
-
-const discoverProjects = (): string[] => {
-  const projects: string[] = [];
-
-  for (const directory of projectDirectories) {
-    const absDirectory = join(root, directory);
-    if (!existsSync(absDirectory)) {
-      continue;
-    }
-
-    for (const entry of readdirSync(absDirectory, { withFileTypes: true })) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const projectDirectory = join(absDirectory, entry.name);
-      if (existsSync(join(projectDirectory, 'project.json'))) {
-        projects.push(projectDirectory);
-      }
-    }
-  }
-
-  return projects;
-};
 
 const validateProject = (projectDirectory: string): ProjectResult => {
   const relativePath = projectDirectory.replace(root + '/', '');
@@ -44,16 +21,24 @@ const validateProject = (projectDirectory: string): ProjectResult => {
 
   const nxConfig = readJson<{ name?: string }>(nxPath);
   const directoryName = basename(projectDirectory);
+  // Two placements disambiguate a directory name that would otherwise collide
+  // across the workspace (`packages/core/occt` vs the occt plugin, `examples/nextjs`
+  // vs the nextjs e2e app), so their project names carry the placement.
+  const expectedProjectName = relativePath.startsWith('packages/core/')
+    ? `${directoryName}-core`
+    : relativePath.startsWith('examples/')
+      ? `example-${directoryName}`
+      : directoryName;
 
   if (!nxConfig.name) {
     diagnostics.push({ level: 'ERROR', message: 'project.json missing "name" field' });
     return { path: relativePath, diagnostics };
   }
 
-  if (nxConfig.name !== directoryName) {
+  if (nxConfig.name !== expectedProjectName) {
     diagnostics.push({
       level: 'ERROR',
-      message: `project.json name "${nxConfig.name}" does not match directory name "${directoryName}"`,
+      message: `project.json name "${nxConfig.name}" does not match placement-derived name "${expectedProjectName}"`,
     });
   }
 
@@ -75,7 +60,12 @@ const validateProject = (projectDirectory: string): ProjectResult => {
   return { path: relativePath, diagnostics };
 };
 
-const projects = discoverProjects();
+// Every project Nx knows that declares a `project.json` — where the name under
+// test lives. Nx also infers projects from a bare `package.json`; those have no
+// project.json name to check.
+const projects = graphProjects(await workspace({ fresh: true }), { predicate: ({ configured }) => configured }).map(
+  ({ root: projectRoot }) => join(root, projectRoot),
+);
 const results = projects.map((project) => validateProject(project));
 
 let errors = 0;

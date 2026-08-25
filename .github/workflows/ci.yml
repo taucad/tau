@@ -23,8 +23,61 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' }}
 
 jobs:
-  formatting:
-    name: Check formatting
+  # One affected computation for every downstream lane. Every selector here is a
+  # tag or a target name — no job in this workflow may name a project.
+  plan:
+    name: Plan affected lanes
+    runs-on: ubuntu-latest
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
+    outputs:
+      apps: ${{ steps.plan.outputs.apps }}
+      api: ${{ steps.plan.outputs.api }}
+      e2e: ${{ steps.plan.outputs.e2e }}
+      size: ${{ steps.plan.outputs.size }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Compute affected lanes
+        id: plan
+        run: |
+          # `tail -1` keeps the JSON array and drops Nx's log lines.
+          apps=$(pnpm nx show projects --affected --type=app --json | tail -1)
+          api=$(pnpm nx show projects --affected --projects tag:scope:api --json | tail -1)
+          e2e=$(pnpm nx show projects --affected --projects tag:type:e2e --json | tail -1)
+          size=$(pnpm nx show projects --affected --with-target size --json | tail -1)
+          echo "Affected apps: $apps"
+          echo "Affected tag:scope:api: $api"
+          echo "Affected tag:type:e2e: $e2e"
+          echo "Affected with a size target: $size"
+          {
+            echo "apps<<EOF"
+            echo "$apps"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          for lane in "api=$api" "e2e=$e2e" "size=$size"; do
+            if [ "${lane#*=}" = '[]' ]; then
+              echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "${lane%%=*}=true" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+  # Every workspace invariant is a `scripts:validate-*` target; `scripts:validate`
+  # is the wildcard umbrella over all of them (frontmatter, workspace root,
+  # project names and tags, tsgo runtime references, quickstart budget, license
+  # partitions, formatting, dead code, license deps, workflows). A new validator
+  # joins by adding the target — this job never changes.
+  workspace:
+    name: Validate workspace
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,73 +86,8 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      - name: Check formatting
-        run: pnpm format:check
-
-  docs:
-    name: Validate docs frontmatter
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-
-      - name: Validate frontmatter
-        run: pnpm docs:validate
-
-  project-names:
-    name: Validate project names
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-
-      - name: Validate project names
-        run: pnpm projects:validate
-
-  tsgo-runtime-references:
-    name: Validate tsgo runtime references
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-
-      - name: Validate tsgo runtime references
-        run: pnpm tsgo-refs:validate
-
-  license-deps:
-    name: Validate license-deps
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-
-      - name: Validate license-deps
-        run: pnpm license-deps:validate
-
-  knip:
-    name: Dead code analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup Nx Environment
-        uses: ./.github/actions/setup-nx
-
-      - name: Run Knip
-        run: pnpm knip
+      - name: Run workspace validators
+        run: pnpm nx run scripts:validate
 
   affected:
     name: Run affected tasks
@@ -118,25 +106,72 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # The PR gate documented in docs/policy/release-policy.md: under version plans,
+      # a touched release project with no plan is an unreleased change. Base and head
+      # come from NX_BASE/NX_HEAD, which `nrwl/nx-set-shas` exported above. Not run on
+      # `push`, where the release commit itself touches every manifest after consuming
+      # the plans.
+      - name: Check version plans
+        if: github.event_name == 'pull_request'
+        run: pnpm nx release plan:check
+
       # This enables task distribution via Nx Cloud
       # Run this command as early as possible, before dependencies are installed
       # Learn more at https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
       # Connect your workspace by running "nx connect" and uncomment this
       # - run: npx nx-cloud start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
 
-      # Nx Affected runs only tasks affected by the changes in this PR/commit
+      # Nx Affected runs only tasks affected by the changes in this PR/commit.
+      # Browser-backed targets are not in this list — they run in the `e2e` lane,
+      # which is the only job that installs Chromium.
       # Learn more: https://nx.dev/ci/features/affected
       - name: Run affected tasks
-        run: pnpm nx affected -t lint test build typecheck size
+        run: pnpm nx affected -t lint test build typecheck size pkgcheck audit-public-surface readme-quickstart
 
       - name: Check workspace root hygiene
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
+  # Browser lane: every `type:e2e` project's Vitest Browser matrices and
+  # development-server qualifications. `nx affected` picks the projects — their
+  # `implicitDependencies` make the selection correct — and target existence
+  # picks the suites, so a new e2e project joins by declaring the targets.
+  e2e:
+    name: Browser end-to-end
+    runs-on: ubuntu-latest
+    needs: [plan]
+    if: needs.plan.outputs.e2e == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Install Chromium for Vitest Browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run affected end-to-end suites
+        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development
+
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
+      - name: Upload Vitest Browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vitest-browser-diagnostics
+          path: out/test-results/vitest-browser
+          if-no-files-found: ignore
+          retention-days: 7
+
   size-report:
     name: Bundle size report
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    needs: [plan]
+    if: github.event_name == 'pull_request' && needs.plan.outputs.size == 'true'
     permissions:
       pull-requests: write
     steps:
@@ -158,17 +193,10 @@ jobs:
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
-  # Check what changed to determine what to deploy
-  changes:
-    name: Detect Changes
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    permissions: # Required for nrwl/nx-set-shas to read workflow runs
-      contents: 'read'
-      actions: 'read'
-      pull-requests: 'read'
-    outputs:
-      affected_apps: ${{ steps.affected.outputs.apps }}
+  performance:
+    name: Runtime performance gates
+    if: github.event_name == 'pull_request' && vars.TAU_BENCHMARK_RUNNER_ENABLED == 'true'
+    runs-on: [self-hosted, tau-benchmark]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -178,15 +206,26 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      - name: Check affected apps
-        id: affected
+      - name: Run invariant and microbenchmark gates
+        env:
+          GLB_WRITER_500K_BASELINE_MS: ${{ vars.GLB_WRITER_500K_BASELINE_MS }}
+          TAU_BENCHMARK_GATE: '1'
+        run: pnpm nx run-many -t performance-gate --parallel=1
+
+      - name: Capture current runtime benchmark
+        run: pnpm nx run-many -t benchmark -- --iterations=5 --filter='box,box-first-render,box-parameter-rerender' --output="${RUNNER_TEMP}/current"
+
+      - name: Capture base runtime benchmark on the same runner
         run: |
-          # Get list of affected app projects as JSON (last line only to filter out log messages)
-          affected_apps=$(pnpm nx show projects --affected --type=app --json | tail -1)
-          echo "Affected apps: $affected_apps"
-          echo "apps<<EOF" >> $GITHUB_OUTPUT
-          echo "$affected_apps" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          git worktree add "${RUNNER_TEMP}/tau-benchmark-baseline" "origin/${GITHUB_BASE_REF}"
+          cd "${RUNNER_TEMP}/tau-benchmark-baseline"
+          pnpm install --frozen-lockfile
+          pnpm nx run-many -t benchmark -- --iterations=5 --filter='box,box-first-render,box-parameter-rerender' --output="${RUNNER_TEMP}/baseline"
+
+      - name: Enforce matching-fingerprint median gate
+        env:
+          TAU_BENCHMARK_GATE: '1'
+        run: pnpm nx run-many -t compare-benchmarks -- --compare="${RUNNER_TEMP}/baseline" --compare="${RUNNER_TEMP}/current"
 
   # API Docker smoke test — catches Dockerfile regressions (multi-stage build,
   # `--parents` package-json copy, pnpm install filter, runtime user, etc.)
@@ -196,10 +235,12 @@ jobs:
   # required, so we don't need a real DB/Redis here; deploy.yml uses
   # `/health/ready` which does check those). Intentionally narrow: does not
   # validate runtime behaviour, only that the container starts and serves.
+  # Kept out of the `api` lane because it needs Buildx and no Nx environment.
   api-docker-smoke:
     name: API Docker smoke test
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    needs: [plan]
+    if: github.event_name == 'pull_request' && needs.plan.outputs.api == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -276,9 +317,15 @@ jobs:
         if: always()
         run: docker rm -f tau-api-smoke || true
 
-  api-tests:
+  # Service lane: the suites that need Postgres + Redis + MinIO. Unit tests for
+  # the same projects already ran in `affected`; only the service-backed targets
+  # (`test:models`, `test:server-modes`) run here. Always runs on `main` pushes
+  # so the deploy gate is never green off a stale service check.
+  api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
+    needs: [plan]
+    if: needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push')
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -289,8 +336,8 @@ jobs:
       - name: Prepare API env file
         run: cp apps/api/.env.example apps/api/.env
 
-      - name: Start Postgres + MinIO
-        run: docker-compose -f infra/docker-compose.yml up -d postgres minio minio-bootstrap
+      - name: Start Postgres + Redis + MinIO
+        run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
       - name: MinIO smoke (seed + RW)
         run: bash infra/docker-compose.test.sh
@@ -298,8 +345,11 @@ jobs:
       - name: Apply Drizzle migrations
         run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
 
-      - name: Run API tests
-        run: pnpm nx test api --watch=false
+      - name: Qualify API development and production servers
+        run: pnpm nx run-many -t test:server-modes
+
+      - name: Run deterministic file-edit profile qualification
+        run: pnpm nx run-many -t test:models -- app/testing/tau-replay.integration.test.ts app/testing/file-edit-profile-live-filesystem.integration.test.ts
 
   # Staging deployments — deploy after builds pass so the Nx Cloud cache is populated.
   # The staging UI is hosted on Netlify (`taucad` site, custom domain `taucad.dev`)
@@ -308,8 +358,8 @@ jobs:
   # the API ships to Fly here (`tau-api-staging`).
   deploy-api-staging:
     name: Deploy API (Staging)
-    needs: [formatting, affected, changes]
-    if: contains(fromJSON(needs.changes.outputs.affected_apps), 'api')
+    needs: [workspace, affected, plan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.apps), 'api')
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging

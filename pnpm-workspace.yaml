@@ -5,7 +5,8 @@ packages:
   - examples/*
   - libs/*
   - packages/*
-  - packages/kernels/*
+  - packages/plugins/*
+  - packages/core/*
   - scripts
   - tools/*
 
@@ -126,6 +127,7 @@ catalog:
   '@types/node': ~24.0.15
   '@types/react': 19.0.12
   '@types/react-dom': 19.0.4
+  '@types/semver': ^7.5.8
   '@types/three': ^0.184.1
   '@types/turndown': ^5.0.6
   '@typescript/native-preview': 7.0.0-dev.20260223.1
@@ -187,6 +189,7 @@ catalog:
   madge: ^8.0.0
   manifold-3d: 3.4.1
   mermaid: ^11.15.0
+  nanoid: ^5.1.14
   netlify-cli: ^25.6.2
   next: ^16.2.12
   next-themes: ^0.4.6
@@ -216,6 +219,7 @@ catalog:
   remark-stringify: 11.0.0
   resend: ^6.14.0
   rolldown: 1.2.3
+  semver: ^7.8.5
   size-limit: ^12.1.0
   socket.io-prometheus-metrics: ^1.0.6
   sonner: ^2.0.7
@@ -271,9 +275,23 @@ catalogMode: prefer
 minimumReleaseAgeExclude:
   - '@taucad/*'
   - '@taulabs/*'
+  - geospec
   - nanoraster
   - nanoraster-darwin-arm64
+  - nanoraster-darwin-x64
+  - nanoraster-win32-arm64-msvc
+  - nanoraster-win32-ia32-msvc
   - nanoraster-linux-x64-gnu
+  - nanoraster-linux-arm64-gnu
+  - nanoraster-linux-arm-gnueabihf
+  - nanoraster-linux-ppc64-gnu
+  - nanoraster-linux-s390x-gnu
+  - nanoraster-linux-x64-musl
+  - nanoraster-linux-arm64-musl
+  - nanoraster-linux-arm-musleabihf
+  - nanoraster-android-arm64
+  - nanoraster-android-arm-eabi
+  - nanoraster-freebsd-x64
   - nanoraster-win32-x64-msvc
   # First-party too — we publish these, so they never need to age. The bare
   # name and the scope are both ours (libcascade, @libcascade/toolchain).
@@ -304,6 +322,7 @@ minimumReleaseAgeExclude:
   - '@rolldown/binding-win32-arm64-msvc@1.2.3'
   - '@rolldown/binding-win32-x64-msvc@1.2.3'
   - rolldown@1.2.3
+  - libassimp@0.1.0
 peerDependencyRules:
   allowedVersions:
     fumadocs-mdx>vite: ^8.0.0

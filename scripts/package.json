@@ -30,6 +30,7 @@
     "unified": "catalog:"
   },
   "devDependencies": {
+    "@taucad/nx": "workspace:*",
     "@types/js-yaml": "catalog:",
     "@types/jsdom": "catalog:",
     "netlify-cli": "catalog:"

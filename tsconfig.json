@@ -11,9 +11,6 @@
       "path": "./apps/api"
     },
     {
-      "path": "./libs/converter"
-    },
-    {
       "path": "./libs/tau-examples"
     },
     {
@@ -71,7 +68,7 @@
       "path": "./packages/geospec"
     },
     {
-      "path": "./packages/kernels/openrscad"
+      "path": "./packages/plugins/openrscad"
     },
     {
       "path": "./libs/events"
@@ -99,9 +96,6 @@
     },
     {
       "path": "./libs/oxlint"
-    },
-    {
-      "path": "./libs/vm"
     },
     {
       "path": "./apps/libs/lsp"

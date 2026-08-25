@@ -10,6 +10,7 @@
     "repos/opencascade.js",
     "repos/replicad",
     "repos/openrscad",
+    "repos/libassimp",
     "repos/nanoraster",
     "repos/picovoxel"
   ],

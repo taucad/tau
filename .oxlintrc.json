@@ -26,6 +26,9 @@
     "**/public/**",
     "**/content/docs/**",
     "experiments/**",
+    // Opt-in benchmark/parity CLIs run by hand against a locally built native
+    // addon; unpublished (`files` excludes them) and outside every tsconfig.
+    "bench/**",
     "**/*.jscad.js",
     "**/fixtures/scripts/**"
   ],
@@ -108,6 +111,7 @@
     "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
     "tau-lint/no-impl-in-index": "error",
+    "tau-lint/plugin-capability-filename": "error",
     "unicorn/no-accessor-recursion": "error",
     "unicorn/no-anonymous-default-export": "error",
     "unicorn/no-array-callback-reference": "error",
@@ -1408,6 +1412,39 @@
       "files": ["packages/**/*.{ts,tsx,mts,cts}"],
       "rules": {
         "tau-lint/require-public-export-jsdoc": "error"
+      }
+    },
+    {
+      // Runtime framework production modules must split before they exceed the workspace ceiling.
+      "files": ["packages/runtime/src/framework/**/*.{ts,tsx,mts,cts}"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1500,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      // Test modules follow testing-policy structure instead of the production-module ceiling.
+      "files": ["packages/runtime/src/framework/**/*.test.{ts,tsx,mts,cts}"],
+      "rules": {
+        "max-lines": "off"
+      }
+    },
+    {
+      // Ratified exception: the stateful kernel orchestrator is split only by a dedicated refactor.
+      "files": ["packages/runtime/src/framework/kernel-worker.ts"],
+      "rules": {
+        "max-lines": [
+          "warn",
+          {
+            "max": 1500,
+            "skipComments": true
+          }
+        ]
       }
     },
     {

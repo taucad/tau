@@ -11,7 +11,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 # Build valid scopes list from project.json files
 VALID_SCOPES="root"
-for project_json in "$REPO_ROOT"/apps/*/project.json "$REPO_ROOT"/apps/libs/*/project.json "$REPO_ROOT"/examples/*/project.json "$REPO_ROOT"/packages/*/project.json "$REPO_ROOT"/packages/kernels/*/project.json "$REPO_ROOT"/libs/*/project.json "$REPO_ROOT"/tools/*/project.json "$REPO_ROOT"/scripts/project.json; do
+for project_json in "$REPO_ROOT"/apps/*/project.json "$REPO_ROOT"/apps/libs/*/project.json "$REPO_ROOT"/examples/*/project.json "$REPO_ROOT"/packages/*/project.json "$REPO_ROOT"/packages/*/*/project.json "$REPO_ROOT"/libs/*/project.json "$REPO_ROOT"/tools/*/project.json "$REPO_ROOT"/scripts/project.json; do
   [ -f "$project_json" ] || continue
   name=$(node -e "console.log(require('$project_json').name || '')" 2>/dev/null)
   [ -n "$name" ] && VALID_SCOPES="$VALID_SCOPES $name"

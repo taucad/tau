@@ -1,6 +1,7 @@
 /**
- * Validate that @taucad/runtime's emitted dependency imports resolve from npm,
- * including subpaths, named exports, and one private-transitive workspace hop.
+ * Validate that every publishable package's emitted dependency imports resolve
+ * from npm, including subpaths, named exports, and one private-transitive
+ * workspace hop.
  *
  * Usage: node scripts/src/check-registry-dependencies.ts [manifest-path…]
  */
@@ -13,6 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { load } from 'js-yaml';
 import ts from 'typescript';
+import { publishable, workspace } from '@taucad/nx';
 
 const execFileAsync = promisify(execFile);
 type Dependencies = Record<string, string>;
@@ -144,8 +146,28 @@ export const findRegistryDependencyIssues = async (options: {
   const issues = new Set<string>();
   const availability = new Map<string, boolean>();
 
+  /**
+   * A non-private workspace sibling pinned at its own workspace version is
+   * published earlier in this same fixed-version run (publish order is asserted
+   * by `check-release-projects`), so npm not having it yet is the normal state
+   * rather than a blocker — and there is no registry copy to inspect. The real
+   * tarballs are exercised by `check-pack-install`. Private siblings and
+   * mismatched versions stay blockers.
+   */
+  const providedByThisRelease = new Set(
+    Object.entries(dependencies)
+      .filter(([name, range]) => {
+        const manifest = workspaceManifests.get(name);
+        return manifest !== undefined && manifest.private !== true && manifest.version === range;
+      })
+      .map(([name]) => name),
+  );
+
   await Promise.all(
     Object.entries(dependencies).map(async ([name, range]) => {
+      if (providedByThisRelease.has(name)) {
+        return;
+      }
       const specifier = registrySpecifier(name, range);
       const available = await exists(specifier);
       availability.set(name, available);
@@ -213,10 +235,12 @@ const findWorkspaceRoot = (start: string): string => {
   throw new Error(`No pnpm-workspace.yaml found above ${start}`);
 };
 
-const readCatalog = async (workspaceRoot: string): Promise<Dependencies> => {
+const readWorkspaceConfiguration = async (
+  workspaceRoot: string,
+): Promise<{ catalog: Dependencies; overrides: Dependencies }> => {
   const source = await readFile(join(workspaceRoot, 'pnpm-workspace.yaml'), 'utf8');
-  const workspace = load(source) as { catalog?: Dependencies };
-  return workspace.catalog ?? {};
+  const workspace = load(source) as { catalog?: Dependencies; overrides?: Dependencies };
+  return { catalog: workspace.catalog ?? {}, overrides: workspace.overrides ?? {} };
 };
 
 const readWorkspaceManifests = async (workspaceRoot: string): Promise<Map<string, WorkspaceManifest>> => {
@@ -265,9 +289,34 @@ const resolveRanges = (
     }),
   );
 
+/** A range npm can serve: not a checkout, a tarball path, or a workspace link. `npm:` aliases are registry ranges. */
+const isRegistryRange = (range: string): boolean => {
+  const aliased = range.startsWith('npm:') ? range.slice(4) : range;
+  const version = aliased.slice(aliased.lastIndexOf('@') + 1);
+  return !['file:', 'link:', 'portal:', 'git+', 'http:', 'https:'].some(
+    (prefix) => aliased.startsWith(prefix) || version.startsWith(prefix),
+  );
+};
+
+/**
+ * `pnpm-workspace.yaml` overrides rewrite every consumer's resolution, including
+ * a published package's transitive tree, so a non-registry override is exactly
+ * as unpublishable as a non-registry dependency — and no manifest scan sees it.
+ * Named catalogs are unsupported here for the same reason as in `resolveRanges`.
+ */
+export const findOverrideIssues = (overrides: Dependencies, catalog: Dependencies): string[] =>
+  Object.entries(overrides)
+    .flatMap(([name, range]) => {
+      const resolved = range.startsWith('catalog:') ? (range === 'catalog:' ? catalog[name] : undefined) : range;
+      if (resolved === undefined) {
+        return [`${name}: ${range} does not resolve through the workspace catalog`];
+      }
+      return isRegistryRange(resolved) ? [] : [`${name}: ${resolved} is not a registry specifier`];
+    })
+    .sort();
+
 const registryHas = async (specifier: string): Promise<boolean> => {
-  const range = specifier.slice(specifier.lastIndexOf('@') + 1);
-  if (['file:', 'link:', 'portal:', 'git+', 'http:', 'https:'].some((prefix) => range.startsWith(prefix))) {
+  if (!isRegistryRange(specifier)) {
     return false;
   }
   try {
@@ -487,14 +536,19 @@ export const checkRegistryDependencies = async (manifestPath: string): Promise<s
   const workspaceVersions = Object.fromEntries(
     [...workspaceManifests].flatMap(([name, manifest]) => (manifest.version ? [[name, manifest.version]] : [])),
   );
+  const { catalog } = await readWorkspaceConfiguration(workspaceRoot);
   const dependencies = resolveRanges(
     { ...manifest.dependencies, ...manifest.optionalDependencies },
-    await readCatalog(workspaceRoot),
+    catalog,
     workspaceVersions,
   );
   return findRegistryDependencyIssues({
     dependencies,
-    requirements: collectArtifactImportRequirements(join(dirname(manifestPath), 'dist'), Object.keys(dependencies)),
+    // An unbuilt package still has its declared dependencies checked; publish.yml
+    // builds the release train before it runs this gate.
+    requirements: existsSync(join(dirname(manifestPath), 'dist'))
+      ? collectArtifactImportRequirements(join(dirname(manifestPath), 'dist'), Object.keys(dependencies))
+      : [],
     workspaceManifests,
     exists: registryHas,
     inspect: inspectRegistryPackage,
@@ -502,10 +556,29 @@ export const checkRegistryDependencies = async (manifestPath: string): Promise<s
 };
 
 const main = async (): Promise<void> => {
-  const manifestPaths = (process.argv.length > 2 ? process.argv.slice(2) : ['packages/runtime/package.json']).map(
-    (path) => resolve(path),
-  );
+  const repositoryRoot = resolve(import.meta.dirname, '../..');
+  const manifestPaths =
+    process.argv.length > 2
+      ? process.argv.slice(2).map((path) => resolve(path))
+      : publishable(await workspace({ fresh: true })).map((project) =>
+          join(repositoryRoot, project.root, 'package.json'),
+        );
   let blockers = 0;
+
+  const { catalog, overrides } = await readWorkspaceConfiguration(repositoryRoot);
+  const overrideIssues = findOverrideIssues(overrides, catalog);
+  if (overrideIssues.length === 0) {
+    console.log(
+      `pnpm-workspace.yaml overrides: all ${String(Object.keys(overrides).length)} override(s) resolve to registry specifiers.`,
+    );
+  } else {
+    blockers += overrideIssues.length;
+    console.error(`pnpm-workspace.yaml overrides: registry blockers (${String(overrideIssues.length)}):`);
+    for (const issue of overrideIssues) {
+      console.error(`- ${issue}`);
+    }
+  }
+
   for (const manifestPath of manifestPaths) {
     // Serial: each manifest installs into its own temporary registry sandbox.
     // eslint-disable-next-line no-await-in-loop -- One npm sandbox at a time.

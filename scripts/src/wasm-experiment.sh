@@ -167,7 +167,7 @@ print(exc)
     BENCH_OUT_DIR="$dir/benchmarks"
     mkdir -p "$BENCH_OUT_DIR"
 
-    BENCH_CMD="pnpm nx benchmark runtime -- --iterations $BENCH_ALL_ITERATIONS"
+    BENCH_CMD="pnpm nx benchmark runtime-e2e -- --iterations $BENCH_ALL_ITERATIONS"
     BENCH_CMD="$BENCH_CMD --wasm-dir $dir/unpacked"
     BENCH_CMD="$BENCH_CMD --wasm-variant $VARIANT"
     BENCH_CMD="$BENCH_CMD --output $BENCH_OUT_DIR"
@@ -203,11 +203,11 @@ print(exc)
       for dir in "${EXP_DIRS[@]}"; do
         COMPARE_ARGS+=(--compare "../../out/artifacts/wasm/experiments/$(basename "$dir")")
       done
-      pnpm nx build-matrix runtime -- "${COMPARE_ARGS[@]}"
-      pnpm nx compare-benchmarks runtime -- "${COMPARE_ARGS[@]}"
+      pnpm nx build-matrix runtime-e2e -- "${COMPARE_ARGS[@]}"
+      pnpm nx compare-benchmarks runtime-e2e -- "${COMPARE_ARGS[@]}"
     else
-      pnpm nx build-matrix runtime -- --experiments ../../out/artifacts/wasm/experiments/
-      pnpm nx compare-benchmarks runtime -- --experiments ../../out/artifacts/wasm/experiments/
+      pnpm nx build-matrix runtime-e2e -- --experiments ../../out/artifacts/wasm/experiments/
+      pnpm nx compare-benchmarks runtime-e2e -- --experiments ../../out/artifacts/wasm/experiments/
     fi
   fi
 
@@ -509,7 +509,7 @@ if [ "$SKIP_BENCHMARK" = "true" ]; then
 else
   echo "═══ Step 7: Run benchmarks ═══"
 
-  BENCH_CMD="pnpm nx benchmark runtime -- --iterations $BENCH_ITERATIONS --output $EXP_DIR"
+  BENCH_CMD="pnpm nx benchmark runtime-e2e -- --iterations $BENCH_ITERATIONS --output $EXP_DIR"
   BENCH_CMD="$BENCH_CMD --wasm-dir $EXP_DIR/unpacked"
 
   # Determine variant from exceptions setting
@@ -539,7 +539,7 @@ else
     if [ -n "$BASELINE_JSON" ] && [ -n "$CURRENT_JSON" ]; then
       COMP_DIR="$ARTIFACTS_DIR/comparisons"
       mkdir -p "$COMP_DIR"
-      pnpm nx benchmark runtime -- --compare "$BASELINE_JSON" "$CURRENT_JSON" --output "$COMP_DIR" || true
+      pnpm nx benchmark runtime-e2e -- --compare "$BASELINE_JSON" "$CURRENT_JSON" --output "$COMP_DIR" || true
     else
       echo "  No benchmark JSON found for comparison."
     fi

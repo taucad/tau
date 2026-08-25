@@ -3,12 +3,23 @@ import type { KnipConfig } from 'knip';
 const config: KnipConfig = {
   ignoreExportsUsedInFile: true,
 
+  // Build output is not a source of truth. Knip follows published `exports`
+  // fields into `dist/`, so a built tree reports every emitted file and export
+  // as unused (~970 phantom issues locally). CI checks out fresh and never
+  // builds before the knip job, so this only ever bit local runs.
+  ignore: ['**/dist/**', '**/build/**'],
+
   rules: {
     optionalPeerDependencies: 'off',
     duplicates: 'off',
   },
 
-  ignoreWorkspaces: ['tools/*', 'libs/api-extractor', 'libs/tau-examples'],
+  // ponytail: kept literal — deriving from `type:tool` would also ignore libs/oxlint, libs/vite and scripts
+  // (which has its own `workspaces` entry below) and lose knip coverage; see mdx-package-boundary blueprint R2 status.
+  // Named one by one rather than as `tools/*`: knip turns each ignored workspace pattern into a negated
+  // project glob (`tools/*` → `!tools/**`), which also hid `tools/pkgcheck.ts` — and with it every
+  // dependency that file is the only consumer of — from the root workspace.
+  ignoreWorkspaces: ['tools/nx', 'tools/workspace-plugin', 'libs/api-extractor', 'libs/tau-examples'],
 
   vitest: {
     config: ['vitest.config.{js,ts}', 'vite.config.{js,ts}'],
@@ -41,13 +52,15 @@ const config: KnipConfig = {
 
   workspaces: {
     '.': {
+      // The workspace-root scripts Nx targets and build configs run; `pkgcheck.ts`
+      // is the only consumer of `@taucad/nx`, `madge`, and `@types/madge`.
+      entry: ['tools/*.ts'],
       project: ['**/*.{ts,tsx,mts}'],
-      ignore: ['.agents/skills/create-repo/templates/**', 'tarballs/**'],
+      ignore: ['.agents/skills/create-repo/templates/**', 'tarballs/**', 'tools/eslint-fixtures/**'],
       ignoreDependencies: [
         'replicad-opencascadejs',
         'libcascade',
         '@arethetypeswrong/cli',
-        'madge',
         '@nx/nest',
         '@nx/node',
         '@nx/web',
@@ -69,13 +82,6 @@ const config: KnipConfig = {
     'apps/ui': {
       entry: ['app/routes/**/*.tsx', 'app/types/**/*.d.ts', 'vite-environment.d.ts', 'content/docs/**/*.{ts,tsx}'],
       ignore: ['public/**'],
-    },
-    'libs/converter': {
-      ignore: ['src/assets/**'],
-      entry: ['src/types/**/*.d.ts'],
-    },
-    'packages/runtime': {
-      entry: ['src/kernels/opencascade/opencascade.types.ts'],
     },
     scripts: {
       entry: ['src/**/*.{ts,tsx,mts}'],

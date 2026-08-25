@@ -1,6 +1,7 @@
 import { existsSync, globSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { publishable, workspace } from '@taucad/nx';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 const readJson = (path: string): Record<string, unknown> =>
@@ -15,27 +16,12 @@ describe('telemetry release partition', () => {
     expect(manifest['name']).toBe('@taucad/telemetry');
     expect(manifest['private']).toBe(true);
     expect(project['tags']).toContain('type:lib');
-
-    const workflow = readFileSync(join(repositoryRoot, '.github/workflows/publish.yml'), 'utf8');
-    const publishCommands = workflow
-      .split('\n')
-      .filter((line) => line.includes('nx-release-publish'))
-      .join('\n');
-    expect(publishCommands).not.toContain('telemetry');
   });
 
-  it('keeps publishable packages independent of application telemetry', () => {
-    const manifestPaths = globSync(['packages/*/package.json', 'packages/kernels/*/package.json'], {
-      cwd: repositoryRoot,
-    });
-
-    for (const manifestPath of manifestPaths) {
-      const manifest = readJson(manifestPath);
-      if (manifest['private'] !== false) {
-        continue;
-      }
-      for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
-        expect(manifest[field] ?? {}, `${manifestPath} ${field}`).not.toHaveProperty('@taucad/telemetry');
+  it('keeps publishable packages independent of application telemetry', async () => {
+    for (const { root, manifest } of publishable(await workspace())) {
+      for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies'] as const) {
+        expect(manifest?.[field] ?? {}, `${root} ${field}`).not.toHaveProperty('@taucad/telemetry');
       }
     }
   });

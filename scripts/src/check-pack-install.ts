@@ -9,11 +9,13 @@
  *
  * Usage: node scripts/src/check-pack-install.ts [package-dir…]
  *
- * A subset only works when it is closed under workspace dependencies — `packages/runtime` alone
- * is, nothing else is; omitting a sibling makes npm fall back to the registry and 404.
+ * A subset only works when it is closed under workspace dependencies; omitting a sibling makes npm
+ * fall back to the registry and 404. Requesting `packages/runtime` also packs the packages its
+ * README quick start imports and their publishable closure, computed from the graph.
  */
 
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import {
   existsSync,
   mkdirSync,
@@ -27,7 +29,8 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { bundledLibraries, publishable, publishableClosure, publishWaves, workspace } from '@taucad/nx';
 
 type Dependencies = Record<string, string>;
 
@@ -51,43 +54,13 @@ export type ImportFailure = {
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 
-/** The release train, in dependency order (`docs/policy/release-policy.md`). */
-const publishablePackageDirectories = [
-  'packages/runtime',
-  'packages/react',
-  'packages/cli',
-  'packages/geospec',
-  'packages/geospec-engine',
-  'packages/kernels/openrscad',
-];
-
-/** Private workspace libraries that are bundled into the artifacts and must never be declared. */
-const bundledPrivatePackages = new Set([
-  '@taucad/converter',
-  '@taucad/events',
-  '@taucad/filesystem',
-  '@taucad/fs-bridge',
-  '@taucad/gltf-extensions',
-  '@taucad/json-schema',
-  '@taucad/memory',
-  '@taucad/rpc',
-  '@taucad/types',
-  '@taucad/units',
-  '@taucad/utils',
-  '@taucad/vm',
-]);
-
 /**
  * Subpaths that cannot be imported in a bare Node process for a stated reason, keyed by a
  * substring the produced error must contain. A tolerated entry still has to *resolve* — the
  * module body runs, so a missing sibling file surfaces as ERR_MODULE_NOT_FOUND and stays red.
  * Anything not listed here, and any listed entry that fails differently, is red.
  */
-const toleratedImportFailures: Record<string, string> = {
-  // Worker entry point: the module body calls `nodeWorkerHost()`, which requires the module to be
-  // the script of a `node:worker_threads` Worker rather than a plain import.
-  '@taucad/runtime/worker/node': 'nodeWorkerHost(): `parentPort` unavailable',
-};
+const toleratedImportFailures: Record<string, string> = {};
 
 /**
  * Payloads that only fail when instantiated, keyed by package name; the source runs inside the
@@ -146,14 +119,14 @@ export const requiredArtifactPaths = (manifest: Manifest): string[] => [
 ];
 
 /** Specifiers that must not survive into a published manifest, plus bundled private libraries. */
-export const manifestViolations = (manifest: Manifest): string[] => {
+export const manifestViolations = (manifest: Manifest, bundledLibraryNames: ReadonlySet<string>): string[] => {
   const violations: string[] = [];
   for (const dependencies of [manifest.dependencies, manifest.optionalDependencies, manifest.peerDependencies]) {
     for (const [name, specifier] of Object.entries(dependencies ?? {})) {
       if (/^(?:file|workspace|catalog):/u.test(specifier)) {
         violations.push(`${manifest.name} declares ${name} as ${specifier}.`);
       }
-      if (bundledPrivatePackages.has(name)) {
+      if (bundledLibraryNames.has(name)) {
         violations.push(`${manifest.name} leaks bundled private dependency ${name}.`);
       }
     }
@@ -175,6 +148,92 @@ export const isToleratedImportFailure = (failure: ImportFailure, peerDependencie
   return (
     failure.code === 'ERR_MODULE_NOT_FOUND' && missingPackage !== undefined && peerDependencies.includes(missingPackage)
   );
+};
+
+/**
+ * Every `new URL('<relative>', import.meta.url)` literal in an emitted module.
+ * That form is the published asset contract — it is how a bundler fingerprints a
+ * WASM payload and how the installed `dist/wasm/…` resolves with no
+ * `node_modules` lookup at consumer runtime — so each one must land inside the
+ * installed package.
+ */
+export const assetUrlSpecifiers = (source: string): string[] =>
+  [...source.matchAll(/new URL\(\s*(["'`])(?<specifier>[^"'`]+)\1\s*,\s*import\.meta\.url\s*\)/gu)].flatMap((match) => {
+    const specifier = match.groups?.['specifier'];
+    // A bare scheme is not a file the tarball has to carry.
+    return specifier === undefined || /^[a-z][\d+.a-z-]*:/u.test(specifier) ? [] : [specifier];
+  });
+
+/** Exported package assets reached through Node's standard package resolver. */
+export const packageAssetUrlSpecifiers = (source: string): string[] =>
+  [...source.matchAll(/new URL\(\s*import\.meta\.resolve\(\s*(["'`])(?<specifier>[^"'`]+)\1\s*\)\s*\)/gu)].flatMap(
+    (match) => (match.groups?.['specifier'] === undefined ? [] : [match.groups['specifier']]),
+  );
+
+/** Every asset an installed package's modules reach for must exist inside that package. */
+const assertAssetUrlsResolve = (installedRoot: string, name: string): number => {
+  const modules = readdirSync(installedRoot, { recursive: true, encoding: 'utf8' }).filter((path) =>
+    path.endsWith('.mjs'),
+  );
+  let checked = 0;
+  for (const module_ of modules) {
+    const modulePath = join(installedRoot, module_);
+    const source = readFileSync(modulePath, 'utf8');
+    for (const specifier of assetUrlSpecifiers(source)) {
+      const asset = fileURLToPath(new URL(specifier, pathToFileURL(modulePath)));
+      invariant(
+        asset.startsWith(`${installedRoot}/`) && existsSync(asset),
+        `${name} resolves ${specifier} from ${module_} to ${asset}, which the installed package does not contain.`,
+      );
+      checked += 1;
+    }
+    const require_ = createRequire(modulePath);
+    for (const specifier of packageAssetUrlSpecifiers(source)) {
+      let asset: string;
+      try {
+        asset = require_.resolve(specifier);
+      } catch (error) {
+        throw new Error(`${name} cannot resolve exported package asset ${specifier} from ${module_}.`, {
+          cause: error,
+        });
+      }
+      invariant(existsSync(asset), `${name} resolves exported package asset ${specifier} to missing file ${asset}.`);
+      checked += 1;
+    }
+  }
+  return checked;
+};
+
+/**
+ * One zod in the installed tree. The schema types carry instance identity
+ * (`instanceof ZodType` inside the runtime's `parse`) and type identity
+ * (`$strip`/`$strict` brands), so a second copy breaks both — this is the
+ * independent witness for the `tau-peer-dependency-shape` gate, read from a real
+ * npm install rather than from the manifests.
+ */
+const assertSingleZodInstance = (appRoot: string): void => {
+  type Node = { readonly path?: string; readonly dependencies?: Record<string, Node> };
+  // `--long` carries each node's install `path`: `--all` lists the same hoisted
+  // copy once per dependent, so paths — not node counts — say how many copies
+  // exist. `npm ls` exits non-zero on any tree advisory, so the JSON is read
+  // regardless of status.
+  const listing = spawnSync('npm', ['ls', 'zod', '--json', '--all', '--long'], {
+    cwd: appRoot,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const installs = new Set<string>();
+  const walk = (node: Node): void => {
+    for (const [name, child] of Object.entries(node.dependencies ?? {})) {
+      if (name === 'zod' && child.path !== undefined) {
+        installs.add(child.path);
+      }
+      walk(child);
+    }
+  };
+  walk(JSON.parse(listing.stdout || '{}') as Node);
+  invariant(installs.size === 1, `npm resolved ${String(installs.size)} zod copies: ${[...installs].join(', ')}`);
+  console.log(`zod: one instance in the installed tree (${[...installs][0]!}).`);
 };
 
 const quickStartSource = (readme: string): string => {
@@ -228,9 +287,31 @@ for (const [name, file] of Object.entries(plan.instantiations)) {
 console.log(JSON.stringify(failures));
 `;
 
-const main = (): void => {
+const main = async (): Promise<void> => {
+  const resolved = await workspace({ fresh: true });
+  const projectByName = new Map(publishable(resolved).map((project) => [project.name, project]));
+  // The release train, in dependency order, derived from the graph.
+  const releaseTrainDirectories = publishWaves(resolved)
+    .flat()
+    .flatMap((name) => {
+      const project = projectByName.get(name);
+      return project ? [project.root] : [];
+    });
+  /** Private workspace libraries bundled into some artifact; none may ever be declared. */
+  const bundledLibraryNames = new Set(
+    publishable(resolved).flatMap((project) => bundledLibraries(resolved, project.name)),
+  );
+
   const requested = process.argv.slice(2);
-  const packageDirectories = requested.length > 0 ? requested : publishablePackageDirectories;
+  // The runtime README quick start imports these plugins, so a subset that packs the runtime must
+  // pack them and everything they publishably depend on, or the install 404s against the registry.
+  const quickStartDirectories = requested.includes('packages/runtime')
+    ? publishableClosure(resolved, ['esbuild', 'replicad']).flatMap((name) => {
+        const root = projectByName.get(name)?.root;
+        return root === undefined || requested.includes(root) ? [] : [root];
+      })
+    : [];
+  const packageDirectories = requested.length > 0 ? [...requested, ...quickStartDirectories] : releaseTrainDirectories;
   const temporaryRoot = mkdtempSync(join(tmpdir(), 'tau-npm-local-'));
   const artifactRoot = join(temporaryRoot, 'artifact');
   const appRoot = join(temporaryRoot, 'app');
@@ -260,7 +341,12 @@ const main = (): void => {
       tarballs.push(tarball);
     }
 
-    writeFileSync(join(appRoot, 'package.json'), JSON.stringify({ private: true, type: 'module' }, undefined, 2));
+    // The app declares zod itself, the way a consumer satisfying the plugin peer
+    // does; `assertSingleZodInstance` then proves npm did not fork it.
+    writeFileSync(
+      join(appRoot, 'package.json'),
+      JSON.stringify({ private: true, type: 'module', dependencies: { zod: '^4.0.0' } }, undefined, 2),
+    );
     // One install for every tarball: npm resolves the sibling `@taucad/*` and `geospec`
     // specifiers against the local files instead of their stale registry copies.
     run('npm', ['install', '--no-save', '--no-audit', '--no-fund', ...tarballs], appRoot);
@@ -269,9 +355,12 @@ const main = (): void => {
       dependencies?: Record<string, { version?: string; resolved?: string }>;
     };
 
+    assertSingleZodInstance(appRoot);
+
     const specifiers: string[] = [];
     const instantiations: Record<string, string> = {};
     const failureContext = new Map<string, readonly string[]>();
+    let assetUrls = 0;
     for (const packageDirectory of packageDirectories) {
       const sourceManifest = JSON.parse(
         readFileSync(resolve(repositoryRoot, packageDirectory, 'package.json'), 'utf8'),
@@ -279,7 +368,7 @@ const main = (): void => {
       const installedRoot = join(appRoot, 'node_modules', sourceManifest.name);
       const installed = JSON.parse(readFileSync(join(installedRoot, 'package.json'), 'utf8')) as Manifest;
 
-      const violations = manifestViolations(installed);
+      const violations = manifestViolations(installed, bundledLibraryNames);
       invariant(violations.length === 0, violations.join('\n'));
 
       for (const required of requiredArtifactPaths(installed)) {
@@ -288,6 +377,8 @@ const main = (): void => {
           `${installed.name} ships a manifest path that the installed tree lacks: ${required}`,
         );
       }
+
+      assetUrls += assertAssetUrlsResolve(installedRoot, installed.name);
 
       const resolvedFrom = dependencyTree.dependencies?.[installed.name];
       invariant(
@@ -309,6 +400,7 @@ const main = (): void => {
       }
     }
     console.log(`npm install: ${packageDirectories.length} TGZ resolved from disk, no registry copies.`);
+    console.log(`Asset URLs: ${String(assetUrls)} relative or exported package reference(s) resolve after install.`);
 
     writeFileSync(join(appRoot, 'probe-plan.json'), JSON.stringify({ specifiers, instantiations }));
     writeFileSync(join(appRoot, 'probe.mjs'), probeSource);
@@ -346,7 +438,7 @@ const main = (): void => {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    main();
+    await main();
   } catch (error) {
     console.error('npm-local pack-install smoke failed:', error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

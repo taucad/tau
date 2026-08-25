@@ -10,10 +10,26 @@ import { cpus, platform, release } from 'node:os';
 import { dirname, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { clearCache } from '@taulabs/openrscad-engine';
-import { openrscad } from '@taucad/openrscad/kernel';
+import { openrscadKernel } from '@taucad/openrscad';
 import type { AnyKernelDefinition, KernelRuntime } from '@taucad/runtime/kernel';
 
 const parseArgs = (args: string[]) => {
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`
+OpenRSCAD Native Kernel Benchmark
+
+Usage:
+  pnpm tsx scripts/src/benchmark-openrscad-native-kernel.ts [options]
+
+Options:
+      --corpus <dir>   Add every .scad file below a corpus directory
+      --report <file>  JSON report path
+                       (default: out/reports/benchmarks/openrscad-native-kernel/native-kernel-results.json)
+      --samples <n>    Samples per case (default: 30)
+  -h, --help           Show this help message
+`);
+    process.exit(0);
+  }
   const result = {
     corpus: undefined as string | undefined,
     report: resolve('out/reports/benchmarks/openrscad-native-kernel/native-kernel-results.json'),
@@ -44,9 +60,9 @@ const args = parseArgs(process.argv.slice(2));
 const { samples } = args;
 const options = { tessellation: { segments: 0, minimumAngle: 12, minimumSize: 2 } } as const;
 const fixtureEntries = [
-  resolve('packages/kernels/openrscad/test/fixtures/planetary-gearbox/main.scad'),
+  resolve('packages/plugins/openrscad/src/fixtures/planetary-gearbox/main.scad'),
   resolve('libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad'),
-  resolve('packages/kernels/openrscad/test/fixtures/greenhouse/main.scad'),
+  resolve('packages/plugins/openrscad/src/fixtures/greenhouse/main.scad'),
 ];
 const reportPath = args.report;
 
@@ -141,7 +157,7 @@ const inspectGlb = (bytes: Uint8Array<ArrayBuffer>): { lineSegments: number; nod
 
 const main = async () => {
   await mkdir(dirname(reportPath), { recursive: true });
-  const plugin = openrscad();
+  const plugin = openrscadKernel();
   const load = (plugin as unknown as Record<symbol, () => AnyKernelDefinition | Promise<AnyKernelDefinition>>)[
     Symbol.for('@taucad/runtime/plugin-definition')
   ];
@@ -192,7 +208,8 @@ const main = async () => {
           {
             fixture,
             cache,
-            edgeDeltaMs: edged.medianMs - plain.medianMs,
+            /** Milliseconds. */
+            edgeDelta: edged.medianMs - plain.medianMs,
             edgePayloadDeltaBytes: edged.medianBytes - plain.medianBytes,
             edgeLineSegments: edged.medianLineSegments,
           },

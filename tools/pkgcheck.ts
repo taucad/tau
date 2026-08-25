@@ -7,7 +7,7 @@
  *
  * Usage: tsx tools/pkgcheck.ts <projectRoot>
  */
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
@@ -15,24 +15,48 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import {
+  bundledLibraries,
+  bundleOwnershipIssues as bundleRuleOwnershipIssues,
+  publishable,
+  workspace,
+} from '@taucad/nx';
+import {
   bundledArtifactIssues,
   bundledWorkspaceMirrors,
+  bundleDeclarationClosure,
   bundleOwnershipIssues,
+  bundleWitnessIssues,
   copyTargetPaths,
   doubledPathSegments,
+  emittedSpecifiers,
+  hostTargetIssues,
+  internalImportsIssues,
+  libDependencyIssues,
   packageMetadataIssues,
+  peerRules,
+  peerDependencyIssues,
+  pluginRuntimePeerDependencyIssues,
+  probedSpecifiers,
+  publishableManifestIssues,
   strictConsumerCompilerOptions,
+  vendoredAssetIssues,
+  vendoredNodeModulesIssues,
+  workspaceRangeIssues,
 } from './pkgcheck-metadata.js';
+import type { AssetFile, CopyEntry, UpstreamExport } from './pkgcheck-metadata.js';
+import { readCopyFilesConfig } from './copy-files-from-to.plugin.js';
 
 type CheckResult = {
   name: string;
@@ -44,13 +68,19 @@ type CheckResult = {
 
 type PackageJson = Record<string, unknown> & {
   dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
   exports?: unknown;
   files?: unknown;
+  imports?: Record<string, unknown>;
   name?: string;
+  optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   private?: boolean;
   publishConfig?: Record<string, unknown>;
   'size-limit'?: unknown;
+  taucad?: { hostTarget?: unknown };
+  version?: string;
 };
 
 type WorkspaceProject = { name: string; directory: string; manifest: PackageJson };
@@ -79,43 +109,43 @@ console.log();
 
 const results: CheckResult[] = [];
 
-/** Workspace globs that can hold a bundle-able library or a publishable package. */
-const workspaceParents = ['libs', 'apps/libs', 'packages', 'packages/kernels'];
+/** The Nx graph answers "what exists" and "what publishes"; nothing here re-derives it. */
+const resolved = await workspace();
 
-function readWorkspaceProjects(): WorkspaceProject[] {
-  const projects: WorkspaceProject[] = [];
-  for (const parent of workspaceParents) {
-    const parentDirectory = join(workspaceRoot, parent);
-    if (!existsSync(parentDirectory)) {
-      continue;
-    }
+const workspaceProjects: WorkspaceProject[] = resolved.projects.flatMap((project) =>
+  project.manifest?.name === undefined
+    ? []
+    : [{ name: project.manifest.name, directory: project.root, manifest: project.manifest as PackageJson }],
+);
 
-    for (const entry of readdirSync(parentDirectory, { withFileTypes: true }).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    )) {
-      const manifestPath = join(parentDirectory, entry.name, 'package.json');
-      if (!entry.isDirectory() || !existsSync(manifestPath)) {
-        continue;
-      }
+const publishableProjects: WorkspaceProject[] = publishable(resolved).flatMap((project) =>
+  project.manifest?.name === undefined
+    ? []
+    : [{ name: project.manifest.name, directory: project.root, manifest: project.manifest as PackageJson }],
+);
 
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as PackageJson;
-      if (manifest.name) {
-        projects.push({ name: manifest.name, directory: `${parent}/${entry.name}`, manifest });
-      }
-    }
-  }
+/** Package name → the private libraries the manifest/tag rule permits it to bundle. */
+const directPermittedBundles = new Map(
+  publishable(resolved).map((project) => [
+    project.manifest?.name ?? project.name,
+    bundledLibraries(resolved, project.name),
+  ]),
+);
 
-  return projects;
-}
-
-const workspaceProjects = readWorkspaceProjects();
-
-/** Publishable roots, discovered the way `tools/pkgcheck.plugin.ts` discovers them. */
-const publishableProjects = workspaceProjects.filter(
-  (project) =>
-    project.manifest.private !== true &&
-    (project.directory.startsWith('packages/') || project.directory.startsWith('packages/kernels/')) &&
-    existsSync(join(workspaceRoot, project.directory, 'tsdown.config.ts')),
+const permittedBundles = bundleDeclarationClosure(
+  directPermittedBundles,
+  resolved.projects.flatMap((project) =>
+    project.manifest?.name !== undefined && project.manifest.private === true && project.tags.includes('type:lib')
+      ? [
+          {
+            name: project.manifest.name,
+            dependencies: project.manifest.dependencies,
+            optionalDependencies: project.manifest.optionalDependencies,
+            devDependencies: project.manifest.devDependencies,
+          },
+        ]
+      : [],
+  ),
 );
 
 /** Every directory under `<projectDirectory>/dist`, relative to that `dist`. */
@@ -333,13 +363,32 @@ function validatePackageMetadata(): CheckResult {
       };
 }
 
+function validatePublishableManifest(): CheckResult {
+  return checkResult(
+    'tau-publishable-manifest-shape',
+    publishableManifestIssues({
+      packageName,
+      projectDirectory: relative(workspaceRoot, absoluteRoot),
+      manifest: packageJson,
+      pathExists: (path) => existsSync(join(absoluteRoot, path)),
+    }),
+    'publish metadata matches the workspace package contract',
+  );
+}
+
 function validateBundleOwnership(): CheckResult {
   const unbuilt = publishableProjects.filter((project) => !existsSync(join(workspaceRoot, project.directory, 'dist')));
   const roots = publishableProjects
     .filter((project) => !unbuilt.includes(project))
     .map((project) => ({ owner: project.name, bundled: bundledWorkspaceProjects(project) }));
 
-  const issues = bundleOwnershipIssues(roots);
+  // Two independent witnesses: the mirrors say what the builds did (one owner
+  // each, and each permitted), the rule says what the manifests and tags allow.
+  const issues = [
+    ...bundleOwnershipIssues(roots),
+    ...bundleWitnessIssues(roots, permittedBundles),
+    ...bundleRuleOwnershipIssues(resolved),
+  ];
   const notes =
     unbuilt.length === 0
       ? undefined
@@ -356,33 +405,24 @@ function validateBundleOwnership(): CheckResult {
 }
 
 /**
- * Workspace packages inlined into this artifact: whatever the build actually
- * mirrored, unioned with whatever the config declares it bundles. The config
- * half keeps the runtime's explicit contract enforced even if a mirror moves.
+ * Workspace packages inlined into this artifact: what the build actually
+ * mirrored. What the rule *permits* is the ownership check's business.
  */
-async function bundledWorkspacePackages(): Promise<string[]> {
+function bundledWorkspacePackages(): string[] {
   const project = publishableProjects.find((candidate) => candidate.name === packageName);
-  const mirrored = project ? bundledWorkspaceProjects(project).filter((name) => name !== packageName) : [];
-
-  const configPath = join(absoluteRoot, 'tsdown.config.ts');
-  const config = existsSync(configPath)
-    ? ((await import(pathToFileURL(configPath).href)) as { bundledWorkspaceDependencies?: unknown })
-    : {};
-  const declared = Array.isArray(config.bundledWorkspaceDependencies)
-    ? config.bundledWorkspaceDependencies
-        .filter((value): value is string => typeof value === 'string')
-        .map((name) => `@taucad/${name}`)
-    : [];
-
-  return [...new Set([...mirrored, ...declared])].sort();
+  return project ? bundledWorkspaceProjects(project).filter((name) => name !== packageName) : [];
 }
 
-async function validateBundledArtifact(): Promise<CheckResult> {
-  const bundledPackages = await bundledWorkspacePackages();
-  const files = walkDirectory(join(absoluteRoot, 'dist'))
-    .filter((path) => /(?:\.[cm]?js|\.d\.[cm]?ts)$/u.test(path))
-    .map((path) => ({ path: relative(absoluteRoot, path), source: readFileSync(path, 'utf8') }));
-  const issues = bundledArtifactIssues(packageJson.dependencies ?? {}, files, bundledPackages);
+/** Every emitted module and declaration file, read once: three rules parse them. */
+const emittedFiles = walkDirectory(join(absoluteRoot, 'dist'))
+  .filter((path) => /(?:\.[cm]?js|\.d\.[cm]?ts)$/u.test(path))
+  .map((path) => ({ path: relative(absoluteRoot, path), source: readFileSync(path, 'utf8') }));
+
+const emitted = emittedSpecifiers(emittedFiles);
+
+function validateBundledArtifact(): CheckResult {
+  const bundledPackages = bundledWorkspacePackages();
+  const issues = bundledArtifactIssues(packageJson.dependencies ?? {}, emittedFiles, bundledPackages);
   return issues.length === 0
     ? {
         name: 'tau-bundled-artifact',
@@ -394,6 +434,316 @@ async function validateBundledArtifact(): Promise<CheckResult> {
         status: 'fail',
         details: [`${String(issues.length)} bundled artifact issue(s) found`, ...issues],
       };
+}
+
+/** Every rule reports the same way: a one-line summary on pass, the issues on failure. */
+const checkResult = (name: string, issues: readonly string[], summary: string): CheckResult =>
+  issues.length === 0
+    ? { name, status: 'pass', details: [summary] }
+    : { name, status: 'fail', details: [`${String(issues.length)} issue(s) found`, ...issues] };
+
+function validateVendoredNodeModules(): CheckResult {
+  return checkResult(
+    'tau-no-vendored-node-modules',
+    vendoredNodeModulesIssues(packageName, emitted, distributionDirectories(absoluteRoot)),
+    'no vendored node_modules tree and no emitted specifier reaching into one',
+  );
+}
+
+function validatePeerDependencyShape(): CheckResult {
+  return checkResult(
+    'tau-peer-dependency-shape',
+    peerDependencyIssues({ packageName, manifest: packageJson, emitted, rules: peerRules }),
+    'identity-critical dependencies are required peers with workspace devDependencies',
+  );
+}
+
+const privateLibraryProjects = resolved.projects.flatMap((project) => {
+  const manifest = project.manifest as PackageJson | undefined;
+  return manifest?.name !== undefined && (project.tags.includes('type:lib') || project.tags.includes('type:app-lib'))
+    ? [
+        {
+          name: manifest.name,
+          dependencies: manifest.dependencies,
+          optionalDependencies: manifest.optionalDependencies,
+        },
+      ]
+    : [];
+});
+
+function validateLibDependencyShape(): CheckResult {
+  return checkResult(
+    'tau-lib-dependency-shape',
+    libDependencyIssues(privateLibraryProjects, peerRules),
+    'private libraries leave identity singletons to their bundle owner or leaf',
+  );
+}
+
+function validateWorkspaceRanges(): CheckResult {
+  return checkResult(
+    'tau-workspace-range-parity',
+    workspaceRangeIssues(publishableProjects.map(({ name, manifest }) => ({ ...manifest, name }))),
+    'every publishable declares workspace dependencies as "workspace:*" and peers as real ranges',
+  );
+}
+
+/**
+ * `package.json#imports` keys the canonical map cannot express, each with the
+ * reason the project needs one. Everything absent from this map must be exactly
+ * the canonical two entries, and a reason that outlives its key is an issue.
+ */
+const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  '@taucad/geospec-engine': {
+    '#cache/node-evidence-store.js':
+      'browser/default platform swap for the evidence store, pinned by src/browser-import-graph.test.ts',
+    // The canonical map reaches `src/` only, and `.oxlintrc.json` ("no-restricted-imports",
+    // regex `^\.`) bans the relative import that would replace these workspace-wide — so a
+    // directory outside `src/` can only be reached through a key of its own.
+    '#e2e/*.js': 'browser-engine harness outside src/; relative imports are banned workspace-wide',
+    '#experiments/*.js': 'load-path experiments outside src/; relative imports are banned workspace-wide',
+  },
+  '@taucad/tau-examples': {
+    '#scripts/*.js': 'thumbnail/manifest generators outside src/; relative imports are banned workspace-wide',
+  },
+};
+
+/** Projects whose sources live under `src/`; `type:app` layouts are deliberately outside the rule. */
+const internalImportsProjects = (): Array<{ name: string; imports: Record<string, unknown> | undefined }> =>
+  resolved.projects.flatMap((project) => {
+    const manifest = project.manifest as PackageJson | undefined;
+    return manifest?.name === undefined ||
+      !['type:package', 'type:lib', 'type:tool', 'type:example'].some((tag) => project.tags.includes(tag))
+      ? []
+      : [{ name: manifest.name, imports: manifest.imports }];
+  });
+
+function validateInternalImports(): CheckResult {
+  return checkResult(
+    'tau-internal-imports-shape',
+    internalImportsIssues(internalImportsProjects(), internalImportsExceptions),
+    'every workspace package/lib/tool declares the canonical imports map',
+  );
+}
+
+/** The canonical vendored-payload directories; `src/assets/` is not one of them (R11). */
+const assetDirectoryNames = new Set(['wasm', 'fonts', 'sourcemaps']);
+
+const copyConfigPath = (projectDirectory: string): string =>
+  join(workspaceRoot, projectDirectory, 'copy-files-from-to.cjson');
+
+/** Publishables plus every project that owns a copy recipe — `apps/ui` and `libs/vm` included. */
+const vendoredAssetProjects = (): WorkspaceProject[] =>
+  workspaceProjects.filter(
+    (project) =>
+      publishableProjects.some((candidate) => candidate.directory === project.directory) ||
+      existsSync(copyConfigPath(project.directory)),
+  );
+
+/** Files under `src/**\/{wasm,fonts,sourcemaps}/` plus `public/*.wasm`, project-relative. */
+function assetFilesOf(project: WorkspaceProject): AssetFile[] {
+  const projectDirectory = join(workspaceRoot, project.directory);
+  const staged = walkDirectory(join(projectDirectory, 'src'))
+    .map((path) => relative(projectDirectory, path))
+    .filter((path) =>
+      path
+        .split('/')
+        .slice(0, -1)
+        .some((segment) => assetDirectoryNames.has(segment)),
+    );
+  const publicDirectory = join(projectDirectory, 'public');
+  const served = existsSync(publicDirectory)
+    ? readdirSync(publicDirectory, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.wasm'))
+        .map((entry) => `public/${entry.name}`)
+    : [];
+
+  return [...staged, ...served].sort().map((path) => ({ project: project.name, path }));
+}
+
+/**
+ * The upstream `exports` subpath that resolves to exactly the file a copy entry
+ * reaches for. Resolution and the realpath comparison are the caller's IO; the
+ * rule rejects export-backed WASM copies and only permits recorded upstream gaps.
+ */
+function upstreamExportOf(project: WorkspaceProject, from: string): UpstreamExport | undefined {
+  const projectDirectory = join(workspaceRoot, project.directory);
+  const segments = from.split('node_modules/').at(-1)?.split('/') ?? [];
+  const packageName_ = segments[0]?.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0];
+  if (packageName_ === undefined) {
+    return undefined;
+  }
+
+  const upstreamRoot = from.slice(0, from.lastIndexOf('node_modules/')) + `node_modules/${packageName_}`;
+  let copied: string;
+  let manifest: PackageJson;
+  try {
+    copied = realpathSync(resolve(projectDirectory, from));
+    manifest = JSON.parse(readFileSync(join(projectDirectory, upstreamRoot, 'package.json'), 'utf8')) as PackageJson;
+  } catch {
+    return undefined;
+  }
+
+  const require_ = createRequire(join(projectDirectory, 'package.json'));
+  for (const subpath of Object.keys(isRecord(manifest.exports) ? manifest.exports : {})) {
+    if (!subpath.startsWith('.') || subpath.includes('*') || subpath === './package.json') {
+      continue;
+    }
+    const specifier = `${packageName_}${subpath.slice(1)}`;
+    try {
+      if (realpathSync(require_.resolve(specifier)) === copied) {
+        return { package: packageName_, subpath: specifier, file: from };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Vendored payloads a copy recipe never wrote, recipes whose destination is
+ * tracked in git, and copy `from` paths no upstream `exports` subpath covers.
+ * Recorded reasons live here so a stale one fails the gate: sub-rule 3 keys them
+ * by the literal `from`, sub-rule 2 by the project-relative asset path.
+ */
+const vendoredAssetReasons: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  '@taucad/brep': {
+    'node_modules/occt-import-js/dist/occt-import-js.wasm':
+      'occt-import-js declares no exports field, so the deep path is the only address',
+  },
+  '@taucad/gltf': {
+    'node_modules/draco3dgltf/draco_decoder_gltf.wasm':
+      'draco3dgltf declares no exports field, so the deep path is the only address',
+    'node_modules/draco3dgltf/draco_encoder.wasm':
+      'draco3dgltf declares no exports field, so the deep path is the only address',
+  },
+  '@taucad/image': {
+    '../../../node_modules/geist/dist/fonts/geist-sans/Geist-Regular.ttf':
+      'geist exports only ./font* JS entries, never the raw font files',
+  },
+  '@taucad/replicad': {
+    '../../../node_modules/geist/dist/fonts/geist-sans/Geist-Regular.ttf':
+      'geist exports only ./font* JS entries, never the raw font files',
+    '../../../node_modules/replicad/dist/replicad.js.map':
+      '@taulabs/replicad exports "." only, not ./replicad.js.map; kept per blueprint Q1 until the sourcemap moves behind an opt-in dev flag',
+  },
+  '@taucad/rhino': {
+    'node_modules/rhino3dm/rhino3dm.wasm': 'rhino3dm declares no exports field, so the deep path is the only address',
+  },
+  '@taucad/ui': {
+    '../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2':
+      'geist exports only ./font* JS entries, never the raw font files',
+    '../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2':
+      'geist exports only ./font* JS entries, never the raw font files',
+    './node_modules/draco3dgltf/draco_decoder_gltf.wasm':
+      'draco3dgltf declares no exports field, so the deep path is the only address',
+    './node_modules/draco3dgltf/draco_encoder.wasm':
+      'draco3dgltf declares no exports field, so the deep path is the only address',
+  },
+  '@taucad/esbuild': {
+    'node_modules/esbuild-wasm/esbuild.wasm':
+      'esbuild-wasm declares no exports field, so the deep path is the only address',
+  },
+};
+
+function validateVendoredAssets(): CheckResult {
+  const projects = vendoredAssetProjects();
+  const entries: CopyEntry[] = [];
+  const upstreamExports: UpstreamExport[] = [];
+  const assetFiles: AssetFile[] = [];
+
+  for (const project of projects) {
+    assetFiles.push(...assetFilesOf(project));
+    const configPath = copyConfigPath(project.directory);
+    if (!existsSync(configPath)) {
+      continue;
+    }
+
+    for (const { from, to } of readCopyFilesConfig(configPath)) {
+      entries.push({ project: project.name, root: project.directory, from, to });
+      const exported = from.includes('node_modules/') ? upstreamExportOf(project, from) : undefined;
+      if (exported) {
+        upstreamExports.push(exported);
+      }
+    }
+  }
+
+  const trackedPaths = execFileSync('git', ['ls-files'], {
+    cwd: workspaceRoot,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  }).split('\n');
+
+  const destinations = [...new Set(entries.map(({ root, to }) => `${root}/${to}`))];
+  const ignored = spawnSync('git', ['check-ignore', '--no-index', '--stdin'], {
+    cwd: workspaceRoot,
+    encoding: 'utf8',
+    input: `${destinations.join('\n')}\n`,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (ignored.error || (ignored.status !== 0 && ignored.status !== 1)) {
+    throw ignored.error ?? new Error(`git check-ignore failed: ${ignored.stderr}`);
+  }
+  const ignoredPaths = ignored.stdout.split('\n').filter((path) => path.length > 0);
+
+  return checkResult(
+    'tau-vendored-assets',
+    vendoredAssetIssues({
+      entries,
+      trackedPaths,
+      ignoredPaths,
+      assetFiles,
+      upstreamExports,
+      reasons: vendoredAssetReasons,
+    }),
+    `${String(entries.length)} unavoidable copy recipe(s) generate untracked payloads with recorded upstream gaps`,
+  );
+}
+
+/** `packages/plugins/*` and `packages/core/*` declare who they run inside. */
+const isPluginPackage = (): boolean => absoluteRoot.includes(join('packages', 'plugins'));
+const isCorePackage = (): boolean => absoluteRoot.includes(join('packages', 'core'));
+
+function validateHostTarget(): CheckResult {
+  if (!isPluginPackage() && !isCorePackage()) {
+    return { name: 'tau-host-target', status: 'skip', details: ['not a plugin or core package'] };
+  }
+
+  // The guard is the generated `*plugin.test.ts` payload-isolation suite; a core
+  // package carries the same walk in its root smoke test.
+  const hasPayloadGuardTest = walkDirectory(join(absoluteRoot, 'src')).some((path) => {
+    const name = basename(path);
+    return (
+      name === 'plugin.test.ts' || name.endsWith('.plugin.test.ts') || (isCorePackage() && name === 'index.test.ts')
+    );
+  });
+
+  return checkResult(
+    'tau-host-target',
+    hostTargetIssues({
+      packageName,
+      hostTarget: packageJson.taucad?.hostTarget,
+      dependencyNames: [
+        ...Object.keys(packageJson.dependencies ?? {}),
+        ...Object.keys(packageJson.optionalDependencies ?? {}),
+      ],
+      hasPayloadGuardTest,
+    }),
+    `taucad.hostTarget is ${JSON.stringify(packageJson.taucad?.hostTarget)} and the package keeps that promise`,
+  );
+}
+
+function validatePluginRuntimePeerDependency(): CheckResult {
+  if (!isPluginPackage()) {
+    return { name: 'tau-plugin-runtime-peer', status: 'skip', details: ['not a plugin package'] };
+  }
+
+  return checkResult(
+    'tau-plugin-runtime-peer',
+    pluginRuntimePeerDependencyIssues(packageName, packageJson.peerDependencies),
+    'package.json peerDependencies declares @taucad/runtime',
+  );
 }
 
 /**
@@ -498,19 +848,21 @@ function stagePublishedPackage(projectDirectory: string, nodeModules: string, st
   writeFileSync(join(destination, 'package.json'), JSON.stringify(publishManifest, undefined, 2));
 
   const distribution = join(projectDirectory, 'dist');
-  if (existsSync(distribution)) {
+  if (existsSync(join(distribution, 'node_modules'))) {
+    // Staging the tree would let a vendored copy resolve the probe's imports and
+    // hide exactly the defect `tau-no-vendored-node-modules` exists to catch.
+    failures.push(`${name}: dist/node_modules exists; declare the vendored dependencies instead of shipping a copy`);
+  } else if (existsSync(distribution)) {
     cpSync(distribution, join(destination, 'dist'), { recursive: true });
   } else {
     failures.push(`${name}: dist/ is missing; build it before running pkgcheck`);
   }
 
-  for (const [dependency, range] of [
+  for (const [dependency] of [
     ...Object.entries(manifest.dependencies ?? {}),
     ...Object.entries(manifest.peerDependencies ?? {}),
   ]) {
-    const workspaceProject = range.startsWith('workspace:')
-      ? workspaceProjects.find((project) => project.name === dependency)
-      : undefined;
+    const workspaceProject = workspaceProjects.find((project) => project.name === dependency);
     if (workspaceProject) {
       failures.push(...stagePublishedPackage(join(workspaceRoot, workspaceProject.directory), nodeModules, staged));
       continue;
@@ -531,53 +883,43 @@ function stagePublishedPackage(projectDirectory: string, nodeModules: string, st
 }
 
 /**
- * The runtime's `./nextjs`, `./vite`, `./electron/*` and `./testing` surfaces are
- * typed against peer frameworks whose *own* shipped declarations do not survive
- * `skipLibCheck: false` (next@16.3.0 alone emits 12 errors of its own under both
- * resolution modes). Those are the peer's defects, not this package's, and a
- * consumer only meets them by opting into that framework. The runtime is probed
- * through the curated entry points below plus its whole kernels surface instead.
+ * Published subpaths the strict-consumer probe cannot cover, each with the
+ * third-party defect that stops it. Everything absent from this map is probed,
+ * and a reason that outlives its export fails the check (`probedSpecifiers`).
+ * Only a *peer's* defect belongs here — one of ours is a bug to fix.
  */
-const runtimeProbedSubpaths = /^\.\/kernels(\/|$)/u;
-
-/** Every published subpath, as an importable specifier. Wildcards cannot be probed. */
-function publishedSpecifiers(): string[] {
-  const { exports } = applyPublishConfig(packageJson);
-  if (!isRecord(exports)) {
-    return [];
-  }
-
-  return Object.keys(exports)
-    .filter((subpath) => subpath.startsWith('.') && !subpath.includes('*') && subpath !== './package.json')
-    .filter((subpath) => packageName !== '@taucad/runtime' || runtimeProbedSubpaths.test(subpath))
-    .map((subpath) => `${packageName}${subpath.slice(1)}`);
-}
+const strictConsumerExclusions: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  '@taucad/runtime': {
+    './nextjs/config':
+      'imports `NextConfig` from next@16.3.0, whose own shipped .d.ts emit 9 errors under bundler and 11 under nodenext with skipLibCheck:false (react-dom PostponedState/resume, PrerenderResult.postponed, PrerenderOptions.onHeaders, URLPatternInput/URLPatternOptions, sharp.SharpConstructor)',
+  },
+};
 
 /** Named imports that pin the runtime's headline entry points by name, not just by module. */
 const runtimeConsumerProbe = `import { createNodeClient } from '@taucad/runtime/node';
-import { presets } from '@taucad/runtime/presets';
+import { definePlugin, deriveExportTargets, deriveImportExtensions } from '@taucad/runtime/plugin';
+import { defineKernel } from '@taucad/runtime/kernel';
+import { defineMiddleware } from '@taucad/runtime/middleware';
+import { defineBundler } from '@taucad/runtime/bundler';
+import { defineTranscoder } from '@taucad/runtime/transcoder';
 import { runtimeContentSchema, type RuntimeContentInput } from '@taucad/runtime/types';
 import { defineRuntimeTransport, type RuntimeTransportClient } from '@taucad/runtime/transport';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { parameterFileResolver } from '@taucad/runtime/middleware/parameter-file-resolver';
-import { parameterCache } from '@taucad/runtime/middleware/parameter-cache';
-import { geometryCache } from '@taucad/runtime/middleware/geometry-cache';
-import { gltfCoordinateTransform } from '@taucad/runtime/middleware/gltf-coordinate-transform';
-import { gltfEdgeDetection } from '@taucad/runtime/middleware/gltf-edge-detection';
 
 type ConsumerTypes = [RuntimeContentInput, RuntimeTransportClient];
 declare const consumerTypes: ConsumerTypes;
 void [
   createNodeClient,
-  presets,
+  definePlugin,
+  deriveExportTargets,
+  deriveImportExtensions,
+  defineKernel,
+  defineMiddleware,
+  defineBundler,
+  defineTranscoder,
   runtimeContentSchema,
   defineRuntimeTransport,
   fromNodeFs,
-  parameterFileResolver,
-  parameterCache,
-  geometryCache,
-  gltfCoordinateTransform,
-  gltfEdgeDetection,
   consumerTypes,
 ];
 `;
@@ -594,15 +936,19 @@ function consumerProbeSource(specifiers: readonly string[]): string {
 }
 
 function validateStrictConsumerTypes(): CheckResult {
-  const specifiers = publishedSpecifiers();
+  const exclusions = strictConsumerExclusions[packageName] ?? {};
+  const { specifiers, issues } = probedSpecifiers(packageName, applyPublishConfig(packageJson).exports, exclusions);
+  const notes = Object.entries(exclusions).map(([subpath, reason]) => `${subpath} is not probed: ${reason}`);
   if (specifiers.length === 0) {
-    return { name: 'tau-strict-consumer-types', status: 'skip', details: ['no published export subpaths'] };
+    return { name: 'tau-strict-consumer-types', status: 'skip', details: ['no published export subpaths'], notes };
   }
 
   const pkgcheckRoot = join(workspaceRoot, 'node_modules', '.cache', 'tau-pkgcheck');
   mkdirSync(pkgcheckRoot, { recursive: true });
   const directory = mkdtempSync(join(pkgcheckRoot, 'consumer-'));
   const failures: string[] = [];
+
+  failures.push(...issues);
 
   try {
     const nodeModules = join(directory, 'node_modules');
@@ -637,11 +983,12 @@ function validateStrictConsumerTypes(): CheckResult {
 
   const summary = `${String(specifiers.length)} published subpath(s) typecheck with skipLibCheck:false under bundler and nodenext`;
   return failures.length === 0
-    ? { name: 'tau-strict-consumer-types', status: 'pass', details: [summary] }
+    ? { name: 'tau-strict-consumer-types', status: 'pass', details: [summary], notes }
     : {
         name: 'tau-strict-consumer-types',
         status: 'fail',
-        details: [`${String(failures.length)} strict consumer mode(s) failed`, ...failures],
+        details: [`${String(failures.length)} strict consumer failure(s)`, ...failures],
+        notes,
       };
 }
 
@@ -654,6 +1001,15 @@ function validateStrictConsumerTypes(): CheckResult {
  */
 async function runAttw(): Promise<CheckResult> {
   const stagingDirectory = join(tmpdir(), `pkgcheck-attw-${Date.now()}`);
+  if (existsSync(join(absoluteRoot, 'dist', 'node_modules'))) {
+    // Attw would resolve the vendored copy and call the types fine; refuse the
+    // tarball instead of certifying one that only works because it ships a store.
+    return {
+      name: 'attw',
+      status: 'fail',
+      details: ['dist/node_modules exists; declare the vendored dependencies instead of packing a copy of them'],
+    };
+  }
 
   try {
     mkdirSync(stagingDirectory, { recursive: true });
@@ -756,15 +1112,23 @@ async function runMadge(): Promise<CheckResult> {
 async function runSizeLimit(): Promise<CheckResult> {
   const hasSizeLimitConfig = packageJson['size-limit'] || existsSync(join(absoluteRoot, '.size-limit.json'));
   if (!hasSizeLimitConfig) {
-    return {
-      name: 'size-limit',
-      status: 'skip',
-      details: ['no config found in package.json or .size-limit.json'],
-    };
+    // A publishable without a budget is an unbudgeted tarball, not an exemption
+    // (npm-policy Rule 7 lists size-limit at error severity).
+    return publishableProjects.some((project) => project.name === packageName)
+      ? {
+          name: 'size-limit',
+          status: 'fail',
+          details: ['no config found in package.json or .size-limit.json; every type:package must declare a budget'],
+        }
+      : {
+          name: 'size-limit',
+          status: 'skip',
+          details: ['no config found in package.json or .size-limit.json'],
+        };
   }
 
   try {
-    const output = execSync('pnpm size-limit', {
+    const output = execFileSync(join(workspaceRoot, 'node_modules/.bin/size-limit'), {
       cwd: absoluteRoot,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1179,13 +1543,40 @@ async function main(): Promise<void> {
   results.push(validatePackageMetadata());
   printResult(results.at(-1)!);
 
+  results.push(validatePublishableManifest());
+  printResult(results.at(-1)!);
+
   results.push(validateBundleOwnership());
+  printResult(results.at(-1)!);
+
+  results.push(validateVendoredNodeModules());
+  printResult(results.at(-1)!);
+
+  results.push(validatePeerDependencyShape());
+  printResult(results.at(-1)!);
+
+  results.push(validateLibDependencyShape());
+  printResult(results.at(-1)!);
+
+  results.push(validateInternalImports());
+  printResult(results.at(-1)!);
+
+  results.push(validateWorkspaceRanges());
+  printResult(results.at(-1)!);
+
+  results.push(validateVendoredAssets());
+  printResult(results.at(-1)!);
+
+  results.push(validateHostTarget());
+  printResult(results.at(-1)!);
+
+  results.push(validatePluginRuntimePeerDependency());
   printResult(results.at(-1)!);
 
   results.push(await validateDistributionAssets());
   printResult(results.at(-1)!);
 
-  results.push(await validateBundledArtifact());
+  results.push(validateBundledArtifact());
   printResult(results.at(-1)!);
 
   results.push(validateStrictConsumerTypes());

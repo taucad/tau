@@ -3,7 +3,7 @@
   "$schema": "../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "scripts/src",
   "projectType": "library",
-  "tags": ["scope:tooling", "type:scripts"],
+  "tags": ["scope:shared", "type:tool"],
   "targets": {
     "validate-frontmatter": {
       "executor": "nx:run-commands",
@@ -21,6 +21,12 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "node scripts/src/validate-project-names.ts"
+      }
+    },
+    "validate-project-tags": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/validate-project-tags.ts"
       }
     },
     "validate-tsgo-runtime-references": {
@@ -41,11 +47,77 @@
         "command": "node scripts/src/validate-license-partitions.ts"
       }
     },
+    "validate-format": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "oxfmt --check"
+      }
+    },
+    "validate-dead-code": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "NX_DAEMON=false knip --max-issues 317"
+      }
+    },
+    "test": {
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/packages/plugins/*/README.md",
+        "{workspaceRoot}/packages/core/*/README.md",
+        "{workspaceRoot}/packages/plugins/*/src/index.ts",
+        "{workspaceRoot}/packages/core/*/src/index.ts"
+      ]
+    },
+    "validate-license-deps": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx scripts/src/update-license-deps.mts --check"
+      }
+    },
+    "validate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "true"
+      },
+      "dependsOn": [{ "target": "validate-*" }],
+      "cache": false
+    },
     "check-registry-dependencies": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "node scripts/src/check-registry-dependencies.ts packages/runtime/package.json packages/geospec/package.json packages/geospec-engine/package.json packages/react/package.json packages/cli/package.json packages/kernels/openrscad/package.json"
+        "command": "node scripts/src/check-registry-dependencies.ts"
       }
+    },
+    "check-release-projects": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/check-release-projects.ts"
+      }
+    },
+    "check-pack-install": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/check-pack-install.ts"
+      },
+      "dependsOn": [{ "target": "build", "projects": ["tag:type:package"] }]
+    },
+    "release-gate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "true"
+      },
+      "dependsOn": [
+        { "target": "validate" },
+        { "target": "check-*" },
+        { "target": "pkgcheck", "projects": ["tag:type:package"] },
+        { "target": "test", "projects": ["tag:type:package", "tag:type:lib"] },
+        { "target": "typecheck", "projects": ["tag:type:package", "tag:type:lib"] },
+        { "target": "lint", "projects": ["tag:type:package", "tag:type:lib"] },
+        { "target": "audit-public-surface", "projects": ["*"] },
+        { "target": "readme-quickstart", "projects": ["*"] }
+      ],
+      "cache": false
     },
     "audit-singular-render-output": {
       "executor": "nx:run-commands",

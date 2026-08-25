@@ -1,70 +1,80 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createProjectGraphAsync, readCachedProjectGraph, type ProjectGraph } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
+import { publishable, workspace } from '@taucad/nx';
 
 const workflow = readFileSync(resolve(import.meta.dirname, '../../.github/workflows/publish.yml'), 'utf8');
 
+/**
+ * Comments name the Nx mechanism (`nx-release-publish`) that makes the single
+ * publish step ordered; only the commands must stay free of project names.
+ */
+const commands = workflow
+  .split('\n')
+  .filter((line) => !line.trim().startsWith('#'))
+  .join('\n');
+
+const stepIndex = (name: string): number => workflow.indexOf(`name: ${name}`);
+
+const projectGraph = async (): Promise<ProjectGraph> => {
+  try {
+    return readCachedProjectGraph();
+  } catch {
+    return await createProjectGraphAsync();
+  }
+};
+
 describe('release publish workflow', () => {
-  it('runs the complete runtime suite without exhausting the Replicad WASM heap', () => {
-    expect(workflow).toContain(
-      'vitest run --no-file-parallelism --exclude src/kernels/replicad/replicad.kernel.test.ts',
-    );
-    expect(workflow).toContain(
-      "-t 'getParameters|defaultName extraction via geometry output|createGeometry|exportGeometry|Named shapes and colors|TypeScript bundling'",
-    );
-    expect(workflow).toContain(
-      "-t '^(?!.*(getParameters|defaultName extraction via geometry output|createGeometry|exportGeometry|Named shapes and colors|TypeScript bundling)).*$'",
-    );
+  it('names no project and re-implements no publish order', () => {
+    expect(commands).not.toMatch(/-p |--projects=|nx-release-publish/u);
+    expect(commands).toContain('nx run scripts:release-gate');
   });
 
-  it('publishes the fixed-version train in dependency order without publishing bundled libraries', () => {
-    const steps = [
-      'Verify live registry dependencies',
-      'Prove npm-local TGZs for the release train',
-      'Dry-run dependency-ordered publish',
-      'Publish runtime',
-      'Publish runtime veneers and GeoSpec',
-      'Publish GeoSpec engine',
-    ].map((name) => workflow.indexOf(`name: ${name}`));
+  it('gates, asserts the publisher, dry-runs, then publishes', () => {
+    const order = [
+      'Run the release gate',
+      'Assert pnpm is the publisher',
+      'Dry-run the dependency-ordered publish',
+      'Publish the release train',
+    ].map(stepIndex);
 
-    expect(steps.every((position) => position >= 0)).toBe(true);
-    expect(steps).toEqual([...steps].sort((left, right) => left - right));
-    expect(workflow).not.toContain('Publish registry substrate');
-    expect(workflow).not.toContain('nx-release-publish -p types,json-schema,units');
-    expect(workflow).toContain('nx-release-publish -p runtime --excludeTaskDependencies --tag=beta');
-    expect(workflow).toContain(
-      'nx-release-publish -p react,cli,openrscad,geospec --excludeTaskDependencies --tag=beta',
-    );
-    expect(workflow).toContain('nx-release-publish -p geospec-engine --excludeTaskDependencies --tag=beta');
-    expect(workflow).not.toContain('nx release publish');
-    expect(workflow).toContain('node scripts/src/check-pack-install.ts');
-    expect(workflow).not.toContain('pnpm runtime:npm-local-smoke');
-    expect(workflow).not.toContain('runtime:pack-smoke');
-  });
-
-  it('asserts pnpm is the publisher before anything is published', () => {
+    expect(order).not.toContain(-1);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(workflow).toContain("packageManager.startsWith('pnpm@')");
-    expect(workflow.indexOf('name: Assert pnpm is the publisher')).toBeGreaterThanOrEqual(0);
-    expect(workflow.indexOf('name: Assert pnpm is the publisher')).toBeLessThan(
-      workflow.indexOf('name: Dry-run dependency-ordered publish'),
-    );
   });
 
-  it('asserts the release project selectors before anything runs under them', () => {
-    expect(workflow).toContain('pnpm release:check-projects');
-    expect(workflow.indexOf('name: Assert release project selectors')).toBeGreaterThanOrEqual(0);
-    expect(workflow.indexOf('name: Assert release project selectors')).toBeLessThan(
-      workflow.indexOf('name: Build release train'),
-    );
+  it('dry-runs the command it publishes with', () => {
+    const publishLines = commands.split('\n').filter((line) => line.includes('nx release publish'));
+
+    expect(publishLines).toHaveLength(2);
+    expect(publishLines[0]).toContain('nx release publish --dry-run --tag=beta');
+    expect(publishLines[1]).toContain('nx release publish --tag=beta');
+    expect(publishLines[1]).not.toContain('--dry-run');
   });
 
-  it('gates every private bundle member and the telemetry application boundary before dry-run', () => {
-    expect(workflow).toContain(
-      '--projects=converter,events,filesystem,fs-bridge,gltf-extensions,json-schema,memory,rpc,types,units,utils,vm,geospec,geospec-engine,react,cli,openrscad,telemetry',
-    );
-    expect(workflow).toContain('src/telemetry-release-partition.test.ts');
-    expect(workflow.indexOf('src/telemetry-release-partition.test.ts')).toBeLessThan(
-      workflow.indexOf('name: Dry-run dependency-ordered publish'),
-    );
+  it('reads the Nx Cloud cache the CI run wrote', () => {
+    expect(workflow).toContain('NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}');
+  });
+
+  it('gives every publishable an ordered, pkgcheck-gated publish target', async () => {
+    const resolved = await workspace();
+    const graph = await projectGraph();
+    const names = publishable(resolved).map(({ name }) => name);
+
+    expect(names.length).toBeGreaterThan(0);
+    expect(names).not.toContain('telemetry');
+
+    for (const name of names) {
+      // Nx synthesises `nx-release-publish` for every non-private package and
+      // merges `nx.json` targetDefaults into it, normalising the bare target
+      // name to `<project>:pkgcheck`.
+      const dependsOn = graph.nodes[name]?.data.targets?.['nx-release-publish']?.dependsOn ?? [];
+      expect(dependsOn, name).toContain('^nx-release-publish');
+      expect(
+        dependsOn.some((entry) => entry === 'pkgcheck' || entry === `${name}:pkgcheck`),
+        `${name} pkgcheck`,
+      ).toBe(true);
+    }
   });
 });

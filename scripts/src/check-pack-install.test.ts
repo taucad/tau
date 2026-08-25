@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Manifest } from '#check-pack-install.js';
 import {
+  assetUrlSpecifiers,
+  packageAssetUrlSpecifiers,
   importableSpecifiers,
   isToleratedImportFailure,
   manifestViolations,
@@ -45,8 +47,10 @@ describe('importableSpecifiers', () => {
       '@taucad/geospec-engine/register',
       '@taucad/geospec-engine/register/node',
       '@taucad/geospec-engine/native/opencascade/single',
+      '@taucad/geospec-engine/native/opencascade/single/wasm-url',
     ]);
-    expect(importableSpecifiers(publishedManifest('packages/runtime'))).toContain('@taucad/runtime/kernels/replicad');
+    expect(importableSpecifiers(publishedManifest('packages/runtime'))).toContain('@taucad/runtime/plugin');
+    expect(importableSpecifiers(publishedManifest('packages/runtime'))).not.toContain('@taucad/runtime/presets');
   });
 });
 
@@ -67,16 +71,21 @@ describe('requiredArtifactPaths', () => {
   });
 });
 
+const bundledLibraryNames = new Set(['@taucad/rpc', '@taucad/vm']);
+
 describe('manifestViolations', () => {
   it('rejects unrewritten workspace, file, and catalog specifiers', () => {
     expect(
-      manifestViolations({
-        name: '@taucad/example',
-        version: '1.0.0',
-        dependencies: { '@taucad/runtime': 'workspace:*' },
-        optionalDependencies: { sharp: 'file:../sharp' },
-        peerDependencies: { zod: 'catalog:' },
-      }),
+      manifestViolations(
+        {
+          name: '@taucad/example',
+          version: '1.0.0',
+          dependencies: { '@taucad/runtime': 'workspace:*' },
+          optionalDependencies: { sharp: 'file:../sharp' },
+          peerDependencies: { zod: 'catalog:' },
+        },
+        bundledLibraryNames,
+      ),
     ).toStrictEqual([
       '@taucad/example declares @taucad/runtime as workspace:*.',
       '@taucad/example declares sharp as file:../sharp.',
@@ -86,17 +95,23 @@ describe('manifestViolations', () => {
 
   it('rejects a bundled private library that escaped into a published manifest', () => {
     expect(
-      manifestViolations({ name: '@taucad/example', version: '1.0.0', dependencies: { '@taucad/rpc': '0.1.0' } }),
+      manifestViolations(
+        { name: '@taucad/example', version: '1.0.0', dependencies: { '@taucad/rpc': '0.1.0' } },
+        bundledLibraryNames,
+      ),
     ).toStrictEqual(['@taucad/example leaks bundled private dependency @taucad/rpc.']);
   });
 
   it('accepts a rewritten manifest', () => {
     expect(
-      manifestViolations({
-        name: '@taucad/example',
-        version: '1.0.0',
-        dependencies: { '@taucad/runtime': '0.1.0-beta.1', zod: '^4.4.3' },
-      }),
+      manifestViolations(
+        {
+          name: '@taucad/example',
+          version: '1.0.0',
+          dependencies: { '@taucad/runtime': '0.1.0-beta.1', zod: '^4.4.3' },
+        },
+        bundledLibraryNames,
+      ),
     ).toStrictEqual([]);
   });
 });
@@ -143,25 +158,33 @@ describe('isToleratedImportFailure', () => {
     ).toBe(false);
   });
 
-  it('tolerates only the stated error for a listed environment-dependent subpath', () => {
+  it('does not tolerate removed environment-dependent subpaths', () => {
     expect(
-      isToleratedImportFailure(
-        {
-          specifier: '@taucad/runtime/worker/node',
-          message: 'nodeWorkerHost(): `parentPort` unavailable — must be called from a `node:worker_threads` Worker',
-        },
-        [],
-      ),
-    ).toBe(true);
-    expect(
-      isToleratedImportFailure(
-        {
-          specifier: '@taucad/runtime/worker/node',
-          code: 'ERR_MODULE_NOT_FOUND',
-          message: "Cannot find module '/app/node_modules/@taucad/runtime/dist/worker/host.mjs'",
-        },
-        [],
-      ),
+      isToleratedImportFailure({ specifier: '@taucad/runtime/worker/node', message: 'removed worker entry' }, []),
     ).toBe(false);
+  });
+});
+
+describe('assetUrlSpecifiers', () => {
+  it('collects the relative asset URLs a published module resolves against itself', () => {
+    expect(
+      assetUrlSpecifiers(
+        `const wasm = new URL("./wasm/replicad_single.wasm", import.meta.url);
+         const font = new URL('fonts/Geist-Regular.ttf', import.meta.url);
+         const cdn = new URL('https://cdn.example/x.wasm', import.meta.url);
+         const dynamic = new URL(name, import.meta.url);
+         const other = new URL('./x.wasm', base);`,
+      ),
+    ).toStrictEqual(['./wasm/replicad_single.wasm', 'fonts/Geist-Regular.ttf']);
+  });
+
+  it('collects exported package assets and ignores dynamic resolution', () => {
+    expect(
+      packageAssetUrlSpecifiers(
+        `const single = new URL(import.meta.resolve('replicad-opencascadejs/wasm'));
+         const multi = new URL(import.meta.resolve("replicad-opencascadejs/multi/wasm")).href;
+         const dynamic = new URL(import.meta.resolve(specifier));`,
+      ),
+    ).toStrictEqual(['replicad-opencascadejs/wasm', 'replicad-opencascadejs/multi/wasm']);
   });
 });

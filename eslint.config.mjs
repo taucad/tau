@@ -5,11 +5,14 @@ import nxEslintPlugin from '@nx/eslint-plugin';
 import * as importXPlugin from 'eslint-plugin-import-x';
 import maxParamsNoConstructorPlugin from 'eslint-plugin-max-params-no-constructor';
 import tauLintPlugin from '@taucad/oxlint/tau-lint';
+import { privateRuntimeDocumentPackages } from '@taucad/oxlint/private-runtime-packages';
 import * as mdxParser from '@taucad/oxlint/mdx-parser';
+
+const unlayeredTargetTypes = ['type:lib', 'type:package', 'type:tool', 'type:example'];
 
 /**
  * Workspace root plus every workspace member directory that has a `package.json`
- * (`packages/*`, `packages/kernels/*`, `libs/*`, `apps/*`, `apps/libs/*`, `examples/*`,
+ * (`packages/*`, nested package groups, `libs/*`, `apps/*`, `apps/libs/*`, `examples/*`,
  * `scripts`), so
  * `import-x/no-extraneous-dependencies` resolves deps from the owning manifest.
  */
@@ -38,7 +41,8 @@ const workspacePackageDirectories = () => {
   };
 
   absorbChildren(path.join(root, 'packages'));
-  absorbChildren(path.join(root, 'packages/kernels'));
+  absorbChildren(path.join(root, 'packages/plugins'));
+  absorbChildren(path.join(root, 'packages/core'));
   absorbChildren(path.join(root, 'libs'));
   absorbChildren(path.join(root, 'apps'));
   absorbChildren(path.join(root, 'apps/libs'));
@@ -252,6 +256,11 @@ const config = [
       // Opt-in benchmark experiments: engine-internal, unpublished, and outside
       // the package tsconfig until PE2 rebuilds what they measure.
       'packages/geospec-engine/experiments/**',
+      // Same class: the native OpenCascade benchmark/parity harnesses are
+      // opt-in CLIs run by hand against a locally built addon and the OCCT
+      // wasm bindings. They are unpublished (`files` excludes `bench/`) and
+      // outside the package tsconfig.
+      'packages/plugins/opencascade-native/bench/**',
     ],
   },
 
@@ -268,6 +277,7 @@ const config = [
             'eslint.config.mjs',
             'examples/electron/electron.vite.config.ts',
             'apps/api/vitest.config.ts',
+            'packages/runtime/src/nextjs/package-assets-loader.mjs',
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -293,24 +303,7 @@ const config = [
             },
             {
               sourceTag: 'type:app',
-              onlyDependOnLibsWithTags: [
-                'type:ui',
-                'type:lib',
-                'type:app-lib',
-                'type:examples',
-                'type:package-root',
-                'type:package-veneer',
-              ],
-            },
-            {
-              sourceTag: 'type:ui',
-              onlyDependOnLibsWithTags: [
-                'type:ui',
-                'type:lib',
-                'type:app-lib',
-                'type:package-root',
-                'type:package-veneer',
-              ],
+              onlyDependOnLibsWithTags: ['type:lib', 'type:app-lib', 'type:example', 'type:package', 'type:tool'],
             },
             {
               /*
@@ -318,52 +311,69 @@ const config = [
                * and `chat` both do: a tool contract that describes kernel
                * results necessarily speaks the runtime's issue vocabulary.
                * `type:app-lib` is deliberately absent here and from every other
-               * allowlist except `type:app`, `type:ui`, and `type:e2e` — that
-               * omission is what stops a published package or shared library
-               * from consuming private application code.
+               * allowlist except `type:app` and `type:e2e` — that omission is
+               * what stops a published package or shared library from consuming
+               * private application code.
                */
               sourceTag: 'type:lib',
-              onlyDependOnLibsWithTags: ['type:lib', 'type:package-root', 'type:package-veneer'],
+              onlyDependOnLibsWithTags: ['type:lib', 'type:package', 'type:tool'],
             },
             {
               // Private application capabilities under `apps/libs/*`.
               sourceTag: 'type:app-lib',
-              onlyDependOnLibsWithTags: ['type:app-lib', 'type:lib', 'type:package-root', 'type:package-veneer'],
+              onlyDependOnLibsWithTags: ['type:app-lib', 'type:lib', 'type:package', 'type:tool'],
             },
             {
-              /*
-               * Layering runs one way: a package root may build on other roots
-               * and on shared libraries, never on a published leaf. The one
-               * root-to-veneer edge in the workspace is a GeoSpec engine test
-               * that loads the standalone openrscad kernel — exempted by file
-               * below rather than by widening this allowlist.
-               */
-              sourceTag: 'type:package-root',
-              onlyDependOnLibsWithTags: ['type:package-root', 'type:lib'],
+              // Published packages build on other published packages, shared
+              // libraries, and dev-time tooling — never on application code.
+              sourceTag: 'type:package',
+              onlyDependOnLibsWithTags: ['type:package', 'type:lib', 'type:tool'],
             },
             {
-              sourceTag: 'type:package-veneer',
-              onlyDependOnLibsWithTags: ['type:package-root'],
+              // Dev-time-only projects: build configs, generators, gates.
+              sourceTag: 'type:tool',
+              onlyDependOnLibsWithTags: ['type:tool', 'type:lib', 'type:package', 'type:example'],
             },
             {
-              // Example projects (fixtures) depend on libs they demonstrate —
-              // geospec for `.geospec.ts` suites, runtime for export scripts.
-              sourceTag: 'type:examples',
-              onlyDependOnLibsWithTags: ['type:lib', 'type:examples', 'type:package-root', 'type:package-veneer'],
+              // Example apps depend on what they demonstrate — geospec for
+              // `.geospec.ts` suites, runtime for export scripts.
+              sourceTag: 'type:example',
+              onlyDependOnLibsWithTags: ['type:lib', 'type:example', 'type:package'],
             },
             {
               // E2e/regression packages sit at the top of the graph and may
-              // consume anything they exercise: apps, ui, libs, and examples.
+              // consume anything they exercise: apps, libs, and examples.
               sourceTag: 'type:e2e',
               onlyDependOnLibsWithTags: [
                 'type:app',
-                'type:ui',
                 'type:lib',
                 'type:app-lib',
-                'type:examples',
-                'type:package-root',
-                'type:package-veneer',
+                'type:example',
+                'type:package',
+                'type:tool',
               ],
+            },
+            {
+              sourceTag: 'layer:feature',
+              onlyDependOnLibsWithTags: [
+                'layer:feature',
+                'layer:ui',
+                'layer:data-access',
+                'layer:util',
+                ...unlayeredTargetTypes,
+              ],
+            },
+            {
+              sourceTag: 'layer:ui',
+              onlyDependOnLibsWithTags: ['layer:ui', 'layer:util', ...unlayeredTargetTypes],
+            },
+            {
+              sourceTag: 'layer:data-access',
+              onlyDependOnLibsWithTags: ['layer:data-access', 'layer:util', ...unlayeredTargetTypes],
+            },
+            {
+              sourceTag: 'layer:util',
+              onlyDependOnLibsWithTags: ['layer:util', ...unlayeredTargetTypes],
             },
           ],
         },
@@ -566,18 +576,30 @@ const config = [
     },
   },
   {
-    // Loads the standalone openrscad kernel as a fixture; see the
-    // `type:package-root` constraint above.
-    files: ['packages/geospec-engine/src/model/load-model.test.ts'],
+    /*
+     * Runtime documentation fixtures are consumer code, so the private-package
+     * boundary the MDX rule enforces inside fenced blocks applies to them too —
+     * `@nx/enforce-module-boundaries` is off for these files (above) and the MDX
+     * rule reads only `.mdx`, which left them checked by nothing.
+     *
+     * The `@typescript-eslint` variant, not the core rule: a later workspace-wide
+     * TypeScript block owns the core rule's options, and these fixtures also
+     * re-export types, which the base rule reports identically.
+     */
+    files: ['apps/ui/content/docs/runtime/**/*.ts'],
     rules: {
-      '@nx/enforce-module-boundaries': 'off',
-    },
-  },
-  {
-    // The MDX boundary rule consumes runtime's canonical private-library tuple.
-    files: ['libs/oxlint/src/rules/validate-mdx-codeblocks.js'],
-    rules: {
-      '@nx/enforce-module-boundaries': 'off',
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: privateRuntimeDocumentPackages.flatMap((name) => [name, `${name}/*`]),
+              message:
+                'Runtime documentation must import private @taucad packages through a public @taucad/runtime subpath.',
+            },
+          ],
+        },
+      ],
     },
   },
 
@@ -598,15 +620,7 @@ const config = [
 
   {
     files: ['**/*.{ts,tsx,mts,cts}'],
-    ignores: [
-      '**/*.test.ts',
-      '**/*.test.tsx',
-      '**/*.spec.ts',
-      '**/*.spec.tsx',
-      '**/*.test-d.ts',
-      '**/__tests__/**',
-      'packages/runtime/src/testing/**',
-    ],
+    ignores: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx', '**/*.test-d.ts', '**/__tests__/**'],
     plugins: { 'tau-lint': tauLintPlugin },
     rules: {
       'tau-lint/no-monaco-create-model': 'error',
@@ -615,9 +629,9 @@ const config = [
         {
           paths: [
             {
-              name: '@taucad/runtime/testing',
+              name: '@taucad/runtime-testing',
               message:
-                'Do not import `@taucad/runtime/testing` from non-test sources (it pulls Vitest into unrelated bundles). Prefer opaque filesystem factories (`fromNodeFs`, `fromMemoryFs`, …).',
+                'Do not import `@taucad/runtime-testing` from non-test sources (it pulls Vitest into production bundles).',
             },
           ],
         },
@@ -627,15 +641,7 @@ const config = [
 
   {
     files: ['apps/ui/**/*.{ts,tsx}', 'apps/libs/**/*.{ts,tsx}', 'libs/**/*.{ts,tsx}', 'packages/runtime/**/*.{ts,tsx}'],
-    ignores: [
-      '**/*.test.ts',
-      '**/*.test.tsx',
-      '**/*.spec.ts',
-      '**/*.spec.tsx',
-      '**/*.test-d.ts',
-      '**/__tests__/**',
-      'packages/runtime/src/testing/**',
-    ],
+    ignores: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx', '**/*.test-d.ts', '**/__tests__/**'],
     plugins: { 'tau-lint': tauLintPlugin },
     rules: {
       'tau-lint/no-handrolled-fanout': 'error',
@@ -759,6 +765,30 @@ const config = [
         'error',
         {
           patterns: [dreiDeepJsImportRestriction],
+        },
+      ],
+    },
+  },
+  {
+    files: [
+      'apps/ui/app/machines/cad.machine.ts',
+      'apps/ui/app/workers/geospec-runner.impl.ts',
+      'packages/runtime-testing/src/kernel-testing.utils.ts',
+      'apps/runtime-e2e/src/benchmarks/**/*.{ts,tsx,mts,cts}',
+    ],
+    rules: {
+      'no-restricted-imports': 'off',
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^@taucad/runtime$',
+              allowTypeImports: true,
+              message:
+                'Latency-sensitive runtime consumers must use the narrowest existing @taucad/runtime subpath; root value imports add the full barrel to cold start.',
+            },
+          ],
         },
       ],
     },

@@ -6,6 +6,7 @@ import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 import {
   collectArtifactImportRequirements,
+  findOverrideIssues,
   findRegistryDependencyIssues,
   findUnavailableDependencies,
 } from '#check-registry-dependencies.js';
@@ -14,7 +15,7 @@ const fixtureRoot = fileURLToPath(new URL('fixtures/registry-gate/', import.meta
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 describe('Replicad registry aliases', () => {
-  it('pins both forks through catalog aliases without workspace overrides', async () => {
+  it('pins both forks through catalog aliases and catalog-routed overrides', async () => {
     const workspace = load(await readFile(join(repositoryRoot, 'pnpm-workspace.yaml'), 'utf8')) as {
       catalog?: Record<string, string>;
       overrides?: Record<string, string>;
@@ -22,18 +23,47 @@ describe('Replicad registry aliases', () => {
     const rootManifest = JSON.parse(await readFile(join(repositoryRoot, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
     };
-    const runtimeManifest = JSON.parse(
-      await readFile(join(repositoryRoot, 'packages/runtime/package.json'), 'utf8'),
+    const replicadPluginManifest = JSON.parse(
+      await readFile(join(repositoryRoot, 'packages/plugins/replicad/package.json'), 'utf8'),
     ) as { dependencies?: Record<string, string> };
 
     expect(workspace.catalog?.['replicad']).toBe('npm:@taulabs/replicad@0.23.4-beta.2');
     expect(workspace.catalog?.['replicad-opencascadejs']).toBe('npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0');
-    expect(workspace.overrides).not.toHaveProperty('replicad');
-    expect(workspace.overrides).not.toHaveProperty('replicad-opencascadejs');
+    expect(workspace.overrides?.['replicad']).toBe('catalog:');
+    expect(workspace.overrides?.['replicad-opencascadejs']).toBe('catalog:');
     expect(rootManifest.dependencies?.['replicad']).toBe('catalog:');
     expect(rootManifest.dependencies?.['replicad-opencascadejs']).toBe('catalog:');
-    expect(runtimeManifest.dependencies?.['replicad']).toBe('catalog:');
-    expect(runtimeManifest.dependencies?.['replicad-opencascadejs']).toBe('catalog:');
+    expect(replicadPluginManifest.dependencies?.['replicad']).toBe('catalog:');
+    expect(replicadPluginManifest.dependencies?.['replicad-opencascadejs']).toBe('catalog:');
+  });
+});
+
+describe('findOverrideIssues', () => {
+  it('accepts every override the workspace pins today', async () => {
+    const workspace = load(await readFile(join(repositoryRoot, 'pnpm-workspace.yaml'), 'utf8')) as {
+      catalog?: Record<string, string>;
+      overrides?: Record<string, string>;
+    };
+
+    expect(findOverrideIssues(workspace.overrides ?? {}, workspace.catalog ?? {})).toEqual([]);
+  });
+
+  it('rejects a link override and a catalog override that routes to a non-registry range', () => {
+    expect(
+      findOverrideIssues(
+        { alias: 'npm:@fork/alias@1.2.3', linked: 'link:../linked', vendored: 'catalog:', zod: '^4.0.0' },
+        { vendored: 'file:./vendor/vendored.tgz' },
+      ),
+    ).toEqual([
+      'linked: link:../linked is not a registry specifier',
+      'vendored: file:./vendor/vendored.tgz is not a registry specifier',
+    ]);
+  });
+
+  it('rejects an override whose catalog entry is missing', () => {
+    expect(findOverrideIssues({ absent: 'catalog:' }, {})).toEqual([
+      'absent: catalog: does not resolve through the workspace catalog',
+    ]);
   });
 });
 
@@ -103,5 +133,56 @@ describe('findUnavailableDependencies', () => {
       '@fixture/missing-subpath@1.0.0: @fixture/missing-subpath/bridge is not exported',
       '@fixture/private-transitive@1.0.0: dependency @fixture/private-leaf@1.0.0 is a private workspace package',
     ]);
+  });
+
+  describe('siblings provided by this release train', () => {
+    const sibling = { private: false, version: '0.2.0' };
+    const privateSibling = { private: true, version: '0.2.0' };
+    const workspaceManifests = new Map([
+      ['@fixture/sibling', sibling],
+      ['@fixture/private-sibling', privateSibling],
+    ]);
+    const absentFromRegistry = { exists: async (): Promise<boolean> => false };
+    const inspect = async (): Promise<{ subpaths: Record<string, readonly string[]> }> => {
+      throw new Error('the registry copy of a train sibling must not be inspected');
+    };
+
+    it('accepts a publishable sibling pinned at the version this run publishes', async () => {
+      await expect(
+        findRegistryDependencyIssues({
+          dependencies: { '@fixture/sibling': '0.2.0' },
+          requirements: [
+            { dependency: '@fixture/sibling', specifier: '@fixture/sibling', subpath: '.', names: ['anything'] },
+          ],
+          workspaceManifests,
+          inspect,
+          ...absentFromRegistry,
+        }),
+      ).resolves.toEqual([]);
+    });
+
+    it('blocks a publishable sibling pinned at a version the registry does not have', async () => {
+      await expect(
+        findRegistryDependencyIssues({
+          dependencies: { '@fixture/sibling': '0.1.0' },
+          requirements: [],
+          workspaceManifests,
+          inspect,
+          ...absentFromRegistry,
+        }),
+      ).resolves.toEqual(['@fixture/sibling@0.1.0']);
+    });
+
+    it('blocks a private sibling even at its workspace version', async () => {
+      await expect(
+        findRegistryDependencyIssues({
+          dependencies: { '@fixture/private-sibling': '0.2.0' },
+          requirements: [],
+          workspaceManifests,
+          inspect,
+          ...absentFromRegistry,
+        }),
+      ).resolves.toEqual(['@fixture/private-sibling@0.2.0']);
+    });
   });
 });

@@ -13,6 +13,7 @@ import { readFile, writeFile, stat, access, realpath } from 'node:fs/promises';
 import { join, dirname, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
+import { bundledLibraries, workspace } from '@taucad/nx';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDirectory = join(__dirname, '../..');
@@ -186,23 +187,21 @@ async function resolvePackageDirectory(name: string, fromDirectory: string): Pro
  * the runtime's own production and optional dependencies, plus those of the
  * workspace libraries bundled into its dist (their code ships inside it).
  *
- * The bundled libraries are the runtime's `workspace:` devDependencies — that is
- * what `packages/runtime/scripts/runtime-bundled-packages.mts` enumerates, and a
- * library can only be bundled if it is depended on that way (a published
- * dependency would have to be a real `dependencies` entry instead).
+ * The bundled libraries come from `@taucad/nx`'s `bundledLibraries('runtime')`,
+ * the one rule the runtime's own bundler is configured from — so the attribution
+ * file cannot cover a different set than the artifact ships. Dev-time
+ * `workspace:` devDependencies (`type:tool`) are not bundled and are excluded by
+ * that rule.
  *
  * peerDependencies are deliberately excluded: the host application supplies
  * them, so Tau does not distribute them and owes no attribution for them.
  */
 async function collectRuntimeClosure(): Promise<ScannedPackage[]> {
   const runtimeManifest = await readManifest(runtimeDirectory);
-  const bundledLibraries = Object.entries(runtimeManifest?.devDependencies ?? {})
-    .filter(([, specifier]) => specifier.startsWith('workspace:'))
-    .map(([name]) => name);
 
   const queue = [
     ...Object.keys({ ...runtimeManifest?.dependencies, ...runtimeManifest?.optionalDependencies }),
-    ...bundledLibraries,
+    ...bundledLibraries(await workspace({ fresh: true }), 'runtime'),
   ].map((name) => ({ name, from: runtimeDirectory }));
 
   const packages: ScannedPackage[] = [];
@@ -421,10 +420,9 @@ function generateMarkdown(groups: LicenseGroup[]): string {
     '',
     '## Licensing Overview',
     '',
-    'Tau source is licensed per directory. The repository root and published perimeter',
-    'packages are **[Apache-2.0](./license)**; `apps/ui`, `apps/api`, and every',
-    'application library under `apps/libs/*` are AGPL-3.0-only; the GeoSpec engine is fair source under',
-    'FSL-1.1-Apache-2.0, converting to Apache-2.0 two years after each release.',
+    'Tau-authored source is **[Apache-2.0](./license)** by default, including the applications,',
+    'libraries, tools, examples, and published packages. The only exception is the GeoSpec engine,',
+    'which is fair source under FSL-1.1-Apache-2.0 and converts to Apache-2.0 two years after each release.',
     'Routing map: **[LICENSING.md](./LICENSING.md)**.',
     '',
     'Some third-party dependencies impose additional obligations on **combined',

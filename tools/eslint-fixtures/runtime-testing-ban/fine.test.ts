@@ -1,8 +1,8 @@
 /* Fixture: test files may import runtime testing helpers. */
 
-import { getTestFileSystem } from '@taucad/runtime/testing';
+import { createTestRuntimeClient } from '@taucad/runtime-testing';
 import { expect, test } from 'vitest';
 
 test('fixture', () => {
-  expect(typeof getTestFileSystem).toBe('function');
+  expect(typeof createTestRuntimeClient).toBe('function');
 });

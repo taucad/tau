@@ -2,4 +2,4 @@
 runtime: patch
 ---
 
-Replace the internal image renderer with nanoraster's factor-only PBR pipeline.
+Adopt nanoraster 0.4.1 for image exports, including WebP quality and per-view size/quality options.

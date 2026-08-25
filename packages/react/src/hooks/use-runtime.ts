@@ -443,13 +443,10 @@ const getRuntimeSourceInputError = (source: unknown): Error | undefined => {
  * import { defineRuntime } from '@taucad/runtime';
  * import { fromMemoryFs } from '@taucad/runtime/filesystem';
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
- * import { replicad } from '@taucad/runtime/kernels/replicad';
- * import { esbuild } from '@taucad/runtime/bundler/esbuild';
+ * import { replicad } from '@taucad/replicad';
+ * import { esbuild } from '@taucad/esbuild';
  *
- * const runtime = defineRuntime({
- *   kernels: [replicad()],
- *   bundlers: [esbuild()],
- * });
+ * const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
  * const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
  *
  * const code = `

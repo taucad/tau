@@ -4,16 +4,26 @@
   "description": "React hooks for @taucad/runtime",
   "type": "module",
   "private": false,
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/react"
   },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/react#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "files": [
     "dist",
-    "README.md"
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "cad",
@@ -41,13 +51,15 @@
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
-  "dependencies": {
-    "@taucad/runtime": "workspace:*"
-  },
   "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
     "react": ">=18.0.0"
   },
   "devDependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/replicad": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "react": "catalog:",

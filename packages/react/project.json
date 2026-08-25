@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/react",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package-veneer"],
+  "tags": ["scope:shared", "type:package"],
   "targets": {
     "lint": {
       "executor": "nx:run-commands",

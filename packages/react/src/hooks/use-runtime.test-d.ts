@@ -4,8 +4,8 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import type { ExportResult } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { replicad } from '@taucad/runtime/kernels/replicad';
-import { esbuild } from '@taucad/runtime/bundler/esbuild';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { useRuntime } from '#hooks/use-runtime.js';
 import type {
   RenderStatus,
@@ -17,8 +17,7 @@ import type {
 } from '#hooks/use-runtime.js';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild()],
 });
 const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
 const clientOptions = { transport };

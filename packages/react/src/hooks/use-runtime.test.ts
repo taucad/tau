@@ -12,9 +12,9 @@ import { createRuntimeClient } from '@taucad/runtime/client';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { createMockRuntimeClient } from '@taucad/runtime/testing';
-import { replicad } from '@taucad/runtime/kernels/replicad';
-import { esbuild } from '@taucad/runtime/bundler/esbuild';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { useRuntime } from '#hooks/use-runtime.js';
 import type { UseRuntimeClientOptionsProvider, UseRuntimeOptions } from '#hooks/use-runtime.js';
 
@@ -28,8 +28,7 @@ vi.mock('@taucad/runtime/client', async (importOriginal) => {
 });
 
 const testRuntime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild()],
 });
 /* `createRuntimeClient` is mocked above so the transport never actually
  * opens — it only needs to satisfy the typed `transport` field on the
@@ -817,8 +816,8 @@ describe('useRuntime', () => {
 
       vi.mocked(createRuntimeClient).mockReturnValueOnce(client1).mockReturnValueOnce(client2);
 
-      const runtime1 = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
-      const runtime2 = defineRuntime({ kernels: [replicad()], bundlers: [esbuild()] });
+      const runtime1 = defineRuntime({ plugins: [replicad(), esbuild()] });
+      const runtime2 = defineRuntime({ plugins: [replicad(), esbuild()] });
       const options1 = { transport: inProcessTransport({ runtime: runtime1 }) };
       const options2 = { transport: inProcessTransport({ runtime: runtime2 }) };
 

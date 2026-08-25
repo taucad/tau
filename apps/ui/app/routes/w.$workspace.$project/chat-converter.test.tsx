@@ -293,6 +293,7 @@ const imageRoute = (): ExportRoute => ({
             mode: { type: 'string', enum: ['single'], default: 'single' },
             width: { type: 'number', default: 768 },
             height: { type: 'number', default: 432 },
+            quality: { type: 'number', default: 1 },
             margin: { type: 'number', default: 0.1 },
             projection: { type: 'string', enum: ['perspective', 'orthographic'], default: 'perspective' },
             label: { type: 'string' },
@@ -311,6 +312,7 @@ const imageRoute = (): ExportRoute => ({
             mode: { type: 'string', enum: ['batch'] },
             width: { type: 'number', default: 768 },
             height: { type: 'number', default: 432 },
+            quality: { type: 'number', default: 1 },
             margin: { type: 'number', default: 0.1 },
             projection: { type: 'string', enum: ['perspective', 'orthographic'], default: 'perspective' },
             axes: { type: 'boolean', default: false },
@@ -531,12 +533,12 @@ describe('ChatConverter', () => {
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
     fireEvent.click(screen.getByRole('button', { name: /webp options/i }));
     expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
-      'mode,width,height,margin,projection,label,axes,scaleBar,phi,theta',
+      'mode,width,height,quality,margin,projection,label,axes,scaleBar,phi,theta',
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch mode' }));
     expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
-      'mode,width,height,margin,projection,axes,scaleBar,views',
+      'mode,width,height,quality,margin,projection,axes,scaleBar,views',
     );
 
     fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
@@ -882,7 +884,7 @@ describe('ChatConverter', () => {
       fireEvent.click(screen.getByRole('button', { name: /webp options/i }));
 
       const exportForm = screen.getAllByTestId('rjsf-form').find((form) => form.dataset['fields']?.startsWith('mode,'));
-      expect(exportForm?.dataset['fields']).toBe('mode,width,height,margin,projection,axes,scaleBar,views');
+      expect(exportForm?.dataset['fields']).toBe('mode,width,height,quality,margin,projection,axes,scaleBar,views');
       fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
       await vi.waitFor(() => {
         expect(mockKernelClient.export).toHaveBeenCalledWith('webp', {

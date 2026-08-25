@@ -9,11 +9,22 @@ import { describe, expect, it } from 'vitest';
  * Application-owned half of two runtime plugin guards. The package-owned halves
  * live in `packages/runtime/src/plugins/plugin-default-export-surface.test.ts`
  * and `packages/runtime/src/testing/browser-import-graph.test.ts`, which scan
- * package roots only — a published Apache package must not read the AGPL
- * application tree (`docs/research/workspace-license-boundary-migration.md`,
- * Finding 2). `apps/ui` may read `apps/libs/*`, so it covers all three app roots.
+ * package roots only — a published package must not read the private
+ * application tree. `apps/ui` may read `apps/libs/*`, so it covers all three
+ * app roots.
  */
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const pluginPackageNames = readdirSync(resolve(repositoryRoot, 'packages/plugins'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map(
+    (entry) =>
+      (
+        JSON.parse(readFileSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json'), 'utf8')) as {
+          name: string;
+        }
+      ).name,
+  )
+  .sort();
 
 const sourceRoots = ['libs/telemetry/src', 'apps/ui/app/middleware', 'apps/ui/app/runtime'] as const;
 
@@ -21,13 +32,11 @@ const pluginImportPrefixes = [
   '#bundler/',
   '#kernels/',
   '#middleware/',
-  '#transcoders/',
   '@taucad/runtime/bundler',
-  '@taucad/runtime/kernels',
   '@taucad/runtime/middleware',
   '@taucad/runtime/transcoder',
-  '@taucad/openrscad',
-] as const;
+  ...pluginPackageNames,
+];
 
 const collectSourceFiles = (relativeRoot: string): string[] => {
   const files: string[] = [];

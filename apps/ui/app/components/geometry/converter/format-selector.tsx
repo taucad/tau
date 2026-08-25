@@ -1,13 +1,12 @@
-import { supportedExportFormats } from '@taucad/converter/formats';
-import type { SupportedExportFormat } from '@taucad/converter/formats';
 import { Checkbox } from '#components/ui/checkbox.js';
 import { Label } from '#components/ui/label.js';
 import { Button } from '#components/ui/button.js';
 import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
+import { converterExportFormats, type ConverterExportFormat } from '#routes/convert/converter-runtime.definition.js';
 
 type FormatSelectorProperties = {
-  readonly selectedFormats: SupportedExportFormat[];
-  readonly onFormatToggle: (format: SupportedExportFormat) => void;
+  readonly selectedFormats: ConverterExportFormat[];
+  readonly onFormatToggle: (format: ConverterExportFormat) => void;
   readonly onClearSelection: () => void;
   readonly headingText?: string;
   readonly clearButtonText?: string;
@@ -31,7 +30,7 @@ export function FormatSelector({
         ) : undefined}
       </div>
       <div className='space-y-2'>
-        {supportedExportFormats.map((format) => {
+        {converterExportFormats.map((format) => {
           const isChecked = selectedFormats.includes(format);
           const formatId = `format-${format}`;
 

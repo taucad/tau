@@ -13,14 +13,24 @@ import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { registry } from '#lib/monaco-language-registry.js';
 import { useGeometryUnitKernelPrefetch } from '#hooks/use-monaco-model-service.js';
+import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 
 type GeometryUnits = Map<string, ActorRefFrom<typeof cadMachine>>;
 
-type Snapshot = { context: { activeKernelId?: string } };
+const capabilities: AppCapabilitiesManifest = {
+  registrations: [
+    { kind: 'kernel', id: 'replicad', extensions: ['ts', 'js'] },
+    { kind: 'kernel', id: 'zoo', extensions: ['kcl'] },
+  ],
+  routes: [],
+  renderCapabilities: {},
+};
+
+type Snapshot = { context: { activeKernelId?: string; capabilities?: AppCapabilitiesManifest } };
 type Listener = (snapshot: Snapshot) => void;
 type StubActor = {
   subscribe: (listener: Listener) => { unsubscribe: () => void };
-  __emit: (kernelId: string | undefined) => void;
+  __emit: (kernelId: string | undefined, nextCapabilities?: AppCapabilitiesManifest) => void;
   __unsubscribeCalls: number;
 };
 
@@ -37,9 +47,9 @@ function createStubActor(): StubActor {
         },
       };
     },
-    __emit(kernelId) {
+    __emit(kernelId, nextCapabilities = capabilities) {
       for (const listener of listeners) {
-        listener({ context: { activeKernelId: kernelId } });
+        listener({ context: { activeKernelId: kernelId, capabilities: nextCapabilities } });
       }
     },
     get __unsubscribeCalls() {
@@ -120,6 +130,21 @@ describe('useGeometryUnitKernelPrefetch', () => {
     actor.__emit('non-existent-kernel');
 
     expect(prefetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('should read extensions from each live capabilities snapshot', () => {
+    const actor = createStubActor();
+    const units = unitsOf(['main.ts', actor]);
+    const unavailable: AppCapabilitiesManifest = { registrations: [], routes: [], renderCapabilities: {} };
+
+    renderHook(() => {
+      useGeometryUnitKernelPrefetch(units, true);
+    });
+    actor.__emit('replicad', unavailable);
+    actor.__emit('replicad', capabilities);
+
+    expect(prefetchSpy).toHaveBeenCalledTimes(1);
+    expect(prefetchSpy).toHaveBeenCalledWith(['typescript', 'javascript']);
   });
 
   it('should call prefetch with kcl when the active kernel is zoo', () => {

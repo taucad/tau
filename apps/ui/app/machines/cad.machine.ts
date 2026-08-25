@@ -2,7 +2,6 @@ import { assign, assertEvent, setup, enqueueActions, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef } from 'xstate';
 import type { CodeIssue, Geometry, LogLevel, LogOrigin } from '@taucad/types';
 import type {
-  CapabilitiesManifest,
   GetParametersResult,
   HashedGeometryResult,
   KernelIssue,
@@ -19,7 +18,11 @@ import type { logMachine } from '#machines/logs.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
-import type { AppRuntimeClient, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type {
+  AppCapabilitiesManifest,
+  AppRuntimeClient,
+  LazyKernelOptionsFactory,
+} from '#types/runtime-client.alias.js';
 
 export type LatestGeometryOutcome = 'success' | 'failure' | undefined;
 
@@ -46,7 +49,7 @@ export type CadContext = {
   telemetryEntries: TelemetryEntry[];
   renderTimeout: number;
   kernelClient?: AppRuntimeClient;
-  capabilities?: CapabilitiesManifest;
+  capabilities?: AppCapabilitiesManifest;
   activeKernelId?: string;
   eventCleanups: Array<() => void>;
   /**
@@ -89,7 +92,7 @@ type CadEvent =
   | { type: 'kernelLog'; level: LogLevel; message: string; origin?: LogOrigin; data?: unknown }
   | { type: 'stateChanged'; state: WorkerState; detail?: string }
   | { type: 'setRenderTimeout'; renderTimeout: number }
-  | { type: 'capabilitiesUpdated'; capabilities: CapabilitiesManifest }
+  | { type: 'capabilitiesUpdated'; capabilities: AppCapabilitiesManifest }
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
@@ -173,7 +176,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   signal.throwIfAborted();
 
   const [{ createRuntimeClient }, { fromFileSystemBridge }] = await Promise.all([
-    import('@taucad/runtime'),
+    import('@taucad/runtime/client'),
     import('@taucad/runtime/filesystem'),
   ]);
 

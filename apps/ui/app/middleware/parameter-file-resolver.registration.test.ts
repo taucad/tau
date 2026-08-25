@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
-import { resolveRuntimePluginDefinition } from '@taucad/runtime/testing';
-import { parameterFileResolver } from '@taucad/runtime/middleware';
-import * as parameterFileResolverModule from '@taucad/runtime/middleware/parameter-file-resolver';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import { parameterFileResolver } from '@taucad/middleware';
+import * as middlewareModule from '@taucad/middleware';
 import { runtime } from '#runtime/ui-runtime.definition.js';
 
 describe('parameterFileResolver plugin registration', () => {
   const moduleUrlProperty = 'moduleUrl';
 
-  it('should expose only the named middleware from the implementation module', () => {
-    expect(Object.keys(parameterFileResolverModule)).toEqual(['parameterFileResolver']);
+  it('should expose the named middleware without a default export', () => {
+    expect(middlewareModule.parameterFileResolver).toBe(parameterFileResolver);
+    expect(middlewareModule).not.toHaveProperty('default');
   });
 
   it('should keep implementation details out of the public client registration', () => {
@@ -28,7 +29,7 @@ describe('parameterFileResolver plugin registration', () => {
 
     expect(resolvedRuntime.middleware.map((middleware) => middleware.id)).toContain('parameterFileResolver');
     const parameterFileResolverMiddleware = await resolveRuntimePluginDefinition('middleware', parameterFileResolver());
-    expect(parameterFileResolverMiddleware.name).toBe('parameter-file-resolver');
+    expect(parameterFileResolverMiddleware.name).toBe('ParameterFileResolver');
     expect(parameterFileResolverMiddleware.getDependencies).toEqual(expect.any(Function));
     expect(parameterFileResolverMiddleware.wrapCreateGeometry).toEqual(expect.any(Function));
   });

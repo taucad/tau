@@ -6,7 +6,7 @@
  * render/export typing instead of erasing it.
  */
 
-import type { RuntimeClient } from '@taucad/runtime';
+import type { CapabilitiesManifest, RuntimeClient } from '@taucad/runtime';
 import type { RuntimeClientOptionsWithTransport, RuntimeExportOptions } from '@taucad/runtime/client';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import type { RuntimeKernels, RuntimeMiddleware, RuntimeTranscoders } from '@taucad/runtime/worker';
@@ -20,6 +20,12 @@ import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
  * downstream consumers have a single source of truth.
  */
 export type AppRuntimeClient = RuntimeClient<
+  RuntimeKernels<typeof runtime>,
+  RuntimeMiddleware<typeof runtime>,
+  RuntimeTranscoders<typeof runtime>
+>;
+
+export type AppCapabilitiesManifest = CapabilitiesManifest<
   RuntimeKernels<typeof runtime>,
   RuntimeMiddleware<typeof runtime>,
   RuntimeTranscoders<typeof runtime>

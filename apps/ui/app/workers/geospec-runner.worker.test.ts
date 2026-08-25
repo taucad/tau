@@ -65,7 +65,7 @@ vi.mock('@taucad/runtime', () => ({
 }));
 
 vi.mock('@taucad/fs-bridge', () => ({
-  createFileSystemBridgeProxy: workerMocks.createFileSystemBridgeProxy,
+  createTransferredFileSystemBridgeProxy: workerMocks.createFileSystemBridgeProxy,
 }));
 
 vi.mock('@taucad/runtime/filesystem', () => ({
@@ -405,11 +405,13 @@ describe('geospec-runner.worker', () => {
     });
     expect(workerMocks.fsProxy.readdir).toHaveBeenCalledWith('/');
     expect(workerMocks.fsProxy.stat).toHaveBeenCalledWith('/vase.geospec.ts');
-    expect(workerMocks.createGeoSpecWebRunner).toHaveBeenCalledWith(
-      expect.objectContaining({
-        projectPath: '/',
-      }),
-    );
+    const runnerOptions = workerMocks.createGeoSpecWebRunner.mock.calls[0]?.[0] as {
+      filesystem: { readFile: unknown; writeFile: unknown };
+      modelLoader: unknown;
+    };
+    expect(typeof runnerOptions.filesystem.readFile).toBe('function');
+    expect(typeof runnerOptions.filesystem.writeFile).toBe('function');
+    expect(typeof runnerOptions.modelLoader).toBe('function');
     expect(workerMocks.runner.run).toHaveBeenCalledWith({
       files: ['vase.geospec.ts'],
       testNamePattern: undefined,

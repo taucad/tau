@@ -19,8 +19,8 @@
  * browser, `inProcessTransport(...)` here for the node test
  * environment).
  *
- * The original L1 (raw bridge round-trip) and L3 (event-driven setFile
- * legacy event) coverage was specific to v5 plumbing and is no longer
+ * The original L1 (raw bridge round-trip) and L3 (event-driven entry
+ * selection) coverage was specific to v5 plumbing and is no longer
  * reachable in v6 — those layers are deleted here per the plan.
  */
 
@@ -29,11 +29,11 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { replicad, tau } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
-import { converterTranscoder } from '@taucad/runtime/transcoder';
+import { gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/middleware';
+import { assimp } from '@taucad/assimp';
 import { runtime as uiRuntime } from '#runtime/ui-runtime.definition.js';
 
 const hollowBoxSource = `
@@ -58,10 +58,8 @@ export default function main(p = defaultParams): Shape3D {
 `;
 
 const integrationRuntime = defineRuntime({
-  kernels: [replicad({ withBrepEdges: true }), tau()],
+  plugins: [assimp(), replicad(), esbuild()],
   middleware: [gltfCoordinateTransform(), gltfEdgeDetection()],
-  bundlers: [esbuild()],
-  transcoders: [converterTranscoder()],
 });
 
 const createIntegrationClient = (fileSystem = fromMemoryFs()) =>
@@ -93,6 +91,15 @@ const createUiRuntimeClient = (fileSystem = fromMemoryFs()) =>
     config: uiRuntimeConfig,
   });
 
+const glbPrimitiveModes = (bytes: Uint8Array<ArrayBuffer>): number[][] => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const jsonLength = view.getUint32(12, true);
+  const json = JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))) as {
+    meshes: Array<{ primitives: Array<{ mode?: number }> }>;
+  };
+  return json.meshes.map((mesh) => mesh.primitives.map((primitive) => primitive.mode ?? 4));
+};
+
 type IntegrationClient = ReturnType<typeof createIntegrationClient> | ReturnType<typeof createUiRuntimeClient>;
 
 describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { timeout: 120_000 }, () => {
@@ -105,7 +112,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
   it('renders non-empty geometry from a transport-owned filesystem source', async () => {
     const fileSystem = fromMemoryFs({
-      '/projects/proj_hollow_box/main.ts': hollowBoxSource,
+      '/main.ts': hollowBoxSource,
     });
 
     client = createIntegrationClient(fileSystem);
@@ -113,7 +120,8 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     await client.connect();
 
     const outcome = await client.render({
-      source: { path: { path: '/projects/proj_hollow_box', filename: 'main.ts' } },
+      source: { path: '/main.ts' },
+      content: { includeEdges: true },
     });
 
     expect(outcome.superseded).toBe(false);
@@ -149,9 +157,45 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     }
   });
 
+  it('renders concurrent root and nested entry paths in independent clients', async () => {
+    const fileSystem = fromMemoryFs({
+      '/main.ts': hollowBoxSource,
+      '/lib/cube.ts': uiCylinderSource,
+    });
+    const rootClient = createIntegrationClient(fileSystem);
+    const nestedClient = createIntegrationClient(fileSystem);
+
+    try {
+      await Promise.all([rootClient.connect(), nestedClient.connect()]);
+
+      const outcomes = await Promise.all([
+        rootClient.render({ source: { path: '/main.ts' } }),
+        nestedClient.render({ source: { path: '/lib/cube.ts' } }),
+      ]);
+
+      for (const outcome of outcomes) {
+        expect(outcome.superseded).toBe(false);
+        if (outcome.superseded) {
+          continue;
+        }
+        expect(outcome.geometry.success).toBe(true);
+        if (!outcome.geometry.success) {
+          continue;
+        }
+        expect(outcome.geometry.data.format).toBe('gltf');
+        if (outcome.geometry.data.format === 'gltf') {
+          expect(outcome.geometry.data.content.byteLength).toBeGreaterThan(0);
+        }
+      }
+    } finally {
+      rootClient.terminate();
+      nestedClient.terminate();
+    }
+  });
+
   it('updateParameters re-renders against the previously opened file', async () => {
     const fileSystem = fromMemoryFs({
-      '/projects/proj_hollow_box/main.ts': hollowBoxSource,
+      '/main.ts': hollowBoxSource,
     });
 
     client = createIntegrationClient(fileSystem);
@@ -159,7 +203,8 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     await client.connect();
 
     const initial = await client.render({
-      source: { path: { path: '/projects/proj_hollow_box', filename: 'main.ts' } },
+      source: { path: '/main.ts' },
+      content: { includeEdges: true },
     });
     expect(initial.superseded).toBe(false);
 
@@ -191,7 +236,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     });
 
     const fileSystem = fromMemoryFs({
-      '/projects/proj_ui_replicad/main.ts': uiCylinderSource,
+      '/main.ts': uiCylinderSource,
     });
 
     client = createUiRuntimeClient(fileSystem);
@@ -200,7 +245,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
       await client.connect();
 
       const outcome = await client.render({
-        source: { path: { path: '/projects/proj_ui_replicad', filename: 'main.ts' } },
+        source: { path: '/main.ts' },
       });
 
       expect(outcome.superseded).toBe(false);
@@ -220,5 +265,25 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
         Reflect.deleteProperty(globalThis, 'crossOriginIsolated');
       }
     }
+  });
+
+  it('uses OpenRSCAD native edges without selecting the JavaScript edge fallback', async () => {
+    client = createUiRuntimeClient(
+      fromMemoryFs({
+        '/main.scad': 'color("red") cube(2);',
+      }),
+    );
+    await client.connect();
+
+    const outcome = await client.render({
+      source: { path: '/main.scad' },
+      content: { includeEdges: true },
+    });
+
+    expect(outcome.superseded).toBe(false);
+    if (outcome.superseded || !outcome.geometry.success || outcome.geometry.data.format !== 'gltf') {
+      throw new Error('Expected successful OpenRSCAD GLB render');
+    }
+    expect(glbPrimitiveModes(outcome.geometry.data.content)).toEqual([[4, 1]]);
   });
 });

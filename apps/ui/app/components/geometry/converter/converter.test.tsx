@@ -1,17 +1,16 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
-import type { SupportedExportFormat } from '@taucad/converter';
 import type * as FileUtilsModule from '@taucad/utils/file';
+import type { ConverterExportFormat } from '#routes/convert/converter-runtime.definition.js';
 
 /* oxlint-disable react-js/boolean-prop-naming -- mocks the controlled Checkbox prop API. */
 
-const { exportFromGlb, downloadBlob } = vi.hoisted(() => ({
-  exportFromGlb: vi.fn(),
+const { exportFormat, downloadBlob } = vi.hoisted(() => ({
+  exportFormat: vi.fn(),
   downloadBlob: vi.fn(),
 }));
 
-vi.mock('@taucad/converter', () => ({ exportFromGlb }));
 vi.mock('@taucad/utils/file', async (importOriginal) => ({
   ...(await importOriginal<typeof FileUtilsModule>()),
   downloadBlob,
@@ -57,10 +56,10 @@ vi.mock('#components/ui/label.js', () => ({
 
 const { Converter } = await import('#components/geometry/converter/converter.js');
 
-const renderConverter = (format: SupportedExportFormat, onExport = vi.fn()) => {
+const renderConverter = (format: ConverterExportFormat, onExport = vi.fn()) => {
   render(
     <Converter
-      getGlbData={async () => new Uint8Array([0x67, 0x6c, 0x54, 0x46])}
+      exportFormat={exportFormat}
       selectedFormats={[format]}
       shouldUseZipForMultiple={false}
       onFormatToggle={vi.fn()}
@@ -77,7 +76,7 @@ describe('Converter dependent export artifacts', () => {
     vi.clearAllMocks();
   });
 
-  it.each<{ format: SupportedExportFormat; names: string[] }>([
+  it.each<{ format: ConverterExportFormat; names: string[] }>([
     {
       format: 'gltf',
       names: ['model.gltf', 'buffers/model.bin'],
@@ -87,7 +86,7 @@ describe('Converter dependent export artifacts', () => {
       names: ['model.obj', 'materials/model.mtl'],
     },
   ])('should ZIP and preserve the complete $format artifact set', async ({ format, names }) => {
-    exportFromGlb.mockResolvedValueOnce(
+    exportFormat.mockResolvedValueOnce(
       names.map((name, index) => ({
         name,
         mimeType: 'application/octet-stream',
@@ -109,7 +108,7 @@ describe('Converter dependent export artifacts', () => {
   });
 
   it('should pass every dependent artifact to the project-save callback', async () => {
-    exportFromGlb.mockResolvedValueOnce([
+    exportFormat.mockResolvedValueOnce([
       { name: 'model.gltf', mimeType: 'model/gltf+json', bytes: new Uint8Array([1]) },
       { name: 'buffers/model.bin', mimeType: 'application/octet-stream', bytes: new Uint8Array([2]) },
     ]);

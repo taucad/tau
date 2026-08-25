@@ -15,20 +15,19 @@ function createRoute(format: FileExtension, overrides: Partial<ExportRoute> = {}
     kernelId: 'replicad',
     sourceFormat: format,
     fidelity: 'mesh',
-    schema: {},
-    defaults: {},
+    exportOptions: { schema: {}, defaults: {} },
     ...overrides,
   };
 }
 
 function createClient(routes: ExportRoute[]): AppRuntimeClient {
-  const capabilities: CapabilitiesManifest = { routes, renderSchemas: {} };
+  const capabilities: CapabilitiesManifest = { routes, renderCapabilities: {}, registrations: [] };
   const client = mock<AppRuntimeClient>();
   Object.defineProperty(client, 'capabilities', { value: capabilities, configurable: true });
-  vi.mocked(client.bestRouteFor).mockImplementation((format: FileExtension, kernelId?: string) => {
+  vi.mocked(client.bestRouteFor).mockImplementation((format: FileExtension, options?: { kernelId?: string }) => {
     const candidates = routes
       .filter((route) => route.targetFormat === format)
-      .filter((route) => (kernelId ? route.kernelId === kernelId : true))
+      .filter((route) => (options?.kernelId ? route.kernelId === options.kernelId : true))
       .map((route, index) => ({ route, index }));
 
     candidates.sort((a, b) => {

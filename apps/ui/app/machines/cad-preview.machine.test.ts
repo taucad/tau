@@ -3,13 +3,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
-import { createMockRuntimeClient } from '@taucad/runtime/testing';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { stopRootWithRehydration } from '#lib/xstate-test.utils.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import type { PrepareFilesInput } from '#machines/cad-preview.machine.js';
-import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type { runtime } from '#runtime/ui-runtime.definition.js';
+import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+
+const createMockAppRuntimeClient = () => createMockRuntimeClient<typeof runtime>();
 
 const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
   mock<ReturnType<KernelOptionsFactory>>({
@@ -29,7 +32,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should send initializeModel to cadRef after prepareFiles completes', async () => {
-    const mockClient = createMockRuntimeClient() as AppRuntimeClient;
+    const mockClient = createMockAppRuntimeClient();
 
     const providedCadMachine = cadMachine.provide({
       actors: {
@@ -89,7 +92,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should send initializeModel after Strict Mode stopRootWithRehydration cycle', async () => {
-    const mockClient = createMockRuntimeClient() as AppRuntimeClient;
+    const mockClient = createMockAppRuntimeClient();
     let connectDelay = 50;
 
     const providedCadMachine = cadMachine.provide({
@@ -173,7 +176,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should handle prepareFiles completing after cadRef connects', async () => {
-    const mockClient = createMockRuntimeClient() as AppRuntimeClient;
+    const mockClient = createMockAppRuntimeClient();
 
     const providedCadMachine = cadMachine.provide({
       actors: {
@@ -252,7 +255,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should handle slow prepareFiles with abort during Strict Mode', async () => {
-    const mockClient = createMockRuntimeClient() as AppRuntimeClient;
+    const mockClient = createMockAppRuntimeClient();
     let connectDelay = 100;
 
     const providedCadMachine = cadMachine.provide({
@@ -347,7 +350,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should not fail with detached ArrayBuffer when zombie prepareFiles transfers file content', async () => {
-    const mockClient = createMockRuntimeClient() as AppRuntimeClient;
+    const mockClient = createMockAppRuntimeClient();
     let connectDelay = 100;
 
     const providedCadMachine = cadMachine.provide({
@@ -477,7 +480,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should handle zombie prepareFiles natively with fromSafeAsync (no manual abort handling needed)', async () => {
-    const mockClient = createMockRuntimeClient() as AppRuntimeClient;
+    const mockClient = createMockAppRuntimeClient();
 
     const providedCadMachine = cadMachine.provide({
       actors: {

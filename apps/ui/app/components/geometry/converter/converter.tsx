@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
-import { exportFromGlb } from '@taucad/converter';
-import type { SupportedImportFormat, SupportedExportFormat } from '@taucad/converter';
+import type { ExportFile } from '@taucad/types';
 import { Download } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
@@ -12,25 +11,26 @@ import { ConverterFileTree } from '#components/geometry/converter/converter-file
 import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
 import { cn } from '#utils/ui.utils.js';
 import { createExportArtifactZip } from '#utils/export-artifact-set.utils.js';
+import type { ConverterExportFormat, ConverterImportFormat } from '#routes/convert/converter-runtime.definition.js';
 
 type UploadedFileInfo = {
   readonly name: string;
-  readonly format: SupportedImportFormat;
+  readonly format: ConverterImportFormat;
   readonly size: number;
 };
 
 export type ExportedFile = {
   readonly filename: string;
   readonly content: Uint8Array<ArrayBuffer>;
-  readonly format: SupportedExportFormat;
+  readonly format: ConverterExportFormat;
 };
 
 type ConverterProperties = {
-  readonly getGlbData: () => Promise<Uint8Array<ArrayBuffer>>;
-  readonly selectedFormats: SupportedExportFormat[];
+  readonly exportFormat: (format: ConverterExportFormat) => Promise<ExportFile[]>;
+  readonly selectedFormats: ConverterExportFormat[];
   readonly shouldUseZipForMultiple: boolean;
   readonly uploadedFile?: UploadedFileInfo;
-  readonly onFormatToggle: (format: SupportedExportFormat) => void;
+  readonly onFormatToggle: (format: ConverterExportFormat) => void;
   readonly onClearSelection: () => void;
   readonly onZipToggle: (useZip: boolean) => void;
   readonly onExport?: (files: ExportedFile[]) => void;
@@ -42,7 +42,7 @@ type ConverterProperties = {
 };
 
 export function Converter({
-  getGlbData,
+  exportFormat,
   selectedFormats,
   shouldUseZipForMultiple,
   uploadedFile,
@@ -89,22 +89,12 @@ export function Converter({
       return;
     }
 
-    let data: Uint8Array<ArrayBuffer>;
-
-    try {
-      // Lazily fetch GLB data when download is triggered
-      data = await getGlbData();
-    } catch {
-      toast.error('Failed to get GLB data');
-      return;
-    }
-
     setIsExporting(true);
 
     try {
       const operation = (async () => {
         const results = await Promise.all(
-          selectedFormats.map(async (format) => ({ format, files: await exportFromGlb(data, format) })),
+          selectedFormats.map(async (format) => ({ format, files: await exportFormat(format) })),
         );
         for (const { format, files } of results) {
           if (files.length === 0) {
@@ -166,7 +156,7 @@ export function Converter({
       setIsExporting(false);
     }
   }, [
-    getGlbData,
+    exportFormat,
     selectedFormats,
     shouldUseZipForMultiple,
     zipFilename,

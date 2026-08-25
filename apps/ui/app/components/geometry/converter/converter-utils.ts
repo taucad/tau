@@ -1,23 +1,29 @@
-import type { SupportedImportFormat, SupportedExportFormat } from '@taucad/converter';
-import { formatConfigurations, isInputFormatSupported } from '@taucad/converter';
+import { formatConfigurations } from '@taucad/types/constants';
 import type { FileExtension } from '@taucad/types';
 import { getFileExtension } from '#utils/filesystem.utils.js';
+import {
+  converterImportFormats,
+  type ConverterExportFormat,
+  type ConverterImportFormat,
+} from '#routes/convert/converter-runtime.definition.js';
+
+const converterImportFormatSet = new Set<string>(converterImportFormats);
 
 /**
  * Extract file format from filename extension
  */
-export function getFormatFromFilename(filename: string): SupportedImportFormat {
+export function getFormatFromFilename(filename: string): ConverterImportFormat {
   const extension = getFileExtension(filename);
 
   if (!extension) {
     throw new Error('File has no extension');
   }
 
-  if (!isInputFormatSupported(extension)) {
+  if (!converterImportFormatSet.has(extension)) {
     throw new Error(`Unsupported file format: .${extension}`);
   }
 
-  return extension;
+  return extension as ConverterImportFormat;
 }
 
 /**
@@ -45,6 +51,6 @@ export function formatFileSize(bytes: number): string {
 /**
  * Get file extension for output format
  */
-export function getExtensionForFormat(format: SupportedExportFormat): string {
+export function getExtensionForFormat(format: ConverterExportFormat): string {
   return format;
 }

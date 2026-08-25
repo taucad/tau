@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import type { RuntimeConfigInput } from '@taucad/runtime/worker';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
-import type { runtime } from '#runtime/ui-runtime.definition.js';
-import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
+import { runtime, uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
 
 const tauApiUrlEnvironmentKey = 'TAU_API_URL';
 const tauWebSocketUrlEnvironmentKey = 'TAU_WEBSOCKET_URL';
@@ -35,5 +35,17 @@ describe('createUiRuntimeConfig', () => {
       expect((error as Error).message).toContain('tauApiUrl');
       expect((error as Error).message).toContain('tauWebSocketUrl');
     }
+  });
+
+  it('routes runtime observability to the configured Tau API', async () => {
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
+      tauApiUrl: 'https://api.tau.test',
+      tauWebSocketUrl: 'wss://api.tau.test',
+    });
+
+    expect(resolvedRuntime.middleware[0]).toMatchObject({
+      id: 'observability',
+      options: { reportUrl: 'https://api.tau.test/v1/telemetry/ingest' },
+    });
   });
 });

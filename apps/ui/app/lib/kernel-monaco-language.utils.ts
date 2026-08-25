@@ -4,30 +4,30 @@
  * `cadMachine.activeKernelChanged`) to the set of Monaco language ids whose
  * contributions should be warmed up.
  *
- * Derived from the registered kernel plugin list, since the runtime
- * `CapabilitiesManifest` only carries export-route metadata — it does not
- * expose per-kernel source-file extensions.
+ * Derived from the live runtime capabilities manifest so configured and
+ * dynamically updated kernel registrations stay authoritative.
  */
 
-import { kernelSourceExtensionsById } from '#constants/kernel-monaco-extensions.constants.js';
 import type { MonacoLanguage } from '#lib/monaco.constants.js';
 import { extensionToMonacoLanguage } from '#lib/monaco.constants.js';
-
-const kernelExtensionsById = new Map<string, readonly string[]>(Object.entries(kernelSourceExtensionsById));
+import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 
 /**
  * Resolve the Monaco language ids associated with a kernel id. Returns an
  * empty array when the kernel id is unknown or none of its extensions map to
  * a Monaco language.
  */
-export function getMonacoLanguageIdsForKernel(kernelId: string): MonacoLanguage[] {
-  const extensions = kernelExtensionsById.get(kernelId);
-  if (!extensions) {
+export function getMonacoLanguageIdsForKernel(
+  kernelId: string,
+  capabilities: AppCapabilitiesManifest | undefined,
+): MonacoLanguage[] {
+  const plugin = capabilities?.registrations.find((candidate) => candidate.id === kernelId);
+  if (plugin?.kind !== 'kernel') {
     return [];
   }
 
   const monacoIds = new Set<MonacoLanguage>();
-  for (const extension of extensions) {
+  for (const extension of plugin.extensions) {
     const id = extensionToMonacoLanguage[extension];
     if (id) {
       monacoIds.add(id);

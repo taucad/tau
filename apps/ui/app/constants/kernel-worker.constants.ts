@@ -1,16 +1,18 @@
 import { webWorkerTransport } from '@taucad/runtime/transport/web';
+import type { RuntimeKernels } from '@taucad/runtime/worker';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type { runtime } from '#runtime/ui-runtime.definition.js';
 
-export type DefaultKernelId = 'openrscad' | 'zoo' | 'replicad' | 'opencascade' | 'manifold' | 'jscad' | 'tau';
+export type DefaultKernelId = RuntimeKernels<typeof runtime>[number]['id'];
 
 const createDefaultRuntimeWorker = (): Worker =>
-  new Worker(new URL('../runtime/runtime.worker.js', import.meta.url), {
+  new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), {
     name: 'tau-ui-runtime-worker',
     type: 'module',
   });
 
 const createDebugRuntimeWorker = (): Worker =>
-  new Worker(new URL('../runtime/runtime-debug.worker.js', import.meta.url), {
+  new Worker(new URL('../runtime/runtime-debug.worker.ts', import.meta.url), {
     name: 'tau-ui-runtime-debug-worker',
     type: 'module',
   });
@@ -56,6 +58,7 @@ export const createDebugKernelOptions: KernelOptionsFactory = (deps) => ({
   config: deps.runtimeConfig,
   transport: webWorkerTransport({
     createWorker: createDebugRuntimeWorker,
+    devtoolsTelemetry: true,
     fileSystem: deps.fileSystem,
     sharedMemory: {
       geometry: { bytes: 100 * 1024 * 1024 },

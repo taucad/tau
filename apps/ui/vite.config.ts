@@ -13,10 +13,8 @@ import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- allowed for Fumadocs; .js for ESM
 import * as MdxConfig from './app/lib/fumadocs/source.config.js';
-import { runtime } from '@taucad/runtime/vite';
-import { tsModuleUrlPlugin } from '@taucad/vite/ts-module-url';
+import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
-import { optimizeDepsFromCache } from '@taucad/vite/optimize-deps-from-cache';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -103,19 +101,11 @@ export default defineConfig(({ mode }) => {
     plugins: [
       createUiSourceAliasPlugin(),
 
-      // Pre-bundle all deps known from the previous dev session's cache,
-      // eliminating cascading "new dependencies optimized → reloading" on cold start.
-      optimizeDepsFromCache(),
-
       /*
-       * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, exclude the
-       * runtime + WASM-bearing deps from optimizeDeps, keep .wasm out of the
-       * inline path, force worker.format to 'es'. See docs/research/runtime-zero-config-bundling.md (R2).
+       * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
+       * out of the inline path, and force module-worker output.
        */
-      ...runtime(),
-
-      // Resolve .ts files referenced via new URL() in both build and serve modes
-      ...tsModuleUrlPlugin(),
+      tauRuntime(),
 
       // Base64 Loader
       base64Loader,
@@ -156,7 +146,6 @@ export default defineConfig(({ mode }) => {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
       plugins: () => [createUiSourceAliasPlugin(), nxViteTsPaths()],
-      format: 'es',
     },
     resolve: {
       alias: isTest
@@ -195,17 +184,11 @@ export default defineConfig(({ mode }) => {
        */
       /*
        * SVGs are forced out of the base64 inline path so the icon sprite
-       * pipeline can fingerprint them. WASM exclusion is the same invariant
-       * shipped by `@taucad/runtime/vite#runtime`; we mirror it here because
-       * Vite's user-config `build.assetsInlineLimit` wins over plugin-level
-       * defaults, and the SVG branch needs to coexist with the WASM rule.
-       * Inlining .wasm breaks worker V8 bytecode caching.
+       * pipeline can fingerprint them. `tauRuntime()` composes its WASM rule with
+       * this application-owned SVG policy.
        */
       assetsInlineLimit(file) {
         if (file.endsWith('.svg')) {
-          return false;
-        }
-        if (file.endsWith('.wasm')) {
           return false;
         }
         return undefined;

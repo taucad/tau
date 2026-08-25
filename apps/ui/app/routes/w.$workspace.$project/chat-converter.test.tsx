@@ -273,7 +273,7 @@ function createCapabilities(overrides?: Partial<CapabilitiesManifest>): Capabili
     ],
     renderCapabilities: {},
     ...overrides,
-    plugins: overrides?.plugins ?? [],
+    registrations: overrides?.registrations ?? [],
   };
 }
 

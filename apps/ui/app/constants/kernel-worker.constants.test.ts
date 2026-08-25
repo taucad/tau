@@ -38,13 +38,16 @@ describe('kernel-worker constants', () => {
     const resolvedRuntime = await resolveRuntimeDefinition(runtime, parsedConfig);
 
     expect(resolvedRuntime.kernels.map((kernel) => kernel.id)).toEqual([
-      'openrscad',
-      'zoo',
-      'replicad',
       'opencascade',
-      'manifold',
+      'openrscad',
       'jscad',
-      'tau',
+      'manifold',
+      'gltf',
+      'brep',
+      'rhino',
+      'assimp',
+      'replicad',
+      'zoo',
     ]);
     for (const kernel of resolvedRuntime.kernels) {
       expect(typeof kernel.id).toBe('string');

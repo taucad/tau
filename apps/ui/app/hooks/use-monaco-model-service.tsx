@@ -229,7 +229,7 @@ export function useGeometryUnitKernelPrefetch(
         if (!kernelId) {
           return;
         }
-        const monacoIds = getMonacoLanguageIdsForKernel(kernelId);
+        const monacoIds = getMonacoLanguageIdsForKernel(kernelId, snapshot.context.capabilities);
         if (monacoIds.length > 0) {
           registry.prefetch(monacoIds);
         }

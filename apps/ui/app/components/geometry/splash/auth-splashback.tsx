@@ -7,9 +7,9 @@ import type { Geometry } from '@taucad/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { jscad } from '@taucad/runtime/kernels';
-import { parameterCache, geometryCache, gltfCoordinateTransform } from '@taucad/runtime/middleware';
-import { esbuild } from '@taucad/runtime/bundler';
+import { jscad } from '@taucad/jscad';
+import { parameterCache, geometryCache, gltfCoordinateTransform } from '@taucad/middleware';
+import { esbuild } from '@taucad/esbuild';
 import { authSplashbackMachine, timing as machineTiming } from '#components/geometry/splash/auth-splashback.machine.js';
 import { UnifiedSplashbackViewer } from '#components/geometry/splash/unified-splashback-viewer.js';
 import type { SplashbackPhase } from '#components/geometry/splash/unified-splashback-viewer.js';
@@ -28,9 +28,8 @@ import {
 const gearCode = { 'main.js': gearJscad };
 
 const splashbackRuntime = defineRuntime({
-  kernels: [jscad()],
+  plugins: [jscad(), esbuild()],
   middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform()],
-  bundlers: [esbuild()],
 });
 const splashbackKernelClientOptions = {
   runtime: splashbackRuntime,
@@ -145,7 +144,7 @@ function PromptStatusIcon({
             transition={{ duration: 0.08 }}
             className='flex size-4 items-center justify-center text-muted-foreground'
           >
-            <Loader className='size-4' variant='spinner' />
+            <Loader className='size-4' />
           </motion.span>
         ) : (
           <motion.span

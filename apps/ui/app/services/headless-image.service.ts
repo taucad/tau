@@ -1,6 +1,7 @@
 import type { FilesystemRuntimeSource } from '@taucad/runtime/client';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import type { ExportFile } from '@taucad/types';
+import type { SvgPngOptions } from '@taucad/image/svg';
 import type { AppRuntimeClient, AppRuntimeExportFormat, AppRuntimeExportOptions } from '#types/runtime-client.alias.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
@@ -14,18 +15,32 @@ type HeadlessImageJobBase = {
   readonly kind: 'automatic-thumbnail' | 'manual-thumbnail' | 'capture';
   readonly identity: string;
   readonly projectId?: string;
+};
+
+type HeadlessGltfImageJobBase = HeadlessImageJobBase & {
+  readonly sourceFormat: 'gltf';
   readonly fileSystem: RuntimeFileSystem;
   readonly source: FilesystemRuntimeSource;
   readonly parameters?: Record<string, unknown>;
   readonly includeEdges: boolean;
 };
 
-export type HeadlessImageJob = {
-  [Format in ImageFormat]: HeadlessImageJobBase & {
+type HeadlessGltfImageJob = {
+  [Format in ImageFormat]: HeadlessGltfImageJobBase & {
     readonly format: Format;
     readonly exportOptions?: AppRuntimeExportOptions<Format>['exportOptions'];
   };
 }[ImageFormat];
+
+type HeadlessSvgImageJob = HeadlessImageJobBase & {
+  readonly sourceFormat: 'svg';
+  readonly sourcePath: string;
+  readonly content: string;
+  readonly format: 'png';
+  readonly exportOptions?: SvgPngOptions;
+};
+
+export type HeadlessImageJob = HeadlessGltfImageJob | HeadlessSvgImageJob;
 
 export type HeadlessImageServiceDependencies = {
   readonly runtimeConfig: UiRuntimeConfigInput;
@@ -42,7 +57,14 @@ type QueuedJob = {
   readonly reject: (error: unknown) => void;
 };
 
-export type HeadlessImageFailureCode = 'adapter-unavailable' | 'device-lost' | 'gpu' | 'parse' | 'encode' | 'unknown';
+export type HeadlessImageFailureCode =
+  | 'adapter-unavailable'
+  | 'device-lost'
+  | 'driver-unsupported'
+  | 'gpu'
+  | 'parse'
+  | 'encode'
+  | 'unknown';
 
 /** Stable image-render failure preserved from the runtime issue details. */
 export class HeadlessImageError extends Error {
@@ -72,6 +94,7 @@ const issueToError = (
       type === 'render' &&
       (code === 'adapter-unavailable' ||
         code === 'device-lost' ||
+        code === 'driver-unsupported' ||
         code === 'gpu' ||
         code === 'parse' ||
         code === 'encode' ||
@@ -82,6 +105,19 @@ const issueToError = (
   }
   return new HeadlessImageError('unknown', issue?.message ?? 'Image render failed');
 };
+
+const svgIssueToError = (error: unknown): HeadlessImageError => {
+  if (error && typeof error === 'object' && 'code' in error) {
+    const { code } = error as { readonly code: unknown };
+    if (code === 'parse' || code === 'encode') {
+      return new HeadlessImageError(code, error instanceof Error ? error.message : 'SVG render failed');
+    }
+  }
+  return new HeadlessImageError('unknown', error instanceof Error ? error.message : String(error));
+};
+
+const sourceLocator = (job: HeadlessImageJob): string =>
+  job.sourceFormat === 'gltf' ? job.source.path : job.sourcePath;
 
 /**
  * App-owned, lazy image export client shared by thumbnails and agent captures.
@@ -159,7 +195,7 @@ export class HeadlessImageService {
             kind: queued.job.kind,
             ...(queued.job.projectId ? { projectId: queued.job.projectId } : {}),
             identity: queued.job.identity,
-            sourceLocator: queued.job.source.path,
+            sourceLocator: sourceLocator(queued.job),
             code: error instanceof HeadlessImageError ? error.code : 'unknown',
             message: error instanceof Error ? error.message : String(error),
           });
@@ -188,6 +224,20 @@ export class HeadlessImageService {
   }
 
   private async execute(job: HeadlessImageJob): Promise<ExportFile[]> {
+    if (job.sourceFormat === 'svg') {
+      const { generation } = this;
+      try {
+        const { renderSvgPng } = await import('@taucad/image/svg');
+        const file = await renderSvgPng(job.content, job.exportOptions);
+        if (this.disposed || generation !== this.generation) {
+          throw new Error('Headless image result arrived after its service was disposed');
+        }
+        return [file];
+      } catch (error) {
+        throw svgIssueToError(error);
+      }
+    }
+
     const client = await this.getClient(job.fileSystem);
     const { generation } = this;
     const result =

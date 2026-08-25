@@ -1,16 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FilesystemRuntimeSource } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { createMockRuntimeClient } from '@taucad/runtime/testing';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ExportFile } from '@taucad/types';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { HeadlessImageError, HeadlessImageService } from '#services/headless-image.service.js';
-import type { HeadlessImageJob } from '#services/headless-image.service.js';
+import type { HeadlessImageJob, HeadlessImageServiceDependencies } from '#services/headless-image.service.js';
 
-const createRuntimeClient = vi.fn<(options: unknown) => AppRuntimeClient>();
-const webWorkerTransport = vi.fn<(options: unknown) => { kind: 'worker-transport' }>(() => ({
-  kind: 'worker-transport',
+const { createRuntimeClient, webWorkerTransport } = vi.hoisted(() => ({
+  createRuntimeClient: vi.fn<(options: unknown) => AppRuntimeClient>(),
+  webWorkerTransport: vi.fn<(options: unknown) => { kind: 'worker-transport' }>(() => ({
+    kind: 'worker-transport',
+  })),
 }));
 const activeServices = new Set<HeadlessImageService>();
 const defaultFileSystem = fromMemoryFs();
@@ -23,10 +25,11 @@ const imageJob = (
   identity: string,
   kind: 'automatic-thumbnail' | 'manual-thumbnail' | 'capture' = 'automatic-thumbnail',
   path: FilesystemRuntimeSource['path'] = '/main.ts',
-): HeadlessImageJob => ({
+): Extract<HeadlessImageJob, { sourceFormat: 'gltf' }> => ({
   kind,
   identity,
   projectId: 'project-1',
+  sourceFormat: 'gltf',
   fileSystem: defaultFileSystem,
   format: 'webp',
   source: { path },
@@ -37,6 +40,23 @@ const imageJob = (
 const webpFiles = (bytes: Uint8Array<ArrayBuffer>): ExportFile[] => [
   { name: 'thumbnail.webp', mimeType: 'image/webp', bytes },
 ];
+
+const svgJob = (identity: string, content: string): Extract<HeadlessImageJob, { sourceFormat: 'svg' }> => ({
+  kind: 'capture',
+  identity,
+  sourceFormat: 'svg',
+  sourcePath: '/drawing.ts',
+  content,
+  format: 'png',
+  exportOptions: {
+    width: 320,
+    height: 240,
+    label: 'drawing.ts',
+    axes: true,
+    scaleBar: true,
+    lengthSymbol: 'mm',
+  },
+});
 
 const createClient = (): AppRuntimeClient => {
   const client = createMockAppRuntimeClient();
@@ -90,6 +110,44 @@ describe('HeadlessImageService', () => {
     }
     expect(options.source?.path).toBe(sourceEntryPath);
     expect(warning).not.toHaveBeenCalled();
+  });
+
+  it('should render settled SVG through real resvg without probing GPU or creating a runtime client', async () => {
+    const createClient = vi.fn<NonNullable<HeadlessImageServiceDependencies['createClient']>>();
+    const isGpuAvailable = vi.fn(() => false);
+    const service = trackService(
+      new HeadlessImageService({
+        runtimeConfig: { tauApiUrl: 'https://example.test', tauWebSocketUrl: 'wss://example.test' },
+        createClient,
+        isGpuAvailable,
+      }),
+    );
+    const content =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><path d="M0 0H100V50H0Z" fill="none" stroke="#ef4444"/></svg>';
+
+    const files = await service.export(svgJob('svg-real', content));
+
+    expect(files).toHaveLength(1);
+    expect(files?.[0]).toMatchObject({ mimeType: 'image/png' });
+    expect(files?.[0]?.bytes.subarray(0, 8)).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10]));
+    expect(createClient).not.toHaveBeenCalled();
+    expect(isGpuAvailable).not.toHaveBeenCalled();
+  });
+
+  it('should recover the shared queue after a typed SVG parse failure', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const service = trackService(
+      new HeadlessImageService({
+        runtimeConfig: { tauApiUrl: 'https://example.test', tauWebSocketUrl: 'wss://example.test' },
+        isGpuAvailable: () => false,
+      }),
+    );
+    const valid = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0H10V10H0Z"/></svg>';
+
+    await expect(service.export(svgJob('svg-invalid', '<svg/>'))).rejects.toMatchObject({ code: 'parse' });
+    await expect(service.export(svgJob('svg-valid', valid))).resolves.toEqual([
+      expect.objectContaining({ mimeType: 'image/png' }),
+    ]);
   });
 
   it('should serialize GPU exports and keep manual requests in FIFO order', async () => {
@@ -178,6 +236,36 @@ describe('HeadlessImageService', () => {
     await expect(service.export(imageJob('broken', 'manual-thumbnail'))).rejects.toMatchObject({ code: 'encode' });
     expect(client.export).toHaveBeenCalledTimes(2);
     expect(warning).toHaveBeenCalledTimes(2);
+  });
+
+  it('should preserve and suppress an unchanged driver-unsupported automatic failure without terminating the client', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const client = createClient();
+    vi.mocked(client.export).mockResolvedValue({
+      success: false,
+      issues: [
+        {
+          message: 'WebP encoding is unsupported by this graphics driver',
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'error',
+          details: { type: 'render', code: 'driver-unsupported' },
+        },
+      ],
+    });
+    const service = createService(client);
+
+    const first = service.export(imageJob('unsupported-driver'));
+    await expect(first).rejects.toBeInstanceOf(HeadlessImageError);
+    await expect(first).rejects.toMatchObject({
+      code: 'driver-unsupported',
+      message: 'WebP encoding is unsupported by this graphics driver',
+    });
+    await expect(service.export(imageJob('unsupported-driver'))).resolves.toBeUndefined();
+
+    expect(client.export).toHaveBeenCalledOnce();
+    expect(client.terminate).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledOnce();
   });
 
   it('should terminate a faulted client so the next request creates a fresh one', async () => {

@@ -1,9 +1,12 @@
 /**
  * Ensures TS/JS contributions read kernel typings from the FM `/node_modules`
  * mount and pass them through {@link TypeAcquisitionService}, which then
- * registers each package's `index.d.ts` plus a synthetic `package.json`.
+ * recursively registers each declaration file plus one root `package.json`.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+/* eslint-disable @typescript-eslint/naming-convention -- Test fixtures are keyed by canonical filesystem paths and package export specifiers. */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { WorkspaceScope } from '@taucad/filesystem';
 import type { ActivationContext } from '#lib/monaco-language-registry.js';
 import type { MonacoTestStub } from '#lib/testing/monaco-language-stub.js';
 import { tsContribution } from '#lib/typescript-contribution.js';
@@ -14,7 +17,7 @@ import { createMonacoTestStub } from '#lib/testing/monaco-language-stub.js';
 import { attachTypescriptShim } from '#lib/testing/monaco-typescript-shim.js';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 
-function createMountProxy(packages: Record<string, string>): FileManagerProxy {
+function createMountProxy(fileContents: Record<string, string>): FileManagerProxy {
   const files = new Map<string, string>();
   const directories = new Map<string, Set<string>>();
   const addDirectoryEntry = (directory: string, entry: string): void => {
@@ -33,59 +36,49 @@ function createMountProxy(packages: Record<string, string>): FileManagerProxy {
     addDirectoryEntry(directory, parts.at(-1)!);
   };
 
-  for (const [packageName, content] of Object.entries(packages)) {
-    addFile(`/node_modules/${packageName}/index.d.ts`, content);
-    addFile(`/node_modules/${packageName}/package.json`, JSON.stringify({ name: packageName, types: 'index.d.ts' }));
+  for (const [path, content] of Object.entries(fileContents)) {
+    addFile(path, content);
   }
 
-  return {
-    readdir: vi.fn(async (path: string) => {
-      const entries = directories.get(path);
-      if (entries) {
-        return [...entries];
-      }
-      throw new Error(`unexpected readdir: ${path}`);
-    }),
-    readFile: vi.fn(async (path: string) => {
-      const content = files.get(path);
-      if (content === undefined) {
-        throw new Error(`ENOENT: ${path}`);
-      }
-      return new TextEncoder().encode(content);
-    }),
-  } as unknown as FileManagerProxy;
+  const proxy: FileManagerProxy = mock<FileManagerProxy>();
+  vi.mocked(proxy.readdir).mockImplementation(async (path: string) => {
+    const entries = directories.get(path);
+    if (entries) {
+      return [...entries];
+    }
+    throw new Error(`unexpected readdir: ${path}`);
+  });
+
+  function readFile(
+    path: string,
+    options: 'utf8' | { readonly encoding: 'utf8'; readonly scope?: WorkspaceScope },
+  ): Promise<string>;
+  function readFile(path: string, options?: { readonly scope?: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
+  async function readFile(
+    path: string,
+    options?: 'utf8' | { readonly encoding?: 'utf8'; readonly scope?: WorkspaceScope },
+  ): Promise<string | Uint8Array<ArrayBuffer>> {
+    const content = files.get(path);
+    if (content === undefined) {
+      throw new Error(`ENOENT: ${path}`);
+    }
+    const asText = options === 'utf8' || (typeof options === 'object' && options.encoding === 'utf8');
+    return asText ? content : new TextEncoder().encode(content);
+  }
+
+  proxy.readFile = readFile;
+  return proxy;
 }
 
 function createMockContext(stub: MonacoTestStub, proxy: FileManagerProxy): ActivationContext {
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal context for contribution.activate
-  return {
-    monaco: stub.monaco,
-    fileManager: {
-      readFile: vi.fn(async () => new Uint8Array()),
-      exists: vi.fn(async () => false),
-      readdir: vi.fn(async () => []),
-      getDirectoryStat: vi.fn(),
-    },
-    fileManagerRef: {
-      getSnapshot: () => ({ context: { proxy } }),
-      subscribe: () => ({ unsubscribe: () => undefined }),
-    } as unknown as FileManagerRef,
-    workspaceFs: {
-      registerFileSystemProvider: vi.fn(() => ({ dispose: vi.fn() })),
-      registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
-      hasProvider: vi.fn(() => false),
-      getFileSystemProvider: vi.fn(),
-      getTextDocumentProvider: vi.fn(),
-      openTextDocument: vi.fn(),
-      openTextProvider: vi.fn(),
-      peekModel: vi.fn(),
-      materialiseUrisForWorkspaceEdit: vi.fn(async () => undefined),
-      findFiles: vi.fn(async () => []),
-      canMaterialise: vi.fn(() => false),
-      bindModelService: vi.fn(),
-      dispose: vi.fn(),
-    },
-  } as unknown as ActivationContext;
+  const context = mock<ActivationContext>();
+  context.monaco = stub.monaco;
+  const fileManagerRef = mock<FileManagerRef>();
+  const snapshot = mock<ReturnType<FileManagerRef['getSnapshot']>>();
+  snapshot.context.proxy = proxy;
+  vi.mocked(fileManagerRef.getSnapshot).mockReturnValue(snapshot);
+  context.fileManagerRef = fileManagerRef;
+  return context;
 }
 
 describe('tsContribution static kernel types', () => {
@@ -106,70 +99,102 @@ describe('tsContribution static kernel types', () => {
     vi.clearAllMocks();
   });
 
-  it('registers index.d.ts and synthetic package.json for each kernel discovered on the mount', async () => {
-    const proxy = createMountProxy({ replicad: 'export declare const stubKernel: 1;' });
+  it('should register index.d.ts and package.json for each kernel discovered on the mount', async () => {
+    const proxy = createMountProxy({
+      '/node_modules/replicad/index.d.ts': 'export declare const stubKernel: 1;',
+      '/node_modules/replicad/package.json': JSON.stringify({ name: 'replicad', types: 'index.d.ts' }),
+    });
     const context = createMockContext(stub, proxy);
     registry.addContribution(tsContribution);
     registry.activate(context);
     stub.__createModel('inmemory://t/kernel', 'typescript');
 
-    const tsAdd = stub.monaco.typescript.typescriptDefaults.addExtraLib as unknown as ReturnType<typeof vi.fn>;
-    const jsAdd = stub.monaco.typescript.javascriptDefaults.addExtraLib as unknown as ReturnType<typeof vi.fn>;
+    const tsAdd = vi.mocked(stub.monaco.typescript.typescriptDefaults.addExtraLib);
+    const jsAdd = vi.mocked(stub.monaco.typescript.javascriptDefaults.addExtraLib);
 
     await vi.waitFor(() => {
       expect(tsAdd.mock.calls.length).toBeGreaterThan(0);
     });
 
-    const tsPaths = tsAdd.mock.calls.map((c) => c[1] as string);
+    const tsPaths = tsAdd.mock.calls.map((c) => c[1]!);
     expect(tsPaths).toContain('file:///node_modules/replicad/index.d.ts');
     expect(tsPaths).toContain('file:///node_modules/replicad/package.json');
 
-    const jsPaths = jsAdd.mock.calls.map((c) => c[1] as string);
+    const jsPaths = jsAdd.mock.calls.map((c) => c[1]!);
     expect(jsPaths).toContain('file:///node_modules/replicad/index.d.ts');
     expect(jsPaths).toContain('file:///node_modules/replicad/package.json');
 
     const packageCall = tsAdd.mock.calls.find((c) => c[1] === 'file:///node_modules/replicad/package.json');
     expect(packageCall).toBeDefined();
-    expect(JSON.parse(packageCall![0] as string)).toEqual({ name: 'replicad', types: 'index.d.ts' });
+    expect(JSON.parse(packageCall![0])).toEqual({ name: 'replicad', types: 'index.d.ts' });
   });
 
-  it('uses /node_modules bytes from the FM proxy for each package', async () => {
-    const proxy = createMountProxy({ replicad: 'export declare const fromMount: 42;' });
+  it('should use /node_modules bytes from the file-manager proxy for each package', async () => {
+    const proxy = createMountProxy({
+      '/node_modules/replicad/index.d.ts': 'export declare const fromMount: 42;',
+      '/node_modules/replicad/package.json': JSON.stringify({ name: 'replicad', types: 'index.d.ts' }),
+    });
     const context = createMockContext(stub, proxy);
     registry.addContribution(tsContribution);
     registry.activate(context);
     stub.__createModel('inmemory://t/kernel2', 'typescript');
 
-    const tsAdd = stub.monaco.typescript.typescriptDefaults.addExtraLib as unknown as ReturnType<typeof vi.fn>;
+    const tsAdd = vi.mocked(stub.monaco.typescript.typescriptDefaults.addExtraLib);
     await vi.waitFor(() => {
       expect(tsAdd).toHaveBeenCalled();
     });
 
     const dtsCall = tsAdd.mock.calls.find((c) => c[1] === 'file:///node_modules/replicad/index.d.ts');
     expect(dtsCall).toBeDefined();
-    expect(dtsCall![0] as string).toContain('fromMount');
+    expect(dtsCall![0]).toContain('fromMount');
+  });
+
+  it('should register libcascade without legacy OpenCascade package aliases', async () => {
+    const proxy = createMountProxy({
+      '/node_modules/libcascade/index.d.ts': 'export declare class TopoDS_Shape {}',
+      '/node_modules/libcascade/package.json': JSON.stringify({ name: 'libcascade', types: 'index.d.ts' }),
+    });
+    const context = createMockContext(stub, proxy);
+    registry.addContribution(tsContribution);
+    registry.activate(context);
+    stub.__createModel('inmemory://t/libcascade', 'typescript');
+
+    const tsAdd = vi.mocked(stub.monaco.typescript.typescriptDefaults.addExtraLib);
+    const jsAdd = vi.mocked(stub.monaco.typescript.javascriptDefaults.addExtraLib);
+    await vi.waitFor(() => {
+      expect(tsAdd.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    for (const addExtraLib of [tsAdd, jsAdd]) {
+      const paths = addExtraLib.mock.calls.map((call) => call[1]);
+      expect(paths).toContain('file:///node_modules/libcascade/index.d.ts');
+      expect(paths).toContain('file:///node_modules/libcascade/package.json');
+      expect(paths).not.toContain('file:///node_modules/opencascade/index.d.ts');
+      expect(paths).not.toContain('file:///node_modules/opencascade.js/index.d.ts');
+    }
   });
 
   it('should register generated GeoSpec package and subpath declarations from the bundled-types mount', async () => {
-    const geospecTypes: Record<string, string> = {};
-    geospecTypes['geospec'] = 'export declare const describe: unknown;';
-    geospecTypes['geospec/brep'] = 'export declare const analyzeBrep: unknown;';
-    geospecTypes['geospec/model'] = 'export declare const loadModel: unknown;';
-    geospecTypes['geospec/runner/web'] = 'export declare const createGeoSpecWebRunner: unknown;';
-    geospecTypes['geospec/runner/worker'] = 'export type GeoSpecRunnerResult = unknown;';
-    geospecTypes['geospec/step'] = 'export declare const loadStep: unknown;';
-    const proxy = createMountProxy(geospecTypes);
+    const proxy = createMountProxy({
+      '/node_modules/geospec/index.d.ts': 'export declare const describe: unknown;',
+      '/node_modules/geospec/brep/index.d.ts': 'export declare const analyzeBrep: unknown;',
+      '/node_modules/geospec/model/index.d.ts': 'export declare const loadModel: unknown;',
+      '/node_modules/geospec/runner/web/index.d.ts': 'export declare const createGeoSpecWebRunner: unknown;',
+      '/node_modules/geospec/runner/worker/index.d.ts': 'export type GeoSpecRunnerResult = unknown;',
+      '/node_modules/geospec/step/index.d.ts': 'export declare const loadStep: unknown;',
+      '/node_modules/geospec/package.json': JSON.stringify({ name: 'geospec', types: 'index.d.ts' }),
+    });
     const context = createMockContext(stub, proxy);
     registry.addContribution(tsContribution);
     registry.activate(context);
     stub.__createModel('inmemory://t/main.geospec.ts', 'typescript');
 
-    const tsAdd = stub.monaco.typescript.typescriptDefaults.addExtraLib as unknown as ReturnType<typeof vi.fn>;
+    const tsAdd = vi.mocked(stub.monaco.typescript.typescriptDefaults.addExtraLib);
     await vi.waitFor(() => {
       expect(tsAdd.mock.calls.length).toBeGreaterThan(0);
     });
 
-    const tsPaths = tsAdd.mock.calls.map((c) => c[1] as string);
+    const tsPaths = tsAdd.mock.calls.map((c) => c[1]!);
     expect(tsPaths).toContain('file:///node_modules/geospec/index.d.ts');
     expect(tsPaths).toContain('file:///node_modules/geospec/brep/index.d.ts');
     expect(tsPaths).toContain('file:///node_modules/geospec/model/index.d.ts');
@@ -194,6 +219,70 @@ describe('tsContribution static kernel types', () => {
     const brepCall = tsAdd.mock.calls.find((c) => c[1] === 'file:///node_modules/geospec/brep/index.d.ts');
     expect(brepCall?.[0]).toContain('analyzeBrep');
   });
+
+  it('should register scoped and unscoped subpath declarations for both TypeScript and JavaScript', async () => {
+    const proxy = createMountProxy({
+      '/node_modules/@jscad/modeling/index.d.ts': 'export type Geometry = unknown;',
+      '/node_modules/@jscad/modeling/colors/index.d.ts': 'export declare const colorize: unknown;',
+      '/node_modules/@jscad/modeling/package.json': JSON.stringify({
+        name: '@jscad/modeling',
+        types: 'index.d.ts',
+      }),
+      '/node_modules/manifold-3d/index.d.ts': 'export declare class Manifold {}',
+      '/node_modules/manifold-3d/manifoldCAD/index.d.ts': 'export declare const manifoldCAD: unknown;',
+      '/node_modules/manifold-3d/package.json': JSON.stringify({ name: 'manifold-3d', types: 'index.d.ts' }),
+    });
+    const context = createMockContext(stub, proxy);
+    registry.addContribution(tsContribution);
+    registry.activate(context);
+    stub.__createModel('inmemory://t/subpaths', 'typescript');
+
+    const tsAdd = vi.mocked(stub.monaco.typescript.typescriptDefaults.addExtraLib);
+    const jsAdd = vi.mocked(stub.monaco.typescript.javascriptDefaults.addExtraLib);
+    await vi.waitFor(() => {
+      expect(tsAdd.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    for (const addExtraLib of [tsAdd, jsAdd]) {
+      const paths = addExtraLib.mock.calls.map((call) => call[1]);
+      expect(paths).toContain('file:///node_modules/@jscad/modeling/colors/index.d.ts');
+      expect(paths).toContain('file:///node_modules/manifold-3d/manifoldCAD/index.d.ts');
+      expect(paths).toContain('file:///node_modules/@jscad/modeling/package.json');
+      expect(paths).toContain('file:///node_modules/manifold-3d/package.json');
+      expect(paths).not.toContain('file:///node_modules/@jscad/modeling/colors/package.json');
+      expect(paths).not.toContain('file:///node_modules/manifold-3d/manifoldCAD/package.json');
+    }
+  });
+
+  it('should preserve custom package metadata when a nested declaration is enumerated first', async () => {
+    const packageJsonContent = JSON.stringify({
+      name: 'geospec',
+      types: 'index.d.ts',
+      exports: { './runner/web': { types: './runner/web/index.d.ts' } },
+    });
+    const proxy = createMountProxy({
+      '/node_modules/geospec/runner/web/index.d.ts': 'export declare const createGeoSpecWebRunner: unknown;',
+      '/node_modules/geospec/index.d.ts': 'export declare const describe: unknown;',
+      '/node_modules/geospec/package.json': packageJsonContent,
+    });
+    const context = createMockContext(stub, proxy);
+    registry.addContribution(tsContribution);
+    registry.activate(context);
+    stub.__createModel('inmemory://t/metadata-order', 'typescript');
+
+    const tsAdd = vi.mocked(stub.monaco.typescript.typescriptDefaults.addExtraLib);
+    const jsAdd = vi.mocked(stub.monaco.typescript.javascriptDefaults.addExtraLib);
+    await vi.waitFor(() => {
+      expect(tsAdd.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    for (const addExtraLib of [tsAdd, jsAdd]) {
+      const packageJsonCall = addExtraLib.mock.calls.find(
+        (call) => call[1] === 'file:///node_modules/geospec/package.json',
+      );
+      expect(packageJsonCall?.[0]).toBe(packageJsonContent);
+    }
+  });
 });
 
 describe('jsContribution static kernel types', () => {
@@ -214,19 +303,22 @@ describe('jsContribution static kernel types', () => {
     vi.clearAllMocks();
   });
 
-  it('registers kernel mount extras when a javascript model opens', async () => {
-    const proxy = createMountProxy({ replicad: 'export declare const stubKernel: 1;' });
+  it('should register kernel mount extras when a JavaScript model opens', async () => {
+    const proxy = createMountProxy({
+      '/node_modules/replicad/index.d.ts': 'export declare const stubKernel: 1;',
+      '/node_modules/replicad/package.json': JSON.stringify({ name: 'replicad', types: 'index.d.ts' }),
+    });
     const context = createMockContext(stub, proxy);
     registry.addContribution(jsContribution);
     registry.activate(context);
     stub.__createModel('inmemory://j/kernel', 'javascript');
 
-    const tsAdd = stub.monaco.typescript.typescriptDefaults.addExtraLib as unknown as ReturnType<typeof vi.fn>;
+    const tsAdd = vi.mocked(stub.monaco.typescript.typescriptDefaults.addExtraLib);
     await vi.waitFor(() => {
       expect(tsAdd.mock.calls.length).toBeGreaterThan(0);
     });
 
-    const tsPaths = tsAdd.mock.calls.map((c) => c[1] as string);
+    const tsPaths = tsAdd.mock.calls.map((c) => c[1]!);
     expect(tsPaths).toContain('file:///node_modules/replicad/index.d.ts');
   });
 });

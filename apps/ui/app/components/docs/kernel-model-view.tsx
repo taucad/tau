@@ -6,19 +6,18 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 import { Loader } from '#components/ui/loader.js';
 import { useSharedRenderer } from '#components/docs/shared-renderer.js';
 import { useRuntime } from '@taucad/react';
 import { cn } from '#utils/ui.utils.js';
-import { gltfCoordinateTransform } from '@taucad/runtime/middleware';
+import { gltfCoordinateTransform } from '@taucad/middleware';
 
 const gltfLoader = new GLTFLoader();
 
 const kernelModelViewRuntime = defineRuntime({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild()],
   middleware: [gltfCoordinateTransform()],
 });
 const kernelModelViewClientOptions = {

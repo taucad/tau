@@ -36,7 +36,7 @@ vi.mock('@taucad/runtime', () => ({
 }));
 
 vi.mock('@taucad/fs-bridge', () => ({
-  createFileSystemBridgeProxy: workerMocks.createFileSystemBridgeProxy,
+  createTransferredFileSystemBridgeProxy: workerMocks.createFileSystemBridgeProxy,
 }));
 
 vi.mock('#constants/kernel-worker.constants.js', () => ({
@@ -47,6 +47,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const execFileAsync = promisify(execFile);
 const repoRootPath = fileURLToPath(new URL('../../../../', import.meta.url));
+const uiRootPath = fileURLToPath(new URL('../../', import.meta.url));
 const runtimeNodeModuleUrl = pathToFileURL(join(repoRootPath, 'packages/runtime/src/node.ts')).href;
 
 const normalizePath = (path: string): string => {
@@ -342,7 +343,11 @@ const exportProjectWithNodeRuntime = async (options: {
       : sourcePath;
     const script = `
       import { createNodeClient } from ${JSON.stringify(runtimeNodeModuleUrl)};
-      const client = await createNodeClient(${JSON.stringify(projectPath)});
+      import { defineRuntime } from '@taucad/runtime/worker';
+      import { esbuild } from '@taucad/esbuild';
+      import { jscad } from '@taucad/jscad';
+      const runtime = defineRuntime({ plugins: [esbuild(), jscad()] });
+      const client = await createNodeClient(${JSON.stringify(projectPath)}, { runtime });
       const result = await client.export(${JSON.stringify(options.format)}, {
         source: {
           path: ${JSON.stringify(file)},
@@ -373,7 +378,7 @@ const exportProjectWithNodeRuntime = async (options: {
       process.execPath,
       ['--import', 'tsx', '--input-type=module', '--eval', script],
       {
-        cwd: repoRootPath,
+        cwd: uiRootPath,
         maxBuffer: 10 * 1024 * 1024,
       },
     );

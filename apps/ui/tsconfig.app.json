@@ -5,6 +5,7 @@
     "app/**/*.tsx",
     "app/**/*.js",
     "app/**/*.jsx",
+    "content/docs/**/examples/**/*.ts",
     "server.ts",
     "react-router.config.ts",
     "vite-environment.d.ts",

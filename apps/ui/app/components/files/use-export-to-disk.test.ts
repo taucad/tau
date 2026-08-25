@@ -48,19 +48,21 @@ function createCapabilities(): CapabilitiesManifest {
         kernelId: 'replicad',
         sourceFormat: 'glb',
         fidelity: 'mesh',
-        schema: {},
-        defaults: {},
+        exportOptions: { schema: {}, defaults: {} },
       },
       {
         targetFormat: 'stl',
         kernelId: 'replicad',
         sourceFormat: 'stl',
         fidelity: 'mesh',
-        schema: { type: 'object', properties: { binary: { type: 'boolean', default: true } } },
-        defaults: { binary: true },
+        exportOptions: {
+          schema: { type: 'object', properties: { binary: { type: 'boolean', default: true } } },
+          defaults: { binary: true },
+        },
       },
     ],
-    renderSchemas: {},
+    renderCapabilities: {},
+    registrations: [],
   };
 }
 

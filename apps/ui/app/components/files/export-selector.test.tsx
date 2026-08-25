@@ -182,6 +182,7 @@ function createCapabilities(overrides?: Partial<CapabilitiesManifest>): Capabili
     ],
     renderCapabilities: {},
     ...overrides,
+    registrations: overrides?.registrations ?? [],
   };
 }
 

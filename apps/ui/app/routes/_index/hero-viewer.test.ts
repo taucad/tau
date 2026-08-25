@@ -15,19 +15,18 @@ describe('deriveExportFormatOptions', () => {
           kernelId: 'openrscad',
           sourceFormat: 'glb',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
         {
           targetFormat: 'stl',
           kernelId: 'openrscad',
           sourceFormat: 'stl',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
       ],
-      renderSchemas: {},
+      renderCapabilities: {},
+      registrations: [],
     };
 
     expect(deriveExportFormatOptions(capabilities)).toEqual([
@@ -45,8 +44,7 @@ describe('deriveExportFormatOptions', () => {
           sourceFormat: 'glb',
           transcoderId: 'converter',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
         {
           targetFormat: 'usdz',
@@ -54,11 +52,11 @@ describe('deriveExportFormatOptions', () => {
           sourceFormat: 'glb',
           transcoderId: 'converter',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
       ],
-      renderSchemas: {},
+      renderCapabilities: {},
+      registrations: [],
     };
 
     expect(deriveExportFormatOptions(capabilities)).toEqual([{ format: 'usdz', label: 'USDZ' }]);
@@ -72,16 +70,14 @@ describe('deriveExportFormatOptions', () => {
           kernelId: 'openrscad',
           sourceFormat: 'stl',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
         {
           targetFormat: 'glb',
           kernelId: 'openrscad',
           sourceFormat: 'glb',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
         {
           targetFormat: '3mf',
@@ -89,11 +85,11 @@ describe('deriveExportFormatOptions', () => {
           sourceFormat: 'glb',
           transcoderId: 'converter',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
       ],
-      renderSchemas: {},
+      renderCapabilities: {},
+      registrations: [],
     };
 
     expect(deriveExportFormatOptions(capabilities).map((o) => o.format)).toEqual(['stl', 'glb', '3mf']);

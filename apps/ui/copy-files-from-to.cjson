@@ -9,6 +9,15 @@
     {
       "from": "../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
       "to": "public/fonts/GeistMono-Variable.woff2"
+    },
+    // Draco decoder/encoder - served over HTTP for the glTF convert route
+    {
+      "from": "./node_modules/draco3dgltf/draco_decoder_gltf.wasm",
+      "to": "public/draco_decoder_gltf.wasm"
+    },
+    {
+      "from": "./node_modules/draco3dgltf/draco_encoder.wasm",
+      "to": "public/draco_encoder.wasm"
     }
   ],
   // Always overwrite files

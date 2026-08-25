@@ -78,7 +78,7 @@ function createCapabilities(): CapabilitiesManifest {
       },
     ],
     renderCapabilities: {},
-    plugins: [],
+    registrations: [],
   };
 }
 

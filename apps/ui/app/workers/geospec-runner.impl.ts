@@ -12,10 +12,11 @@
  */
 
 import '@taucad/geospec-engine/register';
-import { createRuntimeClient } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import type { FsLike } from '@taucad/runtime/filesystem';
 import type { FileStat } from '@taucad/types';
+import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { resolveVirtualPath } from '@taucad/utils/path';
 import { discoverGeoSpecFiles } from 'geospec/runner';
 import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
@@ -39,20 +40,20 @@ type WorkerScope = {
   close(): void;
 };
 
-type ProjectFileSystemBridge = Record<string, unknown> & {
-  readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
-  readFile(path: string, encoding: 'utf8'): Promise<string>;
-  writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
-  readdir(path: string): Promise<string[]>;
-  stat(path: string): Promise<FileStat>;
-  lstat(path: string): Promise<FileStat>;
-  mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
-  unlink(path: string): Promise<void>;
-  rmdir(path: string): Promise<void>;
-  rename(oldPath: string, newPath: string): Promise<void>;
-  exists(path: string): Promise<boolean>;
-  dispose(): void;
-};
+type ProjectFileSystemBridge = Pick<
+  FileSystemBridgeProxy,
+  | 'readFile'
+  | 'writeFile'
+  | 'readdir'
+  | 'stat'
+  | 'lstat'
+  | 'mkdir'
+  | 'unlink'
+  | 'rmdir'
+  | 'rename'
+  | 'exists'
+  | 'dispose'
+>;
 
 type GeoSpecVmFileSystem = GeoSpecWebRunnerOptions['filesystem'];
 
@@ -109,13 +110,10 @@ const hasGeoSpecSelectionFilters = (args: GeoSpecRunnerWorkerRunRequest['args'])
   );
 
 const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectFileSystemBridge> => {
-  const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-  return createFileSystemBridgeProxy<ProjectFileSystemBridge>({
-    port,
-    dispose: () => {
-      port.close();
-    },
-  });
+  const { createTransferredFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+  const proxy = createTransferredFileSystemBridgeProxy(port);
+  await proxy.ready;
+  return proxy;
 };
 
 const createRuntimeFsLike = (proxy: ProjectFileSystemBridge): FsLike => {
@@ -284,7 +282,6 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
     };
     runner = createGeoSpecWebRunner({
       filesystem: createBridgeVmFileSystem(fileSystem),
-      projectPath: '/',
       modelLoader,
     });
     const activeSession = {

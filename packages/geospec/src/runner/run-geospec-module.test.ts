@@ -1,4 +1,4 @@
-import type { VmFileSystem } from '@taucad/runtime/vm';
+import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { geoSpecEngineProtocolVersion } from '#engine/protocol.js';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
@@ -128,6 +128,42 @@ describe('runGeoSpecModule', () => {
 
     expect(result.success && result.tests.map((entry) => entry.status)).toStrictEqual(['skipped']);
     expect((globalThis as Record<string, unknown>)['__RAN__']).toBeUndefined();
+  });
+
+  it('should reuse a successful bundle while keeping each invocation fresh', async () => {
+    const filesystem = filesystemWith([
+      ['/spec.geospec.ts', `import { it } from 'geospec'; it('first', () => {}); it('second', () => {});`],
+    ]);
+    const bundleCache = new Map();
+    const collected = await runGeoSpecModule({
+      filesystem,
+      entryPath: '/spec.geospec.ts',
+      collectOnly: true,
+      bundleCache,
+    });
+    const shard = await runGeoSpecModule({
+      filesystem,
+      entryPath: '/spec.geospec.ts',
+      testNamePattern: 'second$',
+      bundleCache,
+    });
+
+    expect(collected.success).toBe(true);
+    expect(shard.success).toBe(true);
+    if (!collected.success || !shard.success) {
+      return;
+    }
+    expect(shard.bundle).toBe(collected.bundle);
+    expect(shard.tests.map(({ name }) => name)).toStrictEqual(['second']);
+
+    filesystem.setText('/spec.geospec.ts', `import { it } from 'geospec'; it('changed', () => {});`);
+    const changed = await runGeoSpecModule({ filesystem, entryPath: '/spec.geospec.ts', bundleCache });
+    expect(changed.success).toBe(true);
+    if (!changed.success) {
+      return;
+    }
+    expect(changed.bundle).not.toBe(collected.bundle);
+    expect(changed.tests.map(({ name }) => name)).toStrictEqual(['changed']);
   });
 
   it('should expose the injected model and step loaders to authored modules', async () => {

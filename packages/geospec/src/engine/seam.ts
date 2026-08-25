@@ -20,7 +20,7 @@
  * @module
  */
 
-import type { VmFileSystem } from '@taucad/runtime/vm';
+import type { VmFileSystem } from '@taucad/esbuild/vm';
 import type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 import type { GeometryDiagnostic, GeometrySubject } from '#mesh/types.js';
 import type { LoadModelOptions } from '#model/types.js';

@@ -23,6 +23,7 @@ export type GeoSpecPoolShard = {
 /** Host → worker messages. */
 /** @public */
 export type GeoSpecPoolHostMessage =
+  | { type: 'initialize'; compiledWasmModule?: WebAssembly.Module }
   | {
       type: 'run-shard';
       shard: GeoSpecPoolShard;
@@ -46,6 +47,8 @@ export type GeoSpecPoolHostMessage =
 /** @public */
 export type GeoSpecPoolWorkerMessage =
   | { type: 'ready' }
+  | { type: 'initialized' }
+  | { type: 'initialization-error'; message: string }
   | { type: 'file-start'; shardId: number; file: string }
   | {
       type: 'forensic';

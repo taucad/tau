@@ -1,4 +1,4 @@
-import { createEsbuildModuleVm } from '@taucad/runtime/vm';
+import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import { createCollector } from '#runner/collector.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
 import { getRegisteredGeoSpecHostBinding } from '#engine/registry.js';
@@ -17,6 +17,59 @@ const runBindingsGlobal = globalThis as typeof globalThis & {
 };
 
 const createRunToken = (): string => `geospec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+const builtinIdentity = (options: RunGeoSpecModuleOptions): string =>
+  JSON.stringify(
+    Object.entries(options.builtinModules ?? {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, module_]) => [name, module_.version, module_.globalName, module_.code]),
+  );
+
+const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+const cacheEntryIsCurrent = async (
+  filesystem: RunGeoSpecModuleOptions['filesystem'],
+  dependencyContents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
+): Promise<boolean> => {
+  const comparisons = await Promise.all(
+    [...dependencyContents].map(async ([path, previous]) => {
+      try {
+        return bytesEqual(await filesystem.readFile(path), previous);
+      } catch {
+        return false;
+      }
+    }),
+  );
+  return comparisons.every(Boolean);
+};
+
+const snapshotDependencies = async (
+  options: RunGeoSpecModuleOptions,
+  dependencies: readonly string[],
+): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
+  const entries = await Promise.all(
+    [...new Set([options.entryPath, ...dependencies])].map(
+      async (path): Promise<readonly [string, Uint8Array<ArrayBuffer>]> => [
+        path,
+        await options.filesystem.readFile(path),
+      ],
+    ),
+  );
+  return new Map(entries);
+};
+
+const resolveCachedBundle = async (options: RunGeoSpecModuleOptions) => {
+  const entry = options.bundleCache?.get(options.entryPath);
+  if (
+    entry === undefined ||
+    entry.builtinIdentity !== builtinIdentity(options) ||
+    !(await cacheEntryIsCurrent(options.filesystem, entry.dependencyContents))
+  ) {
+    return undefined;
+  }
+  return entry;
+};
 
 const ensureRunBindings = (): Map<string, GeoSpecRunBinding> => {
   const existing = runBindingsGlobal[geospecRunBindingsGlobalKey];
@@ -158,7 +211,8 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),
     ...(options.forensic === undefined ? {} : { forensic: options.forensic }),
   });
-  const runToken = createRunToken();
+  const cached = await resolveCachedBundle(options);
+  const runToken = cached?.runToken ?? createRunToken();
   const bindings = ensureRunBindings();
   // D-S3: the model loader is INJECTED. The engine's runner hosts own its
   // construction (caching, affinity, resource-scope tracking); this module
@@ -191,9 +245,21 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   }
 
   try {
-    const bundle = await vm.bundle(options.entryPath);
+    const bundle = cached?.bundle ?? (await vm.bundle(options.entryPath));
     if (!bundle.success) {
       return { success: false, issues: bundle.issues, bundle };
+    }
+    if (options.bundleCache !== undefined && cached === undefined) {
+      try {
+        options.bundleCache.set(options.entryPath, {
+          builtinIdentity: builtinIdentity(options),
+          runToken,
+          bundle,
+          dependencyContents: await snapshotDependencies(options, bundle.dependencies),
+        });
+      } catch {
+        // Cache bookkeeping must never change execution semantics.
+      }
     }
 
     const executed = await vm.execute(bundle.code);

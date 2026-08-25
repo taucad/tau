@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { JSONValue } from '@taucad/runtime/types';
-import type { VmFileSystem } from '@taucad/runtime/vm';
+import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { analyzeBrep } from '#brep/analyze-brep.js';
 import {
   geoSpecClaimDiagnostics,

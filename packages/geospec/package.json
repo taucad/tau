@@ -10,6 +10,10 @@
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/geospec"
   },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/geospec#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
   "main": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "files": [
@@ -119,7 +123,9 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@taucad/runtime": "workspace:*"
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.4.0"

@@ -1,4 +1,4 @@
-import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/runtime/vm';
+import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/esbuild/vm';
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelector } from '#selector/types.js';
 import type { GeoSpecModelLoader } from '#model/index.js';
@@ -621,6 +621,25 @@ export type GeoSpecAssertion = {
 export type GeoSpecTestStatus = 'passed' | 'failed' | 'skipped';
 
 /**
+ * Worker-local cache for successful GeoSpec bundles.
+ *
+ * The cache is internal runner infrastructure and must only be shared by
+ * serial executions. Each invocation still creates a fresh collector and
+ * host binding.
+ *
+ * @public
+ */
+export type GeoSpecModuleBundleCache = Map<
+  string,
+  {
+    builtinIdentity: string;
+    runToken: string;
+    bundle: BundleResult;
+    dependencyContents: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+  }
+>;
+
+/**
  * A collected GeoSpec test case.
  *
  * @public
@@ -666,6 +685,8 @@ export type RunGeoSpecModuleOptions = {
   builtinModules?: Record<string, BuiltinModule>;
   /** Internal profile counters used by opt-in benchmark tooling. */
   internalProfile?: GeoSpecRunProfile;
+  /** Successful bundle cache owned by a serial runner worker. @internal */
+  bundleCache?: GeoSpecModuleBundleCache;
   /**
    * List-only collection pass (R3 shard splitting): execute the module to
    * REGISTER tests, skip every body, and return all registered tests as

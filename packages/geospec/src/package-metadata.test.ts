@@ -13,12 +13,13 @@ const readPackageJson = async (): Promise<PackageJson> =>
   JSON.parse(await readFile(resolve(import.meta.dirname, '../package.json'), 'utf8')) as PackageJson;
 
 describe('geospec package metadata', () => {
-  it('depends only on the runtime-owned substrate surface', async () => {
+  it('declares the runtime and VM substrate surfaces directly', async () => {
     const packageJson = await readPackageJson();
 
     expect(packageJson.dependencies?.['@taucad/runtime']).toBe('workspace:*');
     expect(packageJson.dependencies?.['@taucad/types']).toBeUndefined();
-    expect(packageJson.dependencies?.['@taucad/vm']).toBeUndefined();
+    // The VM is `@taucad/esbuild`'s own source, published under its `./vm` subpath.
+    expect(packageJson.dependencies?.['@taucad/esbuild']).toBe('workspace:*');
     expect(packageJson.devDependencies?.['@taucad/runtime']).toBeUndefined();
     expect(packageJson.peerDependencies?.['@taucad/runtime']).toBeUndefined();
     expect(packageJson.peerDependenciesMeta?.['@taucad/runtime']).toBeUndefined();

@@ -10,6 +10,28 @@ import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.js';
 
+const gltfGeometry = { format: 'gltf', content: new Uint8Array(), hash: 'geometry-hash' };
+const captureWebp = (index = 0): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array(31);
+  bytes.set(new TextEncoder().encode('RIFF'), 0);
+  bytes.set(new TextEncoder().encode('WEBP'), 8);
+  bytes.set(new TextEncoder().encode('VP8X'), 12);
+  bytes.set([0x1f, 0x03, 0], 24);
+  bytes.set([0x1f, 0x03, 0], 27);
+  bytes[30] = index;
+  return bytes;
+};
+const captureDataUrl = (index = 0): string =>
+  `data:image/webp;base64,${Buffer.from(captureWebp(index)).toString('base64')}`;
+const capturePng = (): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10]);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(16, 800);
+  view.setUint32(20, 800);
+  return bytes;
+};
+
 // ===================================================================
 // Module mocks
 // ===================================================================
@@ -178,6 +200,7 @@ function createMockCadUnit(options?: {
         ...(options?.kernelClient === undefined ? {} : { kernelClient: options.kernelClient }),
         entryPath: options?.entryPath,
         parameters: options?.parameters ?? {},
+        units: { length: 'mm' },
       },
     }),
     send: vi.fn(),
@@ -827,12 +850,12 @@ describe('rpc-handlers', () => {
 
       it('should preserve the nested non-main unit source for a deterministic isometric image', async () => {
         const entryPath = 'src/pen.ts';
-        const cadUnit = createMockCadUnit({ entryPath, parameters: { width: 42 } });
+        const cadUnit = createMockCadUnit({ entryPath, parameters: { width: 42 }, geometry: gltfGeometry });
         const projectRef = createMockProjectRef({ geometryUnits: new Map([['src/pen.ts', cadUnit]]) });
         mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
         const exportImage = vi
           .fn<NonNullable<RpcHandlerDependencies['headlessImageService']>['export']>()
-          .mockResolvedValue([{ name: 'render.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) }]);
+          .mockResolvedValue([{ name: 'render.webp', mimeType: 'image/webp', bytes: captureWebp() }]);
         const fileManager = createMockFileManager();
         const deps = buildDeps({ projectRef, fileManager, headlessImageService: { export: exportImage } });
 
@@ -840,11 +863,12 @@ describe('rpc-handlers', () => {
 
         expect(result).toEqual({
           success: true,
-          images: [{ view: 'isometric', dataUrl: 'data:image/webp;base64,AQID' }],
+          images: [{ view: 'isometric', dataUrl: captureDataUrl() }],
         });
         expect(exportImage).toHaveBeenCalledWith({
           kind: 'capture',
-          identity: 'capture:src/pen.ts:single:true',
+          identity: 'capture:src/pen.ts:geometry-hash:agent:isometric',
+          sourceFormat: 'gltf',
           fileSystem: fileManager.runtimeFileSystem,
           format: 'webp',
           source: { path: entryPath },
@@ -863,12 +887,17 @@ describe('rpc-handlers', () => {
             scaleBar: true,
           },
         });
-        expect(exportImage.mock.calls[0]![0].source.path).toBe(entryPath);
+        const job = exportImage.mock.calls[0]![0];
+        if (job.sourceFormat !== 'gltf') {
+          throw new Error('Expected a GLTF image job');
+        }
+        expect(job.source.path).toBe(entryPath);
+        expect(job.exportOptions).not.toHaveProperty('quality');
       });
 
       it('should forward the exact settled source to all six orthographic views', async () => {
         const entryPath = 'pen.ts';
-        const cadUnit = createMockCadUnit({ entryPath });
+        const cadUnit = createMockCadUnit({ entryPath, geometry: gltfGeometry });
         const projectRef = createMockProjectRef({ geometryUnits: new Map([['pen.ts', cadUnit]]) });
         mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
         const exportImage = vi
@@ -877,7 +906,7 @@ describe('rpc-handlers', () => {
             ['front', 'back', 'right', 'left', 'top', 'bottom'].map((view, index) => ({
               name: `render-${view}.webp`,
               mimeType: 'image/webp',
-              bytes: new Uint8Array([index + 1]),
+              bytes: captureWebp(index),
             })),
           );
         const fileManager = createMockFileManager();
@@ -892,18 +921,19 @@ describe('rpc-handlers', () => {
         expect(result).toEqual({
           success: true,
           images: [
-            { view: 'front', dataUrl: 'data:image/webp;base64,AQ==' },
-            { view: 'back', dataUrl: 'data:image/webp;base64,Ag==' },
-            { view: 'right', dataUrl: 'data:image/webp;base64,Aw==' },
-            { view: 'left', dataUrl: 'data:image/webp;base64,BA==' },
-            { view: 'top', dataUrl: 'data:image/webp;base64,BQ==' },
-            { view: 'bottom', dataUrl: 'data:image/webp;base64,Bg==' },
+            { view: 'front', dataUrl: captureDataUrl(0) },
+            { view: 'back', dataUrl: captureDataUrl(1) },
+            { view: 'right', dataUrl: captureDataUrl(2) },
+            { view: 'left', dataUrl: captureDataUrl(3) },
+            { view: 'top', dataUrl: captureDataUrl(4) },
+            { view: 'bottom', dataUrl: captureDataUrl(5) },
           ],
         });
         expect(exportImage).toHaveBeenCalledOnce();
         expect(exportImage).toHaveBeenCalledWith({
           kind: 'capture',
-          identity: 'capture:pen.ts:multi_angle:false',
+          identity: 'capture:pen.ts:geometry-hash:agent:orthographic',
+          sourceFormat: 'gltf',
           fileSystem: fileManager.runtimeFileSystem,
           format: 'webp',
           source: { path: entryPath },
@@ -927,11 +957,18 @@ describe('rpc-handlers', () => {
             ],
           },
         });
+        const batchOptions = exportImage.mock.calls[0]![0].exportOptions;
+        expect(batchOptions).not.toHaveProperty('quality');
+        const requestedViews = (batchOptions as { readonly views: ReadonlyArray<Readonly<Record<string, unknown>>> })
+          .views;
+        for (const view of requestedViews) {
+          expect(view).not.toHaveProperty('quality');
+        }
       });
 
       it('should reject an incomplete batch atomically instead of returning partial images', async () => {
         const entryPath = 'pen.ts';
-        const cadUnit = createMockCadUnit({ entryPath });
+        const cadUnit = createMockCadUnit({ entryPath, geometry: gltfGeometry });
         const projectRef = createMockProjectRef({ geometryUnits: new Map([['pen.ts', cadUnit]]) });
         mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
         const exportImage = vi
@@ -944,13 +981,13 @@ describe('rpc-handlers', () => {
         expect(result).toEqual({
           success: false,
           errorCode: 'IO_ERROR',
-          message: 'Image capture expected 6 non-empty WebP artifact(s), received 1 [image/webp 1B]',
+          message: 'Image capture expected 6 artifact(s), received 1',
         });
         expect(exportImage).toHaveBeenCalledOnce();
       });
 
       it('should reject artifacts that are not non-empty WebP regardless of their filenames', async () => {
-        const cadUnit = createMockCadUnit({ entryPath: 'pen.ts' });
+        const cadUnit = createMockCadUnit({ entryPath: 'pen.ts', geometry: gltfGeometry });
         const projectRef = createMockProjectRef({ geometryUnits: new Map([['pen.ts', cadUnit]]) });
         mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
         const exportImage = vi
@@ -961,19 +998,70 @@ describe('rpc-handlers', () => {
         expect(await deps.images!.captureImages({ mode: 'single', targetFile: 'pen.ts' })).toEqual({
           success: false,
           errorCode: 'IO_ERROR',
-          message: 'Image capture expected 1 non-empty WebP artifact(s), received 1 [image/webp 0B]',
+          message: 'Image capture expected non-empty image/webp 800×800 artifacts',
         });
 
         exportImage.mockResolvedValue([{ name: 'render.webp', mimeType: 'image/png', bytes: new Uint8Array([1]) }]);
         expect(await deps.images!.captureImages({ mode: 'single', targetFile: 'pen.ts' })).toEqual({
           success: false,
           errorCode: 'IO_ERROR',
-          message: 'Image capture expected 1 non-empty WebP artifact(s), received 1 [image/png 1B]',
+          message: 'Image capture expected non-empty image/webp 800×800 artifacts',
         });
       });
 
+      it('should return a truthful drawing PNG for settled SVG and reject multi-angle before export', async () => {
+        const geometry = {
+          format: 'svg',
+          content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>',
+          hash: 'svg-hash',
+        };
+        const cadUnit = createMockCadUnit({ entryPath: 'drawing.ts', geometry });
+        const projectRef = createMockProjectRef({ geometryUnits: new Map([['drawing.ts', cadUnit]]) });
+        mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
+        const exportImage = vi
+          .fn<NonNullable<RpcHandlerDependencies['headlessImageService']>['export']>()
+          .mockResolvedValue([{ name: 'drawing.png', mimeType: 'image/png', bytes: capturePng() }]);
+        const deps = buildDeps({ projectRef, headlessImageService: { export: exportImage } });
+
+        await expect(deps.images!.captureImages({ mode: 'single', targetFile: 'drawing.ts' })).resolves.toEqual({
+          success: true,
+          images: [
+            { view: 'drawing', dataUrl: `data:image/png;base64,${Buffer.from(capturePng()).toString('base64')}` },
+          ],
+        });
+        expect(exportImage).toHaveBeenCalledWith(
+          expect.objectContaining({ sourceFormat: 'svg', content: geometry.content, format: 'png' }),
+        );
+
+        exportImage.mockClear();
+        await expect(deps.images!.captureImages({ mode: 'multi_angle', targetFile: 'drawing.ts' })).resolves.toEqual({
+          success: false,
+          errorCode: 'IO_ERROR',
+          message: 'Planar SVG drawings have one canonical view; use a single drawing capture',
+        });
+        expect(exportImage).not.toHaveBeenCalled();
+      });
+
+      it('should reject live WebRTC geometry through the RPC adapter before image export', async () => {
+        const cadUnit = createMockCadUnit({
+          entryPath: 'live.ts',
+          geometry: { format: 'webrtc', content: new Uint8Array(), hash: 'live-hash' },
+        });
+        const projectRef = createMockProjectRef({ geometryUnits: new Map([['live.ts', cadUnit]]) });
+        mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
+        const exportImage = vi.fn<NonNullable<RpcHandlerDependencies['headlessImageService']>['export']>();
+        const deps = buildDeps({ projectRef, headlessImageService: { export: exportImage } });
+
+        await expect(deps.images!.captureImages({ mode: 'single', targetFile: 'live.ts' })).resolves.toEqual({
+          success: false,
+          errorCode: 'IO_ERROR',
+          message: 'Live WebRTC geometry cannot be captured headlessly',
+        });
+        expect(exportImage).not.toHaveBeenCalled();
+      });
+
       it('should return UNKNOWN without invoking the service when the settled unit has no entry path', async () => {
-        const cadUnit = createMockCadUnit({ parameters: { width: 42 } });
+        const cadUnit = createMockCadUnit({ parameters: { width: 42 }, geometry: gltfGeometry });
         const projectRef = createMockProjectRef({ geometryUnits: new Map([['pen.ts', cadUnit]]) });
         mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
         const exportImage = vi.fn<NonNullable<RpcHandlerDependencies['headlessImageService']>['export']>();

@@ -47,11 +47,6 @@ const runtime = exampleRuntime;
 const supportedKernels: ReadonlySet<string> = exampleKernelIds;
 const engineIdForFixtureFamily = (kernel: string): string => (kernel === 'openscad' ? 'openrscad' : kernel);
 
-const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
-  bytes.byteLength >= 12 &&
-  new TextDecoder().decode(bytes.subarray(0, 4)) === 'RIFF' &&
-  new TextDecoder().decode(bytes.subarray(8, 12)) === 'WEBP';
-
 const generateAssetMap = (thumbnails: readonly RenderedThumbnail[]): string => {
   const lines = [
     '/* oxlint-disable prettier/prettier, eslint/no-restricted-imports -- Auto-generated Vite asset imports. */',
@@ -88,6 +83,11 @@ const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer
   }
   return left.every((byte, index) => byte === right[index]);
 };
+
+const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
+  bytes.byteLength >= 12 &&
+  new TextDecoder().decode(bytes.subarray(0, 4)) === 'RIFF' &&
+  new TextDecoder().decode(bytes.subarray(8, 12)) === 'WEBP';
 
 const decodeWebp = async (
   bytes: Uint8Array<ArrayBuffer>,
@@ -167,15 +167,21 @@ for (const entry of skipped) {
   console.log(`Skipping ${entry.kernel}/${entry.name}: ${reason}`);
 }
 
-const client = await createNodeClient(kernelsDirectory, { runtime });
-client.on('log', (entry) => {
-  if (entry.level === 'error' || entry.level === 'warn') {
-    console.warn(`[runtime:${entry.level}] ${entry.message}`);
-  }
-});
 const thumbnails: RenderedThumbnail[] = [];
-try {
-  for (const entry of renderable) {
+for (const entry of renderable) {
+  // One fresh client (and kernel WASM instance) per fixture: OCCT's shell/offset
+  // results depend on accumulated heap state, so a shared instance makes a
+  // fixture's bytes depend on the 47 fixtures rendered before it. A clean
+  // instance is bit-reproducible. See
+  // docs/research/tau-examples-thumbnail-nondeterminism.md (costs ~1s/fixture).
+  // oxlint-disable-next-line eslint/no-await-in-loop -- Serial by design; see above.
+  const client = await createNodeClient(kernelsDirectory, { runtime });
+  client.on('log', (logEntry) => {
+    if (logEntry.level === 'error' || logEntry.level === 'warn') {
+      console.warn(`[runtime:${logEntry.level}] ${logEntry.message}`);
+    }
+  });
+  try {
     const sourcePath = `${entry.kernel}/${entry.name}/${entry.mainFile}`;
     console.log(`Rendering ${entry.kernel}/${entry.name}`);
     // oxlint-disable-next-line eslint/no-await-in-loop -- One shared runtime/GPU queue renders fixtures serially.
@@ -200,7 +206,14 @@ try {
     const result = await client.export('webp', {
       ...(!outcome.geometry.success && { source: { path: sourcePath } }),
       content: { includeEdges: true },
-      exportOptions: thumbnailOptions,
+      exportOptions: {
+        mode: 'single',
+        ...thumbnailOptions,
+        projection: 'perspective',
+        phi: 60,
+        theta: -45,
+        quality: 0.9,
+      },
     });
     if (!result.success) {
       throw new Error(
@@ -209,24 +222,20 @@ try {
           .join('; ')}`,
       );
     }
-    if (
-      result.data.length !== 1 ||
-      result.data[0]?.name !== 'thumbnail.webp' ||
-      result.data[0].mimeType !== 'image/webp' ||
-      !isWebp(result.data[0].bytes)
-    ) {
+    const thumbnail = result.data[0];
+    if (result.data.length !== 1 || thumbnail?.mimeType !== 'image/webp' || !isWebp(thumbnail.bytes)) {
       throw new Error(
-        `Thumbnail export for ${entry.kernel}/${entry.name} expected exactly thumbnail.webp (image/webp), received: ${result.data.map((file) => `${file.name} (${file.mimeType})`).join(', ')}`,
+        `Thumbnail export expected exactly one valid image/webp artifact, received: ${result.data.map((file) => `${file.mimeType} (${file.bytes.length} bytes)`).join(', ')}`,
       );
     }
     thumbnails.push({
       entry,
-      bytes: result.data[0].bytes,
+      bytes: thumbnail.bytes,
       path: join(kernelsDirectory, entry.kernel, entry.name, 'thumbnail.webp'),
     });
+  } finally {
+    client.terminate();
   }
-} finally {
-  client.terminate();
 }
 
 const assetMap = only.size === 0 ? generateAssetMap(thumbnails) : undefined;

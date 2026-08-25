@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createNodeClient } from '@taucad/runtime/node';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
-import { exampleKernelIds } from '#scripts/runtime.js';
+import { exampleKernelIds, exampleRuntime } from '#scripts/runtime.js';
 
 type ManifestEntry = {
   readonly kernel: string;
@@ -56,5 +58,31 @@ describe('generated example artifacts', () => {
         expect(metadata.height, `${entry.kernel}/${entry.name}`).toBe(576);
       }),
     );
+  });
+
+  // OCCT's shell/offset results depend on accumulated WASM heap state, so the
+  // generator gives every fixture a fresh client; this pins the property that
+  // makes those checked-in bytes meaningful — a susceptible (shell + fillet)
+  // fixture is bit-reproducible on a clean instance. If this starts failing,
+  // determinism broke below the generator and check-thumbnails will flake.
+  // See docs/research/tau-examples-thumbnail-nondeterminism.md.
+  it('exports a shell+fillet fixture byte-identically on fresh kernel instances', { timeout: 120_000 }, async () => {
+    const exportOnFreshClient = async (): Promise<string> => {
+      const client = await createNodeClient(join(sourceDirectory, 'kernels'), { runtime: exampleRuntime });
+      try {
+        const result = await client.export('glb', {
+          source: { path: 'replicad/vase/main.ts' },
+          content: { includeEdges: true },
+        });
+        if (!result.success) {
+          throw new Error(result.issues.map((issue) => issue.message).join('; '));
+        }
+        return createHash('sha256').update(result.data[0]!.bytes).digest('hex');
+      } finally {
+        client.terminate();
+      }
+    };
+
+    expect(await exportOnFreshClient()).toBe(await exportOnFreshClient());
   });
 });

@@ -42,7 +42,7 @@ flowchart LR
   Main --> Utility["Electron utility process"]
   Utility --> Host["@taucad/runtime/electron/utility"]
   Host --> Runtime["src/tau runtime boundary"]
-  Runtime --> Kernel["@taucad/openrscad/kernel"]
+  Runtime --> Kernel["@taucad/openrscad"]
 ```
 
 ## Runtime Boundary
@@ -72,9 +72,8 @@ import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
 ```
 
 ```typescript
-import { openrscad } from '@taucad/openrscad/kernel';
+import { openrscadKernel } from '@taucad/openrscad';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { geometryCache } from '@taucad/runtime/middleware/geometry-cache';
-import { parameterCache } from '@taucad/runtime/middleware/parameter-cache';
-import { defineRuntime } from '@taucad/runtime';
+import { geometryCache, parameterCache } from '@taucad/middleware';
+import { defineRuntime } from '@taucad/runtime/worker';
 ```

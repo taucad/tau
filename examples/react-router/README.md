@@ -20,8 +20,8 @@ flowchart LR
   Hook --> Transport["@taucad/runtime/transport/web"]
   Transport --> Worker["tau/runtime.worker.ts"]
   Worker --> Runtime["defineRuntime selected plugins"]
-  Runtime --> Kernel["@taucad/runtime/kernels/replicad"]
-  Runtime --> Bundler["@taucad/runtime/bundler/esbuild"]
+  Runtime --> Kernel["@taucad/replicad"]
+  Runtime --> Bundler["@taucad/esbuild"]
 ```
 
 ## Runtime Boundary
@@ -49,10 +49,9 @@ import type { runtime } from '../../tau/runtime-definition';
 ```
 
 ```typescript
-import { esbuild } from '@taucad/runtime/bundler/esbuild';
-import { replicad } from '@taucad/runtime/kernels/replicad';
-import { geometryCache } from '@taucad/runtime/middleware/geometry-cache';
-import { parameterCache } from '@taucad/runtime/middleware/parameter-cache';
-import { defineRuntime } from '@taucad/runtime';
+import { esbuildBundler } from '@taucad/esbuild';
+import { replicadKernel } from '@taucad/replicad';
+import { geometryCache, parameterCache } from '@taucad/middleware';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { serveWebWorkerRuntime } from '@taucad/runtime/worker/web';
 ```

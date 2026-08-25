@@ -20,9 +20,8 @@ export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad';
  *
  * The engine that executes a kernel's files is chosen in
  * `apps/ui/app/runtime/ui-runtime.definition.ts` and matched by file
- * extension, never by this `id`. Swapping the engine behind an offering
- * (for example OpenSCAD moving from `@taucad/openscad` to
- * `@taucad/openrscad`) should not touch this file.
+ * extension, never by this `id`. Swapping the engine package behind
+ * an offering should not touch this file.
  *
  * @public
  */

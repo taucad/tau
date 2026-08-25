@@ -10,13 +10,13 @@ Release workflow for Tau npm packages using Nx Release with Version Plans, pnpm,
 
 ## Source Of Truth
 
-| Fact                              | Owner                                         |
-| --------------------------------- | --------------------------------------------- |
-| Package scope and publish classes | `docs/policy/release-policy.md`               |
-| Resolved Nx release graph         | `pnpm nx release --printConfig` and `nx.json` |
-| CI publish sequence               | `.github/workflows/publish.yml`               |
-| Package quality rules             | `docs/policy/npm-policy.md`                   |
-| Version semantics                 | `docs/policy/version-policy.md`               |
+| Fact                              | Owner                                                                        |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| Package scope and publish classes | `docs/policy/release-policy.md`                                              |
+| Resolved Nx release graph         | `NX_DAEMON=false ./node_modules/.bin/nx release --printConfig` and `nx.json` |
+| CI publish sequence               | `.github/workflows/publish.yml`                                              |
+| Package quality rules             | `docs/policy/npm-policy.md`                                                  |
+| Version semantics                 | `docs/policy/version-policy.md`                                              |
 
 Current model, in brief:
 
@@ -28,7 +28,7 @@ Current model, in brief:
 When release config matters, inspect the resolved Nx config instead of copying package scope from memory:
 
 ```bash
-pnpm nx release --printConfig
+NX_DAEMON=false ./node_modules/.bin/nx release --printConfig
 ```
 
 Then compare with `nx.json` if the output looks surprising. The resolved config is the result of Nx merging `nx.json` and any programmatic release configuration.
@@ -37,25 +37,25 @@ Then compare with `nx.json` if the output looks surprising. The resolved config 
 
 ```bash
 # Create a version plan (tracks desired bump alongside your code change)
-pnpm nx release plan
+NX_DAEMON=false ./node_modules/.bin/nx release plan
 
 # Check version plans exist for changed projects (CI gate)
-pnpm nx release plan:check
+NX_DAEMON=false ./node_modules/.bin/nx release plan:check
 
 # Preview a release (always do this first)
-pnpm nx release --dry-run
+NX_DAEMON=false ./node_modules/.bin/nx release --dry-run
 
 # Prepare the release locally; CI publishes from the tag
-pnpm nx release --skip-publish
+NX_DAEMON=false ./node_modules/.bin/nx release --skip-publish
 
 # Inspect the resolved release config
-pnpm nx release --printConfig
+NX_DAEMON=false ./node_modules/.bin/nx release --printConfig
 ```
 
 Mirror the current CI validation gates before publishing:
 
 ```bash
-pnpm nx run scripts:release-gate
+NX_DAEMON=false ./node_modules/.bin/nx run scripts:release-gate
 ```
 
 `release-gate` (`scripts/project.json`) fans out to every `scripts:validate-*` and `scripts:check-*` target plus `pkgcheck` on `tag:type:package` and `test`/`typecheck`/`lint` on `tag:type:package` and `tag:type:lib`, then `audit-public-surface` and `readme-quickstart` workspace-wide. Selectors are Nx targets and tags — never project path globs.
@@ -65,7 +65,7 @@ pnpm nx run scripts:release-gate
 1. Create a version plan for changes that affect the release group:
 
 ```bash
-pnpm nx release plan
+NX_DAEMON=false ./node_modules/.bin/nx release plan
 ```
 
 This creates a Markdown file in `.nx/version-plans/` with frontmatter specifying the bump type:
@@ -80,17 +80,17 @@ Add runtime export support
 
 Valid bump types: `major`, `minor`, `patch`, `premajor`, `preminor`, `prepatch`, `prerelease`.
 
-2. Commit the version plan with the code change and let CI run `pnpm nx release plan:check`.
+2. Commit the version plan with the code change and let CI run `NX_DAEMON=false ./node_modules/.bin/nx release plan:check`.
 3. After merge, preview the release:
 
 ```bash
-pnpm nx release --dry-run
+NX_DAEMON=false ./node_modules/.bin/nx release --dry-run
 ```
 
 4. Prepare versions, changelogs, the release commit, and the tag locally:
 
 ```bash
-pnpm nx release --skip-publish
+NX_DAEMON=false ./node_modules/.bin/nx release --skip-publish
 ```
 
 This will:
@@ -126,7 +126,7 @@ If the command list above disagrees with `.github/workflows/publish.yml`, the wo
 Before publishing, run the same release gate as CI:
 
 ```bash
-pnpm nx run scripts:release-gate
+NX_DAEMON=false ./node_modules/.bin/nx run scripts:release-gate
 ```
 
 For a local tarball spot-check, inspect the exact filename returned by `pnpm pack`:
@@ -156,16 +156,16 @@ Read the live package list from the release policy at execution time. Do not mai
 
 ## Troubleshooting
 
-| Problem                                             | Solution                                                                                                                                  |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm registry:check` fails                         | A runtime production dependency does not resolve from npm. Publish or replace that dependency before continuing.                          |
-| Publish tries to publish a bundled internal library | The project is publishable by placement. Check `nx.json` release `projects` and the `docs/policy/release-policy.md` bundled-library list. |
-| Release config looks stale                          | Run `pnpm nx release --printConfig`, then compare with `nx.json`; update this skill only after the source files change.                   |
-| `npm ERR! 403` on publish                           | Trusted Publisher is missing for the package, or the npm workflow filename/repository does not match exactly.                             |
-| Package validation fails                            | Run the failing package's `pkgcheck` target and fix the npm-policy violation before release.                                              |
-| Build fails before version                          | Run `pnpm nx run scripts:release-gate` locally and fix the first failing project.                                                         |
-| Provenance not generated                            | Ensure the workflow has `id-token: write` and `NPM_CONFIG_PROVENANCE=true`.                                                               |
-| Stale lockfile after version                        | Run `pnpm install --no-frozen-lockfile` and commit the lockfile update.                                                                   |
+| Problem                                             | Solution                                                                                                                                               |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm registry:check` fails                         | A runtime production dependency does not resolve from npm. Publish or replace that dependency before continuing.                                       |
+| Publish tries to publish a bundled internal library | The project is publishable by placement. Check `nx.json` release `projects` and the `docs/policy/release-policy.md` bundled-library list.              |
+| Release config looks stale                          | Run `NX_DAEMON=false ./node_modules/.bin/nx release --printConfig`, then compare with `nx.json`; update this skill only after the source files change. |
+| `npm ERR! 403` on publish                           | Trusted Publisher is missing for the package, or the npm workflow filename/repository does not match exactly.                                          |
+| Package validation fails                            | Run the failing package's `pkgcheck` target and fix the npm-policy violation before release.                                                           |
+| Build fails before version                          | Run `NX_DAEMON=false ./node_modules/.bin/nx run scripts:release-gate` locally and fix the first failing project.                                       |
+| Provenance not generated                            | Ensure the workflow has `id-token: write` and `NPM_CONFIG_PROVENANCE=true`.                                                                            |
+| Stale lockfile after version                        | Run `pnpm install --no-frozen-lockfile` and commit the lockfile update.                                                                                |
 
 ## References
 

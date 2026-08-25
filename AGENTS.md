@@ -14,7 +14,7 @@ pnpm nx serve example-electron           # Electron PoC: builds then launches pa
 pnpm infra:up / infra:down / infra:reset  # PostgreSQL + Redis (Docker)
 pnpm db:generate                          # Generate Drizzle migrations
 pnpm db:migrate                           # Run migrations
-pnpm ci:affected                          # CI: affected tests, builds, lint, typecheck
+pnpm nx affected -t lint test build typecheck  # What CI runs for your change
 pnpm docs:validate                        # Validate policy/research doc frontmatter
 ```
 
@@ -28,32 +28,33 @@ Tau is the AI-native CAD platform for the web (`tau.new`), built as an Nx monore
 
 - **Frontend**: React Router v7, React 19, TypeScript, Tailwind CSS, Fumadocs
 - **Backend**: NestJS API with Fastify, PostgreSQL (Drizzle ORM), Redis, Better Auth
-- **CAD Engine**: Multi-kernel runtime (Replicad, JSCAD, Manifold, OpenRSCAD, KCL)
+- **CAD Engine**: Six-kernel product runtime (Replicad, OpenCascade, JSCAD, Manifold, OpenRSCAD, KCL)
 - **AI**: LangGraph agent with tool-use (OpenAI, Anthropic, Vertex AI, Ollama, Together AI, Cerebras)
 
 ### Project Map
 
-| Path                         | Description                                                                                                                                                                                                 |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/ui`                    | React Router v7 web app (CAD editor, file manager, AI chat, docs)                                                                                                                                           |
-| `apps/api`                   | NestJS API (auth, database, chat WebSocket, LangGraph agent)                                                                                                                                                |
-| `apps/libs/*`                | Private AGPL application capabilities; nothing under `packages/**` or `libs/**` may depend on them                                                                                                          |
-| `packages/runtime`           | Multi-kernel CAD runtime — consumed as source via package.json exports                                                                                                                                      |
-| `packages/kernels/openrscad` | `@taucad/openrscad` — standalone Apache-2.0 OpenRSCAD kernel                                                                                                                                                |
-| `packages/react`             | React hooks for `@taucad/runtime` (useRender, useGeometryExport)                                                                                                                                            |
-| `packages/cli`               | `@taucad/cli` — headless CAD CLI (`taucad export <file> --ext=glb`)                                                                                                                                         |
-| `libs/converter`             | Internal CAD file conversion (STL, STEP, IGES, DXF, glTF, USDZ); bundled into `@taucad/runtime`                                                                                                             |
-| `libs/memory`                | Shared-memory primitives (`SharedPool`, `SharedMemoryArena`)                                                                                                                                                |
-| `libs/telemetry`             | Private OTEL metric definitions, ingest schemas, and reporting contracts                                                                                                                                    |
-| `libs/json-schema`           | Private JSON to JSON Schema inference bundled into runtime                                                                                                                                                  |
-| `apps/libs/fs-client`        | UI file-manager facades (`FileContentService`, `FileTreeService`, `WorkerChangeChannel`); depends on `@taucad/filesystem`                                                                                   |
-| `libs/chat`                  | Shared Apache-2.0 CAD-tool contract: chat tool schemas, message schemas, RPC definitions; `src/schemas/agent-config.schema.ts` is the wire-contract entry (see `docs/policy/chat-request-config-policy.md`) |
-| `libs/types`                 | Shared TypeScript types (API, project, CAD, file, graphics)                                                                                                                                                 |
-| `libs/utils`                 | Shared utilities (ID generation, path, file, schema, dispose)                                                                                                                                               |
-| `libs/units`                 | Units of measurement and conversions                                                                                                                                                                        |
-| `apps/libs/lsp-fs`           | LSP/workspace FS protocol (`@taucad/lsp-fs/protocol`, `sync` SAB channel)                                                                                                                                   |
-| `apps/libs/lsp`              | Monaco LSP wiring: JSON-RPC bridge, URI workspace, TS worker entry, `lsp-fs` sync host                                                                                                                      |
-| `apps/ui/content/docs/`      | Docs site (Fumadocs): `runtime/` and `editor/` sections                                                                                                                                                     |
+| Path                       | Description                                                                                                                                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/ui`                  | React Router v7 web app (CAD editor, file manager, AI chat, docs)                                                                                                                                           |
+| `apps/api`                 | NestJS API (auth, database, chat WebSocket, LangGraph agent)                                                                                                                                                |
+| `apps/libs/*`              | Private application capabilities tagged by `scope:` and Nx `layer:`; nothing under `packages/**` or `libs/**` may depend on them                                                                            |
+| `packages/runtime`         | Multi-kernel CAD runtime — consumed as source via package.json exports                                                                                                                                      |
+| `packages/runtime-testing` | Public Vitest runtime/plugin-author harness, mocks, glTF inspection, and geometry assertions; no runtime internals                                                                                          |
+| `packages/core/*`          | Two shared production packages: geometry primitives and OCCT lifecycle/options                                                                                                                              |
+| `packages/plugins/*`       | 15 standalone plugin toolkits: 12 kernel-capable packages plus esbuild, image, and middleware                                                                                                               |
+| `packages/react`           | React hooks for `@taucad/runtime` (useRender, useGeometryExport)                                                                                                                                            |
+| `packages/cli`             | `@taucad/cli` — headless CAD CLI (`taucad export <file> --ext=glb`)                                                                                                                                         |
+| `libs/memory`              | Shared-memory primitives (`SharedPool`, `SharedMemoryArena`)                                                                                                                                                |
+| `libs/telemetry`           | Private OTEL metric definitions, ingest schemas, and reporting contracts                                                                                                                                    |
+| `libs/json-schema`         | Private JSON to JSON Schema inference bundled into runtime                                                                                                                                                  |
+| `apps/libs/fs-client`      | UI file-manager facades (`FileContentService`, `FileTreeService`, `WorkerChangeChannel`); depends on `@taucad/filesystem`                                                                                   |
+| `libs/chat`                | Shared Apache-2.0 CAD-tool contract: chat tool schemas, message schemas, RPC definitions; `src/schemas/agent-config.schema.ts` is the wire-contract entry (see `docs/policy/chat-request-config-policy.md`) |
+| `libs/types`               | Shared TypeScript types (API, project, CAD, file, graphics)                                                                                                                                                 |
+| `libs/utils`               | Shared utilities (ID generation, path, file, schema, dispose)                                                                                                                                               |
+| `libs/units`               | Units of measurement and conversions                                                                                                                                                                        |
+| `apps/libs/lsp-fs`         | LSP/workspace FS protocol (`@taucad/lsp-fs/protocol`, `sync` SAB channel)                                                                                                                                   |
+| `apps/libs/lsp`            | Monaco LSP wiring: JSON-RPC bridge, URI workspace, TS worker entry, `lsp-fs` sync host                                                                                                                      |
+| `apps/ui/content/docs/`    | Docs site (Fumadocs): `runtime/` and `editor/` sections                                                                                                                                                     |
 
 ## Skills
 

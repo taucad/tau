@@ -7,17 +7,12 @@
  * containsPoint (1e-6) to absorb transform round-off.
  */
 import type { FaceFinder } from 'replicad';
-import {
-  axis,
-  face,
-  frame,
-  group,
-} from '@taucad/runtime/kernels/replicad/annotations';
+import { axis, face, frame, group } from '@taucad/replicad/annotations';
 import type {
   AxisDeclaration,
   DatumDeclaration,
   FaceDeclaration,
-} from '@taucad/runtime/kernels/replicad/annotations';
+} from '@taucad/replicad/annotations';
 import { Placement } from './frame.js';
 import type { Vec3 } from './frame.js';
 

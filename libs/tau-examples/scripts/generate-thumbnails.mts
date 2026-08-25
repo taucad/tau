@@ -11,11 +11,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openrscad } from '@taucad/openrscad';
 import { createNodeClient } from '@taucad/runtime/node';
-import { presets } from '@taucad/runtime/presets';
-import { defineRuntime } from '@taucad/runtime/worker';
 import sharp from 'sharp';
+import { exampleKernelIds, exampleRuntime } from '#scripts/runtime.js';
 
 type ManifestEntry = {
   readonly kernel: string;
@@ -45,16 +43,8 @@ const only = new Set(
 );
 const thumbnailOptions = { width: 768, height: 576, margin: 0.1 } as const;
 
-const preset = presets.all();
-const runtime = defineRuntime({
-  kernels: [...preset.kernels, openrscad()],
-  // Generated artifacts must reflect the current producers, not persistent
-  // project-local runtime caches left by an earlier implementation.
-  middleware: preset.middleware.filter((middleware) => middleware.id !== 'geometryCache'),
-  bundlers: preset.bundlers,
-  transcoders: preset.transcoders,
-});
-const supportedKernels: ReadonlySet<string> = new Set(runtime.kernels.map((kernel) => kernel.id));
+const runtime = exampleRuntime;
+const supportedKernels: ReadonlySet<string> = exampleKernelIds;
 const engineIdForFixtureFamily = (kernel: string): string => (kernel === 'openscad' ? 'openrscad' : kernel);
 
 const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>

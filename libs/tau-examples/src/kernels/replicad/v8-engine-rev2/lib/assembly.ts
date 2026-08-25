@@ -3,7 +3,7 @@
  * placed at the modeled phase (crank 0 = cyl 1 TDC compression) with exact
  * fits, contacts, and the solved valvetrain kinematics.
  */
-import type { InterfaceDeclarations } from '@taucad/runtime/kernels/replicad/annotations';
+import type { InterfaceDeclarations } from '@taucad/replicad/annotations';
 import { draw, makeCylinder, type Shape3D } from 'replicad';
 import { Placement, vecNorm, type Vec3 } from './frame.js';
 import {

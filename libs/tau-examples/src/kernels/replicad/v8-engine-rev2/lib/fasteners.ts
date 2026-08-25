@@ -10,7 +10,7 @@
  */
 import { draw, drawPolysides, makeCylinder } from 'replicad';
 import type { Shape3D } from 'replicad';
-import type { InterfaceDeclarations } from '@taucad/runtime/kernels/replicad/annotations';
+import type { InterfaceDeclarations } from '@taucad/replicad/annotations';
 import { axisNear, faceNear } from './annotate.js';
 import type { Placement } from './frame.js';
 import { tapHoleDia, threadBandDia } from './params.js';

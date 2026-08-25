@@ -1,10 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openrscad } from '@taucad/openrscad';
-import { presets } from '@taucad/runtime/presets';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
+import { exampleKernelIds } from '#scripts/runtime.js';
 
 type ManifestEntry = {
   readonly kernel: string;
@@ -36,11 +35,7 @@ describe('generated example artifacts', () => {
   });
 
   it('has a valid 768×576 WebP for every entry supported by the generator runtime', async () => {
-    const preset = presets.all();
-    const supportedKernels: ReadonlySet<string> = new Set([
-      ...preset.kernels.map((kernel) => kernel.id),
-      openrscad().id,
-    ]);
+    const supportedKernels: ReadonlySet<string> = exampleKernelIds;
     const renderable = manifest.filter(
       (entry) => entry.mainFile && supportedKernels.has(entry.kernel === 'openscad' ? 'openrscad' : entry.kernel),
     );

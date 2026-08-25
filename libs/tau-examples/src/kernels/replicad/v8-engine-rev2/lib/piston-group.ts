@@ -7,7 +7,7 @@
  */
 import { draw, drawCircle, makeBaseBox, makeCylinder } from 'replicad';
 import type { Shape3D } from 'replicad';
-import type { InterfaceDeclarations } from '@taucad/runtime/kernels/replicad/annotations';
+import type { InterfaceDeclarations } from '@taucad/replicad/annotations';
 import { axisNear, faceNear, groupNear } from './annotate.js';
 import { Placement } from './frame.js';
 import { piston as pp, valve } from './params.js';

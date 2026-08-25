@@ -14,7 +14,7 @@ import {
   sketchHelix,
 } from 'replicad';
 import type { Shape3D, Sketch } from 'replicad';
-import type { InterfaceDeclarations } from '@taucad/runtime/kernels/replicad/annotations';
+import type { InterfaceDeclarations } from '@taucad/replicad/annotations';
 import { axisNear, datumAt, faceNear } from './annotate.js';
 import { Placement } from './frame.js';
 import { threadBandDia, valve as vp } from './params.js';

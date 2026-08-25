@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createNodeClient } from '@taucad/runtime/node';
+import { runtime } from '#runtime.definition.js';
 
 // Entry imports `replicad` directly so kernel auto-detection attributes it, and
 // pulls a dimension from `../lib` (outside the entry's project root) whose edit
@@ -43,7 +44,7 @@ const createCacheKeys = async (baseDirectory: string): Promise<Set<string>> => {
 const exportGlb = async (root: string): Promise<void> => {
   // Fresh client each run so the per-worker L1/file-hash caches don't mask a
   // stale on-disk key — this mirrors separate CLI invocations.
-  const client = await createNodeClient(root);
+  const client = await createNodeClient(root, { runtime });
   try {
     const result = await client.export('glb', { source: { path: 'test-exports/box.ts' } });
     if (!result.success) {

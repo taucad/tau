@@ -10,13 +10,18 @@
  */
 
 import type { TelemetryEntry } from '@taucad/runtime/types';
-import { createRuntimeClient } from '@taucad/runtime';
+import { createHash } from 'node:crypto';
+import { cpus } from 'node:os';
+import { createRuntimeClient } from '@taucad/runtime/client';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { replicad } from '@taucad/runtime/kernels/replicad';
-import { esbuild } from '@taucad/runtime/bundler/esbuild';
+import { replicadKernel } from '@taucad/replicad';
+import { openrscadKernel } from '@taucad/openrscad';
+import { openrscadNativeKernel } from '@taucad/openrscad-native';
+import { esbuild } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
-import type { BenchmarkCase } from '#benchmarks/benchmark-suite.js';
+import { getGeometryStatsFromInspect, getInspectReport } from '@taucad/runtime-testing';
+import type { BenchmarkCase, BenchmarkKernel } from '#benchmarks/benchmark-suite.js';
 import type { CpuProfile, CpuProfiler } from '#benchmarks/cpu-profiler.js';
 import type { ProfileAnalysis } from '#benchmarks/profile-analyzer.js';
 
@@ -38,6 +43,14 @@ type BenchmarkTessellation = {
   angularTolerance: number;
 };
 
+/** Stable JSON keys retained for benchmark artifact compatibility. @public */
+export const benchmarkFirstCallFields = {
+  timeToFirstRender: 'timeToFirstRenderMs',
+  hostCompile: 'hostCompileMs',
+  emscriptenInit: 'emscriptenInitMs',
+  firstRender: 'firstRenderMs',
+} as const;
+
 /** Result of a single benchmark case. */
 export type BenchmarkResult = {
   name: string;
@@ -49,6 +62,22 @@ export type BenchmarkResult = {
   p95: number;
   p99: number;
   stddev: number;
+  coefficientOfVariation: number;
+  warmupRuns: number;
+  mode: 'first-call' | 'steady-state';
+  workloadFingerprint: string;
+  outputHash: string;
+  geometryHash: string;
+  outputSizeBytes: number;
+  triangleCount: number;
+  /** Milliseconds. */
+  [benchmarkFirstCallFields.timeToFirstRender]: number;
+  /** Milliseconds. */
+  [benchmarkFirstCallFields.hostCompile]: number;
+  /** Milliseconds. */
+  [benchmarkFirstCallFields.emscriptenInit]: number;
+  /** Milliseconds. */
+  [benchmarkFirstCallFields.firstRender]: number;
   telemetry: TelemetryEntry[][];
   ocSummary?: TraceSummary;
   librarySummary?: TraceSummary;
@@ -82,6 +111,7 @@ export type BuildProvenance = {
 /** Result of a complete benchmark run across all cases. */
 export type BenchmarkRunResult = {
   timestamp: string;
+  runnerFingerprint: string;
   results: BenchmarkResult[];
   totalDurationMs: number;
   wasmSizes?: WasmSizeInfo;
@@ -138,6 +168,7 @@ function computeStats(timings: number[]): {
   p95: number;
   p99: number;
   stddev: number;
+  coefficientOfVariation: number;
 } {
   const sorted = [...timings].sort((a, b) => a - b);
   const sum = sorted.reduce((a, b) => a + b, 0);
@@ -148,7 +179,7 @@ function computeStats(timings: number[]): {
   const variance = sorted.reduce((accumulator, value) => accumulator + (value - mean) ** 2, 0) / sorted.length;
   const stddev = Math.sqrt(variance);
 
-  return { mean, median, p95, p99, stddev };
+  return { mean, median, p95, p99, stddev, coefficientOfVariation: mean === 0 ? 0 : stddev / mean };
 }
 
 // =============================================================================
@@ -219,6 +250,21 @@ function extractLibrarySummary(telemetryBatches: TelemetryEntry[][]): TraceSumma
 // =============================================================================
 
 const projectRoot = '/';
+const steadyStateWarmups = 8;
+
+const sha256 = (value: string | Uint8Array<ArrayBuffer>): string => createHash('sha256').update(value).digest('hex');
+
+const durationOf = (entries: readonly TelemetryEntry[], names: readonly string[]): number =>
+  entries.filter(({ name }) => names.includes(name)).reduce((total, { duration }) => total + duration, 0);
+
+const runnerFingerprint = sha256(
+  JSON.stringify({
+    arch: process.arch,
+    cpu: cpus()[0]?.model ?? 'unknown',
+    node: process.version,
+    platform: process.platform,
+  }),
+);
 
 /**
  * Runs a set of benchmark cases against the Replicad kernel, capturing telemetry and computing statistics.
@@ -228,13 +274,32 @@ const projectRoot = '/';
  * @returns Aggregated results with per-case statistics and optional OC tracing summaries
  */
 // oxlint-disable-next-line complexity -- intentional sequential loop
+/**
+ * The kernel a case is authored for. Exactly one is registered per case:
+ * `openrscad` and `openrscad-native` declare the same capability id, so
+ * registering both would be a collision, not a fallback pair.
+ */
+function kernelForCase(kernel: BenchmarkKernel | undefined, replicadOptions: Record<string, unknown>) {
+  switch (kernel) {
+    case 'openrscad': {
+      return openrscadKernel();
+    }
+    case 'openrscad-native': {
+      return openrscadNativeKernel();
+    }
+    default: {
+      return replicadKernel(replicadOptions);
+    }
+  }
+}
+
 export async function runBenchmarks(
   cases: BenchmarkCase[],
   options: BenchmarkRunnerOptions,
 ): Promise<BenchmarkRunResult> {
   const {
     iterations,
-    ocTracing = 'summary',
+    ocTracing = 'off',
     libraryTracing = 'off',
     operation = 'export',
     tessellation,
@@ -256,6 +321,16 @@ export async function runBenchmarks(
     const timings: number[] = [];
     const allTelemetry: TelemetryEntry[][] = [];
     const telemetryBatches: TelemetryEntry[][] = [];
+    let outputBytes: Uint8Array<ArrayBuffer> | undefined;
+    let geometryHash = '';
+    /** Milliseconds. */
+    let timeToFirstRender = 0;
+    /** Milliseconds. */
+    let hostCompile = 0;
+    /** Milliseconds. */
+    let emscriptenInit = 0;
+    /** Milliseconds. */
+    let firstRender = 0;
 
     const absoluteFiles: Record<string, string> = {};
     for (const [filename, content] of Object.entries(benchCase.files)) {
@@ -269,11 +344,12 @@ export async function runBenchmarks(
       ...(tessellationInstancing === undefined ? {} : { tessellationInstancing }),
     };
     const renderOptions = tessellation ? { tessellation } : undefined;
+    const caseOperation = benchCase.operation ?? operation;
 
     const fileSystem = fromMemoryFs(absoluteFiles);
     const runtime = defineRuntime({
-      kernels: [replicad(kernelOptions)],
-      bundlers: [esbuild()],
+      plugins: [esbuild()],
+      kernels: [kernelForCase(benchCase.kernel, kernelOptions)],
     });
     const transport = inProcessTransport({ runtime, fileSystem });
     const client = createRuntimeClient({
@@ -293,8 +369,10 @@ export async function runBenchmarks(
       }
     });
 
-    const warmupRuns = 3;
-    const totalRuns = iterations + warmupRuns;
+    const mode = benchCase.mode ?? 'steady-state';
+    const warmupRuns = mode === 'first-call' ? 0 : steadyStateWarmups;
+    const sampleIterations = mode === 'first-call' ? 1 : iterations;
+    const totalRuns = sampleIterations + warmupRuns;
 
     let profiler: CpuProfiler | undefined;
     if (enableCpuProfile) {
@@ -319,27 +397,36 @@ export async function runBenchmarks(
       }
 
       const start = performance.now();
+      const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
       let failureMessage: string | undefined;
-      if (operation === 'render') {
+      if (caseOperation === 'render') {
         const renderResult = await client.render({
           source: { path: `${projectRoot}${benchCase.mainFile}` },
-          parameters: {},
+          parameters,
           content: { includeEdges },
           renderOptions,
         });
         if (renderResult.superseded) {
           failureMessage = 'render was unexpectedly superseded';
-        } else if (!renderResult.geometry.success) {
+        } else if (renderResult.geometry.success) {
+          geometryHash = renderResult.geometry.data.hash;
+          if (renderResult.geometry.data.format === 'gltf') {
+            outputBytes = renderResult.geometry.data.content;
+          }
+        } else {
           failureMessage = renderResult.geometry.issues.map((issue) => issue.message).join('; ');
         }
       } else {
         const exportResult = await client.export('glb', {
           source: { path: `${projectRoot}${benchCase.mainFile}` },
-          parameters: {},
+          parameters,
           content: { includeEdges },
           ...(renderOptions === undefined ? {} : { exportOptions: renderOptions }),
         });
-        if (!exportResult.success) {
+        if (exportResult.success) {
+          outputBytes =
+            exportResult.data.find(({ name }) => name.endsWith('.glb'))?.bytes ?? exportResult.data[0]?.bytes;
+        } else {
           failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
         }
       }
@@ -353,7 +440,15 @@ export async function runBenchmarks(
       });
 
       if (failureMessage) {
-        throw new Error(`Benchmark "${benchCase.name}" ${operation} failed (iteration ${iter}): ${failureMessage}`);
+        throw new Error(`Benchmark "${benchCase.name}" ${caseOperation} failed (iteration ${iter}): ${failureMessage}`);
+      }
+
+      if (iter === 0) {
+        const firstEntries = telemetryBatches.flat();
+        timeToFirstRender = elapsed;
+        hostCompile = durationOf(firstEntries, ['wasm.compile']);
+        emscriptenInit = durationOf(firstEntries, ['wasm.emscripten-init']);
+        firstRender = durationOf(firstEntries, ['kernel.render', 'kernel.export', 'kernel.export-model']);
       }
 
       if (iter < warmupRuns) {
@@ -379,12 +474,44 @@ export async function runBenchmarks(
     const ocSummary = extractOcSummary(allTelemetry);
     const librarySummary = extractLibrarySummary(allTelemetry);
 
+    if (!outputBytes) {
+      throw new Error(`Benchmark "${benchCase.name}" did not produce GLB output bytes`);
+    }
+    const outputHash = sha256(outputBytes);
+    geometryHash ||= outputHash;
+    const geometryStats = getGeometryStatsFromInspect(await getInspectReport(outputBytes));
+    const workloadFingerprint = sha256(
+      JSON.stringify({
+        files: Object.entries(benchCase.files).sort(([left], [right]) => left.localeCompare(right)),
+        includeEdges,
+        kernel: benchCase.kernel ?? 'replicad',
+        mainFile: benchCase.mainFile,
+        mode,
+        operation: caseOperation,
+        parameterSequence: benchCase.parameterSequence,
+        renderOptions,
+        tessellationInstancing,
+        wasm: typeof wasm === 'string' ? wasm : wasm.wasmUrl,
+      }),
+    );
+
     results.push({
       name: benchCase.name,
       category: benchCase.category,
-      iterations,
+      iterations: sampleIterations,
+      warmupRuns,
+      mode,
       timings,
       ...stats,
+      workloadFingerprint,
+      outputHash,
+      geometryHash,
+      outputSizeBytes: outputBytes.byteLength,
+      triangleCount: geometryStats.faceCount,
+      [benchmarkFirstCallFields.timeToFirstRender]: timeToFirstRender,
+      [benchmarkFirstCallFields.hostCompile]: hostCompile,
+      [benchmarkFirstCallFields.emscriptenInit]: emscriptenInit,
+      [benchmarkFirstCallFields.firstRender]: firstRender,
       telemetry: allTelemetry,
       ocSummary,
       librarySummary,
@@ -399,6 +526,7 @@ export async function runBenchmarks(
 
   return {
     timestamp: new Date().toISOString(),
+    runnerFingerprint,
     results,
     totalDurationMs: performance.now() - runStart,
     wasmSizes,
@@ -408,30 +536,31 @@ export async function runBenchmarks(
 async function collectWasmSizes(): Promise<WasmSizeInfo | undefined> {
   try {
     const { statSync } = await import('node:fs');
-    const { resolve, dirname } = await import('node:path');
+    const { dirname, resolve } = await import('node:path');
+    const { createRequire } = await import('node:module');
     const { fileURLToPath: toFilePath } = await import('node:url');
 
-    const wasmDirectory = resolve(dirname(toFilePath(import.meta.url)), 'kernels', 'replicad', 'wasm');
-    const stat = (name: string): number | undefined => {
+    const replicadRoot = dirname(toFilePath(import.meta.resolve('@taucad/replicad/package.json')));
+    const require_ = createRequire(resolve(replicadRoot, 'package.json'));
+    const stat = (specifier: string): number | undefined => {
       try {
-        return statSync(resolve(wasmDirectory, name)).size;
+        return statSync(require_.resolve(specifier)).size;
       } catch {
         return undefined;
       }
     };
 
-    const singleWasm = stat('replicad_single.wasm');
+    const singleWasm = stat('replicad-opencascadejs/wasm');
     if (!singleWasm) {
       return undefined;
     }
 
-    const multiWasm = stat('replicad_multi.wasm');
+    const multiWasm = stat('replicad-opencascadejs/multi/wasm');
 
-    const jsDirectory = resolve(dirname(toFilePath(import.meta.url)), 'kernels', 'replicad');
     const jsSize = (name: string): number => {
       try {
-        return statSync(resolve(jsDirectory, '..', '..', '..', 'node_modules', 'replicad-opencascadejs', 'dist', name))
-          .size;
+        const packageRoot = dirname(require_.resolve('replicad-opencascadejs/package.json'));
+        return statSync(resolve(packageRoot, 'dist', name)).size;
       } catch {
         return 0;
       }

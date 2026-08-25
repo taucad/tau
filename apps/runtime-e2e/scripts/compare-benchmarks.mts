@@ -5,22 +5,39 @@
  * benchmark run from each experiment directory.
  *
  * Usage:
- *   pnpm nx compare-benchmarks runtime -- --experiments ../../out/artifacts/wasm/experiments
+ *   pnpm nx compare-benchmarks runtime-e2e -- --experiments ../../out/artifacts/wasm/experiments
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import { parseArgs } from 'node:util';
 import process from 'node:process';
+import { benchmarkGateExitCode, compareBenchmarkRuns } from '#benchmarks/benchmark-comparator.js';
 
 const { values } = parseArgs({
   options: {
     experiments: { type: 'string', short: 'e' },
     compare: { type: 'string', short: 'c', multiple: true },
+    help: { type: 'boolean', short: 'h', default: false },
   },
   strict: true,
   allowPositionals: false,
 });
+
+if (values.help) {
+  console.log(`
+WASM Benchmark Comparison
+
+Usage:
+  pnpm nx compare-benchmarks runtime-e2e [-- options]
+
+Options:
+  -e, --experiments <dir>   Directory containing experiment subdirectories
+  -c, --compare <dirs>      Compare specific experiment directories (multiple)
+  -h, --help                Show this help message
+`);
+  process.exit(0);
+}
 
 type BenchResult = {
   name: string;
@@ -28,10 +45,14 @@ type BenchResult = {
   median: number;
   mean: number;
   p95: number;
+  workloadFingerprint: string;
+  outputHash: string;
+  improvementExplanation?: string;
 };
 
 type BenchmarkRun = {
   timestamp: string;
+  runnerFingerprint: string;
   results: BenchResult[];
   totalDurationMs: number;
   provenance?: {
@@ -168,6 +189,29 @@ function main(): void {
   if (experiments.length === 0) {
     console.error('No experiments found.');
     process.exit(1);
+  }
+
+  const gateEnabled = process.env['TAU_BENCHMARK_GATE'] === '1';
+  let gateFailed = false;
+  if (gateEnabled && !baseline) {
+    console.error('Benchmark gate requires a baseline experiment.');
+    gateFailed = true;
+  }
+  if (baseline) {
+    for (const experiment of experiments) {
+      const comparison = compareBenchmarkRuns(baseline.benchmark, experiment.benchmark);
+      if (gateEnabled && benchmarkGateExitCode(comparison) !== 0) {
+        gateFailed = true;
+      }
+      for (const issue of comparison.issues) {
+        const output = `${experiment.shortName}/${issue.caseName}: ${issue.message}`;
+        if (gateEnabled) {
+          console.error(`GATE ${issue.kind}: ${output}`);
+        } else {
+          console.warn(`REPORT ${issue.kind}: ${output}`);
+        }
+      }
+    }
   }
 
   const benchmarkNames = experiments[0]!.benchmark.results.map((r) => r.name);
@@ -319,6 +363,9 @@ function main(): void {
   }
 
   console.log();
+  if (gateFailed) {
+    process.exitCode = 1;
+  }
 }
 
 main();

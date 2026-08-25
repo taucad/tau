@@ -24,7 +24,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { createGeometryTestHelpers } from '@taucad/runtime/testing';
+import { createGeometryTestHelpers } from '@taucad/runtime-testing';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
 import type { WebSocketHostHandle, WebSocketHostOptions } from '@taucad/runtime/transport/websocket-host';
@@ -160,7 +160,7 @@ const dialForeignSocket = async (url: string): Promise<{ frame: string; open: bo
   return { frame, open: socket.readyState === WebSocket.OPEN };
 };
 
-describe.sequential('webSocketHost (in-process, real ws server)', () => {
+describe('webSocketHost (in-process, real ws server)', { concurrent: false }, () => {
   it('admits an allowed origin, refuses a disallowed one, and admits a Node client with no Origin', async () => {
     const url = await startHost({ fileSystem: fromNodeFs(await makeRoot()), allowedOrigins: ['http://ui.test'] });
 

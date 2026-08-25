@@ -8,12 +8,24 @@
 
 import { loadFixture } from '@taucad/tau-examples/fixtures';
 
+/** Which kernel a case is written for. Cases are authored in one kernel's
+ *  language, so this is part of the case, not a run-time flag. @public */
+export type BenchmarkKernel = 'replicad' | 'openrscad' | 'openrscad-native';
+
 /** A single benchmark case with its files and metadata. */
 export type BenchmarkCase = {
   name: string;
   category: string;
   files: Record<string, string>;
   mainFile: string;
+  /** Defaults to `replicad`, which every pre-existing case is written in. */
+  kernel?: BenchmarkKernel;
+  /** First-call cases are sampled with zero warmups; all other cases use the steady-state minimum. */
+  mode?: 'first-call' | 'steady-state';
+  /** Optional per-case operation override, used by cold time-to-first-render cases. */
+  operation?: 'export' | 'render';
+  /** Parameter values cycled across runs for parameter-only rerender cases. */
+  parameterSequence?: ReadonlyArray<Record<string, unknown>>;
 };
 
 const defaultMainFile = 'main.ts';
@@ -36,6 +48,20 @@ function inlineCase(name: string, category: string, code: string): BenchmarkCase
 }
 
 const primitives: BenchmarkCase[] = [
+  {
+    ...inlineCase(
+      'box-first-render',
+      'first-call',
+      `
+      import { makeBaseBox } from 'replicad';
+      export default function main() {
+        return makeBaseBox(50, 30, 20);
+      }
+    `,
+    ),
+    mode: 'first-call',
+    operation: 'render',
+  },
   inlineCase(
     'box',
     'primitives',
@@ -44,8 +70,22 @@ const primitives: BenchmarkCase[] = [
     export default function main() {
       return makeBaseBox(50, 30, 20);
     }
-  `,
+    `,
   ),
+  {
+    ...inlineCase(
+      'box-parameter-rerender',
+      'parameters',
+      `
+      import { makeBaseBox } from 'replicad';
+      export default function main({ width = 50 }) {
+        return makeBaseBox(width, 30, 20);
+      }
+    `,
+    ),
+    operation: 'render',
+    parameterSequence: [{ width: 40 }, { width: 50 }],
+  },
   inlineCase(
     'cylinder',
     'primitives',
@@ -248,6 +288,18 @@ const examples: BenchmarkCase[] = [
   },
 ];
 
+/**
+ * OpenSCAD-language cases. The fixture directory is `openscad` (the language),
+ * not `openrscad` (the engine); `openrscad-native` runs the identical source
+ * through the N-API engine, which is what makes the two rows comparable.
+ */
+const openscad: BenchmarkCase[] = (['openrscad', 'openrscad-native'] as const).map((kernel) => ({
+  name: `kitchen-sink-${kernel}`,
+  category: 'openscad',
+  kernel,
+  ...loadFixture('openscad', 'kitchen-sink'),
+}));
+
 const stress: BenchmarkCase[] = [
   inlineCase(
     'deep-boolean-chain',
@@ -275,6 +327,7 @@ export const benchmarkSuite: BenchmarkCase[] = [
   ...extrusions,
   ...complex,
   ...examples,
+  ...openscad,
   ...stress,
 ];
 

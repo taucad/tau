@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { exposeFileSystem, filesystemBridgeConnectMessageType, openFileSystemBridge } from '@taucad/fs-bridge';
 import { createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
-import { esbuild } from '@taucad/runtime/bundler/esbuild';
-import { replicad } from '@taucad/runtime/kernels/replicad';
-import { geometryCache } from '@taucad/runtime/middleware';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { geometryCache } from '@taucad/middleware';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import type { WorkerState } from '@taucad/runtime/types';
+import type { GetParametersResult, WorkerState } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const mainSource = `
@@ -74,15 +74,16 @@ describe('autonomous preview invalidation', () => {
       }),
     );
     const runtime = defineRuntime({
-      kernels: [replicad()],
+      plugins: [replicad(), esbuild()],
       middleware: [geometryCache()],
-      bundlers: [esbuild()],
     });
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem }),
     });
     const states: WorkerState[] = [];
+    const parameterFrames: GetParametersResult[] = [];
     const stopStates = client.on('state', (state) => states.push(state));
+    const stopParameters = client.on('parametersResolved', (result) => parameterFrames.push(result));
 
     try {
       const initial = await client.render({
@@ -119,7 +120,10 @@ describe('autonomous preview invalidation', () => {
       await delay(750);
 
       expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
+      expect(parameterFrames).toHaveLength(2);
+      expect(parameterFrames[1]).toStrictEqual(parameterFrames[0]);
     } finally {
+      stopParameters();
       stopStates();
       await client.shutdown({ drain: true });
       client.terminate();

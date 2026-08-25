@@ -6,6 +6,13 @@
   "tags": ["scope:shared", "type:e2e"],
   "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine"],
   "targets": {
+    "performance-gate": {
+      "command": "vitest run src/benchmarks/wasm-size.test.ts src/benchmarks/benchmark-comparator.test.ts src/benchmarks/native-speedup.bench.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
     "benchmark": {
       "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-kernels.mts",
       "options": {
@@ -23,6 +30,18 @@
       "options": {
         "cwd": "{projectRoot}"
       }
+    },
+    "readme-quickstart": {
+      "command": "node --import tsx scripts/check-runtime-readme-quick-start.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["^build"],
+      "cache": true,
+      "inputs": [
+        "{workspaceRoot}/packages/runtime/README.md",
+        "{projectRoot}/scripts/check-runtime-readme-quick-start.mts"
+      ]
     }
   }
 }

@@ -6,15 +6,18 @@
  * the public `@taucad/runtime` surface.
  */
 import { describe, it } from 'vitest';
-import { replicad as replicadKernel } from '@taucad/runtime/kernels/replicad';
-import { assertSuccess, createTestGeometry, createGeometryTestHelpers } from '@taucad/runtime/testing';
+import { replicadKernel } from '@taucad/replicad';
+import { assertSuccess, createGeometryTestHelpers, createTestGeometry } from '@taucad/runtime-testing';
+import { esbuildBundler } from '@taucad/esbuild';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { exampleFixtures } from '#replicad.test-fixtures.js';
 
 const geometryHelpers = createGeometryTestHelpers();
+const runtime = defineRuntime({ kernels: [replicadKernel({ wasm: 'single' })], bundlers: [esbuildBundler()] });
 
 const createGeometry = async (
-  input: Omit<Parameters<typeof createTestGeometry>[0], 'definition'>,
-): ReturnType<typeof createTestGeometry> => createTestGeometry({ definition: replicadKernel, ...input });
+  input: Omit<Parameters<typeof createTestGeometry>[0], 'runtime'>,
+): ReturnType<typeof createTestGeometry> => createTestGeometry({ runtime, ...input });
 
 // Longer suite verifying opencascadejs bindings to replicad are all present.
 // Kept skipped (as it was in packages/runtime) — enable for a full sweep.
@@ -24,7 +27,6 @@ describe.skip('replicad kernel — all example models', () => {
       const result = await createGeometry({
         files: fixture.files,
         mainFile: fixture.mainFile,
-        options: { workerOptions: { wasm: 'single' } },
       });
 
       assertSuccess(result);

@@ -6,9 +6,9 @@
  * per-benchmark heatmaps, and size breakdown charts.
  *
  * Usage:
- *   pnpm nx build-matrix runtime -- --experiments ../../out/artifacts/wasm/experiments/
- *   pnpm nx build-matrix runtime -- --experiments ../../out/artifacts/wasm/experiments/ --baseline ../../out/artifacts/wasm/baselines/v8-rc4-O2-single
- *   pnpm nx build-matrix runtime -- --compare ../../out/artifacts/wasm/experiments/exp1 ../../out/artifacts/wasm/experiments/exp2
+ *   pnpm nx build-matrix runtime-e2e -- --experiments ../../out/artifacts/wasm/experiments/
+ *   pnpm nx build-matrix runtime-e2e -- --experiments ../../out/artifacts/wasm/experiments/ --baseline ../../out/artifacts/wasm/baselines/v8-rc4-O2-single
+ *   pnpm nx build-matrix runtime-e2e -- --compare ../../out/artifacts/wasm/experiments/exp1 ../../out/artifacts/wasm/experiments/exp2
  */
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, statSync } from 'node:fs';
@@ -39,7 +39,7 @@ if (values.help) {
 Build Matrix Report Generator
 
 Usage:
-  pnpm nx build-matrix runtime [-- options]
+  pnpm nx build-matrix runtime-e2e [-- options]
 
 Options:
   -e, --experiments <dir>   Directory containing experiment subdirectories

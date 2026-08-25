@@ -1,7 +1,5 @@
 /**
- * D7: the bundled `@taucad/runtime/worker/node` entry hosts `presets.all()`, so a
- * Node process gets a crash-isolated runtime over `nodeWorkerTransport` without
- * writing (or bundling) a worker entry of its own.
+ * A consumer-owned Node worker entry hosts an explicit runtime definition.
  *
  * `nodeWorkerTransport` still takes a consumer-supplied URL — defaulting it is
  * pinned forbidden by `node-worker-cycle-prevention.test.ts`. The platform answer
@@ -16,15 +14,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { presets } from '@taucad/runtime/presets';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
 
 const boxSource = `import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(10, 20, 30);\n`;
 
 /**
- * In this workspace the package exports map resolves
- * `@taucad/runtime/worker/node` to its TypeScript source, so the worker thread
- * needs tsx's loader. `workerCtor` is the transport's own seam for exactly this
+ * The application-owned worker entry is TypeScript in this workspace, so the
+ * worker thread needs tsx's loader. `workerCtor` is the transport's own seam for exactly this
  * (`node-worker-client.ts:143`), and it mirrors how `websocket-two-process.test.ts`
  * runs its `.ts` fixture child under `node --import tsx`.
  */
@@ -37,15 +33,14 @@ class TsxWorker extends NodeWorker {
 const createClient = (root: string) =>
   createRuntimeClient({
     transport: nodeWorkerTransport({
-      // `node:worker_threads.Worker` rejects a bare `file://` string, so the
-      // resolved specifier is handed over as a URL.
-      url: new URL(import.meta.resolve('@taucad/runtime/worker/node')),
+      // The invoking application owns and resolves the executable worker URL.
+      url: new URL('fixtures/node-runtime.ts', import.meta.url),
       fileSystem: fromNodeFs(root),
       workerCtor: TsxWorker,
     }),
   });
 
-describe('bundled Node worker entry', () => {
+describe('explicit Node worker entry', () => {
   let projectDirectory: string | undefined;
 
   afterEach(async () => {
@@ -61,7 +56,7 @@ describe('bundled Node worker entry', () => {
     return projectDirectory;
   };
 
-  it('renders a trivial replicad model over nodeWorkerTransport with no app-owned worker entry', async () => {
+  it('renders a trivial replicad model over nodeWorkerTransport', async () => {
     const client = createClient(await createProject());
     try {
       const outcome = await client.render({ source: { path: 'box.ts' }, parameters: {} });
@@ -76,16 +71,15 @@ describe('bundled Node worker entry', () => {
     }
   });
 
-  it('hosts every bundled kernel', async () => {
+  it('hosts the explicitly composed kernel', async () => {
     const client = createClient(await createProject());
     try {
       await client.connect();
 
-      const hosted = (client.capabilities?.plugins ?? []).filter(({ kind }) => kind === 'kernel').map(({ id }) => id);
-      const expected = presets.all().kernels.map(({ id }) => id);
-
-      expect(expected.length).toBeGreaterThan(0);
-      expect([...hosted].sort()).toEqual([...expected].sort());
+      const hosted = (client.capabilities?.registrations ?? [])
+        .filter(({ kind }) => kind === 'kernel')
+        .map(({ id }) => String(id));
+      expect(hosted).toEqual(['replicad']);
     } finally {
       client.terminate();
     }

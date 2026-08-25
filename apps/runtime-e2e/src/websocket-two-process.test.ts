@@ -28,7 +28,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { createGeometryTestHelpers, extractGltfFromExportResult } from '@taucad/runtime/testing';
+import { createGeometryTestHelpers, extractGltfFromExportResult } from '@taucad/runtime-testing';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import type { WebSocketTransportOptions } from '@taucad/runtime/transport/websocket';
@@ -298,7 +298,7 @@ afterEach(async () => {
  * Scenarios                                                         *
  * ---------------------------------------------------------------- */
 
-describe.sequential('WebSocket transport across two processes', () => {
+describe('WebSocket transport across two processes', { concurrent: false }, () => {
   it('E1: renders host-local geometry over the socket, byte-identical to an in-process render', async () => {
     const serverRoot = await makeRoot({ 'main.ts': boxSource(20) });
     const server = await startApiServer({ mode: 'host-local', serverRoot });

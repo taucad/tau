@@ -7,9 +7,9 @@
  * would be comparing two different pipelines.
  */
 
-import { esbuild } from '@taucad/runtime/bundler/esbuild';
-import { replicad } from '@taucad/runtime/kernels/replicad';
-import { geometryCache, parameterCache } from '@taucad/runtime/middleware';
+import { esbuild } from '@taucad/esbuild';
+import { middleware } from '@taucad/middleware';
+import { replicad } from '@taucad/replicad';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 /**
@@ -18,9 +18,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
  * crosses the `/fs` socket.
  */
 export const webSocketRuntime = defineRuntime({
-  kernels: [replicad()],
-  middleware: [parameterCache(), geometryCache()],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild(), middleware({ preset: 'cache' })],
 });
 
 /**

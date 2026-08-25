@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNodeClient } from '@taucad/runtime/node';
 import type { WorkerState } from '@taucad/runtime/types';
+import { runtime } from '#runtime.definition.js';
 
 const mainSource = (height: number): string =>
   `import { makeBaseBox } from 'replicad';\nexport default () => makeBaseBox(10, ${height}, 30);\n`;
@@ -43,7 +44,7 @@ describe('autonomous re-render on the Node filesystem adapter', () => {
     const entryPath = join(root, 'main.ts');
     await writeFile(entryPath, mainSource(20), 'utf8');
 
-    const client = await createNodeClient(root);
+    const client = await createNodeClient(root, { runtime });
     const states: WorkerState[] = [];
     const stopStates = client.on('state', (state) => states.push(state));
     const settle = async (): Promise<void> => {

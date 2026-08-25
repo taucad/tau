@@ -21,7 +21,7 @@ const geospecCli = resolve(repoRoot, 'packages/geospec-engine/src/cli/main.ts');
 
 const source = `
   import { drawRoundedRectangle } from 'replicad';
-  import { face } from '@taucad/runtime/kernels/replicad/annotations';
+  import { face } from '@taucad/replicad/annotations';
 
   export default function main() {
     const prototype = drawRoundedRectangle(20, 10).sketchOnPlane().extrude(8);

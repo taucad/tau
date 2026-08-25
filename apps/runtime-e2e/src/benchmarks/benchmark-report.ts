@@ -6,6 +6,7 @@
  * No external dependencies -- everything is inlined.
  */
 
+import { benchmarkFirstCallFields } from '#benchmarks/benchmark-runner.js';
 import type { BenchmarkResult, BenchmarkRunResult } from '#benchmarks/benchmark-runner.js';
 
 function escapeHtml(text: string): string {
@@ -364,6 +365,18 @@ export function serializeRunResult(run: BenchmarkRunResult): string {
       p95: r.p95,
       p99: r.p99,
       stddev: r.stddev,
+      coefficientOfVariation: r.coefficientOfVariation,
+      warmupRuns: r.warmupRuns,
+      mode: r.mode,
+      workloadFingerprint: r.workloadFingerprint,
+      outputHash: r.outputHash,
+      geometryHash: r.geometryHash,
+      outputSizeBytes: r.outputSizeBytes,
+      triangleCount: r.triangleCount,
+      [benchmarkFirstCallFields.timeToFirstRender]: r[benchmarkFirstCallFields.timeToFirstRender],
+      [benchmarkFirstCallFields.hostCompile]: r[benchmarkFirstCallFields.hostCompile],
+      [benchmarkFirstCallFields.emscriptenInit]: r[benchmarkFirstCallFields.emscriptenInit],
+      [benchmarkFirstCallFields.firstRender]: r[benchmarkFirstCallFields.firstRender],
       ocSummary: r.ocSummary,
       librarySummary: r.librarySummary,
     })),

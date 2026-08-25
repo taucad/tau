@@ -1,13 +1,13 @@
 /**
  * Kernel Benchmarking CLI
  *
- * Run with: pnpm nx benchmark runtime
+ * Run with: pnpm nx benchmark runtime-e2e
  *
  * Usage:
- *   pnpm nx benchmark runtime
- *   pnpm nx benchmark runtime -- --iterations 10 --filter "primitives,booleans"
- *   pnpm nx benchmark runtime -- --compare ../../out/reports/benchmarks/runtime-e2e/benchmark-before.json ../../out/reports/benchmarks/runtime-e2e/benchmark-after.json
- *   pnpm nx benchmark runtime -- --output ../../out/reports/benchmarks/runtime-e2e
+ *   pnpm nx benchmark runtime-e2e
+ *   pnpm nx benchmark runtime-e2e -- --iterations 10 --filter "primitives,booleans"
+ *   pnpm nx benchmark runtime-e2e -- --compare ../../out/reports/benchmarks/runtime-e2e/benchmark-before.json ../../out/reports/benchmarks/runtime-e2e/benchmark-after.json
+ *   pnpm nx benchmark runtime-e2e -- --output ../../out/reports/benchmarks/runtime-e2e
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
@@ -68,6 +68,7 @@ const { values } = parseArgs({
     'wasm-dir': { type: 'string' },
     'wasm-variant': { type: 'string', default: 'auto' },
     ocProfile: { type: 'boolean', default: false },
+    ocTracing: { type: 'string', default: 'off' },
     noTracing: { type: 'boolean', default: false },
     libraryTracing: { type: 'string', default: 'off' },
     operation: { type: 'string', default: 'export' },
@@ -88,7 +89,7 @@ if (values.help) {
 ${c.bold}Kernel Benchmarking CLI${c.reset}
 
 ${c.dim}Usage:${c.reset}
-  pnpm nx benchmark runtime [-- options]
+  pnpm nx benchmark runtime-e2e [-- options]
 
 ${c.dim}Options:${c.reset}
   ${c.cyan}-n${c.reset}, ${c.cyan}--iterations${c.reset} <n>    Number of iterations per benchmark (default: 5)
@@ -100,6 +101,7 @@ ${c.dim}Options:${c.reset}
       ${c.cyan}--wasm-dir${c.reset} <path>   Inject custom WASM from directory (contains .wasm + .js files)
       ${c.cyan}--wasm-variant${c.reset} <v>  WASM variant: auto (default) | single | multi
       ${c.cyan}--ocProfile${c.reset}         Use per-call OC tracing for deep profiling
+      ${c.cyan}--ocTracing${c.reset} <v>     OC tracing: off (default) | summary | per-call
       ${c.cyan}--noTracing${c.reset}         Disable OC tracing entirely for pure timing
       ${c.cyan}--libraryTracing${c.reset} <v> Replicad library tracing: off (default) | summary | per-call
       ${c.cyan}--operation${c.reset} <v>     Operation to time: export (default) | render
@@ -361,7 +363,12 @@ async function runSuite(): Promise<void> {
     process.exit(1);
   }
 
-  const ocTracing = values.noTracing ? 'off' : values.ocProfile ? 'per-call' : 'summary';
+  const requestedOcTracing = values.ocProfile ? 'per-call' : values.noTracing ? 'off' : values.ocTracing;
+  if (!['off', 'summary', 'per-call'].includes(requestedOcTracing)) {
+    console.error(`${c.red}Invalid --ocTracing: ${requestedOcTracing}${c.reset}`);
+    process.exit(1);
+  }
+  const ocTracing = requestedOcTracing as 'off' | 'summary' | 'per-call';
   const libraryTracing = resolveLibraryTracingOption();
   const operation = resolveOperationOption();
   const tessellation = resolveTessellationOption();

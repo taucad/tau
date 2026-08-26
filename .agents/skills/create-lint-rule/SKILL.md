@@ -21,7 +21,7 @@ Reach for a lint rule when a smell is **mechanical and repeatable** (detectable 
 ## 0. Scaffold with the generator
 
 ```bash
-nx g @taucad/workspace-plugin:lint-rule <rule-name> --description "One-line description."
+pnpm nx g @taucad/workspace-plugin:lint-rule <rule-name> --description "One-line description."
 ```
 
 `<rule-name>` is kebab-case with no plugin prefix (e.g. `no-impl-in-index` → `tau-lint/no-impl-in-index`). This creates:

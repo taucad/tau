@@ -14,7 +14,9 @@ const mockCameraSend = vi.fn();
 const mockConnectorRef: { current: ((camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void) | undefined } = {
   current: undefined,
 };
-const mockConsumersRef = { current: new Set<(camera: ThreeCamera) => void>() };
+const mockConsumersRef = {
+  current: new Set<(camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void>(),
+};
 let mockRig: ThreeCameraRig;
 
 const createDriverSnapshot = (projection: CameraProjection, revision: number): CameraDriverSnapshot => ({
@@ -111,6 +113,40 @@ describe('ActorBridge', () => {
     expect(state.camera).toBe(orthographicCamera);
     expect(invalidate).toHaveBeenCalledOnce();
     expect(mockGraphicsSend).toHaveBeenLastCalledWith({ type: 'cameraViewChanged', verticalSpan: 10 });
+  });
+
+  it('retargets a same-camera FOV revision before invalidating', () => {
+    const calls: string[] = [];
+    const state = {
+      camera: mockRig.perspectiveCamera as Camera,
+      controls: null,
+      raycaster: { near: 0, far: 0 },
+    };
+    const invalidate = vi.fn(() => calls.push('invalidate'));
+    const set = vi.fn(() => calls.push('publish'));
+    mockConsumersRef.current.add((_camera, snapshot) => {
+      calls.push(`retarget:${snapshot.view.requestedVerticalFieldOfView}`);
+    });
+    mockUseThree.mockReturnValue({
+      ...state,
+      get: () => state,
+      invalidate,
+      set,
+      size: { width: 800, height: 600 },
+    });
+
+    render(<ActorBridge />);
+    calls.length = 0;
+    invalidate.mockClear();
+    set.mockClear();
+    mockConnectorRef.current?.(
+      mockRig.perspectiveCamera,
+      createDriverSnapshot({ kind: 'perspective', verticalFieldOfView: 39 }, 1),
+    );
+
+    expect(calls).toEqual(['retarget:39', 'invalidate']);
+    expect(set).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledOnce();
   });
 
   it('mounts the interaction listener only after controls exist', () => {

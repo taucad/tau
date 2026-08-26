@@ -1,12 +1,22 @@
 import React from 'react';
 import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createCameraView } from '@taucad/camera';
+import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube.js';
 
 const mocks = vi.hoisted(() => {
   const perspectiveCamera = { kind: 'perspective' };
   const orthographicCamera = { kind: 'orthographic' };
-  const rig = { activeCamera: perspectiveCamera, perspectiveCamera, orthographicCamera };
+  let driverSnapshot: CameraDriverSnapshot;
+  const rig = {
+    activeCamera: perspectiveCamera,
+    perspectiveCamera,
+    orthographicCamera,
+    actorRef: {
+      getSnapshot: () => ({ context: { view: driverSnapshot.view } }),
+    },
+  };
   const compileAsync = vi.fn(async (_scene: unknown, _camera: unknown) => undefined);
   const gl = {
     compileAsync,
@@ -22,16 +32,19 @@ const mocks = vi.hoisted(() => {
   const gizmos: Array<{
     camera: unknown;
     add: ReturnType<typeof vi.fn>;
+    cameraUpdate: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   }> = [];
-  let retarget: ((camera: typeof perspectiveCamera) => void) | undefined;
-  let fov = 60;
+  let retarget:
+    | ((camera: typeof perspectiveCamera | typeof orthographicCamera, snapshot: CameraDriverSnapshot) => void)
+    | undefined;
+  const syncGizmoFov = vi.fn();
 
   return {
     binding,
     compileAsync,
-    getFov: () => fov,
+    getDriverSnapshot: () => driverSnapshot,
     getRetarget: () => retarget,
     graphicsActor,
     gizmos,
@@ -41,14 +54,34 @@ const mocks = vi.hoisted(() => {
     orthographicCamera,
     perspectiveCamera,
     rig,
-    setFov: (value: number) => {
-      fov = value;
+    setDriverSnapshot: (snapshot: CameraDriverSnapshot) => {
+      driverSnapshot = snapshot;
     },
     setRetarget: (callback: typeof retarget) => {
       retarget = callback;
     },
     state,
+    syncGizmoFov,
   };
+});
+
+const createDriverSnapshot = (requestedVerticalFieldOfView: number, revision: number): CameraDriverSnapshot => ({
+  projection:
+    requestedVerticalFieldOfView === 0
+      ? { kind: 'orthographic' }
+      : { kind: 'perspective', verticalFieldOfView: requestedVerticalFieldOfView },
+  view: createCameraView({
+    requestedVerticalFieldOfView,
+    target: [0, 0, 0],
+    direction: [1, -1, 0.7],
+    up: [0, 0, 1],
+    verticalSpan: 10,
+    viewport: { width: 800, height: 600, pixelRatio: 1 },
+    bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+  }),
+  effectiveVerticalFieldOfView: requestedVerticalFieldOfView,
+  perspectiveVerticalFieldOfView: requestedVerticalFieldOfView === 0 ? 60 : requestedVerticalFieldOfView,
+  revision,
 });
 
 vi.mock('@react-three/fiber', () => ({
@@ -60,6 +93,7 @@ vi.mock('three-viewport-gizmo', () => ({
     // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids constructor parameter properties.
     public camera: unknown;
     public readonly add = vi.fn();
+    public readonly cameraUpdate = vi.fn();
     public readonly dispose = vi.fn();
     public readonly update = vi.fn();
     public readonly scale = { multiplyScalar: vi.fn() };
@@ -73,11 +107,15 @@ vi.mock('three-viewport-gizmo', () => ({
 
 vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => mocks.rig,
-  useCameraSelector: () => mocks.getFov(),
-  useCameraRetarget: (retarget: (camera: typeof mocks.perspectiveCamera) => void) => {
+  useCameraRetarget: (
+    retarget: (
+      camera: typeof mocks.perspectiveCamera | typeof mocks.orthographicCamera,
+      snapshot: CameraDriverSnapshot,
+    ) => void,
+  ) => {
     React.useLayoutEffect(() => {
       mocks.setRetarget(retarget);
-      retarget(mocks.rig.activeCamera);
+      retarget(mocks.rig.activeCamera, mocks.getDriverSnapshot());
       return () => {
         mocks.setRetarget(undefined);
       };
@@ -111,7 +149,7 @@ vi.mock('#components/geometry/graphics/three/controls/viewport-gizmo-render-loop
 }));
 vi.mock('#components/geometry/graphics/three/utils/gizmo.utils.js', () => ({
   resolveGizmoContainer: () => document.body,
-  syncGizmoFov: vi.fn(),
+  syncGizmoFov: mocks.syncGizmoFov,
   useGizmoResizeSync: () => undefined,
 }));
 
@@ -124,8 +162,9 @@ describe('ViewportGizmoCube camera retention', () => {
     mocks.gl.domElement = document.createElement('canvas');
     mocks.invalidate.mockClear();
     mocks.rig.activeCamera = mocks.perspectiveCamera;
-    mocks.setFov(60);
+    mocks.setDriverSnapshot(createDriverSnapshot(60, 0));
     mocks.setRetarget(undefined);
+    mocks.syncGizmoFov.mockClear();
   });
 
   it('retargets one gizmo and binding without recreation', () => {
@@ -133,15 +172,30 @@ describe('ViewportGizmoCube camera retention', () => {
     const gizmo = mocks.gizmos[0]!;
     expect(mocks.gizmos).toHaveLength(1);
 
-    act(() => mocks.getRetarget()?.(mocks.orthographicCamera));
+    act(() => mocks.getRetarget()?.(mocks.orthographicCamera, createDriverSnapshot(0, 1)));
     expect(mocks.gizmos).toEqual([gizmo]);
     expect(gizmo.camera).toBe(mocks.orthographicCamera);
     expect(mocks.binding.setCamera).toHaveBeenCalledWith(mocks.orthographicCamera);
-    expect(gizmo.update).toHaveBeenCalledWith(false);
+    expect(gizmo.cameraUpdate).toHaveBeenCalledOnce();
 
-    mocks.setFov(0);
+    mocks.setDriverSnapshot(createDriverSnapshot(0, 1));
     mounted.rerender(<ViewportGizmoCube />);
     expect(mocks.gizmos).toEqual([gizmo]);
+  });
+
+  it('synchronizes a same-camera FOV revision before React rerenders', () => {
+    render(<ViewportGizmoCube />);
+    const gizmo = mocks.gizmos[0]!;
+    mocks.binding.setCamera.mockClear();
+    mocks.syncGizmoFov.mockClear();
+    gizmo.cameraUpdate.mockClear();
+
+    act(() => mocks.getRetarget()?.(mocks.perspectiveCamera, createDriverSnapshot(39, 1)));
+
+    expect(mocks.gizmos).toEqual([gizmo]);
+    expect(mocks.binding.setCamera).toHaveBeenCalledWith(mocks.perspectiveCamera);
+    expect(mocks.syncGizmoFov).toHaveBeenCalledWith(gizmo, 39);
+    expect(gizmo.cameraUpdate).toHaveBeenCalledOnce();
   });
 
   it('warms the axes for both native camera endpoints', () => {

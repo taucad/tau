@@ -5,6 +5,7 @@ import { ViewportGizmo } from 'three-viewport-gizmo';
 import { useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { Object3D, Camera } from 'three';
+import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import type { ThreeCamera } from '@taucad/three/camera';
 import { useColor } from '#hooks/use-color.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
@@ -16,7 +17,7 @@ import {
   bindViewportGizmoInvalidationEvents,
   useViewportGizmoRenderLoop,
 } from '#components/geometry/graphics/three/controls/viewport-gizmo-render-loop.js';
-import { useCameraRetarget, useCameraRig, useCameraSelector, useGraphics } from '#hooks/use-graphics.js';
+import { useCameraRetarget, useCameraRig, useGraphics } from '#hooks/use-graphics.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import {
   resolveGizmoContainer,
@@ -64,26 +65,20 @@ export function ViewportGizmoCube({
   const { serialized } = useColor();
   const { theme } = useTheme();
 
-  const cameraFovAngle = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
-
-  // Keep a ref to the current angle so the creation effect can read it without
-  // adding cameraFovAngle as a dependency (which would cause expensive recreation)
-  const cameraFovAngleRef = useRef(cameraFovAngle);
-  cameraFovAngleRef.current = cameraFovAngle;
-
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref
   const gizmoRef = useRef<ViewportGizmo | undefined>(undefined);
   const controlsBindingRef = useRef<ViewportGizmoControlsBinding | undefined>(undefined);
   const initialCameraRef = useRef(cameraRig.activeCamera);
 
-  const retargetCamera = useCallback((camera: ThreeCamera): void => {
+  const retargetCamera = useCallback((camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
     const gizmo = gizmoRef.current;
     if (!gizmo) {
       return;
     }
     gizmo.camera = camera;
     controlsBindingRef.current?.setCamera?.(camera);
-    gizmo.update(false);
+    syncGizmoFov(gizmo, snapshot.view.requestedVerticalFieldOfView);
+    gizmo.cameraUpdate();
   }, []);
   useCameraRetarget(retargetCamera);
 
@@ -156,7 +151,7 @@ export function ViewportGizmoCube({
     const gizmo = new ViewportGizmo(initialCameraRef.current, gl, gizmoConfig);
     gizmoRef.current = gizmo;
 
-    syncGizmoFov(gizmo, cameraFovAngleRef.current);
+    syncGizmoFov(gizmo, cameraRig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView);
 
     const removeInvalidationListeners = bindViewportGizmoInvalidationEvents({ gizmo, invalidate });
 
@@ -274,13 +269,6 @@ export function ViewportGizmoCube({
   ]);
 
   useGizmoResizeSync(gizmoRef);
-
-  // Real-time FOV sync: update the gizmo's internal camera when the viewport FOV changes.
-  useEffect(() => {
-    if (gizmoRef.current) {
-      syncGizmoFov(gizmoRef.current, cameraFovAngle);
-    }
-  }, [cameraFovAngle]);
 
   return null;
 }

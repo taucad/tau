@@ -14,6 +14,7 @@ vi.mock('#cli-runtime.js', () => ({ createCliRuntime: vi.fn(async () => ({ plugi
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
 const terminate = vi.fn<() => void>();
+const shutdown = vi.fn<(_options?: { drain?: boolean }) => Promise<void>>(async () => undefined);
 const onFunction = vi.fn<(event: string, listener: (entry: unknown) => void) => void>();
 
 const importExportCommand = async () => {
@@ -58,6 +59,7 @@ describe('exportCommand', () => {
       on: onFunction,
       export: exportFunction,
       terminate,
+      shutdown,
     });
   });
 
@@ -136,7 +138,9 @@ describe('exportCommand', () => {
     expect(exportFunction).toHaveBeenCalledWith('glb', { source: { path: 'model.ts' }, parameters: { width: 150 } });
     const written = await readFile(outputPath);
     expect(new Uint8Array(written)).toEqual(bytes);
-    expect(terminate).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    expect(terminate).not.toHaveBeenCalled();
   });
 
   it('should write a gap-free CLI ledger and normalized runtime telemetry profile', async () => {
@@ -301,7 +305,7 @@ describe('exportCommand', () => {
       /Export failed:\n {2}boom\n {2}kaboom/,
     );
 
-    expect(terminate).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
   });
 
   it('should leave recognized but unroutable targets to the runtime', async () => {
@@ -317,13 +321,15 @@ describe('exportCommand', () => {
     });
   });
 
-  it('should call terminate() in finally even when client.export rejects', async () => {
+  it('should await draining shutdown in finally even when client.export rejects', async () => {
     exportFunction.mockRejectedValueOnce(new Error('worker crashed'));
     const command = await importExportCommand();
 
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toThrow('worker crashed');
 
-    expect(terminate).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    expect(terminate).not.toHaveBeenCalled();
   });
 
   it('should subscribe to the log event so client output streams through consola', async () => {
@@ -368,6 +374,6 @@ describe('exportCommand', () => {
       rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'warn.glb')}`],
     });
 
-    expect(terminate).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
   });
 });

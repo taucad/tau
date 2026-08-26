@@ -213,8 +213,8 @@ export const exportCommand = defineCommand({
       }
       profileLedger?.checkpoint('cli.write-artifacts');
     } finally {
-      client.terminate();
-      profileLedger?.checkpoint('runtime.terminate');
+      await client.shutdown({ drain: true });
+      profileLedger?.checkpoint('runtime.shutdown');
     }
 
     if (telemetryPath && profileLedger && runtimeExportPhase) {

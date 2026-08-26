@@ -19,6 +19,11 @@
       "factory": "./src/generators/lint-rule/generator",
       "schema": "./src/generators/lint-rule/schema.json",
       "description": "Create a tau-lint oxlint rule + RuleTester test under libs/oxlint/src/rules"
+    },
+    "machine": {
+      "factory": "./src/generators/machine/generator",
+      "schema": "./src/generators/machine/schema.json",
+      "description": "Add one XState machine to an explicit Tau domain project"
     }
   }
 }

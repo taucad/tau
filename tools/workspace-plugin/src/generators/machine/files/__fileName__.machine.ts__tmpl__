@@ -1,0 +1,42 @@
+import { fromCallback, setup } from 'xstate';
+
+/** Input accepted when creating the <%= machineName %> actor. @public */
+export type <%= className %>MachineInput = Readonly<Record<string, never>>;
+
+/** Serializable state owned by <%= machineName %>. @public */
+export type <%= className %>MachineContext = Readonly<Record<string, never>>;
+
+/** Events accepted by <%= machineName %>. @public */
+export type <%= className %>MachineEvent = { readonly type: 'reset' };
+
+const <%= propertyName %>Driver = fromCallback(() => {
+  return () => undefined;
+});
+
+/**
+ * Headless <%= propertyName %> domain logic with a replaceable driver actor.
+ *
+ * @public
+ */
+export const <%= machineName %> = setup({
+  types: {
+    context: {} as <%= className %>MachineContext,
+    events: {} as <%= className %>MachineEvent,
+    input: {} as <%= className %>MachineInput,
+  },
+  actors: {
+    <%= propertyName %>Driver,
+  },
+}).createMachine({
+  id: '<%= fileName %>',
+  context: {},
+  initial: 'idle',
+  states: {
+    idle: {
+      invoke: {
+        id: '<%= propertyName %>-driver',
+        src: '<%= propertyName %>Driver',
+      },
+    },
+  },
+});

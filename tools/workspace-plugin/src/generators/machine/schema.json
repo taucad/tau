@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "TauMachine",
+  "title": "Add one XState machine to a Tau project",
+  "description": "Adds one headless XState machine to an explicit owning project. Publishable projects require a direct package subpath; application projects remain local.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Machine name without the Machine suffix",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What is the machine name?",
+      "x-priority": "important"
+    },
+    "project": {
+      "type": "string",
+      "description": "Nx project that owns the machine",
+      "x-prompt": "Which Nx project owns the machine?",
+      "x-priority": "important"
+    },
+    "subpath": {
+      "type": "string",
+      "description": "Direct singular package subpath; required for publishable projects and forbidden for application-local machines"
+    }
+  },
+  "required": ["name", "project"]
+}

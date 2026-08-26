@@ -1,0 +1,21 @@
+import { createActor } from 'xstate';
+import { describe, expect, it } from 'vitest';
+
+import * as machineModule from '<%= testImport %>';
+import { <%= machineName %> } from '<%= testImport %>';
+
+const isMachine = (value: unknown): boolean =>
+  typeof value === 'object' && value !== null && 'getInitialSnapshot' in value && 'transition' in value;
+
+describe('<%= machineName %>', () => {
+  it('starts headlessly and exports exactly one machine value', () => {
+    const actor = createActor(<%= machineName %>, { input: {} });
+
+    actor.start();
+
+    expect(actor.getSnapshot().matches('idle')).toBe(true);
+    expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([<%= machineName %>]);
+
+    actor.stop();
+  });
+});

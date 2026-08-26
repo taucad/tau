@@ -1,0 +1,6 @@
+import { expectTypeOf } from 'vitest';
+import type { AnyStateMachine } from 'xstate';
+
+import { <%= machineName %> } from '<%= testImport %>';
+
+expectTypeOf(<%= machineName %>).toExtend<AnyStateMachine>();

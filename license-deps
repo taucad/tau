@@ -23,7 +23,7 @@ Distributions that exclude `@taucad/openscad` carry no GPL obligation.
 
 By using Tau, you agree to comply with the license terms of all included dependencies.
 
-*Generated on 2026-08-15*
+*Generated on 2026-08-26*
 
 ## Summary
 
@@ -275,6 +275,7 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **@taucad/replicad-opencascadejs** v0.23.0-beta.0 — [Repository](https://github.com/taucad/replicad)
 - **@taucad/runtime** v0.1.0-beta.1 — [Repository](https://github.com/taucad/tau)
 - **@taucad/utils** v0.1.0-beta.0 — [Repository](https://github.com/taucad/tau)
+- **@taulabs/three-viewport-gizmo** v2.2.3 — [Repository](https://github.com/taucad/three-viewport-gizmo)
 - **@testing-library/jest-dom** v6.6.3 — [Repository](https://github.com/testing-library/jest-dom)
 - **@testing-library/react** v16.2.0 — [Repository](https://github.com/testing-library/react-testing-library)
 - **@testing-library/user-event** v14.6.1 — [Repository](https://github.com/testing-library/user-event)
@@ -415,7 +416,6 @@ By using Tau, you agree to comply with the license terms of all included depende
 - **tailwindcss** v4.3.0 — [Repository](https://github.com/tailwindlabs/tailwindcss)
 - **three** v0.184.0 — [Repository](https://github.com/mrdoob/three.js)
 - **three-mesh-bvh** v0.9.10 — [Repository](https://github.com/gkjohnson/three-mesh-bvh)
-- **three-viewport-gizmo** v2.2.2-tau.2 — [Repository](https://github.com/Fennec-hub/three-viewport-gizmo)
 - **ts-node** v10.9.2 — [Repository](https://github.com/TypeStrong/ts-node)
 - **tsdown** v0.15.12 — [Repository](https://github.com/rolldown/tsdown)
 - **tsx** v4.22.3 — [Repository](https://github.com/privatenumber/tsx)

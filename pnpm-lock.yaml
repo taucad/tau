@@ -2017,6 +2017,9 @@ importers:
       '@taucad/brep':
         specifier: workspace:*
         version: link:../../packages/plugins/brep
+      '@taucad/camera':
+        specifier: workspace:*
+        version: link:../../packages/camera
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
@@ -2089,6 +2092,9 @@ importers:
       '@taucad/telemetry':
         specifier: workspace:*
         version: link:../../libs/telemetry
+      '@taucad/three':
+        specifier: workspace:*
+        version: link:../../packages/three
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
@@ -2534,6 +2540,12 @@ importers:
         specifier: 'catalog:'
         version: 8.0.10(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
 
+  packages/camera:
+    devDependencies:
+      xstate:
+        specifier: 'catalog:'
+        version: 5.32.1
+
   packages/cli:
     dependencies:
       '@taucad/assimp':
@@ -2806,6 +2818,9 @@ importers:
         specifier: ^0.4.1
         version: 0.4.1
     devDependencies:
+      '@taucad/camera':
+        specifier: workspace:*
+        version: link:../../camera
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
@@ -3226,6 +3241,18 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.2.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.2.0)(esbuild@0.28.1)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/three:
+    devDependencies:
+      '@taucad/camera':
+        specifier: workspace:*
+        version: link:../camera
+      three:
+        specifier: 'catalog:'
+        version: 0.184.0
+      xstate:
+        specifier: 'catalog:'
+        version: 5.32.1
 
   scripts:
     dependencies:

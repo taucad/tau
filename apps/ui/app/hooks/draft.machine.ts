@@ -5,19 +5,17 @@
  * Actors are provided via machine.provide() in the consumer (use-chat.tsx)
  * following the pattern from use-project.tsx.
  *
- * ## Image resize chokepoint
+ * ## Image processing chokepoint
  *
  * The `imageProcessing` parallel sub-region is the SINGLE source of truth for
- * chat-image resizing. `addDraftImage` and `addEditDraftImage` events accept
- * RAW data URLs (any length) and enqueue them in `context.imageQueue`. The
- * `resizing` state invokes `resizeImageActor` (provided via `.provide` from
- * `apps/ui/app/hooks/resize-image.actor.ts`) FIFO. Success appends the resized
- * URL to `draftImages` / `editDraftImages`. Failure shifts the queue and emits
+ * chat-image byte policy. `addDraftImage` and `addEditDraftImage` events accept
+ * raw data URLs and enqueue them in `context.imageQueue`. The `resizing` state
+ * invokes `resizeImageActor` FIFO, resizing user uploads while preserving
+ * generated lossless captures when requested. Success appends the processed URL
+ * to `draftImages` / `editDraftImages`. Failure shifts the queue and emits
  * `imageResizeFailed`, observed by `<ActiveChatProvider>` to surface a toast.
  *
- * Callers MUST send raw URLs and MUST NOT pre-resize — pre-sized URLs would
- * still pass through the queue but waste CPU and confuse the byte-ceiling
- * contract.
+ * Callers MUST send raw URLs and MUST NOT pre-resize.
  */
 
 import { setup, assign, emit } from 'xstate';
@@ -36,6 +34,7 @@ type ImageQueueEntry = {
   readonly id: string;
   readonly raw: string;
   readonly target: ImageQueueTarget;
+  readonly preserveOriginal: boolean;
 };
 
 // Context for draft state
@@ -51,7 +50,7 @@ export type DraftMachineContext = {
   activeEditMessageId?: string;
   editDraftText: string;
   editDraftImages: string[];
-  /** FIFO queue of raw image data URLs awaiting resize via `imageProcessing.resizing`. */
+  /** FIFO queue of raw image data URLs awaiting processing via `imageProcessing.resizing`. */
   imageQueue: readonly ImageQueueEntry[];
 };
 
@@ -117,14 +116,14 @@ type DraftMachineEvents =
   | { type: 'initializeFromChat'; chat: Chat }
   | { type: 'setChatId'; chatId: string }
   | { type: 'setDraftText'; text: string }
-  | { type: 'addDraftImage'; image: string }
+  | { type: 'addDraftImage'; image: string; preserveOriginal?: boolean }
   | { type: 'removeDraftImage'; index: number }
   | { type: 'setDraftToolChoice'; toolChoice: string | string[] }
   | { type: 'setDraftMode'; mode: ChatMode }
   | { type: 'clearDraft' }
   | { type: 'loadDraftFromMessageTransient'; draft: MyUIMessage }
   | { type: 'setEditDraftText'; text: string }
-  | { type: 'addEditDraftImage'; image: string }
+  | { type: 'addEditDraftImage'; image: string; preserveOriginal?: boolean }
   | { type: 'removeEditDraftImage'; index: number }
   | { type: 'loadAllMessageEdits'; edits: Record<string, MyUIMessage> }
   | {
@@ -163,7 +162,10 @@ const clearMessageEditActor = fromSafeAsync<void, { chatId: string; messageId: s
  * (`EphemeralActiveChatProvider`, `ChatSessionStore`). Tests override with
  * a deterministic fake.
  */
-const resizeImageActor = fromSafeAsync<{ type: 'imageResized'; resized: string }, { image: string }>(async () => {
+const resizeImageActor = fromSafeAsync<
+  { type: 'imageResized'; resized: string },
+  { image: string; preserveOriginal: boolean }
+>(async () => {
   throw new Error('resizeImageActor not provided');
 });
 
@@ -257,6 +259,7 @@ export const draftMachine = setup({
                 id: generatePrefixedId(idPrefix.log),
                 raw: event.image,
                 target: 'main' as ImageQueueTarget,
+                preserveOriginal: event.preserveOriginal ?? false,
               },
             ],
           }),
@@ -392,6 +395,7 @@ export const draftMachine = setup({
                 id: generatePrefixedId(idPrefix.log),
                 raw: event.image,
                 target: 'edit' as ImageQueueTarget,
+                preserveOriginal: event.preserveOriginal ?? false,
               },
             ],
           }),
@@ -593,6 +597,7 @@ export const draftMachine = setup({
             src: 'resizeImageActor',
             input: ({ context }) => ({
               image: context.imageQueue[0]!.raw,
+              preserveOriginal: context.imageQueue[0]!.preserveOriginal,
             }),
             onDone: 'idle',
             onError: {

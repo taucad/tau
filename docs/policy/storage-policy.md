@@ -3,7 +3,7 @@ title: 'Storage Policy'
 description: 'Store-selection boundary (what belongs in IndexedDB at all) plus rules for atomic read-modify-write semantics, field-scoped patches, and concurrent-writer safety in client-side persistent storage providers.'
 status: active
 created: '2026-04-20'
-updated: '2026-07-17'
+updated: '2026-08-24'
 related:
   - docs/policy/project-manifest-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -37,11 +37,14 @@ Before applying any rule below, put the data in the right store. Portable projec
 | Entry paths, thumbnails, parameter sidecars, caches                                   | Project filesystem                            | `docs/policy/project-manifest-policy.md`             |
 | Host-local project library lifecycle (`lastActivityAt`, `deletedAt`, `revisionState`) | Dedicated `projectLibraryStates` object store | This policy + manifest policy Rules 6–9              |
 | Browser-local application state (chats, editor layout, resource links)                | Object store via `IndexedDbStorageProvider`   | This policy's RMW rules                              |
+| Browser-local app chrome preferences (project disclosure)                             | Dedicated `appUiPreferences` object store     | This policy's RMW rules                              |
 | Per-device filesystem configuration (`ProjectFileSystemConfig`, workspace handles)    | Dedicated `tau-fs-handles` database           | This policy + filesystem-authority policy Rules 9/11 |
 
 The legacy `projects` object store remains frozen and is cleared only after each row has been converted to a verified strict-v1 filesystem project and its `updatedAt`, `deletedAt`, and `revisionState` have been mapped to verified `ProjectLibraryState`. This is legacy storage conversion, not manifest-version migration. The store must not be repurposed: its `id` key path, full-project API, and legacy cleanup race with the correct local overlay. `projectLibraryStates` is a separate store keyed by `projectId`; it may contain only the fields permitted by the manifest policy and cannot establish project existence.
 
 Adding any other object store requires a documented parity exemption in the PR description: state why no agent, CLI, or on-disk consumer needs the data and why an existing local store cannot own it. A cache of manifest-derived fields is not exempt merely because listing is slow; measure first and keep any justified projection rebuildable and non-authoritative.
+
+`appUiPreferences` has that parity exemption for project disclosure. Expanded/collapsed project rows are browser chrome with no meaning to agents, the CLI, project collaborators, or an on-disk project. The state cannot belong to `projectLibraryStates` because it is not lifecycle or revision data, cannot belong to `editor` because it spans project routes rather than describing one project's workbench, and cannot belong to `chats` because it is not conversation data. The store therefore contains one sparse browser-profile-local row keyed by `singleton`; clearing a permanently deleted project's field is the only lifecycle coupling.
 
 Project recency is owned by the project-domain activity boundary and persisted as `ProjectLibraryState.lastActivityAt`. Mutating chat or editor rows must never cascade a timestamp through generic storage behavior. The project domain touches local activity only after a material project/chat operation commits; navigation repair, generated labels, startup-request consumption, thumbnail writes, caches, and other derived/system activity do not affect recency.
 

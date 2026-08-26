@@ -135,6 +135,15 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
     expect(material.depthBias).toBe(gltfEdgeDepthBiasFactor);
   });
 
+  it('uses native polygon offset for the orthographic endpoint without disabling occlusion', () => {
+    const material = createWebGpuGltfFatLineMaterial();
+
+    expect(material.polygonOffset).toBe(true);
+    expect(material.polygonOffsetFactor).toBe(1);
+    expect(material.polygonOffsetUnits).toBe(1);
+    expect(material.depthTest).toBe(true);
+  });
+
   /**
    * The fat-line edge material must use the in-tree `Line2NodeMaterial` (which fixes the
    * upstream `nearEstimate = b * -0.5 / a` reversed-Z trim flip — collapses to `-far/2`,

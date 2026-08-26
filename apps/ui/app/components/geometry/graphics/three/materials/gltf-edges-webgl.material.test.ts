@@ -4,6 +4,8 @@ import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments
 import type { Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { LineMaterial } from 'three/addons';
+import { createCameraView } from '@taucad/camera';
+import { createThreeCameraRig } from '@taucad/three/camera';
 import {
   applyFatLineSegments,
   createGltfFatLineMaterial,
@@ -14,6 +16,7 @@ import {
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import {
   gltfEdgeDepthBiasFactor,
+  gltfEdgeOrthographicDepthBiasCoefficient,
   gltfEdgeDepthBiasReferenceTanHalfFov,
 } from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 
@@ -67,6 +70,7 @@ function compileShaderProbe(material: LineMaterial): ShaderProbe {
       #include <logdepthbuf_pars_vertex>
       void main() {
         #include <logdepthbuf_vertex>
+        #include <clipping_planes_vertex>
       }
     `,
     fragmentShader: '',
@@ -92,7 +96,7 @@ describe('createWebGlGltfFatLineMaterial', () => {
       const material = createWebGlGltfFatLineMaterial(new Vector2(1024, 768));
 
       const key = material.customProgramCacheKey();
-      expect(key).toBe('tau-gltf-edge-logdepth-bias-v1');
+      expect(key).toBe('tau-gltf-edge-logdepth-bias-v2');
     });
 
     /**
@@ -150,6 +154,41 @@ describe('createWebGlGltfFatLineMaterial', () => {
       expect(shader.vertexShader).toContain('float tanHalfFov = 1.0 / projectionMatrix[1][1];');
       expect(shader.vertexShader).toContain(`float fovScale = tanHalfFov / ${referenceTanHalfFovGlsl};`);
       expect(shader.vertexShader).toContain('vFragDepth *= pow(depthBias, fovScale);');
+      expect(shader.vertexShader).toContain('if (projectionMatrix[3][3] != 0.0)');
+      expect(shader.vertexShader).toContain(
+        `float orthographicBias = ${gltfEdgeOrthographicDepthBiasCoefficient.toPrecision(8)} / projectionMatrix[1][1];`,
+      );
+      expect(shader.vertexShader).toContain(
+        'gl_Position.z += projectionMatrix[2][2] * orthographicBias * gl_Position.w;',
+      );
+    });
+
+    it('keeps the orthographic edge pull larger than one depth-buffer step under the main viewer clip policy', () => {
+      const rig = createThreeCameraRig({
+        initialView: createCameraView({
+          requestedVerticalFieldOfView: 60,
+          target: [0, 0, 0],
+          direction: [1, -1, 0.7],
+          up: [0, 0, 1],
+          verticalSpan: 600,
+          viewport: { width: 1536, height: 900, pixelRatio: 2 },
+          bounds: { min: [-220, -180, -55], max: [220, 180, 55] },
+        }),
+      });
+      rig.actorRef.start();
+      rig.setClipPlanes({
+        near: 1e-3,
+        minimumPerspectiveFar: 10_000_000_000,
+        orthographicFarMultiplier: 5,
+      });
+      rig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
+
+      const camera = rig.orthographicCamera;
+      const depthBufferStep = (camera.far - camera.near) / (2 ** 24 - 1);
+      const edgePull = gltfEdgeOrthographicDepthBiasCoefficient / camera.projectionMatrix.elements[5];
+
+      expect(edgePull).toBeGreaterThan(depthBufferStep);
+      rig.dispose();
     });
   });
 

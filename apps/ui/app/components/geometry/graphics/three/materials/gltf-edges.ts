@@ -1,10 +1,11 @@
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import type { Group, LineSegments, Material, Object3D, Scene, Vector2 } from 'three';
+import type { Group, LineSegments, Object3D, Vector2 } from 'three';
 import { InterleavedBufferAttribute } from 'three';
 import { LineSegments2, LineSegmentsGeometry, LineMaterial } from 'three/addons';
 import { LineSegments2 as WebGpuFatLineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import {
   gltfEdgeDepthBiasFactor,
+  gltfEdgeOrthographicDepthBiasCoefficient,
   gltfEdgeDepthBiasReferenceTanHalfFov,
 } from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
@@ -46,8 +47,9 @@ const webGpuEdgePresentationGeometryLineWidth = 2;
  *
  * **FOV adaptation (perspective cameras)**:
  * `fovScale = tan(fov/2)/tan(30°)`; `adjustedBias = pow(depthBiasFactor, fovScale)`.
- * Orthographic projection is intentionally not biased here (`gl_FragCoord.z` path in three's
- * chunk on WebGL, upstream depth setup on WebGPU); defer ortho parity to a dedicated follow-up.
+ * Orthographic projection uses the analytic zero-FOV limit of the perspective pull. WebGL
+ * applies it in clip space; WebGPU uses native polygon offset because its upstream node depth
+ * setup already selects the renderer's correct orthographic depth encoding.
  *
  * Tuning trade-off (WebGL subtle bias vs ghosting): weaker bias preserves occlusion from real
  * occluders; stronger bias restores full opaque line coverage against coplanar faces.
@@ -65,8 +67,7 @@ const webGpuEdgePresentationGeometryLineWidth = 2;
  *
  * Mutating `sharedDepthBiasUniform.value` at runtime updates every material that references it.
  * Owner-local runtime edges can produce multiple fat-line meshes, and sharing this uniform
- * keeps them on one shader program. The screenshot-clone path
- * (`applyEdgeMaterialsToClonedScene`) still allocates fresh materials per capture.
+ * keeps them on one shader program.
  */
 const sharedDepthBiasUniform = { value: gltfEdgeDepthBiasFactor };
 
@@ -80,7 +81,7 @@ const gltfEdgeDepthBiasReferenceTanHalfFovGlsl = gltfEdgeDepthBiasReferenceTanHa
  * Versioned (`v1`) so a future shader patch can intentionally invalidate every cached program
  * by bumping the suffix.
  */
-const webGlEdgeProgramCacheKey = 'tau-gltf-edge-logdepth-bias-v1';
+const webGlEdgeProgramCacheKey = 'tau-gltf-edge-logdepth-bias-v2';
 
 /**
  * Disable raycast on edge meshes. Pointer events traverse the scene every move; the default
@@ -277,6 +278,15 @@ export function createWebGlGltfFatLineMaterial(
         }
       #endif`,
     );
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <clipping_planes_vertex>',
+      `if (projectionMatrix[3][3] != 0.0) {
+        float orthographicBias = ${gltfEdgeOrthographicDepthBiasCoefficient.toPrecision(8)} / projectionMatrix[1][1];
+        gl_Position.z += projectionMatrix[2][2] * orthographicBias * gl_Position.w;
+      }
+      #include <clipping_planes_vertex>`,
+    );
   };
 
   // Stable cache key so three's WebGLPrograms collapses identical-shader materials into a
@@ -326,6 +336,9 @@ export function createWebGpuGltfFatLineMaterial(edgeColor: number = gltfEdgeColo
   material.edgePresentationCoverage = true;
   material.edgePresentationLineWidth = defaultLineWidth;
   material.useViewportSrgbBlend = false;
+  material.polygonOffset = true;
+  material.polygonOffsetFactor = 1;
+  material.polygonOffsetUnits = 1;
 
   return material;
 }
@@ -467,76 +480,6 @@ export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOp
   }
 }
 
-type ApplyEdgeMaterialsToClonedSceneOptions = Readonly<{
-  backend: ResolvedGraphicsBackend;
-  /** Required for the WebGL `LineMaterial` `resolution` uniform; ignored on WebGPU. */
-  resolution: Vector2;
-}>;
-
-/**
- * Allocate fresh fat-line materials on every `LineSegments2` in a cloned screenshot scene.
- *
- * The screenshot renderer's flag set diverges from the viewport's on `reversedDepthBuffer`,
- * `logarithmicDepthBuffer`, and the `RenderPipeline`/`PassNode` post-processing chain. A
- * `Line2NodeMaterial` whose TSL graph is materialised once against the viewport's flags
- * cannot legally be reused by a renderer with a different sample-count contract — three.js
- * caches the built node graph on the material instance, so the screenshot renderer would
- * inherit the viewport's reversed-Z depth encoder, HalfFloat color attachment expectations,
- * and PassNode-level filtering assumptions.
- *
- * Allocating fresh materials here means each renderer compiles its own pipeline against
- * its own flag set. Tau's `Line2NodeMaterial.setupDepth` then correctly picks the
- * screenshot renderer's `viewZToLogarithmicDepth` branch instead of the viewport's
- * `viewZToReversedPerspectiveDepth` one. Combined with `applyMatcapToClonedScene`'s
- * existing fresh-allocation pattern for surface meshes, this closes the captured-output
- * graininess gap (Symptom B in
- * `docs/research/screenshot-viewport-shared-material-state-bleed.md`).
- *
- * The live scene shares one edge material across owner-local `LineSegments2` meshes. The
- * screenshot clone path allocates fresh materials for renderer-specific pipeline state, but
- * still avoids reconstructing edge geometry.
- *
- * @returns The set of newly-allocated edge materials owned by this clone pass.
- */
-export function applyEdgeMaterialsToClonedScene(
-  scene: Scene,
-  options: ApplyEdgeMaterialsToClonedSceneOptions,
-): Set<Material> {
-  const allocated = new Set<Material>();
-
-  scene.traverse((child) => {
-    if (!('type' in child) || child.type !== 'LineSegments2') {
-      return;
-    }
-
-    // Both the WebGL `LineSegments2` (from `three/addons`) and the WebGPU
-    // `LineSegments2` (from `three/addons/lines/webgpu/LineSegments2.js`) set
-    // `.type === 'LineSegments2'`. Their `material` slots accept different
-    // concrete material classes (`LineMaterial` vs `Line2NodeMaterial`), so we
-    // treat both via the structural intersection both materials expose.
-    type FatLineMesh = { material: { color?: { getHex(): number }; linewidth?: number } };
-    const lineSegments = child as unknown as FatLineMesh;
-    const sourceMaterial = lineSegments.material;
-
-    const fresh =
-      options.backend === 'webgpu'
-        ? createWebGpuGltfFatLineMaterial()
-        : createWebGlGltfFatLineMaterial(options.resolution);
-
-    if (sourceMaterial.color && 'color' in fresh) {
-      (fresh as { color: { setHex(hex: number): void } }).color.setHex(sourceMaterial.color.getHex());
-    }
-    if (typeof sourceMaterial.linewidth === 'number') {
-      (fresh as { linewidth: number }).linewidth = sourceMaterial.linewidth;
-    }
-
-    lineSegments.material = fresh as { color?: { getHex(): number }; linewidth?: number };
-    allocated.add(fresh);
-  });
-
-  return allocated;
-}
-
 /**
  * Update the resolution of all LineMaterial instances in a scene.
  * Call this when the viewport size changes to maintain correct line widths.
@@ -560,8 +503,7 @@ export function updateLineMaterialResolution(scene: Group, resolution: Vector2):
 /**
  * Update the edge tint on every `LineSegments2` in a scene.
  *
- * Shared materials mean one `setHex` updates all edge meshes (including screenshot
- * clones that copied the viewport color via {@link applyEdgeMaterialsToClonedScene}).
+ * Shared materials mean one `setHex` updates all edge meshes.
  *
  * @param scene - Scene group containing fat-line edge meshes.
  * @param edgeColor - sRGB hex edge tint.

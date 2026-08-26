@@ -34,7 +34,7 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/jscad'),
     import('@taucad/manifold'),
     import('@taucad/gltf'),
-    (await import('@taucad/brep')).brep,
+    import('@taucad/brep'),
     import('@taucad/rhino'),
   ]);
   const [{ assimp }, { image }] = await Promise.all([import('@taucad/assimp'), import('@taucad/image')]);

@@ -3,7 +3,7 @@ title: 'Worker Lifecycle Policy'
 description: 'Standard patterns for creating, managing, and terminating Web Workers in Tau, plus worker topology: when a feature warrants its own worker, runtime-client consumers, and bridge writes. Covers lazy creation, termination, cleanup, mobile budgets, XState/React integration.'
 status: active
 created: '2026-03-04'
-updated: '2026-07-21'
+updated: '2026-08-24'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/runtime-architecture-policy.md
@@ -482,12 +482,21 @@ A feature worker may return a bounded, owned encoded artifact (`Uint8Array<Array
 CORRECT:
 
 ```typescript
-// Worker: render → encode → transfer ownership to the orchestrator
-const webp = await renderGlbToImage(meshArtifact, options);
-postMessage({ type: 'imageReady', bytes: webp }, [webp.buffer]);
+// Worker: export through the composed runtime, then transfer the owned result
+const result = await client.export('webp', {
+  source: { path: sourcePath },
+  content: { includeEdges: true },
+  exportOptions,
+});
+if (!result.success || result.data.length !== 1) {
+  throw new Error('Image export failed');
+}
+const file = result.data[0];
+postMessage({ type: 'imageReady', file }, [file.bytes.buffer]);
 
 // Main-thread owner: one authoritative project write
-await fileManager.client.writeFile(thumbnailPath, webp);
+const receivedFile = event.data.file;
+await fileManager.client.writeFile(thumbnailPath, receivedFile.bytes);
 ```
 
 INCORRECT:

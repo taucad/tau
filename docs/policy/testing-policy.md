@@ -3,7 +3,7 @@ title: 'Testing Policy'
 description: 'Writing high-quality tests across the Tau monorepo. Assert observable behavior, error assertions, resource cleanup, mock factories, and async patterns. Covers Vitest, kernel tests, and API tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-07-14'
+updated: '2026-08-24'
 related:
   - docs/policy/react-testing-policy.md
   - docs/policy/typescript-policy.md
@@ -209,8 +209,7 @@ Prior art for adopting an RBV container via `stack.use(...)`:
 
 ## 5. Type-Safe Mocks with `mock<T>()`
 
-Use `mock<T>()` from `vitest-mock-extended` (already installed) to create typed
-test doubles. Never use `as unknown as T` to cast partial objects to full types.
+Use `mock<T>()` from `vitest-mock-extended` where the package already depends on it to create typed test doubles. Never use `as unknown as T` to cast partial objects to full types. A dedicated testing package may instead expose an explicit, Vitest-backed object literal when doing so removes `vitest-mock-extended` from the production package's dependency surface; keep the one necessary interface assertion inside that shared factory.
 
 **Why**: `as unknown as` bypasses the compiler entirely. `mock<T>()` returns a
 deep Proxy that satisfies the full interface, auto-stubbing methods with
@@ -240,7 +239,7 @@ const mockResult = mockDeep<StreamTextResult>();
 For domain objects with sensible defaults, use shared factory functions:
 
 ```typescript
-import { createMockFileSystem } from '#testing/kernel-testing.utils.js';
+import { createMockFileSystem } from '@taucad/runtime-testing';
 
 const filesystem = createMockFileSystem();
 filesystem.mocks.exists.mockResolvedValue(true);
@@ -386,7 +385,7 @@ The agent-facing geometry-test surface is GeoSpec: Vitest-style `*.geospec.ts` /
 4. **Geometry evidence only.** Mesh checks must operate purely on geometry files/bytes such as GLB/glTF. No kernel `extras`, no per-kernel metadata propagation, no scene-level cooperation. BRep/topology checks must consume explicit BRep/STEP evidence and return typed unsupported diagnostics when that evidence is unavailable. Future kernels emit valid geometry evidence and the checks work; if a check needs more than the evidence tells it, redesign the algorithm (see [`mesh-continuity-test-semantics.md`](../research/mesh-continuity-test-semantics.md) for the AABB-clustering rewrite of `connectedComponents`).
 5. **AABB is broad-phase only for relationships.** Axis-aligned bounding boxes may prune candidates, assert explicit envelopes, and enrich diagnostics, but they must not decide production contact, clearance, containment, mate, shaft/bore, fastener, port, or manufacturability relationships. Return an unsupported-evidence diagnostic when relationship-grade evidence is unavailable.
 6. **Adversarial false-positive fixtures are mandatory.** Every new geometric matcher must include a fixture where the tempting broad-phase or approximate shortcut would pass while the real relationship fails, such as overlapping AABBs with separated mating faces or aligned envelopes with misaligned analytic axes. Relationship matcher tests must assert the diagnostic evidence type, not only pass/fail status.
-7. **Kernel-author surface stays separate.** Raw mesh-count / vertex-count assertions remain available to kernel authors via `expectMeshCount` / `expectVertexCount` in `@taucad/runtime/testing` for Vitest-based kernel tests. The two surfaces intentionally do not share a vocabulary; do not mirror low-level helpers back into the agent surface.
+7. **Keep kernel-author assertions out of production packages.** Raw mesh-count / vertex-count assertions remain available to kernel authors via `expectMeshCount` / `expectVertexCount` in `@taucad/runtime-testing` alongside runtime harnesses and mocks. Production packages expose no testing subpath. The kernel-author and agent-facing surfaces intentionally do not share a vocabulary; do not mirror low-level helpers into the agent surface.
 
 ## 13. Cross-Layer Contract Changes
 

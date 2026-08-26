@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-08-22'
+updated: '2026-08-24'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -20,16 +20,17 @@ Nx Release with version plans provides native monorepo integration and decouples
 
 ## Packages in Scope
 
-| Package                  | Description                                             |
-| ------------------------ | ------------------------------------------------------- |
-| `@taucad/runtime`        | Multi-kernel CAD runtime for browser and Node.js        |
-| `@taucad/cli`            | Headless CAD export CLI                                 |
-| `@taucad/react`          | React bindings for the runtime                          |
-| `geospec`                | GeoSpec authoring contract and CLI-facing specification |
-| `@taucad/geospec-engine` | Fair-source GeoSpec execution/proof engine and CLI      |
-| `@taucad/openrscad`      | OpenRSCAD runtime plugin                                |
-| `packages/plugins/*`     | Publishable runtime capability toolkits                 |
-| `packages/core/*`        | Publishable shared implementation packages              |
+| Package                   | Description                                             |
+| ------------------------- | ------------------------------------------------------- |
+| `@taucad/runtime`         | Multi-kernel CAD runtime for browser and Node.js        |
+| `@taucad/runtime-testing` | Runtime harnesses, mocks, and geometry assertions       |
+| `@taucad/cli`             | Headless CAD export CLI                                 |
+| `@taucad/react`           | React bindings for the runtime                          |
+| `geospec`                 | GeoSpec authoring contract and CLI-facing specification |
+| `@taucad/geospec-engine`  | Fair-source GeoSpec execution/proof engine and CLI      |
+| `@taucad/openrscad`       | OpenRSCAD runtime plugin                                |
+| `packages/plugins/*`      | Publishable runtime capability toolkits                 |
+| `packages/core/*`         | Publishable shared implementation packages              |
 
 The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/rpc`, `@taucad/types`, `@taucad/units`, and `@taucad/utils`. Runtime bundles all nine. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public plugin and core packages remain external dependencies and publish in the same fixed train.
 
@@ -247,9 +248,10 @@ npm deprecate '@taucad/json-schema@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/units@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/utils@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/fs-client@0.1.0-beta.0' 'Use @taucad/runtime/filesystem.'
-npm deprecate '@taucad/testing@0.1.0-beta.0' 'Use @taucad/runtime/testing.'
 npm deprecate '@taucad/telemetry@0.1.0-beta.0' 'Internal Tau application package; no public replacement.'
 ```
+
+The retired `@taucad/testing` package has no one-to-one replacement: its chat schema and prompt/harness concerns moved to their owners before the narrower `@taucad/runtime-testing` package was created. Do not deprecate it with a misleading replacement pointer.
 
 ## Security Considerations
 

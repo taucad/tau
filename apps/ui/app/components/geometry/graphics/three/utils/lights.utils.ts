@@ -271,7 +271,7 @@ export type ApplyLightingOptions = {
  */
 export function applyLightingForCamera({ scene, camera, headlamp, ambient, config }: ApplyLightingOptions): void {
   // FOV compensation
-  const currentFov = (camera as THREE.PerspectiveCamera).fov;
+  const currentFov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 0;
   const compensation = calculateFovLightingCompensation(currentFov);
 
   // Theme scaling (applied after FOV compensation to preserve lighting ratios)

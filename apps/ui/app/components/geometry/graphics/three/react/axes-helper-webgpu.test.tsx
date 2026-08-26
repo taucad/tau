@@ -10,6 +10,14 @@ import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials
 const { line2InstanceSpy } = vi.hoisted(() => ({
   line2InstanceSpy: vi.fn(),
 }));
+const cameraRig = vi.hoisted(() => ({
+  perspectiveCamera: { kind: 'perspective' },
+  orthographicCamera: { kind: 'orthographic' },
+}));
+
+vi.mock('#hooks/use-graphics.js', () => ({
+  useCameraRig: () => cameraRig,
+}));
 
 /**
  * Stub `Line2WebGpu` that extends real `Object3D` so callers can traverse children and
@@ -47,11 +55,11 @@ function createStubWebGpuRenderer(): WebGLRenderer & CompileAsyncStub {
   canvas.width = 800;
   canvas.height = 600;
 
-  let resolveCurrent: (() => void) | undefined;
+  const resolvers: Array<() => void> = [];
   const compileAsync = vi.fn(
     async (_scene: unknown, _camera: unknown): Promise<void> =>
       new Promise<void>((resolve) => {
-        resolveCurrent = resolve;
+        resolvers.push(resolve);
       }),
   );
 
@@ -62,8 +70,9 @@ function createStubWebGpuRenderer(): WebGLRenderer & CompileAsyncStub {
     outputColorSpace: '',
     render: vi.fn(),
     resolveNext: () => {
-      resolveCurrent?.();
-      resolveCurrent = undefined;
+      for (const resolve of resolvers.splice(0)) {
+        resolve();
+      }
     },
     setPixelRatio: vi.fn(),
     setSize: vi.fn(),
@@ -158,10 +167,10 @@ describe('AxesWebGpuFatLine resource guard', () => {
    * from a `useLayoutEffect` before the first `useFrame` tick so that cost is paid off
    * the critical path. Regression here would re-introduce a cold-cache first-frame skip.
    */
-  it('invokes renderer.compileAsync(group, camera) exactly once on mount', async () => {
+  it('invokes renderer.compileAsync for both persistent endpoint cameras on mount', async () => {
     const harness = await mountFatLine();
 
-    expect(harness.gl.compileAsync).toHaveBeenCalledTimes(1);
+    expect(harness.gl.compileAsync).toHaveBeenCalledTimes(2);
     const firstCall = harness.gl.compileAsync.mock.calls[0] as unknown as readonly [unknown, unknown];
     const warmedScene = firstCall[0];
     const warmedCamera = firstCall[1];
@@ -171,7 +180,8 @@ describe('AxesWebGpuFatLine resource guard', () => {
       (child): child is ActualThree.Object3D => child instanceof ActualThree.Object3D,
     );
     expect(meshChildren).toHaveLength(1);
-    expect(warmedCamera).toBeInstanceOf(ActualThree.PerspectiveCamera);
+    expect(warmedCamera).toBe(cameraRig.perspectiveCamera);
+    expect(harness.gl.compileAsync.mock.calls[1]?.[1]).toBe(cameraRig.orthographicCamera);
 
     harness.gl.resolveNext();
     harness.unmountScene();

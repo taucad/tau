@@ -6,7 +6,7 @@
 /* oxlint-disable @typescript-eslint/class-literal-property-style -- This is a port of the original transform-controls.ts file   */
 /* oxlint-disable max-depth -- This is a port of the original transform-controls.ts file */
 /* oxlint-disable complexity -- This is a port of the original transform-controls.ts file */
-import type { OrthographicCamera, Intersection, Camera } from 'three';
+import type { OrthographicCamera, Intersection, Camera, Object3DEventMap } from 'three';
 import {
   Material,
   BoxGeometry,
@@ -52,17 +52,113 @@ export type TransformControlsPointerObject = {
   button: number;
 };
 
-class TransformControls<TCamera extends Camera = Camera> extends Object3D {
+export type TransformControlsMode = 'translate' | 'rotate' | 'scale';
+
+export type TransformControlsAxis = 'X' | 'Y' | 'Z' | 'E' | 'XY' | 'YZ' | 'XZ' | 'XYZ' | 'XYZE';
+
+const transformControlsAxes = new Set<string>([
+  'X',
+  'Y',
+  'Z',
+  'E',
+  'XY',
+  'YZ',
+  'XZ',
+  'XYZ',
+  'XYZE',
+] satisfies TransformControlsAxis[]);
+
+export const isTransformControlsAxis = (value: string): value is TransformControlsAxis =>
+  transformControlsAxes.has(value);
+
+type TransformControlsProperties<TCamera extends Camera> = {
+  camera: TCamera;
+  object: Object3D | undefined;
+  enabled: boolean;
+  axis: TransformControlsAxis | undefined;
+  highlightAxis: string | undefined;
+  mode: TransformControlsMode;
+  translationSnap: number | undefined;
+  rotationSnap: number | undefined;
+  scaleSnap: number | undefined;
+  space: 'world' | 'local';
+  size: number;
+  dragging: boolean;
+  showX: boolean;
+  showY: boolean;
+  showZ: boolean;
+  worldPosition: Vector3;
+  worldPositionStart: Vector3;
+  worldQuaternion: Quaternion;
+  worldQuaternionStart: Quaternion;
+  cameraPosition: Vector3;
+  cameraQuaternion: Quaternion;
+  pointStart: Vector3;
+  pointEnd: Vector3;
+  rotationAxis: Vector3;
+  rotationAngle: number;
+  eye: Vector3;
+};
+
+type TransformControlsPropertyEventMap<TCamera extends Camera> = {
+  [Property in keyof TransformControlsProperties<TCamera> as `${Property & string}-changed`]: { value: unknown };
+};
+
+export type TransformControlsEventMap<TCamera extends Camera = Camera> = Object3DEventMap &
+  TransformControlsPropertyEventMap<TCamera> & {
+    change: Record<never, never>;
+    pointerDown: { mode: TransformControlsMode };
+    pointerUp: { mode: TransformControlsMode };
+    objectChange: Record<never, never>;
+  };
+
+class TransformControls<TCamera extends Camera = Camera>
+  extends Object3D<TransformControlsEventMap<TCamera>>
+  implements TransformControlsProperties<TCamera>
+{
   public readonly isTransformControls = true;
 
   public override visible = false;
+
+  public highlightAxis: string | undefined = undefined;
+
+  public readonly pointStart = new Vector3();
+  public readonly pointEnd = new Vector3();
+  public readonly rotationAxis = new Vector3();
+  public rotationAngle = 0;
+
+  public readonly cameraPosition = new Vector3();
+  public readonly cameraQuaternion = new Quaternion();
+
+  public readonly worldPositionStart = new Vector3();
+  public readonly worldQuaternionStart = new Quaternion();
+
+  public readonly worldPosition = new Vector3();
+  public readonly worldQuaternion = new Quaternion();
+
+  public readonly eye = new Vector3();
+
+  public camera: TCamera;
+  public object: Object3D | undefined = undefined;
+  public enabled = true;
+  public axis: TransformControlsAxis | undefined = undefined;
+  public mode: TransformControlsMode = 'translate';
+  public translationSnap: number | undefined = undefined;
+  public rotationSnap: number | undefined = undefined;
+  public scaleSnap: number | undefined = undefined;
+  public space: 'world' | 'local' = 'world';
+  public size = 1;
+  public dragging = false;
+  public showX = true;
+  public showY = true;
+  public showZ = true;
 
   private domElement: HTMLElement | undefined;
 
   private readonly raycaster = new Raycaster();
 
-  private gizmo: TransformControlsGizmo;
-  private plane: TransformControlsPlane;
+  private readonly gizmo: TransformControlsGizmo;
+  private readonly plane: TransformControlsPlane;
 
   private readonly tempVector = new Vector3();
   private readonly tempVector2 = new Vector3();
@@ -73,16 +169,10 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
     Z: new Vector3(0, 0, 1),
   };
 
-  private readonly pointStart = new Vector3();
-  private readonly pointEnd = new Vector3();
   private readonly offset = new Vector3();
-  private readonly rotationAxis = new Vector3();
   private readonly startNorm = new Vector3();
   private readonly endNorm = new Vector3();
-  private rotationAngle = 0;
 
-  private readonly cameraPosition = new Vector3();
-  private readonly cameraQuaternion = new Quaternion();
   private readonly cameraScale = new Vector3();
 
   private readonly parentPosition = new Vector3();
@@ -90,43 +180,27 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
   private readonly parentQuaternionInv = new Quaternion();
   private readonly parentScale = new Vector3();
 
-  private readonly worldPositionStart = new Vector3();
-  private readonly worldQuaternionStart = new Quaternion();
   private readonly worldScaleStart = new Vector3();
 
-  private readonly worldPosition = new Vector3();
-  private readonly worldQuaternion = new Quaternion();
   private readonly worldQuaternionInv = new Quaternion();
   private readonly worldScale = new Vector3();
-
-  private readonly eye = new Vector3();
 
   private readonly pointerVector = new Vector2();
   private readonly positionStart = new Vector3();
   private readonly quaternionStart = new Quaternion();
   private readonly scaleStart = new Vector3();
 
-  private readonly camera: TCamera;
-  private object: Object3D | undefined;
-  private readonly enabled: boolean = true;
-  private axis: string | undefined = undefined;
-  private readonly highlightAxis: string | undefined = undefined;
-  private mode: 'translate' | 'rotate' | 'scale' = 'translate';
-  private translationSnap: number | undefined = undefined;
-  private rotationSnap: number | undefined = undefined;
-  private scaleSnap: number | undefined = undefined;
-  private space = 'world';
-  private size = 1;
-  private dragging = false;
-  private readonly showX = true;
-  private readonly showY = true;
-  private readonly showZ = true;
-
   // Events
-  private readonly changeEvent = { type: 'change' };
-  private readonly pointerDownEvent = { type: 'pointerDown', mode: this.mode };
-  private readonly pointerUpEvent = { type: 'pointerUp', mode: this.mode };
-  private readonly objectChangeEvent = { type: 'objectChange' };
+  private readonly changeEvent = { type: 'change' } as const;
+  private readonly pointerDownEvent: { type: 'pointerDown'; mode: TransformControlsMode } = {
+    type: 'pointerDown',
+    mode: this.mode,
+  };
+  private readonly pointerUpEvent: { type: 'pointerUp'; mode: TransformControlsMode } = {
+    type: 'pointerUp',
+    mode: this.mode,
+  };
+  private readonly objectChangeEvent = { type: 'objectChange' } as const;
 
   public constructor(camera: TCamera, domElement: HTMLElement | undefined) {
     super();
@@ -141,32 +215,30 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
     this.add(this.plane);
 
     // Defined getter, setter and store for a property
-    const defineProperty = <TValue>(propertyName: string, defaultValue: TValue): void => {
+    const defineProperty = <Property extends keyof TransformControlsProperties<TCamera>>(
+      propertyName: Property,
+      defaultValue: TransformControlsProperties<TCamera>[Property],
+    ): void => {
       let propertyValue = defaultValue;
 
       Object.defineProperty(this, propertyName, {
-        get() {
-          return propertyValue ?? defaultValue;
-        },
-
-        set(value) {
+        get: () => propertyValue ?? defaultValue,
+        set: (value: TransformControlsProperties<TCamera>[Property]) => {
           if (propertyValue !== value) {
             propertyValue = value;
-            this.plane[propertyName] = value;
-            this.gizmo[propertyName] = value;
+            Reflect.set(this.plane, propertyName, value);
+            Reflect.set(this.gizmo, propertyName, value);
 
-            this.dispatchEvent({ type: propertyName + '-changed', value });
+            // oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- tsgo cannot infer a generic template-literal result.
+            const type = `${propertyName}-changed` as `${Property & string}-changed`;
+            this.dispatchEvent({ type, value });
             this.dispatchEvent(this.changeEvent);
           }
         },
       });
 
-      // @ts-expect-error -- custom controls event, needs augmentation
-      this[propertyName] = defaultValue;
-      // @ts-expect-error -- custom controls event, needs augmentation
-      this.plane[propertyName] = defaultValue;
-      // @ts-expect-error -- custom controls event, needs augmentation
-      this.gizmo[propertyName] = defaultValue;
+      Reflect.set(this.plane, propertyName, defaultValue);
+      Reflect.set(this.gizmo, propertyName, defaultValue);
     };
 
     defineProperty('camera', this.camera);
@@ -229,9 +301,7 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
       this.object.position.copy(this.positionStart);
       this.object.quaternion.copy(this.quaternionStart);
       this.object.scale.copy(this.scaleStart);
-      // @ts-expect-error -- custom controls event, needs augmentation
       this.dispatchEvent(this.changeEvent);
-      // @ts-expect-error -- custom controls event, needs augmentation
       this.dispatchEvent(this.objectChangeEvent);
       this.pointStart.copy(this.pointEnd);
     }
@@ -265,7 +335,7 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
 
   public getMode = (): TransformControls['mode'] => this.mode;
 
-  public setMode = (mode: TransformControls['mode']): void => {
+  public setMode = (mode: TransformControlsMode): void => {
     this.mode = mode;
   };
 
@@ -285,7 +355,7 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
     this.size = size;
   };
 
-  public setSpace = (space: string): void => {
+  public setSpace = (space: 'world' | 'local'): void => {
     this.space = space;
   };
 
@@ -350,13 +420,14 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
   private readonly resolveAxisFromPointer = (
     pointer: TransformControlsPointerObject,
     target: Object3D,
-  ): string | undefined => {
+  ): TransformControlsAxis | undefined => {
     this.pointerVector.set(pointer.x, pointer.y);
     this.raycaster.setFromCamera(this.pointerVector, this.camera);
 
     const intersect = this.intersectObjectWithRay(target, this.raycaster);
 
-    return intersect ? intersect.object.name : undefined;
+    const axis = intersect ? intersect.object.name : undefined;
+    return axis && isTransformControlsAxis(axis) ? axis : undefined;
   };
 
   private readonly pointerHover = (pointer: TransformControlsPointerObject): void => {
@@ -445,7 +516,6 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
 
       this.dragging = true;
       this.pointerDownEvent.mode = this.mode;
-      // @ts-expect-error -- custom controls event, needs augmentation
       this.dispatchEvent(this.pointerDownEvent);
     }
   };
@@ -686,9 +756,7 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
       // No default
     }
 
-    // @ts-expect-error -- custom controls event, needs augmentation
     this.dispatchEvent(this.changeEvent);
-    // @ts-expect-error -- custom controls event, needs augmentation
     this.dispatchEvent(this.objectChangeEvent);
   };
 
@@ -699,7 +767,6 @@ class TransformControls<TCamera extends Camera = Camera> extends Object3D {
 
     if (this.dragging && this.axis !== undefined) {
       this.pointerUpEvent.mode = this.mode;
-      // @ts-expect-error -- custom controls event, needs augmentation
       this.dispatchEvent(this.pointerUpEvent);
     }
 

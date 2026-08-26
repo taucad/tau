@@ -2,10 +2,10 @@
 import { useThree } from '@react-three/fiber';
 import type { GizmoAxisOptions, GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import type * as THREE from 'three';
 import type { Object3D, Camera } from 'three';
+import type { ThreeCamera } from '@taucad/three/camera';
 import { useColor } from '#hooks/use-color.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube-axes.js';
@@ -16,7 +16,7 @@ import {
   bindViewportGizmoInvalidationEvents,
   useViewportGizmoRenderLoop,
 } from '#components/geometry/graphics/three/controls/viewport-gizmo-render-loop.js';
-import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useCameraRetarget, useCameraRig, useCameraSelector, useGraphics } from '#hooks/use-graphics.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import {
   resolveGizmoContainer,
@@ -53,19 +53,18 @@ export function ViewportGizmoCube({
   container,
   dependencies = emptyDependencies,
 }: ViewportGizmoCubeProps): ReactNode {
-  const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera;
   const gl = useThree((state) => state.gl);
   const controls = useThree((state) => state.controls);
   const scene = useThree((state) => state.scene);
   const invalidate = useThree((state) => state.invalidate);
   const interactionLock = useViewportGizmoInteractionLock();
   const graphicsActor = useGraphics();
+  const cameraRig = useCameraRig();
 
   const { serialized } = useColor();
   const { theme } = useTheme();
 
-  // Subscribe to the viewport FOV from the per-view graphics machine
-  const cameraFovAngle = useGraphicsSelector((state) => state.context.cameraFovAngle);
+  const cameraFovAngle = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
 
   // Keep a ref to the current angle so the creation effect can read it without
   // adding cameraFovAngle as a dependency (which would cause expensive recreation)
@@ -75,6 +74,18 @@ export function ViewportGizmoCube({
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref
   const gizmoRef = useRef<ViewportGizmo | undefined>(undefined);
   const controlsBindingRef = useRef<ViewportGizmoControlsBinding | undefined>(undefined);
+  const initialCameraRef = useRef(cameraRig.activeCamera);
+
+  const retargetCamera = useCallback((camera: ThreeCamera): void => {
+    const gizmo = gizmoRef.current;
+    if (!gizmo) {
+      return;
+    }
+    gizmo.camera = camera;
+    controlsBindingRef.current?.setCamera?.(camera);
+    gizmo.update(false);
+  }, []);
+  useCameraRetarget(retargetCamera);
 
   const graphicsBackendThree = useThreeGraphicsBackend();
 
@@ -82,7 +93,7 @@ export function ViewportGizmoCube({
 
   // ViewportGizmo overlays into a sub-viewport of the shared R3F canvas (same pattern as three-viewport-gizmo docs).
   useEffect(() => {
-    if (!camera || !gl || !controls) {
+    if (!gl || !controls) {
       return;
     }
 
@@ -115,7 +126,7 @@ export function ViewportGizmoCube({
 
     const gizmoConfig: GizmoOptions = {
       type: 'rounded-cube',
-      placement: 'bottom-right',
+      placement: container ? 'top-right' : 'bottom-right',
       size,
       font: {
         weight: 'normal',
@@ -142,7 +153,7 @@ export function ViewportGizmoCube({
       bottom: faceConfig,
     };
 
-    const gizmo = new ViewportGizmo(camera, gl, gizmoConfig);
+    const gizmo = new ViewportGizmo(initialCameraRef.current, gl, gizmoConfig);
     gizmoRef.current = gizmo;
 
     syncGizmoFov(gizmo, cameraFovAngleRef.current);
@@ -167,7 +178,7 @@ export function ViewportGizmoCube({
     gizmo.add(gizmoAxes);
 
     const controlsBinding = bindViewportGizmoControls({
-      camera,
+      camera: initialCameraRef.current,
       controls,
       gizmo,
       interactionLock,
@@ -215,7 +226,10 @@ export function ViewportGizmoCube({
       // teardown before resolution is a no-op.
       void (async () => {
         try {
-          await warmupCompile.call(renderer, gizmoAxes, camera);
+          await Promise.all([
+            warmupCompile.call(renderer, gizmoAxes, cameraRig.perspectiveCamera),
+            warmupCompile.call(renderer, gizmoAxes, cameraRig.orthographicCamera),
+          ]);
         } catch (error) {
           console.error('ViewportGizmoCube pipeline warm-up failed', error);
           return;
@@ -244,7 +258,6 @@ export function ViewportGizmoCube({
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- dependencies array is user-provided for custom recreation triggers
   }, [
-    camera,
     gl,
     controls,
     graphicsBackendThree,
@@ -256,6 +269,7 @@ export function ViewportGizmoCube({
     invalidate,
     interactionLock,
     graphicsActor,
+    cameraRig,
     ...dependencies,
   ]);
 

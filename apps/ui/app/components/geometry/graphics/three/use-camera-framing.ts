@@ -1,28 +1,39 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
-import type * as THREE from 'three';
-import { useCameraReset } from '#components/geometry/graphics/three/use-camera-reset.js';
-import { useGraphicsSelector } from '#hooks/use-graphics.js';
+import * as THREE from 'three';
+import type { CameraBounds, CameraVector } from '@taucad/camera';
+import { useCameraRig, useCameraViewInitialization, useGraphics } from '#hooks/use-graphics.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
+import { resolveCameraUp } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 
 const significantRadiusChangeRatio = 0.1;
 const significantAspectChangeRatio = 0.1;
 
+const toCameraBounds = (bounds: THREE.Box3): CameraBounds => ({
+  min: [bounds.min.x, bounds.min.y, bounds.min.z],
+  max: [bounds.max.x, bounds.max.y, bounds.max.z],
+});
+
+const directionFromRotation = ({
+  side,
+  vertical,
+}: {
+  readonly side: number;
+  readonly vertical: number;
+}): CameraVector => {
+  const horizontalScale = Math.cos(vertical);
+  return [horizontalScale * Math.cos(side), horizontalScale * Math.sin(side), Math.sin(vertical)];
+};
+
 /**
- * Camera framing policy hook.
+ * Sends geometry framing policy to the provider-owned portable camera actor.
  *
- * Resolves `StageOptions` into concrete camera parameters, wires them into
- * `useCameraReset`, and runs the auto-reset `useLayoutEffect` that decides
- * whether an initial (with configured angles) or subsequent (preserving the
- * current viewing direction) camera reset is needed when the geometry bounds
- * change significantly.
- *
- * Returns `resetCamera` for manual (e.g. toolbar button) resets.
+ * The first real geometry uses configured angles and becomes the reset home.
+ * Later significant bounds/aspect changes preserve the user's direction.
  */
 export function useCameraFraming({
   geometryRadius,
-  geometryCenter,
   geometryBounds,
   stageOptions = defaultStageOptions,
 }: {
@@ -31,10 +42,12 @@ export function useCameraFraming({
   geometryBounds: THREE.Box3;
   stageOptions?: StageOptions;
 }): (options?: { enableConfiguredAngles?: boolean }) => void {
-  const cameraFovAngle = useGraphicsSelector((state) => state.context.cameraFovAngle);
-
-  // Merge caller options with defaults
-  const { offsetRatio, nearPlane, minimumFarPlane, farPlaneRadiusMultiplier, zoomLevel, fitMargin, rotation } = useMemo(
+  const rig = useCameraRig();
+  const cameraViewInitialization = useCameraViewInitialization();
+  const graphicsActor = useGraphics();
+  const { size } = useThree();
+  const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
+  const resolvedOptions = useMemo(
     () => ({
       ...defaultStageOptions,
       ...stageOptions,
@@ -42,58 +55,73 @@ export function useCameraFraming({
     }),
     [stageOptions],
   );
+  const previousRadiusRef = useRef<number | undefined>(undefined);
+  const previousBoundsRef = useRef<THREE.Box3 | undefined>(undefined);
+  const previousAspectRef = useRef(viewportAspect);
+  const hasHomeRef = useRef(false);
+  const cameraViewIdentityRef = useRef(cameraViewInitialization.identity);
+  if (cameraViewIdentityRef.current !== cameraViewInitialization.identity) {
+    cameraViewIdentityRef.current = cameraViewInitialization.identity;
+    previousRadiusRef.current = undefined;
+    previousBoundsRef.current = undefined;
+    previousAspectRef.current = viewportAspect;
+    hasHomeRef.current = false;
+  }
 
-  const sceneRadiusRef = useRef<number | undefined>(undefined);
-  const sceneBoundsRef = useRef<THREE.Box3 | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (geometryRadius <= 0) {
+      return;
+    }
+    rig.setClipPlanes({
+      near: resolvedOptions.nearPlane,
+      minimumPerspectiveFar: Math.max(
+        resolvedOptions.minimumFarPlane,
+        geometryRadius * resolvedOptions.farPlaneRadiusMultiplier,
+      ),
+      orthographicFarMultiplier: resolvedOptions.farPlaneRadiusMultiplier,
+    });
+  }, [geometryRadius, resolvedOptions, rig]);
 
-  const setSceneRadiusCallback = useCallback(
-    (radius: number) => {
-      sceneRadiusRef.current = radius;
-      sceneBoundsRef.current = geometryBounds.clone();
+  const frame = useCallback(
+    (options?: { enableConfiguredAngles?: boolean }) => {
+      if (geometryRadius <= 0 || geometryBounds.isEmpty()) {
+        return;
+      }
+
+      const actor = rig.actorRef;
+      const { view } = actor.getSnapshot().context;
+      if (options?.enableConfiguredAngles ?? true) {
+        const direction = directionFromRotation(resolvedOptions.rotation);
+        const up = resolveCameraUp({
+          direction: new THREE.Vector3(...direction),
+          preferredUp: new THREE.Vector3(...view.up),
+        });
+        actor.send({
+          type: 'setView',
+          target: view.target,
+          direction,
+          up: [up.x, up.y, up.z],
+          verticalSpan: view.verticalSpan,
+        });
+      }
+      actor.send({ type: 'setBounds', bounds: toCameraBounds(geometryBounds) });
+      actor.send({ type: 'frame', margin: resolvedOptions.fitMargin });
     },
-    [geometryBounds],
+    [geometryBounds, geometryRadius, resolvedOptions.fitMargin, resolvedOptions.rotation, rig],
   );
 
-  // Ref tracking the original camera distance for zoom-relative positioning
-  const originalDistanceReference = useRef<number | undefined>(undefined);
-
-  // Whether the very first camera reset (with configured angles) has fired
-  const isInitialResetDoneRef = useRef<boolean>(false);
-
-  // Wire everything into the lower-level camera reset hook
-  const resetCamera = useCameraReset({
-    geometryRadius,
-    geometryCenter,
-    geometryBounds,
-    rotation: {
-      side: rotation.side,
-      vertical: rotation.vertical,
-    },
-    perspective: {
-      offsetRatio,
-      zoomLevel,
-      nearPlane,
-      minimumFarPlane,
-      farPlaneRadiusMultiplier,
-    },
-    fitMargin,
-    setSceneRadius: setSceneRadiusCallback,
-    originalDistanceReference,
-    cameraFovAngle,
-  });
-
-  /**
-   * Auto-reset the camera when the geometry's bounding sphere changes
-   * significantly relative to the last committed scene radius.
-   */
   useLayoutEffect(() => {
-    const sceneRadius = sceneRadiusRef.current;
-    const changeRatio =
-      sceneRadius === undefined || sceneRadius === 0
+    if (geometryRadius <= 0 || geometryBounds.isEmpty()) {
+      return;
+    }
+
+    const previousRadius = previousRadiusRef.current;
+    const radiusChange =
+      previousRadius === undefined || previousRadius === 0
         ? Infinity
-        : Math.abs((geometryRadius - sceneRadius) / sceneRadius);
-    const previousBounds = sceneBoundsRef.current;
-    const boundsScale = Math.max(sceneRadius ?? 0, geometryRadius, 1e-9);
+        : Math.abs((geometryRadius - previousRadius) / previousRadius);
+    const previousBounds = previousBoundsRef.current;
+    const scale = Math.max(previousRadius ?? 0, geometryRadius, 1e-9);
     const boundsChange = previousBounds
       ? Math.max(
           Math.abs(previousBounds.min.x - geometryBounds.min.x),
@@ -102,49 +130,55 @@ export function useCameraFraming({
           Math.abs(previousBounds.max.x - geometryBounds.max.x),
           Math.abs(previousBounds.max.y - geometryBounds.max.y),
           Math.abs(previousBounds.max.z - geometryBounds.max.z),
-        ) / boundsScale
+        ) / scale
       : Infinity;
-    const hasGeometry = geometryRadius > 0 && !geometryBounds.isEmpty();
-    const isSignificantChange =
-      sceneRadius === undefined ||
-      (hasGeometry && (changeRatio > significantRadiusChangeRatio || boundsChange > significantRadiusChangeRatio));
 
-    if (isSignificantChange) {
-      // Only real geometry completes the initial reset. Empty bootstrap bounds
-      // must not prevent the first model from using the configured angles.
-      if (isInitialResetDoneRef.current && geometryRadius > 0) {
-        resetCamera({ enableConfiguredAngles: false });
+    if (radiusChange > significantRadiusChangeRatio || boundsChange > significantRadiusChangeRatio) {
+      if (hasHomeRef.current) {
+        frame({ enableConfiguredAngles: false });
       } else {
-        resetCamera();
-        if (geometryRadius > 0) {
-          isInitialResetDoneRef.current = true;
+        const initialization = cameraViewInitialization.begin();
+        if (!initialization.initialize) {
+          rig.actorRef.send({ type: 'setBounds', bounds: toCameraBounds(geometryBounds) });
+          hasHomeRef.current = true;
+          previousRadiusRef.current = geometryRadius;
+          previousBoundsRef.current = geometryBounds.clone();
+          previousAspectRef.current = viewportAspect;
+          return;
         }
+        frame({ enableConfiguredAngles: true });
+        rig.actorRef.send({ type: 'saveHome' });
+        if (initialization.cameraView) {
+          rig.actorRef.send({ type: 'setView', ...initialization.cameraView });
+        }
+        hasHomeRef.current = true;
       }
+      previousRadiusRef.current = geometryRadius;
+      previousBoundsRef.current = geometryBounds.clone();
     }
-  }, [resetCamera, geometryRadius, geometryBounds]);
-
-  // Track viewport aspect ratio and re-frame when it changes significantly.
-  // This ensures the model remains fully visible when Dockview panels are
-  // resized (e.g. split into narrow portrait viewports).
-  const { size } = useThree();
-  const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
-  const lastAspectRef = useRef<number>(viewportAspect);
+  }, [cameraViewInitialization, frame, geometryBounds, geometryRadius, rig, viewportAspect]);
 
   useLayoutEffect(() => {
-    // Skip if the initial geometry reset hasn't happened yet
-    if (!isInitialResetDoneRef.current || geometryRadius <= 0) {
-      lastAspectRef.current = viewportAspect;
+    if (!hasHomeRef.current || geometryRadius <= 0) {
+      previousAspectRef.current = viewportAspect;
       return;
     }
-
-    const lastAspect = lastAspectRef.current;
-    const aspectChange = Math.abs(viewportAspect - lastAspect) / Math.max(lastAspect, 1e-9);
-
+    const previousAspect = previousAspectRef.current;
+    const aspectChange = Math.abs(viewportAspect - previousAspect) / Math.max(previousAspect, 1e-9);
     if (aspectChange > significantAspectChangeRatio) {
-      lastAspectRef.current = viewportAspect;
-      resetCamera({ enableConfiguredAngles: false });
+      previousAspectRef.current = viewportAspect;
+      frame({ enableConfiguredAngles: false });
     }
-  }, [viewportAspect, resetCamera, geometryRadius]);
+  }, [frame, geometryRadius, viewportAspect]);
 
-  return resetCamera;
+  useLayoutEffect(() => {
+    const subscription = graphicsActor.on('viewResetRequested', () => {
+      rig.actorRef.send({ type: 'reset' });
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [graphicsActor, rig]);
+
+  return frame;
 }

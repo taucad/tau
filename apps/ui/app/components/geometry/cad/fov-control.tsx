@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.
 import { useModifiers } from '#hooks/use-keyboard.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
-import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useCameraRig, useCameraSelector } from '#hooks/use-graphics.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -26,17 +26,17 @@ type FovControlProps = {
  * External UI component that provides a slider to transition between
  * orthographic (0deg) and perspective (90deg) camera views.
  *
- * Reads the current FOV from the per-view GraphicsMachine state via GraphicsProvider.
+ * Reads the current FOV from the per-view portable camera actor.
  */
 export function FovControl({ className, isCompact = false }: FovControlProps): React.JSX.Element {
-  const graphicsRef = useGraphics();
-  const fovAngle = useGraphicsSelector((state) => state.context.cameraFovAngle);
+  const cameraRig = useCameraRig();
+  const fovAngle = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
 
   // Track Shift key state for changing slider step
   const { shift: isShiftHeld } = useModifiers();
 
   const handleFovChange = (value: number[]): void => {
-    graphicsRef.send({ type: 'setFovAngle', payload: value[0]! });
+    cameraRig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: value[0]! });
   };
 
   return (

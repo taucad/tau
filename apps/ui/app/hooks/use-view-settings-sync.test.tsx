@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
+import { useLayoutEffect } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createActor, fromPromise } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentManifest } from '@taucad/types';
-import { GraphicsProvider } from '#hooks/use-graphics.js';
+import type { ThreeCameraRig } from '@taucad/three/camera';
+import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
@@ -66,21 +68,30 @@ function createManifest(): GeometryComponentManifest {
 function SyncHarness({
   graphicsRef,
   editorRef,
+  onRig,
+  persistCameraView,
 }: {
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
+  readonly onRig?: (rig: ThreeCameraRig) => void;
+  readonly persistCameraView?: boolean | 'pending';
 }): React.JSX.Element {
+  const cameraRig = useCameraRig();
   useViewSettingsSync({
     viewId: 'view-1',
     graphicsRef,
     cadRef: undefined,
     editorRef,
+    persistCameraView,
   });
+  useLayoutEffect(() => {
+    onRig?.(cameraRig);
+  }, [cameraRig, onRig]);
   return <div data-testid='sync-harness' />;
 }
 
 describe('useViewSettingsSync', () => {
-  it('should persist display mutations and ignore hover-only model interaction changes', async () => {
+  it('should keep model display mutations out of per-view settings', async () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
         probeWebGpu: fromPromise(async () => false),
@@ -102,36 +113,111 @@ describe('useViewSettingsSync', () => {
     act(() => {
       graphicsRef.send({ type: 'loadModelComponentManifest', unitId, manifest: createManifest(), source: 'viewer' });
       graphicsRef.send({ type: 'setHoveredModelComponent', unitId, componentId, source: 'viewer' });
-      graphicsRef.send({ type: 'controlsInteractionStart' });
-      graphicsRef.send({ type: 'controlsInteractionMoved' });
-      graphicsRef.send({ type: 'controlsInteractionEnd', zoom: 1 });
-      graphicsRef.send({ type: 'clearModelPointerClickGuard' });
     });
     expect(editorSend).not.toHaveBeenCalled();
 
     act(() => {
       graphicsRef.send({ type: 'hideModelComponent', unitId, componentId, source: 'explorer' });
     });
+    expect(editorSend).not.toHaveBeenCalled();
 
-    await waitFor(() => {
-      expect(editorSend).toHaveBeenCalled();
+    act(() => {
+      graphicsRef.send({ type: 'setGridVisibility', payload: false });
     });
 
-    const updateEvent = editorSend.mock.calls.at(-1)?.[0];
-    expect(updateEvent).toMatchObject({
-      type: 'updateViewSettings',
-      viewId: 'view-1',
-      settings: {
-        schemaVersion: 5,
-        componentDisplay: {
-          schemaVersion: 1,
-          unitsById: {
-            [unitId]: {
-              hiddenComponentIds: [componentId],
-            },
+    await waitFor(() => {
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+        type: 'updateViewSettings',
+        viewId: 'view-1',
+        settings: { schemaVersion: 7, enableGrid: false },
+      });
+    });
+    expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty('settings.componentDisplay');
+    graphicsRef.stop();
+  });
+
+  it('persists canonical camera changes without writing viewport-only revisions', async () => {
+    const graphicsRef = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      { input: {} },
+    ).start();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+    let cameraRig: ThreeCameraRig | undefined;
+
+    render(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <SyncHarness
+          graphicsRef={graphicsRef}
+          editorRef={editorRef}
+          onRig={(rig) => {
+            cameraRig = rig;
+          }}
+        />
+      </GraphicsProvider>,
+    );
+
+    expect(cameraRig).toBeDefined();
+    act(() => {
+      cameraRig!.actorRef.send({
+        type: 'setView',
+        target: [3, 4, 5],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 12,
+      });
+    });
+
+    await waitFor(() => {
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+        type: 'updateViewSettings',
+        settings: {
+          schemaVersion: 7,
+          cameraView: {
+            target: [3, 4, 5],
+            direction: [1, 0, 0],
+            up: [0, 0, 1],
+            verticalSpan: 12,
           },
         },
-      },
+      });
+    });
+
+    editorSend.mockClear();
+    act(() => {
+      cameraRig!.actorRef.send({ type: 'setViewport', viewport: { width: 1200, height: 800, pixelRatio: 2 } });
+      cameraRig!.actorRef.send({ type: 'setBounds', bounds: { min: [-2, -2, -2], max: [2, 2, 2] } });
+    });
+    await act(async () => undefined);
+    expect(editorSend).not.toHaveBeenCalled();
+    graphicsRef.stop();
+  });
+
+  it('defers camera sync until a non-3D viewer can clear stale state', async () => {
+    const graphicsRef = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      { input: {} },
+    ).start();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+    const mounted = render(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} persistCameraView='pending' />
+      </GraphicsProvider>,
+    );
+
+    expect(editorSend).not.toHaveBeenCalled();
+    mounted.rerender(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} persistCameraView={false} />
+      </GraphicsProvider>,
+    );
+
+    await waitFor(() => {
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+        type: 'updateViewSettings',
+        settings: { schemaVersion: 7, cameraView: undefined },
+      });
     });
     graphicsRef.stop();
   });

@@ -1,9 +1,9 @@
 import { useFrame } from '@react-three/fiber';
-import { EffectComposer, N8AO } from '@react-three/postprocessing';
 import type { ReactNode } from 'react';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { PostProcessingWebGPU } from '#components/geometry/graphics/three/post-processing-webgpu.js';
+import { PostProcessingWebGL } from '#components/geometry/graphics/three/post-processing-webgl.js';
 
 /**
  * When ambient occlusion / GTAO post-processing is off, R3F still needs a terminal
@@ -55,9 +55,5 @@ export function PostProcessing(): ReactNode {
     return <PostProcessingWebGPU />;
   }
 
-  return (
-    <EffectComposer stencilBuffer multisampling={4}>
-      <N8AO screenSpaceRadius aoRadius={24} intensity={1} distanceFalloff={0} />
-    </EffectComposer>
-  );
+  return <PostProcessingWebGL />;
 }

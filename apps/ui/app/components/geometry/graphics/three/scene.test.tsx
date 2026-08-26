@@ -6,6 +6,7 @@ import { createActor, fromPromise } from 'xstate';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import CameraControlsImpl from 'camera-controls';
 import * as THREE from 'three';
+import { perspectiveVerticalSpan } from '@taucad/camera';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
 import { Scene } from '#components/geometry/graphics/three/scene.js';
 import { GraphicsProvider } from '#hooks/use-graphics.js';
@@ -151,7 +152,10 @@ describe('Scene camera lifecycle', () => {
 
       const cameras = new Set(samples.map((sample) => sample.camera));
       const controlsInstances = new Set(samples.map((sample) => sample.controls).filter(Boolean));
-      expect(cameras.size).toBe(1);
+      // This low-level R3F harness must configure a bootstrap camera before it can
+      // render GraphicsProvider; production Canvas is covered by ThreeCanvasInstance's
+      // first-frame rig-camera regression.
+      expect(cameras.size).toBe(2);
       expect(controlsInstances.size).toBe(1);
       expect(controls.camera).toBe(finalCamera);
 
@@ -168,11 +172,14 @@ describe('Scene camera lifecycle', () => {
       expect(finalCamera.zoom).toBeCloseTo(framedZoom, 10);
       expect(controls.getTarget(new THREE.Vector3())).toEqual(expectedTarget);
 
-      await expect.poll(() => graphicsActor.getSnapshot().context.cameraPosition).toBeCloseTo(controls.distance, 10);
+      const visibleSpan = perspectiveVerticalSpan({
+        distance: controls.distance,
+        verticalFieldOfView: finalCamera.fov,
+        zoom: finalCamera.zoom,
+      });
+      await expect.poll(() => graphicsActor.getSnapshot().context.cameraVisibleSpan).toBeCloseTo(visibleSpan, 10);
       const graphicsContext = graphicsActor.getSnapshot().context;
-      expect(graphicsContext.cameraFovAngleComputed).toBeCloseTo(finalCamera.getEffectiveFOV(), 10);
-      expect(graphicsContext.gridSizesComputed.baseSize).toBeCloseTo(controls.distance, 10);
-      expect(graphicsContext.gridSizesComputed.fov).toBeCloseTo(finalCamera.getEffectiveFOV(), 10);
+      expect(graphicsContext.gridSizesComputed.baseSize).toBeCloseTo(visibleSpan, 10);
       expect(graphicsContext.gridSizesComputed).not.toMatchObject({ smallSize: 0.1, largeSize: 1 });
     } finally {
       await act(async () => {

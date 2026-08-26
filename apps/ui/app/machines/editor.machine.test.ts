@@ -230,6 +230,12 @@ describe('editorMachine', () => {
       const oldMainUnitId = 'file:src/main.ts';
       const newMainUnitId = 'file:src/index.ts';
       const otherUnitId = 'file:src/other.ts';
+      const cameraView = {
+        target: [3, 4, 5],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 12,
+      } as const;
       const actor = await startAndLoad({
         loadResult: {
           ...stubEditorState,
@@ -245,6 +251,7 @@ describe('editorMachine', () => {
                     [otherUnitId]: { hiddenComponentIds: ['component:Other'] },
                   },
                 },
+                cameraView,
               },
             },
           },
@@ -255,6 +262,7 @@ describe('editorMachine', () => {
 
       const settings = actor.getSnapshot().context.viewSettings['view1'];
       expect(settings?.entryPath).toBe('src/index.ts');
+      expect(settings?.graphicsSettings.cameraView).toEqual(cameraView);
       expect(settings?.graphicsSettings.componentDisplay).toEqual({
         schemaVersion: 1,
         unitsById: {

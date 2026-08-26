@@ -1,8 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useCameraCapability } from '#hooks/use-graphics.js';
-import { syncCameraControlsUp } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
+import { useCameraRig } from '#hooks/use-graphics.js';
+import {
+  resolveCameraUp,
+  syncCameraControlsUp,
+} from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 
 type UpDirectionHandlerProperties = {
   readonly upDirection: 'x' | 'y' | 'z';
@@ -13,10 +16,12 @@ type UpDirectionHandlerProperties = {
  * Must be inside the Canvas component to access the Three.js context.
  */
 export function UpDirectionHandler({ upDirection }: UpDirectionHandlerProperties): undefined {
-  const { camera, scene, controls, invalidate } = useThree();
-  const cameraCapabilityActor = useCameraCapability();
+  const get = useThree((state) => state.get);
+  const cameraRig = useCameraRig();
+  const previousUpDirectionRef = useRef<typeof upDirection | undefined>(undefined);
 
   useEffect(() => {
+    const { camera, scene, controls, invalidate } = get();
     // Define the new up direction based on the selected axis
     // x: X-up (1, 0, 0) - Alternative coordinate system
     // y: Y-up (0, 1, 0) - Standard Three.js
@@ -31,9 +36,22 @@ export function UpDirectionHandler({ upDirection }: UpDirectionHandlerProperties
     // Set the global default for new objects
     THREE.Object3D.DEFAULT_UP.copy(newUp);
 
+    const {
+      context: { view },
+    } = cameraRig.actorRef.getSnapshot();
+    const isInitialSetup = previousUpDirectionRef.current === undefined;
+    previousUpDirectionRef.current = upDirection;
+    const cameraUp = isInitialSetup
+      ? new THREE.Vector3(...view.up)
+      : resolveCameraUp({
+          direction: new THREE.Vector3(...view.direction),
+          preferredUp: newUp,
+          fallbackUp: new THREE.Vector3(...view.up),
+        });
+
     // Update the camera's up vector and CameraControls' cached up-space before
     // any target/lookAt/reset work re-encodes spherical state.
-    syncCameraControlsUp({ camera, controls: controls ?? undefined, up: newUp });
+    syncCameraControlsUp({ camera, controls: controls ?? undefined, up: cameraUp });
 
     // Set up vectors on all objects without matrix updates during traverse,
     // then call updateMatrixWorld once on the scene root. This reduces O(N²)
@@ -45,12 +63,19 @@ export function UpDirectionHandler({ upDirection }: UpDirectionHandlerProperties
 
     camera.updateProjectionMatrix();
 
-    // Trigger a camera reset to properly position the camera for the new up direction
-    cameraCapabilityActor.send({ type: 'reset' });
+    if (!isInitialSetup) {
+      cameraRig.actorRef.send({
+        type: 'setView',
+        target: view.target,
+        direction: view.direction,
+        up: [cameraUp.x, cameraUp.y, cameraUp.z],
+        verticalSpan: view.verticalSpan,
+      });
+    }
 
     // Force a render
     invalidate();
-  }, [upDirection, camera, scene, controls, invalidate, cameraCapabilityActor]);
+  }, [upDirection, get, cameraRig]);
 
   return undefined;
 }

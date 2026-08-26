@@ -3,9 +3,9 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-type GraphicsState = {
+type CameraState = {
   readonly context: {
-    readonly cameraFovAngle: number;
+    readonly view: { readonly requestedVerticalFieldOfView: number };
   };
 };
 
@@ -15,13 +15,14 @@ type SliderProps = {
 };
 
 const mocks = vi.hoisted(() => ({
-  graphicsSend: vi.fn(),
+  cameraSend: vi.fn(),
   modifiers: { shift: false },
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphics: () => ({ send: mocks.graphicsSend }),
-  useGraphicsSelector: <T,>(selector: (state: GraphicsState) => T): T => selector({ context: { cameraFovAngle: 42 } }),
+  useCameraRig: () => ({ actorRef: { send: mocks.cameraSend } }),
+  useCameraSelector: <T,>(selector: (state: CameraState) => T): T =>
+    selector({ context: { view: { requestedVerticalFieldOfView: 42 } } }),
 }));
 
 vi.mock('#hooks/use-keyboard.js', () => ({
@@ -58,6 +59,8 @@ describe('FovControl', () => {
     expect(screen.getByTestId('fov-slider')).toHaveAttribute('data-step', '1');
     expect(screen.getByTestId('tooltip-content')).toHaveTextContent(/Hold .* for 5\u00B0 steps/);
     expect(screen.getByTestId('tooltip-content')).not.toHaveTextContent(/Release .* for 1\u00B0 steps/);
+    screen.getByTestId('fov-slider').click();
+    expect(mocks.cameraSend).toHaveBeenCalledWith({ type: 'setVerticalFieldOfView', verticalFieldOfView: 30 });
   });
 
   it('shows the 1-degree helper text while using 5-degree steps when Shift is held', () => {

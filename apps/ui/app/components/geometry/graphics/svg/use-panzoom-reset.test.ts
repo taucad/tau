@@ -5,10 +5,12 @@ import { usePanzoomReset } from '#components/geometry/graphics/svg/use-panzoom-r
 
 // ── Controllable mocks ───────────────────────────────────────────────────────
 
-const mockSend = vi.fn();
+const mockUnsubscribe = vi.fn();
+const mockOn = vi.fn(() => ({ unsubscribe: mockUnsubscribe }));
+const mockGraphicsActor = { on: mockOn };
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useCameraCapability: () => ({ send: mockSend }),
+  useGraphics: () => mockGraphicsActor,
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -58,7 +60,8 @@ function createMockContainer(rect: Partial<DOMRect> = {}): HTMLDivElement {
 // ── Setup ────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
-  mockSend.mockClear();
+  mockOn.mockClear();
+  mockUnsubscribe.mockClear();
 });
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -67,16 +70,17 @@ describe('usePanzoomReset', () => {
   // ── Registration ─────────────────────────────────────────────────────────
 
   describe('registration', () => {
-    it('registers the reset function with the camera capability actor on mount', () => {
+    it('subscribes to the renderer-neutral reset event on mount', () => {
       const panzoomRef = { current: createMockPanzoomInstance() };
       const containerRef = { current: createMockContainer() };
 
       renderHook(() => usePanzoomReset({ panzoomRef, containerRef }));
 
-      expect(mockSend).toHaveBeenCalledTimes(1);
-      expect(mockSend).toHaveBeenCalledWith(
+      expect(mockOn).toHaveBeenCalledTimes(1);
+      expect(mockOn).toHaveBeenCalledWith(
+        'viewResetRequested',
         // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.any() returns AsymmetricMatcher typed as any
-        { type: 'registerReset', reset: expect.any(Function) },
+        expect.any(Function),
       );
     });
 
@@ -89,7 +93,7 @@ describe('usePanzoomReset', () => {
       rerender();
       rerender();
 
-      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(mockOn).toHaveBeenCalledTimes(1);
     });
   });
 

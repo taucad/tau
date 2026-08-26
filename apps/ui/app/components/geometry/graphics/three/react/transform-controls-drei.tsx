@@ -3,7 +3,15 @@ import { useThree } from '@react-three/fiber';
 import * as React from 'react';
 import * as THREE from 'three';
 import type { ForwardRefComponent } from '@react-three/drei/helpers/ts-utils.js';
-import { TransformControls as TransformControlsImpl } from '#components/geometry/graphics/three/controls/transform-controls.js';
+import type {
+  TransformControlsAxis,
+  TransformControlsMode,
+} from '#components/geometry/graphics/three/controls/transform-controls.js';
+import {
+  TransformControls as TransformControlsImpl,
+  isTransformControlsAxis,
+} from '#components/geometry/graphics/three/controls/transform-controls.js';
+import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.js';
 
 type ControlsProto = {
   enabled: boolean;
@@ -21,15 +29,15 @@ function isTransformControlsDomElement(value: unknown): value is HTMLElement {
   );
 }
 
-export type TransformControlsProps = Omit<ThreeElement<typeof TransformControlsImpl>, 'ref' | 'args'> &
+export type TransformControlsProps = Omit<ThreeElement<typeof TransformControlsImpl>, 'ref' | 'args' | 'object'> &
   Omit<ThreeElements['group'], 'ref'> & {
-    readonly object?: THREE.Object3D | React.RefObject<THREE.Object3D>;
+    readonly object?: THREE.Object3D | React.RefObject<THREE.Object3D | undefined>;
     // oxlint-disable-next-line react-js/boolean-prop-naming -- third-party component prop
     readonly enabled?: boolean;
-    readonly axis?: string | undefined;
+    readonly axis?: TransformControlsAxis | undefined;
     readonly highlightAxis?: string | undefined;
     readonly domElement?: HTMLElement;
-    readonly mode?: 'translate' | 'rotate' | 'scale';
+    readonly mode?: TransformControlsMode;
     readonly translationSnap?: number | undefined;
     readonly rotationSnap?: number | undefined;
     readonly scaleSnap?: number | undefined;
@@ -46,7 +54,7 @@ export type TransformControlsProps = Omit<ThreeElement<typeof TransformControlsI
     readonly onChange?: (event?: THREE.Event) => void;
     readonly onPointerDown?: (event?: THREE.Event) => void;
     readonly onPointerUp?: (event?: THREE.Event) => void;
-    readonly onAxisChange?: (axis: string | undefined, event?: THREE.Event) => void;
+    readonly onAxisChange?: (axis: TransformControlsAxis | undefined, event?: THREE.Event) => void;
     readonly onObjectChange?: (event?: THREE.Event) => void;
     readonly makeDefault?: boolean;
   };
@@ -86,22 +94,31 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
       const defaultControls = rawControls && 'enabled' in rawControls ? (rawControls as ControlsProto) : undefined;
       const gl = useThree((state) => state.gl);
       const events = useThree((state) => state.events);
-      const defaultCamera = useThree((state) => state.camera);
       const invalidate = useThree((state) => state.invalidate);
       const get = useThree((state) => state.get);
       const set = useThree((state) => state.set);
-      const explCamera = camera ?? defaultCamera;
+      const cameraRig = useCameraRig();
+      const explCamera = camera ?? cameraRig.activeCamera;
       const explDomElement =
         domElement ?? (isTransformControlsDomElement(events.connected) ? events.connected : gl.domElement);
+      const initialCameraRef = React.useRef(explCamera);
       const controls = React.useMemo(
-        () => new TransformControlsImpl(explCamera, explDomElement),
-        [explCamera, explDomElement],
+        () => new TransformControlsImpl(initialCameraRef.current, explDomElement),
+        [explDomElement],
       );
+      const retargetCamera = React.useCallback(
+        (activeCamera: THREE.Camera): void => {
+          controls.camera = camera ?? activeCamera;
+        },
+        [camera, controls],
+      );
+      useCameraRetarget(retargetCamera);
       const group = React.useRef<THREE.Group>(null!);
 
       React.useLayoutEffect(() => {
-        if (object) {
-          controls.attach(object instanceof THREE.Object3D ? object : object.current);
+        const target = object instanceof THREE.Object3D ? object : object?.current;
+        if (target instanceof THREE.Object3D) {
+          controls.attach(target);
         } else if (group.current instanceof THREE.Object3D) {
           controls.attach(group.current);
         }
@@ -113,14 +130,14 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
 
       React.useEffect(() => {
         if (defaultControls) {
-          const callback = (event: { value: boolean }) => {
-            defaultControls.enabled = !event.value;
+          const callback = (event: { value: unknown }) => {
+            if (typeof event.value === 'boolean') {
+              defaultControls.enabled = !event.value;
+            }
           };
 
-          // @ts-expect-error -- adding a new event.
           controls.addEventListener('dragging-changed', callback);
           return () => {
-            // @ts-expect-error -- adding a new event.
             controls.removeEventListener('dragging-changed', callback);
           };
         }
@@ -133,9 +150,9 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
       const onChangeRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
       const onPointerDownRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
       const onPointerUpRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
-      const onAxisChangeRef = React.useRef<((axis: string | undefined, event?: THREE.Event) => void) | undefined>(
-        undefined,
-      );
+      const onAxisChangeRef = React.useRef<
+        ((axis: TransformControlsAxis | undefined, event?: THREE.Event) => void) | undefined
+      >(undefined);
       const onObjectChangeRef = React.useRef<((event?: THREE.Event) => void) | undefined>(undefined);
 
       React.useLayoutEffect(() => {
@@ -155,7 +172,7 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
       }, [onObjectChange]);
 
       React.useLayoutEffect(() => {
-        (controls as TransformControlsImpl & { highlightAxis: string | undefined }).highlightAxis = highlightAxis;
+        controls.highlightAxis = highlightAxis;
       }, [controls, highlightAxis]);
 
       React.useEffect(() => {
@@ -166,30 +183,24 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
 
         const onPointerDown = (event: THREE.Event) => onPointerDownRef.current?.(event);
         const onPointerUp = (event: THREE.Event) => onPointerUpRef.current?.(event);
-        const onAxisChange = (event: THREE.Event & { value?: string }) => onAxisChangeRef.current?.(event.value, event);
+        const onAxisChange = (event: THREE.Event & { value: unknown }) => {
+          const axis =
+            typeof event.value === 'string' && isTransformControlsAxis(event.value) ? event.value : undefined;
+          onAxisChangeRef.current?.(axis, event);
+        };
         const onObjectChange = (event: THREE.Event) => onObjectChangeRef.current?.(event);
 
-        // @ts-expect-error -- newly added events
         controls.addEventListener('change', onChange);
-        // @ts-expect-error -- newly added events
         controls.addEventListener('pointerDown', onPointerDown);
-        // @ts-expect-error -- newly added events
         controls.addEventListener('pointerUp', onPointerUp);
-        // @ts-expect-error -- newly added events
         controls.addEventListener('axis-changed', onAxisChange);
-        // @ts-expect-error -- newly added events
         controls.addEventListener('objectChange', onObjectChange);
 
         return () => {
-          // @ts-expect-error -- newly added events
           controls.removeEventListener('change', onChange);
-          // @ts-expect-error -- newly added events
           controls.removeEventListener('pointerDown', onPointerDown);
-          // @ts-expect-error -- newly added events
           controls.removeEventListener('pointerUp', onPointerUp);
-          // @ts-expect-error -- newly added events
           controls.removeEventListener('axis-changed', onAxisChange);
-          // @ts-expect-error -- newly added events
           controls.removeEventListener('objectChange', onObjectChange);
         };
       }, [invalidate, controls]);

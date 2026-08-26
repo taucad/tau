@@ -7,8 +7,8 @@ import { Line2 as Line2WebGpu } from 'three/addons/lines/webgpu/Line2.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import { axesHelperColors, axesHelperOpacity } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
-import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
+import { useCameraRig } from '#hooks/use-graphics.js';
 
 /**
  * Shared origin used as one endpoint of the drei `<Line>` points array on the WebGL
@@ -90,8 +90,8 @@ export function AxesWebGpuFatLine({
   thickness,
 }: AxesWebGpuFatLineProps): React.JSX.Element {
   const gl = useThree((state) => state.gl);
-  const camera = useThree((state) => state.camera);
   const invalidate = useThree((state) => state.invalidate);
+  const cameraRig = useCameraRig();
 
   const resources = React.useMemo<FatLineResources>(() => {
     const material = new Line2NodeMaterial({
@@ -137,7 +137,10 @@ export function AxesWebGpuFatLine({
     // ensures a teardown before resolution is a no-op.
     void (async () => {
       try {
-        await compile.call(renderer, resources.group, camera);
+        await Promise.all([
+          compile.call(renderer, resources.group, cameraRig.perspectiveCamera),
+          compile.call(renderer, resources.group, cameraRig.orthographicCamera),
+        ]);
       } catch (error) {
         console.error('AxesWebGpuFatLine pipeline warm-up failed', error);
         return;
@@ -151,7 +154,7 @@ export function AxesWebGpuFatLine({
     return () => {
       cancellation.cancelled = true;
     };
-  }, [camera, gl, invalidate, resources]);
+  }, [cameraRig, gl, invalidate, resources]);
 
   React.useEffect(
     () => () => {
@@ -196,7 +199,7 @@ export function AxesHelper({
   }, [size, xAxisColor, yAxisColor, zAxisColor]);
 
   return (
-    <group userData={sceneTagData(sceneTag.previewOnly)}>
+    <group>
       {axes.map((axis) => {
         return (
           <React.Fragment key={axis.id}>

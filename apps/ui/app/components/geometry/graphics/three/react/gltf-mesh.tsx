@@ -14,6 +14,8 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  WebGLCoordinateSystem,
+  WebGPUCoordinateSystem,
 } from 'three';
 import { useThree } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
@@ -45,7 +47,7 @@ import {
   getModelComponentIdInHierarchy,
   setModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
-import { useGraphics, useModelInteractionRef, useModelInteractionSelector } from '#hooks/use-graphics.js';
+import { useCameraRig, useGraphics, useModelInteractionRef, useModelInteractionSelector } from '#hooks/use-graphics.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
@@ -1086,6 +1088,7 @@ export function GltfMesh({
   const modelInteractionRef = useModelInteractionRef();
   const graphicsBackendThree = useThreeGraphicsBackend();
   const sectionView = useSectionView();
+  const cameraRig = useCameraRig();
   // The "base scene" is the parsed GLTF with line segments converted but no material overrides.
   // It serves as the template from which material modes (matcap/original) are derived.
   const [baseScene, setBaseScene] = useState<Group | undefined>(undefined);
@@ -1219,11 +1222,21 @@ export function GltfMesh({
         // is absent, so the guard skips the call entirely.
         const renderer = gl as unknown as {
           compileAsync?: (scene: Object3D, camera: Camera) => Promise<unknown>;
+          coordinateSystem?: unknown;
         };
-        const compile = renderer.compileAsync;
+        const { compileAsync: compile, coordinateSystem } = renderer;
         if (typeof compile === 'function') {
           try {
-            await compile.call(renderer, gltf.scene, camera);
+            const endpointCameras = [cameraRig.perspectiveCamera, cameraRig.orthographicCamera];
+            if (coordinateSystem === WebGLCoordinateSystem || coordinateSystem === WebGPUCoordinateSystem) {
+              for (const endpointCamera of endpointCameras) {
+                endpointCamera.coordinateSystem = coordinateSystem;
+                endpointCamera.updateProjectionMatrix();
+              }
+            }
+            await Promise.all(
+              endpointCameras.map(async (endpointCamera) => compile.call(renderer, gltf.scene, endpointCamera)),
+            );
           } catch (error) {
             console.error('GLTF pipeline warm-up failed', error);
           }
@@ -1265,12 +1278,12 @@ export function GltfMesh({
     graphicsBackendThree,
     invalidate,
     gl,
-    camera,
     graphicsActor,
     modelInteractionRef,
     sourceFile,
     geometryHash,
     unitId,
+    cameraRig,
   ]);
 
   // Theme-aware edge tint without re-parsing the GLTF binary.

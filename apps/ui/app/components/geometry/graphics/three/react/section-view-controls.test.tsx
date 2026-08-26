@@ -13,6 +13,37 @@ import {
 import { sceneTag, hasSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
+const cameraMocks = vi.hoisted(() => ({
+  rig: undefined as unknown as {
+    activeCamera: THREE.Camera;
+    perspectiveCamera: THREE.PerspectiveCamera;
+    orthographicCamera: THREE.OrthographicCamera;
+  },
+  retargeters: new Set<(camera: THREE.Camera) => void>(),
+}));
+
+vi.mock('#hooks/use-graphics.js', async () => {
+  const three = await import('three');
+  const perspectiveCamera = new three.PerspectiveCamera();
+  cameraMocks.rig = {
+    activeCamera: perspectiveCamera,
+    perspectiveCamera,
+    orthographicCamera: new three.OrthographicCamera(),
+  };
+  return {
+    useCameraRig: () => cameraMocks.rig,
+    useCameraRetarget: (retarget: (camera: THREE.Camera) => void) => {
+      React.useLayoutEffect(() => {
+        cameraMocks.retargeters.add(retarget);
+        retarget(cameraMocks.rig.activeCamera);
+        return () => {
+          cameraMocks.retargeters.delete(retarget);
+        };
+      }, [retarget]);
+    },
+  };
+});
+
 function createStubWebGlRenderer(): WebGLRenderer {
   const canvas = document.createElement('canvas');
   canvas.width = 800;
@@ -217,6 +248,47 @@ describe('SectionViewControls', () => {
       }
     } finally {
       cleanup();
+    }
+  });
+
+  it('should retain transform-control identity and attachment across camera endpoint switches', async () => {
+    const { scene, cleanup } = await renderSectionViewControls(
+      <SectionViewControls
+        {...baseProperties()}
+        availablePlanes={[{ id: 'xy', normal: [0, 0, 1], constant: 0 }]}
+        pivot={[0, 0, 0]}
+        selectedPlaneId='xy'
+      />,
+    );
+    try {
+      const controls: TransformControlsImpl[] = [];
+      scene.traverse((child) => {
+        if (child instanceof TransformControlsImpl) {
+          controls.push(child as TransformControlsImpl);
+        }
+      });
+      const attachments = controls.map((control) => control.object);
+
+      act(() => {
+        cameraMocks.rig.activeCamera = cameraMocks.rig.orthographicCamera;
+        for (const retarget of cameraMocks.retargeters) {
+          retarget(cameraMocks.rig.activeCamera);
+        }
+      });
+
+      const afterSwitch: TransformControlsImpl[] = [];
+      scene.traverse((child) => {
+        if (child instanceof TransformControlsImpl) {
+          afterSwitch.push(child as TransformControlsImpl);
+        }
+      });
+      expect(afterSwitch).toEqual(controls);
+      expect(afterSwitch.map((control) => control.object)).toEqual(attachments);
+      expect(afterSwitch.every((control) => control.camera === cameraMocks.rig.orthographicCamera)).toBe(true);
+    } finally {
+      cleanup();
+      cameraMocks.retargeters.clear();
+      cameraMocks.rig.activeCamera = cameraMocks.rig.perspectiveCamera;
     }
   });
 

@@ -5,7 +5,6 @@ import type { PanzoomObject } from '@panzoom/panzoom';
 import type { GeometrySvg } from '@taucad/types';
 // @ts-expect-error - no types available for the ESM build.
 import panzoom from '@panzoom/panzoom/dist/panzoom.es.js';
-import { SvgActorBridge } from '#components/geometry/graphics/svg/svg-actor-bridge.js';
 import { usePanzoomReset } from '#components/geometry/graphics/svg/use-panzoom-reset.js';
 import { axesColors } from '#constants/color.constants.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
@@ -367,10 +366,8 @@ function SvgWindow({ viewBox, innerHtml, enableGrid, enableAxes, defaultColor, s
       const scale = instance.getScale();
       setTransform({ scale, x: 0, y: 0 });
       graphicsActor.send({
-        type: 'controlsChanged',
-        zoom: scale,
-        position: currentViewBox.height / scale,
-        fov: 60,
+        type: 'cameraViewChanged',
+        verticalSpan: currentViewBox.height / scale,
       });
     },
     [graphicsActor],
@@ -517,7 +514,6 @@ export function SvgViewer({ geometry, enableGrid = true, enableAxes = true, defa
         defaultColor={defaultColor}
         svgRef={svgRef}
       />
-      <SvgActorBridge svgRef={svgRef} />
     </div>
   );
 }

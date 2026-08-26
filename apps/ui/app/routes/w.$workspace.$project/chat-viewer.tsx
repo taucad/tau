@@ -171,6 +171,7 @@ export const ChatViewer = memo(function ({
           graphicsSettings: {
             ...(existingGraphics ?? defaultGraphicsSettings),
             // Clear geometry-dependent state on file switch
+            cameraView: undefined,
             pinnedMeasurements: undefined,
           },
         },
@@ -266,7 +267,13 @@ export const ChatViewer = memo(function ({
 
   return (
     <CadProvider cadRef={cadActor}>
-      <GraphicsProvider graphicsRef={graphicsActor}>
+      <GraphicsProvider
+        graphicsRef={graphicsActor}
+        cameraViewRestore={{
+          identity: entryPath,
+          cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
+        }}
+      >
         <ViewerContent viewId={viewId} entryPath={entryPath} panelApi={panelApi} containerApi={containerApi} />
       </GraphicsProvider>
     </CadProvider>
@@ -324,6 +331,7 @@ const ViewerContent = memo(function ({
     graphicsRef: graphicsActor,
     cadRef,
     editorRef,
+    persistCameraView: geometry === undefined ? 'pending' : geometry.format === 'gltf',
   });
 
   // Restore persisted render timeout on mount

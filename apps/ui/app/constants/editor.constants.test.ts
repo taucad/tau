@@ -55,10 +55,17 @@ describe('graphics view settings parsing', () => {
     expect(defaultGraphicsSettings.renderTimeout).toBe(defaultRenderTimeout);
   });
 
-  it('should parse v5 component display state', () => {
+  it('should parse v6 component display and canonical camera state', () => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
-      schemaVersion: 5,
+      schemaVersion: 6,
+      cameraFovAngle: 0,
+      cameraView: {
+        target: [3, 4, 5],
+        direction: [2, 0, 0],
+        up: [0, 0, 4],
+        verticalSpan: 12,
+      },
       componentDisplay: {
         schemaVersion: 1,
         unitsById: {
@@ -71,7 +78,14 @@ describe('graphics view settings parsing', () => {
       },
     });
 
-    expect(settings.schemaVersion).toBe(5);
+    expect(settings.schemaVersion).toBe(6);
+    expect(settings.cameraFovAngle).toBe(0);
+    expect(settings.cameraView).toEqual({
+      target: [3, 4, 5],
+      direction: [1, 0, 0],
+      up: [0, 0, 1],
+      verticalSpan: 12,
+    });
     expect(settings.componentDisplay).toEqual({
       schemaVersion: 1,
       unitsById: {
@@ -84,18 +98,19 @@ describe('graphics view settings parsing', () => {
     });
   });
 
-  it.each([2, 3, 4] as const)('should migrate schema v%s settings to v5', (schemaVersion) => {
+  it.each([2, 3, 4, 5] as const)('should migrate schema v%s settings to v6', (schemaVersion) => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
       schemaVersion,
       graphicsBackend: schemaVersion === 3 ? 'auto' : 'webgl',
     });
 
-    expect(settings.schemaVersion).toBe(5);
+    expect(settings.schemaVersion).toBe(6);
+    expect(settings.cameraView).toBeUndefined();
     expect(settings.graphicsBackend).toBe('webgl');
   });
 
-  it.each([3, 4, 5] as const)('should normalize persisted WebGPU from schema v%s to WebGL', (schemaVersion) => {
+  it.each([3, 4, 5, 6] as const)('should normalize persisted WebGPU from schema v%s to WebGL', (schemaVersion) => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
       schemaVersion,
@@ -103,7 +118,7 @@ describe('graphics view settings parsing', () => {
       enableGrid: false,
     });
 
-    expect(settings.schemaVersion).toBe(5);
+    expect(settings.schemaVersion).toBe(6);
     expect(settings.graphicsBackend).toBe('webgl');
     expect(settings.enableGrid).toBe(false);
   });
@@ -123,6 +138,24 @@ describe('graphics view settings parsing', () => {
     });
 
     expect(settings).toEqual(defaultGraphicsSettings);
+  });
+
+  it.each([
+    { target: [0, 0, Number.POSITIVE_INFINITY], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 2 },
+    { target: [0, 0, 0], direction: [0, 0, 0], up: [0, 0, 1], verticalSpan: 2 },
+    { target: [0, 0, 0], direction: [1, 0, 0], up: [2, 0, 0], verticalSpan: 2 },
+    { target: [0, 0, 0], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 0 },
+  ])('should drop corrupt camera state without discarding other settings', (cameraView) => {
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      schemaVersion: 6,
+      enableGrid: false,
+      cameraFovAngle: 42,
+      cameraView,
+    });
+
+    expect(settings).toMatchObject({ schemaVersion: 6, enableGrid: false, cameraFovAngle: 42 });
+    expect(settings.cameraView).toBeUndefined();
   });
 
   it('should omit empty component display state', () => {

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useLayoutEffect, useRef } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 import { RenderPipeline as ThreeRenderPipeline, UnsignedByteType } from 'three/webgpu';
 import type { WebGPURenderer } from 'three/webgpu';
 import {
@@ -15,12 +15,16 @@ import {
   vec4,
 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
-import type { PerspectiveCamera as ThreePerspectiveCamera } from 'three';
+import type { Camera } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
+import type { ThreeCamera } from '@taucad/three/camera';
+import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.js';
 
 type PostProcessingPipelineResources = Readonly<{
+  camera: ThreeCamera;
   post: InstanceType<typeof ThreeRenderPipeline>;
-  aoNode: { dispose(): void };
+  aoNode: ReturnType<typeof ao>;
+  scenePass: ScenePassWithCompile;
 }>;
 
 /**
@@ -51,27 +55,28 @@ type PostProcessingPipelineResources = Readonly<{
  */
 type ScenePassWithCompile = Readonly<{
   compileAsync(renderer: unknown): Promise<void>;
+  dispose(): void;
 }>;
 
-function PostProcessingWebGpuActive(): ReactNode {
-  const { gl, scene, camera, invalidate } = useThree();
-  const pipelineRef = useRef<PostProcessingPipelineResources | undefined>(undefined);
-  const cancellationRef = useRef<{ cancelled: boolean }>({ cancelled: false });
-
-  useLayoutEffect(() => {
-    const gpuRenderer = gl as unknown as WebGPURenderer;
-    const perspectiveCamera = camera as ThreePerspectiveCamera;
-    const localCancellation = { cancelled: false };
-    cancellationRef.current = localCancellation;
-
-    const scenePass = pass(scene, perspectiveCamera);
+const createPipelineResources = ({
+  camera,
+  gpuRenderer,
+  scene,
+}: {
+  readonly camera: ThreeCamera;
+  readonly gpuRenderer: WebGPURenderer;
+  readonly scene: Parameters<typeof pass>[0];
+}): PostProcessingPipelineResources => {
+  const scenePass = pass(scene, camera);
+  let aoNode: ReturnType<typeof ao> | undefined;
+  let post: InstanceType<typeof ThreeRenderPipeline> | undefined;
+  try {
     scenePass.setMRT(
       mrt({
         // Beauty colour — TSL `output` is the standard fragment output (lit scene colour).
         output,
         // View-space normal encoded into a UNORM8 RGB channel; decoded below before feeding GTAO.
-        // Encoding (vs. storing `normalView` raw) keeps the MRT attachment compact and matches
-        // the existing UnsignedByteType type override applied a few lines down.
+        // Encoding keeps the MRT attachment compact and matches the existing type override.
         normal: directionToColor(normalView),
       }),
     );
@@ -83,57 +88,96 @@ function PostProcessingWebGpuActive(): ReactNode {
     const scenePassNormal = sample((uv) => colorToDirection(scenePass.getTextureNode('normal').sample(uv)));
     const scenePassDepth = scenePass.getTextureNode('depth');
 
-    const aoNode = ao(scenePassDepth, scenePassNormal, perspectiveCamera);
+    aoNode = ao(scenePassDepth, scenePassNormal, camera as Camera);
     aoNode.resolutionScale = 0.5;
-    // D3 (perf audit): temporal direction rotation produces shimmer under `frameloop='demand'` because the
-    // viewport never accumulates frame-to-frame. Re-enable only when we adopt a true history-buffer TAA pass
-    // or switch the canvas to `frameloop='always'`.
+    // Temporal direction rotation shimmers under `frameloop='demand'` because the
+    // viewport never accumulates frame-to-frame.
     aoNode.useTemporalFiltering = false;
     aoNode.radius.value = 0.09;
     aoNode.thickness.value = 1;
-    // D4 (perf audit): 8 samples is the GTAO-paper-recommended real-time floor. CAD geometry is dominated by
-    // planar faces and tolerates undersampling well; bump back to 16 if corner/crevice AO degrades on dense assemblies.
     aoNode.samples.value = 8;
     aoNode.distanceFallOff.value = 1;
 
     const aoTexture = aoNode.getTextureNode();
 
-    const post = new ThreeRenderPipeline(gpuRenderer);
+    post = new ThreeRenderPipeline(gpuRenderer);
     /* oxlint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access -- TSL fluent builder (`.mul`, `.sample`) is typed as `any` in `@types/three`; the runtime shape is verified via the unit + snapshot tests. */
-    // Compose AO multiplicatively with the beauty color; alpha is preserved via the explicit `vec4(_, _, _, 1)` constant.
     post.outputNode = scenePassColor.mul(vec4(vec3(aoTexture.sample(screenUV).r), 1));
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
 
-    // D2 (perf audit): warm the scene render pipeline off the critical path. `PassNode.compileAsync`
-    // precompiles the scene's vertex+fragment pipelines so the first `post.render()` after mount does
-    // not block on shader compile. `RenderPipeline` itself has no compileAsync hook; the composite
-    // quad is comparatively cheap and compiles lazily on its first draw.
-    // async-iife: bootstrap — useLayoutEffect cannot be async; the bootstrap publishes `pipelineRef`
-    // on completion and the `cancelled` flag ensures a teardown before resolution is a no-op.
+    return { camera, post, aoNode, scenePass: scenePass as unknown as ScenePassWithCompile };
+  } catch (error) {
+    post?.dispose();
+    aoNode?.dispose();
+    scenePass.dispose();
+    throw error;
+  }
+};
+
+const disposePipelineResources = (resources: readonly PostProcessingPipelineResources[]): void => {
+  for (const resource of resources) {
+    resource.post.dispose();
+    resource.aoNode.dispose();
+    resource.scenePass.dispose();
+  }
+};
+
+function PostProcessingWebGpuActive(): ReactNode {
+  const { gl, scene, invalidate } = useThree();
+  const cameraRig = useCameraRig();
+  const resourcesRef = useRef<Map<Camera, PostProcessingPipelineResources> | undefined>(undefined);
+  const selectedCameraRef = useRef<ThreeCamera>(cameraRig.activeCamera);
+
+  useLayoutEffect(() => {
+    const gpuRenderer = gl as unknown as WebGPURenderer;
+    const cancellation = { cancelled: false };
+    let resources: PostProcessingPipelineResources[] = [];
+    try {
+      resources.push(
+        createPipelineResources({ camera: cameraRig.perspectiveCamera, gpuRenderer, scene }),
+        createPipelineResources({ camera: cameraRig.orthographicCamera, gpuRenderer, scene }),
+      );
+    } catch (error) {
+      disposePipelineResources(resources);
+      console.error('Failed to create WebGPU post-processing pipelines', error);
+      return undefined;
+    }
+
+    // Publish only after both endpoint scene passes are warm. Until then the stable
+    // priority-1 owner below renders the scene directly with the active camera.
     void (async (): Promise<void> => {
       try {
-        await (scenePass as unknown as ScenePassWithCompile).compileAsync(gpuRenderer);
+        await Promise.all(resources.map((resource) => resource.scenePass.compileAsync(gpuRenderer)));
       } catch (error) {
-        console.error('Failed to warm WebGPU post-processing pipeline', error);
+        console.error('Failed to warm WebGPU post-processing pipelines', error);
         return;
       }
-      if (localCancellation.cancelled) {
+      if (cancellation.cancelled) {
         return;
       }
-      pipelineRef.current = { post, aoNode };
+      resourcesRef.current = new Map(resources.map((resource) => [resource.camera, resource]));
       invalidate();
     })();
 
     return (): void => {
-      localCancellation.cancelled = true;
-      pipelineRef.current = undefined;
-      post.dispose();
-      aoNode.dispose();
+      cancellation.cancelled = true;
+      resourcesRef.current = undefined;
+      disposePipelineResources(resources);
     };
-  }, [gl, scene, camera, invalidate]);
+  }, [cameraRig, gl, invalidate, scene]);
 
-  useFrame(() => {
-    pipelineRef.current?.post.render();
+  const retarget = useCallback((camera: ThreeCamera): void => {
+    selectedCameraRef.current = camera;
+  }, []);
+  useCameraRetarget(retarget);
+
+  useFrame((state) => {
+    const selected = resourcesRef.current?.get(selectedCameraRef.current);
+    if (selected) {
+      selected.post.render();
+      return;
+    }
+    state.gl.render(state.scene, state.camera);
   }, 1);
 
   return null;

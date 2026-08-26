@@ -3,12 +3,25 @@ import * as THREE from 'three';
 import {
   getControlsDistance,
   getControlsListenerEventNames,
+  resolveCameraUp,
   resolveControlsTarget,
   syncCameraControlsUp,
   syncControlsLookAt,
 } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 
 describe('camera-controls-adapter', () => {
+  it('keeps a preferred up axis unless it is parallel to the camera direction', () => {
+    const preferred = new THREE.Vector3(0, 0, 1);
+    expect(resolveCameraUp({ direction: new THREE.Vector3(1, 1, 1), preferredUp: preferred })).toEqual(preferred);
+    expect(
+      resolveCameraUp({
+        direction: new THREE.Vector3(0, 0, 1),
+        preferredUp: preferred,
+        fallbackUp: new THREE.Vector3(0, 1, 0),
+      }),
+    ).toEqual(new THREE.Vector3(0, 1, 0));
+  });
+
   it('should resolve CameraControls target from getTarget', () => {
     const camera = new THREE.PerspectiveCamera();
     camera.position.set(0, 0, 10);

@@ -143,7 +143,7 @@ describe('TransformControlsGizmo section controls rendering contract', () => {
     const bodyMeshes = collectTransformControlBodyMeshes(gizmo);
     const initialColors = bodyMeshes.map((mesh) => mesh.material.color.getHexString());
 
-    (controls as TransformControls<PerspectiveCamera> & { axis: string }).axis = 'X';
+    controls.axis = 'X';
     controls.updateMatrixWorld();
 
     expect(bodyMeshes.map((mesh) => mesh.material.color.getHexString())).toEqual(initialColors);
@@ -158,16 +158,16 @@ describe('TransformControlsGizmo section controls rendering contract', () => {
 
     translateControls.setMode('translate');
     rotateControls.setMode('rotate');
-    (translateControls as unknown as { highlightAxis: string }).highlightAxis = 'Z';
-    (rotateControls as unknown as { highlightAxis: string }).highlightAxis = 'Z';
+    translateControls.highlightAxis = 'Z';
+    rotateControls.highlightAxis = 'Z';
     translateControls.updateMatrixWorld();
     rotateControls.updateMatrixWorld();
 
     const translateMeshes = collectTransformControlBodyMeshesForMode(translateGizmo, 'translate');
     const rotateMeshes = collectTransformControlBodyMeshesForMode(rotateGizmo, 'rotate');
 
-    expect((translateControls as unknown as { axis?: string }).axis).toBeUndefined();
-    expect((rotateControls as unknown as { axis?: string }).axis).toBeUndefined();
+    expect(translateControls.axis).toBeUndefined();
+    expect(rotateControls.axis).toBeUndefined();
     expect(translateMeshes.filter((mesh) => mesh.name === 'Y').every((mesh) => mesh.material.opacity < 1)).toBe(true);
     expect(translateMeshes.filter((mesh) => mesh.name === 'Z').every((mesh) => mesh.material.opacity === 1)).toBe(true);
     expect(rotateMeshes.filter((mesh) => mesh.name === 'X').every((mesh) => mesh.material.opacity < 1)).toBe(true);
@@ -180,7 +180,7 @@ describe('TransformControlsGizmo section controls rendering contract', () => {
     const { gizmo } = controls as unknown as { readonly gizmo: TransformControlsGizmo };
     const translateMeshes = collectTransformControlBodyMeshesForMode(gizmo, 'translate');
 
-    (controls as TransformControls<PerspectiveCamera> & { axis: string }).axis = 'Z';
+    controls.axis = 'Z';
     controls.updateMatrixWorld();
 
     expect(translateMeshes.filter((mesh) => mesh.name === 'X').every((mesh) => mesh.material.opacity < 1)).toBe(true);
@@ -190,7 +190,7 @@ describe('TransformControlsGizmo section controls rendering contract', () => {
     domElement.dispatchEvent(new Event('pointerleave'));
     controls.updateMatrixWorld();
 
-    expect((controls as unknown as { axis?: string }).axis).toBeUndefined();
+    expect(controls.axis).toBeUndefined();
     expect(translateMeshes.every((mesh) => mesh.material.opacity === 1)).toBe(true);
     expect(translateMeshes.every((mesh) => !mesh.material.transparent)).toBe(true);
   });
@@ -200,7 +200,7 @@ describe('TransformControlsGizmo section controls rendering contract', () => {
     const { gizmo } = controls as unknown as { readonly gizmo: TransformControlsGizmo };
     const translateMeshes = collectTransformControlBodyMeshesForMode(gizmo, 'translate');
 
-    (controls as TransformControls<PerspectiveCamera> & { axis: string }).axis = 'Z';
+    controls.axis = 'Z';
     controls.updateMatrixWorld();
 
     expect(translateMeshes.filter((mesh) => mesh.name === 'X').every((mesh) => mesh.material.opacity < 1)).toBe(true);
@@ -209,18 +209,18 @@ describe('TransformControlsGizmo section controls rendering contract', () => {
     dispatchMousePointerMove(domElement.ownerDocument, 150, 50);
     controls.updateMatrixWorld();
 
-    expect((controls as unknown as { axis?: string }).axis).toBeUndefined();
+    expect(controls.axis).toBeUndefined();
     expect(translateMeshes.every((mesh) => mesh.material.opacity === 1)).toBe(true);
   });
 
   it('should keep the active drag axis when the pointer leaves the viewport control element mid-drag', () => {
     const { controls, domElement } = createAttachedControlsFixture();
 
-    (controls as TransformControls<PerspectiveCamera> & { axis: string }).axis = 'Z';
-    (controls as unknown as { dragging: boolean }).dragging = true;
+    controls.axis = 'Z';
+    controls.dragging = true;
 
     domElement.dispatchEvent(new Event('pointerleave'));
 
-    expect((controls as unknown as { axis?: string }).axis).toBe('Z');
+    expect(controls.axis).toBe('Z');
   });
 });

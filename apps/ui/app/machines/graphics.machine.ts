@@ -69,11 +69,10 @@ export type GraphicsContext = {
   /** Whether the grid size should be locked to the computed value */
   isGridSizeLocked: boolean;
 
-  // Camera state (library-agnostic)
-  cameraFovAngle: number; // The FOV set by the user
-  cameraFovAngleComputed: number; // The FOV computed from the camera position and fov
-  cameraPosition: number;
-  currentZoom: number;
+  /** Immutable seed used only when the provider constructs its camera actor. */
+  initialCameraFovAngle: number;
+  /** Projection-neutral visible vertical span supplied by the active renderer. */
+  cameraVisibleSpan: number;
   geometryRadius: number;
   sceneRadius: number | undefined;
 
@@ -136,11 +135,9 @@ export type GraphicsContext = {
 
   // Capability registrations
   screenshotCapability?: AnyActorRef;
-  cameraCapability?: AnyActorRef;
 
   // State flags
   isScreenshotReady: boolean;
-  isCameraReady: boolean;
   cameraInteracting: boolean;
   cameraInteractionHadMovement: boolean;
   suppressNextModelPointerClick: boolean;
@@ -169,9 +166,8 @@ export type GraphicsEvent =
   | { type: 'setGridSizeLocked'; payload: boolean }
   | { type: 'setGridUnit'; payload: { unit: LengthSymbol } }
   // Camera events
-  | { type: 'setFovAngle'; payload: number }
-  | { type: 'resetCamera'; options?: { enableConfiguredAngles?: boolean } }
-  | { type: 'cameraResetCompleted' }
+  | { type: 'resetCamera' }
+  | { type: 'cameraViewChanged'; verticalSpan: number }
   // Visibility events
   | { type: 'setSurfaceVisibility'; payload: boolean }
   | { type: 'setLinesVisibility'; payload: boolean }
@@ -216,16 +212,7 @@ export type GraphicsEvent =
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsInteractionMoved' }
-  | {
-      type: 'controlsChanged';
-      zoom: number;
-      position: number;
-      fov: number;
-    }
-  | {
-      type: 'controlsInteractionEnd';
-      zoom: number;
-    }
+  | { type: 'controlsInteractionEnd' }
   | {
       type: 'beginViewerModelHoverSuppression';
       reason: ViewerHoverSuppressionReason;
@@ -249,9 +236,7 @@ export type GraphicsEvent =
   | { type: 'screenshotFailed'; error: string; requestId: string }
   // Capability registration
   | { type: 'registerScreenshotCapability'; actorRef: AnyActorRef }
-  | { type: 'registerCameraCapability'; actorRef: AnyActorRef }
   | { type: 'unregisterScreenshotCapability' }
-  | { type: 'unregisterCameraCapability' }
   // Geometry updates from CAD
   | {
       type: 'updateGeometry';
@@ -298,7 +283,7 @@ export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
   | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
   | { type: 'screenshotFailed'; error: string; requestId: string }
-  | { type: 'cameraResetCompleted' }
+  | { type: 'viewResetRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number };
 
 // Input type
@@ -386,18 +371,15 @@ const baseGridSizeCoefficient = 3;
 
 // Grid size calculation logic (ported from React)
 function calculateGridSizes({
-  cameraPosition,
-  cameraFov,
+  visibleSpan,
   gridUnitSystem,
   unitFactor,
 }: {
-  cameraPosition: number;
-  cameraFov: number;
+  visibleSpan: number;
   gridUnitSystem: 'si' | 'imperial';
   unitFactor: number;
 }): GridSizes {
-  const visibleWidthAtDistance = 2 * cameraPosition * Math.tan((cameraFov * Math.PI) / 360);
-  let baseGridSize = visibleWidthAtDistance / baseGridSizeCoefficient;
+  let baseGridSize = visibleSpan / baseGridSizeCoefficient;
 
   let scalingFactor;
   if (gridUnitSystem === 'imperial') {
@@ -421,8 +403,7 @@ function calculateGridSizes({
     smallSize,
     largeSize: safeSize,
     effectiveSize: baseGridSize,
-    baseSize: cameraPosition,
-    fov: cameraFov,
+    baseSize: visibleSpan,
   };
 }
 
@@ -650,8 +631,7 @@ export const graphicsMachine = setup({
         // Use relative factor × 1000 for grid calculations
         const gridUnitFactor = relativeFactor * 1000;
         const newGridSizes = calculateGridSizes({
-          cameraPosition: context.cameraPosition,
-          cameraFov: context.cameraFovAngleComputed,
+          visibleSpan: context.cameraVisibleSpan,
           gridUnitSystem: unitData.system,
           unitFactor: gridUnitFactor,
         });
@@ -663,28 +643,19 @@ export const graphicsMachine = setup({
       }
     }),
 
-    setFovAngle: assign({
-      cameraFovAngle({ event }) {
-        assertEvent(event, 'setFovAngle');
-        return event.payload;
-      },
-    }),
-
-    handleControlsChange: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'controlsChanged');
+    handleCameraViewChange: enqueueActions(({ enqueue, event, context }) => {
+      assertEvent(event, 'cameraViewChanged');
+      if (!Number.isFinite(event.verticalSpan) || event.verticalSpan <= 0) {
+        return;
+      }
 
       enqueue.assign({
-        currentZoom: event.zoom,
-        cameraPosition: event.position,
-        cameraFovAngleComputed: event.fov,
+        cameraVisibleSpan: event.verticalSpan,
       });
 
-      // Recalculate grid sizes based on new controls state
-      // Use relative factor × 1000 for grid calculations
       const gridUnitFactor = context.units.length.factor * 1000;
       const newGridSizes = calculateGridSizes({
-        cameraPosition: event.position,
-        cameraFov: event.fov,
+        visibleSpan: event.verticalSpan,
         gridUnitSystem: context.units.length.system,
         unitFactor: gridUnitFactor,
       });
@@ -719,10 +690,8 @@ export const graphicsMachine = setup({
       });
     }),
 
-    handleControlsInteractionEnd: enqueueActions(({ enqueue, event }) => {
-      assertEvent(event, 'controlsInteractionEnd');
+    handleControlsInteractionEnd: enqueueActions(({ enqueue }) => {
       enqueue.assign({
-        currentZoom: event.zoom,
         cameraInteracting: false,
         cameraInteractionHadMovement: false,
       });
@@ -874,19 +843,6 @@ export const graphicsMachine = setup({
       isScreenshotReady: false,
     }),
 
-    registerCameraCapability: assign({
-      cameraCapability({ event }) {
-        assertEvent(event, 'registerCameraCapability');
-        return event.actorRef;
-      },
-      isCameraReady: true,
-    }),
-
-    unregisterCameraCapability: assign({
-      cameraCapability: undefined,
-      isCameraReady: false,
-    }),
-
     requestScreenshot: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'takeScreenshot');
 
@@ -955,18 +911,9 @@ export const graphicsMachine = setup({
       });
     }),
 
-    requestCameraReset: enqueueActions(({ enqueue, context, event }) => {
+    requestCameraReset: emit(({ event }) => {
       assertEvent(event, 'resetCamera');
-      if (context.cameraCapability) {
-        enqueue.sendTo(context.cameraCapability, {
-          type: 'reset',
-          options: event.options,
-        });
-      }
-    }),
-
-    completeCameraReset: emit({
-      type: 'cameraResetCompleted',
+      return { type: 'viewResetRequested' } satisfies GraphicsEmitted;
     }),
 
     setSurfaceVisibility: assign({
@@ -1466,10 +1413,8 @@ export const graphicsMachine = setup({
       },
 
       // Camera state
-      cameraFovAngle: input.defaultCameraFovAngle ?? 60,
-      cameraFovAngleComputed: 75,
-      cameraPosition: 1000,
-      currentZoom: 1,
+      initialCameraFovAngle: input.defaultCameraFovAngle ?? 60,
+      cameraVisibleSpan: 2,
       geometryRadius: 0,
       sceneRadius: undefined,
 
@@ -1522,11 +1467,9 @@ export const graphicsMachine = setup({
 
       // Capabilities
       screenshotCapability: undefined,
-      cameraCapability: undefined,
 
       // State flags
       isScreenshotReady: false,
-      isCameraReady: false,
       cameraInteracting: false,
       cameraInteractionHadMovement: false,
       suppressNextModelPointerClick: false,
@@ -1559,14 +1502,11 @@ export const graphicsMachine = setup({
         },
 
         // Camera events
-        setFovAngle: {
-          actions: 'setFovAngle',
-        },
         resetCamera: {
           actions: 'requestCameraReset',
         },
-        cameraResetCompleted: {
-          actions: 'completeCameraReset',
+        cameraViewChanged: {
+          actions: 'handleCameraViewChange',
         },
 
         // Visibility events
@@ -1616,9 +1556,6 @@ export const graphicsMachine = setup({
         controlsInteractionMoved: {
           actions: 'handleControlsInteractionMoved',
         },
-        controlsChanged: {
-          actions: 'handleControlsChange',
-        },
         controlsInteractionEnd: {
           actions: 'handleControlsInteractionEnd',
         },
@@ -1655,12 +1592,6 @@ export const graphicsMachine = setup({
         },
         unregisterScreenshotCapability: {
           actions: 'unregisterScreenshotCapability',
-        },
-        registerCameraCapability: {
-          actions: 'registerCameraCapability',
-        },
-        unregisterCameraCapability: {
-          actions: 'unregisterCameraCapability',
         },
 
         // Geometry updates

@@ -131,6 +131,8 @@ export class HeadlessImageService {
   private fileSystem: RuntimeFileSystem | undefined;
   private queue: QueuedJob[] = [];
   private running = false;
+  private activeJob: HeadlessImageJob | undefined;
+  private preemptedAutomaticJob: HeadlessImageJob | undefined;
   private disposed = false;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly failedAutomaticIdentities = new Set<string>();
@@ -147,6 +149,10 @@ export class HeadlessImageService {
     if (job.kind === 'automatic-thumbnail' && this.failedAutomaticIdentities.has(job.identity)) {
       return undefined;
     }
+    if (job.kind !== 'automatic-thumbnail' && this.activeJob?.kind === 'automatic-thumbnail') {
+      this.preemptedAutomaticJob = this.activeJob;
+      this.terminateClient();
+    }
 
     return new Promise((resolve, reject) => {
       const queued = { job, resolve, reject };
@@ -161,7 +167,12 @@ export class HeadlessImageService {
           this.queue[existingIndex] = queued;
         }
       } else {
-        this.queue.push(queued);
+        const automaticIndex = this.queue.findIndex(({ job: queuedJob }) => queuedJob.kind === 'automatic-thumbnail');
+        if (automaticIndex === -1) {
+          this.queue.push(queued);
+        } else {
+          this.queue.splice(automaticIndex, 0, queued);
+        }
       }
       void this.drain();
     });
@@ -186,18 +197,23 @@ export class HeadlessImageService {
       /* oxlint-disable no-await-in-loop -- A single GPU queue must execute image exports serially. */
       while (this.queue.length > 0) {
         const queued = this.queue.shift()!;
+        this.activeJob = queued.job;
         try {
           const files = await this.execute(queued.job);
           this.failedAutomaticIdentities.delete(queued.job.identity);
           queued.resolve(files);
         } catch (error) {
+          if (this.preemptedAutomaticJob === queued.job) {
+            queued.resolve(undefined);
+            continue;
+          }
           console.warn('Headless image job failed', {
+            message: error instanceof Error ? error.message : String(error),
             kind: queued.job.kind,
             ...(queued.job.projectId ? { projectId: queued.job.projectId } : {}),
             identity: queued.job.identity,
             sourceLocator: sourceLocator(queued.job),
             code: error instanceof HeadlessImageError ? error.code : 'unknown',
-            message: error instanceof Error ? error.message : String(error),
           });
           if (error instanceof HeadlessImageError && error.isGpuFault) {
             this.terminateClient();
@@ -206,6 +222,11 @@ export class HeadlessImageService {
             this.failedAutomaticIdentities.add(queued.job.identity);
           }
           queued.reject(error);
+        } finally {
+          if (this.preemptedAutomaticJob === queued.job) {
+            this.preemptedAutomaticJob = undefined;
+          }
+          this.activeJob = undefined;
         }
       }
       /* oxlint-enable no-await-in-loop */
@@ -286,10 +307,15 @@ export class HeadlessImageService {
       );
     }
 
+    const { generation } = this;
     if (this.dependencies.createClient) {
-      this.client = await this.dependencies.createClient(fileSystem);
+      const client = await this.dependencies.createClient(fileSystem);
+      if (this.disposed || generation !== this.generation) {
+        client.terminate();
+        throw new Error('Headless image client creation was superseded');
+      }
+      this.client = client;
       this.fileSystem = fileSystem;
-      this.generation += 1;
       return this.client;
     }
 
@@ -297,6 +323,9 @@ export class HeadlessImageService {
       import('@taucad/runtime/client'),
       import('@taucad/runtime/transport/web'),
     ]);
+    if (this.disposed || generation !== this.generation) {
+      throw new Error('Headless image client creation was superseded');
+    }
     const client = createRuntimeClient<typeof runtime>({
       config: this.dependencies.runtimeConfig,
       transport: webWorkerTransport({
@@ -310,7 +339,6 @@ export class HeadlessImageService {
     });
     this.client = client;
     this.fileSystem = fileSystem;
-    this.generation += 1;
     return client;
   }
 

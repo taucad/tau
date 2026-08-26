@@ -48,6 +48,8 @@ const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
 const client = createRuntimeClient({ transport });
 const entryPath = 'main.ts';
 const source = { files: { [entryPath]: 'export default () => null' } };
+const frontCamera = { framing: 'fit', direction: [0, -1, 0], up: [0, 0, 1] } as const;
+const topCamera = { framing: 'fit', direction: [0, 0, 1], up: [0, 1, 0] } as const;
 
 describe('image export option types', () => {
   it('should infer a defaultable input and mandatory output discriminator', () => {
@@ -58,12 +60,12 @@ describe('image export option types', () => {
   it('should narrow branch-specific properties', () => {
     const narrow = (options: WebpOutput): void => {
       if (options.mode === 'batch') {
-        expectTypeOf(options.views).toExtend<ReadonlyArray<{ id: string; phi: number; theta: number }>>();
-        // @ts-expect-error phi belongs to the single branch.
-        void options.phi;
+        expectTypeOf(options.views).toExtend<ReadonlyArray<{ id: string; camera: { framing: 'fit' | 'fixed' } }>>();
+        // @ts-expect-error camera belongs to each batch view.
+        void options.camera;
         return;
       }
-      expectTypeOf(options.phi).toBeNumber();
+      expectTypeOf(options.camera).toExtend<{ framing: 'fit' | 'fixed' }>();
       // @ts-expect-error views belongs to the batch branch.
       void options.views;
     };
@@ -79,7 +81,16 @@ describe('image export option types', () => {
         quality: 1,
         axes: true,
         scaleBar: true,
-        views: [{ id: 'front', label: 'Front', phi: 90, theta: 0, width: 400, height: 300, quality: 0.9 }],
+        surfaces: false,
+        visiblePrimitives: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+        sections: {
+          planes: [
+            { point: [0, 0, 0], normal: [0, 0, 1] },
+            { point: [1, 0, 0], normal: [-1, 0, 0] },
+          ],
+          clipLines: false,
+        },
+        views: [{ id: 'front', label: 'Front', camera: frontCamera, width: 400, height: 300, quality: 0.9 }],
       },
     });
     if (result.success) {
@@ -90,9 +101,9 @@ describe('image export option types', () => {
       source,
       exportOptions: {
         mode: 'batch',
-        views: [{ id: 'front', phi: 90, theta: 0 }],
-        // @ts-expect-error top-level angles belong to the single branch.
-        phi: 90,
+        views: [{ id: 'front', camera: frontCamera }],
+        // @ts-expect-error a shared camera would make per-view precedence ambiguous.
+        camera: frontCamera,
       },
     });
     void client.export('png', {
@@ -100,7 +111,7 @@ describe('image export option types', () => {
       exportOptions: {
         mode: 'single',
         // @ts-expect-error views belong to the batch branch.
-        views: [{ id: 'front', phi: 90, theta: 0 }],
+        views: [{ id: 'front', camera: frontCamera }],
       },
     });
     // A label's presence is its own switch — optional at both altitudes, with no
@@ -111,8 +122,8 @@ describe('image export option types', () => {
       exportOptions: {
         mode: 'batch',
         views: [
-          { id: 'front', label: 'Front', phi: 90, theta: 0 },
-          { id: 'top', phi: 0, theta: 0, quality: 0.9 },
+          { id: 'front', label: 'Front', camera: frontCamera },
+          { id: 'top', camera: topCamera, quality: 0.9 },
         ],
       },
     });
@@ -131,8 +142,7 @@ describe('image export option types', () => {
         views: [
           {
             id: 'front',
-            phi: 90,
-            theta: 0,
+            camera: frontCamera,
             // @ts-expect-error axes is shared at the operation level.
             axes: true,
           },
@@ -153,8 +163,7 @@ describe('image export option types', () => {
         views: [
           {
             id: 'front',
-            phi: 90,
-            theta: 0,
+            camera: frontCamera,
             // @ts-expect-error per-view quality is not a PNG option.
             quality: 0.8,
           },
@@ -168,8 +177,7 @@ describe('image export option types', () => {
         views: [
           {
             id: 'front',
-            phi: 90,
-            theta: 0,
+            camera: frontCamera,
             // @ts-expect-error runtime routes stay homogeneous.
             format: 'png',
           },
@@ -188,7 +196,7 @@ describe('image export option types', () => {
       source,
       exportOptions: {
         mode: 'batch',
-        views: [{ id: 'front', phi: 90, theta: 0 }],
+        views: [{ id: 'front', camera: frontCamera }],
         // @ts-expect-error unrelated export settings are rejected.
         binary: true,
       },

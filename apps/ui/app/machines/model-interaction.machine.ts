@@ -27,9 +27,6 @@ export type ModelInteractionUnitState = {
 export type ModelInteractionContext = {
   unitsById: Record<string, ModelInteractionUnitState>;
   unitOrder: string[];
-  activeUnitId?: string;
-  viewerHoverSuppressionReasons: ViewerHoverSuppressionReason[];
-  isViewerHoverSuppressed: boolean;
   revision: number;
   displayRevision: number;
   lastInteractionSource: ModelInteractionSource;
@@ -42,8 +39,9 @@ export type ModelInteractionInput = {
 export type ModelInteractionEvent =
   | { type: 'loadManifest'; unitId: string; manifest: GeometryComponentManifest; source?: ModelInteractionSource }
   | { type: 'clearManifest'; unitId: string; source?: ModelInteractionSource }
-  | { type: 'beginViewerHoverSuppression'; reason: ViewerHoverSuppressionReason; source?: ModelInteractionSource }
-  | { type: 'endViewerHoverSuppression'; reason: ViewerHoverSuppressionReason; source?: ModelInteractionSource }
+  | { type: 'restoreComponentDisplay'; componentDisplay?: PersistedModelComponentDisplayState }
+  | { type: 'rekeySourceUnits'; oldPath: string; newPath: string }
+  | { type: 'pruneSourceUnits'; path: string }
   | { type: 'setHoveredComponent'; unitId: string; componentId: string | undefined; source?: ModelInteractionSource }
   | { type: 'toggleComponentSelection'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'selectComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
@@ -60,6 +58,7 @@ export type ModelInteractionEvent =
       opacity: number;
       source?: ModelInteractionSource;
     }
+  | { type: 'resetComponentOpacities'; unitId: string; source?: ModelInteractionSource }
   | { type: 'focusComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'clearFocus'; unitId: string; source?: ModelInteractionSource };
 
@@ -160,10 +159,6 @@ function hasComponent(unit: ModelInteractionUnitState, componentId: string | und
   return Boolean(unit.manifest?.nodesById[componentId]);
 }
 
-function isViewerHoverSource(source: ModelInteractionSource | undefined): boolean {
-  return source === undefined || source === 'viewer' || source === 'unknown';
-}
-
 const withRevision = ({
   context,
   source,
@@ -217,26 +212,6 @@ function omitRecordKey<Value>(record: Readonly<Record<string, Value>>, key: stri
   return Object.fromEntries(Object.entries(record).filter(([candidate]) => candidate !== key));
 }
 
-function clearUnitHover(unit: ModelInteractionUnitState): ModelInteractionUnitState {
-  return unit.hoveredComponentId === undefined ? unit : { ...unit, hoveredComponentId: undefined };
-}
-
-function clearAllUnitHovers(unitsById: Record<string, ModelInteractionUnitState>): {
-  unitsById: Record<string, ModelInteractionUnitState>;
-  changed: boolean;
-} {
-  let changed = false;
-  const nextUnitsById = Object.fromEntries(
-    Object.entries(unitsById).map(([unitId, unit]) => {
-      const nextUnit = clearUnitHover(unit);
-      changed ||= nextUnit !== unit;
-      return [unitId, nextUnit];
-    }),
-  );
-
-  return { unitsById: nextUnitsById, changed };
-}
-
 function displayStateEqual(previous: ModelInteractionUnitState, next: ModelInteractionUnitState): boolean {
   return (
     arraysEqual(previous.hiddenComponentIds, next.hiddenComponentIds) &&
@@ -282,6 +257,74 @@ export function serializeModelComponentDisplayState(
   return omitEmptyComponentDisplayState({ schemaVersion: 1, unitsById });
 }
 
+function hasDisplayState(unit: ModelInteractionUnitState): boolean {
+  return (
+    unit.hiddenComponentIds.length > 0 ||
+    unit.isolatedComponentIds.length > 0 ||
+    Object.keys(unit.opacityByComponentId).length > 0
+  );
+}
+
+function restoreUnitDisplayState(
+  unit: ModelInteractionUnitState,
+  persisted: PersistedModelComponentDisplayUnitState | undefined,
+): ModelInteractionUnitState {
+  const hiddenComponentIds = [...(persisted?.hiddenComponentIds ?? [])];
+  const isolatedComponentIds = [...(persisted?.isolatedComponentIds ?? [])];
+  const opacityByComponentId = { ...persisted?.opacityByComponentId };
+  if (!unit.manifest) {
+    return { ...unit, hiddenComponentIds, isolatedComponentIds, opacityByComponentId };
+  }
+  return {
+    ...unit,
+    hiddenComponentIds: pruneIdsForManifest(unit.manifest, hiddenComponentIds),
+    isolatedComponentIds: pruneIdsForManifest(unit.manifest, isolatedComponentIds),
+    opacityByComponentId: pruneOpacityForManifest(unit.manifest, opacityByComponentId),
+  };
+}
+
+function mergeUnitStates(
+  existing: ModelInteractionUnitState | undefined,
+  moved: ModelInteractionUnitState,
+): ModelInteractionUnitState {
+  if (!existing) {
+    return moved;
+  }
+  return {
+    manifest: moved.manifest ?? existing.manifest,
+    hoveredComponentId: moved.hoveredComponentId ?? existing.hoveredComponentId,
+    selectedComponentIds: [...new Set([...existing.selectedComponentIds, ...moved.selectedComponentIds])],
+    focusedComponentId: moved.focusedComponentId ?? existing.focusedComponentId,
+    hiddenComponentIds: [...new Set([...existing.hiddenComponentIds, ...moved.hiddenComponentIds])],
+    isolatedComponentIds: [...new Set([...existing.isolatedComponentIds, ...moved.isolatedComponentIds])],
+    opacityByComponentId: { ...existing.opacityByComponentId, ...moved.opacityByComponentId },
+  };
+}
+
+function rewriteSourceUnitId(unitId: string, oldPath: string, newPath: string): string {
+  const oldPrefix = createSourceModelInteractionUnitId(oldPath);
+  if (unitId === oldPrefix) {
+    return createSourceModelInteractionUnitId(newPath);
+  }
+  return unitId.startsWith(`${oldPrefix}/`)
+    ? createSourceModelInteractionUnitId(`${newPath}${unitId.slice(oldPrefix.length)}`)
+    : unitId;
+}
+
+function matchesSourceUnitPath(unitId: string, path: string): boolean {
+  const prefix = createSourceModelInteractionUnitId(path);
+  return unitId === prefix || unitId.startsWith(`${prefix}/`);
+}
+
+function manifestsMatch(previous: GeometryComponentManifest | undefined, next: GeometryComponentManifest): boolean {
+  return (
+    previous === next ||
+    (previous?.geometryHash !== undefined &&
+      previous.geometryHash === next.geometryHash &&
+      previous.sourceFile === next.sourceFile)
+  );
+}
+
 function assignUnit({
   context,
   unitId,
@@ -301,7 +344,6 @@ function assignUnit({
       [unitId]: unit,
     },
     unitOrder: context.unitOrder.includes(unitId) ? context.unitOrder : [...context.unitOrder, unitId],
-    activeUnitId: unitId,
     ...withRevision({
       context,
       source,
@@ -323,6 +365,9 @@ export const modelInteractionMachine = setup({
     loadManifest: assign(({ context, event }) => {
       assertEvent(event, 'loadManifest');
       const unit = getModelInteractionUnitState(context, event.unitId);
+      if (manifestsMatch(unit.manifest, event.manifest)) {
+        return {};
+      }
       return assignUnit({
         context,
         unitId: event.unitId,
@@ -333,6 +378,9 @@ export const modelInteractionMachine = setup({
     clearManifest: assign(({ context, event }) => {
       assertEvent(event, 'clearManifest');
       const unit = getModelInteractionUnitState(context, event.unitId);
+      if (unit.manifest === undefined && unit.hoveredComponentId === undefined) {
+        return {};
+      }
       return assignUnit({
         context,
         unitId: event.unitId,
@@ -345,37 +393,81 @@ export const modelInteractionMachine = setup({
         displayChanged: false,
       });
     }),
-    beginViewerHoverSuppression: assign(({ context, event }) => {
-      assertEvent(event, 'beginViewerHoverSuppression');
-      if (context.viewerHoverSuppressionReasons.includes(event.reason)) {
+    restoreComponentDisplay: assign(({ context, event }) => {
+      assertEvent(event, 'restoreComponentDisplay');
+      const persistedUnits = event.componentDisplay?.unitsById ?? {};
+      const unitOrder = [...new Set([...context.unitOrder, ...Object.keys(persistedUnits)])];
+      const unitsById = Object.fromEntries(
+        unitOrder.map((unitId) => {
+          const existing = context.unitsById[unitId] ?? createEmptyUnitState();
+          return [unitId, restoreUnitDisplayState(existing, persistedUnits[unitId])];
+        }),
+      );
+      const displayChanged = unitOrder.some((unitId) => {
+        return !displayStateEqual(
+          getModelInteractionUnitState(context, unitId),
+          unitsById[unitId] ?? createEmptyUnitState(),
+        );
+      });
+      if (!displayChanged && arraysEqual(context.unitOrder, unitOrder)) {
         return {};
       }
-      const cleared = clearAllUnitHovers(context.unitsById);
-      const reasons = [...context.viewerHoverSuppressionReasons, event.reason];
       return {
-        unitsById: cleared.unitsById,
-        viewerHoverSuppressionReasons: reasons,
-        isViewerHoverSuppressed: reasons.length > 0,
-        ...withRevision({ context, source: event.source, displayChanged: false }),
+        unitsById,
+        unitOrder,
+        ...withRevision({ context, displayChanged }),
       };
     }),
-    endViewerHoverSuppression: assign(({ context, event }) => {
-      assertEvent(event, 'endViewerHoverSuppression');
-      if (!context.viewerHoverSuppressionReasons.includes(event.reason)) {
+    rekeySourceUnits: assign(({ context, event }) => {
+      assertEvent(event, 'rekeySourceUnits');
+      const movedEntries = context.unitOrder.map((unitId): readonly [string, string] => [
+        rewriteSourceUnitId(unitId, event.oldPath, event.newPath),
+        unitId,
+      ]);
+      if (movedEntries.every(([nextUnitId, unitId]) => nextUnitId === unitId)) {
         return {};
       }
-      const reasons = context.viewerHoverSuppressionReasons.filter((reason) => reason !== event.reason);
+      const unitsById: Record<string, ModelInteractionUnitState> = {};
+      const unitOrder: string[] = [];
+      let displayChanged = false;
+      for (const [nextUnitId, unitId] of movedEntries) {
+        const unit = context.unitsById[unitId];
+        if (!unit) {
+          continue;
+        }
+        unitsById[nextUnitId] = mergeUnitStates(unitsById[nextUnitId], unit);
+        if (!unitOrder.includes(nextUnitId)) {
+          unitOrder.push(nextUnitId);
+        }
+        displayChanged ||= nextUnitId !== unitId && hasDisplayState(unit);
+      }
       return {
-        viewerHoverSuppressionReasons: reasons,
-        isViewerHoverSuppressed: reasons.length > 0,
-        ...withRevision({ context, source: event.source, displayChanged: false }),
+        unitsById,
+        unitOrder,
+        ...withRevision({ context, displayChanged }),
+      };
+    }),
+    pruneSourceUnits: assign(({ context, event }) => {
+      assertEvent(event, 'pruneSourceUnits');
+      const removedIds = context.unitOrder.filter((unitId) => matchesSourceUnitPath(unitId, event.path));
+      if (removedIds.length === 0) {
+        return {};
+      }
+      const removed = new Set(removedIds);
+      const unitsById = Object.fromEntries(
+        Object.entries(context.unitsById).filter(([unitId]) => !removed.has(unitId)),
+      );
+      return {
+        unitsById,
+        unitOrder: context.unitOrder.filter((unitId) => !removed.has(unitId)),
+        ...withRevision({
+          context,
+          displayChanged: removedIds.some((unitId) => hasDisplayState(context.unitsById[unitId] ?? emptyUnitState)),
+        }),
       };
     }),
     setHoveredComponent: assign(({ context, event }) => {
       assertEvent(event, 'setHoveredComponent');
-      if (context.isViewerHoverSuppressed && isViewerHoverSource(event.source)) {
-        return {};
-      }
       const unit = getModelInteractionUnitState(context, event.unitId);
       const componentId = hasComponent(unit, event.componentId) ? event.componentId : undefined;
       if (componentId === unit.hoveredComponentId) {
@@ -548,6 +640,19 @@ export const modelInteractionMachine = setup({
         source: event.source,
       });
     }),
+    resetComponentOpacities: assign(({ context, event }) => {
+      assertEvent(event, 'resetComponentOpacities');
+      const unit = getModelInteractionUnitState(context, event.unitId);
+      if (Object.keys(unit.opacityByComponentId).length === 0) {
+        return {};
+      }
+      return assignUnit({
+        context,
+        unitId: event.unitId,
+        unit: { ...unit, opacityByComponentId: {} },
+        source: event.source,
+      });
+    }),
     focusComponent: assign(({ context, event }) => {
       assertEvent(event, 'focusComponent');
       const unit = getModelInteractionUnitState(context, event.unitId);
@@ -591,9 +696,6 @@ export const modelInteractionMachine = setup({
     return {
       unitsById: hydrated.unitsById,
       unitOrder: hydrated.unitOrder,
-      activeUnitId: undefined,
-      viewerHoverSuppressionReasons: [],
-      isViewerHoverSuppressed: false,
       revision: 0,
       displayRevision: 0,
       lastInteractionSource: 'unknown',
@@ -602,8 +704,9 @@ export const modelInteractionMachine = setup({
   on: {
     loadManifest: { actions: 'loadManifest' },
     clearManifest: { actions: 'clearManifest' },
-    beginViewerHoverSuppression: { actions: 'beginViewerHoverSuppression' },
-    endViewerHoverSuppression: { actions: 'endViewerHoverSuppression' },
+    restoreComponentDisplay: { actions: 'restoreComponentDisplay' },
+    rekeySourceUnits: { actions: 'rekeySourceUnits' },
+    pruneSourceUnits: { actions: 'pruneSourceUnits' },
     setHoveredComponent: { actions: 'setHoveredComponent' },
     toggleComponentSelection: { actions: 'toggleComponentSelection' },
     selectComponent: { actions: 'selectComponent' },
@@ -614,6 +717,7 @@ export const modelInteractionMachine = setup({
     isolateComponent: { actions: 'isolateComponent' },
     clearIsolation: { actions: 'clearIsolation' },
     setComponentOpacity: { actions: 'setComponentOpacity' },
+    resetComponentOpacities: { actions: 'resetComponentOpacities' },
     focusComponent: { actions: 'focusComponent' },
     clearFocus: { actions: 'clearFocus' },
   },

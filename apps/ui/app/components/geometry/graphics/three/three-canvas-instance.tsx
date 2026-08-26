@@ -15,6 +15,7 @@ import type { ThreeContextProperties } from '#components/geometry/graphics/three
 import { WebGpuInspectorOverlay } from '#components/geometry/graphics/three/webgpu-inspector-overlay.js';
 import { useFeature } from '#flags/use-feature.js';
 import { cn } from '#utils/ui.utils.js';
+import { useCameraRig } from '#hooks/use-graphics.js';
 
 export type ThreeCanvasInstanceProps = ThreeContextProperties & {
   /** Parent bumps canvas key — remount this instance fresh after real device/context loss retry. */
@@ -48,6 +49,7 @@ export function ThreeCanvasInstance({
   const isTauDebugEnabled = useFeature('tauDebug');
   const [isCanvasReady, setIsCanvasReady] = useState(false);
   const [isContextLost, setIsContextLost] = useState(false);
+  const cameraRig = useCameraRig();
 
   const glProperty: CanvasProps['gl'] = useMemo(() => createTauR3fGlProp(graphicsBackend), [graphicsBackend]);
 
@@ -82,6 +84,7 @@ export function ThreeCanvasInstance({
     <Canvas
       // Spread consumer props before Tau policy props so callers cannot shadow `gl`, `dpr`, `frameloop`, or `onCreated`.
       {...canvasProperties}
+      camera={cameraRig.activeCamera}
       gl={glProperty}
       dpr={dpr}
       frameloop='demand'

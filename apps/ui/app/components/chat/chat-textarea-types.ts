@@ -3,6 +3,7 @@ import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
+import type { DraftImageOptions } from '#hooks/use-chat.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -119,6 +120,7 @@ const parseFileDragPaths = (raw: string): string[] => {
 
 export type ChatTextareaHandle = {
   focus: () => void;
+  closeOptions?: () => void;
 };
 
 export type ChatTextareaProperties = {
@@ -130,6 +132,12 @@ export type ChatTextareaProperties = {
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
+  readonly creationLocationControls?: {
+    readonly toolbar: React.ReactNode;
+    readonly field: React.ReactNode;
+  };
+  /** Blocks every submit path while external prerequisites are unresolved. */
+  readonly isSubmitDisabled?: boolean;
   readonly mode?: 'main' | 'edit';
 };
 
@@ -147,7 +155,7 @@ export const cancelChatStreamKeyCombination = {
  */
 export type ChatTextareaLogicOptions = Pick<
   ChatTextareaProperties,
-  'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode'
+  'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode' | 'isSubmitDisabled'
 > & {
   /** Called when a viewer panel tab is dropped — the host should screenshot the matching pane. */
   readonly onViewerScreenshotDrop?: (entryPath: string) => void;
@@ -166,6 +174,7 @@ export function useChatTextareaLogic({
   onEscapePressed,
   onBlur,
   mode = 'main',
+  isSubmitDisabled = false,
   onViewerScreenshotDrop,
   onAddContextChips,
 }: ChatTextareaLogicOptions): {
@@ -205,9 +214,9 @@ export function useChatTextareaLogic({
   handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleTextChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   handleContextMenuSelect: (text: string) => void;
-  handleContextImageAdd: (image: string) => void;
+  handleContextImageAdd: (image: string, options?: DraftImageOptions) => void;
   handleAddText: (text: string) => void;
-  handleAddImage: (image: string) => void;
+  handleAddImage: (image: string, options?: DraftImageOptions) => void;
   rejectUnsupportedImageInput: () => void;
   handleTextareaBlur: () => void;
   handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
@@ -277,16 +286,16 @@ export function useChatTextareaLogic({
   }, []);
 
   const addImage = useCallback(
-    (image: string) => {
+    (image: string, options?: DraftImageOptions) => {
       if (!imageInputSupported) {
         rejectUnsupportedImageInput();
         return;
       }
 
       if (mode === 'main') {
-        addDraftImage(image);
+        addDraftImage(image, options);
       } else {
-        addEditDraftImage(image);
+        addEditDraftImage(image, options);
       }
     },
     [mode, addDraftImage, addEditDraftImage, imageInputSupported, rejectUnsupportedImageInput],
@@ -310,11 +319,17 @@ export function useChatTextareaLogic({
   imagesRef.current = images;
   const isSubmittingRef = useRef(isSubmitting);
   isSubmittingRef.current = isSubmitting;
+  const isSubmitDisabledRef = useRef(isSubmitDisabled);
+  isSubmitDisabledRef.current = isSubmitDisabled;
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
 
   const handleSubmit = useCallback(async (): Promise<void> => {
-    if ((inputTextRef.current.trim().length === 0 && imagesRef.current.length === 0) || isSubmittingRef.current) {
+    if (
+      (inputTextRef.current.trim().length === 0 && imagesRef.current.length === 0) ||
+      isSubmittingRef.current ||
+      isSubmitDisabledRef.current
+    ) {
       return;
     }
 
@@ -543,8 +558,8 @@ export function useChatTextareaLogic({
   );
 
   const handleAddImage = useCallback(
-    (image: string): void => {
-      addImage(image);
+    (image: string, options?: DraftImageOptions): void => {
+      addImage(image, options);
       focusInput();
     },
     [focusInput, addImage],

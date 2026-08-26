@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
-import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import {
+  buildGltfComponentManifest,
+  listReachableGltfPrimitiveReferences,
+} from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 
 const positionAttribute = 'POSITION';
 const duplicateDurableIdField = `persistent${'Id'}` as const;
@@ -11,6 +14,23 @@ function encodeJson(value: unknown): Uint8Array<ArrayBuffer> {
 }
 
 describe('buildGltfComponentManifest', () => {
+  it('should enumerate active-scene primitive instances, including shared meshes', () => {
+    const bytes = encodeJson({
+      scene: 0,
+      scenes: [{ nodes: [0, 1] }, { nodes: [3] }],
+      nodes: [{ mesh: 0, children: [2] }, { mesh: 0 }, { mesh: 1 }, { mesh: 2 }],
+      meshes: [{ primitives: [{}, {}] }, { primitives: [{}] }, { primitives: [{}] }],
+    });
+
+    expect(listReachableGltfPrimitiveReferences(bytes)).toEqual([
+      { nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 },
+      { nodeIndex: 0, meshIndex: 0, primitiveIndex: 1 },
+      { nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 },
+      { nodeIndex: 1, meshIndex: 0, primitiveIndex: 0 },
+      { nodeIndex: 1, meshIndex: 0, primitiveIndex: 1 },
+    ]);
+  });
+
   it('should build a root-only manifest for an empty glTF scene', () => {
     const bytes = encodeJson({
       asset: { version: '2.0' },
@@ -219,10 +239,89 @@ describe('buildGltfComponentManifest', () => {
       { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },
       {
         fidelity: 'brep',
-        formats: ['step', 'stp', 'iges', 'igs', 'brep', 'dxf'],
+        formats: ['step', 'stp', 'brep', 'dxf'],
         available: false,
         reason: 'Precise topology is not available for this component.',
       },
+    ]);
+  });
+
+  it('should preserve standard glTF hierarchy including named meshless parents', () => {
+    const bytes = encodeJson({
+      scene: 0,
+      scenes: [{ nodes: [0] }],
+      nodes: [
+        { name: 'Assembly', children: [1] },
+        { name: 'Roof Frame', mesh: 0 },
+      ],
+      meshes: [{ primitives: [{ attributes: { [positionAttribute]: 0 }, material: 0 }] }],
+      accessors: [{ componentType: 5126, count: 3, type: 'VEC3', min: [1, 2, 3], max: [4, 5, 6] }],
+      materials: [
+        {
+          name: 'roof paint',
+          pbrMetallicRoughness: { baseColorFactor: [1, 0, 0, 1] },
+        },
+      ],
+    });
+
+    const manifest = buildGltfComponentManifest(bytes, { sourceFile: 'main.scad' });
+    const assembly = manifest.nodesById['component:node-0']!;
+    const roof = manifest.nodesById['component:node-1']!;
+
+    expect(manifest.nodesById['root']?.childIds).toEqual(['component:node-0']);
+    expect(manifest.nodeOrder).toEqual(['root', 'component:node-0', 'component:node-1']);
+    expect(assembly).toMatchObject({
+      name: 'Assembly',
+      parentId: 'root',
+      childIds: ['component:node-1'],
+      depth: 1,
+      path: ['Model', 'Assembly'],
+      primitiveRefs: [],
+      materialIndices: [0],
+      bounds: { min: [1, 2, 3], max: [4, 5, 6], center: [2.5, 3.5, 4.5] },
+      appearance: { color: '#ff0000', colors: ['#ff0000'], materialNames: ['roof paint'] },
+    });
+    expect(roof).toMatchObject({
+      parentId: 'component:node-0',
+      childIds: [],
+      depth: 2,
+      path: ['Model', 'Assembly', 'Roof Frame'],
+      primitiveRefs: [{ nodeIndex: 1, meshIndex: 0, primitiveIndex: 0 }],
+    });
+  });
+
+  it('should keep parent direct primitives distinct while aggregating descendant bounds and appearance', () => {
+    const bytes = encodeJson({
+      scene: 0,
+      scenes: [{ nodes: [0] }],
+      nodes: [
+        { name: 'Parent', mesh: 0, children: [1] },
+        { name: 'Child', mesh: 1 },
+      ],
+      meshes: [
+        { primitives: [{ attributes: { [positionAttribute]: 0 }, material: 0 }] },
+        { primitives: [{ attributes: { [positionAttribute]: 1 }, material: 1 }] },
+      ],
+      accessors: [
+        { componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 1] },
+        { componentType: 5126, count: 3, type: 'VEC3', min: [5, 0, 0], max: [6, 1, 1] },
+      ],
+      materials: [
+        { name: 'red', pbrMetallicRoughness: { baseColorFactor: [1, 0, 0, 1] } },
+        { name: 'blue', pbrMetallicRoughness: { baseColorFactor: [0, 0, 1, 1] } },
+      ],
+    });
+
+    const manifest = buildGltfComponentManifest(bytes);
+    expect(manifest.nodesById['component:node-0']).toMatchObject({
+      childIds: ['component:node-1'],
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+      materialIndices: [0, 1],
+      bounds: { min: [0, 0, 0], max: [6, 1, 1], center: [3, 0.5, 0.5] },
+      appearance: { color: '#ff0000', colors: ['#ff0000', '#0000ff'], materialNames: ['red', 'blue'] },
+    });
+    expect(manifest.nodesById['component:node-1']?.primitiveRefs).toEqual([
+      { nodeIndex: 1, meshIndex: 1, primitiveIndex: 0 },
     ]);
   });
 

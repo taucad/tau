@@ -18,7 +18,7 @@ export const screenshotInputSchema = z
 export type ScreenshotInput = z.infer<typeof screenshotInputSchema>;
 
 /** Canonical view identifiers produced by screenshot capture. @public */
-export const screenshotViewSchema = z.enum(['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom']);
+export const screenshotViewSchema = z.enum(['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom', 'drawing']);
 /** @public */
 export type ScreenshotView = z.infer<typeof screenshotViewSchema>;
 

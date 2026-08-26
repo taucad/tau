@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect } from 'react';
 import type { RefObject } from 'react';
 import type { PanzoomObject } from '@panzoom/panzoom';
-import { useCameraCapability } from '#hooks/use-graphics.js';
+import { useGraphics } from '#hooks/use-graphics.js';
 
 type PanzoomResetParameters = {
   /**
@@ -24,8 +24,7 @@ type PanzoomResetParameters = {
  * @returns The reset function.
  */
 export function usePanzoomReset(parameters: PanzoomResetParameters): () => void {
-  const cameraCapabilityActor = useCameraCapability();
-  const isRegistered = useRef(false);
+  const graphicsActor = useGraphics();
 
   const { panzoomRef, containerRef } = parameters;
 
@@ -53,13 +52,12 @@ export function usePanzoomReset(parameters: PanzoomResetParameters): () => void 
     panzoomInstance.pan(0, 0, { animate: false });
   }, [panzoomRef, containerRef]);
 
-  // Register the reset function with the camera capability actor only once
   useEffect(() => {
-    if (!isRegistered.current) {
-      cameraCapabilityActor.send({ type: 'registerReset', reset: resetSvg });
-      isRegistered.current = true;
-    }
-  }, [resetSvg, cameraCapabilityActor]);
+    const subscription = graphicsActor.on('viewResetRequested', resetSvg);
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [graphicsActor, resetSvg]);
 
   // Return the reset function for direct use if needed
   return resetSvg;

@@ -137,7 +137,10 @@ vi.mock('#components/ui/sonner.js', () => ({
 }));
 
 vi.mock('#hooks/resize-image.actor.js', () => ({
-  resizeImageActor: fromSafeAsync<{ type: 'imageResized'; resized: string }, { image: string }>(async ({ input }) => {
+  resizeImageActor: fromSafeAsync<
+    { type: 'imageResized'; resized: string },
+    { image: string; preserveOriginal: boolean }
+  >(async ({ input }) => {
     const resized = await harness.resize(input.image);
     return { type: 'imageResized', resized };
   }),

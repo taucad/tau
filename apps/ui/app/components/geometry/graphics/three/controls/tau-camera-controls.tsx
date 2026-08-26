@@ -1,6 +1,18 @@
-import { Box3, MathUtils, Matrix4, Quaternion, Raycaster, Sphere, Spherical, Vector2, Vector3, Vector4 } from 'three';
-import type { EventDispatcher, OrthographicCamera, PerspectiveCamera } from 'three';
-import { forwardRef, useEffect, useLayoutEffect, useMemo } from 'react';
+import {
+  Box3,
+  MathUtils,
+  Matrix4,
+  OrthographicCamera,
+  Quaternion,
+  Raycaster,
+  Sphere,
+  Spherical,
+  Vector2,
+  Vector3,
+  Vector4,
+} from 'three';
+import type { EventDispatcher, PerspectiveCamera } from 'three';
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { extend, useFrame, useThree } from '@react-three/fiber';
 import type { EventManager, ThreeElement } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
@@ -13,6 +25,7 @@ export type TauCameraControlsProps = Omit<
 > & {
   readonly camera?: PerspectiveCamera | OrthographicCamera;
   readonly domElement?: HTMLElement;
+  readonly initialTarget?: readonly [number, number, number];
   readonly makeDefault?: boolean;
   readonly onControlStart?: (event?: { type: 'controlstart' }) => void;
   readonly onControl?: (event?: { type: 'control' }) => void;
@@ -31,6 +44,44 @@ export type TauCameraControlsProps = Omit<
 type TauCameraControlsFrameState = {
   readonly controls: Pick<CameraControlsImpl, 'enabled' | 'update'>;
   readonly interactionLock: Pick<ViewportGizmoInteractionLock, 'activeRef'>;
+};
+
+export type RetargetableCameraControls = Pick<CameraControlsImpl, 'cancel' | 'updateCameraUp'> & {
+  camera: PerspectiveCamera | OrthographicCamera;
+  mouseButtons: { wheel: CameraControlsImpl['mouseButtons']['wheel'] };
+  touches: { two: CameraControlsImpl['touches']['two'] };
+};
+
+export const retargetCameraControls = ({
+  controls,
+  camera,
+}: {
+  readonly controls: RetargetableCameraControls;
+  readonly camera: PerspectiveCamera | OrthographicCamera;
+}): boolean => {
+  if (controls.camera === camera) {
+    return false;
+  }
+
+  controls.cancel();
+  controls.camera = camera;
+  if (camera instanceof OrthographicCamera) {
+    if (controls.mouseButtons.wheel === CameraControlsImpl.ACTION.DOLLY) {
+      controls.mouseButtons.wheel = CameraControlsImpl.ACTION.ZOOM;
+    }
+    if (controls.touches.two === CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK) {
+      controls.touches.two = CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK;
+    }
+  } else {
+    if (controls.mouseButtons.wheel === CameraControlsImpl.ACTION.ZOOM) {
+      controls.mouseButtons.wheel = CameraControlsImpl.ACTION.DOLLY;
+    }
+    if (controls.touches.two === CameraControlsImpl.ACTION.TOUCH_ZOOM_TRUCK) {
+      controls.touches.two = CameraControlsImpl.ACTION.TOUCH_DOLLY_TRUCK;
+    }
+  }
+  controls.updateCameraUp();
+  return true;
 };
 
 export const shouldUpdateTauCameraControlsFrame = ({
@@ -66,6 +117,7 @@ export const TauCameraControls = forwardRef<CameraControlsImpl, TauCameraControl
     const {
       camera,
       domElement,
+      initialTarget,
       makeDefault,
       onControlStart,
       onControl,
@@ -97,7 +149,26 @@ export const TauCameraControls = forwardRef<CameraControlsImpl, TauCameraControl
 
     const resolvedCamera = camera ?? defaultCamera;
     const resolvedDomElement = domElement ?? events.connected ?? gl.domElement;
-    const controls = useMemo(() => new CameraControlsImpl(resolvedCamera), [resolvedCamera]);
+    const [controls] = useState(() => {
+      const instance = new CameraControlsImpl(resolvedCamera);
+      if (initialTarget) {
+        void instance.setLookAt(
+          resolvedCamera.position.x,
+          resolvedCamera.position.y,
+          resolvedCamera.position.z,
+          initialTarget[0],
+          initialTarget[1],
+          initialTarget[2],
+          false,
+        );
+        instance.update(0);
+      }
+      return instance;
+    });
+
+    useLayoutEffect(() => {
+      retargetCameraControls({ controls, camera: resolvedCamera });
+    }, [controls, resolvedCamera]);
 
     useFrame((_state, delta) => {
       if (!shouldUpdateTauCameraControlsFrame({ controls, interactionLock })) {

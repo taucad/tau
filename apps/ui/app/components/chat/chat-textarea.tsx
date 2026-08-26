@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
-import { createActor } from 'xstate';
+import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
@@ -12,17 +12,15 @@ import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useDraftActions } from '#hooks/use-chat.js';
-import { useImageQuality } from '#hooks/use-image-quality.js';
 import { toast } from '#components/ui/sonner.js';
-import { orthographicViews, screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
 import { takeScreenshotGroup } from '#components/chat/tiptap/context-suggestion.utils.js';
-import { captureViewScreenshot } from '#components/chat/capture-view-screenshot.utils.js';
-import { buildScreenshotOverlayForPath, resolveScreenshotOverlay } from '#machines/resolve-screenshot-overlay.js';
 import { useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
+import { useHeadlessImageService } from '#providers/headless-image-provider.js';
+import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
 
 /**
  * Main chat textarea component that conditionally renders either the
@@ -42,6 +40,8 @@ export const ChatTextarea = memo(function ({
   className,
   enableContextActions = true,
   enableKernelSelector = true,
+  creationLocationControls,
+  isSubmitDisabled = false,
   mode = 'main',
 }: ChatTextareaProperties): React.JSX.Element {
   const isMobile = useIsMobile();
@@ -68,7 +68,7 @@ export const ChatTextarea = memo(function ({
   }, [registerContextReferenceInserter]);
 
   // Forward declaration — the actual screenshot-on-drop callback is defined
-  // below (it depends on `projectContextRef`, `screenshotQualityRef` and the
+  // below (it depends on `projectContextRef` and the
   // active-actor set wired into the existing single-view branch).
   const handleViewerScreenshotDropRef = useRef<(entryPath: string) => void>(() => undefined);
   const handleViewerScreenshotDrop = useCallback((entryPath: string): void => {
@@ -82,12 +82,14 @@ export const ChatTextarea = memo(function ({
     onEscapePressed,
     onBlur,
     mode,
+    isSubmitDisabled,
     onViewerScreenshotDrop: handleViewerScreenshotDrop,
     onAddContextChips: handleAddContextChips,
   });
 
   const projectContext = useProject({ enableNoContext: true });
-  const { treeService } = useFileManager();
+  const { treeService, runtimeFileSystem } = useFileManager();
+  const imageService = useHeadlessImageService();
   const { chats } = useChats(projectContext?.projectId ?? '');
   const { setDraftText: setMainDraftText, setEditDraftText } = useDraftActions();
 
@@ -105,6 +107,7 @@ export const ChatTextarea = memo(function ({
   // Mutable ref populated by ChatTextareaDesktop so the imperative handle
   // can focus the Tiptap editor instead of the (non-existent) <textarea>
   const focusEditorRef = useRef<(() => void) | undefined>(undefined);
+  const closeOptionsRef = useRef<(() => void) | undefined>(undefined);
 
   useImperativeHandle(
     ref,
@@ -116,12 +119,19 @@ export const ChatTextarea = memo(function ({
           logic.focusInput();
         }
       },
+      closeOptions: () => {
+        closeOptionsRef.current?.();
+      },
     }),
     [logic.focusInput],
   );
 
   const geometryUnits = projectContext?.geometryUnits;
   const mainEntryPath = projectContext?.mainEntryPath;
+  const mainGeometryFormat = useSelector(
+    mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined,
+    (state) => state?.context.geometry?.format,
+  );
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
     if (!geometryUnits || !logic.imageInputSupported) {
       return [];
@@ -136,15 +146,17 @@ export const ChatTextarea = memo(function ({
         isAction: true,
         screenshotAction: { type: 'single' },
       },
-      {
+    ];
+    if (mainGeometryFormat === 'gltf') {
+      items.push({
         id: 'screenshot-orthographic',
         label: 'Orthographic views x 6',
         chipType: 'screenshot',
         group: takeScreenshotGroup,
         isAction: true,
-        screenshotAction: { type: 'composite' },
-      },
-    ];
+        screenshotAction: { type: 'orthographic' },
+      });
+    }
 
     for (const [entryPath] of geometryUnits) {
       if (entryPath === mainEntryPath) {
@@ -162,19 +174,13 @@ export const ChatTextarea = memo(function ({
     }
 
     return items;
-  }, [geometryUnits, mainEntryPath, logic.imageInputSupported]);
+  }, [geometryUnits, mainEntryPath, mainGeometryFormat, logic.imageInputSupported]);
 
-  const { quality: screenshotQuality } = useImageQuality();
-
-  // Track active screenshot actors for lifecycle cleanup
-  const activeScreenshotActorsRef = useRef(new Set<{ stop: () => void }>());
+  const mounted = useRef(true);
   useEffect(() => {
-    const actors = activeScreenshotActorsRef;
+    mounted.current = true;
     return () => {
-      for (const actor of actors.current) {
-        actor.stop();
-      }
-      actors.current.clear();
+      mounted.current = false;
     };
   }, []);
 
@@ -187,8 +193,6 @@ export const ChatTextarea = memo(function ({
   imageInputSupportedRef.current = logic.imageInputSupported;
   const rejectUnsupportedImageInputRef = useRef(logic.rejectUnsupportedImageInput);
   rejectUnsupportedImageInputRef.current = logic.rejectUnsupportedImageInput;
-  const screenshotQualityRef = useRef(screenshotQuality);
-  screenshotQualityRef.current = screenshotQuality;
 
   /**
    * Resolve the per-view graphics actor whose pane currently shows `entryPath`.
@@ -219,15 +223,7 @@ export const ChatTextarea = memo(function ({
     [],
   );
 
-  /**
-   * Resolve the per-view CAD actor whose geometry unit corresponds to
-   * `entryPath`. Used to thread the screenshot overlay's file path + icon
-   * key through to the screenshot pipeline (see
-   * `docs/research/screenshot-overlay-watermark-architecture.md` Finding 3).
-   *
-   * Falls back to the main entry when omitted, mirroring the graphics-ref
-   * resolution above so chip + capture stay in lock-step.
-   */
+  /** Resolve the CAD actor matching a viewer entry path. */
   const resolveCadRefForEntry = useCallback(
     (entryPath: string | undefined): ActorRefFrom<typeof cadMachine> | undefined => {
       const currentProjectContext = projectContextRef.current;
@@ -247,8 +243,40 @@ export const ChatTextarea = memo(function ({
     [],
   );
 
-  // Wire viewer-drop screenshots into the same active-actors set used by the
-  // existing single-view + composite branches so unmount cleanup stays uniform.
+  const captureEntry = useCallback(
+    async (entryPath: string | undefined, captureMode: 'current' | 'orthographic', successToast = false) => {
+      const cadRef = resolveCadRefForEntry(entryPath);
+      if (!cadRef) {
+        toast.error('No CAD view available for image capture');
+        return;
+      }
+      try {
+        const files = await captureCadImages({
+          cadRef,
+          graphicsRef: resolveGraphicsRefForEntry(entryPath),
+          imageService,
+          fileSystem: runtimeFileSystem,
+          recipe: { purpose: 'chat', mode: captureMode },
+        });
+        if (!mounted.current) {
+          return;
+        }
+        for (const dataUrl of captureFilesToDataUrls(files)) {
+          handleAddImageRef.current(dataUrl, { preserveOriginal: true });
+        }
+        if (successToast) {
+          toast.success('Added screenshot to chat');
+        }
+      } catch (error) {
+        if (mounted.current) {
+          toast.error(error instanceof Error ? error.message : 'Image capture failed');
+        }
+      }
+    },
+    [imageService, resolveCadRefForEntry, resolveGraphicsRefForEntry, runtimeFileSystem],
+  );
+
+  // Viewer-drop screenshots use the same settled-geometry adapter as menu actions.
   useEffect(() => {
     handleViewerScreenshotDropRef.current = (entryPath: string): void => {
       if (!imageInputSupportedRef.current) {
@@ -256,28 +284,9 @@ export const ChatTextarea = memo(function ({
         return;
       }
 
-      const graphicsRef = resolveGraphicsRefForEntry(entryPath);
-      if (!graphicsRef) {
-        toast.error('No graphics view available for screenshot');
-        return;
-      }
-      const overlay =
-        resolveScreenshotOverlay(resolveCadRefForEntry(entryPath)) ?? buildScreenshotOverlayForPath(entryPath);
-      captureViewScreenshot({
-        graphicsRef,
-        quality: screenshotQualityRef.current,
-        activeActors: activeScreenshotActorsRef.current,
-        overlay,
-        onImage: (dataUrl) => {
-          handleAddImageRef.current(dataUrl);
-          toast.success('Added screenshot to chat');
-        },
-        onError: (message) => {
-          toast.error(message);
-        },
-      });
+      void captureEntry(entryPath, 'current', true);
     };
-  }, [resolveGraphicsRefForEntry, resolveCadRefForEntry]);
+  }, [captureEntry]);
 
   const handleScreenshotAction = useCallback(
     (item: ContextSuggestionItem) => {
@@ -292,86 +301,9 @@ export const ChatTextarea = memo(function ({
       }
 
       const targetEntry = screenshotAction.type === 'view' ? screenshotAction.entryPath : undefined;
-      const graphicsRef = resolveGraphicsRefForEntry(targetEntry);
-      if (!graphicsRef) {
-        toast.error('No graphics view available for screenshot');
-        return;
-      }
-
-      const quality = screenshotQualityRef.current;
-      const overlay =
-        resolveScreenshotOverlay(resolveCadRefForEntry(targetEntry)) ??
-        (targetEntry ? buildScreenshotOverlayForPath(targetEntry) : undefined);
-
-      if (screenshotAction.type === 'composite') {
-        const actor = createActor(screenshotRequestMachine, {
-          input: { graphicsRef },
-        });
-        const actors = activeScreenshotActorsRef.current;
-        actors.add(actor);
-        actor.start();
-
-        const cleanup = (): void => {
-          actor.stop();
-          actors.delete(actor);
-        };
-
-        actor.send({
-          type: 'requestCompositeScreenshot',
-          options: {
-            output: {
-              format: 'image/webp',
-              quality,
-              isPreview: true,
-            },
-            cameraAngles: orthographicViews.slice(0, 6),
-            aspectRatio: 1,
-            maxResolution: 800,
-            zoomLevel: 1.2,
-            overlay,
-            composite: {
-              enabled: true,
-              preferredRatio: { columns: 3, rows: 2 },
-              showLabels: true,
-              padding: 12,
-              labelHeight: 24,
-              backgroundColor: 'transparent',
-              dividerColor: 'var(--border)',
-              dividerWidth: 1,
-            },
-          },
-          onSuccess(dataUrls) {
-            cleanup();
-            const dataUrl = dataUrls[0];
-            if (dataUrl) {
-              handleAddImageRef.current(dataUrl);
-            } else {
-              toast.error('Failed to capture composite screenshot');
-            }
-          },
-          onError(error) {
-            cleanup();
-            toast.error(`Screenshot failed: ${error}`);
-          },
-        });
-        return;
-      }
-
-      // Single-view (`'single'` or `'view'`) — delegated to the shared helper.
-      captureViewScreenshot({
-        graphicsRef,
-        quality,
-        activeActors: activeScreenshotActorsRef.current,
-        overlay,
-        onImage: (dataUrl) => {
-          handleAddImageRef.current(dataUrl);
-        },
-        onError: (message) => {
-          toast.error(message);
-        },
-      });
+      void captureEntry(targetEntry, screenshotAction.type === 'orthographic' ? 'orthographic' : 'current');
     },
-    [resolveGraphicsRefForEntry, resolveCadRefForEntry],
+    [captureEntry],
   );
 
   // Mobile drag-drop chip insertion: append `@<path>` segments and lean on the
@@ -421,6 +353,8 @@ export const ChatTextarea = memo(function ({
           enableAutoFocus={enableAutoFocus}
           enableContextActions={enableContextActions}
           enableKernelSelector={enableKernelSelector}
+          creationLocationControl={creationLocationControls?.field}
+          isSubmitDisabled={isSubmitDisabled}
           // State
           dragKind={logic.dragKind}
           showContextMenu={logic.showContextMenu}
@@ -438,6 +372,7 @@ export const ChatTextarea = memo(function ({
           textareaReference={logic.textareaReference}
           fileInputReference={logic.fileInputReference}
           containerReference={logic.containerReference}
+          closeOptionsRef={closeOptionsRef}
           // Handlers
           handleSubmit={logic.handleSubmit}
           handleCancelClick={logic.handleCancelClick}
@@ -474,6 +409,8 @@ export const ChatTextarea = memo(function ({
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}
         enableKernelSelector={enableKernelSelector}
+        creationLocationControl={creationLocationControls?.toolbar}
+        isSubmitDisabled={isSubmitDisabled}
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}

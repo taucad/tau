@@ -1,0 +1,65 @@
+{
+  "name": "@taucad/camera",
+  "version": "0.0.1",
+  "description": "Renderer-neutral camera state and projection logic",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/camera"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/camera#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json",
+    "./machine": "./src/camera.machine.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json",
+      "./machine": {
+        "types": "./dist/camera.machine.d.mts",
+        "import": "./dist/camera.machine.mjs",
+        "default": "./dist/camera.machine.mjs"
+      }
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "xstate": "^5.0.0"
+  },
+  "devDependencies": {
+    "xstate": "catalog:"
+  }
+}

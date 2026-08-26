@@ -44,8 +44,8 @@ vi.mock('#components/chat/chat-textarea-mobile-images.js', () => ({
 }));
 
 vi.mock('#components/chat/chat-textarea-submit-button.js', () => ({
-  ChatTextareaSubmitButton: () => (
-    <button type='button' data-testid='submit'>
+  ChatTextareaSubmitButton: ({ isDisabled }: { readonly isDisabled: boolean }) => (
+    <button type='button' data-testid='submit' aria-label='Send message' disabled={isDisabled}>
       submit
     </button>
   ),
@@ -60,7 +60,11 @@ vi.mock('#components/ui/textarea.js', () => ({
 }));
 
 vi.mock('#components/ui/button.js', () => ({
-  Button: ({ children }: { readonly children: React.ReactNode }) => <button type='button'>{children}</button>,
+  Button: ({ children, ...properties }: React.ComponentProps<'button'>) => (
+    <button type='button' {...properties}>
+      {children}
+    </button>
+  ),
 }));
 
 vi.mock('#components/ui/menu.variants.js', () => ({
@@ -69,8 +73,19 @@ vi.mock('#components/ui/menu.variants.js', () => ({
 
 vi.mock('#components/ui/drawer.js', () => ({
   Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer'>{children}</div>,
-  DrawerContent: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='drawer-content'>{children}</div>
+  DrawerContent: ({
+    children,
+    onCloseAutoFocus,
+  }: {
+    readonly children: React.ReactNode;
+    readonly onCloseAutoFocus?: (event: { preventDefault: () => void }) => void;
+  }) => (
+    <div data-testid='drawer-content'>
+      {children}
+      <button type='button' onClick={() => onCloseAutoFocus?.({ preventDefault: noop })}>
+        Close drawer
+      </button>
+    </div>
   ),
   DrawerDescription: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   DrawerTitle: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
@@ -102,7 +117,12 @@ const stubTextareaRef: React.RefObject<HTMLTextAreaElement | null> = { current: 
 const stubContainerRef: React.RefObject<HTMLDivElement | null> = { current: null };
 // oxlint-enable @typescript-eslint/no-restricted-types
 
-function renderMobile() {
+function renderMobile(options?: {
+  readonly creationLocationControl?: React.ReactNode;
+  readonly inputText?: string;
+  readonly isSubmitDisabled?: boolean;
+  readonly focusInput?: () => void;
+}) {
   return render(
     <ChatTextareaMobile
       dragKind={undefined}
@@ -110,7 +130,7 @@ function renderMobile() {
       contextSearchQuery=''
       selectedMenuIndex={0}
       isSubmitting={false}
-      inputText=''
+      inputText={options?.inputText ?? ''}
       images={[]}
       selectedToolChoice='auto'
       setDraftToolChoice={noop}
@@ -137,12 +157,14 @@ function renderMobile() {
       handleAddImage={noop}
       handleTextareaBlur={noop}
       handlePointerDown={noop}
-      focusInput={noop}
+      focusInput={options?.focusInput ?? noop}
       removeImage={noop}
       setShowContextMenu={noop}
       setAtSymbolPosition={noop}
       setContextSearchQuery={noop}
       setSelectedMenuIndex={noop}
+      creationLocationControl={options?.creationLocationControl}
+      isSubmitDisabled={options?.isSubmitDisabled}
     />,
   );
 }
@@ -163,5 +185,23 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
     renderMobile();
     expect(screen.getAllByText('JSCAD').length).toBeGreaterThan(0);
     expect(screen.queryByText('OpenSCAD')).toBeNull();
+  });
+
+  it('names the options trigger and renders location inside Settings', () => {
+    renderMobile({ creationLocationControl: <button type='button'>Create in Home</button> });
+    expect(screen.getByRole('button', { name: 'Open chat options' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create in Home' })).toBeInTheDocument();
+  });
+
+  it('disables the submit button for external prerequisites even with text', () => {
+    renderMobile({ inputText: 'draft', isSubmitDisabled: true });
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+  });
+
+  it('returns focus to the editor when the options drawer closes', () => {
+    const focusInput = vi.fn();
+    renderMobile({ focusInput });
+    screen.getByRole('button', { name: 'Close drawer' }).click();
+    expect(focusInput).toHaveBeenCalledOnce();
   });
 });

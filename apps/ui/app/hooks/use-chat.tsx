@@ -411,19 +411,26 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
  * the session-required {@link ChatActions} so marketing-route composers can
  * write to the draft without a session.
  */
+export type DraftImageOptions = {
+  /** Keep a generated lossless artifact byte-for-byte instead of applying the upload compression policy. */
+  readonly preserveOriginal?: boolean;
+};
+
 export type DraftActions = {
   setDraftText: (text: string) => void;
   /**
    * Add a raw image data URL to the new-message draft. Synchronous: the
-   * `draftMachine` enqueues the URL and resizes it through the single
+   * `draftMachine` enqueues the URL and processes it through the single
    * `imageProcessing` chokepoint (see `apps/ui/app/hooks/draft.machine.ts`).
    * Pass the original (un-resized) data URL — the machine handles
-   * dimension/compression caps via `resizeImageForChat()`. Failures surface
+   * dimension/compression caps via `resizeImageForChat()`. Generated captures
+   * pass `preserveOriginal` so their lossless bytes bypass upload compression.
+   * Failures surface
    * as a single global `toast.error` from the provider's
    * `useDraftImageErrorToast` subscriber, so callers MUST NOT wrap this in
    * try/catch or await any resize step.
    */
-  addDraftImage: (image: string) => void;
+  addDraftImage: (image: string, options?: DraftImageOptions) => void;
   removeDraftImage: (index: number) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
   setDraftMode: (mode: string) => void;
@@ -435,7 +442,7 @@ export type DraftActions = {
    * Add a raw image data URL to the message-edit draft. Same contract as
    * {@link DraftActions.addDraftImage}.
    */
-  addEditDraftImage: (image: string) => void;
+  addEditDraftImage: (image: string, options?: DraftImageOptions) => void;
   removeEditDraftImage: (index: number) => void;
   clearMessageEdit: (messageId: string) => void;
 };
@@ -448,8 +455,8 @@ export function useDraftActions(): DraftActions {
       setDraftText(text: string) {
         draftActorRef.send({ type: 'setDraftText', text });
       },
-      addDraftImage(image: string) {
-        draftActorRef.send({ type: 'addDraftImage', image });
+      addDraftImage(image: string, options?: DraftImageOptions) {
+        draftActorRef.send({ type: 'addDraftImage', image, preserveOriginal: options?.preserveOriginal });
       },
       removeDraftImage(index: number) {
         draftActorRef.send({ type: 'removeDraftImage', index });
@@ -473,8 +480,8 @@ export function useDraftActions(): DraftActions {
       setEditDraftText(text: string) {
         draftActorRef.send({ type: 'setEditDraftText', text });
       },
-      addEditDraftImage(image: string) {
-        draftActorRef.send({ type: 'addEditDraftImage', image });
+      addEditDraftImage(image: string, options?: DraftImageOptions) {
+        draftActorRef.send({ type: 'addEditDraftImage', image, preserveOriginal: options?.preserveOriginal });
       },
       removeEditDraftImage(index: number) {
         draftActorRef.send({ type: 'removeEditDraftImage', index });

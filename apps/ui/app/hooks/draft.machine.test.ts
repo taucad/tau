@@ -17,13 +17,14 @@ function createTestActor(options?: { chatId?: string; resize?: (image: string) =
       persistEditDraftActor: fromSafeAsync(async () => {}),
       // oxlint-disable-next-line no-empty-function -- mock stub
       clearMessageEditActor: fromSafeAsync(async () => {}),
-      resizeImageActor: fromSafeAsync<{ type: 'imageResized'; resized: string }, { image: string }>(
-        async ({ input }) => {
-          const resizer = options?.resize ?? (async (image) => image);
-          const resized = await resizer(input.image);
-          return { type: 'imageResized', resized };
-        },
-      ),
+      resizeImageActor: fromSafeAsync<
+        { type: 'imageResized'; resized: string },
+        { image: string; preserveOriginal: boolean }
+      >(async ({ input }) => {
+        const resizer = options?.resize ?? (async (image) => image);
+        const resized = await resizer(input.image);
+        return { type: 'imageResized', resized };
+      }),
     },
   });
 
@@ -42,9 +43,10 @@ function createTestActorWithPersistCapture(options: { chatId: string; onPersist:
       persistEditDraftActor: fromSafeAsync(async () => {}),
       // oxlint-disable-next-line no-empty-function -- mock stub
       clearMessageEditActor: fromSafeAsync(async () => {}),
-      resizeImageActor: fromSafeAsync<{ type: 'imageResized'; resized: string }, { image: string }>(
-        async ({ input }) => ({ type: 'imageResized', resized: input.image }),
-      ),
+      resizeImageActor: fromSafeAsync<
+        { type: 'imageResized'; resized: string },
+        { image: string; preserveOriginal: boolean }
+      >(async ({ input }) => ({ type: 'imageResized', resized: input.image })),
     },
   });
 
@@ -68,9 +70,10 @@ function createTestActorWithDeferredPersist(options: {
       persistEditDraftActor: fromSafeAsync(async () => {}),
       // oxlint-disable-next-line no-empty-function -- mock stub
       clearMessageEditActor: fromSafeAsync(async () => {}),
-      resizeImageActor: fromSafeAsync<{ type: 'imageResized'; resized: string }, { image: string }>(
-        async ({ input }) => ({ type: 'imageResized', resized: input.image }),
-      ),
+      resizeImageActor: fromSafeAsync<
+        { type: 'imageResized'; resized: string },
+        { image: string; preserveOriginal: boolean }
+      >(async ({ input }) => ({ type: 'imageResized', resized: input.image })),
     },
   });
 
@@ -468,11 +471,11 @@ describe('draftMachine', () => {
   // ===========================================================================
   // Image resize chokepoint
   //
-  // The machine owns image resizing. `addDraftImage` / `addEditDraftImage`
-  // events accept RAW data URLs and enqueue them; the `imageProcessing`
-  // parallel sub-region invokes `resizeImageActor` FIFO and assigns the
-  // resized URL back into `draftImages` / `editDraftImages`. Failures
-  // surface via the typed `imageResizeFailed` emit.
+  // The machine owns image processing. `addDraftImage` / `addEditDraftImage`
+  // events enqueue raw data URLs; the `imageProcessing` parallel sub-region
+  // invokes `resizeImageActor` FIFO to either resize user uploads or retain
+  // generated captures byte-for-byte. Failures surface via the typed
+  // `imageResizeFailed` emit.
   // ===========================================================================
   describe('image resize chokepoint', () => {
     it('should append the resized URL to draftImages once the resize actor settles', async () => {

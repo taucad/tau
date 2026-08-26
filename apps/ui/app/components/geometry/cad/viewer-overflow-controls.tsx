@@ -19,20 +19,20 @@ import {
 } from '#components/ui/dropdown-menu.js';
 import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
 import { gridUnitOptions, maxGridDigits } from '#components/geometry/cad/grid-unit-options.js';
-import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 
 // ── FOV Overflow Control ──────────────────────────────────────────────────────
 
 /** FOV slider rendered as a DropdownMenuSliderItem */
 export function FovOverflowControl(): React.JSX.Element {
-  const graphicsRef = useGraphics();
-  const fovAngle = useGraphicsSelector((state) => state.context.cameraFovAngle);
+  const cameraRig = useCameraRig();
+  const fovAngle = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
 
   const handleFovChange = useCallback(
     (value: number) => {
-      graphicsRef.send({ type: 'setFovAngle', payload: value });
+      cameraRig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: value });
     },
-    [graphicsRef],
+    [cameraRig],
   );
 
   const formatValue = useCallback((value: number): string => `${value}\u00B0`, []);

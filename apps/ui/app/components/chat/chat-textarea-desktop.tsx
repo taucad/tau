@@ -22,6 +22,7 @@ import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.
 import { useSelector } from '@xstate/react';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useDraftActions } from '#hooks/use-chat.js';
+import type { DraftImageOptions } from '#hooks/use-chat.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useFeature } from '#flags/use-feature.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
@@ -44,6 +45,8 @@ type ChatTextareaDesktopProperties = {
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
+  readonly creationLocationControl?: React.ReactNode;
+  readonly isSubmitDisabled?: boolean;
 
   // State
   readonly dragKind: ChatTextareaDragKind | undefined;
@@ -82,7 +85,7 @@ type ChatTextareaDesktopProperties = {
   readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  readonly handleAddImage: (image: string) => void;
+  readonly handleAddImage: (image: string, options?: DraftImageOptions) => void;
   readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
   readonly onEscapePressed?: () => void;
   readonly handleTextareaBlur: () => void;
@@ -107,6 +110,8 @@ export const ChatTextareaDesktop = memo(function ({
   enableAutoFocus = true,
   enableContextActions = true,
   enableKernelSelector = true,
+  creationLocationControl,
+  isSubmitDisabled = false,
 
   // State
   dragKind,
@@ -287,7 +292,7 @@ export const ChatTextareaDesktop = memo(function ({
     }
   }, []);
 
-  const isDisabled = inputText.trim().length === 0 && images.length === 0;
+  const isDisabled = isSubmitDisabled || (inputText.trim().length === 0 && images.length === 0);
 
   return (
     // Outer wrapper is purely a positioning context for the beam overlay
@@ -346,6 +351,7 @@ export const ChatTextareaDesktop = memo(function ({
           setDraftToolChoice={setDraftToolChoice}
           fileInputReference={fileInputReference}
           handleFileChange={handleFileChange}
+          creationLocationControl={creationLocationControl}
         />
 
         {/* Bottom-right controls */}
@@ -385,6 +391,7 @@ export const ChatTextareaLeftControls = memo(function ({
   setDraftToolChoice,
   fileInputReference,
   handleFileChange,
+  creationLocationControl,
 }: {
   readonly selectedModel: ResolvedModel;
   readonly enableKernelSelector: boolean;
@@ -394,6 +401,7 @@ export const ChatTextareaLeftControls = memo(function ({
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly fileInputReference: React.RefObject<HTMLInputElement | null>;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  readonly creationLocationControl?: React.ReactNode;
 }): React.JSX.Element {
   // Chat-scoped resolver — falls back to cookie kernel when no chat-local
   // selection exists. Display label follows the chat's active kernel so
@@ -439,6 +447,7 @@ export const ChatTextareaLeftControls = memo(function ({
           </span>
         </TooltipContent>
       </Tooltip>
+      {creationLocationControl}
       {/* Kernel selector */}
       {enableKernelSelector ? (
         <Tooltip>
@@ -571,6 +580,7 @@ const ChatTextareaRightControls = memo(function ({
               data-chat-textarea-focustrap={focusTrapAttribute}
               variant='outline'
               size='icon'
+              aria-label='Add context'
               className='size-6 rounded-full text-muted-foreground hover:text-foreground'
               onClick={handleAtButtonClick}
             >

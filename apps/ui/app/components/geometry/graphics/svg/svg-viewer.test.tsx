@@ -5,23 +5,16 @@ import type { PanzoomObject, PanzoomOptions } from '@panzoom/panzoom';
 import type { GeometrySvg } from '@taucad/types';
 import { SvgViewer } from '#components/geometry/graphics/svg/svg-viewer.js';
 
-type CameraEvent = {
-  readonly type: string;
-  readonly reset?: () => void;
-};
-
 type GraphicsEvent = {
-  readonly fov?: number;
-  readonly position?: number;
   readonly type: string;
-  readonly zoom?: number;
+  readonly verticalSpan?: number;
 };
 
 const mocks = vi.hoisted(() => ({
-  cameraSend: vi.fn<(event: CameraEvent) => void>(),
   graphicsSend: vi.fn<(event: GraphicsEvent) => void>(),
+  graphicsOn: vi.fn(),
+  resetListener: undefined as (() => void) | undefined,
   panzoom: vi.fn<(element: Element, options: PanzoomOptions) => PanzoomObject>(),
-  screenshotSend: vi.fn<(event: { readonly type: string }) => void>(),
 }));
 
 vi.mock('@panzoom/panzoom/dist/panzoom.es.js', () => ({
@@ -29,12 +22,16 @@ vi.mock('@panzoom/panzoom/dist/panzoom.es.js', () => ({
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useCameraCapability: () => ({ send: mocks.cameraSend }),
-  useGraphics: () => ({ send: mocks.graphicsSend }),
+  useGraphics: () => ({
+    send: mocks.graphicsSend,
+    on: mocks.graphicsOn.mockImplementation((_type: string, listener: () => void) => {
+      mocks.resetListener = listener;
+      return { unsubscribe: vi.fn() };
+    }),
+  }),
   useGraphicsSelector: <T,>(
     selector: (state: { context: { gridSizes: { largeSize: number; smallSize: number } } }) => T,
   ) => selector({ context: { gridSizes: { largeSize: 10, smallSize: 1 } } }),
-  useScreenshotCapability: () => ({ send: mocks.screenshotSend }),
 }));
 
 vi.mock('#hooks/use-theme.js', () => ({
@@ -100,6 +97,7 @@ let panzoomInstance: PanzoomObject;
 let originalResizeObserver: typeof ResizeObserver;
 
 beforeEach(() => {
+  mocks.resetListener = undefined;
   panzoomInstance = createMockPanzoomInstance();
   mocks.panzoom.mockReturnValue(panzoomInstance);
   originalResizeObserver = globalThis.ResizeObserver;
@@ -115,13 +113,10 @@ afterEach(() => {
 });
 
 const getRegisteredReset = (): (() => void) => {
-  const event = mocks.cameraSend.mock.calls
-    .map(([payload]) => payload)
-    .find((payload) => payload.type === 'registerReset');
-  if (!event?.reset) {
+  if (!mocks.resetListener) {
     throw new Error('Expected the SVG viewer to register a reset callback');
   }
-  return event.reset;
+  return mocks.resetListener;
 };
 
 describe('SvgViewer', () => {
@@ -224,15 +219,14 @@ describe('SvgViewer', () => {
     );
     expect(patternTransforms).toEqual(['translate(0 0)', 'translate(0 0)']);
 
-    const controlsEvent = mocks.graphicsSend.mock.calls
+    const cameraViewEvent = mocks.graphicsSend.mock.calls
       .map(([payload]) => payload)
-      .find((payload) => payload.type === 'controlsChanged');
-    expect(controlsEvent?.fov).toBe(60);
-    expect(typeof controlsEvent?.position).toBe('number');
-    expect(controlsEvent?.zoom).toBe(2);
+      .filter((payload) => payload.type === 'cameraViewChanged')
+      .at(-1);
+    expect(cameraViewEvent?.verticalSpan).toBe(9);
   });
 
-  it('should reset the SVG camera through the shared camera capability', async () => {
+  it('should reset the SVG view through the renderer-neutral reset event', async () => {
     render(<SvgViewer geometry={geometry} />);
     await waitFor(() => {
       expect(mocks.panzoom).toHaveBeenCalledOnce();

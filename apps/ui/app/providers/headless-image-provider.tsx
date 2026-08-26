@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { ENV } from '#environment.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
@@ -9,13 +9,6 @@ const HeadlessImageContext = createContext<HeadlessImageService | undefined>(und
 export function HeadlessImageProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const runtimeConfig = useMemo(() => createUiRuntimeConfig(ENV), []);
   const service = useMemo(() => new HeadlessImageService({ runtimeConfig }), [runtimeConfig]);
-
-  useEffect(
-    () => () => {
-      service.dispose();
-    },
-    [service],
-  );
 
   return <HeadlessImageContext.Provider value={service}>{children}</HeadlessImageContext.Provider>;
 }

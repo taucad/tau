@@ -1,19 +1,18 @@
 /**
  * Chat-image resize chokepoint contract test.
  *
- * Locks the end-to-end byte-ceiling guarantee for every image entry point:
+ * Locks the image policy for every entry point:
  *
- *   ANY caller that funnels an image into `addDraftImage` / `addEditDraftImage`
- *   ends up with a resized URL in `draftImages` / `editDraftImages` whose
- *   `length <= MAX_DATA_URL_LENGTH`, regardless of how oversized the input
- *   was.
+ *   user-provided images are resized to the chat byte ceiling, while generated
+ *   headless captures are retained byte-for-byte so lossless renders are not
+ *   silently downscaled and converted to JPEG.
  *
  * The 12 entry points (OS drag-drop, file picker, paste, Tiptap paste, viewer
  * toolbar, viewer-pane drag, desktop @-suggestion single + composite, mobile
  * @-popover current/all/per-view, and edit-mode draft) all converge on these
  * two methods. We assert the contract by driving the **real**
  * `resizeImageActor` (wrapping the **real** `resizeImageForChat` with
- * FakeImage stubs) through every entry-point category. Failure paths are
+ * FakeImage stubs where upload compression applies) through every entry-point category. Failure paths are
  * also covered: a corrupt image in a multi-file batch must NOT block the
  * surviving images, and a single failure must surface as one toast via the
  * `imageResizeFailed` emit subscriber.
@@ -107,6 +106,10 @@ const dispatchToMain: EntryDispatch = (actor, raw) => {
   actor.send({ type: 'addDraftImage', image: raw });
 };
 
+const dispatchPreservedToMain: EntryDispatch = (actor, raw) => {
+  actor.send({ type: 'addDraftImage', image: raw, preserveOriginal: true });
+};
+
 const dispatchToEdit: EntryDispatch = (actor, raw) => {
   actor.send({ type: 'startEditingMessage', messageId: 'msg-edit-1' });
   actor.send({ type: 'addEditDraftImage', image: raw });
@@ -116,7 +119,7 @@ const dispatchToEdit: EntryDispatch = (actor, raw) => {
  * The 12 image entry points, every one of which dispatches either
  * `addDraftImage` (entries #1-11) or `addEditDraftImage` (entry #12) with a
  * raw data URL. We test the chokepoint at the convergence point — if
- * `addDraftImage(raw)` produces a sized URL in `draftImages`, then by
+ * `addDraftImage(raw)` applies the requested policy in `draftImages`, then by
  * construction every caller does too.
  */
 type EntryTarget = 'main' | 'edit';
@@ -125,6 +128,7 @@ type EntryPoint = {
   readonly label: string;
   readonly dispatch: EntryDispatch;
   readonly target: EntryTarget;
+  readonly preserveOriginal?: boolean;
 };
 
 const entryPoints: readonly EntryPoint[] = [
@@ -132,19 +136,61 @@ const entryPoints: readonly EntryPoint[] = [
   { id: 2, label: 'File-picker selection (#2)', dispatch: dispatchToMain, target: 'main' },
   { id: 3, label: 'Textarea clipboard paste (#3)', dispatch: dispatchToMain, target: 'main' },
   { id: 4, label: 'Tiptap clipboard paste (#4)', dispatch: dispatchToMain, target: 'main' },
-  { id: 5, label: 'Viewer toolbar Capture View (#5)', dispatch: dispatchToMain, target: 'main' },
-  { id: 6, label: 'Viewer-pane drag-drop screenshot (#6)', dispatch: dispatchToMain, target: 'main' },
-  { id: 7, label: 'Desktop @-suggestion single screenshot (#7)', dispatch: dispatchToMain, target: 'main' },
-  { id: 8, label: 'Desktop @-suggestion composite (#8)', dispatch: dispatchToMain, target: 'main' },
-  { id: 9, label: 'Mobile @-popover current view (#9)', dispatch: dispatchToMain, target: 'main' },
-  { id: 10, label: 'Mobile @-popover composite (#10)', dispatch: dispatchToMain, target: 'main' },
-  { id: 11, label: 'Mobile @-popover per-non-main view (#11)', dispatch: dispatchToMain, target: 'main' },
+  {
+    id: 5,
+    label: 'Viewer toolbar Capture View (#5)',
+    dispatch: dispatchPreservedToMain,
+    target: 'main',
+    preserveOriginal: true,
+  },
+  {
+    id: 6,
+    label: 'Viewer-pane drag-drop screenshot (#6)',
+    dispatch: dispatchPreservedToMain,
+    target: 'main',
+    preserveOriginal: true,
+  },
+  {
+    id: 7,
+    label: 'Desktop @-suggestion single screenshot (#7)',
+    dispatch: dispatchPreservedToMain,
+    target: 'main',
+    preserveOriginal: true,
+  },
+  {
+    id: 8,
+    label: 'Desktop @-suggestion composite (#8)',
+    dispatch: dispatchPreservedToMain,
+    target: 'main',
+    preserveOriginal: true,
+  },
+  {
+    id: 9,
+    label: 'Mobile @-popover current view (#9)',
+    dispatch: dispatchPreservedToMain,
+    target: 'main',
+    preserveOriginal: true,
+  },
+  {
+    id: 10,
+    label: 'Mobile @-popover composite (#10)',
+    dispatch: dispatchPreservedToMain,
+    target: 'main',
+    preserveOriginal: true,
+  },
+  {
+    id: 11,
+    label: 'Mobile @-popover per-non-main view (#11)',
+    dispatch: dispatchPreservedToMain,
+    target: 'main',
+    preserveOriginal: true,
+  },
   { id: 12, label: 'Edit-mode draft image (#12)', dispatch: dispatchToEdit, target: 'edit' },
 ];
 
 describe('Chat-image resize chokepoint — contract for all 12 entry points', () => {
   for (const entry of entryPoints) {
-    it(`should resize ${entry.label} via the draft-machine chokepoint`, async () => {
+    it(`should apply the draft image policy to ${entry.label}`, async () => {
       const actor = startActor();
       try {
         entry.dispatch(actor, OVERSIZED_RAW_URL);
@@ -159,8 +205,12 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
         const resized = (
           entry.target === 'main' ? resultState.context.draftImages : resultState.context.editDraftImages
         )[0]!;
-        expect(resized.length).toBeLessThanOrEqual(MAX_DATA_URL_LENGTH);
-        expect(resized.startsWith('data:image/')).toBe(true);
+        if (entry.preserveOriginal) {
+          expect(resized).toBe(OVERSIZED_RAW_URL);
+        } else {
+          expect(resized.length).toBeLessThanOrEqual(MAX_DATA_URL_LENGTH);
+          expect(resized.startsWith('data:image/')).toBe(true);
+        }
       } finally {
         actor.stop();
       }

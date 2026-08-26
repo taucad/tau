@@ -116,7 +116,7 @@ const stubModel: ResolvedModel = {
 const stubFileInput: React.RefObject<HTMLInputElement | null> = { current: null };
 const noop = (): void => undefined;
 
-function renderControls() {
+function renderControls(creationLocationControl?: React.ReactNode) {
   return render(
     <ChatTextareaLeftControls
       selectedModel={stubModel}
@@ -126,6 +126,7 @@ function renderControls() {
       setDraftToolChoice={noop}
       fileInputReference={stubFileInput}
       handleFileChange={noop}
+      creationLocationControl={creationLocationControl}
     />,
   );
 }
@@ -152,5 +153,11 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
     renderControls();
 
     expect(screen.getAllByText('OpenSCAD').length).toBeGreaterThan(0);
+  });
+
+  it('places the creation location control directly after the model selector', () => {
+    renderControls(<button type='button'>Create in Home</button>);
+    const location = screen.getByRole('button', { name: 'Create in Home' });
+    expect(location.previousElementSibling).toHaveTextContent('Select model');
   });
 });

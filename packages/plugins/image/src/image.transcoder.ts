@@ -61,15 +61,26 @@ const toExportFile = ({ name, bytes, mimeType }: Nanoraster.RenderedImageFile): 
   mimeType,
 });
 
+const asRenderSections = (
+  sections:
+    | {
+        readonly planes: readonly Nanoraster.RenderSectionPlane[];
+        readonly clipSurfaces: boolean;
+        readonly clipLines: boolean;
+      }
+    | undefined,
+): Nanoraster.RenderSections | undefined =>
+  sections ? { ...sections, planes: sections.planes as Nanoraster.RenderSections['planes'] } : undefined;
+
 /** GLB-to-image transcoder with strict single and ordered batch modes. @public */
 export const imageTranscoder = defineTranscoder({
   id: 'image',
   name: 'ImageTranscoder',
   // Bump whenever the renderer's output bytes change for identical input, or
   // persisted export caches keep serving images from the previous renderer.
-  // 7.0.0 = nanoraster 0.4.x, whose restored deterministic Huffman tie-break
-  // changes lossless WebP bytes once while making native and WASM output agree.
-  version: '7.0.0',
+  // 8.0.0 = fixed Cartesian cameras and output-pixel line width; both change
+  // pixels for existing requests while preserving deterministic encoding.
+  version: '8.0.0',
   edges,
 
   async initialize() {
@@ -97,21 +108,21 @@ export const imageTranscoder = defineTranscoder({
       const { renderImage, renderImages } = context.renderer;
       runtime.logger.log(`Rendering GLB → ${input.to}`);
       if (options.mode === 'batch') {
-        const { mode: _, views, ...renderOptions } = options;
+        const { mode: _, views, sections, ...renderOptions } = options;
         const images = await renderImages(glb, {
           format: input.to,
-          up: 'z',
           ...renderOptions,
+          sections: asRenderSections(sections),
           views,
         });
         return { success: true, data: images.map(({ file }) => toExportFile(file)), issues: [] };
       }
 
-      const { mode: _, ...renderOptions } = options;
+      const { mode: _, sections, ...renderOptions } = options;
       const file = await renderImage(glb, {
         format: input.to,
-        up: 'z',
         ...renderOptions,
+        sections: asRenderSections(sections),
       });
       return { success: true, data: [toExportFile(file)], issues: [] };
     } catch (error) {

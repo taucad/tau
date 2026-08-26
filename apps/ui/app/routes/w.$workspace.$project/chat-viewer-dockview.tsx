@@ -155,7 +155,6 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
         return {
           ...validated,
           pinnedMeasurements: undefined,
-          componentDisplay: undefined,
         };
       }
     }

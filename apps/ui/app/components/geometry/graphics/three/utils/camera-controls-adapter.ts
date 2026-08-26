@@ -48,13 +48,39 @@ export type ClassicTargetControlsLike = {
   removeEventListener?: (type: string, listener: ControlEventListener) => void;
 };
 
-export type CameraControlSurface = CameraControlsLike | ClassicTargetControlsLike;
+type CameraControlSurface = CameraControlsLike | ClassicTargetControlsLike;
 
 export type ControlsListenerEventNames = {
   readonly start: string;
   readonly stateChange: string;
   readonly userMove: string;
   readonly end: string;
+};
+
+const cameraUpParallelEpsilon = 1e-8;
+
+/** Preserves the preferred up axis unless it is parallel to the view direction. */
+export const resolveCameraUp = ({
+  direction,
+  preferredUp,
+  fallbackUp,
+}: {
+  readonly direction: THREE.Vector3;
+  readonly preferredUp: THREE.Vector3;
+  readonly fallbackUp?: THREE.Vector3;
+}): THREE.Vector3 => {
+  const normalizedDirection = direction.clone().normalize();
+  const candidates = [preferredUp, fallbackUp, THREE.Object3D.DEFAULT_UP, new THREE.Vector3(1, 0, 0)];
+  const resolved = candidates.find(
+    (candidate) =>
+      candidate !== undefined &&
+      candidate.lengthSq() > 0 &&
+      normalizedDirection.clone().cross(candidate).lengthSq() > cameraUpParallelEpsilon,
+  );
+  if (!resolved) {
+    return new THREE.Vector3(0, 1, 0);
+  }
+  return resolved.clone().normalize();
 };
 
 export const isClassicTargetControls = (controls: unknown): controls is ClassicTargetControlsLike => {

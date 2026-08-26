@@ -9,6 +9,7 @@ import { resolveTestServerAction } from './src/support/server-readiness.ts';
 
 const uiRoot = resolve(import.meta.dirname, '../ui');
 const debugProbeUrl = new URL('/__e2e/project-creation-location?fixture=health-check', testBaseURL);
+const viteClientUrl = new URL('/@vite/client', testBaseURL);
 
 const isReady = async (): Promise<boolean> => {
   try {
@@ -28,8 +29,21 @@ const isDebugReady = async (): Promise<boolean> => {
   }
 };
 
+const isDevelopmentReady = async (): Promise<boolean> => {
+  try {
+    const response = await fetch(viteClientUrl);
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
 export const setup = async (): Promise<() => void> => {
+  const development = process.env['TAU_E2E_SERVER_MODE'] === 'development';
   const rootReady = await isReady();
+  if (development && rootReady && !(await isDevelopmentReady())) {
+    throw new Error(`Development UI E2E requires ownership of its dedicated server at ${testBaseURL}`);
+  }
   const serverAction = resolveTestServerAction({
     baseUrl: testBaseURL,
     rootReady,
@@ -45,13 +59,19 @@ export const setup = async (): Promise<() => void> => {
   environment['TAU_API_URL'] = 'http://localhost:4000';
   environment['TAU_WEBSOCKET_URL'] = 'ws://localhost:4001';
   environment['TAU_FRONTEND_URL'] = testBaseURL;
-  environment['NODE_ENV'] = 'production';
+  environment['NODE_ENV'] = development ? 'development' : 'production';
 
-  const server = spawn('node', ['--env-file-if-exists=.env', '--import', '@oxc-node/core/register', 'server.ts'], {
-    cwd: uiRoot,
-    env: environment,
-    stdio: 'inherit',
-  });
+  const server = development
+    ? spawn('pnpm', ['exec', 'react-router', 'dev', '--port', testPort, '--strictPort'], {
+        cwd: uiRoot,
+        env: environment,
+        stdio: 'inherit',
+      })
+    : spawn('node', ['--env-file-if-exists=.env', '--import', '@oxc-node/core/register', 'server.ts'], {
+        cwd: uiRoot,
+        env: environment,
+        stdio: 'inherit',
+      });
 
   const deadline = Date.now() + 180_000;
   while (!(await isReady())) {

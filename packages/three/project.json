@@ -1,0 +1,7 @@
+{
+  "name": "three",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/three",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

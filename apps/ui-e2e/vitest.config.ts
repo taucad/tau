@@ -43,7 +43,12 @@ export default defineConfig({
         '../../out/test-results/vitest-browser/apps/ui-e2e/screenshots',
       ),
       instances: [
-        { browser: 'chromium', name: 'chromium' },
+        {
+          browser: 'chromium',
+          name: 'chromium',
+          exclude: ['src/headless-chat-image-capture.no-webgpu.spec.ts'],
+          provider: playwright({ actionTimeout: 10_000, launchOptions: { args: ['--enable-unsafe-webgpu'] } }),
+        },
         {
           browser: 'webkit',
           name: 'webkit-smoke',
@@ -51,6 +56,7 @@ export default defineConfig({
             'src/preview.spec.ts',
             'src/birdhouse-preview.spec.ts',
             'src/project-creation-location-unsupported.spec.ts',
+            'src/headless-chat-image-capture.no-webgpu.spec.ts',
           ],
         },
       ],

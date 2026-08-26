@@ -3,26 +3,34 @@ import type { ThumbnailAssetKey } from '@taucad/tau-examples';
 import type { KernelProvider } from '@taucad/runtime';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 
-// Sample data
-type Model = {
+type Files = Record<string, { content: Uint8Array<ArrayBuffer> }>;
+
+type ExampleModel = {
   id: string;
   name: string;
   code: string;
-  thumbnail: string;
-  language: KernelProvider;
+  thumbnailKey: ThumbnailAssetKey;
 };
 
-type Files = Record<string, { content: Uint8Array<ArrayBuffer> }>;
+/** Purpose-specific metadata for built-in community examples. */
+export type ProjectsWithFiles = {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly author: { readonly name: string; readonly avatar: string };
+  readonly tags: string[];
+  readonly createdAt: number;
+  readonly assets: { readonly main: { readonly entryPath: string } };
+  readonly files: Files;
+  readonly thumbnail: string;
+};
 
-export type ProjectsWithFiles = Project & { files: Files };
-
-const createProject = (model: Omit<Model, 'language'>, mainFile: string, kernel: KernelProvider): ProjectsWithFiles => {
+const createProject = (model: ExampleModel, mainFile: string, kernel: KernelProvider): ProjectsWithFiles => {
   return {
     id: model.id,
     assets: {
-      mechanical: {
-        main: mainFile,
-        parameters: {},
+      main: {
+        entryPath: mainFile,
       },
     },
     name: model.name,
@@ -32,9 +40,8 @@ const createProject = (model: Omit<Model, 'language'>, mainFile: string, kernel:
       avatar: '/avatar-sample.png',
     },
     createdAt: 1_740_702_000_000,
-    updatedAt: 1_740_702_000_000,
     tags: ['3d-printing', 'parametric', kernel],
-    thumbnail: model.thumbnail,
+    thumbnail: thumbnailAssets[model.thumbnailKey],
     files: { [mainFile]: { content: encodeTextFile(model.code) } },
   };
 };
@@ -58,3 +65,5 @@ const jscadProjects: ProjectsWithFiles[] = jscadExamples.map((model) => {
 });
 
 export const sampleProjects: ProjectsWithFiles[] = [...replicadProjects, ...openscadProjects, ...jscadProjects];
+
+export const galleryProjects: ProjectsWithFiles[] = sampleProjects;

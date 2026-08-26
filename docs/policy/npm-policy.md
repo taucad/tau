@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-08-22'
+updated: '2026-08-25'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -18,6 +18,7 @@ related:
   - docs/research/runtime-plugin-runtime-slimming-migration-blueprint.md
   - docs/research/runtime-converter-dissolution-blueprint.md
   - docs/research/third-party-fork-org-naming.md
+  - docs/research/apache-default-relicensing-blueprint.md
 ---
 
 # npm Publishing Policy
@@ -42,7 +43,7 @@ Most of these properties are configuration, not code. This policy codifies the c
 
 Applies to every package under `packages/*`, `packages/plugins/*`, and `packages/core/*` whose `package.json` declares `"private": false`.
 
-Internal workspace libraries under `libs/*` are `"private": true` and exempt from this policy; they must either remain internal or be bundled into a publishable package via `deps.alwaysBundle` (see Rule 4). Runtime bundles only engine-owned private helpers. Concrete kernels, middleware, bundlers, transcoders, and backend helper logic belong to published plugin or core packages. Telemetry remains private application infrastructure and is not bundled or published.
+Internal workspace libraries under `libs/*` and `apps/libs/*` are `"private": true` and exempt from publish-specific rules; Rule 1's internal-library dependency shape still applies. They must either remain internal or be bundled into a publishable package via `deps.alwaysBundle` (see Rule 4). Runtime bundles only engine-owned private helpers. Concrete kernels, middleware, bundlers, transcoders, and backend helper logic belong to published plugin or core packages. Telemetry remains private application infrastructure and is not bundled or published.
 
 ## Rules
 
@@ -100,15 +101,16 @@ INCORRECT:
 
 Plugin and core packages have additional dependency rules:
 
-| Package class                               | Required dependency shape                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@taucad/runtime`                           | Must not depend on concrete plugin packages, concrete backend packages, native/Python runners, or toolchain-specific `@taucad/*-core` packages.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Plugin toolkit and `@taucad/*-core` package | Declares `@taucad/runtime` as a required (non-optional) `peerDependencies` range plus a `workspace:*` `devDependencies` entry for development — never a hard dependency. One runtime instance serves the whole install; a hard dependency can fork runtime instances and protocol/type identity. (Ratified 2026-08-21.) While the train sits on a prerelease line the range must carry the prerelease lower bound (`^0.1.0-beta.0`, not `^0.1.0`): a caret range without one excludes every prerelease, so npm rejects the install and `nx release version` refuses to bump across it under `preserveMatchingDependencyRanges`. |
-| Browser/WASM-safe plugin package            | May depend on browser/WASM-safe runtime deps and shared core packages; must not hard-depend on native, Python, or daemon implementation packages.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Native/Python/daemon plugin package         | May declare platform-specific payloads as `optionalDependencies` only when install may legitimately fail on unsupported hosts; otherwise use explicit runtime diagnostics.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `@taucad/*-core` helper package             | May depend on small shared helper deps; must not export `plugin` and must not initialize heavy backends at root import.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| CLI package                                 | May depend on first-party plugin packages for out-of-box defaults, but must lazy-load them by requested source/target or explicit `--plugin`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `zod`-emitting package                      | Declares `zod` as a required (non-optional) `peerDependencies` range — the literal `^4.0.0`, never `catalog:`, which would publish the workspace pin — plus a `catalog:` `devDependencies` entry, wherever the built emit imports `zod` or `zod/*`. Schema instance identity (`instanceof ZodType`) and type identity (the `$strip`/`$strict` brands) must not fork across an install. Leaf consumers that never re-export schemas (CLI, apps, `@taucad/geospec*`) declare `zod` in `dependencies` to satisfy the peer. (Ratified 2026-08-22.)                                                                                  |
+| Package class                                | Required dependency shape                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@taucad/runtime`                            | Must not depend on concrete plugin packages, concrete backend packages, native/Python runners, or toolchain-specific `@taucad/*-core` packages.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Plugin toolkit and `@taucad/*-core` package  | Declares `@taucad/runtime` as a required (non-optional) `peerDependencies` range plus a `workspace:*` `devDependencies` entry for development — never a hard dependency. One runtime instance serves the whole install; a hard dependency can fork runtime instances and protocol/type identity. (Ratified 2026-08-21.) While the train sits on a prerelease line the range must carry the prerelease lower bound (`^0.1.0-beta.0`, not `^0.1.0`): a caret range without one excludes every prerelease, so npm rejects the install and `nx release version` refuses to bump across it under `preserveMatchingDependencyRanges`. |
+| Browser/WASM-safe plugin package             | May depend on browser/WASM-safe runtime deps and shared core packages; must not hard-depend on native, Python, or daemon implementation packages.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Native/Python/daemon plugin package          | May declare platform-specific payloads as `optionalDependencies` only when install may legitimately fail on unsupported hosts; otherwise use explicit runtime diagnostics.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `@taucad/*-core` helper package              | May depend on small shared helper deps; must not export `plugin` and must not initialize heavy backends at root import.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| CLI package                                  | May depend on first-party plugin packages for out-of-box defaults, but must lazy-load them by requested source/target or explicit `--plugin`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `zod`-emitting package                       | Declares `zod` as a required (non-optional) `peerDependencies` range — the literal `^4.0.0`, never `catalog:`, which would publish the workspace pin — plus a `catalog:` `devDependencies` entry, wherever the built emit imports `zod` or `zod/*`. Schema instance identity (`instanceof ZodType`) and type identity (the `$strip`/`$strict` brands) must not fork across an install. Leaf consumers that never re-export schemas (CLI, apps, `@taucad/geospec*`) declare `zod` in `dependencies` to satisfy the peer — never a `libs/*` or `apps/libs/*` project. (Ratified 2026-08-22; amended 2026-08-23.)                  |
+| Internal `type:lib` / `type:app-lib` project | Never declares an identity-singleton dependency named by the workspace peer-rule registry (today `zod`) in `dependencies` or `optionalDependencies`; the published bundle owner or leaf application satisfies that peer. A buildable internal library explicitly externalises that singleton in its build config so its private `dist` cannot vendor a second copy. Ordinary third-party runtime dependencies remain declared because they record what the bundle owner must externalise.                                                                                                                                       |
 
 **Why**: Tree shaking removes code from bundles; it does not remove packages from `node_modules`. Payload isolation must be represented in the package graph.
 
@@ -259,16 +261,16 @@ Do **not** emit `import` or `default` for type-only entries.
 
 Plugin and core packages add package-shape invariants:
 
-| Package shape                                 | Root export rule                                                                                                                                                  |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plugin toolkit package (`packages/plugins/*`) | Export the canonical named callable `plugin`, the package-named alias bound to the same factory, and role-named direct factories; do not export a default plugin. |
-| Single-capability subpath                     | Export one named capability factory or authoring artifact when a smaller import is useful; keep incompatible host payloads behind explicit subpaths or packages.  |
-| Core helper package (`packages/core/*`)       | Do not export `plugin`; expose helpers and types only.                                                                                                            |
+| Package shape                                 | Root export rule                                                                                                                                                                    |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plugin toolkit package (`packages/plugins/*`) | Declare the package-named callable factory, re-export that same binding as `plugin` for mechanical loaders, and expose role-named direct factories; do not export a default plugin. |
+| Single-capability subpath                     | Export one named capability factory or authoring artifact when a smaller import is useful; keep incompatible host payloads behind explicit subpaths or packages.                    |
+| Core helper package (`packages/core/*`)       | Do not export `plugin`; expose helpers and types only.                                                                                                                              |
 
 CORRECT:
 
 ```typescript
-export { plugin, plugin as image } from '#image.plugin.js';
+export { image, image as plugin } from '#image.plugin.js';
 export { imageTranscoder } from '#image.transcoder.js';
 ```
 
@@ -385,9 +387,9 @@ Every publishable Tau package ships ESM-only output.
 
 **Why**: Tau's public runtime surface is browser-first and ESM-native; carrying a parallel CJS tree doubles publish metadata and type-resolution failure modes without matching the repo architecture.
 
-### 10. `peerDependencies` for Build-Time Integration
+### 10. `peerDependencies` for Build-Time and Test Integration
 
-Build-time integrations (Vite plugins, Rolldown plugins, Vitest helpers, React Router plugins) must declare their host as an **optional** peer dependency, never a hard dep.
+Build-time integrations (Vite plugins, Rolldown plugins, React Router plugins) must declare their host as an **optional** peer dependency, never a hard dep. A dedicated testing package whose shipped root imports a test runner is the exception: the runner is a **required** peer because every consumer of that package needs it. Production packages must not ship testing subpaths solely to expose runner-backed helpers; keep their own runner in `devDependencies` and publish reusable helpers from a separate testing package.
 
 CORRECT:
 
@@ -395,13 +397,26 @@ CORRECT:
 {
   "peerDependencies": {
     "vite": ">=7.0.0",
-    "rolldown": ">=1.0.0-rc.1",
-    "vitest": ">=3.0.0"
+    "rolldown": ">=1.0.0-rc.1"
   },
   "peerDependenciesMeta": {
     "vite": { "optional": true },
-    "rolldown": { "optional": true },
-    "vitest": { "optional": true }
+    "rolldown": { "optional": true }
+  }
+}
+```
+
+Dedicated testing package:
+
+```json
+{
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "vitest": ">=2.0.0"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*",
+    "vitest": "catalog:"
   }
 }
 ```
@@ -416,7 +431,7 @@ INCORRECT:
 }
 ```
 
-**Why**: Browser-only consumers should not install Vite or Vitest. Marking them optional peers communicates the integration intent without forcing the install.
+**Why**: Browser-only consumers should not install build tools or test runners. Optional peers communicate optional integration points. A package explicitly installed for testing has no non-testing use, so making its runner peer optional would allow an invalid install that fails as soon as the root is imported.
 
 ### 11. No `private: true` on Publishable Packages
 
@@ -424,42 +439,38 @@ Publishable packages must declare `"private": false` (or omit the field entirely
 
 `libs/*` packages (internal-only) **must** declare `"private": true` and are never published.
 
-### 12. License Field and `LICENSE` File Per Partition Bucket
+### 12. Apache-2.0 by Default, FSL Only for the GeoSpec Engine
 
-Every workspace package — published _and_ private — declares a `license` field, and its value is fixed by the ratified
-license partition. No package may be license-less; no package picks its own.
+Every workspace package — published _and_ private — declares a `license` field. Use Apache-2.0 everywhere except the
+explicit GeoSpec engine exception.
 
-| Bucket                | Projects                                                                                                       | `license` field      | `LICENSE` file                                                                                           |
-| --------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------- |
-| Perimeter (published) | `packages/{cli,geospec,react,runtime}`, `packages/plugins/*`, `packages/core/*`                                | `Apache-2.0`         | Required — canonical Apache-2.0 text                                                                     |
-| Engine (published)    | `packages/geospec-engine`                                                                                      | `FSL-1.1-Apache-2.0` | Required — FSL 1.1 Apache-2.0-future text                                                                |
-| Applications          | `apps/{ui,api}`, `apps/libs/*`                                                                                 | `AGPL-3.0-only`      | Required — AGPL v3 text **plus the section 7 additional permission** for combination with the FSL engine |
-| Internal (private)    | `libs/*`, `scripts`, `tools/workspace-plugin`, `apps/runtime-e2e`, `apps/react-e2e/apps/*`, `examples/*`, root | `Apache-2.0`         | Not required unless bundled into a published artifact                                                    |
+| Bucket           | Projects                                                 | `license` field      | `LICENSE` file                            |
+| ---------------- | -------------------------------------------------------- | -------------------- | ----------------------------------------- |
+| Apache default   | Every workspace package except `packages/geospec-engine` | `Apache-2.0`         | Required — canonical Apache-2.0 text      |
+| Engine exception | `packages/geospec-engine`                                | `FSL-1.1-Apache-2.0` | Required — FSL 1.1 Apache-2.0-future text |
 
 Rules that follow from the table:
 
-- The `LICENSE` file is named exactly `LICENSE` — npm includes it in the tarball regardless of the `files` array, so
-  it never needs a `files` entry. Verify with `npm pack --dry-run | grep LICENSE` before publishing.
-- License texts are **verbatim**. Do not add a preamble, a summary, or extra restrictions to a license text; GitHub's
-  licensee stops recognising a modified text, and stacking restrictions onto AGPL is void under its own sections 7 and 10. Additional _permissions_ (the section 7 grant on the AGPL projects) are appended as a clearly delimited block
-  after the unmodified license text.
-- **Every** workspace package carries a same-directory `LICENSE`, private ones included, and its bytes must be
-  identical to the canonical Apache or AGPL text at the repository root. Private packages are not exempt: location
-  derives the license, and `scripts/src/validate-license-partitions.ts` proves SPDX field, file presence, and byte
-  identity for all of them.
-- The engine is described as **fair source** or **source-available**, never as open source. The perimeter and apps
-  are open source.
-- New packages derive their bucket from **placement**, not from a switch. The workspace generator's `scope` option
-  (`packages`, `libs`, `apps/libs`) fixes the tags, the `private` flag, the SPDX field, and which canonical `LICENSE`
-  is copied in, so an invalid combination cannot be scaffolded. Moving a package between buckets is a deliberate edit
-  of all four together.
+- Published package license files are named exactly `LICENSE` — npm includes them in the tarball regardless of the
+  `files` array. The private repository root retains its historical lowercase [`license`](../../license) filename.
+  Verify published artifacts with `npm pack --dry-run | grep LICENSE`.
+- License texts are **verbatim**. Do not add a preamble, summary, or extra restriction to either text.
+- **Every** workspace package carries a same-directory license file, private ones included. Apache packages use bytes
+  identical to the canonical root text. `scripts/src/validate-license-partitions.ts` proves the SPDX field, file
+  presence, and byte identity across the workspace.
+- Describe the engine as **fair source** or **source-available**, never as open source. Describe the rest of Tau's
+  first-party code as Apache-2.0 open source.
+- The workspace generator always emits Apache-2.0. Architectural placement still derives tags, privacy, and build
+  defaults, but never legal terms. Create the singular FSL engine exception deliberately rather than as a generator
+  option.
+- Moving code between the editor, API, `apps/libs`, `libs`, and ordinary `packages` keeps Apache-2.0 unchanged. Review
+  any extraction from `packages/geospec-engine` and all third-party code separately.
 
-Routing prose for consumers lives in `LICENSING.md` at the repository root; the partition's decision record is
-`docs/research/licensing-strategy.md` and `docs/research/geospec-v2-licensing-options.md`.
+Routing prose for consumers lives in `LICENSING.md` at the repository root. The current decision record is
+`docs/research/apache-default-relicensing-blueprint.md`; older licensing comparisons remain historical evidence.
 
 **Why**: the tarball is the unit of distribution, so the SPDX field and the license text must travel with each package
-independently. A mixed-license monorepo is safe and standard practice, but only when every package states its own
-license unambiguously.
+independently. The single exception remains unambiguous without coupling ordinary package placement to licensing.
 
 ## Decision Tables
 
@@ -473,8 +484,8 @@ license unambiguously.
 | First-party package needed only for CLI out-of-box defaults                            | No                             | **Yes** — lazy-load at command time     |
 | Browser package would otherwise install native/Python/daemon payloads                  | No                             | **Yes** — split into explicit package   |
 | Published externally (npm registry)                                                    | No                             | **Yes**                                 |
-| Test-only, imported by a shipped subpath (`vitest-mock-extended` via `./testing`)      | No                             | No — declare as optional peer (Rule 10) |
-| Test-only, used by the package's own tests alone (`@vitest/spy`)                       | No — `devDependencies`         | No                                      |
+| Test-only, imported by a dedicated `*-testing` package root                            | No                             | No — required peer (Rule 10)            |
+| Test-only, used by a production package's own tests alone (`vitest`)                   | No — `devDependencies`         | No                                      |
 | Build-time integration (`vite`, `rolldown`)                                            | No                             | No — declare as optional peer (Rule 10) |
 | Node built-in shim (`ws` before Node 22)                                               | Optional — depends on min Node | No — use `optionalDependencies`         |
 
@@ -492,6 +503,7 @@ license unambiguously.
 Before merging a PR that touches a publishable package's `package.json` or `tsdown.config.ts`:
 
 - [ ] Every dep classified per Rule 1; mis-categorised deps moved
+- [ ] Internal libraries declare ordinary runtime dependencies, but no identity-singleton dependency from the peer-rule registry
 - [ ] Plugin/core package deps preserve payload isolation; browser/WASM packages do not hard-depend on native/Python/daemon packages
 - [ ] No `file:`, `link:`, `portal:`, or git-URL deps (Rule 2)
 - [ ] `tsdown.config.ts` matches the canonical ESM-only baseline (Rule 3): `unbundle: true`, `dts: true`, `minify: true`, `format: 'esm'`, `outDir: 'dist'`

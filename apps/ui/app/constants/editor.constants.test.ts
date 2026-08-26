@@ -71,7 +71,7 @@ describe('graphics view settings parsing', () => {
       },
     });
 
-    expect(settings.schemaVersion).toBe(5);
+    expect(settings.schemaVersion).toBe(6);
     expect(settings.componentDisplay).toEqual({
       schemaVersion: 1,
       unitsById: {
@@ -84,18 +84,18 @@ describe('graphics view settings parsing', () => {
     });
   });
 
-  it.each([2, 3, 4] as const)('should migrate schema v%s settings to v5', (schemaVersion) => {
+  it.each([2, 3, 4, 5] as const)('should migrate schema v%s settings to v6', (schemaVersion) => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
       schemaVersion,
       graphicsBackend: schemaVersion === 3 ? 'auto' : 'webgl',
     });
 
-    expect(settings.schemaVersion).toBe(5);
+    expect(settings.schemaVersion).toBe(6);
     expect(settings.graphicsBackend).toBe('webgl');
   });
 
-  it.each([3, 4, 5] as const)('should normalize persisted WebGPU from schema v%s to WebGL', (schemaVersion) => {
+  it.each([3, 4, 5, 6] as const)('should normalize persisted WebGPU from schema v%s to WebGL', (schemaVersion) => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
       schemaVersion,
@@ -103,9 +103,51 @@ describe('graphics view settings parsing', () => {
       enableGrid: false,
     });
 
-    expect(settings.schemaVersion).toBe(5);
+    expect(settings.schemaVersion).toBe(6);
     expect(settings.graphicsBackend).toBe('webgl');
     expect(settings.enableGrid).toBe(false);
+  });
+
+  it('should normalize a persisted camera view without discarding other settings', () => {
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      schemaVersion: 6,
+      enableGrid: false,
+      cameraView: {
+        target: [3, 4, 5],
+        direction: [2, 0, 0],
+        up: [0, 0, 4],
+        verticalSpan: 12,
+      },
+    });
+
+    expect(settings).toMatchObject({
+      schemaVersion: 6,
+      enableGrid: false,
+      cameraView: {
+        target: [3, 4, 5],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 12,
+      },
+    });
+  });
+
+  it('should drop a corrupt camera view without discarding other settings', () => {
+    const settings = parseGraphicsViewSettings({
+      ...defaultGraphicsSettings,
+      schemaVersion: 6,
+      enableGrid: false,
+      cameraView: {
+        target: [0, 0, 0],
+        direction: [0, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 2,
+      },
+    });
+
+    expect(settings).toMatchObject({ schemaVersion: 6, enableGrid: false });
+    expect(settings.cameraView).toBeUndefined();
   });
 
   it('should fall back to defaults for corrupt persisted settings', () => {

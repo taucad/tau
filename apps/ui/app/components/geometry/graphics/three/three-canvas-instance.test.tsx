@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { JSX } from 'react';
 import { useEffect } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { PerspectiveCamera } from 'three';
 
 import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-canvas-instance.js';
 
@@ -13,18 +14,26 @@ import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-c
 let fireLatestWebGlContextLost: (() => void) | undefined;
 let latestCanvasEventSource: ReactThreeFiber.CanvasProps['eventSource'] | undefined;
 let latestCanvasEventPrefix: ReactThreeFiber.CanvasProps['eventPrefix'] | undefined;
+let latestCanvasCamera: ReactThreeFiber.CanvasProps['camera'] | undefined;
+const rigCamera = new PerspectiveCamera();
+
+vi.mock('#hooks/use-graphics.js', () => ({
+  useCameraRig: () => ({ activeCamera: rigCamera }),
+}));
 
 vi.mock('@react-three/fiber', async (importOriginal) => {
   const actual = await importOriginal<typeof ReactThreeFiber>();
 
   type StubCanvasProps = {
     readonly children?: React.ReactNode;
+    readonly camera?: ReactThreeFiber.CanvasProps['camera'];
     readonly eventPrefix?: ReactThreeFiber.CanvasProps['eventPrefix'];
     readonly eventSource?: ReactThreeFiber.CanvasProps['eventSource'];
     readonly onCreated?: (state: { gl: Record<string, unknown> }) => void;
   };
 
-  function StubCanvas({ children, eventPrefix, eventSource, onCreated }: StubCanvasProps): JSX.Element {
+  function StubCanvas({ camera, children, eventPrefix, eventSource, onCreated }: StubCanvasProps): JSX.Element {
+    latestCanvasCamera = camera;
     latestCanvasEventPrefix = eventPrefix;
     latestCanvasEventSource = eventSource;
 
@@ -115,6 +124,7 @@ describe('ThreeCanvasInstance', () => {
     fireLatestWebGlContextLost = undefined;
     latestCanvasEventPrefix = undefined;
     latestCanvasEventSource = undefined;
+    latestCanvasCamera = undefined;
   });
 
   it('shows Graphics context lost fallback when WebGL fires context loss', async () => {
@@ -213,5 +223,18 @@ describe('ThreeCanvasInstance', () => {
 
     expect(latestCanvasEventPrefix).toBe('client');
     expect(latestCanvasEventSource).toBe(eventSource);
+  });
+
+  it('uses the provider-owned native camera from the first Canvas render', async () => {
+    await act(async () => {
+      render(
+        <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
+          {null}
+        </ThreeCanvasInstance>,
+      );
+      await Promise.resolve();
+    });
+
+    expect(latestCanvasCamera).toBe(rigCamera);
   });
 });

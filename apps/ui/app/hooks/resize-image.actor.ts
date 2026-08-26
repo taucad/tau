@@ -19,9 +19,10 @@
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { resizeImageForChat } from '#utils/resize-image.js';
 
-export const resizeImageActor = fromSafeAsync<{ type: 'imageResized'; resized: string }, { image: string }>(
-  async ({ input }) => {
-    const resized = await resizeImageForChat(input.image);
-    return { type: 'imageResized', resized };
-  },
-);
+export const resizeImageActor = fromSafeAsync<
+  { type: 'imageResized'; resized: string },
+  { image: string; preserveOriginal: boolean }
+>(async ({ input }) => {
+  const resized = input.preserveOriginal ? input.image : await resizeImageForChat(input.image);
+  return { type: 'imageResized', resized };
+});

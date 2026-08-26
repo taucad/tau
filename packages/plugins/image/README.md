@@ -6,11 +6,12 @@
 [![license](https://img.shields.io/npm/l/@taucad/image)](./LICENSE)
 [![provenance](https://img.shields.io/badge/provenance-npm-blue)](https://docs.npmjs.com/generating-provenance-statements)
 
-Image import and export toolkit for @taucad/runtime
+Image import and export toolkit for `@taucad/runtime`.
 
 ## Why @taucad/image?
 
-- **GLB to PNG, WebP, or JPEG** — thumbnails rendered from kernel output through `nanoraster`'s Rust/wgpu core.
+- **GLB to PNG, WebP, or JPEG** — fitted thumbnails, exact camera captures, and ordered view batches.
+- **SVG to PNG** — deterministic rasterization through resvg.
 - **Contained failures** — a malformed GLB, a missing adapter, or a lost device returns a structured issue, never a throw.
 - **Warm renderer** — one GPU device per process, reused by every render after the first.
 - **No module-scope work** — the renderer loads in `initialize()` and stays in transcoder context.
@@ -18,11 +19,10 @@ Image import and export toolkit for @taucad/runtime
 ## Install
 
 ```bash
-npm i @taucad/image @taucad/runtime zod
+npm i @taucad/camera @taucad/image @taucad/runtime zod
 ```
 
-`@taucad/runtime` and `zod` are required peers: the runtime parses this package's option schemas, so
-one install must hold one runtime and one zod.
+`@taucad/camera`, `@taucad/runtime`, and `zod` are required peers. The runtime parses this package's option schemas, so one install must hold one runtime and one zod.
 
 ## Quick start
 
@@ -38,17 +38,78 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export             | Kind               | Use                                                                             |
-| ------------------ | ------------------ | ------------------------------------------------------------------------------- |
-| `image`            | toolkit factory    | package-named authoring factory; presets select capabilities                    |
-| `plugin`           | toolkit factory    | the same factory under its mechanical name, for loaders that read a fixed key   |
-| `imageTranscoder`  | transcoder factory | direct `transcoders` composition; edges `glb → png`, `glb → webp`, `glb → jpeg` |
-| `imageEdgeSchemas` | zod schemas        | per-target render options — size, background, quality, single or batch views    |
+| Export               | Kind               | Use                                                                             |
+| -------------------- | ------------------ | ------------------------------------------------------------------------------- |
+| `image`              | toolkit factory    | package-named authoring factory; presets select capabilities                    |
+| `plugin`             | toolkit factory    | the same factory under its mechanical name, for loaders that read a fixed key   |
+| `imageTranscoder`    | transcoder factory | direct `transcoders` composition; edges `glb → png`, `glb → webp`, `glb → jpeg` |
+| `svgTranscoder`      | transcoder factory | direct `svg → png` composition                                                  |
+| `imageEdgeSchemas`   | zod schemas        | size, background, camera, annotations, line width, and single or batch views    |
+| `toNanorasterCamera` | camera adapter     | map a renderer-neutral `CameraState` to the image renderer's fixed camera       |
 
 One preset, `default`, selecting `transcoders.export`.
 
 WebP defaults to `quality: 1`, which is lossless. Set a value below `1` for lossy output, for example
 `exportOptions: { quality: 0.9 }`. PNG does not accept quality; JPEG defaults to `0.92`.
+
+## Fit the model
+
+Omit `camera` for the default fitted three-quarter view, or provide a fitted direction.
+
+```ts
+const result = await client.export('webp', {
+  source: { path: '/main.ts' },
+  content: { includeEdges: true },
+  exportOptions: {
+    width: 1600,
+    height: 1600,
+    quality: 1,
+    background: '#242424',
+    axes: true,
+    scaleBar: true,
+    label: 'Three-quarter view',
+    camera: {
+      framing: 'fit',
+      direction: [1, -1, 0.7],
+      up: [0, 0, 1],
+      margin: 0.1,
+      projection: { kind: 'perspective', verticalFieldOfView: 45 },
+    },
+  },
+});
+```
+
+## Reproduce a viewer camera
+
+Copy native renderer state into `CameraState`, then map camera lengths into the GLB world unit. The image dimensions must use the same aspect as the copied state.
+
+```ts
+import { readThreeCameraState } from '@taucad/three/camera';
+import { toNanorasterCamera } from '@taucad/image/camera';
+
+const cameraState = readThreeCameraState({ camera, target: controls.target });
+const width = 2400;
+const height = Math.round(width / cameraState.aspect);
+
+const result = await client.export('webp', {
+  source: { path: '/main.ts' },
+  content: { includeEdges: true },
+  exportOptions: {
+    width,
+    height,
+    quality: 1,
+    background: '#242424',
+    axes: true,
+    scaleBar: true,
+    camera: toNanorasterCamera({
+      cameraState,
+      lengthScale: 0.001, // viewer millimetres to GLB metres
+    }),
+  },
+});
+```
+
+See [Capture camera views](https://tau.new/docs/runtime/guides/headless-camera-capture) for mixed preset batches, projection semantics, and RPC use.
 
 If the selected graphics driver cannot encode the requested image, the runtime returns a structured
 render issue with code `driver-unsupported`.

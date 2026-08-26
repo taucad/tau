@@ -418,7 +418,7 @@ describe('getItemsForCategory', () => {
           chipType: 'screenshot',
           group: takeScreenshotGroup,
           isAction: true,
-          screenshotAction: { type: 'composite' },
+          screenshotAction: { type: 'orthographic' },
         },
         { id: 'f1', label: 'a.ts', chipType: 'file', group: filesFoldersGroup },
       ];

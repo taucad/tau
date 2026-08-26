@@ -32,7 +32,7 @@ describe('createScreenshotContextHandler', () => {
     expect(handleAddImage).not.toHaveBeenCalled();
   });
 
-  it('should delegate composite-screenshot items to onScreenshotAction', () => {
+  it('should delegate orthographic screenshot items to onScreenshotAction', () => {
     const handleAddImage = vi.fn();
     const onScreenshotAction = vi.fn();
 
@@ -41,7 +41,7 @@ describe('createScreenshotContextHandler', () => {
       onScreenshotAction,
     });
 
-    const item = createScreenshotItem('screenshot-orthographic', { type: 'composite' }, 'Orthographic views x 6');
+    const item = createScreenshotItem('screenshot-orthographic', { type: 'orthographic' }, 'Orthographic views x 6');
     handler(item);
 
     expect(onScreenshotAction).toHaveBeenCalledWith(item);
@@ -100,7 +100,7 @@ describe('createScreenshotContextHandler', () => {
 
     const items = [
       createScreenshotItem('screenshot-current-view', { type: 'single' }),
-      createScreenshotItem('screenshot-orthographic', { type: 'composite' }),
+      createScreenshotItem('screenshot-orthographic', { type: 'orthographic' }),
       createScreenshotItem('screenshot-view:models/part.ts', { type: 'view', entryPath: 'models/part.ts' }),
     ];
 

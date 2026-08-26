@@ -171,6 +171,7 @@ export const ChatViewer = memo(function ({
           graphicsSettings: {
             ...(existingGraphics ?? defaultGraphicsSettings),
             // Clear geometry-dependent state on file switch
+            cameraView: undefined,
             pinnedMeasurements: undefined,
           },
         },
@@ -198,7 +199,13 @@ export const ChatViewer = memo(function ({
   // If no file selected, render empty state with file selector
   if (!entryPath) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor}>
+      <GraphicsProvider
+        graphicsRef={graphicsActor}
+        cameraViewRestore={{
+          identity: entryPath,
+          cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
+        }}
+      >
         <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
           <span className='text-sm'>No file selected</span>
           <FileSelector
@@ -324,6 +331,7 @@ const ViewerContent = memo(function ({
     graphicsRef: graphicsActor,
     cadRef,
     editorRef,
+    persistCameraView: geometry === undefined ? 'pending' : geometry.format === 'gltf',
   });
 
   // Restore persisted render timeout on mount

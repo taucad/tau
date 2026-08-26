@@ -14,7 +14,7 @@ import {
   Raycaster,
   Plane,
 } from 'three';
-import type { Material } from 'three';
+import type { Material, Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import {
   annotateSceneComponents,
@@ -262,6 +262,85 @@ describe('probeGltfScene (OCJS rendering smoke trail)', () => {
 });
 
 describe('annotateSceneComponents', () => {
+  it('should use GLTFLoader associations for parent-owned surfaces, edges, and child meshes', () => {
+    const parentId = 'component:node-0';
+    const childId = 'component:node-1';
+    const { capabilities } = createManifest();
+    const manifest: GeometryComponentManifest = {
+      schemaVersion: 1,
+      rootId: 'root',
+      nodeOrder: ['root', parentId, childId],
+      capabilities,
+      nodesById: {
+        root: {
+          id: 'root',
+          name: 'Model',
+          kind: 'model',
+          selector: 'root',
+          childIds: [parentId],
+          depth: 0,
+          path: ['Model'],
+          meshNodeIndices: [],
+          primitiveIndices: [],
+          materialIndices: [],
+          capabilities,
+        },
+        [parentId]: {
+          id: parentId,
+          name: 'Parent',
+          kind: 'part',
+          selector: 'node/0',
+          parentId: 'root',
+          childIds: [childId],
+          depth: 1,
+          path: ['Model', 'Parent'],
+          meshNodeIndices: [0],
+          primitiveIndices: [0, 1],
+          primitiveRefs: [
+            { nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 },
+            { nodeIndex: 0, meshIndex: 0, primitiveIndex: 1 },
+          ],
+          materialIndices: [0],
+          capabilities,
+        },
+        [childId]: {
+          id: childId,
+          name: 'Child',
+          kind: 'part',
+          selector: 'node/1',
+          parentId,
+          childIds: [],
+          depth: 2,
+          path: ['Model', 'Parent', 'Child'],
+          meshNodeIndices: [1],
+          primitiveIndices: [0],
+          primitiveRefs: [{ nodeIndex: 1, meshIndex: 1, primitiveIndex: 0 }],
+          materialIndices: [1],
+          capabilities,
+        },
+      },
+    };
+    const scene = new Group();
+    const parentNode = new Group();
+    const parentSurface = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const parentEdges = buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]);
+    const childSurface = buildMeshWithPositions([2, 0, 0, 3, 0, 0, 2, 1, 0]);
+    parentNode.add(parentSurface, parentEdges, childSurface);
+    scene.add(parentNode);
+    const associations = new Map<Object3D, { meshes?: number; nodes?: number; primitives?: number }>([
+      [parentNode, { nodes: 0, meshes: 0 }],
+      [parentSurface, { meshes: 0, primitives: 0 }],
+      [parentEdges, { meshes: 0, primitives: 1 }],
+      [childSurface, { nodes: 1, meshes: 1, primitives: 0 }],
+    ]);
+
+    annotateSceneComponents(scene, manifest, { unitId, associations });
+
+    expect(getModelComponentOwner(parentSurface)).toEqual({ unitId, componentId: parentId });
+    expect(getModelComponentOwner(parentEdges)).toEqual({ unitId, componentId: parentId });
+    expect(getModelComponentOwner(childSurface)).toEqual({ unitId, componentId: childId });
+  });
+
   it('should assign sibling edge lines to the owning surface fallback component', () => {
     const scene = new Group();
     const meshGroup = new Group();

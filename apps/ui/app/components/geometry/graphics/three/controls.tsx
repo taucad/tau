@@ -1,11 +1,12 @@
 import CameraControlsImpl from 'camera-controls';
 import React, { useMemo } from 'react';
 import type * as THREE from 'three';
+import { selectCameraProjection } from '@taucad/camera/machine';
 import { TauCameraControls } from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube.js';
 import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
 import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
-import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import type { SecondaryMouseButtonMode } from '#components/geometry/graphics/three/three-viewer-properties.js';
 
 type ControlsProperties = {
@@ -46,6 +47,7 @@ export const Controls = React.memo(function ({
 }: ControlsProperties) {
   const dollySpeed = zoomSpeed * 0.5;
   const graphicsActor = useGraphics();
+  const cameraRig = useCameraRig();
   const isActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const selectedPlaneId = useGraphicsSelector((state) => state.context.selectedSectionViewId);
   const rotation = useGraphicsSelector((state) => state.context.sectionViewRotation);
@@ -54,9 +56,10 @@ export const Controls = React.memo(function ({
   const planeName = useGraphicsSelector((state) => state.context.planeName);
   const hoveredSectionViewId = useGraphicsSelector((state) => state.context.hoveredSectionViewId);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
+  const projectionKind = useCameraSelector((state) => selectCameraProjection(state).kind);
   const mouseButtons = useMemo(
-    () => resolveCameraControlMouseButtons({ enablePan, enableZoom, secondaryMouseButtonMode }),
-    [enablePan, enableZoom, secondaryMouseButtonMode],
+    () => resolveCameraControlMouseButtons({ enablePan, enableZoom, secondaryMouseButtonMode, projectionKind }),
+    [enablePan, enableZoom, projectionKind, secondaryMouseButtonMode],
   );
 
   // Handlers to send events to xstate
@@ -119,6 +122,7 @@ export const Controls = React.memo(function ({
     <>
       <TauCameraControls
         makeDefault
+        initialTarget={cameraRig.actorRef.getSnapshot().context.view.target}
         dollySpeed={dollySpeed}
         truckSpeed={enablePan ? 2 : 0}
         smoothTime={0}
@@ -152,10 +156,12 @@ export function resolveCameraControlMouseButtons({
   enablePan,
   enableZoom,
   secondaryMouseButtonMode,
+  projectionKind = 'perspective',
 }: {
   readonly enablePan: boolean;
   readonly enableZoom: boolean;
   readonly secondaryMouseButtonMode: SecondaryMouseButtonMode;
+  readonly projectionKind?: 'orthographic' | 'perspective';
 }): React.ComponentProps<typeof TauCameraControls>['mouseButtons'] {
   return {
     left: CameraControlsImpl.ACTION.ROTATE,
@@ -164,6 +170,10 @@ export function resolveCameraControlMouseButtons({
       enablePan && secondaryMouseButtonMode === 'camera-pan'
         ? CameraControlsImpl.ACTION.TRUCK
         : CameraControlsImpl.ACTION.NONE,
-    wheel: enableZoom ? CameraControlsImpl.ACTION.DOLLY : CameraControlsImpl.ACTION.NONE,
+    wheel: enableZoom
+      ? projectionKind === 'orthographic'
+        ? CameraControlsImpl.ACTION.ZOOM
+        : CameraControlsImpl.ACTION.DOLLY
+      : CameraControlsImpl.ACTION.NONE,
   };
 }

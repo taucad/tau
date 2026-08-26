@@ -2,12 +2,21 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
-import type { GraphicsViewSettings, PinnedMeasurement } from '#constants/editor.constants.js';
+import type { GraphicsViewSettings, PersistedCameraView, PinnedMeasurement } from '#constants/editor.constants.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
-import { useModelInteractionRef } from '#hooks/use-graphics.js';
+import { useCameraSelector, useModelInteractionRef } from '#hooks/use-graphics.js';
 import { serializeModelComponentDisplayState } from '#machines/model-interaction.machine.js';
+
+const cameraVectorEqual = (left: PersistedCameraView['target'], right: PersistedCameraView['target']): boolean =>
+  left[0] === right[0] && left[1] === right[1] && left[2] === right[2];
+
+const cameraViewEqual = (left: PersistedCameraView, right: PersistedCameraView): boolean =>
+  cameraVectorEqual(left.target, right.target) &&
+  cameraVectorEqual(left.direction, right.direction) &&
+  cameraVectorEqual(left.up, right.up) &&
+  left.verticalSpan === right.verticalSpan;
 /**
  * Synchronises persistable graphics settings from the per-view GraphicsMachine
  * (and render timeout from the CadMachine) back to the EditorMachine's
@@ -28,11 +37,14 @@ export function useViewSettingsSync({
   graphicsRef,
   cadRef,
   editorRef,
+  persistCameraView = true,
 }: {
   viewId: string;
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   cadRef: ActorRefFrom<typeof cadMachine> | undefined;
   editorRef: ActorRefFrom<typeof editorMachine>;
+  /** `pending` defers the first emission until the renderer format is known. */
+  persistCameraView?: boolean | 'pending';
 }): void {
   // Track whether we've emitted at least once (skip the first emission)
   const hasEmittedRef = useRef(false);
@@ -49,7 +61,16 @@ export function useViewSettingsSync({
   const enableMatcap = useSelector(graphicsRef, (s) => s.context.enableMatcap);
   const enablePostProcessing = useSelector(graphicsRef, (s) => s.context.enablePostProcessing);
   const upDirection = useSelector(graphicsRef, (s) => s.context.upDirection);
-  const cameraFovAngle = useSelector(graphicsRef, (s) => s.context.cameraFovAngle);
+  const cameraFovAngle = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
+  const cameraView = useCameraSelector(
+    (state): PersistedCameraView => ({
+      target: state.context.view.target,
+      direction: state.context.view.direction,
+      up: state.context.view.up,
+      verticalSpan: state.context.view.verticalSpan,
+    }),
+    cameraViewEqual,
+  );
   const environmentPreset = useSelector(graphicsRef, (s) => s.context.environmentPreset);
   const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
   const modelInteractionRef = useModelInteractionRef();
@@ -66,6 +87,10 @@ export function useViewSettingsSync({
   const renderTimeout = useSelector(cadRef, (s) => s?.context.renderTimeout ?? defaultRenderTimeout);
 
   useEffect(() => {
+    if (persistCameraView === 'pending') {
+      return;
+    }
+
     // Extract pinned measurements for persistence
     const pinnedMeasurements: PinnedMeasurement[] = measurements
       .filter((m) => m.isPinned)
@@ -87,16 +112,17 @@ export function useViewSettingsSync({
       enablePostProcessing,
       upDirection,
       cameraFovAngle,
+      cameraView: persistCameraView ? cameraView : undefined,
       environmentPreset,
       graphicsBackend: graphicsBackendPreference,
       pinnedMeasurements,
       componentDisplay,
       renderTimeout,
-      schemaVersion: 5,
+      schemaVersion: 6,
     };
 
     // Skip the very first emission to avoid overwriting restored state
-    if (hasEmittedRef.current) {
+    if (hasEmittedRef.current || !persistCameraView) {
       // Already emitted, continue to comparison logic below
     } else {
       hasEmittedRef.current = true;
@@ -128,6 +154,8 @@ export function useViewSettingsSync({
     enablePostProcessing,
     upDirection,
     cameraFovAngle,
+    cameraView,
+    persistCameraView,
     environmentPreset,
     graphicsBackendPreference,
     measurements,

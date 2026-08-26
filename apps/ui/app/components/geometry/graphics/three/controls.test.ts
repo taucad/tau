@@ -3,6 +3,19 @@ import { describe, expect, it } from 'vitest';
 import { resolveCameraControlMouseButtons } from '#components/geometry/graphics/three/controls.js';
 
 describe('resolveCameraControlMouseButtons', () => {
+  it('should use zoom rather than unsupported dolly input for the orthographic endpoint', () => {
+    const orthographicOptions = {
+      enablePan: true,
+      enableZoom: true,
+      secondaryMouseButtonMode: 'camera-pan' as const,
+      projectionKind: 'orthographic' as const,
+    };
+
+    expect(resolveCameraControlMouseButtons(orthographicOptions)).toMatchObject({
+      wheel: CameraControlsImpl.ACTION.ZOOM,
+    });
+  });
+
   it('should preserve right-button camera pan when secondary mouse owns camera pan', () => {
     expect(
       resolveCameraControlMouseButtons({

@@ -42,8 +42,26 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     getZippedDirectory: vi.fn(),
+    runtimeFileSystem: {},
     writeFile: vi.fn(),
   }),
+}));
+
+vi.mock('#hooks/use-graphics.js', () => ({
+  useCameraRegistryVersion: vi.fn(),
+}));
+
+vi.mock('#providers/headless-image-provider.js', () => ({
+  useHeadlessImageService: () => ({ export: vi.fn() }),
+}));
+
+vi.mock('#services/graphics-camera-registry.js', () => ({
+  getGraphicsCameraState: vi.fn(),
+  hasGraphicsCameraRig: () => false,
+}));
+
+vi.mock('#services/headless-capture.js', () => ({
+  captureCadImages: vi.fn(),
 }));
 
 vi.mock('#hooks/use-file-tree.js', () => ({

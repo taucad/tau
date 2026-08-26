@@ -21,11 +21,12 @@ export type StageOptions = {
    */
   nearPlane?: number;
   /**
-   * The minimum far plane of the camera.
+   * The minimum far plane of the logarithmic-depth perspective endpoint.
    */
   minimumFarPlane?: number;
   /**
-   * The multiplier for the camera's far plane.
+   * The geometry-envelope multiplier used for perspective coverage and the
+   * bounds-derived orthographic far plane.
    */
   farPlaneRadiusMultiplier?: number;
   /**

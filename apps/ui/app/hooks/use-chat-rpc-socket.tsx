@@ -13,9 +13,9 @@
 import type { ReactNode } from 'react';
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 
-import type { RpcRequest, RpcResponse } from '@taucad/chat';
+import type { CaptureImagesRpcInput, CaptureImagesRpcResult, RpcRequest, RpcResponse } from '@taucad/chat';
 import { rpcWireSuccessResponse } from '@taucad/chat';
-import { rpcNames } from '@taucad/chat/constants';
+import { rpcName, rpcNames } from '@taucad/chat/constants';
 import { ChatRpcSocketService } from '#services/chat-rpc-socket.service.js';
 import type { ConnectionStatus, RpcRequestHandler } from '#services/chat-rpc-socket.service.js';
 import { createRpcHandlers } from '#hooks/rpc-handlers.js';
@@ -29,6 +29,7 @@ import { ENV } from '#environment.config.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { captureFilesToDataUrls } from '#services/headless-capture.js';
 
 type RpcHandlerDepsBase = Omit<RpcHandlerDependencies, 'chatId'>;
 
@@ -194,6 +195,91 @@ export function useChatRpcConnection(options: UseChatRpcConnectionOptions): UseC
       return client;
     },
   };
+
+  if (ENV.TAU_DEBUG) {
+    // Debug-only probe: runs the real browser GeoSpec path with phase timings,
+    // so a slow or hung run can be measured without the API's 60s RPC budget
+    // truncating it. Paired with the `/__e2e/geospec-runner` seed route.
+    (globalThis as unknown as Record<string, unknown>)['__tauRunGeoSpec'] = async (
+      args: Record<string, unknown> = {},
+    ) => {
+      const startedAt = performance.now();
+      const client = depsRef.current?.createGeoSpecClient?.();
+      const readyAt = performance.now();
+      const result = await client?.runTests(args as Parameters<GeoSpecWorkerRpcClient['runTests']>[0]);
+      return {
+        /** Milliseconds. */
+        clientReady: Math.round(readyAt - startedAt),
+        /** Milliseconds. */
+        total: Math.round(performance.now() - startedAt),
+        result,
+      };
+    };
+    (globalThis as unknown as Record<string, unknown>)['__tauGeoSpecReady'] = () =>
+      fileManager.fileManagerRef.getSnapshot().context.openFileSystemBridge !== undefined;
+    (globalThis as unknown as Record<string, unknown>)['__tauCaptureImages'] = async (
+      input: CaptureImagesRpcInput,
+    ): Promise<CaptureImagesRpcResult> => {
+      const baseDeps = depsRef.current;
+      if (!baseDeps || !chatId) {
+        throw new Error('Capture image RPC handler is not ready');
+      }
+      return createRpcHandlers({ ...baseDeps, chatId }).executeRpcCall({
+        rpcName: rpcName.captureImages,
+        args: input,
+        toolCallId: 'e2e-capture-images',
+      });
+    };
+    (globalThis as unknown as Record<string, unknown>)['__tauCaptureSectionPlanePair'] = async (): Promise<{
+      onePlane: string;
+      twoPlanes: string;
+    }> => {
+      const baseDeps = depsRef.current;
+      if (!baseDeps?.headlessImageService) {
+        throw new Error('Headless image service is not ready');
+      }
+      const imageService = baseDeps.headlessImageService;
+      const render = async (
+        planes: ReadonlyArray<{
+          point: readonly [number, number, number];
+          normal: readonly [number, number, number];
+        }>,
+      ) => {
+        const files = await imageService.export({
+          kind: 'capture',
+          identity: `e2e-section-planes:${planes.length}`,
+          sourceFormat: 'gltf',
+          fileSystem: baseDeps.fileManager.runtimeFileSystem,
+          source: { path: 'src/main.ts' },
+          includeEdges: true,
+          format: 'png',
+          exportOptions: {
+            mode: 'single',
+            width: 512,
+            height: 512,
+            lineWidth: 1,
+            camera: {
+              framing: 'fit',
+              direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+              up: [0, 0, 1],
+              margin: 0.1,
+              projection: { kind: 'perspective', verticalFieldOfView: 45 },
+            },
+            sections: { planes, clipSurfaces: true, clipLines: true },
+          },
+        });
+        if (files?.length !== 1) {
+          throw new Error(`Expected one section image, received ${files?.length ?? 0}`);
+        }
+        return captureFilesToDataUrls(files)[0]!;
+      };
+      const first = { point: [0, 0, 0] as const, normal: [1, 0, 0] as const };
+      return {
+        onePlane: await render([first]),
+        twoPlanes: await render([first, { point: [0, 0, 0], normal: [0, 1, 0] }]),
+      };
+    };
+  }
 
   useEffect(() => {
     return () => {

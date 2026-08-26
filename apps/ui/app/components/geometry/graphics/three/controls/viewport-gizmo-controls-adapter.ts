@@ -26,6 +26,7 @@ type ViewportGizmoAttachable = {
 export type ViewportGizmoControlsBinding = {
   detach: () => void;
   afterGizmoRender?: () => void;
+  setCamera?: (camera: THREE.Camera) => void;
 };
 
 export type ViewportGizmoModelPointerInteraction = {
@@ -71,6 +72,7 @@ const bindCameraControls = ({
   readonly interactionLock?: ViewportGizmoInteractionLock;
   readonly modelPointerInteraction?: ViewportGizmoModelPointerInteraction;
 }): ViewportGizmoControlsBinding => {
+  let activeCamera = camera;
   let controlsEnabledBeforeGizmo = controls.enabled ?? true;
   let isGizmoInteractionActive = false;
   let hasGizmoChangeDuringInteraction = false;
@@ -79,15 +81,15 @@ const bindCameraControls = ({
 
   const syncControlsFromCamera = (): void => {
     if (typeof controls.setPosition === 'function') {
-      void controls.setPosition(camera.position.x, camera.position.y, camera.position.z, false);
+      void controls.setPosition(activeCamera.position.x, activeCamera.position.y, activeCamera.position.z, false);
       return;
     }
 
     if (typeof controls.setLookAt === 'function') {
       void controls.setLookAt(
-        camera.position.x,
-        camera.position.y,
-        camera.position.z,
+        activeCamera.position.x,
+        activeCamera.position.y,
+        activeCamera.position.z,
         gizmo.target.x,
         gizmo.target.y,
         gizmo.target.z,
@@ -185,6 +187,9 @@ const bindCameraControls = ({
   controls.addEventListener?.('update', handleControlsUpdate);
 
   return {
+    setCamera: (nextCamera) => {
+      activeCamera = nextCamera;
+    },
     afterGizmoRender: () => {
       if (!isGizmoInteractionActive && gizmo.animating !== true) {
         return;

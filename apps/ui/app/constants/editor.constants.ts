@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { createCameraView } from '@taucad/camera';
+import type { CameraView } from '@taucad/camera';
 
 // ============================================================================
 // Panel Constants
@@ -119,6 +121,8 @@ export type PersistedModelComponentDisplayState = {
   unitsById: Record<string, PersistedModelComponentDisplayUnitState>;
 };
 
+export type PersistedCameraView = Pick<CameraView, 'target' | 'direction' | 'up' | 'verticalSpan'>;
+
 export type GraphicsViewSettings = {
   enableSurfaces: boolean;
   enableLines: boolean;
@@ -129,6 +133,8 @@ export type GraphicsViewSettings = {
   enablePostProcessing: boolean;
   upDirection: 'x' | 'y' | 'z';
   cameraFovAngle: number;
+  /** Canonical user-authored camera view; viewport, bounds, and clipping are derived at runtime. */
+  cameraView?: PersistedCameraView;
   /** Render timeout. Milliseconds. */
   renderTimeout: number;
   environmentPreset: EnvironmentPreset;
@@ -152,8 +158,9 @@ export type GraphicsViewSettings = {
    * `3` = adds persisted `graphicsBackend` with `'auto' | 'webgl' | 'webgpu'`.
    * `4` = drops `'auto'`; persisted `'auto'` migrates to `'webgl'`.
    * `5` = adds optional per-component display state.
+   * `6` = adds the optional canonical camera view.
    */
-  schemaVersion?: 2 | 3 | 4 | 5;
+  schemaVersion?: 2 | 3 | 4 | 5 | 6;
 };
 
 // ============================================================================
@@ -161,6 +168,13 @@ export type GraphicsViewSettings = {
 // ============================================================================
 
 const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
+
+const persistedCameraViewSchema = z.object({
+  target: vector3Schema,
+  direction: vector3Schema,
+  up: vector3Schema,
+  verticalSpan: z.number(),
+});
 
 const pinnedMeasurementSchema = z.object({
   id: z.string(),
@@ -197,15 +211,45 @@ export const graphicsViewSettingsSchema = z.object({
   pinnedMeasurements: z.array(pinnedMeasurementSchema).optional(),
   graphicsBackend: z.enum(['auto', 'webgl', 'webgpu']).optional(),
   componentDisplay: componentDisplayStateSchema.optional(),
+  // Parse independently so corrupt camera data does not discard unrelated settings.
+  cameraView: z.unknown().optional(),
   /**
    * Settings schema version. Absent / `1` = legacy seconds-based renderTimeout;
    * `2` = milliseconds-only contract.
    * `3` = adds persisted `graphicsBackend` with `'auto' | 'webgl' | 'webgpu'`.
    * `4` = drops `'auto'`; persisted `'auto'` migrates to `'webgl'`.
    * `5` = adds optional per-component display state.
+   * `6` = adds the optional canonical camera view.
    */
-  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
+  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]).optional(),
 });
+
+const parsePersistedCameraView = (
+  raw: unknown,
+  requestedVerticalFieldOfView: number,
+): PersistedCameraView | undefined => {
+  const result = persistedCameraViewSchema.safeParse(raw);
+  if (!result.success) {
+    return undefined;
+  }
+
+  try {
+    const view = createCameraView({
+      ...result.data,
+      requestedVerticalFieldOfView,
+      viewport: { width: 1, height: 1, pixelRatio: 1 },
+      bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+    });
+    return {
+      target: view.target,
+      direction: view.direction,
+      up: view.up,
+      verticalSpan: view.verticalSpan,
+    };
+  } catch {
+    return undefined;
+  }
+};
 
 export function isComponentDisplayStateEmpty(
   componentDisplay: PersistedModelComponentDisplayState | undefined,
@@ -252,19 +296,21 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   }
 
   const parsed = result.data;
-  if (parsed.schemaVersion === 5) {
+  if (parsed.schemaVersion === 6) {
     return {
       ...parsed,
+      cameraView: parsePersistedCameraView(parsed.cameraView, parsed.cameraFovAngle),
       componentDisplay: omitEmptyComponentDisplayState(parsed.componentDisplay),
       graphicsBackend: 'webgl',
     };
   }
 
-  if (parsed.schemaVersion === 4) {
+  if (parsed.schemaVersion === 5 || parsed.schemaVersion === 4) {
     return {
       ...parsed,
+      componentDisplay: omitEmptyComponentDisplayState(parsed.componentDisplay),
       graphicsBackend: 'webgl',
-      schemaVersion: 5,
+      schemaVersion: 6,
     };
   }
 
@@ -272,7 +318,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     return {
       ...parsed,
       graphicsBackend: 'webgl',
-      schemaVersion: 5,
+      schemaVersion: 6,
     };
   }
 
@@ -280,7 +326,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     return {
       ...parsed,
       graphicsBackend: 'webgl',
-      schemaVersion: 5,
+      schemaVersion: 6,
     };
   }
 
@@ -288,7 +334,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     ...parsed,
     renderTimeout: parsed.renderTimeout * 1000,
     graphicsBackend: 'webgl',
-    schemaVersion: 5,
+    schemaVersion: 6,
   };
 }
 
@@ -309,7 +355,7 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   renderTimeout: defaultRenderTimeout,
   environmentPreset: 'performance',
   graphicsBackend: 'webgl',
-  schemaVersion: 5,
+  schemaVersion: 6,
 };
 
 // ============================================================================

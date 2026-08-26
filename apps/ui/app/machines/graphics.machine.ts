@@ -1,6 +1,6 @@
 import { assign, assertEvent, setup, emit, enqueueActions, fromPromise, sendTo } from 'xstate';
-import type { AnyActorRef } from 'xstate';
-import type { GeometryComponentManifest, GridSizes, ScreenshotOptions, Geometry } from '@taucad/types';
+import type { ActorRefFrom } from 'xstate';
+import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { LengthSymbol, UnitSystem } from '@taucad/units';
 import { standardInternationalBaseUnits } from '@taucad/units/constants';
@@ -9,7 +9,6 @@ import type {
   EnvironmentPreset,
   GraphicsBackendPreference,
   PinnedMeasurement,
-  PersistedModelComponentDisplayState,
   ResolvedGraphicsBackend,
 } from '#constants/editor.constants.js';
 import {
@@ -19,6 +18,8 @@ import {
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+
+export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
 export type ModelPointerClickSuppressionReason = 'measureTool';
 
@@ -69,11 +70,10 @@ export type GraphicsContext = {
   /** Whether the grid size should be locked to the computed value */
   isGridSizeLocked: boolean;
 
-  // Camera state (library-agnostic)
-  cameraFovAngle: number; // The FOV set by the user
-  cameraFovAngleComputed: number; // The FOV computed from the camera position and fov
-  cameraPosition: number;
-  currentZoom: number;
+  /** Immutable seed used only when the provider constructs its camera actor. */
+  initialCameraFovAngle: number;
+  /** Projection-neutral visible vertical span supplied by the active renderer. */
+  cameraVisibleSpan: number;
   geometryRadius: number;
   sceneRadius: number | undefined;
 
@@ -134,32 +134,22 @@ export type GraphicsContext = {
   measureSnapDistance: number; // Pixels
   hoveredMeasurementId?: string;
 
-  // Capability registrations
-  screenshotCapability?: AnyActorRef;
-  cameraCapability?: AnyActorRef;
-
   // State flags
-  isScreenshotReady: boolean;
-  isCameraReady: boolean;
   cameraInteracting: boolean;
   cameraInteractionHadMovement: boolean;
   suppressNextModelPointerClick: boolean;
   modelPointerClickSuppressionReasons: ModelPointerClickSuppressionReason[];
+  viewerHoverSuppressionReasons: ViewerHoverSuppressionReason[];
   /** Bumps when geometry or component display changes can invalidate renderer-side picking caches. */
   pickableMeshesVersion: number;
-
-  // Active operations
-  activeScreenshotRequest?: {
-    requestId: string;
-    options: ScreenshotOptions;
-  };
+  modelInteractionRef: ModelInteractionRef;
+  ownsModelInteractionRef: boolean;
+  modelInteractionUnitId?: string;
 
   // Geometry data from CAD
   geometry: Geometry | undefined;
   /** Deterministic key derived from the geometry content hash. Used for skip-when-unchanged optimizations. */
   geometryKey: string;
-  /** Restored per-component display state passed through to the model-interaction child. */
-  componentDisplay?: PersistedModelComponentDisplayState;
 };
 
 // Event types
@@ -169,9 +159,8 @@ export type GraphicsEvent =
   | { type: 'setGridSizeLocked'; payload: boolean }
   | { type: 'setGridUnit'; payload: { unit: LengthSymbol } }
   // Camera events
-  | { type: 'setFovAngle'; payload: number }
-  | { type: 'resetCamera'; options?: { enableConfiguredAngles?: boolean } }
-  | { type: 'cameraResetCompleted' }
+  | { type: 'resetCamera' }
+  | { type: 'cameraViewChanged'; verticalSpan: number }
   // Visibility events
   | { type: 'setSurfaceVisibility'; payload: boolean }
   | { type: 'setLinesVisibility'; payload: boolean }
@@ -216,16 +205,7 @@ export type GraphicsEvent =
   // Controls events
   | { type: 'controlsInteractionStart' }
   | { type: 'controlsInteractionMoved' }
-  | {
-      type: 'controlsChanged';
-      zoom: number;
-      position: number;
-      fov: number;
-    }
-  | {
-      type: 'controlsInteractionEnd';
-      zoom: number;
-    }
+  | { type: 'controlsInteractionEnd' }
   | {
       type: 'beginViewerModelHoverSuppression';
       reason: ViewerHoverSuppressionReason;
@@ -238,20 +218,6 @@ export type GraphicsEvent =
     }
   | { type: 'markModelPointerGestureMoved' }
   | { type: 'clearModelPointerClickGuard' }
-  // Screenshot events
-  | { type: 'takeScreenshot'; options: ScreenshotOptions; requestId: string }
-  | {
-      type: 'takeCompositeScreenshot';
-      options: ScreenshotOptions;
-      requestId: string;
-    }
-  | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
-  | { type: 'screenshotFailed'; error: string; requestId: string }
-  // Capability registration
-  | { type: 'registerScreenshotCapability'; actorRef: AnyActorRef }
-  | { type: 'registerCameraCapability'; actorRef: AnyActorRef }
-  | { type: 'unregisterScreenshotCapability' }
-  | { type: 'unregisterCameraCapability' }
   // Geometry updates from CAD
   | {
       type: 'updateGeometry';
@@ -288,6 +254,7 @@ export type GraphicsEvent =
       opacity: number;
       source?: ModelInteractionSource;
     }
+  | { type: 'resetModelComponentOpacities'; unitId: string; source?: ModelInteractionSource }
   | { type: 'focusModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'clearModelComponentFocus'; unitId: string; source?: ModelInteractionSource }
   // Scene radius update from Three.js bounding sphere (sent by Stage)
@@ -296,9 +263,7 @@ export type GraphicsEvent =
 // Emitted events
 export type GraphicsEmitted =
   | { type: 'gridUpdated'; sizes: GridSizes }
-  | { type: 'screenshotCompleted'; dataUrls: string[]; requestId: string }
-  | { type: 'screenshotFailed'; error: string; requestId: string }
-  | { type: 'cameraResetCompleted' }
+  | { type: 'viewResetRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number };
 
 // Input type
@@ -318,7 +283,7 @@ export type GraphicsInput = {
   /** Saved pinned measurements to restore */
   pinnedMeasurements?: PinnedMeasurement[];
   graphicsBackendPreference?: GraphicsBackendPreference;
-  componentDisplay?: PersistedModelComponentDisplayState;
+  modelInteractionRef?: ModelInteractionRef;
 };
 
 type LengthUnitData = {
@@ -386,18 +351,15 @@ const baseGridSizeCoefficient = 3;
 
 // Grid size calculation logic (ported from React)
 function calculateGridSizes({
-  cameraPosition,
-  cameraFov,
+  visibleSpan,
   gridUnitSystem,
   unitFactor,
 }: {
-  cameraPosition: number;
-  cameraFov: number;
+  visibleSpan: number;
   gridUnitSystem: 'si' | 'imperial';
   unitFactor: number;
 }): GridSizes {
-  const visibleWidthAtDistance = 2 * cameraPosition * Math.tan((cameraFov * Math.PI) / 360);
-  let baseGridSize = visibleWidthAtDistance / baseGridSizeCoefficient;
+  let baseGridSize = visibleSpan / baseGridSizeCoefficient;
 
   let scalingFactor;
   if (gridUnitSystem === 'imperial') {
@@ -421,8 +383,7 @@ function calculateGridSizes({
     smallSize,
     largeSize: safeSize,
     effectiveSize: baseGridSize,
-    baseSize: cameraPosition,
-    fov: cameraFov,
+    baseSize: visibleSpan,
   };
 }
 
@@ -650,8 +611,7 @@ export const graphicsMachine = setup({
         // Use relative factor × 1000 for grid calculations
         const gridUnitFactor = relativeFactor * 1000;
         const newGridSizes = calculateGridSizes({
-          cameraPosition: context.cameraPosition,
-          cameraFov: context.cameraFovAngleComputed,
+          visibleSpan: context.cameraVisibleSpan,
           gridUnitSystem: unitData.system,
           unitFactor: gridUnitFactor,
         });
@@ -663,28 +623,21 @@ export const graphicsMachine = setup({
       }
     }),
 
-    setFovAngle: assign({
-      cameraFovAngle({ event }) {
-        assertEvent(event, 'setFovAngle');
-        return event.payload;
-      },
-    }),
-
-    handleControlsChange: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'controlsChanged');
+    handleCameraViewChange: enqueueActions(({ enqueue, event, context }) => {
+      assertEvent(event, 'cameraViewChanged');
+      if (!Number.isFinite(event.verticalSpan) || event.verticalSpan <= 0) {
+        return;
+      }
 
       enqueue.assign({
-        currentZoom: event.zoom,
-        cameraPosition: event.position,
-        cameraFovAngleComputed: event.fov,
+        cameraVisibleSpan: event.verticalSpan,
       });
 
       // Recalculate grid sizes based on new controls state
       // Use relative factor × 1000 for grid calculations
       const gridUnitFactor = context.units.length.factor * 1000;
       const newGridSizes = calculateGridSizes({
-        cameraPosition: event.position,
-        cameraFov: event.fov,
+        visibleSpan: event.verticalSpan,
         gridUnitSystem: context.units.length.system,
         unitFactor: gridUnitFactor,
       });
@@ -711,43 +664,48 @@ export const graphicsMachine = setup({
       enqueue.assign({
         cameraInteractionHadMovement: true,
         suppressNextModelPointerClick: true,
+        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, 'cameraControls'),
       });
-      enqueue.sendTo('modelInteraction', {
-        type: 'beginViewerHoverSuppression',
-        reason: 'cameraControls',
-        source: 'viewer',
-      });
+      if (!context.viewerHoverSuppressionReasons.includes('cameraControls') && context.modelInteractionUnitId) {
+        enqueue.sendTo(context.modelInteractionRef, {
+          type: 'setHoveredComponent',
+          unitId: context.modelInteractionUnitId,
+          componentId: undefined,
+          source: 'viewer',
+        });
+      }
     }),
 
-    handleControlsInteractionEnd: enqueueActions(({ enqueue, event }) => {
-      assertEvent(event, 'controlsInteractionEnd');
+    handleControlsInteractionEnd: enqueueActions(({ enqueue, context }) => {
       enqueue.assign({
-        currentZoom: event.zoom,
         cameraInteracting: false,
         cameraInteractionHadMovement: false,
-      });
-      enqueue.sendTo('modelInteraction', {
-        type: 'endViewerHoverSuppression',
-        reason: 'cameraControls',
-        source: 'viewer',
+        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'cameraControls'),
       });
     }),
 
-    beginViewerModelHoverSuppression: sendTo('modelInteraction', ({ event }) => {
+    beginViewerModelHoverSuppression: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'beginViewerModelHoverSuppression');
-      return {
-        type: 'beginViewerHoverSuppression',
-        reason: event.reason,
-        source: event.source ?? 'viewer',
-      };
+      if (context.viewerHoverSuppressionReasons.includes(event.reason)) {
+        return;
+      }
+      enqueue.assign({
+        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
+      });
+      if (context.modelInteractionUnitId) {
+        enqueue.sendTo(context.modelInteractionRef, {
+          type: 'setHoveredComponent',
+          unitId: context.modelInteractionUnitId,
+          componentId: undefined,
+          source: event.source ?? 'viewer',
+        });
+      }
     }),
 
-    endViewerModelHoverSuppression: sendTo('modelInteraction', ({ event }) => {
+    endViewerModelHoverSuppression: assign(({ context, event }) => {
       assertEvent(event, 'endViewerModelHoverSuppression');
       return {
-        type: 'endViewerHoverSuppression',
-        reason: event.reason,
-        source: event.source ?? 'viewer',
+        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
       };
     }),
 
@@ -765,12 +723,16 @@ export const graphicsMachine = setup({
           context.modelPointerClickSuppressionReasons,
           'measureTool',
         ),
+        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
       });
-      enqueue.sendTo('modelInteraction', {
-        type: 'beginViewerHoverSuppression',
-        reason: 'measureTool',
-        source: 'viewer',
-      });
+      if (!context.viewerHoverSuppressionReasons.includes('measureTool') && context.modelInteractionUnitId) {
+        enqueue.sendTo(context.modelInteractionRef, {
+          type: 'setHoveredComponent',
+          unitId: context.modelInteractionUnitId,
+          componentId: undefined,
+          source: 'viewer',
+        });
+      }
     }),
 
     endMeasureHoverSuppression: enqueueActions(({ enqueue, context }) => {
@@ -779,11 +741,7 @@ export const graphicsMachine = setup({
           context.modelPointerClickSuppressionReasons,
           'measureTool',
         ),
-      });
-      enqueue.sendTo('modelInteraction', {
-        type: 'endViewerHoverSuppression',
-        reason: 'measureTool',
-        source: 'viewer',
+        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
       });
     }),
 
@@ -806,6 +764,9 @@ export const graphicsMachine = setup({
       enqueue.assign({
         geometry: event.geometry,
         geometryKey: event.geometry.hash,
+        modelInteractionUnitId:
+          componentManifestUpdate?.unitId ??
+          (event.sourceFile ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile }) : undefined),
         pickableMeshesVersion: context.pickableMeshesVersion + 1,
         cadUnits: {
           length: {
@@ -823,7 +784,7 @@ export const graphicsMachine = setup({
       });
 
       if (componentManifestUpdate) {
-        enqueue.sendTo('modelInteraction', {
+        enqueue.sendTo(context.modelInteractionRef, {
           type: 'loadManifest',
           unitId: componentManifestUpdate.unitId,
           manifest: componentManifestUpdate.manifest,
@@ -832,7 +793,7 @@ export const graphicsMachine = setup({
       }
 
       if (event.sourceFile && !componentManifestUpdate) {
-        enqueue.sendTo('modelInteraction', {
+        enqueue.sendTo(context.modelInteractionRef, {
           type: 'clearManifest',
           unitId: deriveModelInteractionUnitId({ sourceFile: event.sourceFile }),
           source: 'viewer',
@@ -849,124 +810,9 @@ export const graphicsMachine = setup({
       });
     }),
 
-    registerScreenshotCapability: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'registerScreenshotCapability');
-
-      enqueue.assign({
-        screenshotCapability: event.actorRef,
-        isScreenshotReady: true,
-      });
-
-      // If there's a pending screenshot request, send it now that capability is registered
-      if (context.activeScreenshotRequest) {
-        const isComposite = 'composite' in context.activeScreenshotRequest.options;
-
-        enqueue.sendTo(event.actorRef, {
-          type: isComposite ? 'captureComposite' : 'capture',
-          options: context.activeScreenshotRequest.options,
-          requestId: context.activeScreenshotRequest.requestId,
-        });
-      }
-    }),
-
-    unregisterScreenshotCapability: assign({
-      screenshotCapability: undefined,
-      isScreenshotReady: false,
-    }),
-
-    registerCameraCapability: assign({
-      cameraCapability({ event }) {
-        assertEvent(event, 'registerCameraCapability');
-        return event.actorRef;
-      },
-      isCameraReady: true,
-    }),
-
-    unregisterCameraCapability: assign({
-      cameraCapability: undefined,
-      isCameraReady: false,
-    }),
-
-    requestScreenshot: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'takeScreenshot');
-
-      enqueue.assign({
-        activeScreenshotRequest: {
-          requestId: event.requestId,
-          options: event.options,
-        },
-      });
-
-      // Only send to capability if it's registered, otherwise it will be sent when capability registers
-      if (context.screenshotCapability) {
-        enqueue.sendTo(context.screenshotCapability, {
-          type: 'capture',
-          options: event.options,
-          requestId: event.requestId,
-        });
-      }
-    }),
-
-    requestCompositeScreenshot: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'takeCompositeScreenshot');
-
-      enqueue.assign({
-        activeScreenshotRequest: {
-          requestId: event.requestId,
-          options: event.options,
-        },
-      });
-
-      // Only send to capability if it's registered, otherwise it will be sent when capability registers
-      if (context.screenshotCapability) {
-        enqueue.sendTo(context.screenshotCapability, {
-          type: 'captureComposite',
-          options: event.options,
-          requestId: event.requestId,
-        });
-      }
-    }),
-
-    completeScreenshot: enqueueActions(({ enqueue, event }) => {
-      assertEvent(event, 'screenshotCompleted');
-
-      enqueue.assign({
-        activeScreenshotRequest: undefined,
-      });
-
-      enqueue.emit({
-        type: 'screenshotCompleted',
-        dataUrls: event.dataUrls,
-        requestId: event.requestId,
-      });
-    }),
-
-    failScreenshot: enqueueActions(({ enqueue, event }) => {
-      assertEvent(event, 'screenshotFailed');
-
-      enqueue.assign({
-        activeScreenshotRequest: undefined,
-      });
-
-      enqueue.emit({
-        type: 'screenshotFailed',
-        error: event.error,
-        requestId: event.requestId,
-      });
-    }),
-
-    requestCameraReset: enqueueActions(({ enqueue, context, event }) => {
+    requestCameraReset: emit(({ event }) => {
       assertEvent(event, 'resetCamera');
-      if (context.cameraCapability) {
-        enqueue.sendTo(context.cameraCapability, {
-          type: 'reset',
-          options: event.options,
-        });
-      }
-    }),
-
-    completeCameraReset: emit({
-      type: 'cameraResetCompleted',
+      return { type: 'viewResetRequested' } satisfies GraphicsEmitted;
     }),
 
     setSurfaceVisibility: assign({
@@ -1301,82 +1147,140 @@ export const graphicsMachine = setup({
       },
     }),
 
-    loadModelComponentManifest: sendTo('modelInteraction', ({ event }) => {
+    loadModelComponentManifest: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'loadModelComponentManifest');
+        return { type: 'loadManifest', unitId: event.unitId, manifest: event.manifest, source: event.source };
+      },
+    ),
+    clearModelComponentManifest: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'clearModelComponentManifest');
+        return { type: 'clearManifest', unitId: event.unitId, source: event.source };
+      },
+    ),
+    setHoveredModelComponent: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'setHoveredModelComponent');
+        return {
+          type: 'setHoveredComponent',
+          unitId: event.unitId,
+          componentId: event.componentId,
+          source: event.source,
+        };
+      },
+    ),
+    bindModelInteractionUnit: assign(({ event }) => {
       assertEvent(event, 'loadModelComponentManifest');
-      return { type: 'loadManifest', unitId: event.unitId, manifest: event.manifest, source: event.source };
+      return { modelInteractionUnitId: event.unitId };
     }),
-    clearModelComponentManifest: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'clearModelComponentManifest');
-      return { type: 'clearManifest', unitId: event.unitId, source: event.source };
-    }),
-    setHoveredModelComponent: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'setHoveredModelComponent');
-      return {
-        type: 'setHoveredComponent',
-        unitId: event.unitId,
-        componentId: event.componentId,
-        source: event.source,
-      };
-    }),
-    toggleModelComponentSelection: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'toggleModelComponentSelection');
-      return {
-        type: 'toggleComponentSelection',
-        unitId: event.unitId,
-        componentId: event.componentId,
-        source: event.source,
-      };
-    }),
-    selectModelComponent: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'selectModelComponent');
-      return {
-        type: 'selectComponent',
-        unitId: event.unitId,
-        componentId: event.componentId,
-        source: event.source,
-      };
-    }),
-    clearModelComponentSelection: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'clearModelComponentSelection');
-      return { type: 'clearSelection', unitId: event.unitId, source: event.source };
-    }),
-    hideModelComponent: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'hideModelComponent');
-      return { type: 'hideComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
-    }),
-    showModelComponent: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'showModelComponent');
-      return { type: 'showComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
-    }),
-    showHiddenModelComponents: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'showHiddenModelComponents');
-      return { type: 'showHiddenComponents', unitId: event.unitId, source: event.source };
-    }),
-    isolateModelComponent: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'isolateModelComponent');
-      return { type: 'isolateComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
-    }),
-    clearModelComponentIsolation: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'clearModelComponentIsolation');
-      return { type: 'clearIsolation', unitId: event.unitId, source: event.source };
-    }),
-    setModelComponentOpacity: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'setModelComponentOpacity');
-      return {
-        type: 'setComponentOpacity',
-        unitId: event.unitId,
-        componentId: event.componentId,
-        opacity: event.opacity,
-        source: event.source,
-      };
-    }),
-    focusModelComponent: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'focusModelComponent');
-      return { type: 'focusComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
-    }),
-    clearModelComponentFocus: sendTo('modelInteraction', ({ event }) => {
-      assertEvent(event, 'clearModelComponentFocus');
-      return { type: 'clearFocus', unitId: event.unitId, source: event.source };
+    toggleModelComponentSelection: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'toggleModelComponentSelection');
+        return {
+          type: 'toggleComponentSelection',
+          unitId: event.unitId,
+          componentId: event.componentId,
+          source: event.source,
+        };
+      },
+    ),
+    selectModelComponent: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'selectModelComponent');
+        return {
+          type: 'selectComponent',
+          unitId: event.unitId,
+          componentId: event.componentId,
+          source: event.source,
+        };
+      },
+    ),
+    clearModelComponentSelection: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'clearModelComponentSelection');
+        return { type: 'clearSelection', unitId: event.unitId, source: event.source };
+      },
+    ),
+    hideModelComponent: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'hideModelComponent');
+        return { type: 'hideComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+      },
+    ),
+    showModelComponent: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'showModelComponent');
+        return { type: 'showComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+      },
+    ),
+    showHiddenModelComponents: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'showHiddenModelComponents');
+        return { type: 'showHiddenComponents', unitId: event.unitId, source: event.source };
+      },
+    ),
+    isolateModelComponent: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'isolateModelComponent');
+        return { type: 'isolateComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+      },
+    ),
+    clearModelComponentIsolation: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'clearModelComponentIsolation');
+        return { type: 'clearIsolation', unitId: event.unitId, source: event.source };
+      },
+    ),
+    setModelComponentOpacity: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'setModelComponentOpacity');
+        return {
+          type: 'setComponentOpacity',
+          unitId: event.unitId,
+          componentId: event.componentId,
+          opacity: event.opacity,
+          source: event.source,
+        };
+      },
+    ),
+    resetModelComponentOpacities: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'resetModelComponentOpacities');
+        return { type: 'resetComponentOpacities', unitId: event.unitId, source: event.source };
+      },
+    ),
+    focusModelComponent: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'focusModelComponent');
+        return { type: 'focusComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+      },
+    ),
+    clearModelComponentFocus: sendTo(
+      ({ context }) => context.modelInteractionRef,
+      ({ event }) => {
+        assertEvent(event, 'clearModelComponentFocus');
+        return { type: 'clearFocus', unitId: event.unitId, source: event.source };
+      },
+    ),
+    stopOwnedModelInteraction: enqueueActions(({ enqueue, context }) => {
+      if (context.ownsModelInteractionRef) {
+        enqueue.stopChild(context.modelInteractionRef);
+      }
     }),
   },
   guards: {
@@ -1420,13 +1324,6 @@ export const graphicsMachine = setup({
 
   invoke: [
     {
-      src: 'modelInteraction',
-      id: 'modelInteraction',
-      input: ({ context }) => ({
-        componentDisplay: context.componentDisplay,
-      }),
-    },
-    {
       src: 'probeWebGpu',
       id: 'probeWebGpuInvocation',
       onDone: { actions: 'recordWebGpuProbeResult' },
@@ -1434,8 +1331,15 @@ export const graphicsMachine = setup({
     },
   ],
 
-  context: ({ input }) => {
+  context: ({ input, spawn }) => {
     const preference = input.graphicsBackendPreference ?? 'webgl';
+    const ownsModelInteractionRef = input.modelInteractionRef === undefined;
+    const modelInteractionRef =
+      input.modelInteractionRef ??
+      spawn('modelInteraction', {
+        id: 'model-interaction',
+        input: {},
+      });
 
     return {
       // Grid state
@@ -1466,10 +1370,8 @@ export const graphicsMachine = setup({
       },
 
       // Camera state
-      cameraFovAngle: input.defaultCameraFovAngle ?? 60,
-      cameraFovAngleComputed: 75,
-      cameraPosition: 1000,
-      currentZoom: 1,
+      initialCameraFovAngle: input.defaultCameraFovAngle ?? 60,
+      cameraVisibleSpan: 2,
       geometryRadius: 0,
       sceneRadius: undefined,
 
@@ -1520,28 +1422,23 @@ export const graphicsMachine = setup({
       measureSnapDistance: input.measureSnapDistance ?? 40,
       hoveredMeasurementId: undefined,
 
-      // Capabilities
-      screenshotCapability: undefined,
-      cameraCapability: undefined,
-
       // State flags
-      isScreenshotReady: false,
-      isCameraReady: false,
       cameraInteracting: false,
       cameraInteractionHadMovement: false,
       suppressNextModelPointerClick: false,
       modelPointerClickSuppressionReasons: [],
+      viewerHoverSuppressionReasons: [],
       pickableMeshesVersion: 0,
-
-      // Active operations
-      activeScreenshotRequest: undefined,
+      modelInteractionRef,
+      ownsModelInteractionRef,
+      modelInteractionUnitId: undefined,
 
       // Shapes
       geometry: undefined,
       geometryKey: '',
-      componentDisplay: input.componentDisplay,
     };
   },
+  exit: 'stopOwnedModelInteraction',
   initial: 'operational',
   states: {
     operational: {
@@ -1559,14 +1456,11 @@ export const graphicsMachine = setup({
         },
 
         // Camera events
-        setFovAngle: {
-          actions: 'setFovAngle',
-        },
         resetCamera: {
           actions: 'requestCameraReset',
         },
-        cameraResetCompleted: {
-          actions: 'completeCameraReset',
+        cameraViewChanged: {
+          actions: 'handleCameraViewChange',
         },
 
         // Visibility events
@@ -1616,9 +1510,6 @@ export const graphicsMachine = setup({
         controlsInteractionMoved: {
           actions: 'handleControlsInteractionMoved',
         },
-        controlsChanged: {
-          actions: 'handleControlsChange',
-        },
         controlsInteractionEnd: {
           actions: 'handleControlsInteractionEnd',
         },
@@ -1635,34 +1526,6 @@ export const graphicsMachine = setup({
           actions: 'clearModelPointerClickGuard',
         },
 
-        // Screenshot events
-        takeScreenshot: {
-          actions: 'requestScreenshot',
-        },
-        takeCompositeScreenshot: {
-          actions: 'requestCompositeScreenshot',
-        },
-        screenshotCompleted: {
-          actions: 'completeScreenshot',
-        },
-        screenshotFailed: {
-          actions: 'failScreenshot',
-        },
-
-        // Capability registration
-        registerScreenshotCapability: {
-          actions: 'registerScreenshotCapability',
-        },
-        unregisterScreenshotCapability: {
-          actions: 'unregisterScreenshotCapability',
-        },
-        registerCameraCapability: {
-          actions: 'registerCameraCapability',
-        },
-        unregisterCameraCapability: {
-          actions: 'unregisterCameraCapability',
-        },
-
         // Geometry updates
         updateGeometry: {
           actions: 'updateGeometry',
@@ -1673,7 +1536,7 @@ export const graphicsMachine = setup({
 
         // Model/component interaction
         loadModelComponentManifest: {
-          actions: 'loadModelComponentManifest',
+          actions: ['bindModelInteractionUnit', 'loadModelComponentManifest'],
         },
         clearModelComponentManifest: {
           actions: 'clearModelComponentManifest',
@@ -1691,22 +1554,25 @@ export const graphicsMachine = setup({
           actions: 'clearModelComponentSelection',
         },
         hideModelComponent: {
-          actions: ['hideModelComponent', 'bumpPickableMeshesVersion'],
+          actions: 'hideModelComponent',
         },
         showModelComponent: {
-          actions: ['showModelComponent', 'bumpPickableMeshesVersion'],
+          actions: 'showModelComponent',
         },
         showHiddenModelComponents: {
-          actions: ['showHiddenModelComponents', 'bumpPickableMeshesVersion'],
+          actions: 'showHiddenModelComponents',
         },
         isolateModelComponent: {
-          actions: ['isolateModelComponent', 'bumpPickableMeshesVersion'],
+          actions: 'isolateModelComponent',
         },
         clearModelComponentIsolation: {
-          actions: ['clearModelComponentIsolation', 'bumpPickableMeshesVersion'],
+          actions: 'clearModelComponentIsolation',
         },
         setModelComponentOpacity: {
           actions: 'setModelComponentOpacity',
+        },
+        resetModelComponentOpacities: {
+          actions: 'resetModelComponentOpacities',
         },
         focusModelComponent: {
           actions: 'focusModelComponent',

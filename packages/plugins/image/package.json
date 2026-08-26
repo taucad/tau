@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./camera": "./src/nanoraster-camera.ts",
     "./label": "./src/label.ts",
     "./svg": "./src/svg.ts",
     "./package.json": "./package.json"
@@ -45,6 +46,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./camera": {
+        "types": "./dist/nanoraster-camera.d.mts",
+        "import": "./dist/nanoraster-camera.mjs",
+        "default": "./dist/nanoraster-camera.mjs"
       },
       "./label": {
         "types": "./dist/label.d.mts",
@@ -65,6 +71,7 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
+    "@taucad/camera": "^0.0.1",
     "@taucad/runtime": "^0.1.0-beta.0",
     "zod": "^4.0.0"
   },
@@ -73,6 +80,7 @@
     "nanoraster": "^0.4.1"
   },
   "devDependencies": {
+    "@taucad/camera": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "geist": "catalog:",
     "vite": "catalog:",

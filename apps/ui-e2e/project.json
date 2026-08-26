@@ -25,7 +25,11 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --config apps/ui-e2e/vitest.config.ts src/preview.spec.ts src/geospec-runner.spec.ts"
+        "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/preview.spec.ts src/geospec-runner.spec.ts src/headless-chat-image-capture.development.spec.ts",
+        "env": {
+          "PORT": "3012",
+          "TAU_E2E_SERVER_MODE": "development"
+        }
       }
     }
   }

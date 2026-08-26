@@ -26,6 +26,7 @@
     "guides/cross-origin-isolation",
     "guides/bundling",
     "guides/error-handling",
+    "guides/headless-camera-capture",
     "guides/testing-kernels",
 
     "---Concepts---",

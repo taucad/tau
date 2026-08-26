@@ -54,7 +54,7 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('7.0.0');
+      expect(imageDefinition.version).toBe('8.0.0');
     });
 
     it('should load the renderer once during initialize', () => {
@@ -84,8 +84,6 @@ describe('image transcoder', () => {
     it('should default an empty request to the strict single branch', () => {
       expect(imageEdgeSchemas.webp.parse({})).toMatchObject({
         mode: 'single',
-        phi: 60,
-        theta: -45,
         axes: false,
         scaleBar: false,
       });
@@ -95,14 +93,14 @@ describe('image transcoder', () => {
       expect(
         imageEdgeSchemas.webp.parse({
           mode: 'batch',
-          views: [{ id: 'front', phi: 90, theta: 0 }],
+          views: [{ id: 'front' }],
         }),
-      ).toMatchObject({ mode: 'batch', views: [{ id: 'front', phi: 90, theta: 0 }] });
+      ).toMatchObject({ mode: 'batch', views: [{ id: 'front' }] });
       expect(
         imageEdgeSchemas.webp.safeParse({
           mode: 'batch',
           phi: 90,
-          views: [{ id: 'front', phi: 90, theta: 0 }],
+          views: [{ id: 'front' }],
         }).success,
       ).toBe(false);
       expect(imageEdgeSchemas.webp.safeParse({ mode: 'single', views: [] }).success).toBe(false);
@@ -113,15 +111,10 @@ describe('image transcoder', () => {
       expect(
         imageEdgeSchemas.webp.safeParse({
           mode: 'batch',
-          views: [
-            { id: 'front', phi: 90, theta: 0 },
-            { id: 'front', phi: 90, theta: 180 },
-          ],
+          views: [{ id: 'front' }, { id: 'front' }],
         }).success,
       ).toBe(false);
-      expect(
-        imageEdgeSchemas.webp.safeParse({ mode: 'batch', views: [{ id: '../front', phi: 90, theta: 0 }] }).success,
-      ).toBe(false);
+      expect(imageEdgeSchemas.webp.safeParse({ mode: 'batch', views: [{ id: '../front' }] }).success).toBe(false);
     });
   });
 
@@ -203,12 +196,16 @@ describe('image transcoder', () => {
           format: 'png',
           width: 768,
           height: 432,
-          phi: 60,
-          theta: -45,
-          margin: 0.1,
+          lineWidth: 2,
           axes: false,
           scaleBar: false,
-          up: 'z',
+          camera: {
+            framing: 'fit',
+            direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+            up: [0, 0, 1],
+            margin: 0.1,
+            projection: { kind: 'perspective', verticalFieldOfView: 45 },
+          },
         }),
       );
       expect(renderImage.mock.calls[0]?.[1]).not.toHaveProperty('mode');
@@ -229,11 +226,11 @@ describe('image transcoder', () => {
 
       expect(renderImage).toHaveBeenCalledWith(
         expect.any(Uint8Array),
-        expect.objectContaining({ format: 'jpeg', background: '#FFFFFF', quality: 0.92, up: 'z' }),
+        expect.objectContaining({ format: 'jpeg', background: '#FFFFFF', quality: 0.92 }),
       );
     });
 
-    it('should pass through caller overrides for camera and size', async () => {
+    it('should pass through camera, presentation, and size', async () => {
       renderImage.mockResolvedValue({
         name: 'render.png',
         bytes: new Uint8Array([1]),
@@ -250,8 +247,26 @@ describe('image transcoder', () => {
           options: {
             width: 1920,
             height: 1080,
-            phi: 30,
+            camera: {
+              framing: 'fixed',
+              position: [8, -6, 4],
+              target: [1, 2, 3],
+              up: [0, 0, 1],
+              projection: { kind: 'perspective', verticalFieldOfView: 52, zoom: 1.4 },
+              clipping: { near: 0.2, far: 900 },
+            },
             label: 'Housing datum A',
+            surfaces: false,
+            lines: true,
+            visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
+            sections: {
+              planes: [
+                { point: [0, 0, 0], normal: [0, 0, 1] },
+                { point: [1, 0, 0], normal: [-1, 0, 0] },
+              ],
+              clipSurfaces: true,
+              clipLines: false,
+            },
           },
         },
         runtime,
@@ -263,8 +278,26 @@ describe('image transcoder', () => {
         expect.objectContaining({
           width: 1920,
           height: 1080,
-          phi: 30,
+          camera: {
+            framing: 'fixed',
+            position: [8, -6, 4],
+            target: [1, 2, 3],
+            up: [0, 0, 1],
+            projection: { kind: 'perspective', verticalFieldOfView: 52, zoom: 1.4 },
+            clipping: { near: 0.2, far: 900 },
+          },
           label: 'Housing datum A',
+          surfaces: false,
+          lines: true,
+          visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
+          sections: {
+            planes: [
+              { point: [0, 0, 0], normal: [0, 0, 1] },
+              { point: [1, 0, 0], normal: [-1, 0, 0] },
+            ],
+            clipSurfaces: true,
+            clipLines: false,
+          },
         }),
       );
       expect(renderImage.mock.calls[0]?.[1]).not.toHaveProperty('includeLabel');
@@ -290,8 +323,18 @@ describe('image transcoder', () => {
         { id: 'top', file: top },
       ]);
       const views = [
-        { id: 'front', label: 'Front — View From +Z', phi: 90, theta: 0 },
-        { id: 'top', phi: 0, theta: 0, width: 384, height: 216, quality: 0.9 },
+        {
+          id: 'front',
+          label: 'Front — View From +Z',
+          camera: { framing: 'fit', direction: [0, -1, 0], up: [0, 0, 1], projection: { kind: 'orthographic' } },
+        },
+        {
+          id: 'top',
+          camera: { framing: 'fit', direction: [0, 0, 1], up: [0, 1, 0], projection: { kind: 'orthographic' } },
+          width: 384,
+          height: 216,
+          quality: 0.9,
+        },
       ] as const;
 
       const result = await imageDefinition.transcode(
@@ -302,9 +345,14 @@ describe('image transcoder', () => {
           options: {
             mode: 'batch',
             views,
-            projection: 'orthographic',
             axes: true,
             scaleBar: true,
+            surfaces: false,
+            sections: {
+              planes: [{ point: [0, 0, 0], normal: [0, 0, 1] }],
+              clipSurfaces: true,
+              clipLines: true,
+            },
           },
         },
         runtime,
@@ -320,18 +368,29 @@ describe('image transcoder', () => {
         issues: [],
       });
       expect(renderImages).toHaveBeenCalledOnce();
-      expect(renderImages).toHaveBeenCalledWith(
-        expect.any(Uint8Array),
-        expect.objectContaining({
-          format: 'webp',
-          quality: 1,
-          views,
-          projection: 'orthographic',
-          axes: true,
-          scaleBar: true,
-          up: 'z',
-        }),
-      );
+      expect(renderImages.mock.calls[0]?.[0]).toEqual(expect.any(Uint8Array));
+      expect(renderImages.mock.calls[0]?.[1]).toMatchObject({
+        format: 'webp',
+        quality: 1,
+        views: [
+          {
+            id: 'front',
+            camera: { projection: { kind: 'orthographic' } },
+          },
+          {
+            id: 'top',
+            camera: { projection: { kind: 'orthographic' } },
+          },
+        ],
+        axes: true,
+        scaleBar: true,
+        surfaces: false,
+        sections: {
+          planes: [{ point: [0, 0, 0], normal: [0, 0, 1] }],
+          clipSurfaces: true,
+          clipLines: true,
+        },
+      });
       expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('mode');
       expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('includeLabel');
       expect(renderImage).not.toHaveBeenCalled();

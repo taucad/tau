@@ -1,0 +1,69 @@
+{
+  "name": "@taucad/three",
+  "version": "0.0.1",
+  "description": "Framework-independent Three.js capabilities for Tau",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/three"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/three#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./camera": "./src/camera.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./camera": {
+        "types": "./dist/camera.d.mts",
+        "import": "./dist/camera.mjs",
+        "default": "./dist/camera.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "@taucad/camera": "^0.0.1",
+    "three": "^0.184.0",
+    "xstate": "^5.0.0"
+  },
+  "devDependencies": {
+    "@taucad/camera": "workspace:*",
+    "three": "catalog:",
+    "xstate": "catalog:"
+  }
+}

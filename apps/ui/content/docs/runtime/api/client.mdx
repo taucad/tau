@@ -162,6 +162,8 @@ const renderedImage = await client.export('webp', {
 
 WebP quality defaults to `1` (lossless); values below `1` request lossy encoding.
 
+For fitted cameras, exact viewer placement, annotations, and ordered view batches, see [Capture Camera Views](../guides/headless-camera-capture).
+
 The initial content properties are `includeEdges` and `includeTopology`. Support is property-specific and belongs to a concrete route, not globally to a format or kernel. Typed runtime definitions therefore expose only reachable properties: an image route may accept edges, a Replicad GLB route may accept edges and topology, and STEP/STL routes expose no `content` field.
 
 Use the capability helpers when the source-selected kernel is dynamic:

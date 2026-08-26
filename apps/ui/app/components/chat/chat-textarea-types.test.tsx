@@ -9,6 +9,7 @@ import {
 } from '@taucad/types/constants';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
+import type { DraftImageOptions } from '#hooks/use-chat.js';
 
 // ---------------------------------------------------------------------------
 // Unified composer-context mock — `useChatTextareaLogic` is a single
@@ -47,11 +48,11 @@ let mockActiveModel: ResolvedModel = stableModel;
 const chatActionsMock = {
   stop: vi.fn<() => void>(),
   setDraftText: vi.fn<(text: string) => void>(),
-  addDraftImage: vi.fn<(image: string) => void>(),
+  addDraftImage: vi.fn<(image: string, options?: DraftImageOptions) => void>(),
   removeDraftImage: vi.fn<(index: number) => void>(),
   setDraftToolChoice: vi.fn<(choice: string | string[]) => void>(),
   setEditDraftText: vi.fn<(text: string) => void>(),
-  addEditDraftImage: vi.fn<(image: string) => void>(),
+  addEditDraftImage: vi.fn<(image: string, options?: DraftImageOptions) => void>(),
   removeEditDraftImage: vi.fn<(index: number) => void>(),
 };
 
@@ -155,6 +156,22 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
       expect(submittedPayload).not.toHaveProperty('metadata');
       expect(Object.keys(submittedPayload).sort()).toEqual(['content', 'imageUrls']);
     }
+  });
+
+  it('blocks programmatic and Enter submission while an external prerequisite is unresolved', async () => {
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit, isSubmitDisabled: true }));
+
+    await act(async () => result.current.handleSubmit());
+    act(() => {
+      result.current.handleTextareaKeyDown({
+        key: 'Enter',
+        shiftKey: false,
+        preventDefault: vi.fn(),
+      } as unknown as React.KeyboardEvent);
+    });
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
 

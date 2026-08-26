@@ -213,6 +213,87 @@ describe('HeadlessImageService', () => {
     expect(calls).toEqual(['/running.ts', '/new.ts']);
   });
 
+  it('should preempt active automatic work and run explicit work before queued automatic work', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let rejectAutomatic: ((error: Error) => void) | undefined;
+    const automaticClient = createClient();
+    vi.mocked(automaticClient.export).mockImplementation(
+      async () =>
+        new Promise((_resolve, reject) => {
+          rejectAutomatic = reject;
+        }),
+    );
+    vi.mocked(automaticClient.terminate).mockImplementation(() => {
+      rejectAutomatic?.(new Error('terminated'));
+    });
+    const healthyClient = createClient();
+    const createClientSequence = vi.fn().mockResolvedValueOnce(automaticClient).mockResolvedValueOnce(healthyClient);
+    const service = trackService(
+      new HeadlessImageService({
+        runtimeConfig: { tauApiUrl: 'https://example.test', tauWebSocketUrl: 'wss://example.test' },
+        createClient: createClientSequence,
+        isGpuAvailable: () => true,
+      }),
+    );
+
+    const automatic = service.export({ ...imageJob('active'), source: { path: '/active.ts' } });
+    await vi.waitFor(() => {
+      expect(automaticClient.export).toHaveBeenCalledOnce();
+    });
+    const queuedAutomatic = service.export({
+      ...imageJob('queued'),
+      projectId: 'project-2',
+      source: { path: '/queued.ts' },
+    });
+    const capture = service.export({ ...imageJob('capture', 'capture'), source: { path: '/capture.ts' } });
+
+    await expect(automatic).resolves.toBeUndefined();
+    await expect(capture).resolves.toEqual(webpFiles(new Uint8Array([1, 2, 3])));
+    await expect(queuedAutomatic).resolves.toEqual(webpFiles(new Uint8Array([1, 2, 3])));
+    expect(automaticClient.terminate).toHaveBeenCalledOnce();
+    const paths = vi.mocked(healthyClient.export).mock.calls.map(([, options]) => {
+      if (!options) {
+        throw new Error('Expected request-scoped export options');
+      }
+      return options.source?.path;
+    });
+    expect(paths).toEqual(['/capture.ts', '/queued.ts']);
+  });
+
+  it('should preempt automatic work while its lazy client is still being created', async () => {
+    let releaseClient: ((client: AppRuntimeClient) => void) | undefined;
+    const staleClient = createClient();
+    const healthyClient = createClient();
+    const createClientSequence = vi
+      .fn<NonNullable<HeadlessImageServiceDependencies['createClient']>>()
+      .mockImplementationOnce(
+        async () =>
+          new Promise<AppRuntimeClient>((resolve) => {
+            releaseClient = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(healthyClient);
+    const service = trackService(
+      new HeadlessImageService({
+        runtimeConfig: { tauApiUrl: 'https://example.test', tauWebSocketUrl: 'wss://example.test' },
+        createClient: createClientSequence,
+        isGpuAvailable: () => true,
+      }),
+    );
+
+    const automatic = service.export(imageJob('active'));
+    await vi.waitFor(() => {
+      expect(createClientSequence).toHaveBeenCalledOnce();
+    });
+    const capture = service.export(imageJob('capture', 'capture'));
+    releaseClient?.(staleClient);
+
+    await expect(automatic).resolves.toBeUndefined();
+    await expect(capture).resolves.toEqual(webpFiles(new Uint8Array([1, 2, 3])));
+    expect(staleClient.terminate).toHaveBeenCalledOnce();
+    expect(healthyClient.export).toHaveBeenCalledOnce();
+  });
+
   it('should suppress repeated automatic failures for the same identity but never manual work', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const client = createClient();

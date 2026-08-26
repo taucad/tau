@@ -1,52 +1,37 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
-import type { CaptureViewScreenshotOptions } from '#components/chat/capture-view-screenshot.utils.js';
+import type { captureCadImages as captureCadImagesType } from '#services/headless-capture.js';
 
 const mockAddDraftImage = vi.fn();
 const mockTrigger = vi.fn();
 const mockGraphicsRef = { send: vi.fn(), id: 'graphics-actor' };
+const mockCadRef = { send: vi.fn(), id: 'cad-actor' };
+const mockImageService = { export: vi.fn() };
+const runtimeFileSystem = {};
+const mockCaptureCadImages = vi.fn<typeof captureCadImagesType>();
 
-const captureCalls: CaptureViewScreenshotOptions[] = [];
-const mockCaptureViewScreenshot = vi.fn((options: CaptureViewScreenshotOptions) => {
-  captureCalls.push(options);
-});
-
-vi.mock('#components/chat/capture-view-screenshot.utils.js', () => ({
-  captureViewScreenshot: (options: CaptureViewScreenshotOptions) => {
-    mockCaptureViewScreenshot(options);
-  },
+vi.mock('#services/headless-capture.js', () => ({
+  captureCadImages: mockCaptureCadImages,
+  captureFilesToDataUrls: () => ['data:image/webp;base64,AQID'],
 }));
-
-vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphics: () => mockGraphicsRef,
-}));
-
-vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ addDraftImage: mockAddDraftImage }),
-}));
-
-vi.mock('#hooks/use-image-quality.js', () => ({
-  useImageQuality: () => ({ quality: 0.42, setQuality: vi.fn() }),
-}));
-
+vi.mock('#hooks/use-graphics.js', () => ({ useGraphics: () => mockGraphicsRef }));
+vi.mock('#hooks/use-cad.js', () => ({ useCad: () => mockCadRef }));
+vi.mock('#hooks/use-chat.js', () => ({ useChatActions: () => ({ addDraftImage: mockAddDraftImage }) }));
 vi.mock('#hooks/use-tick-animation.js', () => ({
   useTickAnimation: () => ({ ticked: false, trigger: mockTrigger }),
 }));
-
-vi.mock('#components/ui/sonner.js', () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({ runtimeFileSystem }) }));
+vi.mock('#providers/headless-image-provider.js', () => ({
+  useHeadlessImageService: () => mockImageService,
 }));
-
-// Tooltip + DropdownMenuItem render their children directly so we can
-// interact with the underlying button via testing-library.
+vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('#components/ui/tooltip.js', () => ({
   Tooltip: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   TooltipContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
-
 vi.mock('#components/ui/button.js', () => ({
   Button: ({ children, onClick }: { readonly children: React.ReactNode; readonly onClick?: () => void }) => (
     <button type='button' onClick={onClick} data-testid='capture-button'>
@@ -54,7 +39,6 @@ vi.mock('#components/ui/button.js', () => ({
     </button>
   ),
 }));
-
 vi.mock('#components/ui/dropdown-menu.js', () => ({
   DropdownMenuItem: ({
     children,
@@ -75,44 +59,41 @@ const { CaptureViewControl, CaptureViewOverflowControl } =
 describe('CaptureViewControl', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    captureCalls.length = 0;
+    mockCaptureCadImages.mockResolvedValue([
+      { name: 'capture.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) },
+    ]);
   });
 
-  it('invokes captureViewScreenshot with the per-view graphicsRef + cookie quality on click', async () => {
+  it('captures the local CAD unit losslessly through the headless service', async () => {
     const user = userEvent.setup();
     render(<CaptureViewControl />);
-
     await user.click(screen.getByTestId('capture-button'));
 
-    expect(mockCaptureViewScreenshot).toHaveBeenCalledOnce();
-    const call = captureCalls[0]!;
-    expect(call.graphicsRef).toBe(mockGraphicsRef);
-    expect(call.quality).toBe(0.42);
-    expect(call.activeActors).toBeInstanceOf(Set);
-  });
-
-  it('forwards the raw screenshot data URL to addDraftImage (machine resizes downstream)', async () => {
-    const user = userEvent.setup();
-    render(<CaptureViewControl />);
-
-    await user.click(screen.getByTestId('capture-button'));
-
-    const oversizedRaw = `data:image/webp;base64,${'A'.repeat(2_000_000)}`;
-    captureCalls[0]!.onImage(oversizedRaw);
-
-    expect(mockAddDraftImage).toHaveBeenCalledExactlyOnceWith(oversizedRaw);
+    await waitFor(() => {
+      expect(mockCaptureCadImages).toHaveBeenCalledOnce();
+    });
+    expect(mockCaptureCadImages).toHaveBeenCalledWith({
+      cadRef: mockCadRef,
+      graphicsRef: mockGraphicsRef,
+      imageService: mockImageService,
+      fileSystem: runtimeFileSystem,
+      recipe: { purpose: 'chat', mode: 'current' },
+    });
+    expect(mockAddDraftImage).toHaveBeenCalledWith('data:image/webp;base64,AQID', { preserveOriginal: true });
     expect(mockTrigger).toHaveBeenCalledOnce();
   });
 
-  it('overflow variant forwards the raw screenshot data URL to addDraftImage', async () => {
+  it('completes the overflow capture after its dropdown item unmounts', async () => {
+    const capture = Promise.withResolvers<Awaited<ReturnType<typeof captureCadImagesType>>>();
+    mockCaptureCadImages.mockReturnValueOnce(capture.promise);
     const user = userEvent.setup();
-    render(<CaptureViewOverflowControl />);
-
+    const { unmount } = render(<CaptureViewOverflowControl />);
     await user.click(screen.getByTestId('capture-overflow-button'));
+    unmount();
+    capture.resolve([{ name: 'capture.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) }]);
 
-    expect(mockCaptureViewScreenshot).toHaveBeenCalledOnce();
-    const oversizedRaw = `data:image/webp;base64,${'B'.repeat(2_000_000)}`;
-    captureCalls[0]!.onImage(oversizedRaw);
-    expect(mockAddDraftImage).toHaveBeenCalledExactlyOnceWith(oversizedRaw);
+    await waitFor(() => {
+      expect(mockAddDraftImage).toHaveBeenCalledWith('data:image/webp;base64,AQID', { preserveOriginal: true });
+    });
   });
 });

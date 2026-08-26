@@ -1,6 +1,20 @@
 import type { UIMatch } from 'react-router';
 import type { ReactNode } from 'react';
 import type { SetNonNullable } from 'type-fest';
+import type { FeatureFlags } from '#flags/flag.constants.js';
+import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
+
+/**
+ * Context passed to a function-form `enablePageWrapper` so a route can decide
+ * its chrome from the resolved auth state and active feature flags. Flags are
+ * included so a route can keep its legacy (unflagged) chrome behaviour — e.g.
+ * the home route only drops the app shell for anonymous viewers once the
+ * marketing landing flag is on.
+ */
+export type PageChromeContext = {
+  readonly authState: ResolvedAuth;
+  readonly flags: FeatureFlags;
+};
 
 export type Handle = {
   /**
@@ -27,8 +41,14 @@ export type Handle = {
   /**
    * Enable the page wrapper (sidebar and header). Defaults to true.
    * Set to false when you want to render the page content directly without a sidebar and header.
+   *
+   * Pass a function to decide per viewer: it receives the resolved auth state
+   * and returns whether to render the wrapper. Used by the home route to show
+   * the app shell unless the viewer is confirmed anonymous. The function is
+   * resolved client-side (see `useResolvedAuth`); SSR and unresolved session
+   * checks are indeterminate so the CDN-cached HTML stays viewer-neutral.
    */
-  enablePageWrapper?: boolean;
+  enablePageWrapper?: boolean | ((context: PageChromeContext) => boolean);
   /**
    * Enable floating sidebar mode where the sidebar overlays content.
    *

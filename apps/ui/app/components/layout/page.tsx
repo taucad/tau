@@ -25,6 +25,8 @@ import { PageFooter } from '#components/layout/page-footer.js';
 import { SidebarOffset } from '#components/layout/sidebar-offset.js';
 import { CookieConsent } from '#components/cookie-consent.js';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
+import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
+import { useFeatureFlags } from '#flags/use-feature.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 
@@ -88,12 +90,15 @@ function SectionContent({
 }
 
 export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Element {
+  const resolvedAuth = useResolvedAuth();
+  const flags = useFeatureFlags();
+
   const {
     breadcrumbItems,
     hasBreadcrumbItems,
     actionItems,
     hasActionItems,
-    enablePageWrapper,
+    pageWrapperMatches,
     enableFloatingSidebar,
     enableOverflowY,
     providers,
@@ -103,12 +108,23 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
     actionItems: handles.actions,
     hasActionItems: handles.actions.length > 0,
-    enablePageWrapper: !handles.enablePageWrapper.some((match) => match.handle.enablePageWrapper === false),
+    pageWrapperMatches: handles.enablePageWrapper,
     enableFloatingSidebar: handles.enableFloatingSidebar.some((match) => match.handle.enableFloatingSidebar === true),
     enableOverflowY: handles.enableOverflowY.some((match) => match.handle.enableOverflowY === true),
     providers: handles.providers,
     enablePageFooter: handles.enablePageFooter.some((match) => match.handle.enablePageFooter === true),
   }));
+
+  // Resolve `enablePageWrapper` per match: a match disables the wrapper when its
+  // value is `false`, or when its function form returns `false` for the current
+  // viewer (see `Handle.enablePageWrapper`). The wrapper stays on unless some
+  // match opts out.
+  const chromeContext = { authState: resolvedAuth, flags };
+  const enablePageWrapper = !pageWrapperMatches.some((match) => {
+    const value = match.handle.enablePageWrapper;
+    const resolved = typeof value === 'function' ? value(chromeContext) : value;
+    return resolved === false;
+  });
 
   const Providers = useMemo<Array<React.JSXElementConstructor<React.PropsWithChildren>>>(() => {
     const providerComponents = providers
@@ -130,9 +146,20 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   const shouldContentApplyPositioning = enableFloatingSidebar && error !== undefined;
 
   if (!enablePageWrapper) {
+    // `html, body { overflow: hidden }` (global.css) means the document never
+    // scrolls — the app shell's inner `<section>` is normally the scroll
+    // container. Without the wrapper we must supply one, but only when the route
+    // asks for it (`enableOverflowY`); full-screen routes (auth, viewer) opt out
+    // and keep the bare outlet.
     return (
       <Compose components={Providers}>
-        <Outlet />
+        {enableOverflowY ? (
+          <div className='h-dvh overflow-y-auto'>
+            <Outlet />
+          </div>
+        ) : (
+          <Outlet />
+        )}
       </Compose>
     );
   }

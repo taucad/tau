@@ -3,7 +3,7 @@ title: 'Public Surface Policy'
 description: 'Freeze register and admission rules for published Tau package exports, subpaths, declarations, and unstable internal escape hatches.'
 status: active
 created: '2026-08-15'
-updated: '2026-08-22'
+updated: '2026-08-23'
 related:
   - docs/policy/version-policy.md
   - docs/policy/library-api-policy.md
@@ -100,10 +100,10 @@ The next runtime prerelease is the framework owner only. It bundles exactly nine
 
 The as-built runtime export map contains the root plus these public subpaths:
 
-- framework and authoring: `./client`, `./worker`, `./plugin`, `./kernel`, `./middleware`, `./bundler`, `./transcoder`, `./types`, `./metadata`, and `./testing`;
+- framework and authoring: `./client`, `./worker`, `./plugin`, `./kernel`, `./middleware`, `./bundler`, `./transcoder`, `./types`, and `./metadata`;
 - transports: `./transport`, `./transport/in-process`, `./transport/web`, `./transport/node`, `./transport/websocket`, and `./transport/websocket-host`;
 - filesystems: `./filesystem`, `./filesystem/node`, and `./filesystem/browser`;
-- framework adapters: `./worker/web`, `./electron/main`, `./electron/preload`, `./electron/renderer`, `./electron/utility`, `./electron/vite`, `./node`, `./cross-origin-isolation`, `./cross-origin-isolation/express`, `./react-router`, `./vite`, `./nextjs`, `./nextjs/config`, and `./nextjs/browser-node-builtins`;
+- framework adapters: `./worker/web`, `./electron/main`, `./electron/preload`, `./electron/renderer`, `./electron/utility`, `./electron/vite`, `./node`, `./cross-origin-isolation`, `./cross-origin-isolation/express`, `./react-router`, `./vite`, `./nextjs/config`, and `./nextjs/browser-node-builtins`;
 - package metadata: `./package.json`.
 
 The migration removes `./presets`, `./kernels`, every `./kernels/*` key, every concrete `./middleware/*` key, `./bundler/esbuild`, `./vm`, and `./worker/node`. It adds `./plugin`. The websocket subpaths remain the topology-specific remote transport surfaces.

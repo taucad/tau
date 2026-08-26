@@ -3,7 +3,7 @@ title: 'Version Policy'
 description: 'Versioning, stability tiers, breaking change management, and developer experience for @taucad/* packages. SemVer, experimental/future-flag/stable tiers, deprecation protocol, codemods.'
 status: active
 created: '2026-03-10'
-updated: '2026-07-14'
+updated: '2026-08-23'
 related:
   - docs/policy/release-policy.md
   - docs/policy/library-api-policy.md
@@ -82,7 +82,7 @@ import { unstable_streamingExport } from '@taucad/runtime';
 import { replicad } from '@taucad/replicad';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
+  plugins: [replicad()],
 });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime }),
@@ -123,7 +123,7 @@ Future flags are **stabilized breaking changes** that consumers opt into before 
 import { replicad } from '@taucad/replicad';
 
 const runtime = defineRuntime({
-  kernels: [replicad()],
+  plugins: [replicad()],
 });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime }),

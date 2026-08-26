@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-08-22'
+updated: '2026-08-24'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -61,13 +61,13 @@ Do not create a second public wrapper helper for the same concern. A split betwe
 Prefer flat option objects over deeply nested configuration. Use optional fields with defaults, not required nested objects.
 
 ```typescript
-import { replicad } from '@taucad/replicad';
+import { replicadKernel } from '@taucad/replicad';
 
 // CORRECT: flat, obvious defaults
-replicad({ wasm: 'single-exceptions', linearTolerance: 0.1 });
+replicadKernel({ wasm: 'single', withSourceMapping: true });
 
 // INCORRECT: deeply nested, hard to read
-replicad({
+replicadKernel({
   options: {
     exceptions: { enabled: true },
     mesh: { tolerances: { linear: 0.1 } },
@@ -132,11 +132,11 @@ Three signals that indicate a parameter design violation:
 
 ```typescript
 // INCORRECT: developer must write _runtime, _ctx just to reach nativeHandle
-async exportGeometry({ fileType, tessellation }, _runtime, _ctx, nativeHandle) {
-  // Only uses fileType, tessellation, and nativeHandle
+async exportGeometry({ format, tessellation }, _runtime, _ctx, nativeHandle) {
+  // Only uses format, tessellation, and nativeHandle
 
 // CORRECT: nativeHandle is in the input object, no placeholders needed
-async exportGeometry({ fileType, tessellation, nativeHandle }, _runtime, _ctx) {
+async exportGeometry({ format, tessellation, nativeHandle }, _runtime, _ctx) {
   // Everything the developer needs is in the first param
 ```
 
@@ -292,7 +292,7 @@ Organize `package.json` exports by what each audience needs, not by internal fil
 @taucad/esbuild                         -- esbuild toolkit and bundler factory (consumer)
 @taucad/middleware                      -- middleware toolkit and role factories (consumer)
 @taucad/runtime/transport/web           -- selected browser worker transport (consumer)
-@taucad/runtime/testing                 -- test utilities (testing)
+@taucad/runtime-testing                 -- runtime test utilities (testing)
 ```
 
 ### Capability subpaths are dependency-graph boundaries
@@ -395,8 +395,7 @@ import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
 
 export const runtime = defineRuntime({
-  kernels: [replicad({ wasm: 'auto' })],
-  bundlers: [esbuild()],
+  plugins: [replicad(), esbuild()],
 });
 ```
 
@@ -481,9 +480,9 @@ Use `package.json` export conditions for environment-specific code:
 }
 ```
 
-## 15. Toolkit Presets for Common Configurations
+## 15. Toolkit Presets and Capability Options
 
-Let each plugin toolkit provide a default preset and any backend-coherent variants. Applications still compose their runtime explicitly; runtime exposes no global preset.
+Let each plugin toolkit provide a default preset and additional presets only for distinct capability sets. Configure a selected capability through role-nested plugin options derived from that capability factory; do not create a preset solely to bind an option value. Applications still compose their runtime explicitly; runtime exposes no global preset.
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
@@ -492,11 +491,17 @@ import { replicad } from '@taucad/replicad';
 import { esbuild } from '@taucad/esbuild';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'auto' } } }), esbuild()],
+});
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime }),
 });
 ```
+
+Every published plugin package declares `@taucad/runtime` in `peerDependencies`. Dynamic loaders resolve that manifest range, compare it with their bundled runtime through standard semver prerelease semantics, and warn on mismatch. Runtime composition never performs a package-version check; a path-loaded plugin without a resolvable manifest skips the check. Any future CLI, store, daemon, or project-package loader owns the same check.
+
+Treat the five `Symbol.for('@taucad/runtime/...')` slot names and the shapes reachable through them as a frozen same-realm contract. Bump `runtimePluginAbiVersion` when either changes, and require the exact ABI integer on factory and instance brands. Do not send those brands over structured clone; validate the discriminated `CapabilitiesManifest.registrations` schema at worker and process boundaries.
 
 ## 16. Type-Safe Options Constants
 
@@ -504,11 +509,11 @@ Use TypeScript's native `satisfies` operator for standalone options constants. D
 
 ```typescript
 import type { RuntimeClientOptions } from '@taucad/runtime';
-import { defineRuntime } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { replicad } from '@taucad/replicad';
 
-const runtime = defineRuntime({ kernels: [replicad()] });
+const runtime = defineRuntime({ plugins: [replicad()] });
 const transport = inProcessTransport({ runtime });
 const options = { transport } satisfies RuntimeClientOptions<typeof runtime, typeof transport>;
 ```
@@ -528,10 +533,12 @@ When explicitly composing a runtime definition from an existing definition, appl
 ### Explicit plugin replacement
 
 ```typescript
+import { replicadKernel } from '@taucad/replicad';
+
 const debugRuntime = defineRuntime({
   ...defaultRuntime,
   kernels: defaultRuntime.kernels.map((kernel) =>
-    kernel.id === 'replicad' ? replicad({ withSourceMapping: true }) : kernel,
+    kernel.id === 'replicad' ? replicadKernel({ withSourceMapping: true }) : kernel,
   ),
 });
 ```
@@ -689,7 +696,7 @@ await client.export('glb', {
 });
 ```
 
-This rule refines the flat-options preference in §3. Plugin factory configuration should still stay flat (`replicad({ wasm, linearTolerance })`), because the plugin owns that entire options object. Operation inputs are different: the runtime owns the operation envelope, while kernels/transcoders own nested option bags.
+This rule refines the flat-options preference in §3. Capability factory configuration stays flat (`replicadKernel({ wasm, withSourceMapping })`) because the capability owns that options object. A toolkit exposes the same flat bag under its role and selected capability path (`replicad({ kernels: { default: { wasm, withSourceMapping } } })`); it must derive that shape from the capability factory rather than duplicate it. Operation inputs are different: the runtime owns the operation envelope, while kernels/transcoders own nested option bags.
 
 Framework-wide semantic requirements belong in a stable runtime-owned parent such as `content`, not in plugin option bags and not as phase selectors. Each property is independently capability-declared and route-inferred: supporting `includeEdges` does not imply support for `includeTopology`. Unsupported keys must disappear from exact inferred operation types and be rejected by runtime validation. Authors declare what a route can fulfill; consumers never choose an internal source phase.
 

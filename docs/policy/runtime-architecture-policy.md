@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers runtime engine boundaries, plugin toolkits, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-08-22'
+updated: '2026-08-24'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -79,7 +79,7 @@ The opaque {@link RuntimeFileSystem} attaches on the isolate that owns filesyste
 
 Concrete option placement MUST be enforced by **per-transport Zod schemas**. The dispatcher binds only `inlineFileSystem` and `fileSystemPort` transferables — phantom `bindings.fileSystem`-style seams are forbidden.
 
-Third-party transports pick the descriptor row matching their wire; avoid `@taucad/runtime/testing` in any production bundle (ESLint bans it).
+Third-party transports pick the descriptor row matching their wire. `@taucad/runtime-testing` is a development-only package root; ESLint bans it from production source.
 
 For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus runtime paths. Runtime `/` is the supplied filesystem's root, not the host OS root. None may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, authority-global file-pool buffer, or host filesystem path.
 
@@ -107,11 +107,11 @@ For persisted browser projects, trusted application composition selects the auth
 
 Runtime authoring APIs serve three distinct audiences:
 
-| Audience                  | Pattern                                                                                  | Example                                      | Runs In                    |
-| ------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------- |
-| **Capability author**     | `defineKernel()`, `defineTranscoder()`, `defineBundler()`, middleware                    | Implement one kernel, transcoder, or bundler | Worker or configured host  |
-| **Plugin package author** | `definePlugin()`                                                                         | Group Assimp import/export capabilities      | Package root / worker load |
-| **Consumer or host**      | Package-named alias, canonical named `plugin`, or role-named direct capability factories | `assimp()`, `plugin()`, `assimpKernel()`     | Main thread or host setup  |
+| Audience                  | Pattern                                                                                               | Example                                      | Runs In                    |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------- |
+| **Capability author**     | `defineKernel()`, `defineTranscoder()`, `defineBundler()`, middleware                                 | Implement one kernel, transcoder, or bundler | Worker or configured host  |
+| **Plugin package author** | `definePlugin()`                                                                                      | Group Assimp import/export capabilities      | Package root / worker load |
+| **Consumer or host**      | Package-named authoring factory, mechanical `plugin` alias, or role-named direct capability factories | `assimp()`, `plugin()`, `assimpKernel()`     | Main thread or host setup  |
 
 ## Plugin Toolkit Model
 
@@ -127,13 +127,15 @@ All concrete CAD capabilities are provided by plugin packages, not hardcoded in 
 
 A plugin package is a toolkit. It may contain several roles when one backend naturally owns them together: `@taucad/assimp` may expose both Assimp import-kernel and transcoder capabilities; `@taucad/replicad` may later expose a Replicad kernel plus a STEP transcoder over its own OCCT-backed import path. This mirrors established plugin ecosystems where one package owns a collection of related rules, loaders, transforms, or commands.
 
-Capability ids stay flat and author-declared (`replicad`, `geometry-cache`); `meta.namespace` is the plugin's short explicit runtime namespace for diagnostics, preset paths, cache keys, config keys, and telemetry — it never prefixes or rewrites capability ids. Plugin factory options select a preset only; a capability that needs host configuration registers through the direct capability buckets, which append after plugin-expanded capabilities. A host that needs an outer position for its own middleware lists that whole kind directly.
+Capability ids stay flat and author-declared (`replicad`, `geometry-cache`). Plugin metadata is only `meta: { name }`; loaders use `meta.name` for toolkit identity and diagnostics identify a selected capability as `${meta.name}/${capabilityPath}`. Presets select capability paths and role-nested plugin options configure only factories selected by that preset. Direct capability buckets append after plugin-expanded capabilities and are reserved for app-local capabilities, isolated tests, or a whole role whose outer ordering must interleave differently.
 
 ### Package Ownership Boundaries
 
-`@taucad/runtime` owns only the generic engine: contracts, authoring helpers, route planning, worker/client/transport/filesystem infrastructure, diagnostics, and testing helpers. Concrete kernels, middleware, bundlers, transcoders, toolchain assets, and backend lifecycle code live outside runtime.
+`@taucad/runtime` owns only the generic production engine: contracts, authoring helpers, route planning, worker/client/transport/filesystem infrastructure, and diagnostics. Concrete kernels, middleware, bundlers, transcoders, testing helpers, toolchain assets, and backend lifecycle code live outside runtime.
 
-Plugin packages live under `packages/plugins/*` and publish as `@taucad/<toolkit>`. They export the canonical named callable factory `plugin`, a package-named camelCase alias bound to the same factory (`export { plugin, plugin as replicad }`), role-named direct factories, and no default export. Plugin and core packages declare `@taucad/runtime` as a required peer dependency, never a hard dependency, so one runtime instance serves the install (see `docs/policy/npm-policy.md`).
+Plugin packages live under `packages/plugins/*` and publish as `@taucad/<toolkit>`. They declare the package-named camelCase callable factory and re-export that binding as `plugin` (`export { replicad, replicad as plugin }`), expose role-named direct factories, and have no default export. Plugin and core packages declare `@taucad/runtime` as a required peer dependency, never a hard dependency, so one runtime instance serves the install (see `docs/policy/npm-policy.md`). Every dynamic loader checks the resolved package manifest's peer range warn-only; runtime composition never performs this package-level check.
+
+The five globally registered plugin slots and their reachable shapes form a frozen same-realm ABI, pinned by `runtimePluginAbiVersion`. Factory and instance brands carry that exact integer, so loaders and `defineRuntime` distinguish an incompatible ABI from an unbranded value. Symbol brands do not cross structured clone; worker and transport boundaries instead validate the discriminated `CapabilitiesManifest.registrations` schema, which preserves unknown fields and tolerates future capability kinds.
 
 Shared helper packages live under `packages/core/*` and publish as `@taucad/<name>-core`. Core packages are not plugins: they expose reusable implementation functions and types, have no root `plugin` export, and must not initialize WASM, native, Python, or daemon backends at root import.
 
@@ -436,8 +438,15 @@ Target runtime exports are engine and authoring surfaces only:
 @taucad/runtime/middleware  → defineMiddleware and middleware authoring types
 @taucad/runtime/bundler     → defineBundler and bundler authoring types
 @taucad/runtime/transport   → defineRuntimeTransport and transport implementations
-@taucad/runtime/testing     → testing utilities for runtime and plugin authors
 ```
+
+Testing utilities live in a separate development package, not runtime or core subpaths:
+
+```text
+@taucad/runtime-testing → public-client harnesses, runtime/plugin mocks, glTF inspection, and geometry assertions
+```
+
+`@taucad/runtime-testing` may import only public runtime entries and exercises `createRuntimeClient` through `inProcessTransport`. It may depend on production geometry libraries for output inspection, but no production source may import it. Runtime's own white-box worker fixture remains under `packages/runtime/test/support`, outside the build and package files. Callers own and shut down clients returned by `createTestRuntimeClient`; one-shot helpers shut down the clients they create.
 
 Runtime package exports must not include legacy preset or concrete-capability barrels. Concrete kernels, middleware, transcoders, and bundlers live in plugin packages:
 

@@ -3,7 +3,7 @@ title: 'Runtime API Policy'
 description: 'Naming and ownership rules for runtime consumer, plugin-author, transport, filesystem, and artifact APIs.'
 status: active
 created: '2026-07-20'
-updated: '2026-08-22'
+updated: '2026-08-24'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-architecture-policy.md
@@ -323,40 +323,56 @@ type CompatibleCreateGeometryInput = {
 
 Use `definePlugin` for package-level Tau plugin toolkits. Do not use `defineTauPlugin`: the import path already supplies the Tau namespace, and the runtime authoring APIs are named `defineRuntime`, `defineKernel`, `defineTranscoder`, `defineBundler`, and `defineMiddleware`.
 
-Plugin packages export the canonical named callable factory `plugin` from the root, a package-named camelCase alias bound to the same factory (`export { plugin, plugin as image }`), and no default export. Mechanical loaders read `plugin`; humans read the alias. Also expose role-named direct factories such as `assimpKernel`, `imageTranscoder`, or `geometryCache`.
+Plugin packages declare the package-named camelCase callable factory at `definePlugin`, re-export that same binding as `plugin` from the root (`export { image, image as plugin }`), and expose no default export. Humans and IDE navigation use the package name; mechanical loaders read `plugin`. Also expose role-named direct factories such as `assimpKernel`, `imageTranscoder`, or `geometryCache`.
 
 Name presets by what they select: every package offers `default`, and role-named presets (`import`, `export`) only where a package carries more than one capability.
 
-Use `meta.name` for the package/toolkit identity. Use `meta.namespace` for the mandatory short stable runtime namespace (`image`, `assimp`) that scopes diagnostics, preset capability paths, cache keys, config keys, and telemetry labels; write it explicitly in source so package renames, forks, or aliases never silently change runtime identity. The namespace must be the short form — never a duplicate of the full package name. `meta.namespace` does not rewrite capability ids: kernel, transcoder, middleware, and bundler ids stay the flat author-declared ids from their `define*` calls.
+Configure selected packaged capabilities through role-nested plugin options derived from their factory parameters. Do not duplicate capability schemas in the plugin definition, and do not encode an option value as a second capability or preset. Supplying an unknown role/name, an unselected capability path, or options to a factory without an options schema must fail.
+
+Keep plugin metadata to `meta: { name }`. The wrapper separates toolkit identity from the read-only `Function.name`; `meta.name` is the package/toolkit identity used by loaders and diagnostics. Capability ids stay the flat author-declared ids from their `define*` calls, and diagnostic origins use `${meta.name}/${capabilityPath}`.
+
+Declare `@taucad/runtime` as a required peer dependency in every published plugin package. Dynamic loaders check that manifest range against their bundled runtime and warn on mismatch; the runtime never performs package-version checks because it does not own package resolution. Path-loaded plugins without a resolvable package manifest deliberately skip this check. Any future dynamic-load surface owns the same manifest check.
+
+Treat the five `Symbol.for('@taucad/runtime/...')` plugin slots and every shape reachable through them as a frozen same-realm cross-version contract. Change a slot name or reachable shape only with a `runtimePluginAbiVersion` bump. Factory and instance guards require the exact ABI integer; the Zod-validated capabilities manifest, not the symbol brands, governs worker/process traffic.
 
 Name grouped items `kernels`, `transcoders`, `middleware`, or `bundlers` by their runtime role, as records keyed by capability name so presets can reference entries such as `transcoders.export`; do not call them `contributions`.
 
-**Why**: A stable named export gives CLIs and agents a one-shot loader contract, an explicit short namespace keeps persisted identity stable across package renames, and role names are more obvious than a generic collection term.
+**Why**: A stable named export gives CLIs and agents a one-shot loader contract, the manifest peer range puts compatibility metadata in every published artifact, and role names are more obvious than a generic collection term.
 
 CORRECT:
 
 ```typescript
 import { definePlugin } from '@taucad/runtime/plugin';
 
-export const plugin = definePlugin({
-  meta: { name: '@taucad/image', namespace: 'image', version: '0.1.0' },
+export const image = definePlugin({
+  meta: { name: '@taucad/image' },
   transcoders: { export: imageTranscoder },
   presets: { default: ['transcoders.export'] },
 });
 
 // src/index.ts
-export { plugin, plugin as image } from '#image.plugin.js';
+export { image, image as plugin } from '#image.plugin.js';
 export { imageTranscoder } from '#image.transcoder.js';
+```
+
+CORRECT:
+
+```typescript
+replicad({ kernels: { default: { wasm: 'single' } } });
+zoo({ kernels: { default: { baseUrl, closeErrors } } });
+```
+
+INCORRECT:
+
+```typescript
+replicad({ preset: 'single' }); // an option is not a capability identity
 ```
 
 INCORRECT:
 
 ```typescript
 export default defineTauPlugin({
-  meta: {
-    name: '@taucad/image',
-    namespace: '@taucad/image',
-  },
+  meta: { name: '@taucad/image' },
   contributions: [imageTranscoder],
 });
 ```
@@ -372,7 +388,7 @@ export default defineTauPlugin({
 - Do not infer semantic role from whether a path is relative or absolute; the owning boundary defines the role.
 - Do not call a runtime path an unqualified “absolute path”; define the supplied runtime filesystem root instead.
 - Do not expose authority-global `/projects/<id>` paths or host filesystem paths to kernels, bundlers, or middleware.
-- Do not document default plugin imports; import the package-named alias, the canonical named `plugin` export, or a role-named direct factory.
+- Do not document default plugin imports; import the package-named authoring factory, the mechanical `plugin` alias, or a role-named direct factory.
 - Do not call plugin-owned kernels, transcoders, middleware, or bundlers `contributions`.
 
 ## Summary Checklist
@@ -386,8 +402,10 @@ export default defineTauPlugin({
 - [ ] Normalized protocol locators remain runtime-owned.
 - [ ] Shared types and positive type tests enforce the vocabulary.
 - [ ] No compatibility alias or semantic-name lint rule was added.
-- [ ] Plugin toolkit packages expose named `plugin` plus a package-named alias bound to the identical factory; no default plugin export appears in source, docs, or generator output.
-- [ ] Plugin metadata carries an explicit short `meta.namespace` distinct from the full package name; capability ids stay flat and author-declared.
+- [ ] Plugin toolkit packages declare the package-named factory and re-export it as `plugin`; no default plugin export appears in source, docs, or generator output.
+- [ ] Plugin metadata is exactly `meta: { name }`; capability ids stay flat and author-declared.
+- [ ] Published plugin packages declare the runtime peer; each dynamic loader checks it warn-only, while runtime code does not.
+- [ ] Plugin registry slot changes bump `runtimePluginAbiVersion`; wire traffic validates through the discriminated manifest schema.
 - [ ] Runtime `/` is documented as the supplied runtime filesystem root, never the host OS root.
 - [ ] Authority-global, host, runtime, project-relative, and engine-private paths remain qualified at their owning boundaries.
 

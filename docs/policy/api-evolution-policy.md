@@ -3,7 +3,7 @@ title: 'API Evolution Policy'
 description: 'Rules for evolving library APIs over time: future flags, stability tiers, API surface management, advanced error patterns, and provider abstractions.'
 status: active
 created: '2026-03-10'
-updated: '2026-07-21'
+updated: '2026-08-23'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-api-policy.md
@@ -60,7 +60,7 @@ function resolveConfig(user: Partial<FutureConfig>): FutureConfig {
 import { replicad } from '@taucad/replicad';
 
 const runtimeOptions = {
-  kernels: [replicad()],
+  plugins: [replicad()],
   future: {
     v2_middlewareApi: true,
   },
@@ -183,13 +183,13 @@ type RuntimeTransport = {
 };
 
 // Adapter: browser Web Worker
-function createWorkerTransport(worker: Worker): RuntimeTransport { ... }
+function webWorkerTransport(options: WebWorkerTransportOptions): TransportPlugin { ... }
 
 // Adapter: Node.js worker_threads
-function createNodeTransport(worker: NodeWorker): RuntimeTransport { ... }
+function nodeWorkerTransport(options: NodeWorkerClientOptions): TransportPlugin { ... }
 
 // Adapter: in-process (testing)
-function createInlineTransport(runtime: KernelRuntimeWorker): RuntimeTransport { ... }
+function inProcessTransport(options: InProcessClientOptions): TransportPlugin { ... }
 ```
 
 ### Adapter Export Convention
@@ -198,14 +198,15 @@ Adapters are exported from dedicated subpaths, not from the main entry point. Th
 
 ```text
 @taucad/runtime                     -- core (platform-agnostic)
-@taucad/runtime/transport           -- transport adapters
-@taucad/runtime/transport/worker    -- Web Worker adapter (browser)
+@taucad/runtime/transport           -- shared transport contracts
+@taucad/runtime/transport/in-process -- same-isolate adapter
+@taucad/runtime/transport/web       -- Web Worker adapter (browser)
 @taucad/runtime/transport/node      -- worker_threads adapter (Node.js)
 ```
 
 ### Shared API Across Adapters
 
-All adapters for the same interface must expose the same factory signature pattern. A developer who learns `createWorkerTransport(worker, options?)` can predict the shape of `createNodeTransport(worker, options?)`.
+All adapters for the same interface must return the same transport plugin contract. Keep factory names predictable (`webWorkerTransport`, `nodeWorkerTransport`, `inProcessTransport`) while their topology-specific option objects remain explicit.
 
 ## 5. Error Hierarchy with Symbol Markers
 
@@ -402,7 +403,7 @@ import { defineRuntime } from './worker';
 
 describe('createRuntimeClient', () => {
   it('should infer kernel context types', () => {
-    const runtime = defineRuntime({ kernels: [replicad()] });
+    const runtime = defineRuntime({ plugins: [replicad()] });
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime }),
     });

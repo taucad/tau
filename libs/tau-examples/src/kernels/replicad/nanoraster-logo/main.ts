@@ -1,5 +1,5 @@
 /**
- * nanoraster brandmark.
+ * Nanoraster brandmark.
  *
  * A sphere — the canonical render-test subject — resolved the way a
  * rasteriser resolves it: one scanline at a time. Each row spans the

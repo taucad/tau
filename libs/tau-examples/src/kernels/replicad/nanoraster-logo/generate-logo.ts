@@ -111,7 +111,7 @@ const banner = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${bannerWid
 `;
 
 const here = dirname(fileURLToPath(import.meta.url));
-const targets: readonly (readonly [string, string])[] = [
+const targets: ReadonlyArray<readonly [string, string]> = [
   [join(here, 'nanoraster.svg'), square],
   [join(here, 'banner.svg'), banner],
 ];

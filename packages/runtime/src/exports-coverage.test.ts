@@ -1,8 +1,8 @@
 /**
  * Regression test for the runtime's bundling contract:
  *
- * Every `package.json#publishConfig.exports.<subpath>.import.default` chunk
- * (e.g. `./dist/esm/middleware/parameter-cache.middleware.js`) must have a
+ * Every `package.json#publishConfig.exports.<subpath>.default` chunk
+ * (e.g. `./dist/middleware/parameter-cache.middleware.mjs`) must have a
  * matching `tsdown.config.ts` entry (e.g. `src/middleware/parameter-cache.middleware.ts`)
  * so the build emits a real file at that path.
  *
@@ -20,19 +20,29 @@ import { describe, it, expect } from 'vitest';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 type ExportConditions = {
-  readonly require?: { readonly types?: string; readonly default?: string };
-  readonly import?: { readonly types?: string; readonly default?: string };
+  readonly types?: string;
+  readonly import?: string;
+  readonly default?: string;
+  readonly require?: unknown;
 };
 
-type PublishExports = Readonly<Record<string, ExportConditions>>;
+type PublishExports = Readonly<Record<string, ExportConditions | string>>;
 
 type RuntimePackage = {
+  readonly main?: string;
+  readonly module?: string;
+  readonly types?: string;
+  readonly exports?: Readonly<Record<string, unknown>>;
+  readonly dependencies?: Readonly<Record<string, string>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependenciesMeta?: Readonly<Record<string, { readonly optional?: boolean }>>;
+  readonly devDependencies?: Readonly<Record<string, string>>;
   readonly publishConfig?: { readonly exports?: PublishExports };
 };
 
-const distributionEsmToSourceEntry = (distributionEsmPath: string): string => {
-  const withoutPrefix = distributionEsmPath.replace(/^\.\/dist\/esm\//, '');
-  const tsRelative = withoutPrefix.replace(/\.js$/, '.ts');
+const distributionPathToSourceEntry = (distributionPath: string): string => {
+  const withoutPrefix = distributionPath.replace(/^\.\/dist\//, '');
+  const tsRelative = withoutPrefix.replace(/\.mjs$/, '.ts');
   return `src/${tsRelative}`;
 };
 
@@ -61,36 +71,68 @@ describe('runtime publishConfig.exports → tsdown entries', () => {
     expect(packageJson.publishConfig?.exports).toBeDefined();
   });
 
+  it('should advertise an ESM-only package entry point', () => {
+    expect(packageJson.main).toBe('./dist/index.mjs');
+    expect(packageJson.types).toBe('./dist/index.d.mts');
+    expect(packageJson.module).toBeUndefined();
+  });
+
   const exportsMap = packageJson.publishConfig?.exports ?? {};
-  const subpaths = Object.keys(exportsMap);
+  // `./package.json` is a self-referential asset export, not a built chunk.
+  const subpaths = Object.keys(exportsMap).filter((subpath) => subpath !== './package.json');
 
   it('should have a non-empty exports map', () => {
     expect(subpaths.length).toBeGreaterThan(0);
   });
 
+  it('should export its own package.json in both maps', () => {
+    expect(packageJson.exports?.['./package.json']).toBe('./package.json');
+    expect(exportsMap['./package.json']).toBe('./package.json');
+  });
+
+  it('keeps development and published export keys identical', () => {
+    expect(Object.keys(packageJson.exports ?? {}).sort()).toEqual(Object.keys(exportsMap).sort());
+  });
+
   it.each(subpaths)('subpath "%s" should map to a tsdown entry', (subpath) => {
     const conditions = exportsMap[subpath];
-    if (!conditions) {
+    if (!conditions || typeof conditions === 'string') {
       throw new Error(`Missing export conditions for ${subpath}`);
     }
-    const importDefault = conditions.import?.default;
-    expect(importDefault, `${subpath} must declare an "import.default" target`).toMatch(/^\.\/dist\/esm\/.+\.js$/);
-    if (!importDefault) {
+    expect(conditions.require, `${subpath} must not declare a CommonJS "require" branch`).toBeUndefined();
+    expect(conditions.types, `${subpath} must declare an ESM declaration target`).toMatch(/^\.\/dist\/.+\.d\.mts$/);
+    expect(conditions.import, `${subpath} must declare an ESM "import" target`).toMatch(/^\.\/dist\/.+\.mjs$/);
+    expect(conditions.default, `${subpath} must declare an ESM "default" target`).toMatch(/^\.\/dist\/.+\.mjs$/);
+    expect(conditions.import, `${subpath} import/default targets should stay aligned`).toBe(conditions.default);
+    if (!conditions.default) {
       return;
     }
 
-    const expectedEntry = distributionEsmToSourceEntry(importDefault);
-    expect(tsdownEntries, `${subpath} → ${importDefault} requires tsdown entry "${expectedEntry}"`).toContain(
+    const expectedEntry = distributionPathToSourceEntry(conditions.default);
+    expect(tsdownEntries, `${subpath} → ${conditions.default} requires tsdown entry "${expectedEntry}"`).toContain(
       expectedEntry,
     );
   });
+});
 
-  it.each(subpaths)('subpath "%s" should map to a tsdown CJS entry', (subpath) => {
-    const conditions = exportsMap[subpath];
-    if (!conditions) {
-      throw new Error(`Missing export conditions for ${subpath}`);
-    }
-    const requireDefault = conditions.require?.default;
-    expect(requireDefault, `${subpath} must declare a "require.default" target`).toMatch(/^\.\/dist\/cjs\/.+\.cjs$/);
+describe('runtime production dependency classification', () => {
+  const packageJson = readJson<RuntimePackage>(resolve(packageRoot, 'package.json'));
+
+  it('does not publish test-runner peers or mock dependencies', () => {
+    expect(packageJson.exports?.['./testing']).toBeUndefined();
+    expect(packageJson.publishConfig?.exports?.['./testing']).toBeUndefined();
+    expect(packageJson.peerDependencies?.['vitest']).toBeUndefined();
+    expect(packageJson.dependencies?.['vitest-mock-extended']).toBeUndefined();
+    expect(packageJson.peerDependencies?.['vitest-mock-extended']).toBeUndefined();
+    expect(packageJson.devDependencies?.['vitest-mock-extended']).toBeUndefined();
+    expect(packageJson.devDependencies?.['vitest']).toBeDefined();
+  });
+
+  it('does not retain the convenience Next.js barrel or an unused electron-vite contract', () => {
+    expect(packageJson.exports?.['./nextjs']).toBeUndefined();
+    expect(packageJson.publishConfig?.exports?.['./nextjs']).toBeUndefined();
+    expect(packageJson.peerDependencies?.['electron-vite']).toBeUndefined();
+    expect(packageJson.peerDependenciesMeta?.['electron-vite']).toBeUndefined();
+    expect(packageJson.devDependencies?.['electron-vite']).toBeUndefined();
   });
 });

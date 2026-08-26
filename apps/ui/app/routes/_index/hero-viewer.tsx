@@ -1,20 +1,21 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Download, Check, ChevronDown, ArrowUpRight } from 'lucide-react';
-import { createRuntimeClientOptions } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { openscad } from '@taucad/openscad';
-import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
-import { esbuild } from '@taucad/runtime/bundler';
-import { converterTranscoder } from '@taucad/runtime/transcoder';
-import { downloadBlob } from '@taucad/utils/file';
+import { openrscad } from '@taucad/openrscad';
+import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/middleware';
+import { esbuild } from '@taucad/esbuild';
+import { assimp } from '@taucad/assimp';
+import { parameterEntryPath } from '@taucad/types';
 import { deriveExportFormatOptions } from '#routes/_index/hero-viewer.utils.js';
 import type { ExportFormatOption } from '#routes/_index/hero-viewer.utils.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
-import { ModelViewer, RenderStatusOverlay } from '#components/model-viewer.js';
+import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useRender } from '@taucad/react';
+import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
+import { useRuntime } from '@taucad/react';
 import { Button } from '#components/ui/button.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
@@ -23,55 +24,57 @@ import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 import qrcodeScad from '#routes/_index/qrcode.scad?raw';
+import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
+import { createParameterEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
+import { projectUrl } from '#utils/project-url.utils.js';
 
-const heroProjectId = 'hero-qrcode-v2';
 const heroMainFile = 'main.scad';
 
 const heroCode = { [heroMainFile]: qrcodeScad };
 
 const heroUnits: Units = { length: { symbol: 'mm', factor: 1 } };
 
-const heroKernelClientOptions = createRuntimeClientOptions({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [openscad()],
+const heroRuntime = defineRuntime({
+  plugins: [assimp(), openrscad(), esbuild()],
   middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
-  bundlers: [esbuild()],
-  transcoders: [converterTranscoder()],
 });
+const heroKernelClientOptions = {
+  runtime: heroRuntime,
+  transport: inProcessTransport({ runtime: heroRuntime, fileSystem: fromMemoryFs() }),
+};
 
 export function HeroViewer(): React.JSX.Element {
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const presentLocationError = useProjectCreationLocationError();
 
   const [currentParams, setCurrentParams] = useState<Record<string, unknown>>({});
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  const renderParams = useMemo(
-    () => (Object.keys(currentParams).length > 0 ? currentParams : undefined),
-    [currentParams],
-  );
-
-  const { geometries, status, defaultParameters, jsonSchema, exportGeometry, capabilities } = useRender({
+  const { geometry, status, defaultParameters, jsonSchema, exportGeometry, capabilities, setParameters } = useRuntime({
     clientOptions: heroKernelClientOptions,
-    code: heroCode,
-    parameters: renderParams,
+    source: { files: heroCode },
   });
 
   const hasParameters = Boolean(jsonSchema);
 
-  const exportFormatOptions = useMemo<ExportFormatOption[]>(
-    () => deriveExportFormatOptions(capabilities),
-    [capabilities],
-  );
+  type HeroExportFormat = NonNullable<typeof capabilities>['routes'][number]['targetFormat'];
+  type HeroExportFormatOption = ExportFormatOption<HeroExportFormat>;
 
-  const [selectedFormat, setSelectedFormat] = useState<ExportFormatOption | undefined>();
+  const exportFormatOptions = useMemo(() => deriveExportFormatOptions(capabilities), [capabilities]);
+
+  const [selectedFormat, setSelectedFormat] = useState<HeroExportFormatOption | undefined>();
   const activeFormat = selectedFormat ?? exportFormatOptions[0];
-  const canExport = status === 'success' && Boolean(activeFormat);
+  const canExport = status === 'ready' && Boolean(activeFormat);
 
-  const handleParametersChange = useCallback((newParameters: Record<string, unknown>) => {
-    setCurrentParams(newParameters);
-  }, []);
+  const handleParametersChange = useCallback(
+    (newParameters: Record<string, unknown>) => {
+      setCurrentParams(newParameters);
+      setParameters({ ...defaultParameters, ...newParameters });
+    },
+    [defaultParameters, setParameters],
+  );
 
   const handleExport = useCallback(() => {
     if (!activeFormat || isExporting) {
@@ -84,9 +87,11 @@ export function HeroViewer(): React.JSX.Element {
       try {
         const result = await exportGeometry(activeFormat.format);
         if (result.success) {
-          const blob = new Blob([result.data.bytes]);
           const filename = `qrcode.${activeFormat.format}`;
-          downloadBlob(blob, filename);
+          await downloadExportArtifactSet(result.data, {
+            singleFileName: filename,
+            archiveName: `qrcode-${activeFormat.format}.zip`,
+          });
           toast.success(`Downloaded ${filename}`);
         } else {
           const message = result.issues[0]?.message ?? 'Export failed';
@@ -123,30 +128,30 @@ export function HeroViewer(): React.JSX.Element {
         project: {
           name: 'QR Code Generator',
           description: 'A parametric QR code generator built with OpenSCAD',
-          thumbnail: '/tau-desktop.jpg',
-          author: {
-            name: 'Community',
-            avatar: '/avatar-sample.png',
-          },
           tags: ['openscad', 'parametric', 'qr-code'],
           assets: {
-            mechanical: {
-              main: heroMainFile,
-              parameters: currentParams,
+            main: {
+              entryPath: heroMainFile,
             },
           },
-          forkedFrom: heroProjectId,
         },
-        files: { [heroMainFile]: { content: encodeTextFile(qrcodeScad) } },
+        files: {
+          [heroMainFile]: { content: encodeTextFile(qrcodeScad) },
+          [parameterEntryPath(heroMainFile)]: {
+            content: encodeTextFile(serializeParameterEntry(createParameterEntry(currentParams))),
+          },
+        },
       });
 
-      await navigate(`/projects/${createProject.id}`);
+      await navigate(projectUrl(createProject.slugs));
     } catch (error) {
       console.error('Failed to create project:', error);
-      toast.error('Failed to create project');
+      if (!presentLocationError(error)) {
+        toast.error('Failed to create project');
+      }
       setIsCreatingProject(false);
     }
-  }, [isCreatingProject, currentParams, projectManager, navigate]);
+  }, [isCreatingProject, currentParams, projectManager, navigate, presentLocationError]);
 
   return (
     <div className='space-y-6'>
@@ -160,7 +165,7 @@ export function HeroViewer(): React.JSX.Element {
 
       <div className='flex flex-col overflow-hidden rounded-xl border bg-sidebar md:h-[700px] md:flex-row'>
         <div className='relative h-[300px] md:h-full md:flex-1'>
-          <RenderStatusOverlay status={status} className='top-auto right-4 bottom-4' />
+          <RuntimeStatusOverlay status={status} className='top-auto right-4 bottom-4' />
 
           <Button
             variant='outline'
@@ -173,12 +178,7 @@ export function HeroViewer(): React.JSX.Element {
             {isCreatingProject ? <Loader className='size-4' /> : <ArrowUpRight className='size-4' />}
           </Button>
 
-          <ModelViewer
-            geometries={geometries}
-            enablePan
-            graphicsOptions={{ enableGrid: true, enableAxes: true }}
-            stageOptions={{ zoomLevel: 1.2 }}
-          />
+          <ModelViewer geometry={geometry} enablePan graphicsOptions={{ enableGrid: true, enableAxes: true }} />
         </div>
 
         {hasParameters ? (

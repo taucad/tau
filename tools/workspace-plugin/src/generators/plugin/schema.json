@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "TauPlugin",
+  "title": "Create a @taucad/* runtime plugin toolkit",
+  "description": "Scaffolds a publishable @taucad/* plugin package under packages/plugins/ with one or more runtime capabilities.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Package name without the @taucad/ prefix",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What is the plugin package name (without @taucad/ prefix)?",
+      "x-priority": "important"
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "Runtime capability roles supplied by this toolkit",
+      "items": {
+        "type": "string",
+        "enum": ["kernel", "transcoder", "middleware", "bundler"]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "x-prompt": "Which runtime capabilities does this package provide?",
+      "x-priority": "important"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line package description"
+    },
+    "publishable": {
+      "type": "boolean",
+      "default": true,
+      "description": "Plugin toolkits under packages/plugins are always publishable"
+    },
+    "hostTarget": {
+      "type": "string",
+      "enum": ["browser", "node", "daemon", "python", "native"],
+      "default": "browser",
+      "description": "Host compatibility hint used by generated payload-isolation tests"
+    }
+  },
+  "required": ["name", "capabilities"]
+}

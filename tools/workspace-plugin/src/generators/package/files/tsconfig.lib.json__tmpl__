@@ -5,12 +5,15 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
+<% if (typeof react !== 'undefined' && react) { -%>
+    "jsx": "react-jsx",
+<% } -%>
     "types": ["node"],
     "target": "ESNext",
     "paths": {
       "#*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
+  "include": ["src/**/*.ts"<% if (typeof react !== 'undefined' && react) { %>, "src/**/*.tsx"<% } %>],
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.test-d.ts"<% if (typeof react !== 'undefined' && react) { %>, "src/**/*.spec.tsx", "src/**/*.test.tsx"<% } %>]
 }

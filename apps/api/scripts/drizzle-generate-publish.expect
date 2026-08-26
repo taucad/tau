@@ -1,0 +1,20 @@
+#!/usr/bin/expect -f
+# Non-interactive drizzle-kit generate: accept default "create table" on rename prompts.
+set timeout 180
+set cwd [file dirname [file dirname [info script]]]
+cd $cwd
+set env(DATABASE_URL) {postgresql://dev_user:dev_password@localhost:5432/tau_dev}
+spawn pnpm exec drizzle-kit generate --name publish_foundation
+expect {
+  -re "Is .* created or renamed" {
+    send "\r"
+    exp_continue
+  }
+  -re "Is .* deleted or renamed" {
+    send "\r"
+    exp_continue
+  }
+  eof
+}
+catch wait result
+exit [lindex $result 3]

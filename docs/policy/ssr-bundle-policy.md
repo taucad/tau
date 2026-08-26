@@ -3,7 +3,7 @@ title: 'SSR bundle policy (`apps/ui`)'
 description: Avoid pulling client-only CAD/kernel/Three.js graphs into the Netlify SSR function bundle.
 status: active
 created: '2026-05-06'
-updated: '2026-05-21'
+updated: '2026-08-17'
 related:
   - docs/research/ssr-bundle-audit.md
   - docs/research/netlify-production-performance-audit.md
@@ -15,10 +15,10 @@ The UI SSR bundle size directly drives Netlify Function cold-start latency. Keep
 
 ## Rules
 
-1. **No static value imports from `@taucad/runtime` in modules reachable from generic SSR entry paths** (e.g. shared machines, `root` loaders). Use `import type` for types only. Resolve `createRuntimeClient`, `fromChannelFs`, and similar entry points via **dynamic `import()` inside browser-only actors** (XState `fromPromise` / `fromSafeAsync` callbacks) or inject factories from route-local client shells.
+1. **No static value imports from `@taucad/runtime` in modules reachable from generic SSR entry paths** (e.g. shared machines, `root` loaders). Use `import type` for types only. Resolve `createRuntimeClient`, `fromFileSystemBridge`, `openFileSystemBridge`, and similar browser/runtime entry points via **dynamic `import()` inside browser-only actors** (XState `fromPromise` / `fromSafeAsync` callbacks) or inject factories from route-local client shells.
 2. **`'use client'` is not SSR-safe tree-shaking.** It does not remove the module from the SSR graph. For MDX and route components that touch kernels or Three.js, use `lazy()` + `ClientOnly` at the **MDX component map** or route shell — not only `<ClientOnly>` wrappers.
-3. **Heavy kernel option factories** (`createRuntimeClientOptions`, default kernel arrays) live in modules that are imported **only** from client-scoped route shells or lazy chunks — never from hooks imported by marketing/docs SSR paths.
-4. **Vite `ssr.external`** includes **only** `@taucad/runtime` and `@taucad/openscad` — the workspace packages whose kernel/worker plugins use static `new URL('./<file>.js', import.meta.url)` patterns that would cascade dozens of dead SSR chunks if bundled. All other `@taucad/*` dependencies used from SSR **bundle** into `build/server` (Node Function hosts only; edge runtimes remain out of scope). When adding a new first-party package, run the audit in `vite.config.ts` before widening `external`.
+3. **Heavy runtime definitions** (`defineRuntime(...)`, default kernel arrays, middleware arrays, bundler arrays) live in worker files or modules imported **only** from client-scoped worker entries — never from hooks imported by marketing/docs SSR paths.
+4. **Vite `ssr.external`** includes **only** `@taucad/runtime`, whose kernel/worker plugins use static `new URL('./<file>.js', import.meta.url)` patterns that would cascade dozens of dead SSR chunks if bundled. All other `@taucad/*` dependencies used from SSR **bundle** into `build/server` (Node Function hosts only; edge runtimes remain out of scope). When adding a new first-party package, run the audit in `vite.config.ts` before widening `external`.
 5. **Server source maps** must not ship in the function artifact. Use `react-router build --sourcemapClient hidden` without forcing `--sourcemapServer` (Rolldown rejects boolean `false` for `build.sourcemap` on the SSR environment).
 6. **`rollup-plugin-visualizer`** runs only when `STATS=1` is set at build time.
 7. **`monaco-editor` runtime is quarantined to `*.client.{ts,tsx}` modules.** `monaco-editor/esm/*` transitively imports `codicon/codicon.css`, which Node's ESM loader cannot resolve during `react-router build`. Any static value import of `monaco-editor` (or `monaco-editor/esm/*`) MUST live in a `*.client.ts` / `*.client.tsx` file — React Router v7 replaces those modules with empty exports during the SSR build, terminating the static graph at the boundary. Type-only imports (`import type * as Monaco from 'monaco-editor'`) are erased at compile time and remain unrestricted. The hook/route/component that consumes the `.client` module must perform the call inside `useEffect` (or similar browser-only callback) since the binding is `undefined` on the server.

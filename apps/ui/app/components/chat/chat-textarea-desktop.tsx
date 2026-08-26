@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ChevronDown, Paperclip, Wrench, AtSign } from 'lucide-react';
 import type { Chat, ToolSelection } from '@taucad/chat';
 import type { FileEntry } from '@taucad/types';
@@ -27,11 +27,11 @@ import { useFeature } from '#flags/use-feature.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
 import { useChatEditor, buildEditorContentJson } from '#components/chat/tiptap/use-chat-editor.js';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
+import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { createScreenshotContextHandler } from '#components/chat/screenshot-actions.utils.js';
 import { buildPastedContent } from '#utils/at-reference.utils.js';
-import { defaultSkills } from '#components/chat/tiptap/slash-command-suggestion.js';
-
-const knownSkillIds = new Set(defaultSkills.map((s) => s.id));
+import { skillMetadataToSlashCommand, useSkillsCatalog } from '#hooks/use-skills-catalog.js';
+import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
   image: 'Add image(s)',
@@ -53,6 +53,7 @@ type ChatTextareaDesktopProperties = {
   readonly selectedToolChoice: ToolSelection;
   readonly status: string;
   readonly selectedModel: ResolvedModel;
+  readonly imageInputSupported: boolean;
   readonly formattedCancelKeyCombination: string;
 
   // Context data for Tiptap editor
@@ -70,6 +71,7 @@ type ChatTextareaDesktopProperties = {
   readonly focusEditorRef: React.RefObject<(() => void) | undefined>;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object populated by this component for parent-driven chip insertion
   readonly addContextChipsRef: React.RefObject<((paths: string[]) => void) | undefined>;
+  readonly addContextReferencesRef: React.RefObject<((references: ChatContextReference[]) => void) | undefined>;
 
   // Handlers (all must be stable references to prevent tooltip re-render loops)
   readonly handleSubmit: () => Promise<void>;
@@ -77,6 +79,7 @@ type ChatTextareaDesktopProperties = {
   readonly handleDragOver: (event: React.DragEvent) => void;
   readonly handleDragLeave: () => void;
   readonly handleDrop: (event: React.DragEvent) => Promise<void>;
+  readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly handleAddImage: (image: string) => void;
@@ -113,6 +116,7 @@ export const ChatTextareaDesktop = memo(function ({
   selectedToolChoice,
   status,
   selectedModel,
+  imageInputSupported,
   formattedCancelKeyCombination,
 
   // Context data
@@ -126,6 +130,7 @@ export const ChatTextareaDesktop = memo(function ({
   containerReference,
   focusEditorRef,
   addContextChipsRef,
+  addContextReferencesRef,
 
   // Handlers
   handleSubmit,
@@ -133,6 +138,7 @@ export const ChatTextareaDesktop = memo(function ({
   handleDragOver,
   handleDragLeave,
   handleDrop,
+  handlePaste,
   handleFileSelect,
   handleFileChange,
   handleAddImage,
@@ -142,6 +148,13 @@ export const ChatTextareaDesktop = memo(function ({
   removeImage,
   setDraftToolChoice,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
+  const skillsCatalog = useSkillsCatalog();
+  const slashCommandItems = useMemo(
+    () => skillsCatalog.map((skillMetadata) => skillMetadataToSlashCommand(skillMetadata)),
+    [skillsCatalog],
+  );
+  const knownSkillIds = useMemo(() => new Set(slashCommandItems.map((s) => s.id)), [slashCommandItems]);
+
   const handleEditorUpdate = useCallback(
     (content: { text: string }) => {
       setDraftText(content.text);
@@ -153,10 +166,11 @@ export const ChatTextareaDesktop = memo(function ({
     onSubmit: handleSubmit,
     onEscape: onEscapePressed,
     onUpdate: handleEditorUpdate,
-    onImagePaste: handleAddImage,
     treeService,
     chats,
     actionItems,
+    slashCommandItems,
+    handleImagePaste: handlePaste,
     onContextAction: createScreenshotContextHandler({
       handleAddImage,
       onScreenshotAction,
@@ -183,7 +197,7 @@ export const ChatTextareaDesktop = memo(function ({
       const json = buildEditorContentJson(segments);
       editor.commands.setContent(json ?? inputText, { emitUpdate: false });
     }
-  }, [inputText, editor, treeService, chats]);
+  }, [inputText, editor, treeService, chats, knownSkillIds]);
 
   // Expose focus function to parent via mutable ref
   useEffect(() => {
@@ -193,37 +207,49 @@ export const ChatTextareaDesktop = memo(function ({
     };
   }, [focusEditorRef]);
 
-  // Expose chip insertion to parent via mutable ref so the outer container's
-  // drop dispatcher can route file/editor mime drops into Tiptap nodes.
+  const insertContextReferences = useCallback((references: ChatContextReference[]): void => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || references.length === 0) {
+      return;
+    }
+    const chain = currentEditor.chain().focus();
+    for (const reference of references) {
+      chain
+        .insertContent({
+          type: 'contextChip',
+          attrs: {
+            id: reference.id,
+            label: reference.label,
+            chipType: reference.chipType,
+            path: reference.path,
+            referenceToken: reference.referenceToken,
+            geometryReference: reference.geometryReference ? JSON.stringify(reference.geometryReference) : undefined,
+          },
+        })
+        .insertContent(' ');
+    }
+    chain.run();
+  }, []);
+
+  // Expose chip insertion to parent via mutable refs so the outer container's
+  // drop dispatcher and geometry explorer can route references into Tiptap nodes.
   useEffect(() => {
     addContextChipsRef.current = (paths: string[]): void => {
-      const currentEditor = editorRef.current;
-      if (!currentEditor || paths.length === 0) {
-        return;
-      }
-      const chain = currentEditor.chain().focus();
-      for (const path of paths) {
-        const isFolder = path.endsWith('/');
-        const segments = path.split('/').filter((segment) => segment.length > 0);
-        const label = segments.at(-1) ?? path;
-        chain
-          .insertContent({
-            type: 'contextChip',
-            attrs: {
-              id: path,
-              label,
-              chipType: isFolder ? 'folder' : 'file',
-              path,
-            },
-          })
-          .insertContent(' ');
-      }
-      chain.run();
+      insertContextReferences(
+        paths.map((path) => {
+          const isFolder = path.endsWith('/');
+          const segments = path.split('/').filter((segment) => segment.length > 0);
+          const label = segments.at(-1) ?? path;
+          return { id: path, label, chipType: isFolder ? 'folder' : 'file', path };
+        }),
+      );
     };
+    addContextReferencesRef.current = insertContextReferences;
     return () => {
       addContextChipsRef.current = undefined;
+      addContextReferencesRef.current = undefined;
     };
-  }, [addContextChipsRef]);
+  }, [addContextChipsRef, addContextReferencesRef, insertContextReferences]);
 
   useEffect(() => {
     if (enableAutoFocus && editor) {
@@ -276,7 +302,7 @@ export const ChatTextareaDesktop = memo(function ({
         className={cn(
           'group/chat-textarea @container',
           'relative flex size-full flex-col rounded-2xl border bg-background',
-          'cursor-text overflow-auto',
+          'cursor-text overflow-hidden',
           'shadow-md',
           'focus-within:border-primary/50',
           className,
@@ -286,11 +312,14 @@ export const ChatTextareaDesktop = memo(function ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {/* Images */}
+        <ChatTextareaDesktopImages images={images} onRemoveImage={removeImage} />
+
         {/* Editor */}
-        <div className={cn('flex size-full flex-col overflow-auto')} onClick={handleEditorAreaClick}>
+        <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-auto')} onClick={handleEditorAreaClick}>
           <ChatEditor
             editor={editor}
-            className={cn(images.length > 0 ? 'pt-10' : 'pt-2')}
+            className='pt-2'
             contextSuggestionState={chatEditor.contextSuggestionState}
             slashCommandState={chatEditor.slashCommandState}
             contextKeydownRef={chatEditor.contextKeydownRef}
@@ -298,9 +327,6 @@ export const ChatTextareaDesktop = memo(function ({
             isLoading={isSubmitting}
           />
         </div>
-
-        {/* Images overlay */}
-        <ChatTextareaDesktopImages images={images} onRemoveImage={removeImage} />
 
         {/* Drag and drop feedback */}
         {dragKind ? (
@@ -327,6 +353,7 @@ export const ChatTextareaDesktop = memo(function ({
           enableContextActions={enableContextActions}
           handleAtButtonClick={handleAtButtonClick}
           handleFileSelect={handleFileSelect}
+          imageInputSupported={imageInputSupported}
           status={status}
           isSubmitting={isSubmitting}
           isDisabled={isDisabled}
@@ -513,6 +540,7 @@ const ChatTextareaRightControls = memo(function ({
   enableContextActions,
   handleAtButtonClick,
   handleFileSelect,
+  imageInputSupported,
   status,
   isSubmitting,
   isDisabled,
@@ -523,6 +551,7 @@ const ChatTextareaRightControls = memo(function ({
   readonly enableContextActions: boolean;
   readonly handleAtButtonClick: () => void;
   readonly handleFileSelect: () => void;
+  readonly imageInputSupported: boolean;
   readonly status: string;
   readonly isSubmitting: boolean;
   readonly isDisabled: boolean;
@@ -558,7 +587,11 @@ const ChatTextareaRightControls = memo(function ({
           <Button
             variant='outline'
             size='icon'
-            className='size-6 rounded-full text-muted-foreground hover:text-foreground'
+            aria-disabled={!imageInputSupported}
+            className={cn(
+              'size-6 rounded-full text-muted-foreground hover:text-foreground',
+              !imageInputSupported && 'opacity-50',
+            )}
             title='Add image'
             onClick={handleFileSelect}
           >
@@ -566,7 +599,7 @@ const ChatTextareaRightControls = memo(function ({
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>Upload an image</p>
+          <p>{imageInputSupported ? 'Upload an image' : 'Selected model cannot read images'}</p>
         </TooltipContent>
       </Tooltip>
 

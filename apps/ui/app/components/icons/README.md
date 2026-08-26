@@ -32,10 +32,12 @@ id used by `<SvgIcon id="iconName" />`.
 The `generated/` directory contains the build output of the sprite generator
 (`sprite.svg` + `svg-icons.d.ts`). DO NOT edit these files directly.
 
-These files are checked into source control. To refresh them after editing or
-adding a raw icon, flip `enableSpriteGeneration` to `true` in
-[`apps/ui/vite.config.ts`](../../../vite.config.ts), run a Vite build, then flip
-the flag back off and commit the regenerated artefacts.
+These files are checked into source control. Refresh them after editing or adding
+a raw icon, then commit the regenerated artefacts:
+
+```bash
+pnpm nx run ui:generate-svg-sprite
+```
 
 ## Notes
 
@@ -43,6 +45,12 @@ the flag back off and commit the regenerated artefacts.
   `sprite.svg` below ~125 KB (compressed in transit, but uncompressed in the
   initial document). If it grows further, split icons into multiple sprites or
   move large/rare icons to lazy-loaded React components.
-- For raster brand assets (e.g. `manifold.png`), `<SvgIcon>` already supports a
-  PNG fallback via the `pngIcons` map — use it when an asset cannot be expressed
-  cleanly as path data.
+- Every icon is path data. The `pngIcons` `<image>` fallback that once carried
+  `manifold.png` is gone, along with the raster: the Manifold mark is now
+  generated as an SVG from the model itself, in
+  `libs/tau-examples/src/kernels/manifold/manifold-logo`.
+
+## Attribution
+
+- `kimi.svg` is sourced from Lobe Icons' `kimi-color.svg` at commit
+  `fbd2d56e3f734e889f1373e71c8368cc4e60e0d7`, licensed under MIT (Copyright 2023 LobeHub).

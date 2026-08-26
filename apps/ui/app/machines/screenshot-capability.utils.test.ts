@@ -13,7 +13,7 @@ import {
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import type { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import { calculateFovDistanceCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
-import { computeViewFittingZoom } from '#components/geometry/graphics/three/utils/camera.utils.js';
+import { calculatePositionFromSphericalCoordinates } from '#components/geometry/graphics/three/utils/camera.utils.js';
 import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
 
 describe('calculateOptimalGrid', () => {
@@ -740,20 +740,18 @@ describe('screenshot camera centering', () => {
     it('should position camera at geometryCenter + offset for front view (phi=90, theta=270)', () => {
       const geometryCenter = new THREE.Vector3(10, 5, 3);
       const distance = 20;
-      const phiRad = (90 * Math.PI) / 180;
-      const thetaRad = (270 * Math.PI) / 180;
-
-      // Z-up: ox = d*sin(phi)*cos(theta), oy = d*sin(phi)*sin(theta), oz = d*cos(phi)
-      const ox = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-      const oy = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-      const oz = distance * Math.cos(phiRad);
-
-      const cameraPosition = new THREE.Vector3(geometryCenter.x + ox, geometryCenter.y + oy, geometryCenter.z + oz);
+      const offset = calculatePositionFromSphericalCoordinates({
+        distance,
+        horizontalAngle: THREE.MathUtils.degToRad(270),
+        verticalAngle: 0,
+        up: new THREE.Vector3(0, 0, 1),
+      });
+      const cameraPosition = geometryCenter.clone().add(offset);
 
       // Camera should be offset from the geometry center, not the origin
-      expect(cameraPosition.x).toBeCloseTo(10 + ox, 6);
-      expect(cameraPosition.y).toBeCloseTo(5 + oy, 6);
-      expect(cameraPosition.z).toBeCloseTo(3 + oz, 6);
+      expect(cameraPosition.x).toBeCloseTo(10 + offset.x, 6);
+      expect(cameraPosition.y).toBeCloseTo(5 + offset.y, 6);
+      expect(cameraPosition.z).toBeCloseTo(3 + offset.z, 6);
 
       // Distance from camera to geometry center should equal the computed distance
       expect(cameraPosition.distanceTo(geometryCenter)).toBeCloseTo(distance, 6);
@@ -774,14 +772,13 @@ describe('screenshot camera centering', () => {
       ];
 
       for (const { phi, theta } of angles) {
-        const phiRad = (phi * Math.PI) / 180;
-        const thetaRad = (theta * Math.PI) / 180;
-
-        const ox = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-        const oy = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-        const oz = distance * Math.cos(phiRad);
-
-        const cameraPosition = new THREE.Vector3(geometryCenter.x + ox, geometryCenter.y + oy, geometryCenter.z + oz);
+        const offset = calculatePositionFromSphericalCoordinates({
+          distance,
+          horizontalAngle: THREE.MathUtils.degToRad(theta),
+          verticalAngle: Math.PI / 2 - THREE.MathUtils.degToRad(phi),
+          up: new THREE.Vector3(0, 0, 1),
+        });
+        const cameraPosition = geometryCenter.clone().add(offset);
 
         expect(cameraPosition.distanceTo(geometryCenter)).toBeCloseTo(distance, 6);
       }
@@ -790,14 +787,13 @@ describe('screenshot camera centering', () => {
     it('should NOT be at distance from origin when geometry is off-center', () => {
       const geometryCenter = new THREE.Vector3(100, 0, 0);
       const distance = 10;
-      const phiRad = (90 * Math.PI) / 180; // Equatorial
-      const thetaRad = 0;
-
-      const ox = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-      const oy = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-      const oz = distance * Math.cos(phiRad);
-
-      const cameraPosition = new THREE.Vector3(geometryCenter.x + ox, geometryCenter.y + oy, geometryCenter.z + oz);
+      const offset = calculatePositionFromSphericalCoordinates({
+        distance,
+        horizontalAngle: 0,
+        verticalAngle: 0,
+        up: new THREE.Vector3(0, 0, 1),
+      });
+      const cameraPosition = geometryCenter.clone().add(offset);
 
       // Distance from origin is NOT the intended camera distance
       const distanceFromOrigin = cameraPosition.length();
@@ -855,324 +851,6 @@ describe('screenshot camera centering', () => {
     });
   });
 });
-
-describe('computeViewFittingZoom', () => {
-  // Helper: axis-aligned bounding box centred at `center` with given half-extents
-  // oxlint-disable-next-line max-params -- test helper, simple positional args are clearer here
-  function makeBox(center: THREE.Vector3, hx: number, hy: number, hz: number): THREE.Box3 {
-    return new THREE.Box3(
-      new THREE.Vector3(center.x - hx, center.y - hy, center.z - hz),
-      new THREE.Vector3(center.x + hx, center.y + hy, center.z + hz),
-    );
-  }
-
-  const fov = 45;
-  const squareAspect = 1;
-
-  describe('basic framing', () => {
-    it('should return a positive zoom for a unit cube viewed from the Z-axis', () => {
-      const zoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, 0, 10),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: makeBox(new THREE.Vector3(0, 0, 0), 1, 1, 1),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-      });
-      expect(zoom).toBeGreaterThan(0);
-    });
-
-    it('should produce a perspective-correct zoom for a cube face', () => {
-      const distance = 10;
-      const halfExtent = 1;
-      const tanHalf = Math.tan((fov / 2) * (Math.PI / 180));
-
-      // With perspective-correct projection, the closest bbox corners (at z = +halfExtent)
-      // are at forward distance (d - halfExtent), which makes them subtend a larger angle.
-      // zoom = (d - halfExtent) * tan(fov/2) / halfExtent
-      const closestForwardDistance = distance - halfExtent;
-      const expectedZoom = (closestForwardDistance * tanHalf) / halfExtent;
-
-      const zoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, 0, distance),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: makeBox(new THREE.Vector3(0, 0, 0), halfExtent, halfExtent, halfExtent),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1, // No padding for exact comparison
-      });
-
-      expect(zoom).toBeCloseTo(expectedZoom, 5);
-    });
-  });
-
-  describe('aspect ratio handling', () => {
-    it('should produce different zoom for landscape vs portrait aspect ratios', () => {
-      const box = makeBox(new THREE.Vector3(0, 0, 0), 2, 1, 1);
-      const camera = new THREE.Vector3(0, 0, 10);
-      const target = new THREE.Vector3(0, 0, 0);
-
-      const landscapeZoom = computeViewFittingZoom({
-        cameraPosition: camera,
-        target,
-        boundingBox: box,
-        fovDeg: fov,
-        aspectRatio: 16 / 9,
-        paddingFactor: 1,
-      });
-
-      const portraitZoom = computeViewFittingZoom({
-        cameraPosition: camera,
-        target,
-        boundingBox: box,
-        fovDeg: fov,
-        aspectRatio: 9 / 16,
-        paddingFactor: 1,
-      });
-
-      // Wider aspect lets horizontal extent fit more easily → higher zoom
-      expect(landscapeZoom).toBeGreaterThan(portraitZoom);
-    });
-
-    it('should be constrained by the wider axis in landscape when object is wider than tall', () => {
-      const wideBox = makeBox(new THREE.Vector3(0, 0, 0), 4, 1, 1);
-      const camera = new THREE.Vector3(0, 0, 10);
-      const target = new THREE.Vector3(0, 0, 0);
-
-      const zoom = computeViewFittingZoom({
-        cameraPosition: camera,
-        target,
-        boundingBox: wideBox,
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      const tanHalf = Math.tan((fov / 2) * (Math.PI / 180));
-      // Closest corners at z=+1 have forward distance 9.
-      // Horizontal constrains: aspect * tanHalf / (4/9) = 9 * aspect * tanHalf / 4
-      const closestForwardDistance = 9;
-      const zoomH = (squareAspect * closestForwardDistance * tanHalf) / 4;
-      expect(zoom).toBeCloseTo(zoomH, 5);
-    });
-  });
-
-  describe('viewpoint-dependent framing', () => {
-    it('should produce higher zoom for a tall object viewed from the top (Z-up)', () => {
-      // Tall cylinder-like bbox: narrow in X/Y, tall in Z
-      const tallBox = makeBox(new THREE.Vector3(0, 0, 0), 1, 1, 5);
-      const target = new THREE.Vector3(0, 0, 0);
-
-      // Side view (camera on X-axis, sees Y × Z face → 1 × 5 projected)
-      const sideZoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(10, 0, 0),
-        target,
-        boundingBox: tallBox,
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      // Top view (camera on Z-axis, sees X × Y face → 1 × 1 projected)
-      const topZoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, 0, 10),
-        target,
-        boundingBox: tallBox,
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      // Top view should zoom in more (higher zoom) since projected extents are smaller
-      expect(topZoom).toBeGreaterThan(sideZoom);
-    });
-
-    it('should produce consistent zoom regardless of up-axis for front view', () => {
-      // This test uses the default up axis (Z-up in this project)
-      const box = makeBox(new THREE.Vector3(0, 0, 0), 2, 1, 3);
-      const target = new THREE.Vector3(0, 0, 0);
-
-      // Camera on Y-axis (front view in Z-up: sees X × Z face)
-      const zoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, -10, 0),
-        target,
-        boundingBox: box,
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      expect(zoom).toBeGreaterThan(0);
-      expect(Number.isFinite(zoom)).toBe(true);
-    });
-  });
-
-  describe('off-center geometry', () => {
-    it('should produce the same zoom as centered geometry (projection is relative to target)', () => {
-      const halfExtent = 2;
-      const box = makeBox;
-
-      const centeredZoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, 0, 10),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: box(new THREE.Vector3(0, 0, 0), halfExtent, halfExtent, halfExtent),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      // Shift everything by (100, 50, -30)
-      const offset = new THREE.Vector3(100, 50, -30);
-      const offCenterZoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0 + offset.x, 0 + offset.y, 10 + offset.z),
-        target: offset.clone(),
-        boundingBox: box(offset.clone(), halfExtent, halfExtent, halfExtent),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      expect(offCenterZoom).toBeCloseTo(centeredZoom, 5);
-    });
-  });
-
-  describe('padding factor', () => {
-    it('should scale linearly with padding factor', () => {
-      const baseParameters = {
-        cameraPosition: new THREE.Vector3(0, 0, 10),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: makeBox(new THREE.Vector3(0, 0, 0), 1, 1, 1),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-      };
-
-      const zoomFull = computeViewFittingZoom({
-        ...baseParameters,
-        paddingFactor: 1,
-      });
-      const zoomPadded = computeViewFittingZoom({
-        ...baseParameters,
-        paddingFactor: 0.8,
-      });
-
-      expect(zoomPadded / zoomFull).toBeCloseTo(0.8, 5);
-    });
-
-    it('should default to 0.9 padding when not specified', () => {
-      const baseParameters = {
-        cameraPosition: new THREE.Vector3(0, 0, 10),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: makeBox(new THREE.Vector3(0, 0, 0), 1, 1, 1),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-      };
-
-      const zoomDefault = computeViewFittingZoom(baseParameters);
-      const zoomExplicit = computeViewFittingZoom({
-        ...baseParameters,
-        paddingFactor: 0.9,
-      });
-
-      expect(zoomDefault).toBeCloseTo(zoomExplicit, 10);
-    });
-  });
-
-  describe('degenerate cases', () => {
-    it('should handle camera looking straight down the up axis without error', () => {
-      // Looking straight down Z in Z-up → forward cross worldUp = zero vector
-      const zoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, 0, 10),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: makeBox(new THREE.Vector3(0, 0, 0), 2, 3, 1),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      expect(zoom).toBeGreaterThan(0);
-      expect(Number.isFinite(zoom)).toBe(true);
-    });
-
-    it('should return 1 when camera is at the target', () => {
-      const zoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(5, 5, 5),
-        target: new THREE.Vector3(5, 5, 5),
-        boundingBox: makeBox(new THREE.Vector3(5, 5, 5), 1, 1, 1),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-      });
-
-      expect(zoom).toBe(1);
-    });
-
-    it('should return 1 for a zero-extent bounding box (point)', () => {
-      const zoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, 0, 10),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)),
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-      });
-
-      expect(zoom).toBe(1);
-    });
-  });
-
-  describe('perspective depth correction', () => {
-    it('should produce lower zoom than the orthographic formula for a tall box viewed from below', () => {
-      // Tall box: narrow in X/Y (half-extent 2), tall in Z (half-extent 8)
-      // Camera below at distance 20 from center, looking up
-      const distance = 20;
-      const halfZ = 8;
-      const halfXy = 2;
-      const tallBox = makeBox(new THREE.Vector3(0, 0, 0), halfXy, halfXy, halfZ);
-      const tanHalf = Math.tan((fov / 2) * (Math.PI / 180));
-
-      const zoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, 0, -distance),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: tallBox,
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      // Orthographic approximation would give: d * tanHalf / halfXY = 20 * tan / 2
-      const orthographicZoom = (distance * tanHalf) / halfXy;
-
-      // Perspective-correct: closest corners at z = -halfZ are at forward distance
-      // (distance - halfZ) = 12 from camera. Their tangent = halfXY / 12, which is
-      // larger than halfXY / 20, so the required zoom is lower (less zoomed in).
-      const perspectiveForwardDistance = distance - halfZ;
-      const perspectiveZoom = (perspectiveForwardDistance * tanHalf) / halfXy;
-
-      expect(zoom).toBeCloseTo(perspectiveZoom, 5);
-      expect(zoom).toBeLessThan(orthographicZoom);
-    });
-
-    it('should match orthographic formula when box has zero depth along viewing axis', () => {
-      // Flat box (no Z extent) — all corners are at the same forward distance
-      const distance = 10;
-      const halfExtent = 3;
-      const flatBox = makeBox(new THREE.Vector3(0, 0, 0), halfExtent, halfExtent, 0.001);
-      const tanHalf = Math.tan((fov / 2) * (Math.PI / 180));
-
-      const zoom = computeViewFittingZoom({
-        cameraPosition: new THREE.Vector3(0, 0, distance),
-        target: new THREE.Vector3(0, 0, 0),
-        boundingBox: flatBox,
-        fovDeg: fov,
-        aspectRatio: squareAspect,
-        paddingFactor: 1,
-      });
-
-      // All corners nearly at forward distance d, so result ≈ orthographic
-      const orthographicZoom = (distance * tanHalf) / halfExtent;
-      expect(zoom).toBeCloseTo(orthographicZoom, 1);
-    });
-  });
-});
-
-// ── removeCloneUnsafeObjects ────────────────────────────────────────────────
 
 describe('removeCloneUnsafeObjects', () => {
   /**

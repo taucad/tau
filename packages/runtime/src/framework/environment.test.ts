@@ -1,12 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  getEnvironment,
-  isNode,
-  isBrowser,
-  isWebWorker,
-  resolveFileUrl,
-  assertCrossOriginIsolated,
-} from '#framework/environment.js';
+import { getEnvironment, isNode, isBrowser, isWebWorker, resolveFileUrl } from '#framework/environment.js';
 import type { RuntimeEnvironment } from '#framework/environment.js';
 
 describe('environment detection', () => {
@@ -44,15 +37,6 @@ describe('environment detection', () => {
     it('exactly one convenience helper returns true', () => {
       const results = [isNode(), isBrowser(), isWebWorker()];
       expect(results.filter(Boolean)).toHaveLength(1);
-    });
-  });
-
-  describe('assertCrossOriginIsolated', () => {
-    it('does not throw in Node.js (SharedArrayBuffer always available)', () => {
-      expect(isNode()).toBe(true);
-      expect(() => {
-        assertCrossOriginIsolated();
-      }).not.toThrow();
     });
   });
 

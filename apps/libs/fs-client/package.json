@@ -1,0 +1,129 @@
+{
+  "name": "@taucad/fs-client",
+  "version": "0.1.0-beta.0",
+  "description": "Client-side filesystem services (FileContentService, FileTreeService, WorkerChangeChannel) for Tau",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/fs-client"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "filesystem",
+    "client",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "AGPL-3.0-only",
+  "exports": {
+    "./workspace-path-resolver": "./src/workspace-path-resolver.ts",
+    "./path-subscriber-registry": "./src/path-subscriber-registry.ts",
+    "./visibility-provider": "./src/visibility-provider.ts",
+    "./refresh-generation-guard": "./src/refresh-generation-guard.ts",
+    "./worker-change-channel": "./src/worker-change-channel.ts",
+    "./file-write-source": "./src/file-write-source.ts",
+    "./file-system-client": "./src/file-system-client.ts",
+    "./file-content-errors": "./src/file-content-errors.ts",
+    "./seems-binary": "./src/seems-binary.ts",
+    "./file-content-service": "./src/file-content-service.ts",
+    "./file-tree-service": "./src/file-tree-service.ts",
+    "./directory-listing": "./src/directory-listing.ts",
+    "./react/use-directory-listing": "./src/react/use-directory-listing.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      "./workspace-path-resolver": {
+        "types": "./dist/workspace-path-resolver.d.mts",
+        "import": "./dist/workspace-path-resolver.mjs",
+        "default": "./dist/workspace-path-resolver.mjs"
+      },
+      "./path-subscriber-registry": {
+        "types": "./dist/path-subscriber-registry.d.mts",
+        "import": "./dist/path-subscriber-registry.mjs",
+        "default": "./dist/path-subscriber-registry.mjs"
+      },
+      "./visibility-provider": {
+        "types": "./dist/visibility-provider.d.mts",
+        "import": "./dist/visibility-provider.mjs",
+        "default": "./dist/visibility-provider.mjs"
+      },
+      "./refresh-generation-guard": {
+        "types": "./dist/refresh-generation-guard.d.mts",
+        "import": "./dist/refresh-generation-guard.mjs",
+        "default": "./dist/refresh-generation-guard.mjs"
+      },
+      "./worker-change-channel": {
+        "types": "./dist/worker-change-channel.d.mts",
+        "import": "./dist/worker-change-channel.mjs",
+        "default": "./dist/worker-change-channel.mjs"
+      },
+      "./file-write-source": {
+        "types": "./dist/file-write-source.d.mts",
+        "import": "./dist/file-write-source.mjs",
+        "default": "./dist/file-write-source.mjs"
+      },
+      "./file-system-client": {
+        "types": "./dist/file-system-client.d.mts",
+        "import": "./dist/file-system-client.mjs",
+        "default": "./dist/file-system-client.mjs"
+      },
+      "./file-content-errors": {
+        "types": "./dist/file-content-errors.d.mts",
+        "import": "./dist/file-content-errors.mjs",
+        "default": "./dist/file-content-errors.mjs"
+      },
+      "./seems-binary": {
+        "types": "./dist/seems-binary.d.mts",
+        "import": "./dist/seems-binary.mjs",
+        "default": "./dist/seems-binary.mjs"
+      },
+      "./file-content-service": {
+        "types": "./dist/file-content-service.d.mts",
+        "import": "./dist/file-content-service.mjs",
+        "default": "./dist/file-content-service.mjs"
+      },
+      "./file-tree-service": {
+        "types": "./dist/file-tree-service.d.mts",
+        "import": "./dist/file-tree-service.mjs",
+        "default": "./dist/file-tree-service.mjs"
+      },
+      "./directory-listing": {
+        "types": "./dist/directory-listing.d.mts",
+        "import": "./dist/directory-listing.mjs",
+        "default": "./dist/directory-listing.mjs"
+      },
+      "./react/use-directory-listing": {
+        "types": "./dist/react/use-directory-listing.d.mts",
+        "import": "./dist/react/use-directory-listing.mjs",
+        "default": "./dist/react/use-directory-listing.mjs"
+      }
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "@taucad/events": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
+    "@taucad/memory": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@testing-library/react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "vitest": "catalog:"
+  }
+}

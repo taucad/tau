@@ -1,0 +1,29 @@
+{
+  "nx": {
+    "tags": [
+      "scope:shared",
+      "type:e2e"
+    ]
+  },
+  "name": "@taucad/react-e2e-react-router",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "dependencies": {
+    "@react-router/node": "catalog:react-router7",
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/middleware": "workspace:*",
+    "@taucad/react": "workspace:*",
+    "@taucad/replicad": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:react-router7",
+    "three": "catalog:",
+    "isbot": "catalog:"
+  },
+  "devDependencies": {
+    "@react-router/dev": "catalog:react-router7",
+    "vite": "catalog:react-router7"
+  }
+}

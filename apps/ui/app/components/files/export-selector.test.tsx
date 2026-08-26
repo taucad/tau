@@ -28,7 +28,7 @@ function directnessRank(route: ExportRoute): number {
 
 const mockExport = vi.fn().mockResolvedValue({
   success: true,
-  data: { bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' },
+  data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
   issues: [],
 });
 
@@ -42,7 +42,7 @@ const mockKernelClient = {
     }
     return mockCapabilities.routes.filter((route) => route.targetFormat === format);
   },
-  bestRouteFor(format: FileExtension, kernelId?: string): ExportRoute | undefined {
+  bestRouteFor(format: FileExtension, options?: { readonly kernelId?: string }): ExportRoute | undefined {
     if (!mockCapabilities) {
       return undefined;
     }
@@ -50,7 +50,7 @@ const mockKernelClient = {
     if (matches.length === 0) {
       return undefined;
     }
-    const kernelMatches = kernelId ? matches.filter((route) => route.kernelId === kernelId) : matches;
+    const kernelMatches = options?.kernelId ? matches.filter((route) => route.kernelId === options.kernelId) : matches;
     const candidates = kernelMatches.length > 0 ? kernelMatches : matches;
     const indexed = candidates.map((route, index) => ({ route, index }));
     indexed.sort((a, b) => {
@@ -150,6 +150,7 @@ vi.mock('#components/ui/tooltip.js', () => ({
 }));
 
 const { ExportSelector } = await import('./export-selector.js');
+const { groupExportFormatsByFidelity } = await import('./export-format-groups.js');
 
 function createCapabilities(overrides?: Partial<CapabilitiesManifest>): CapabilitiesManifest {
   return {
@@ -159,28 +160,29 @@ function createCapabilities(overrides?: Partial<CapabilitiesManifest>): Capabili
         kernelId: 'replicad',
         sourceFormat: 'glb',
         fidelity: 'mesh',
-        schema: {},
-        defaults: {},
+        exportOptions: { schema: {}, defaults: {} },
       },
       {
         targetFormat: 'stl',
         kernelId: 'replicad',
         sourceFormat: 'stl',
         fidelity: 'mesh',
-        schema: { type: 'object', properties: { binary: { type: 'boolean', default: true } } },
-        defaults: { binary: true },
+        exportOptions: {
+          schema: { type: 'object', properties: { binary: { type: 'boolean', default: true } } },
+          defaults: { binary: true },
+        },
       },
       {
         targetFormat: 'step',
         kernelId: 'replicad',
         sourceFormat: 'step',
         fidelity: 'brep',
-        schema: {},
-        defaults: {},
+        exportOptions: { schema: {}, defaults: {} },
       },
     ],
-    renderSchemas: {},
+    renderCapabilities: {},
     ...overrides,
+    registrations: overrides?.registrations ?? [],
   };
 }
 
@@ -189,6 +191,17 @@ describe('ExportSelector', () => {
     vi.clearAllMocks();
     mockCapabilities = createCapabilities();
     mockActiveKernelId = 'replicad';
+  });
+
+  it('should group BREP formats before mesh formats for combobox menus', () => {
+    const groups = groupExportFormatsByFidelity([
+      { format: 'glb', fidelity: 'mesh', direct: true },
+      { format: 'step', fidelity: 'brep', direct: true },
+    ]);
+
+    expect(groups.map((group) => group.name)).toEqual(['BREP', 'Mesh']);
+    expect(groups[0]?.items.map((entry) => entry.format)).toEqual(['step']);
+    expect(groups[1]?.items.map((entry) => entry.format)).toEqual(['glb']);
   });
 
   it('should render the format grid for a single cad actor', () => {
@@ -214,7 +227,7 @@ describe('ExportSelector', () => {
       <ExportSelector
         geometryUnits={geometryUnits}
         filenameBase='test-project'
-        mainEntryFile='main.ts'
+        mainEntryPath='main.ts'
         variant='inline'
       />,
     );
@@ -228,7 +241,7 @@ describe('ExportSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: /stl/i }));
 
     await vi.waitFor(() => {
-      expect(mockExport).toHaveBeenCalledWith('stl', { binary: true });
+      expect(mockExport).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
     });
 
     await vi.waitFor(() => {
@@ -262,7 +275,7 @@ describe('ExportSelector', () => {
         cadActor={mockCadRef}
         filenameBase='test-project'
         variant='inline'
-        defaultEntryFile='main.ts'
+        defaultEntryPath='main.ts'
         onExport={onExport}
       />,
     );
@@ -291,7 +304,7 @@ describe('ExportSelector', () => {
       <ExportSelector
         geometryUnits={geometryUnits}
         filenameBase='test-project'
-        mainEntryFile='main.ts'
+        mainEntryPath='main.ts'
         variant='inline'
         onExport={onExport}
       />,

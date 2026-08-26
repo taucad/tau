@@ -5,5 +5,5 @@
     "checkJs": false,
     "noEmit": true
   },
-  "include": ["src/**/*.js", "vitest.config.js"]
+  "include": ["src/**/*.js", "src/**/*.ts", "vitest.config.js"]
 }

@@ -6,8 +6,6 @@
 
 import { describe, it, expectTypeOf } from 'vitest';
 import type {
-  HostAbortBinding,
-  HostFileDeliveryBinding,
   HostGeometryDeliveryBinding,
   HostInitializeBindingsCore,
   HostInitializeBindings,
@@ -18,13 +16,9 @@ describe('HostInitializeBindingsCore excludes fileSystem slot (Finding 1, R1)', 
     expectTypeOf<HostInitializeBindingsCore>().not.toHaveProperty('fileSystem');
   });
 
-  it('retains abort, geometryDelivery, fileDelivery bindings', () => {
-    expectTypeOf<HostInitializeBindingsCore>().toHaveProperty('abort');
+  it('retains the geometry-delivery binding', () => {
     expectTypeOf<HostInitializeBindingsCore>().toHaveProperty('geometryDelivery');
-    expectTypeOf<HostInitializeBindingsCore>().toHaveProperty('fileDelivery');
-    expectTypeOf<HostInitializeBindingsCore['abort']>().toMatchTypeOf<HostAbortBinding>();
     expectTypeOf<HostInitializeBindingsCore['geometryDelivery']>().toMatchTypeOf<HostGeometryDeliveryBinding>();
-    expectTypeOf<HostInitializeBindingsCore['fileDelivery']>().toMatchTypeOf<HostFileDeliveryBinding>();
   });
 
   it('HostInitializeBindings default still extends HostInitializeBindingsCore without fileSystem', () => {

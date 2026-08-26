@@ -3,10 +3,11 @@ title: 'Chat Request Config Policy'
 description: 'Single source of truth for chat request configuration: schema-as-registry, top-level `agent` block, and the profile-scoped chat-client indirection that keeps configuration centralized.'
 status: active
 created: '2026-05-18'
-updated: '2026-05-18'
+updated: '2026-06-19'
 related:
   - docs/research/chat-metadata-first-class-architecture.md
   - docs/research/chat-edit-message-metadata-stripping.md
+  - docs/research/google-opaque-error-and-multimodal-followup.md
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
 ---
@@ -223,6 +224,31 @@ Every chat client ships a `*.wire.integration.test.tsx` co-located with its sour
 
 **Why**: The class of bugs this policy exists to kill — "missing kernel", "missing testingEnabled", "wrong profile" — is caught at compile time by Zod inference, but only the wire-shape integration test proves that the producer hooks actually populate every required field on the live render path.
 
+### 11. Canonicalize Provider-Visible `additional_kwargs` Before Model Calls
+
+Treat `AIMessage.additional_kwargs` as provider-owned metadata, not as a durable replay contract. Before sending checkpointed history to a provider, provider-boundary middleware must canonicalize replay-safe legacy tool metadata into `message.tool_calls` or drop it. Never let `additional_kwargs.tool_calls` or `additional_kwargs.function_call` remain provider-visible when canonical `message.tool_calls` is empty, malformed, divergent, or unavailable.
+
+**Why**: Provider formatters can replay legacy metadata even when Tau's canonical `message.tool_calls` is empty. Google Vertex rejects a replayed `functionCall` with an empty `name`, yielding opaque `400 INVALID_ARGUMENT` errors unless this is stopped at the provider boundary.
+
+CORRECT:
+
+```typescript
+const normalized = createCrossProviderContentNormalizerMiddleware('vertexai');
+// Valid legacy calls become canonical message.tool_calls; invalid legacy calls are removed.
+```
+
+INCORRECT:
+
+```typescript
+new AIMessage({
+  content: [{ type: 'text', text: '[interrupted]' }],
+  tool_calls: [],
+  additional_kwargs: {
+    tool_calls: [{ type: 'function', function: { name: '', arguments: '{}' } }],
+  },
+});
+```
+
 ## Anti-Patterns
 
 | Anti-pattern                                                                 | Why it's banned                                                                             |
@@ -233,6 +259,7 @@ Every chat client ships a `*.wire.integration.test.tsx` co-located with its sour
 | `import { Chat } from '@ai-sdk/react'` outside the chat-client tree          | Bypasses the body-composition layer; the new wire body never gets attached.                 |
 | `modelId === 'name-generator' \| 'commit-name-generator'` discrimination     | Profile lives on `agent.profile`; sentinel-string matching hides it from the type system.   |
 | `useChatConstants` (deleted in t18)                                          | Owned a second `DefaultChatTransport`; superseded by the `_internal/shared-chat-transport`. |
+| Replaying provider-visible legacy tool metadata from `additional_kwargs`     | `additional_kwargs` may contain streaming control debris or deprecated provider shapes.     |
 
 ## Summary Checklist
 
@@ -243,11 +270,13 @@ Every chat client ships a `*.wire.integration.test.tsx` co-located with its sour
 - [ ] No new `metadata.<config>` reads in handlers (structurally impossible — `MyMetadata` is `{ createdAt?, status? }`)
 - [ ] Wire-shape integration test covers the field
 - [ ] `chat.controller.json-schema.test.ts` snapshot regenerated and reviewed (still clean `oneOf`)
+- [ ] Provider-boundary tests prove `additional_kwargs.tool_calls` cannot bypass canonical `message.tool_calls`
 
 ## References
 
 - Blueprint: `docs/research/chat-metadata-first-class-architecture.md`
 - Smoking gun audit: `docs/research/chat-edit-message-metadata-stripping.md`
+- Google opaque error audit: `docs/research/google-opaque-error-and-multimodal-followup.md`
 - Schema source: `libs/chat/src/schemas/agent-config.schema.ts`
 - Wire schema: `libs/chat/src/schemas/chat-turn-request.schema.ts`
 - Controller dispatch: `apps/api/app/api/chat/chat.controller.ts`

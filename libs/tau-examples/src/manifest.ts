@@ -4,8 +4,25 @@
 
 /** Map of kernel names to their available example fixture names. */
 export type ExampleManifest = {
-  jscad: 'cube' | 'cylinder' | 'gear';
+  build123d: 'v8-engine-brep';
+  jscad:
+    | 'cube'
+    | 'cube-cylinder-section-fixture'
+    | 'cylinder'
+    | 'edge-occlusion-fixture'
+    | 'gear'
+    | 'non-manifold-section-fixture'
+    | 'section-cap-fixture'
+    | 'section-overlap-fixture'
+    | 'section-overlap-heavy-planetary-fixture'
+    | 'section-overlap-heavy-v8-fixture'
+    | 'section-picking-fixture';
+  manifold: 'manifold-logo';
+  occt: 'v8-engine-brep';
+  opencascade: 'v8-engine-brep';
+  openscad: 'kitchen-sink';
   replicad:
+    | 'bambu-plate'
     | 'birdhouse'
     | 'bottle'
     | 'card-holder'
@@ -13,21 +30,33 @@ export type ExampleManifest = {
     | 'cycloidal-gear'
     | 'decorated-box'
     | 'drinking-glass'
+    | 'flower-attachment-section-outline-fixture'
     | 'gridfinity-box'
+    | 'helical-gear'
     | 'hex-screwdriver'
     | 'hollow-box'
     | 'ibeam'
+    | 'jscad-logo'
     | 'lego'
+    | 'logo'
+    | 'logo-keychain'
+    | 'nanoraster-logo'
+    | 'picovoxel-logo'
     | 'pot-plant'
     | 'projection-test'
+    | 'rao-nozzle'
+    | 'replicad-logo'
     | 'simple-tray'
     | 'staircase'
     | 'stress-test'
     | 't-slot-rail'
     | 'table'
+    | 'tau-wordmark'
     | 'tray'
+    | 'v8-engine-rev2'
     | 'vase'
-    | 'wavy-vase';
+    | 'wavy-vase'
+    | 'wedge-door-stopper';
 };
 
 /** Available kernel names. */

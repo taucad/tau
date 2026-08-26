@@ -126,6 +126,25 @@ describe('transformAiMessageContent', () => {
       expect(result.additional_kwargs).toEqual({ custom: 'value' });
     });
 
+    it('should preserve invalid_tool_calls', () => {
+      const invalidToolCalls = [
+        {
+          id: 'call_bad',
+          name: 'read_file',
+          args: '{"targetFile":',
+          error: 'Malformed args.',
+          type: 'invalid_tool_call' as const,
+        },
+      ];
+      const message = new AIMessage({
+        content: 'hello',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        invalid_tool_calls: invalidToolCalls,
+      });
+      const result = transformAiMessageContent(message, toUpperCase);
+      expect(result.invalid_tool_calls).toEqual(invalidToolCalls);
+    });
+
     it('should preserve response_metadata', () => {
       /* eslint-disable @typescript-eslint/naming-convention -- LangChain API uses snake_case */
       const responseMetadata = { model: 'claude-3-5-sonnet-20241022', stop_reason: 'end_turn' };

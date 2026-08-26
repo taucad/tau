@@ -6,7 +6,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/libs/oxlint',
+      reportsDirectory: '../../out/reports/coverage/libs/oxlint',
       include: ['src/**/*'],
       exclude: ['src/**/*.test.js'],
     },

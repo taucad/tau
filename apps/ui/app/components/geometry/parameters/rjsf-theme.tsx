@@ -19,7 +19,7 @@ import { ParametersBoolean } from '#components/geometry/parameters/parameters-bo
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { cn } from '#utils/ui.utils.js';
-import { toTitleCase } from '#utils/string.utils.js';
+import { formatDisplayLabel } from '#utils/string.utils.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { ParametersWidget } from '#components/geometry/parameters/parameters-widget.js';
@@ -79,7 +79,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
 
   // Always call hooks at the very top level
   const { formContext } = registry;
-  const prettyLabel = toTitleCase(label);
+  const prettyLabel = formatDisplayLabel(label);
   const descriptionText = typeof schema.description === 'string' ? schema.description : '';
 
   // Check if we need to filter this field
@@ -98,7 +98,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
       for (let i = 1; i < idParts.length - 1; i++) {
         const parentSegment = idParts[i];
         if (parentSegment) {
-          const parentName = toTitleCase(parentSegment);
+          const parentName = formatDisplayLabel(parentSegment);
           // oxlint-disable-next-line max-depth -- consider refactoring.
           if (formContext.shouldShowField(parentName)) {
             isInMatchingGroup = true;
@@ -190,7 +190,7 @@ function ObjectFieldTemplate(
   // Check if the group should be visible by checking:
   // 1. If the group title itself matches the search term, OR
   // 2. If any child properties (or their nested children) match
-  const prettyTitle = toTitleCase(title);
+  const prettyTitle = formatDisplayLabel(title);
   const groupTitleMatches = formContext.shouldShowField(prettyTitle);
 
   // Use the schema to check if any nested properties match
@@ -287,7 +287,7 @@ function ArrayFieldTemplate(
   // Check if the array should be visible by checking:
   // 1. If the array title itself matches the search term, OR
   // 2. If the array items schema matches (indicating children would match)
-  const prettyTitle = toTitleCase(title);
+  const prettyTitle = formatDisplayLabel(title);
 
   // Check if the schema or its title matches the search
   const shouldShowArray = isSchemaMatchingSearch(schema, formContext.searchTerm, title);
@@ -299,6 +299,14 @@ function ArrayFieldTemplate(
       setIsOpen(true);
     }
   }, [formContext.searchTerm, shouldShowArray]);
+
+  if (Array.isArray(schema.items)) {
+    return (
+      <div aria-label={`Invalid Field: ${title}`} className='rounded-md border border-warning bg-warning/10 p-2.5'>
+        Fixed-length tuple fields are not supported.
+      </div>
+    );
+  }
 
   // Don't render the array if it wouldn't be visible
   if (!shouldShowArray) {
@@ -357,7 +365,7 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
     onChange(matched ? matched.value : newValue);
   };
 
-  const prettyLabel = name ? toTitleCase(name) : '';
+  const prettyLabel = name ? formatDisplayLabel(name) : '';
 
   return (
     <Select value={String(value ?? '')} onValueChange={handleChange}>
@@ -399,7 +407,7 @@ function CustomCheckboxWidget(props: WidgetProps): React.ReactNode {
 function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }): React.ReactNode {
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
   const { value, onChange, inputType, schema, name } = props;
-  const prettyLabel = name ? toTitleCase(name) : '';
+  const prettyLabel = name ? formatDisplayLabel(name) : '';
   return (
     <Input
       type={inputType}

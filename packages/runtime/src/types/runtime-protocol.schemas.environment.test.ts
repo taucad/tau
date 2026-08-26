@@ -53,4 +53,84 @@ describe('runtime protocol schemas in constrained browser environments', () => {
       expect(runtimeProtocolSchemas.calls.initialize.args).toBeDefined();
     });
   });
+
+  it('should reject file-system ports when MessagePort is unavailable', async () => {
+    await withGlobalOverride('MessagePort', undefined, async () => {
+      const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+
+      expect(
+        runtimeInitializeMemoryHandleSchema.safeParse({
+          fileSystemPort: {},
+        }).success,
+      ).toBe(false);
+    });
+  });
+});
+
+describe('runtime initialize memory handle port validation (X7)', () => {
+  it('should accept a Node MessageChannel port', async () => {
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const channel = new MessageChannel();
+
+    try {
+      expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: channel.port1 }).success).toBe(true);
+    } finally {
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+
+  it('should accept a structural port that is not a MessagePort instance', async () => {
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const structuralPort = {
+      postMessage(): void {
+        /* No-op. */
+      },
+      addEventListener(): void {
+        /* No-op. */
+      },
+      removeEventListener(): void {
+        /* No-op. */
+      },
+      close(): void {
+        /* No-op. */
+      },
+    };
+
+    expect(structuralPort instanceof MessagePort).toBe(false);
+    expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: structuralPort }).success).toBe(true);
+  });
+
+  it('should reject a plain object that exposes no port methods', async () => {
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+
+    expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: { postMessage: 1 } }).success).toBe(false);
+    expect(runtimeInitializeMemoryHandleSchema.safeParse({ fileSystemPort: {} }).success).toBe(false);
+  });
+
+  it('should reject port shapes that wrapMessagePort cannot drive', async () => {
+    const { runtimeInitializeMemoryHandleSchema } = await import('#types/runtime-protocol.schemas.js');
+    const noop = (): void => {
+      /* No-op. */
+    };
+
+    // EventEmitter-shaped: `on`/`off` instead of add/removeEventListener. Previously admitted, then crashed in wrapMessagePort.
+    expect(
+      runtimeInitializeMemoryHandleSchema.safeParse({
+        fileSystemPort: { postMessage: noop, on: noop, off: noop, close: noop },
+      }).success,
+    ).toBe(false);
+    // Missing removeEventListener: unsubscribe would throw.
+    expect(
+      runtimeInitializeMemoryHandleSchema.safeParse({
+        fileSystemPort: { postMessage: noop, addEventListener: noop, close: noop },
+      }).success,
+    ).toBe(false);
+    // Missing close: transport shutdown would throw.
+    expect(
+      runtimeInitializeMemoryHandleSchema.safeParse({
+        fileSystemPort: { postMessage: noop, addEventListener: noop, removeEventListener: noop },
+      }).success,
+    ).toBe(false);
+  });
 });

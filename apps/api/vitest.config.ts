@@ -13,6 +13,9 @@ export default defineConfig({
   plugins: [nxViteTsPaths()],
   cacheDir: '../../node_modules/.vite/apps/api',
   test: {
+    coverage: {
+      reportsDirectory: '../../out/reports/coverage/apps/api',
+    },
     globals: false,
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],

@@ -6,7 +6,7 @@ import { Text } from '@tiptap/extension-text';
 import { HardBreak } from '@tiptap/extension-hard-break';
 import { ContextChipNode } from '#components/chat/tiptap/context-chip-node.js';
 import { SubmitOnEnter } from '#components/chat/tiptap/submit-on-enter.js';
-import { SlashCommand } from '#components/chat/tiptap/slash-command-suggestion.js';
+import { SlashCommand, shouldAllowSlashCommandTrigger } from '#components/chat/tiptap/slash-command-suggestion.js';
 import { extractContent } from '#components/chat/tiptap/use-chat-editor.js';
 
 import type { Extensions } from '@tiptap/core';
@@ -434,5 +434,33 @@ describe('skill chip insertion', () => {
 
     editor.destroy();
     editor2.destroy();
+  });
+});
+
+describe('slash command trigger boundaries', () => {
+  function expectSlashTrigger(content: string, expected: boolean) {
+    const editor = createTestEditor();
+    editor.commands.setContent(`<p>${content}</p>`);
+    const slashIndex = content.lastIndexOf('/');
+
+    expect(slashIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      shouldAllowSlashCommandTrigger({
+        state: editor.state,
+        range: { from: slashIndex + 1 },
+      }),
+    ).toBe(expected);
+
+    editor.destroy();
+  }
+
+  it('should allow slash commands at paragraph start and after whitespace', () => {
+    expectSlashTrigger('/', true);
+    expectSlashTrigger('design this /', true);
+  });
+
+  it('should not trigger slash command suggestions inside paths or words', () => {
+    expectSlashTrigger('src/foo/', false);
+    expectSlashTrigger('open/http/', false);
   });
 });

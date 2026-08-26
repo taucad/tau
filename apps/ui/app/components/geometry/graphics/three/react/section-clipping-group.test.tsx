@@ -188,6 +188,61 @@ describe('SectionClippingGroup', () => {
     });
   });
 
+  it('updates WebGL source material clipping when mesh clipping toggles without remounting', async () => {
+    const stubGl = createStubWebGlRenderer();
+    const canvas = stubGl.domElement;
+    const innerRef = React.createRef<ActualThree.Group>();
+
+    const meshMat = new ActualThree.MeshStandardMaterial();
+    const mesh = new ActualThree.Mesh(new ActualThree.BoxGeometry(1, 1, 1), meshMat);
+
+    document.body.append(canvas);
+
+    const root = createRoot(canvas);
+
+    await act(async () => {
+      await root.configure({
+        camera: new ActualThree.PerspectiveCamera(75, 800 / 600, 0.1, 100_000),
+        gl: stubGl,
+        size: { height: 600, left: 0, top: 0, width: 800 },
+      });
+    });
+
+    const renderClippingGroup = (enableMesh: boolean): void => {
+      root.render(
+        <ThreeGraphicsBackendProvider value='webgl'>
+          <SectionClippingGroup enableLines enableMesh={enableMesh} enabled innerRef={innerRef} plane={testPlane}>
+            <group ref={innerRef}>
+              <primitive object={mesh} />
+            </group>
+          </SectionClippingGroup>
+        </ThreeGraphicsBackendProvider>,
+      );
+    };
+
+    await act(async () => {
+      renderClippingGroup(true);
+    });
+    expect(meshMat.clippingPlanes).toHaveLength(1);
+    expect(meshMat.clippingPlanes![0]).toBe(testPlane);
+
+    await act(async () => {
+      renderClippingGroup(false);
+    });
+    expect(meshMat.clippingPlanes).toHaveLength(0);
+
+    await act(async () => {
+      renderClippingGroup(true);
+    });
+    expect(meshMat.clippingPlanes).toHaveLength(1);
+    expect(meshMat.clippingPlanes![0]).toBe(testPlane);
+
+    act(() => {
+      root.unmount();
+      canvas.remove();
+    });
+  });
+
   it('keeps meshes unclipped but clips lines when enableMesh is false and enableLines is true (WebGL)', async () => {
     const stubGl = createStubWebGlRenderer();
     const canvas = stubGl.domElement;

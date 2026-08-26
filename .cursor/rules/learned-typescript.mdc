@@ -19,3 +19,8 @@ cleanup; they may exceed the 200-char cap.
 - Never introduce a second TS path-alias scheme alongside an existing one (e.g. adding `@*` when `#*` already exists is damaging) — consolidate to one alias and migrate every consumer rather than running two in parallel.
 - Fix import/module resolution issues at the source file or package boundary, never by patching `tsconfig.json` paths/options to paper over the underlying mistake.
 
+## Learned Workspace Facts
+
+- `isolatedDeclarations` TS90xx violations surface reliably only via tsdown/oxc DTS emit — standalone `tsc` can mask them when semantic errors block declaration emit.
+- Inline `const x = {…} as const satisfies T` fails TS9010 under `isolatedDeclarations` — use `as const` then standalone `satisfies T`, or an explicit type annotation.
+

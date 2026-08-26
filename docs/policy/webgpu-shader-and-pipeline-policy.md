@@ -3,7 +3,7 @@ title: 'WebGPU Shader and Pipeline Policy'
 description: 'Rules for authoring WGSL/TSL materials and managing render-pipeline ownership under three.js WebGPURenderer'
 status: active
 created: '2026-05-15'
-updated: '2026-05-16'
+updated: '2026-06-08'
 related:
   - docs/policy/graphics-backend-policy.md
   - docs/policy/webgpu-rendering-pipeline.md
@@ -14,6 +14,7 @@ related:
   - docs/research/webgpu-render-loop-audit.md
   - docs/research/webgpu-axes-hover-pipeline-stall.md
   - docs/research/gltf-edges-fat-line-performance.md
+  - docs/research/webgl-section-view-white-occlusion.md
 ---
 
 # WebGPU Shader and Pipeline Policy
@@ -38,16 +39,25 @@ CORRECT:
 
 ```typescript
 const cloneByMaterial = new WeakMap<THREE.Material, THREE.Material>();
-const getDepthOnlyClone = (source: THREE.Material): THREE.Material => {
-  const cached = cloneByMaterial.get(source);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const clone = source.clone();
+const syncDepthOnlyCloneState = (source: THREE.Material, clone: THREE.Material): void => {
   clone.colorWrite = false;
   clone.transparent = false;
   clone.depthWrite = true;
   clone.depthTest = true;
+  clone.visible = source.visible;
+  clone.clippingPlanes = source.clippingPlanes ?? null;
+  clone.clipIntersection = source.clipIntersection;
+  clone.clipShadows = source.clipShadows;
+};
+
+const getDepthOnlyClone = (source: THREE.Material): THREE.Material => {
+  const cached = cloneByMaterial.get(source);
+  if (cached !== undefined) {
+    syncDepthOnlyCloneState(source, cached);
+    return cached;
+  }
+  const clone = source.clone();
+  syncDepthOnlyCloneState(source, clone);
   source.addEventListener('dispose', () => {
     clone.dispose();
     cloneByMaterial.delete(source);
@@ -122,7 +132,7 @@ Express axis-/feature-permutations via `If/ElseIf/Else` over `uniform()` values,
 
 **Line materials addendum (mandatory).** For line materials drawn into the viewport canvas (`Line2NodeMaterial` consumers — scene `AxesHelper`, gizmo cube axes, edge overlays, future fat-line surfaces), the persistent mesh + material instance pattern is **mandatory**: each axis/edge owns one `Line2NodeMaterial` + one or more `Line2WebGpu` meshes constructed exactly once on mount, with hover/selection/visibility state mutated imperatively (`material.linewidth = ...`, `mesh.visible = ...`) from a `useLayoutEffect`. Routing hover state through React props that drive the material constructor inside a `useMemo` is forbidden — it triggers the exact pipeline-compile gap this rule warns about, manifesting as the "axis line vanishes on hover" frame skip documented in `docs/research/webgpu-axes-hover-pipeline-stall.md`. Combine with rule 13 (`compileAsync` warmup) so the first mount also pays no first-frame skip.
 
-**Edge-merge addendum (mandatory).** Edge-overlay line materials produced by the runtime (kernel-emitted `LINES` primitives — replicad `meshEdges`, dihedral edge detection, future kernel edge paths) must be merged into a **single** `LineSegments2` per backend before the GLTF bytes reach the UI. The merge runs in `packages/runtime/src/middleware/gltf-edge-detection.middleware.ts` via `mergeGltfLineSegments` (`packages/runtime/src/utils/merge-gltf-edges.ts`); world matrices are baked into the merged positions so the consolidated node sits at the scene root with identity transform. The UI fat-line conversion (`apps/ui/app/components/geometry/graphics/three/materials/gltf-edges.ts`) then wraps the single source `LineSegments` into one `LineSegments2` with one shared `Line2NodeMaterial` instance, yielding exactly one pipeline + one draw call per loaded model regardless of part count. Allocating one material-per-source-primitive on the UI side is forbidden: it produces one `createRenderPipelineAsync` per part of a CAD assembly under cold cache (the "disabling edge rendering for large models" lag documented in `docs/research/gltf-edges-fat-line-performance.md`). On the WebGL path, the shared `LineMaterial` also pins a stable `customProgramCacheKey` so three's `WebGLPrograms` collapses the GLSL program cache across viewport + screenshot renderers.
+**Owner-local edge addendum (mandatory).** Edge-overlay line materials produced by the runtime (kernel-emitted `LINES` primitives — replicad `meshEdges`, JSCAD normalized topology edges, dihedral fallback detection, future kernel edge paths) must preserve source mesh/component ownership in the GLB. Do not merge runtime lines into a scene-root bundle before the UI reads them; owner-local lines let visibility, selection, diagnostics, and kernel-specific topology stay attached to the source mesh. The UI fat-line conversion (`apps/ui/app/components/geometry/graphics/three/materials/gltf-edges.ts`) wraps each source `LineSegments` into `LineSegments2`, but all wrapped edges for a backend share one material instance and one shader program. Allocating one material-per-source-primitive on the UI side is forbidden: it produces one `createRenderPipelineAsync` per part of a CAD assembly under cold cache (the "disabling edge rendering for large models" lag documented in `docs/research/gltf-edges-fat-line-performance.md`). On the WebGL path, the shared `LineMaterial` also pins a stable `customProgramCacheKey` so three's `WebGLPrograms` collapses the GLSL program cache across viewport + screenshot renderers.
 
 CORRECT:
 
@@ -215,7 +225,7 @@ A material's `transparent`, `depthWrite`, `depthTest`, `colorWrite`, and `side` 
 | Depth-only prepass clone | `false`       | `true`       | `true`      | `false`      |
 | Compositing fullscreen   | `false`       | `false`      | `false`     | `true`       |
 
-**Why**: `transparent = true` defers the draw to the transparent pass with depth-write off, even if `depthWrite = true` is set, because three.js's `renderObject` sorting respects `transparent` first. A depth-only prepass clone marked `transparent = true` will silently fail to write the depth attachment.
+**Why**: `transparent = true` defers the draw to the transparent pass, but three.js still honors the material's explicit `depthWrite` value in both WebGL and WebGPU. Transparent overlays and ghosted model surfaces must set `depthWrite = false` themselves; depth-only prepass clones must stay `transparent = false`, `depthWrite = true`, and `colorWrite = false`. See `docs/research/cad-viewer-isolation-transparency-depth-write.md`.
 
 ### 8. Pipeline cache keys include geometry signature — assume per-mesh recompiles
 
@@ -272,6 +282,8 @@ post.outputNode = scenePass;
 ### 12. Overlay scenes own their own depth pre-pass; do **not** rely on `RenderPipeline._quadMesh.material.depthNode` for canvas depth
 
 Overlay scenes that must depth-test against main-scene geometry on WebGPU (the priority-2 `SceneOverlay`: grid, axes, future overlays) **must explicitly render a depth pre-pass into the canvas depth attachment before compositing**. Use the rule 1 `scene.traverse` + per-source-material cached `colorWrite=false` clone-swap pattern, then `gl.render(overlayScene, camera)`, all under `gl.autoClear = false`. The canonical implementation lives in `apps/ui/app/components/geometry/graphics/three/scene-overlay.tsx`.
+
+Cached clone-swap passes must synchronize every source-material field that affects depth ownership **on every use**, not only when the clone is created. At minimum this includes `visible`, `clippingPlanes`, `clipIntersection`, and `clipShadows`, while preserving the pass invariant (`colorWrite=false`, `transparent=false`, `depthWrite=true`, `depthTest=true`). This is mandatory for WebGL section view because clipping is material-local there; WebGPU section view inherits `THREE.ClippingGroup` state through the scene graph, but the shared clone-swap pass must remain correct for both backends.
 
 Do **not** attempt to populate the canvas depth attachment by wiring the post `RenderPipeline`'s composite quad — i.e. `post._quadMesh.material.depthNode = scenePassDepth.sample(screenUV)` — as a depth-only side effect. In three.js r184 the composite quad runs against the `RenderPipeline`'s **internal** render target, not the swap-chain depth attachment subsequent `gl.render(overlayScene, camera)` calls read. The depth output is silently discarded for canvas-depth purposes and downstream overlays depth-test against stale / uninitialised values.
 
@@ -371,6 +383,7 @@ The following idioms read fine in a WebGL world but break or silently misbehave 
 - **Sharing a `RenderPipeline` across multiple React components** (rule 9).
 - **`builtinAOContext` + dedicated prepass when a single MRT scenepass would suffice** (rule 11).
 - **Relying on `RenderPipeline._quadMesh.material.depthNode` to populate the canvas depth attachment** (rule 12). Use an explicit depth pre-pass inside the overlay frame loop.
+- **Returning stale cached depth-prepass clones without mirroring source clipping/visibility state** (rule 12). This writes depth for geometry the main color pass has already clipped away.
 - **First frame of a `RenderPipeline` blocking on synchronous pipeline compile** (rule 13).
 - **`useTemporalFiltering = true` on a node-graph AO under `frameloop='demand'`** — accumulator never converges; the per-frame rotation produces shimmer instead of smoothing. Set `false` until either `frameloop='always'` or a true history-buffer TAA pass exists.
 
@@ -390,7 +403,7 @@ Before merging a new TSL material or render-pipeline change:
 - [ ] New `NodeMaterial` factory has a `__shader-snapshots__/` snapshot test.
 - [ ] `RenderPipeline` instances have single React-owned lifecycle.
 - [ ] AO composes via `scenePassColor.mul(vec4(vec3(aoOutput.r), 1))`, not `builtinAOContext` + dedicated prepass.
-- [ ] Overlay scenes that need to depth-test against main-scene geometry run an explicit `scene.traverse` + cached `colorWrite=false` clone-swap depth pre-pass before compositing; **no** reliance on `RenderPipeline._quadMesh.material.depthNode` for canvas-depth bridging.
+- [ ] Overlay scenes that need to depth-test against main-scene geometry run an explicit `scene.traverse` + cached `colorWrite=false` clone-swap depth pre-pass before compositing; cached clones mirror source clipping/visibility state on every use; **no** reliance on `RenderPipeline._quadMesh.material.depthNode` for canvas-depth bridging.
 - [ ] First-frame pipeline compile is warmed via `scenePass.compileAsync(renderer)` or `gl.compileAsync(group, camera)` in `useLayoutEffect`, including for line-material persistent groups.
 
 ## References

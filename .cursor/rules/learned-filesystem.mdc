@@ -16,6 +16,9 @@ capped at 200 chars and 12 bullets per section.
 - Once the structural routing fix lands, strip the heuristic tombstone caches added during the regression — leaving the band-aid behind hides future bugs (`_recentlyUnmounted` Option-3 full cleanup pattern).
 - `WorkspaceFileService.mount/unmount(prefix, config)` is the only configuration surface — callers compose domain paths; mount-table fall-through to a broader prefix must NEVER silently swallow an unmount of a more specific prefix.
 - `normalize*`-style helpers inside a service module are a smell — investigate whether the inputs can be made canonical at their source (caller, schema, mount-table key) rather than papering over inconsistencies at the consumer boundary.
+- Implement `writeFiles` through canonical `writeFile`; a provider write is incomplete until writer caches are invalidated and exact-path watchers receive the mutation.
+- Give runtime/headless only an opaque writable rooted filesystem plus local `/` paths; trusted filesystem composition owns global routes and authorization, never runtime layers.
+- Concrete watch/write events keep exact virtual paths; only explicit information-loss signals enter conservative resync. Never infer loss from provider case metadata.
 
 ## Learned Workspace Facts
 
@@ -23,3 +26,4 @@ capped at 200 chars and 12 bullets per section.
 - `WorkspaceFileService` owns mount lifecycle: `_resolveProvider` consults the mount table for the longest matching prefix; tombstone caches like `_recentlyUnmounted` were removed after the explicit-workspace-boundaries fix made provider routing deterministic.
 - Two filesystem watch planes coexist: the kernel fast path (dependency-scoped) and the UI tree path (directory-scoped) — keep them separate; merging into one coarse stream regresses both surfaces.
 - `InMemoryFileTree` (O(1) stat/readdir), `ResourceWriteQueue` (per-parent-dir serialisation), and the dedicated import worker (off-thread fetch+extract+write) are the large-repo perf primitives — never re-implement on top of provider primitives in UI code.
+- `WorkspaceFileService.createRootedFileSystem()` captures one exact project mount/provider/base, rebases it to `/`, shares WFS queues/events, and rejects traversal or stale mounts before provider I/O.

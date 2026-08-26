@@ -16,7 +16,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { useMonaco } from '@monaco-editor/react';
 import { toast } from 'sonner';
 import { MonacoMarkerService } from '#lib/monaco-marker-service.js';
-import { MonacoModelService } from '#lib/monaco-model-service.js';
+import { createWorkspaceContentBinding, MonacoModelService } from '#lib/monaco-model-service.js';
 import { registry } from '#lib/monaco-language-registry.js';
 import { registerMonacoNavigation } from '#lib/monaco-navigation-service.js';
 import { registerTsFileRenameParticipant } from '#lib/monaco-typescript-extras/register-materializing-typescript-providers.client.js';
@@ -85,14 +85,13 @@ export function MonacoModelServiceProvider({ children }: { readonly children: Re
       contentService,
       markerService,
     });
-    workspaceFs.bindModelService({
-      async refreshContent(uri) {
-        await modelService.refreshContent(uri);
-      },
-    });
-    const workspaceContentDispatch = subscribeWorkspaceContentDispatch(contentService, (event) => {
-      modelService.applyContentChange(event);
-    });
+    const workspaceContentBinding = createWorkspaceContentBinding(modelService);
+    workspaceFs.bindModelService(workspaceContentBinding);
+    const workspaceContentDispatch = subscribeWorkspaceContentDispatch(
+      contentService,
+      workspaceContentBinding.applyContentChange,
+      workspaceContentBinding.applyOutcomeChange,
+    );
 
     // R17: family-global TS file-rename participant. Listens on the same
     // `onDidContentChange` channel as `MonacoModelService` and applies
@@ -230,7 +229,7 @@ export function useGeometryUnitKernelPrefetch(
         if (!kernelId) {
           return;
         }
-        const monacoIds = getMonacoLanguageIdsForKernel(kernelId);
+        const monacoIds = getMonacoLanguageIdsForKernel(kernelId, snapshot.context.capabilities);
         if (monacoIds.length > 0) {
           registry.prefetch(monacoIds);
         }

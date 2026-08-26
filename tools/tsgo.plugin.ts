@@ -10,6 +10,11 @@
  * Type resolution works through pnpm workspace symlinks and package.json exports
  * pointing to source files, so no declaration emit is needed for type-checking.
  *
+ * A project's tsconfigs each become their own command rather than one
+ * `&&`-chained string, so a failure in one never hides the diagnostics of
+ * another. Build mode (`tsgo -b`) over the solution config would aggregate them
+ * natively, but it reintroduces the project-reference problems documented below.
+ *
  * Cross-project `references` are intentionally omitted from tsconfig.lib.json and
  * tsconfig.app.json files. With `--composite false`, tsgo does not emit declarations,
  * so referenced projects' `.d.ts` outputs would never exist, causing TS6305 errors.
@@ -24,20 +29,16 @@ import { existsSync } from 'node:fs';
 import { readJsonFile } from '@nx/devkit';
 import type { CreateNodesContextV2, CreateNodesResult, CreateNodesV2, ProjectConfiguration } from '@nx/devkit';
 
-type InputDefinition =
-  | { input: string; projects: string | string[] }
-  | { input: string; dependencies: true }
-  | { input: string }
-  | { fileset: string }
-  | { runtime: string }
-  | { externalDependencies: string[] }
-  | { dependentTasksOutputFiles: string; transitive?: boolean }
-  | { env: string }
-  | { workingDirectory: 'relative' | 'absolute' };
+/**
+ * The input shapes this plugin itself emits. Nx's own `InputDefinition` is a
+ * wider union it does not re-export from `@nx/devkit`, so this stays local and
+ * describes only what is constructed below — never what is read back.
+ */
+type InputDefinition = { externalDependencies: string[] };
 
 type PackageJson = {
   nx?: {
-    namedInputs?: Record<string, Array<string | InputDefinition>>;
+    namedInputs?: Record<string, unknown>;
   };
 };
 
@@ -57,10 +58,8 @@ const tsGoFlags = '--noEmit --composite false --declaration false --declarationM
  */
 const tsConfigCandidates = ['tsconfig.app.json', 'tsconfig.lib.json'];
 
-function getNamedInputs(
-  directory: string,
-  context: CreateNodesContextV2,
-): Record<string, Array<string | InputDefinition>> {
+/** Only probed for key presence, so the value shape is deliberately opaque. */
+function getNamedInputs(directory: string, context: CreateNodesContextV2): Record<string, unknown> {
   const projectJsonPath = join(directory, 'project.json');
   const projectJson: ProjectConfiguration | undefined = existsSync(projectJsonPath)
     ? readJsonFile<ProjectConfiguration>(projectJsonPath)
@@ -125,8 +124,8 @@ function getAdditionalInputPatterns(workspaceRoot: string, projectRoot: string):
     patterns.push('{projectRoot}/.react-router/types/**/*');
   }
 
-  if (directoryExists(workspaceRoot, projectRoot, '.source')) {
-    patterns.push('{projectRoot}/.source/**/*');
+  if (projectRoot === 'apps/ui') {
+    patterns.push('{workspaceRoot}/node_modules/.cache/fumadocs/apps/ui/**/*');
   }
 
   if (fileExists(workspaceRoot, projectRoot, 'react-router.config.ts')) {
@@ -206,7 +205,17 @@ const createTsgoTarget = (
   const tsConfigInputs = getTsConfigInputs(workspaceRoot, projectRoot);
   const additionalInputPatterns = getAdditionalInputPatterns(workspaceRoot, projectRoot);
 
-  const command = tsConfigs.map((config) => `tsgo -p ${config} ${tsGoFlags}`).join(' && ');
+  // Every tsconfig must report, even when an earlier one fails.
+  //
+  // `&&` short-circuits, so while the app/lib config had any error the spec
+  // config never ran and an entire test suite's type errors stayed invisible.
+  // Nx's own `parallel: true` is no better: `ParallelRunningTasks` terminates
+  // the sibling processes the moment one exits non-zero, truncating whatever
+  // the other was still printing. So the configs are chained with `;` and the
+  // failure is accumulated by hand — every config runs to completion, output
+  // stays sequential and unmangled, and the target still exits non-zero.
+  const checks = tsConfigs.map((config) => `tsgo -p ${config} ${tsGoFlags} || status=1`);
+  const command = `${checks.join('; ')}; exit \${status:-0}`;
 
   const inputs: Array<string | InputDefinition> = [
     '{projectRoot}/package.json',

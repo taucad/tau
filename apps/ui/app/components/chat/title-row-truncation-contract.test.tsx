@@ -6,8 +6,6 @@ import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { FileLink } from '#components/files/file-link.js';
 import { ViewerLink } from '#components/files/viewer-link.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
-import { GeometryArtifactBadge } from '#routes/projects_.$id/chat-message-tool-test-model.js';
 
 // ChatToolCard transitively calls `useCookie`, which expects a react-router
 // data router for `useRouteLoaderData`. Stub the cookie hook so these contract
@@ -241,41 +239,6 @@ describe('chat-tool title-row truncation cascade', () => {
     expect(ancestorButtonClick).not.toHaveBeenCalled();
   });
 
-  it('keeps GeometryArtifactBadge truncating long artifact paths via the chip wrapper + inner span min-w-0/truncate chain, with the cube auto-injected by ViewerLink (no manual <Box />)', () => {
-    // The artifact badge sits as a chip inside `chat-message-tool-test-model`'s
-    // `FileGroupSection`. The truncation chain is identical to the canonical
-    // chat-tool title row: the outermost flex chip needs `min-w-0 max-w-full`
-    // (so the chip itself can shrink under its parent), and the inner path
-    // span needs `min-w-0 truncate` (so the path itself can character-clip
-    // instead of overflowing the chip).
-    const longPath = '.tau/artifacts/tooluu_01ARC_thisIsAnIntentionallyLongFilenameToProveTruncation__main.scad.glb';
-    render(
-      <TooltipProvider>
-        <GeometryArtifactBadge artifactPath={longPath} />
-      </TooltipProvider>,
-    );
-
-    const pathSpan = screen.getByText(longPath);
-    expect(pathSpan).toHaveClass('min-w-0');
-    expect(pathSpan).toHaveClass('truncate');
-
-    // Walk up to the chip wrapper that ViewerLink's asChild merges onto.
-    const chipWrapper = pathSpan.parentElement;
-    expect(chipWrapper).not.toBeNull();
-    expect(chipWrapper).toHaveClass('flex');
-    expect(chipWrapper).toHaveClass('min-w-0');
-    expect(chipWrapper).toHaveClass('max-w-full');
-
-    // ViewerLink auto-injects the cube into the consumer's chip via
-    // SlotPrimitive.Slottable — the badge JSX must NOT render its own <Box />
-    // (the architectural rule that the icon lives in exactly one place).
-    // Assert exactly one cube is present, and that it sits as a sibling of
-    // the path span inside the chip wrapper.
-    const cubes = chipWrapper?.querySelectorAll('svg.lucide-box');
-    expect(cubes?.length).toBe(1);
-    expect(cubes?.[0]?.parentElement).toBe(chipWrapper);
-  });
-
   it('still allows callers to override the default `inline` (e.g. chat-stack-trace uses `flex min-w-0`)', () => {
     render(
       <FileLink path='main.kcl' className='flex min-w-0'>
@@ -291,12 +254,12 @@ describe('chat-tool title-row truncation cascade', () => {
     expect(link).toHaveClass('min-w-0');
   });
 
-  it('does NOT impose `inline` when used with `asChild`, so the consumer chip / wrapper owns its own display (e.g. ContextChip `inline-flex`, GeometryArtifactBadge `flex`)', () => {
+  it('does NOT impose `inline` when used with `asChild`, so the consumer owns its own display', () => {
     // Radix Slot concatenates classNames via plain string join (no twMerge —
     // see `@radix-ui/react-slot` source: `[a, b].filter(Boolean).join(' ')`).
     // If FileLink/ViewerLink emit an `inline` class on the asChild branch, it
     // ends up on the consumer's element alongside the consumer's `inline-flex`
-    // (ContextChip) or `flex` (GeometryArtifactBadge). Both are utility classes
+    // or `flex`. Both are utility classes
     // with the same specificity, so which display value wins is decided by
     // Tailwind's CSS source order — fragile and bug-prone. The contract here
     // is that asChild merges DON'T leak a display value at all; the consumer

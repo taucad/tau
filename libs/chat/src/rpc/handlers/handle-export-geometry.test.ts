@@ -26,8 +26,7 @@ describe('handleExportGeometry', () => {
     const graphics = mock<RpcGraphicsClient>();
     graphics.exportGeometry.mockResolvedValue({
       success: true,
-      bytes: new Uint8Array([9, 9, 9]),
-      mimeType: 'application/step',
+      files: [{ name: 'model.step', bytes: new Uint8Array([9, 9, 9]), mimeType: 'application/step' }],
     });
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.writeBinaryFile.mockResolvedValue(undefined);
@@ -41,8 +40,10 @@ describe('handleExportGeometry', () => {
     const graphics = mock<RpcGraphicsClient>();
     graphics.exportGeometry.mockResolvedValue({
       success: true,
-      bytes: new Uint8Array([1, 2]),
-      mimeType: 'model/stl',
+      files: [
+        { name: 'model.obj', bytes: new Uint8Array([1, 2]), mimeType: 'model/obj' },
+        { name: 'materials/model.mtl', bytes: new Uint8Array([3]), mimeType: 'application/octet-stream' },
+      ],
     });
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.writeBinaryFile.mockResolvedValue(undefined);
@@ -55,9 +56,20 @@ describe('handleExportGeometry', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.artifactPath).toBe('.tau/artifacts/tc-42__src_pen_with_spaces.ts.stl');
-      expect(result.byteLength).toBe(2);
-      expect(result.mimeType).toBe('model/stl');
+      expect(result.files).toEqual([
+        {
+          name: 'model.obj',
+          artifactPath: '.tau/artifacts/tc-42__src_pen_with_spaces.ts-stl/model.obj',
+          mimeType: 'model/obj',
+          byteLength: 2,
+        },
+        {
+          name: 'materials/model.mtl',
+          artifactPath: '.tau/artifacts/tc-42__src_pen_with_spaces.ts-stl/materials/model.mtl',
+          mimeType: 'application/octet-stream',
+          byteLength: 1,
+        },
+      ]);
       expect(result.format).toBe('stl');
     }
   });
@@ -66,8 +78,7 @@ describe('handleExportGeometry', () => {
     const graphics = mock<RpcGraphicsClient>();
     graphics.exportGeometry.mockResolvedValue({
       success: true,
-      bytes: new Uint8Array([1]),
-      mimeType: 'model/stl',
+      files: [{ name: 'model.stl', bytes: new Uint8Array([1]), mimeType: 'model/stl' }],
     });
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.writeBinaryFile.mockRejectedValue(new Error('disk full'));

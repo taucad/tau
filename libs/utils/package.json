@@ -1,0 +1,92 @@
+{
+  "name": "@taucad/utils",
+  "version": "0.1.0-beta.1",
+  "description": "Tau shared utilities (ID generation, path, file, schema, dispose)",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/utils"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "utils",
+    "cad"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "exports": {
+    "./id": "./src/id.utils.ts",
+    "./path": "./src/path.utils.ts",
+    "./file": "./src/file.utils.ts",
+    "./import": "./src/import.utils.ts",
+    "./schema": "./src/schema.utils.ts",
+    "./dispose": "./src/dispose.utils.ts",
+    "./error": "./src/error.utils.ts",
+    "./cache": "./src/cache.utils.ts",
+    "./hash": "./src/hash.utils.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      "./id": {
+        "types": "./dist/id.utils.d.mts",
+        "import": "./dist/id.utils.mjs",
+        "default": "./dist/id.utils.mjs"
+      },
+      "./path": {
+        "types": "./dist/path.utils.d.mts",
+        "import": "./dist/path.utils.mjs",
+        "default": "./dist/path.utils.mjs"
+      },
+      "./file": {
+        "types": "./dist/file.utils.d.mts",
+        "import": "./dist/file.utils.mjs",
+        "default": "./dist/file.utils.mjs"
+      },
+      "./import": {
+        "types": "./dist/import.utils.d.mts",
+        "import": "./dist/import.utils.mjs",
+        "default": "./dist/import.utils.mjs"
+      },
+      "./schema": {
+        "types": "./dist/schema.utils.d.mts",
+        "import": "./dist/schema.utils.mjs",
+        "default": "./dist/schema.utils.mjs"
+      },
+      "./dispose": {
+        "types": "./dist/dispose.utils.d.mts",
+        "import": "./dist/dispose.utils.mjs",
+        "default": "./dist/dispose.utils.mjs"
+      },
+      "./error": {
+        "types": "./dist/error.utils.d.mts",
+        "import": "./dist/error.utils.mjs",
+        "default": "./dist/error.utils.mjs"
+      },
+      "./cache": {
+        "types": "./dist/cache.utils.d.mts",
+        "import": "./dist/cache.utils.mjs",
+        "default": "./dist/cache.utils.mjs"
+      },
+      "./hash": {
+        "types": "./dist/hash.utils.d.mts",
+        "import": "./dist/hash.utils.mjs",
+        "default": "./dist/hash.utils.mjs"
+      }
+    }
+  },
+  "dependencies": {
+    "@taucad/json-schema": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "cdn-resolve": "catalog:"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  }
+}

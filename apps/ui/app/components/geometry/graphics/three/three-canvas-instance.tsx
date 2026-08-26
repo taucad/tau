@@ -34,6 +34,7 @@ export function ThreeCanvasInstance({
   enableAxes = false,
   enableZoom = false,
   enablePan = false,
+  secondaryMouseButtonMode = 'camera-pan',
   enableDamping = false,
   upDirection = 'z',
   enableCentering = false,
@@ -94,6 +95,7 @@ export function ThreeCanvasInstance({
           enableDamping={enableDamping}
           enableZoom={enableZoom}
           enablePan={enablePan}
+          secondaryMouseButtonMode={secondaryMouseButtonMode}
           upDirection={upDirection}
           stageOptions={stageOptions}
           zoomSpeed={zoomSpeed}

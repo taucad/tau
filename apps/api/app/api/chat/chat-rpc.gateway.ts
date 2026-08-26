@@ -8,6 +8,8 @@ import type { Server, Socket } from 'socket.io';
 import type { Auth } from 'better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import { AttributeKey } from '@taucad/telemetry';
+import { chatRpcProtocolErrorCode, chatRpcProtocolVersion } from '@taucad/chat';
+import type { ChatRpcJoinAck, ChatRpcJoinMessage } from '@taucad/chat';
 import { MetricsService } from '#telemetry/metrics.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
@@ -53,9 +55,9 @@ export class ChatRpcGateway
   /**
    * Initialize the gateway based on environment.
    */
-  public onModuleInit(): void {
+  public async onModuleInit(): Promise<void> {
     if (import.meta.env.DEV) {
-      this.initDevSocketIo();
+      await this.initDevSocketIo();
     }
   }
 
@@ -75,8 +77,8 @@ export class ChatRpcGateway
    * auth succeeds. This prevents a race where clients emit 'join' before handlers
    * are registered (the old async handleDevConnection pattern dropped those events).
    */
-  private initDevSocketIo(): void {
-    const io = this.devWebSocketService.getSocketIoServer();
+  private async initDevSocketIo(): Promise<void> {
+    const io = await this.devWebSocketService.ensureSocketIoServer();
 
     this.bindConnectionMetrics(io);
 
@@ -117,7 +119,7 @@ export class ChatRpcGateway
   private handleDevConnection(client: Socket): void {
     this.logger.debug(`[Dev] Client connected: ${client.id}`);
 
-    client.on('join', async (data: { chatId: string }, callback?: (ack: { success: boolean }) => void) => {
+    client.on('join', async (data: ChatRpcJoinMessage, callback?: (ack: ChatRpcJoinAck) => void) => {
       const result = await this.handleJoinMessage(client, data);
       callback?.(result);
     });
@@ -138,12 +140,25 @@ export class ChatRpcGateway
    * Enforces chat ownership: the first user to join a chatId owns it,
    * subsequent joins by different users are rejected.
    */
-  private async handleJoinMessage(client: Socket, data: { chatId: string } | undefined): Promise<{ success: boolean }> {
+  private async handleJoinMessage(client: Socket, data: ChatRpcJoinMessage | undefined): Promise<ChatRpcJoinAck> {
     const chatId = data?.chatId;
 
     if (!chatId) {
       this.logger.warn(`Join request without chatId from ${client.id}`);
       return { success: false };
+    }
+
+    if (data.rpcProtocolVersion !== chatRpcProtocolVersion) {
+      this.logger.warn(
+        `Chat RPC protocol mismatch for socket ${client.id}: received ${data.rpcProtocolVersion}, expected ${chatRpcProtocolVersion}`,
+      );
+      return {
+        success: false,
+        code: chatRpcProtocolErrorCode.protocolVersionMismatch,
+        message: 'Chat RPC protocol changed. Reload this page to reconnect.',
+        expectedProtocolVersion: chatRpcProtocolVersion,
+        receivedProtocolVersion: data.rpcProtocolVersion,
+      };
     }
 
     const { userId } = client.data as { userId?: string };
@@ -167,7 +182,7 @@ export class ChatRpcGateway
     }
 
     this.logger.debug(`Client ${client.id} joined chat: ${chatId}`);
-    return { success: true };
+    return { success: true, rpcProtocolVersion: chatRpcProtocolVersion };
   }
 
   /**
@@ -251,8 +266,8 @@ export class ChatRpcGateway
   @SubscribeMessage('join')
   public async handleJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatId: string },
-  ): Promise<{ success: boolean }> {
+    @MessageBody() data: ChatRpcJoinMessage,
+  ): Promise<ChatRpcJoinAck> {
     if (import.meta.env.DEV) {
       return { success: false };
     }

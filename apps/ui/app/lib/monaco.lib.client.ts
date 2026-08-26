@@ -22,6 +22,8 @@ import { stepfileContribution } from '#lib/stepfile-language/stepfile-register-l
 import { stlContribution } from '#lib/stl-language/stl-register-language.js';
 import { usdContribution } from '#lib/usd-language/usd-register-language.js';
 import { sysmlContribution } from '#lib/sysml-language/sysml-register-language.js';
+import { markdownContribution } from '#lib/markdown-language/markdown-register-language.js';
+import { bashContribution } from '#lib/bash-language/bash-register-language.js';
 import { jsContribution } from '#lib/javascript-contribution.js';
 import { tsContribution } from '#lib/typescript-contribution.js';
 
@@ -47,6 +49,8 @@ registry.addContribution(stepfileContribution);
 registry.addContribution(stlContribution);
 registry.addContribution(usdContribution);
 registry.addContribution(sysmlContribution);
+registry.addContribution(markdownContribution);
+registry.addContribution(bashContribution);
 registry.addContribution(tsContribution);
 registry.addContribution(jsContribution);
 
@@ -171,6 +175,10 @@ export const configureMonaco = async (): Promise<void> => {
   // Phase 1: Register language metadata for all contributions (idempotent)
   registry.registerAll(monaco);
 
+  // JSONL is deliberately metadata-only: Shiki owns tokenization, and there is
+  // no JSON language service validation for multi-root newline-delimited JSON.
+  monaco.languages.register({ id: monacoLanguages.jsonl, aliases: ['JSON Lines', 'jsonl'], extensions: ['.jsonl'] });
+
   const highlighter = await getHighlighter();
 
   // Register Shiki highlighter globally. The idempotency guard above ensures
@@ -183,12 +191,6 @@ export const configureMonaco = async (): Promise<void> => {
   const jsonGrammar = highlighter.getLanguage('json');
   const jsonTokensProvider = createJsonTokensProvider(jsonGrammar);
   monaco.languages.setTokensProvider('json', jsonTokensProvider);
-
-  // JSONL (newline-delimited JSON): register as a distinct language so it
-  // gets JSON syntax highlighting without the JSON language service validation
-  // that would flag multi-root documents as errors.
-  monaco.languages.register({ id: 'jsonl', aliases: ['JSON Lines'], extensions: ['.jsonl'] });
-  monaco.languages.setTokensProvider('jsonl', jsonTokensProvider);
 
   // Augment GitHub themes with JSON-specific depth and value rules
   // derived from each theme's own scope colors.
@@ -207,9 +209,7 @@ export const configureMonaco = async (): Promise<void> => {
 /**
  * Languages that should use monacopilot AI code completion.
  *
- * KCL and OpenSCAD register their own completion providers via language
- * contributions ({@link kclContribution}, {@link openscadContribution}).
- * Binary/non-code formats (stepfile, stl, usd) don't need AI completion.
+ * @returns A no-op registration while AI completion is disabled.
  */
 export const completionLanguages = [
   monacoLanguages.typescript,
@@ -235,26 +235,28 @@ export const registerCompletions = (
   editor: Monaco.editor.IStandaloneCodeEditor,
   monaco: typeof Monaco,
 ): CompletionRegistration => {
-  const registrations: CompletionRegistration[] = completionLanguages.map((language) =>
-    registerCompletion(monaco, editor, {
-      endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
-      language,
-      trigger: 'onTyping',
-      async requestHandler(request) {
-        const response = await fetch(`${ENV.TAU_API_URL}/v1/code-completion`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(request.body),
-          credentials: 'include',
-        });
-        const data = (await response.json()) as Awaited<ReturnType<CompletionCopilot['complete']>>;
+  const registrations: CompletionRegistration[] = [];
+  // oxlint-disable-next-line capitalized-comments -- UI kill switch while /v1/code-completion points at an unmaintained model.
+  // const registrations: CompletionRegistration[] = completionLanguages.map((language) =>
+  //   registerCompletion(monaco, editor, {
+  //     endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
+  //     language,
+  //     trigger: 'onTyping',
+  //     async requestHandler(request) {
+  //       const response = await fetch(`${ENV.TAU_API_URL}/v1/code-completion`, {
+  //         method: 'POST',
+  //         headers: {
+  //           'Content-Type': 'application/json',
+  //         },
+  //         body: JSON.stringify(request.body),
+  //         credentials: 'include',
+  //       });
+  //       const data = (await response.json()) as Awaited<ReturnType<CompletionCopilot['complete']>>;
 
-        return data;
-      },
-    }),
-  );
+  //       return data;
+  //     },
+  //   }),
+  // );
 
   return {
     trigger() {

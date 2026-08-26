@@ -6,6 +6,8 @@
 import { errorCategory } from '@taucad/types/constants';
 import type { ErrorCategory, ChatError } from '@taucad/types';
 import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
+import { decodeProviderErrorBody } from '#api/chat/utils/provider-error-decoder.js';
+import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 
 /**
  * LangChain error codes that may be present on wrapped errors.
@@ -212,6 +214,86 @@ function isAbortError(error: unknown): boolean {
   return false;
 }
 
+function extractRegexGroup(message: string, pattern: RegExp): string | undefined {
+  const match = pattern.exec(message);
+  return match?.[1];
+}
+
+/**
+ * First-party ledger exhaustion (billing B2). The marker + µ$ amounts survive
+ * the agent stream's error channel inside `error.message` (only the string
+ * crosses `toUIMessageStream`); this re-extracts them into the friendly copy
+ * `chat-error-credits.tsx` renders.
+ */
+function normalizeInsufficientCreditsError(
+  rawMessage: string,
+): Pick<ChatError, 'category' | 'code' | 'message' | 'raw'> | undefined {
+  if (!rawMessage.includes('INSUFFICIENT_CREDITS')) {
+    return undefined;
+  }
+  const balanceMicro = extractRegexGroup(rawMessage, /balanceMicro=(-?\d+)/);
+  const requiredMicro = extractRegexGroup(rawMessage, /requiredMicro=(-?\d+)/);
+  const formatMicro = (value: string | undefined): string | undefined => {
+    if (value === undefined) {
+      return undefined;
+    }
+    const micro = Number(value);
+    return Number.isFinite(micro) ? (micro / 1_000_000).toFixed(2) : undefined;
+  };
+  const balance = formatMicro(balanceMicro);
+  const required = formatMicro(requiredMicro);
+  const details =
+    balance !== undefined && required !== undefined
+      ? `Your credit balance is $${balance} and this request needs about $${required}. Add credits to continue.`
+      : 'Your credit balance is too low for this request. Add credits to continue.';
+  return {
+    category: errorCategory.credits,
+    code: 'INSUFFICIENT_CREDITS',
+    message: details,
+    raw: rawMessage,
+  };
+}
+
+function normalizeTauImplementationBugError(
+  error: unknown,
+  rawMessage: string,
+): Pick<ChatError, 'category' | 'code' | 'message' | 'raw'> | undefined {
+  if (isCompactionPipelineError(error)) {
+    const details = [
+      `Context compaction failed before provider dispatch.`,
+      `Failure kind: ${error.failureKind}.`,
+      `Failure disposition: ${error.failureDisposition}.`,
+      error.debugId ? `Debug ID: ${error.debugId}.` : undefined,
+    ].filter((entry): entry is string => entry !== undefined);
+    return {
+      category: errorCategory.toolError,
+      code: error.code,
+      message: details.join(' '),
+      raw: rawMessage,
+    };
+  }
+
+  if (rawMessage.includes('CONTEXT_COMPACTION_FAILED')) {
+    const failureKind = extractRegexGroup(rawMessage, /failureKind=([_a-z]+)/);
+    const failureDisposition = extractRegexGroup(rawMessage, /failureDisposition=([_a-z]+)/);
+    const debugId = extractRegexGroup(rawMessage, /debugId=([\w-]+)/);
+    const details = [
+      `Context compaction failed before provider dispatch.`,
+      failureKind ? `Failure kind: ${failureKind}.` : undefined,
+      failureDisposition ? `Failure disposition: ${failureDisposition}.` : undefined,
+      debugId ? `Debug ID: ${debugId}.` : undefined,
+    ].filter((entry): entry is string => entry !== undefined);
+    return {
+      category: errorCategory.toolError,
+      code: 'CONTEXT_COMPACTION_FAILED',
+      message: details.join(' '),
+      raw: rawMessage,
+    };
+  }
+
+  return undefined;
+}
+
 /**
  * Detects specific error patterns in message text.
  */
@@ -269,12 +351,14 @@ function detectPatternCategory(message: string): ErrorCategory | undefined {
  * 1. LangChain/LangGraph error codes (lc_error_code property)
  * 2. HTTP status codes (SDK error classes)
  * 3. JSON parsing from error message
- * 4. Pattern matching on message text
- * 5. Generic fallback
+ * 4. Billing pattern override on extracted provider message
+ * 5. Generic-only pattern matching on message text
+ * 6. Generic fallback
  */
 // oxlint-disable-next-line eslint/complexity -- multi-layer error normalization requires sequential checks
 export function normalizeError(error: unknown): string {
   const rawMessage = error instanceof Error ? error.message : String(error);
+  const decodedProviderError = decodeProviderErrorBody(rawMessage);
   let category: ErrorCategory = errorCategory.generic;
   let code: string | undefined;
   let httpStatus: number | undefined;
@@ -287,6 +371,20 @@ export function normalizeError(error: unknown): string {
   // 0. Check for abort errors first (explicit user cancellation)
   if (isAbortError(error)) {
     category = errorCategory.cancelled;
+  }
+
+  const insufficientCreditsError = normalizeInsufficientCreditsError(rawMessage);
+  if (insufficientCreditsError && category !== errorCategory.cancelled) {
+    category = insufficientCreditsError.category;
+    code = insufficientCreditsError.code;
+    message = insufficientCreditsError.message;
+  }
+
+  const tauImplementationBugError = normalizeTauImplementationBugError(error, rawMessage);
+  if (tauImplementationBugError && category !== errorCategory.cancelled && code === undefined) {
+    category = tauImplementationBugError.category;
+    code = tauImplementationBugError.code;
+    message = tauImplementationBugError.message;
   }
 
   // 1. Check for LangChain error codes
@@ -307,6 +405,13 @@ export function normalizeError(error: unknown): string {
     }
   }
 
+  if (decodedProviderError.httpStatus && !httpStatus) {
+    httpStatus = decodedProviderError.httpStatus;
+    if (category === errorCategory.generic) {
+      category = httpStatusToCategory(decodedProviderError.httpStatus);
+    }
+  }
+
   // Extract request ID
   requestId = extractRequestId(error);
 
@@ -315,6 +420,14 @@ export function normalizeError(error: unknown): string {
   const nestedMessage = extractNestedAnthropicMessage(error);
   if (nestedMessage) {
     message = nestedMessage;
+  }
+
+  if (decodedProviderError.providerMessage && category !== errorCategory.cancelled) {
+    message = decodedProviderError.providerMessage;
+  }
+
+  if (decodedProviderError.providerCode !== undefined) {
+    code ??= String(decodedProviderError.providerCode);
   }
 
   // 3. Try to parse JSON from message (for additional metadata like HTTP status)
@@ -383,12 +496,14 @@ export function normalizeError(error: unknown): string {
     }
   }
 
-  // 4. Pattern matching on message text
-  if (category === errorCategory.generic) {
-    const patternCategory = detectPatternCategory(message);
-    if (patternCategory) {
-      category = patternCategory;
-    }
+  // 4. Pattern matching on final provider-facing message text. Billing
+  // signals are more specific than wrapper categories like HTTP 400 or
+  // Anthropic invalid_request_error, but explicit cancellation still wins.
+  const patternCategory = detectPatternCategory(message);
+  if (patternCategory === errorCategory.credits && category !== errorCategory.cancelled) {
+    category = errorCategory.credits;
+  } else if (category === errorCategory.generic && patternCategory) {
+    category = patternCategory;
   }
 
   // Build the normalized error

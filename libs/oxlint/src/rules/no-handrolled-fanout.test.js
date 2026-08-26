@@ -15,12 +15,12 @@ const ruleTester = new RuleTester({
 });
 
 const root = process.cwd();
-const eventsTopicFile = path.join(root, 'packages/events/src/topic.ts');
-const testFile = path.join(root, 'packages/fs-client/src/example.test.ts');
-const offendingFile = path.join(root, 'packages/fs-client/src/example-service.ts');
+const eventsTopicFile = path.join(root, 'libs/events/src/topic.ts');
+const testFile = path.join(root, 'apps/libs/fs-client/src/example.test.ts');
+const offendingFile = path.join(root, 'apps/libs/fs-client/src/example-service.ts');
 
 describe('no-handrolled-fanout', () => {
-  it('flags hand-rolled Set/Array fan-out; allows Topic and non-function Sets', () => {
+  it('flags hand-rolled fan-out declarations; allows Topic and non-function containers', () => {
     ruleTester.run('no-handrolled-fanout', noHandrolledFanoutRule, {
       valid: [
         {
@@ -43,6 +43,11 @@ describe('no-handrolled-fanout', () => {
           code: 'class Foo { private readonly items = new Set<string>(); }',
           filename: offendingFile,
         },
+        {
+          name: 'resolver queue is not pubsub fan-out',
+          code: 'const waiters: Array<(value: string) => void> = [];',
+          filename: offendingFile,
+        },
       ],
       invalid: [
         {
@@ -60,6 +65,30 @@ describe('no-handrolled-fanout', () => {
         {
           name: 'flags Set of listener objects',
           code: 'class Foo { private readonly listeners = new Set<{ callback(): void }>(); }',
+          filename: offendingFile,
+          errors: [{ messageId: 'noHandrolledFanout' }],
+        },
+        {
+          name: 'flags local variable declarations',
+          code: 'const listeners = new Set<() => void>();',
+          filename: offendingFile,
+          errors: [{ messageId: 'noHandrolledFanout' }],
+        },
+        {
+          name: 'flags nested Map values',
+          code: 'const listeners = new Map<string, Set<(value: string) => void>>();',
+          filename: offendingFile,
+          errors: [{ messageId: 'noHandrolledFanout' }],
+        },
+        {
+          name: 'flags named listener aliases',
+          code: 'type StatusListener = () => void; class Foo { private listeners = new Set<StatusListener>(); }',
+          filename: offendingFile,
+          errors: [{ messageId: 'noHandrolledFanout' }],
+        },
+        {
+          name: 'flags named arrays of handlers',
+          code: 'const handlers: Array<(value: string) => void> = [];',
           filename: offendingFile,
           errors: [{ messageId: 'noHandrolledFanout' }],
         },

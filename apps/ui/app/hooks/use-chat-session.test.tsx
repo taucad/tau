@@ -29,6 +29,8 @@ const harness = vi.hoisted(() => ({
     patchChat: vi.fn().mockResolvedValue(undefined),
     setMessageEdit: vi.fn().mockResolvedValue(undefined),
     clearMessageEdit: vi.fn().mockResolvedValue(undefined),
+    consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
+    commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -124,6 +126,8 @@ describe('useChatSession', () => {
     harness.projectManager.patchChat.mockReset().mockResolvedValue(undefined);
     harness.projectManager.setMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.projectManager.clearMessageEdit.mockReset().mockResolvedValue(undefined);
+    harness.projectManager.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
+    harness.projectManager.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {

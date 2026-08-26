@@ -27,11 +27,11 @@ Internal reference for maintaining `AGENTS.md` and the agent context hierarchy.
 
 The agent context system has three artifact types with different discovery mechanics and token costs:
 
-| Artifact                   | Purpose                       | Discovery                                      | Token Cost           |
-| -------------------------- | ----------------------------- | ---------------------------------------------- | -------------------- |
-| `AGENTS.md`                | Project-wide conventions      | Always loaded at session start                 | Fixed per session    |
-| `.cursor/rules/*.mdc`      | Passive reference for editing | `alwaysApply`, `globs`, or description-matched | Varies by activation |
-| `.agent/skills/*/SKILL.md` | Active multi-step workflows   | Description-matched on demand                  | Only when invoked    |
+| Artifact                    | Purpose                       | Discovery                                      | Token Cost           |
+| --------------------------- | ----------------------------- | ---------------------------------------------- | -------------------- |
+| `AGENTS.md`                 | Project-wide conventions      | Always loaded at session start                 | Fixed per session    |
+| `.cursor/rules/*.mdc`       | Passive reference for editing | `alwaysApply`, `globs`, or description-matched | Varies by activation |
+| `.agents/skills/*/SKILL.md` | Active multi-step workflows   | Description-matched on demand                  | Only when invoked    |
 
 ### Rules: what/when (passive)
 
@@ -100,7 +100,7 @@ Terse description of the project structure. Pointers, not prose.
 
 ### 3. Skills
 
-Table of project skills in `.agent/skills/` so the agent knows what guided workflows are available and when to use them. Keep the table updated when skills are added or removed.
+Table of project skills in `.agents/skills/` so the agent knows what guided workflows are available and when to use them. Keep the table updated when skills are added or removed.
 
 ### 4. Code Conventions
 
@@ -212,7 +212,7 @@ When editing `AGENTS.md`:
 - [ ] No secrets, tokens, or transient details
 - [ ] Learned sections maintained only by `agents-memory-updater` (not hand-edited)
 - [ ] Buffer sections respect the 12-bullet / 200-char-per-bullet cap
-- [ ] Skills table reflects current `.agent/skills/` contents
+- [ ] Skills table reflects current `.agents/skills/` contents
 
 When editing `.cursor/rules/learned-<project>.mdc`:
 

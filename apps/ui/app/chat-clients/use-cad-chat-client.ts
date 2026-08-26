@@ -56,7 +56,7 @@ export type CadChatClient = {
   edit: (messageId: string, input: CadChatSubmitInput) => void;
   /** Re-run the assistant turn after a specific user message id (used by message-edit / regen-on-N flows). */
   retry: (messageId: string, modelId?: string) => void;
-  /** Re-run the latest assistant turn (used by pending-tail hydration + Fix-with-AI in-place). */
+  /** Re-run the latest assistant turn (used by startup-request hydration + Fix-with-AI in-place). */
   regenerateTail: () => void;
   /** Abort the in-flight request, if any. */
   stop: () => void;
@@ -120,6 +120,7 @@ export const useCadChatClient = (): CadChatClient => {
   const agent = useCadAgentConfig();
   const status = useChatSelector((state) => state.status);
   const body = useMemo(() => ({ agent }), [agent]);
+  const requestInFlight = status === 'submitted' || status === 'streaming';
   // The CAD chat client is session-required by construction (it composes
   // `useActiveChatInstance` / `useChatActions`), so `activeChatId` is a
   // guaranteed `string` from the strict session context — no optional
@@ -127,10 +128,10 @@ export const useCadChatClient = (): CadChatClient => {
   const { activeChatId } = useActiveChatSession();
   const store = useChatSessionStore();
 
-  // Publish the latest agent body to the chat-session store so the
-  // hydration auto-regenerate on pending-tail (the one path that fires a
-  // request through the persistence machine without an explicit body) can
-  // fall back to this snapshot. Without this, the very first
+  // Publish the latest agent body to the chat-session store so startup
+  // hydration (the one route-driven path that may fire a request through the
+  // persistence machine without an explicit body) can fall back to this
+  // snapshot. Without this, the very first
   // homepage-seeded turn would dispatch with `body: undefined` and the API
   // would 400 with `agent: Required`. See `ChatSessionStore.setLatestAgentBody`.
   useEffect(() => {
@@ -142,24 +143,36 @@ export const useCadChatClient = (): CadChatClient => {
 
   const submit = useCallback(
     (input: CadChatSubmitInput) => {
+      if (requestInFlight) {
+        return;
+      }
+
       const userMessage = buildUserMessage(input);
       actions.sendMessage(userMessage, { body });
     },
-    [actions, body],
+    [actions, body, requestInFlight],
   );
 
   const edit = useCallback(
     (messageId: string, input: CadChatSubmitInput) => {
+      if (requestInFlight) {
+        return;
+      }
+
       actions.editMessage(messageId, input.text, {
         imageUrls: input.imageUrls ? [...input.imageUrls] : undefined,
         body,
       });
     },
-    [actions, body],
+    [actions, body, requestInFlight],
   );
 
   const retry = useCallback(
     (messageId: string, modelId?: string) => {
+      if (requestInFlight) {
+        return;
+      }
+
       // "Retry with a different model" overrides only `agent.model` for this
       // single dispatch; the active model is **not** mutated. The override
       // is composed inline so the wire body still carries the rest of the
@@ -170,12 +183,16 @@ export const useCadChatClient = (): CadChatClient => {
       const overrideBody = modelId ? { agent: { ...agent, model: modelId } } : body;
       actions.retryMessage(messageId, { body: overrideBody });
     },
-    [actions, agent, body],
+    [actions, agent, body, requestInFlight],
   );
 
   const regenerateTail = useCallback(() => {
+    if (requestInFlight) {
+      return;
+    }
+
     actions.regenerate({ body });
-  }, [actions, body]);
+  }, [actions, body, requestInFlight]);
 
   const stop = useCallback(() => {
     actions.stop();

@@ -12,9 +12,9 @@
  * - That package requires Redis 8.0+ OR Redis Stack (RedisJSON + RediSearch).
  *   Tau ships `redis:7-alpine` in dev and a vanilla Redis 7 cluster in prod;
  *   Fly.io's 2026 Valkey path explicitly does NOT bundle the Stack modules.
- * - The dedup cache only needs four BaseStore ops (`get`/`put`/`delete`/
- *   `listNamespaces`). Search / vector / full-text is intentionally out of
- *   scope.
+ * - The dedup cache only needs three BaseStore ops (`get`/`put`/`delete`)
+ *   plus Tau's explicit `clearChat` maintenance hook. Search / vector /
+ *   full-text / namespace-listing are intentionally out of scope.
  *
  * Wire shape:
  *

@@ -26,16 +26,22 @@ Create a runtime client with the Replicad kernel and esbuild bundler:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
 
 const client = createRuntimeClient({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
-`createRuntimeClient` returns a high-level client that manages worker lifecycle, kernel selection, and middleware. Inline `code:` input runs in an in-memory filesystem.
+`createRuntimeClient` returns a high-level client that manages worker lifecycle, kernel selection, and middleware. Inline `source.files` input is staged into the transport-owned filesystem, and `source.entry` selects a key from that map. Raw transports need `fileSystem`, while high-level helpers provide one automatically. See [Path Namespaces](../concepts/path-namespaces) for the relationship between consumer source paths and normalized plugin entry paths.
 
 **Verify:** No output yet. The client initializes lazily -- the worker is only spawned on the first command call.
 
@@ -69,12 +75,15 @@ The `main` function is the entry point that the kernel calls. It receives a `par
 
 ## Step 3: Render and Export to glTF
 
-Hand the model code, entry file, and parameters to `client.export('glb', input)` -- this self-renders the model and returns the binary glTF in one call:
+Hand the model code, entry path, and parameters to `client.export('glb', input)` -- this self-renders the model and returns the binary glTF in one call:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const modelCode = `
   import { drawRoundedRectangle } from 'replicad';
@@ -84,15 +93,19 @@ const modelCode = `
   }
 `;
 
-const client = createRuntimeClient({ kernels: [replicad()], bundlers: [esbuild()] });
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
 const result = await client.export('glb', {
-  code: { 'main.ts': modelCode },
-  file: 'main.ts',
+  source: { files: { 'main.ts': modelCode } },
   parameters: { width: 50, depth: 15 },
 });
 
 if (result.success) {
-  console.log(`Rendered ${result.data.bytes.byteLength} bytes (${result.data.mimeType})`);
+  for (const file of result.data) {
+    console.log(`Rendered ${file.name}: ${file.bytes.byteLength} bytes (${file.mimeType})`);
+  }
 } else {
   for (const issue of result.issues) {
     console.error(`[${issue.severity}] ${issue.message}`);
@@ -100,9 +113,9 @@ if (result.success) {
 }
 ```
 
-`export(format, input)` self-renders the input and resolves a single
-`ExportResult` -- the `success` discriminant narrows the payload so you can
-safely access `result.data.bytes` in the `true` branch. If rendering fails, the
+`export(format, input)` self-renders the input and resolves an ordered, non-empty
+artifact array -- the `success` discriminant narrows the payload so you can
+safely iterate `result.data` in the `true` branch. If rendering fails, the
 `issues` array contains structured errors with messages, locations, and
 severity levels.
 
@@ -110,7 +123,7 @@ severity levels.
 
 > Need a UI viewer that re-renders on parameter changes or file edits? See
 > [Live Rendering](../guides/live-rendering) for the autonomous-loop API
-> (`client.openFile`, `client.updateParameters`, `client.setOptions`, and the
+> (`client.render`, `client.updateParameters`, `client.setOptions`, and the
 > `geometry` event).
 
 ## Step 4: Export to STEP
@@ -119,8 +132,11 @@ The same `export()` call swaps formats by changing the first argument -- the run
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 const modelCode = `
   import { drawRoundedRectangle } from 'replicad';
@@ -130,16 +146,19 @@ const modelCode = `
   }
 `;
 
-const client = createRuntimeClient({ kernels: [replicad()], bundlers: [esbuild()] });
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
 const stepResult = await client.export('step', {
-  code: { 'main.ts': modelCode },
-  file: 'main.ts',
+  source: { files: { 'main.ts': modelCode } },
   parameters: { width: 50, depth: 15 },
 });
 
 if (stepResult.success) {
-  const { name, bytes, mimeType } = stepResult.data;
-  console.log(`Exported: ${name} (${bytes.byteLength} bytes, ${mimeType})`);
+  for (const { name, bytes, mimeType } of stepResult.data) {
+    console.log(`Exported: ${name} (${bytes.byteLength} bytes, ${mimeType})`);
+  }
 } else {
   console.error('Export failed:', stepResult.issues);
 }
@@ -155,18 +174,25 @@ Terminate the client to shut down workers and release resources:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient({ kernels: [replicad()], bundlers: [esbuild()] });
-const result = await client.export('glb', {
-  code: {
-    'main.ts':
-      "import { drawCircle } from 'replicad';\nexport default () => drawCircle(10).sketchOnPlane('XY').extrude(5);",
-  },
-  file: 'main.ts',
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
-console.log(`Rendered ${result.success ? result.data.bytes.byteLength : 0} bytes`);
+const result = await client.export('glb', {
+  source: {
+    files: {
+      'main.ts':
+        "import { drawCircle } from 'replicad';\nexport default () => drawCircle(10).sketchOnPlane('XY').extrude(5);",
+    },
+  },
+});
+console.log(`Rendered ${result.success ? result.data.reduce((sum, file) => sum + file.bytes.byteLength, 0) : 0} bytes`);
 
 client.terminate();
 ```

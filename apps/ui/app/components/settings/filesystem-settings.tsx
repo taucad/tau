@@ -6,47 +6,31 @@
  *
  * - Lists every connected workspace; each row owns its own connect /
  *   grant-access / change / forget controls via `WorkspaceDirectoryPanel`.
- * - Lets the user toggle the default workspace used by new webaccess
- *   projects.
- * - Disables the webaccess option in the default-backend picker when no
- *   workspace is connected — clicking that option would otherwise leave
- *   `/projects/new` immediately blocked by a `WorkspaceDirectoryRequiredError`.
- * - Renames the bottom card to "Origin Storage Usage" so users understand
- *   IndexedDB + OPFS are the only buckets counted by `navigator.storage`
- *   (webaccess workspaces sit outside the browser origin).
- *
- * Cookie semantics: the `filesystem-backend` cookie controls which
- * backend the next "New Project" creation defaults to. It does NOT
- * retroactively change the backend of an existing project — that
- * binding is owned by `ProjectFileSystemConfig` in `handle-store`.
+ * - Creation destinations are selected where projects are created.
+ * - Reports aggregate Home storage pressure without exposing its engine.
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { HardDrive, Plus } from 'lucide-react';
+import { AlertCircle, HardDrive, Plus } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { Card, CardContent, CardHeader, CardTitle } from '#components/ui/card.js';
-import { BackendSelector, coerceFilesystemBackendCookie } from '#components/filesystem/backend-selector.js';
-import type { SelectableFilesystemBackend } from '#components/filesystem/backend-selector.js';
 import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
 import {
   checkHandlePermission,
   createWorkspace,
-  forgetWorkspace,
   getWorkspace,
   listProjectsForWorkspace,
   listWorkspaces,
   requestHandlePermission,
-  setDefaultWorkspace,
-  updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
-import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
 import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
 import { Loader } from '#components/ui/loader.js';
 import { toast } from '#components/ui/sonner.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
 
 type WorkspaceRow = {
   workspace: Workspace;
@@ -55,13 +39,13 @@ type WorkspaceRow = {
 };
 
 export function FileSystemSettings(): React.JSX.Element {
-  const [rawBackendCookie, setRawBackendCookie] = useCookie(cookieName.filesystemBackend, 'indexeddb');
-  const backendCookie: SelectableFilesystemBackend = coerceFilesystemBackendCookie(rawBackendCookie);
   const [rows, setRows] = useState<WorkspaceRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [busyWorkspaceId, setBusyWorkspaceId] = useState<string | undefined>(undefined);
   const [isAddingWorkspace, setIsAddingWorkspace] = useState(false);
   const telemetry = useWorkspaceTelemetry();
+  const projectManager = useProjectManager();
+  const { workspace } = useFileManager();
 
   const reloadRows = useCallback(async (): Promise<void> => {
     try {
@@ -88,25 +72,6 @@ export function FileSystemSettings(): React.JSX.Element {
     void reloadRows();
   }, [reloadRows]);
 
-  const hasConnectedWorkspace = rows.some((row) => row.status === 'connected');
-
-  // Audit R13: webaccess is disabled as a default when no workspace is
-  // connected. Picking it would immediately fail at `/projects/new` with
-  // `WorkspaceDirectoryRequiredError`. The selector still surfaces the
-  // option so users can read the description, but it stays unselectable
-  // until the user adds a workspace below.
-  const handleBackendChange = useCallback(
-    (value: string) => {
-      const next = value as SelectableFilesystemBackend;
-      if (next === 'webaccess' && !hasConnectedWorkspace) {
-        toast.error('Connect a workspace folder first to set File System as the default backend.');
-        return;
-      }
-      setRawBackendCookie(next);
-    },
-    [hasConnectedWorkspace, setRawBackendCookie],
-  );
-
   const handleAddWorkspace = useCallback(async () => {
     if (!isFileSystemAccessSupported) {
       return;
@@ -117,8 +82,15 @@ export function FileSystemSettings(): React.JSX.Element {
         id: 'tau-workspace',
         mode: 'readwrite',
       });
-      const workspace = await createWorkspace(handle, { setDefault: rows.length === 0 });
-      telemetry.workspaceCreated({ workspaceId: workspace.workspaceId, isDefault: rows.length === 0 });
+      // The store decides the default from durable rows, and only reports a
+      // creation when it actually minted an identity (DF6 / DF19).
+      const createdWorkspace = await createWorkspace(handle);
+      await workspace.syncProjectRoots();
+      if (createdWorkspace.minted) {
+        telemetry.workspaceCreated({
+          workspaceId: createdWorkspace.workspaceId,
+        });
+      }
       await reloadRows();
       toast.success(`Connected workspace "${handle.name}"`);
     } catch (error) {
@@ -132,7 +104,7 @@ export function FileSystemSettings(): React.JSX.Element {
     } finally {
       setIsAddingWorkspace(false);
     }
-  }, [reloadRows, rows.length, telemetry]);
+  }, [reloadRows, telemetry, workspace]);
 
   const handleConnectChange = useCallback(
     async (workspaceId: string) => {
@@ -141,11 +113,12 @@ export function FileSystemSettings(): React.JSX.Element {
       }
       setBusyWorkspaceId(workspaceId);
       try {
+        await projectManager.assertWorkspaceMutationAllowed(workspaceId);
         const handle = await globalThis.window.showDirectoryPicker({
           id: `tau-workspace-${workspaceId}`,
           mode: 'readwrite',
         });
-        await updateWorkspaceHandle(workspaceId, handle);
+        await workspace.replaceWorkspaceHandle(workspaceId, handle);
         telemetry.workspaceConnected({ workspaceId });
         await reloadRows();
         toast.success(`Updated workspace folder to "${handle.name}"`);
@@ -161,7 +134,7 @@ export function FileSystemSettings(): React.JSX.Element {
         setBusyWorkspaceId(undefined);
       }
     },
-    [reloadRows, telemetry],
+    [projectManager, reloadRows, telemetry, workspace],
   );
 
   const handleGrantAccess = useCallback(
@@ -174,6 +147,7 @@ export function FileSystemSettings(): React.JSX.Element {
         }
         const granted = await requestHandlePermission(entry.handle);
         if (granted) {
+          await workspace.syncProjectRoots();
           telemetry.workspaceConnected({ workspaceId });
         } else {
           telemetry.workspaceOpenFailed({ workspaceId, reason: 'permission' });
@@ -184,13 +158,14 @@ export function FileSystemSettings(): React.JSX.Element {
         setBusyWorkspaceId(undefined);
       }
     },
-    [reloadRows, telemetry],
+    [reloadRows, telemetry, workspace],
   );
 
   const handleForgetWorkspace = useCallback(
     async (workspaceId: string) => {
       setBusyWorkspaceId(workspaceId);
       try {
+        await projectManager.assertWorkspaceMutationAllowed(workspaceId);
         const projects = await listProjectsForWorkspace(workspaceId);
         if (projects.length > 0) {
           toast.error(
@@ -198,26 +173,13 @@ export function FileSystemSettings(): React.JSX.Element {
           );
           return;
         }
-        await forgetWorkspace(workspaceId);
+        await workspace.forgetWorkspace(workspaceId);
         await reloadRows();
       } finally {
         setBusyWorkspaceId(undefined);
       }
     },
-    [reloadRows],
-  );
-
-  const handleSetDefault = useCallback(
-    async (workspaceId: string) => {
-      setBusyWorkspaceId(workspaceId);
-      try {
-        await setDefaultWorkspace(workspaceId);
-        await reloadRows();
-      } finally {
-        setBusyWorkspaceId(undefined);
-      }
-    },
-    [reloadRows],
+    [projectManager, reloadRows, workspace],
   );
 
   const [storageUsage, setStorageUsage] = useState<{ used: number; quota: number } | undefined>(undefined);
@@ -230,33 +192,22 @@ export function FileSystemSettings(): React.JSX.Element {
           used: estimate.usage ?? 0,
           quota: estimate.quota ?? 0,
         });
-      } catch {
-        // Storage estimation not available
+      } catch (error) {
+        // R6: a failed estimate used to vanish silently, hiding the one signal
+        // we have that the origin is under storage pressure.
+        console.warn('Storage estimate unavailable', error);
       }
     };
 
     void estimateStorage();
   }, []);
 
+  // R6: above this share of quota the browser is close to refusing writes.
+  const isStorageUnderPressure =
+    storageUsage !== undefined && storageUsage.quota > 0 && storageUsage.used / storageUsage.quota > 0.8;
+
   return (
     <div className='flex flex-col gap-6 pb-6'>
-      <Card>
-        <CardHeader>
-          <CardTitle>Default Storage</CardTitle>
-        </CardHeader>
-        <CardContent className='flex flex-col gap-4'>
-          <div className='flex items-center justify-between gap-4'>
-            <div className='flex flex-col gap-1'>
-              <span className='font-medium'>Default Backend</span>
-              <span className='text-sm text-muted-foreground'>
-                Used for new projects. Existing projects keep the backend they were created with.
-              </span>
-            </div>
-            <BackendSelector value={backendCookie} onSelect={handleBackendChange} />
-          </div>
-        </CardContent>
-      </Card>
-
       {isFileSystemAccessSupported ? (
         <Card>
           <CardHeader className='flex flex-row items-center justify-between gap-2'>
@@ -268,13 +219,14 @@ export function FileSystemSettings(): React.JSX.Element {
           </CardHeader>
           <CardContent className='flex flex-col gap-3'>
             <p className='text-sm text-muted-foreground'>
-              A workspace is a folder on your computer. New File System projects go into the default workspace.
+              Connected workspaces are folders on your disk. Choose one from the new-project location picker when you do
+              not want to use Home.
             </p>
             {isLoading ? (
               <Loader className='size-4' />
             ) : rows.length === 0 ? (
               <p className='text-sm text-muted-foreground'>
-                No workspaces yet. Add one to use the File System backend.
+                No connected workspaces yet. Add one to store projects in a folder on your disk.
               </p>
             ) : (
               <div className='flex flex-col gap-2'>
@@ -284,23 +236,6 @@ export function FileSystemSettings(): React.JSX.Element {
                   const meta = (
                     <div className='flex items-center gap-2 text-xs text-muted-foreground'>
                       <span>{projectCountLabel}</span>
-                      {row.workspace.isDefault ? (
-                        <span className='rounded-full border border-border bg-muted/60 px-2 py-0.5 font-medium text-foreground'>
-                          Default
-                        </span>
-                      ) : (
-                        <Button
-                          size='sm'
-                          variant='ghost'
-                          className='h-6 px-2 text-xs'
-                          disabled={isBusyRow}
-                          onClick={() => {
-                            void handleSetDefault(row.workspace.workspaceId);
-                          }}
-                        >
-                          Set as default
-                        </Button>
-                      )}
                     </div>
                   );
                   return (
@@ -353,9 +288,18 @@ export function FileSystemSettings(): React.JSX.Element {
                 </div>
               </div>
             </div>
+            {isStorageUnderPressure ? (
+              <div className='border-amber-500/40 flex items-center gap-3 rounded-md border p-3'>
+                <AlertCircle className='text-amber-600 size-4 shrink-0' />
+                <p className='text-sm'>
+                  Browser storage is nearly full. Free up space or move projects to a connected workspace — writes start
+                  failing once the quota is reached.
+                </p>
+              </div>
+            ) : undefined}
             <p className='text-xs text-muted-foreground'>
-              Browser-managed storage for IndexedDB + OPFS projects. File System workspaces live on your disk and are
-              not counted here.
+              Home uses browser-managed storage and can be cleared or evicted. Connected workspaces live on your disk
+              and are not counted here.
             </p>
           </CardContent>
         </Card>

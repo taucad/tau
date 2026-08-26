@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import {
   resolveKernel,
   tauEditorPanelDragMime,
@@ -21,10 +21,26 @@ import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 // + sonner mocks.
 // ---------------------------------------------------------------------------
 
-const stableModel: ResolvedModel = {
-  id: 'chat-scoped-model',
-  details: { family: 'gpt' },
-} as unknown as ResolvedModel;
+const makeResolvedModel = (
+  id = 'chat-scoped-model',
+  input: Array<'text' | 'image'> = ['text', 'image'],
+): ResolvedModel =>
+  ({
+    id,
+    name: id,
+    family: 'gpt',
+    provider: { id: 'openai', name: 'OpenAI' },
+    isResolved: true,
+    model: {
+      support: {
+        tools: true,
+        toolChoice: true,
+        modalities: { input, output: ['text'] },
+      },
+    } as unknown as NonNullable<ResolvedModel['model']>,
+  }) satisfies ResolvedModel;
+
+const stableModel = makeResolvedModel();
 
 let mockActiveModel: ResolvedModel = stableModel;
 
@@ -126,7 +142,7 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
       await result.current.handleSubmit();
     });
 
-    mockActiveModel = { id: 'next-chat-scoped-model', details: { family: 'gpt' } } as unknown as ResolvedModel;
+    mockActiveModel = makeResolvedModel('next-chat-scoped-model');
     rerender();
 
     await act(async () => {
@@ -230,7 +246,7 @@ describe('useChatTextareaLogic — dragKind detection + drop routing', () => {
     expect(result.current.dragKind).toBeUndefined();
   });
 
-  it('routes a viewer drop to onViewerScreenshotDrop with the entryFile', () => {
+  it('routes a viewer drop to onViewerScreenshotDrop with the entryPath', () => {
     const onViewerScreenshotDrop = vi.fn();
     const onAddContextChips = vi.fn();
     const { result } = renderHook(() =>
@@ -246,7 +262,7 @@ describe('useChatTextareaLogic — dragKind detection + drop routing', () => {
       void result.current.handleDrop(
         buildDragEvent({
           types: [tauViewerPanelDragMime],
-          data: { [tauViewerPanelDragMime]: JSON.stringify({ entryFile: 'models/part.scad' }) },
+          data: { [tauViewerPanelDragMime]: JSON.stringify({ entryPath: 'models/part.scad' }) },
         }),
       );
     });
@@ -345,6 +361,13 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
       preventDefault: vi.fn(),
       dataTransfer: buildDataTransfer(files),
     }) as unknown as React.DragEvent;
+
+  const buildClipboardEvent = (files: readonly File[]) => {
+    return {
+      preventDefault: vi.fn(),
+      clipboardData: buildDataTransfer(files),
+    };
+  };
 
   const makeFile = (name: string, type = 'image/png'): File => {
     return Object.assign(new File([new Blob(['stub'])], name, { type }), { __taggedAs: name });
@@ -476,5 +499,83 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     const dispatched = chatActionsMock.addDraftImage.mock.calls[0]?.[0];
     expect(dispatched).toBe('data:image/png;base64,RAW_A.png');
     expect(dispatched?.startsWith('data:image/png;base64,RAW_')).toBe(true);
+  });
+
+  it('should dispatch addDraftImage once per pasted image, in paste order, with raw data URLs', async () => {
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    const files = ['A.png', 'B.png', 'C.png', 'D.png', 'E.png'].map((n) => makeFile(n));
+    const event = buildClipboardEvent(files);
+
+    act(() => {
+      expect(result.current.handlePaste(event)).toBe(true);
+    });
+
+    await waitFor(() => {
+      expect(chatActionsMock.addDraftImage).toHaveBeenCalledTimes(5);
+    });
+    const args = chatActionsMock.addDraftImage.mock.calls.map((c) => c[0]);
+    expect(args).toEqual([
+      'data:image/png;base64,RAW_A.png',
+      'data:image/png;base64,RAW_B.png',
+      'data:image/png;base64,RAW_C.png',
+      'data:image/png;base64,RAW_D.png',
+      'data:image/png;base64,RAW_E.png',
+    ]);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject direct image adds when the selected model is text-only', () => {
+    mockActiveModel = makeResolvedModel('together-glm-5.2', ['text']);
+
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    act(() => {
+      result.current.handleAddImage('data:image/png;base64,AAA');
+    });
+
+    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
+      description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
+    });
+  });
+
+  it('should reject pasted images when the selected model is text-only', () => {
+    mockActiveModel = makeResolvedModel('together-glm-5.2', ['text']);
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+    const event = buildClipboardEvent([makeFile('A.png')]);
+
+    act(() => {
+      expect(result.current.handlePaste(event)).toBe(true);
+    });
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
+      description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
+    });
+  });
+
+  it('should reject dropped image files when the selected model is text-only', async () => {
+    mockActiveModel = makeResolvedModel('together-glm-5.2', ['text']);
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    await act(async () => {
+      await result.current.handleDrop(buildDragEvent([makeFile('A.png')]));
+    });
+
+    expect(chatActionsMock.addDraftImage).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith('This model cannot read images', {
+      description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
+    });
   });
 });

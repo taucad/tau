@@ -29,10 +29,10 @@ import {
 import { cn } from '#utils/ui.utils.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import { axesColors } from '#constants/color.constants.js';
-import type { EnvironmentPreset, GraphicsBackendPreference } from '#constants/editor.constants.js';
+import { defaultRenderTimeout } from '#constants/editor.constants.js';
+import type { EnvironmentPreset } from '#constants/editor.constants.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
-import { BetaBadge } from '#components/release-badge.js';
 
 // Up direction options
 type UpDirection = 'x' | 'y' | 'z';
@@ -51,6 +51,9 @@ const timeoutOptions: TimeoutOption[] = [
   { value: 300_000, label: '5 min' },
   { value: 600_000, label: '10 min' },
 ];
+
+const defaultTimeoutOption =
+  timeoutOptions.find((option) => option.value === defaultRenderTimeout) ?? timeoutOptions[0]!;
 
 const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ariaLabel: string }> = [
   { value: 'x', label: <span style={{ color: axesColors.x }}>X</span>, ariaLabel: 'X-up' },
@@ -78,25 +81,6 @@ const environmentPresetOptions: EnvironmentPresetOption[] = [
     id: 'performance',
     label: 'Performance',
     description: 'Minimal lights for best performance',
-  },
-];
-
-const graphicsBackendOptions: Array<{
-  id: GraphicsBackendPreference;
-  label: string;
-  description: string;
-  isBeta?: boolean;
-}> = [
-  {
-    id: 'webgl',
-    label: 'WebGL',
-    description: 'Stable default; widest browser support.',
-  },
-  {
-    id: 'webgpu',
-    label: 'WebGPU',
-    description: 'Faster when supported; falls back automatically if unavailable.',
-    isBeta: true,
   },
 ];
 
@@ -131,15 +115,11 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const enablePostProcessing = useGraphicsSelector((state) => state.context.enablePostProcessing);
   const environmentPreset = useGraphicsSelector((state) => state.context.environmentPreset);
-  const graphicsBackendPreference = useGraphicsSelector((state) => state.context.graphicsBackendPreference);
-  const webGpuAvailable = useGraphicsSelector((state) => state.context.webGpuAvailable);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-  const is2dGeometry = useGraphicsSelector((state) =>
-    state.context.geometries.some((geometry) => geometry.format === 'svg'),
-  );
+  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
 
   const cadRef = useCad();
-  const renderTimeout = useCadSelector((state) => state.context.renderTimeout, 30_000);
+  const renderTimeout = useCadSelector((state) => state.context.renderTimeout, defaultRenderTimeout);
 
   const handleMeshToggle = useCallback(
     (checked: boolean) => {
@@ -208,23 +188,6 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
     [graphicsRef],
   );
 
-  const handleGraphicsBackendChange = useCallback(
-    (value: string): void => {
-      if (value !== 'webgl' && value !== 'webgpu') {
-        return;
-      }
-
-      graphicsRef.send({ type: 'setGraphicsBackendPreference', payload: value });
-    },
-    [graphicsRef],
-  );
-
-  const currentGraphicsBackendOption = useMemo(() => {
-    return (
-      graphicsBackendOptions.find((option) => option.id === graphicsBackendPreference) ?? graphicsBackendOptions[0]!
-    );
-  }, [graphicsBackendPreference]);
-
   const handleRenderTimeoutChange = useCallback(
     (value: string) => {
       cadRef?.send({ type: 'setRenderTimeout', renderTimeout: Number(value) });
@@ -233,25 +196,13 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
   );
 
   const currentTimeoutOption = useMemo(
-    () => timeoutOptions.find((option) => option.value === renderTimeout) ?? timeoutOptions[2]!,
+    () => timeoutOptions.find((option) => option.value === renderTimeout) ?? defaultTimeoutOption,
     [renderTimeout],
   );
 
   const currentEnvironmentPresetOption = useMemo(
     () => environmentPresetOptions.find((option) => option.id === environmentPreset) ?? environmentPresetOptions[0]!,
     [environmentPreset],
-  );
-
-  const getGraphicsBackendValue = useCallback(
-    (option: (typeof graphicsBackendOptions)[number]): string => option.id,
-    [],
-  );
-  const getGraphicsBackendLabel = useCallback(
-    (option: (typeof graphicsBackendOptions)[number]): string => {
-      const suffix = option.id === 'webgpu' && !webGpuAvailable ? ' — falls back to WebGL' : '';
-      return `${option.label}${suffix}`;
-    },
-    [webGpuAvailable],
   );
 
   const getEnvironmentPresetOptionValue = useCallback((option: EnvironmentPresetOption): string => option.id, []);
@@ -386,41 +337,6 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
         )}
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Rendering</DropdownMenuLabel>
-        {!is2dGeometry && (
-          <DropdownMenuSelectItem
-            value={currentGraphicsBackendOption}
-            options={graphicsBackendOptions}
-            title='Graphics backend'
-            description='WebGPU enables the modern renderer when the browser exposes an adapter.'
-            getOptionValue={getGraphicsBackendValue}
-            getOptionLabel={getGraphicsBackendLabel}
-            renderOption={(option, isSelected) => (
-              <span className='flex w-full items-center justify-between gap-2'>
-                <span className='flex min-w-0 flex-1 flex-col'>
-                  <span className='flex items-center gap-1.5'>
-                    {option.label}
-                    {option.isBeta ? <BetaBadge /> : null}
-                  </span>
-                  <span className='text-xs leading-snug whitespace-normal text-muted-foreground'>
-                    {option.description}
-                  </span>
-                </span>
-                {isSelected ? <Check className='size-4 shrink-0' /> : null}
-              </span>
-            )}
-            selectPopoverContentClassName='min-w-72 w-auto max-w-[min(var(--radix-popover-content-available-width))]'
-            shouldCloseOnSelect={() => false}
-            infoTooltip={
-              <InfoTooltip>
-                WebGPU uses the experimental three.js renderer. Use WebGL if you hit compatibility issues.
-              </InfoTooltip>
-            }
-            onValueChange={handleGraphicsBackendChange}
-          >
-            <Layers />
-            Backend
-          </DropdownMenuSelectItem>
-        )}
         <DropdownMenuSelectItem
           value={currentTimeoutOption}
           options={timeoutOptions}

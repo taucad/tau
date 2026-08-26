@@ -1,0 +1,125 @@
+{
+  "name": "@taucad/geospec-engine",
+  "version": "0.1.0-beta.1",
+  "description": "GeoSpec engine: matcher implementations, geometry proofs, evidence ledger, kernel adapters, and the geospec CLI",
+  "type": "module",
+  "sideEffects": [
+    "./src/register.ts",
+    "./dist/register.mjs",
+    "./src/cli/main.ts",
+    "./dist/cli/main.mjs",
+    "./src/runner/node/pool-worker-entry.ts",
+    "./dist/runner/node/pool-worker-entry.mjs"
+  ],
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/geospec-engine"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/geospec-engine#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "provenance.schema.json",
+    "provenance.json"
+  ],
+  "keywords": [
+    "cad",
+    "geospec",
+    "typescript"
+  ],
+  "bin": {
+    "geospec": "./dist/cli/main.mjs"
+  },
+  "author": "Richard Fontein",
+  "license": "FSL-1.1-Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./register": "./src/register.ts",
+    "./register/node": "./src/register-node.ts",
+    "./native/opencascade/single": {
+      "types": "./native/opencascade/dist/init.d.ts",
+      "default": "./native/opencascade/dist/init.js"
+    },
+    "./native/opencascade/single/wasm-url": "./src/native/opencascade-wasm.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./register": {
+        "types": "./dist/register.d.mts",
+        "import": "./dist/register.mjs",
+        "default": "./dist/register.mjs"
+      },
+      "./register/node": {
+        "types": "./dist/register-node.d.mts",
+        "import": "./dist/register-node.mjs",
+        "default": "./dist/register-node.mjs"
+      },
+      "./native/opencascade/single": {
+        "types": "./dist/native/opencascade/init.d.ts",
+        "import": "./dist/native/opencascade/init.js",
+        "default": "./dist/native/opencascade/init.js"
+      },
+      "./native/opencascade/single/wasm-url": {
+        "types": "./dist/native/opencascade-wasm.d.mts",
+        "import": "./dist/native/opencascade-wasm.mjs",
+        "default": "./dist/native/opencascade-wasm.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#e2e/*.js": "./e2e/*.ts",
+    "#experiments/*.js": "./experiments/*.ts",
+    "#cache/node-evidence-store.js": {
+      "browser": "./src/cache/browser-evidence-store.ts",
+      "default": "./src/cache/node-evidence-store.ts"
+    },
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.4.0",
+    "@taucad/assimp": "workspace:*",
+    "@taucad/brep": "workspace:*",
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/gltf": "workspace:*",
+    "@taucad/image": "workspace:*",
+    "@taucad/jscad": "workspace:*",
+    "@taucad/manifold": "workspace:*",
+    "@taucad/middleware": "workspace:*",
+    "@taucad/occt-core": "workspace:*",
+    "@taucad/opencascade": "workspace:*",
+    "@taucad/replicad": "workspace:*",
+    "@taucad/rhino": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "geospec": "workspace:*",
+    "manifold-3d": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@libcascade/toolchain": "catalog:",
+    "@taucad/chat": "workspace:*",
+    "@taucad/openrscad": "workspace:*",
+    "@taucad/tau-examples": "workspace:*"
+  },
+  "scripts": {
+    "prepack": "node scripts/generate-provenance.mjs"
+  }
+}

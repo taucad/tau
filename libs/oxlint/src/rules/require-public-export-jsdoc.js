@@ -8,6 +8,7 @@
  *
  * @typedef {import('eslint').Rule.RuleModule} RuleModule
  * @typedef {{ importsMap: Record<string, string>; packageDirectory: string }} ResolveContext
+ * @typedef {{ publicFiles: Map<string, Set<string>>; resolveContext: ResolveContext }} TraversalContext
  */
 
 import fs from 'node:fs';
@@ -17,7 +18,19 @@ const PUBLIC_TAG_REGEX = /@public(?:\s|$|\*)/;
 
 // ─── package.json resolution ────────────────────────────────────────────────
 
-/** @type {Map<string, Set<string>>} */
+const ALL_EXPORTS = '*';
+const ALL_TYPES = 'type:*';
+const TYPE_ONLY_PREFIX = 'type:';
+
+/** @param {string} name */
+const asTypeOnly = (name) => {
+  if (name === ALL_EXPORTS || name === ALL_TYPES) {
+    return ALL_TYPES;
+  }
+  return name.startsWith(TYPE_ONLY_PREFIX) ? name : `${TYPE_ONLY_PREFIX}${name}`;
+};
+
+/** @type {Map<string, Map<string, Set<string>>>} */
 const publicFilesCache = new Map();
 
 /**
@@ -68,13 +81,16 @@ function resolveHashImport(importsMap, specifier, packageDirectory) {
       continue;
     }
     const remainder = specifier.slice(prefix.length);
-    let resolved = target.slice(0, -1) + remainder;
-    if (resolved.endsWith('.js')) {
-      resolved = `${resolved.slice(0, -3)}.ts`;
-    }
+    const resolved = target.slice(0, -1) + remainder;
     const absolute = path.resolve(packageDirectory, resolved);
     if (fs.existsSync(absolute)) {
       return absolute;
+    }
+    if (resolved.endsWith('.js')) {
+      const typescriptSource = path.resolve(packageDirectory, `${resolved.slice(0, -3)}.ts`);
+      if (fs.existsSync(typescriptSource)) {
+        return typescriptSource;
+      }
     }
   }
   return undefined;
@@ -87,13 +103,15 @@ function resolveHashImport(importsMap, specifier, packageDirectory) {
  */
 function resolveRelative(fromFile, specifier) {
   const directory = path.dirname(fromFile);
-  let target = specifier;
-  if (target.endsWith('.js')) {
-    target = `${target.slice(0, -3)}.ts`;
-  }
-  const full = path.resolve(directory, target);
+  const full = path.resolve(directory, specifier);
   if (fs.existsSync(full)) {
     return full;
+  }
+  if (specifier.endsWith('.js')) {
+    const typescriptSource = path.resolve(directory, `${specifier.slice(0, -3)}.ts`);
+    if (fs.existsSync(typescriptSource)) {
+      return typescriptSource;
+    }
   }
   const withExtension = `${full}.ts`;
   if (fs.existsSync(withExtension)) {
@@ -106,21 +124,64 @@ function resolveRelative(fromFile, specifier) {
   return undefined;
 }
 
-// oxlint-disable-next-line unicorn-js/better-regex -- named capture group clarity
-const RE_EXPORT_REGEX = /export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s+['"](?<specifier>[^'"]+)['"]/g;
+const RE_EXPORT_REGEX =
+  /export\s+(?<typeOnly>type\s+)?(?:(?<star>\*)(?:\s+as\s+(?<namespace>[\w$]+))?|{(?<names>[^}]*)})\s+from\s+["'](?<specifier>[^"']+)["']/g;
+
+/**
+ * @param {string} source
+ * @param {boolean} statementTypeOnly
+ * @returns {Array<{ imported: string; exported: string; typeOnly: boolean }>}
+ */
+function namedReExports(source, statementTypeOnly) {
+  return source.split(',').flatMap((part) => {
+    const trimmed = part.trim();
+    const typeOnly = statementTypeOnly || trimmed.startsWith('type ');
+    const declaration = trimmed.replace(/^type\s+/, '');
+    if (!declaration) {
+      return [];
+    }
+    const [imported, exported = imported] = declaration.split(/\s+as\s+/);
+    return imported ? [{ imported, exported, typeOnly }] : [];
+  });
+}
 
 /**
  * Recursively follow `export * from` / `export { } from` statements to
  * build the full set of files reachable from a barrel entry point.
  *
  * @param {string} filePath
- * @param {Set<string>} publicFiles
- * @param {ResolveContext} resolveContext
+ * @param {Set<string>} requestedNames
+ * @param {TraversalContext} traversalContext
  */
-function followReExports(filePath, publicFiles, resolveContext) {
+function followReExports(filePath, requestedNames, traversalContext) {
   if (!fs.existsSync(filePath)) {
     return;
   }
+
+  const { publicFiles, resolveContext } = traversalContext;
+  const currentNames = publicFiles.get(filePath) ?? new Set();
+  const newNames = new Set();
+  if (requestedNames.has(ALL_EXPORTS)) {
+    if (!currentNames.has(ALL_EXPORTS)) {
+      currentNames.clear();
+      currentNames.add(ALL_EXPORTS);
+      newNames.add(ALL_EXPORTS);
+    }
+  } else if (!currentNames.has(ALL_EXPORTS)) {
+    for (const name of requestedNames) {
+      if (name.startsWith(TYPE_ONLY_PREFIX) && currentNames.has(ALL_TYPES)) {
+        continue;
+      }
+      if (!currentNames.has(name)) {
+        currentNames.add(name);
+        newNames.add(name);
+      }
+    }
+  }
+  if (newNames.size === 0) {
+    return;
+  }
+  publicFiles.set(filePath, currentNames);
 
   const content = fs.readFileSync(filePath, 'utf8');
   const { importsMap, packageDirectory } = resolveContext;
@@ -139,9 +200,43 @@ function followReExports(filePath, publicFiles, resolveContext) {
       resolved = resolveRelative(filePath, specifier);
     }
 
-    if (resolved && !publicFiles.has(resolved)) {
-      publicFiles.add(resolved);
-      followReExports(resolved, publicFiles, resolveContext);
+    if (!resolved) {
+      continue;
+    }
+
+    /** @type {Set<string>} */
+    let targetNames;
+    if (match.groups?.star) {
+      const typeOnly = Boolean(match.groups.typeOnly);
+      const { namespace } = match.groups;
+      if (namespace) {
+        const valueReachable = newNames.has(ALL_EXPORTS) || newNames.has(namespace);
+        const typeReachable = newNames.has(ALL_TYPES) || newNames.has(asTypeOnly(namespace));
+        targetNames = valueReachable
+          ? new Set([typeOnly ? ALL_TYPES : ALL_EXPORTS])
+          : new Set(typeReachable ? [ALL_TYPES] : []);
+      } else {
+        targetNames = new Set([...newNames].map((name) => (typeOnly ? asTypeOnly(name) : name)));
+      }
+    } else {
+      const exports = namedReExports(match.groups?.names ?? '', Boolean(match.groups?.typeOnly));
+      targetNames = new Set(
+        exports
+          .filter(
+            ({ exported }) =>
+              newNames.has(ALL_EXPORTS) ||
+              newNames.has(ALL_TYPES) ||
+              newNames.has(exported) ||
+              newNames.has(asTypeOnly(exported)),
+          )
+          .map(({ imported, exported, typeOnly }) => {
+            const valueReachable = newNames.has(ALL_EXPORTS) || newNames.has(exported);
+            return typeOnly || !valueReachable ? asTypeOnly(imported) : imported;
+          }),
+      );
+    }
+    if (targetNames.size > 0) {
+      followReExports(resolved, targetNames, traversalContext);
     }
   }
 }
@@ -151,7 +246,7 @@ function followReExports(filePath, publicFiles, resolveContext) {
  * reachable from the nearest package.json `exports`.
  *
  * @param {string} filename - Absolute path of the file being linted
- * @returns {Set<string>}
+ * @returns {Map<string, Set<string>>}
  */
 function getPublicFiles(filename) {
   let directory = path.dirname(filename);
@@ -177,7 +272,7 @@ function getPublicFiles(filename) {
   }
 
   if (!packageJsonPath) {
-    return new Set();
+    return new Map();
   }
 
   const cached = publicFilesCache.get(packageJsonPath);
@@ -197,13 +292,13 @@ function getPublicFiles(filename) {
   };
 
   const directFiles = flattenExports(packageJson.exports);
-  /** @type {Set<string>} */
-  const publicFiles = new Set();
+  /** @type {Map<string, Set<string>>} */
+  const publicFiles = new Map();
+  const traversalContext = { publicFiles, resolveContext };
 
   for (const relativePath of directFiles) {
     const absolutePath = path.resolve(packageDirectory, relativePath);
-    publicFiles.add(absolutePath);
-    followReExports(absolutePath, publicFiles, resolveContext);
+    followReExports(absolutePath, new Set([ALL_EXPORTS]), traversalContext);
   }
 
   publicFilesCache.set(packageJsonPath, publicFiles);
@@ -255,7 +350,7 @@ export const requirePublicExportJsdocRule = {
   meta: {
     type: 'suggestion',
     docs: {
-      description: 'Requires @public JSDoc tag on symbols exported from package.json export entry files',
+      description: 'Requires @public JSDoc tag on symbols exported from package.json export entry paths',
     },
     messages: {
       missingPublicTag: 'Publicly exported symbol "{{name}}" must have a @public JSDoc tag',
@@ -263,20 +358,28 @@ export const requirePublicExportJsdocRule = {
   },
   create(context) {
     const filePath = path.resolve(context.filename);
-    const publicFiles = getPublicFiles(filePath);
+    const publicNames = getPublicFiles(filePath).get(filePath);
 
-    if (!publicFiles.has(filePath)) {
+    if (!publicNames) {
       return {};
     }
 
     /** @type {import('estree').Comment[]} */
     const jsdocComments = [];
 
+    /** @type {Map<string, Array<{ exported: string; typeOnly: boolean }>>} */
+    const localExports = new Map();
+
     /**
      * @param {import('estree').Node} node
      * @param {string} name
+     * @param {boolean} [typeDeclaration]
      */
-    function checkPublicTag(node, name) {
+    function checkPublicTag(node, name, typeDeclaration = false) {
+      const typeReachable = typeDeclaration && (publicNames.has(ALL_TYPES) || publicNames.has(asTypeOnly(name)));
+      if (!publicNames.has(ALL_EXPORTS) && !publicNames.has(name) && !typeReachable) {
+        return;
+      }
       const jsdoc = findJsdocBefore(node, context.sourceCode, jsdocComments);
       if (!jsdoc || !PUBLIC_TAG_REGEX.test(jsdoc.value)) {
         context.report({
@@ -287,12 +390,97 @@ export const requirePublicExportJsdocRule = {
       }
     }
 
+    /**
+     * @param {import('estree').Node} node
+     * @param {string} localName
+     * @param {boolean} [typeDeclaration]
+     */
+    function checkLocalExportTag(node, localName, typeDeclaration = false) {
+      for (const localExport of localExports.get(localName) ?? []) {
+        const { exported, typeOnly } = localExport;
+        const typeReachable =
+          (typeDeclaration || typeOnly) && (publicNames.has(ALL_TYPES) || publicNames.has(asTypeOnly(exported)));
+        if (!publicNames.has(ALL_EXPORTS) && !publicNames.has(exported) && !typeReachable) {
+          continue;
+        }
+        const jsdoc = findJsdocBefore(node, context.sourceCode, jsdocComments);
+        if (!jsdoc || !PUBLIC_TAG_REGEX.test(jsdoc.value)) {
+          context.report({ node, messageId: 'missingPublicTag', data: { name: localName } });
+        }
+        return;
+      }
+    }
+
     return {
-      Program() {
+      Program(node) {
         for (const comment of context.sourceCode.getAllComments()) {
           if (comment.type === 'Block' && comment.value.startsWith('*')) {
             jsdocComments.push(comment);
           }
+        }
+
+        for (const statement of node.body) {
+          if (
+            statement.type !== 'ExportNamedDeclaration' ||
+            statement.source !== null ||
+            statement.declaration !== null
+          ) {
+            continue;
+          }
+          for (const specifier of statement.specifiers) {
+            if (specifier.type !== 'ExportSpecifier' || specifier.local.type !== 'Identifier') {
+              continue;
+            }
+            const exported =
+              specifier.exported.type === 'Identifier' ? specifier.exported.name : String(specifier.exported.value);
+            const exports = localExports.get(specifier.local.name) ?? [];
+            exports.push({
+              exported,
+              typeOnly: statement.exportKind === 'type' || specifier.exportKind === 'type',
+            });
+            localExports.set(specifier.local.name, exports);
+          }
+        }
+      },
+
+      FunctionDeclaration(node) {
+        if (node.parent.type === 'Program' && node.id) {
+          checkLocalExportTag(node, node.id.name);
+        }
+      },
+
+      ClassDeclaration(node) {
+        if (node.parent.type === 'Program' && node.id) {
+          checkLocalExportTag(node, node.id.name, true);
+        }
+      },
+
+      VariableDeclaration(node) {
+        if (node.parent.type !== 'Program') {
+          return;
+        }
+        for (const declarator of node.declarations) {
+          if (declarator.id.type === 'Identifier') {
+            checkLocalExportTag(node, declarator.id.name);
+          }
+        }
+      },
+
+      TSTypeAliasDeclaration(node) {
+        if (node.parent.type === 'Program') {
+          checkLocalExportTag(node, node.id.name, true);
+        }
+      },
+
+      TSInterfaceDeclaration(node) {
+        if (node.parent.type === 'Program') {
+          checkLocalExportTag(node, node.id.name, true);
+        }
+      },
+
+      TSEnumDeclaration(node) {
+        if (node.parent.type === 'Program' && node.id) {
+          checkLocalExportTag(node, node.id.name, true);
         }
       },
 
@@ -315,7 +503,7 @@ export const requirePublicExportJsdocRule = {
           }
           case 'ClassDeclaration': {
             if (declaration.id) {
-              checkPublicTag(node, declaration.id.name);
+              checkPublicTag(node, declaration.id.name, true);
             }
             break;
           }
@@ -328,16 +516,16 @@ export const requirePublicExportJsdocRule = {
             break;
           }
           case 'TSTypeAliasDeclaration': {
-            checkPublicTag(node, declaration.id.name);
+            checkPublicTag(node, declaration.id.name, true);
             break;
           }
           case 'TSInterfaceDeclaration': {
-            checkPublicTag(node, declaration.id.name);
+            checkPublicTag(node, declaration.id.name, true);
             break;
           }
           case 'TSEnumDeclaration': {
             if (declaration.id) {
-              checkPublicTag(node, declaration.id.name);
+              checkPublicTag(node, declaration.id.name, true);
             }
             break;
           }

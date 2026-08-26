@@ -1,7 +1,6 @@
 ---
 name: mine
 description: Orchestrates deep exploration of an external technology ecosystem — clones repos, deploys parallel subagents for source analysis, and creates a research document. Use when asked to deeply mine, evaluate an external technology, explore an ecosystem, leave no stone unturned, or compare an external approach against Tau.
-disable-model-invocation: true
 ---
 
 # Technology Mining

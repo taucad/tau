@@ -1,0 +1,172 @@
+---
+title: Framework Integrations API
+description: Vite, React Router, Next.js, Electron, and browser-worker helpers for configuring and hosting @taucad/runtime.
+icon: lucide:blocks
+---
+
+# Framework Integrations API
+
+Framework helpers package Tau's required build, header, worker, and host-process invariants behind stable configuration seams. Application code uses the same helper across every qualified framework version; the helpers never inspect installed package versions.
+
+## Vite and React Router
+
+`tauRuntime(options?){:ts}` returns an array of Vite plugins. Vite recursively flattens nested plugin arrays, so place the result directly in the native `plugins` array without spreading it:
+
+```typescript
+import { reactRouter } from '@react-router/dev/vite';
+import { tauRuntime } from '@taucad/runtime/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [tauRuntime(), reactRouter()],
+});
+```
+
+<auto-type-table path='./props/frameworks.ts' name='RuntimePluginOptions' />
+
+<auto-type-table path='./props/frameworks.ts' name='RuntimeVitePlugin' />
+
+`tauRuntime()` includes cross-origin-isolation middleware by default. Set `crossOriginIsolation: false` only when the production host owns those headers. The lower-level `crossOriginIsolation()` export installs only Vite dev/preview headers.
+
+React Router SSR response code applies the canonical headers to the framework-owned `Headers` object:
+
+```typescript
+import { applyHandleRequestHeaders } from '@taucad/runtime/react-router';
+
+export function applyRuntimeHeaders(responseHeaders: Headers): void {
+  applyHandleRequestHeaders(responseHeaders);
+}
+```
+
+Express and Connect hosts mount the server adapter without a cast:
+
+```typescript
+import express from 'express';
+import { coiMiddleware } from '@taucad/runtime/cross-origin-isolation/express';
+
+const app = express();
+app.use(coiMiddleware());
+```
+
+## Next.js
+
+`withTauRuntime()` composes application headers and bundler configuration. The same call configures Next.js 15's supported Webpack production path and Next.js 16's Turbopack path.
+
+```typescript
+import { withTauRuntime } from '@taucad/runtime/nextjs/config';
+
+export default withTauRuntime({
+  output: 'standalone',
+});
+```
+
+<auto-type-table path='./props/frameworks.ts' name='NextConfig' />
+
+<auto-type-table path='./props/frameworks.ts' name='NextRuntimeHeadersOptions' />
+
+<auto-type-table path='./props/frameworks.ts' name='NextRuntimeHeaderRule' />
+
+Use `nextRuntimeHeaders(options?){:ts}` only as the low-level header-rule escape hatch. It does not configure browser-worker assets or Node builtin aliases, so ordinary runtime applications should use `withTauRuntime()`.
+
+## Electron config
+
+`electronRuntimeConfig()` composes electron-vite's main, preload, and renderer config without package aliases or version branches. It supports electron-vite 5/Vite 7 and electron-vite 6 beta/Vite 8 through the same call:
+
+```typescript
+import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
+
+export default electronRuntimeConfig({
+  main: {},
+  preload: {},
+  renderer: {},
+});
+```
+
+<auto-type-table path='./props/frameworks.ts' name='ElectronRuntimeUserConfig' />
+
+The adapter installs Tau's Vite invariants in main and renderer and configures electron-vite's native dependency externalizer in main and preload. See [Bundling](../guides/bundling) for the required `?modulePath` utility-entry import.
+
+## Electron process boundaries
+
+The public Electron topology has one helper at each process boundary:
+
+| Process  | Import                              | Helper                                                         |
+| -------- | ----------------------------------- | -------------------------------------------------------------- |
+| Main     | `@taucad/runtime/electron/main`     | `installElectronRuntimeHeaders`, `registerElectronRuntimeMain` |
+| Preload  | `@taucad/runtime/electron/preload`  | `exposeElectronRuntime`                                        |
+| Utility  | `@taucad/runtime/electron/utility`  | `serveElectronRuntime`                                         |
+| Renderer | `@taucad/runtime/electron/renderer` | `createElectronClientOptions`                                  |
+
+<auto-type-table path='./props/frameworks.ts' name='ElectronRuntimeHeadersOptions' />
+
+<auto-type-table path='./props/frameworks.ts' name='RegisterElectronRuntimeMainOptions' />
+
+<auto-type-table path='./props/frameworks.ts' name='ElectronRuntimeMainHandle' />
+
+<auto-type-table path='./props/frameworks.ts' name='ExposeElectronRuntimeOptions' />
+
+<auto-type-table path='./props/frameworks.ts' name='ElectronRuntimePreloadBridge' />
+
+<auto-type-table path='./props/frameworks.ts' name='ServeElectronRuntimeOptions' />
+
+<auto-type-table path='./props/frameworks.ts' name='CreateElectronClientOptionsOptions' />
+
+<auto-type-table path='./props/frameworks.ts' name='ElectronRuntimeRendererBridge' />
+
+<auto-type-table path='./props/frameworks.ts' name='RequestElectronRuntimePortOptions' />
+
+Application renderer code normally needs only the high-level options provider:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
+
+const provideClientOptions = createElectronClientOptions({ renderTimeout: 60_000 });
+const client = createRuntimeClient(await provideClientOptions());
+```
+
+`requestElectronRuntimePort()` and the bridge types are escape hatches for alternate globals or host adapters. Application code should not handle opaque host IDs or call `releaseRuntimeHost()` directly.
+
+## Browser-worker transport
+
+Use the paired high-level helpers for the common app-owned Web Worker topology:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
+
+const clientOptions = createWebWorkerClientOptions({
+  createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+  renderTimeout: 60_000,
+});
+
+const client = createRuntimeClient(clientOptions);
+```
+
+<auto-type-table path='./props/frameworks.ts' name='CreateWebWorkerClientOptionsOptions' />
+
+The app-owned worker entry serves its executable runtime definition:
+
+```typescript
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { serveWebWorkerRuntime } from '@taucad/runtime/worker/web';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
+
+await serveWebWorkerRuntime({ runtime });
+```
+
+<auto-type-table path='./props/frameworks.ts' name='ServeWebWorkerRuntimeOptions' />
+
+Use `webWorkerTransport` and `webWorkerHost` directly only when authoring a custom host composition. See [Transport API](./transport) for that lower-level surface.
+
+## Related
+
+- [Bundling](../guides/bundling)
+- [Cross-Origin Isolation](../guides/cross-origin-isolation)
+- [Embedding in a Host](../guides/embedding-in-a-host)
+- [Transport API](./transport)

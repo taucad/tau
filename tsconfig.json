@@ -11,9 +11,6 @@
       "path": "./apps/api"
     },
     {
-      "path": "./packages/converter"
-    },
-    {
       "path": "./libs/tau-examples"
     },
     {
@@ -26,34 +23,85 @@
       "path": "./libs/api-extractor"
     },
     {
-      "path": "./packages/types"
+      "path": "./libs/types"
     },
     {
-      "path": "./packages/json-schema"
-    },
-    {
-      "path": "./packages/js"
+      "path": "./libs/json-schema"
     },
     {
       "path": "./packages/runtime"
     },
     {
-      "path": "./packages/units"
+      "path": "./libs/units"
     },
     {
-      "path": "./libs/billing"
+      "path": "./apps/libs/billing"
     },
     {
       "path": "./libs/chat"
     },
     {
-      "path": "./packages/utils"
+      "path": "./libs/utils"
     },
     {
       "path": "./libs/vite"
+    },
+    {
+      "path": "./tools/workspace-plugin"
+    },
+    {
+      "path": "./examples/react-router"
+    },
+    {
+      "path": "./libs/filesystem"
+    },
+    {
+      "path": "./apps/libs/fs-client"
+    },
+    {
+      "path": "./libs/telemetry"
+    },
+    {
+      "path": "./examples/electron"
+    },
+    {
+      "path": "./packages/geospec"
+    },
+    {
+      "path": "./packages/plugins/openrscad"
+    },
+    {
+      "path": "./libs/events"
+    },
+    {
+      "path": "./examples/nextjs"
+    },
+    {
+      "path": "./libs/memory"
+    },
+    {
+      "path": "./packages/react"
+    },
+    {
+      "path": "./packages/cli"
+    },
+    {
+      "path": "./libs/rpc"
+    },
+    {
+      "path": "./libs/fs-bridge"
+    },
+    {
+      "path": "./apps/libs/lsp-fs"
+    },
+    {
+      "path": "./libs/oxlint"
+    },
+    {
+      "path": "./apps/libs/lsp"
     }
   ],
   "files": [],
-  "include": ["vitest.workspace.ts", "eslint.config.mjs", "scripts/**/*", "tools/**/*"],
+  "include": ["eslint.config.mjs", "scripts/**/*", "tools/**/*"],
   "exclude": ["node_modules", "tmp"]
 }

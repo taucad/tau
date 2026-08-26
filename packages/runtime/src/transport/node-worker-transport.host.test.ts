@@ -4,8 +4,7 @@
  * Mirrors `web-worker-transport.host.test.ts` for the Node side: the
  * host owns `parentPort` acquisition from `node:worker_threads`, the
  * dispatcher wiring, and the crash trap. Consumers compose the worker
- * entry by importing `@taucad/runtime/worker/node` and never touch
- * `parentPort` directly.
+ * entry with `nodeWorkerHost()` and never touch `parentPort` directly.
  *
  * The test runs in the default Node vitest env (no jsdom) so we have a
  * real Worker scope. We use a `MessageChannel.port1` as a parentPort
@@ -15,30 +14,39 @@
 
 import { MessageChannel } from 'node:worker_threads';
 import { describe, it, expect, vi } from 'vitest';
+import type { Geometry } from '@taucad/types';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { nodeWorkerHost } from '#transport/node-worker-host.js';
 import * as nodeParentPortModule from '#transport/_internal/node-parent-port.js';
 
+const testGeometry = { format: 'gltf', content: new Uint8Array([1]), hash: 'mock' } satisfies Geometry;
+
 const createMockKernelWorker = (): KernelWorker => {
   const base = {
     initialize: vi.fn().mockResolvedValue(undefined),
-    render: vi.fn().mockResolvedValue({ success: true, data: [] }),
-    exportGeometry: vi.fn().mockResolvedValue({ success: true, data: [] }),
+    render: vi.fn().mockResolvedValue({ success: true, data: testGeometry, issues: [] }),
+    exportGeometry: vi.fn().mockResolvedValue({
+      success: true,
+      data: [
+        { name: 'model.gltf', mimeType: 'model/gltf+json', bytes: new Uint8Array([1]) },
+        { name: 'model.bin', mimeType: 'application/octet-stream', bytes: new Uint8Array([2]) },
+      ],
+      issues: [],
+    }),
     cleanup: vi.fn().mockResolvedValue(undefined),
     notifyFileChanged: vi.fn().mockResolvedValue(undefined),
     handleOpenFile: vi.fn(),
     handleStageAndOpenFile: vi.fn().mockResolvedValue(undefined),
     handleUpdateParameters: vi.fn(),
     handleSetOptions: vi.fn(),
-    configureMiddleware: vi.fn().mockResolvedValue(undefined),
     ensureLoadedBundler: vi.fn().mockResolvedValue(undefined),
     setTelemetrySend: vi.fn(),
+    setDevtoolsTelemetryEnabled: vi.fn(),
+    setCompiledWasmModules: vi.fn(),
     flushTelemetry: vi.fn(),
     setSignalBuffer: vi.fn(),
-    setGeometryPoolBuffer: vi.fn(),
-    setFilePoolBuffer: vi.fn(),
     handleWireAbort: vi.fn(),
-    capabilitiesManifest: { routes: [], renderSchemas: {} },
+    capabilitiesManifest: { routes: [], renderCapabilities: {} },
   };
   return base as unknown as KernelWorker;
 };
@@ -59,7 +67,6 @@ describe('nodeWorkerHost — real port acquisition (R3)', () => {
       expect(typeof host.open).toBe('function');
       expect(typeof host.adoptInitialize).toBe('function');
       expect(typeof host.encodeGeometry).toBe('function');
-      expect(typeof host.encodeFile).toBe('function');
       expect(host.closed).toBeInstanceOf(Promise);
     } finally {
       acquireSpy.mockRestore();

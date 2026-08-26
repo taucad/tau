@@ -6,16 +6,43 @@ import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { VitePluginNode as vitePluginNode } from 'vite-plugin-node';
 import { oxcRuntimeEsm } from '@taucad/vite/oxc-runtime-esm';
-import { tsModuleUrlServePlugin } from '@taucad/vite/ts-module-url';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
+import { createApiDevViteNodeLifecycle } from '#api-dev-vite-node-lifecycle.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
+  // Nx loads apps/api/.env before Vite evaluates this config. Force Vite's
+  // documented production semantics so import.meta.env.DEV branches compile
+  // correctly even when the application env says NODE_ENV=development.
+  if (command === 'build') {
+    process.env.NODE_ENV = 'production';
+  }
+
   const isTest = mode === 'test';
+  const apiDevPlugins = isTest
+    ? []
+    : (() => {
+        const apiDevLifecycle = createApiDevViteNodeLifecycle();
+
+        return [
+          apiDevLifecycle.plugin,
+          vitePluginNode({
+            adapter: apiDevLifecycle.adapter,
+            appPath: './app/main.ts',
+            outputFormat: 'module',
+            exportName: 'viteNodeApp',
+            initAppOnBoot: false,
+          }),
+        ];
+      })();
 
   return {
     root: __dirname,
+    // Nest owns application environment loading. Letting Vite also read the
+    // local .env turns NODE_ENV=development into import.meta.env.DEV=true
+    // during `vite build` and tree-shakes the standalone server bootstrap.
+    envDir: false,
     cacheDir: '../../node_modules/.vite/apps/api',
     build: {
       outDir: 'dist',
@@ -30,7 +57,6 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [
       oxcRuntimeEsm(),
-      tsModuleUrlServePlugin(),
       nxViteTsPaths(),
       viteStaticCopy({
         // `vite-plugin-node` builds an SSR environment; the plugin defaults to
@@ -48,17 +74,7 @@ export default defineConfig(({ mode }) => {
           },
         ],
       }),
-      ...(isTest
-        ? []
-        : [
-            vitePluginNode({
-              adapter: 'nest',
-              appPath: './app/main.ts',
-              outputFormat: 'module',
-              exportName: 'viteNodeApp',
-              initAppOnBoot: true,
-            }),
-          ]),
+      ...apiDevPlugins,
     ],
     optimizeDeps: {
       // Vite does not work well with optionnal dependencies,
@@ -84,7 +100,7 @@ export default defineConfig(({ mode }) => {
       reporter: ['verbose'], // Ensure detailed test output
       coverage: {
         provider: 'v8',
-        reportsDirectory: '../../coverage/apps/api',
+        reportsDirectory: '../../out/reports/coverage/apps/api',
         include: ['app/**/*'],
         exclude: ['app/**/*.{test,spec}.ts', 'app/main.ts'],
       },

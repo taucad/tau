@@ -33,11 +33,23 @@ describe('isFeatureEnabled', () => {
     expect(isFeatureEnabled('planMode', storage)).toBe(false);
   });
 
+  it('should return false for the Plugins Store flag by default', () => {
+    const storage = createMockStorage();
+    expect(isFeatureEnabled('pluginsStore', storage)).toBe(false);
+  });
+
   it('should return overridden value when override is set to true', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify({ planMode: true }),
     });
     expect(isFeatureEnabled('planMode', storage)).toBe(true);
+  });
+
+  it('should return overridden value for the Plugins Store flag', () => {
+    const storage = createMockStorage({
+      'tau:flags': JSON.stringify({ pluginsStore: true }),
+    });
+    expect(isFeatureEnabled('pluginsStore', storage)).toBe(true);
   });
 
   it('should return overridden value when override is set to false', () => {
@@ -106,6 +118,23 @@ describe('isFeatureEnabled', () => {
       'tau:flags': JSON.stringify({ planMode: null }),
     });
     expect(isFeatureEnabled('planMode', storage)).toBe(false);
+  });
+});
+
+// Gates the e2e-only `SectionViewTestBridge` mount in stage.tsx. Off by
+// default ⇒ the bridge is never mounted/executed in prod; the e2e suite turns
+// it on via `TAU_DEBUG=true` (apps/ui-e2e/global-setup.ts).
+describe('tauDebug gate for SectionViewTestBridge', () => {
+  it('should be disabled by default so the test bridge is not mounted in prod', () => {
+    const storage = createMockStorage();
+    expect(isFeatureEnabled('tauDebug', storage)).toBe(false);
+  });
+
+  it('should be enabled when the debug override is set so the bridge mounts under e2e', () => {
+    const storage = createMockStorage({
+      'tau:flags': JSON.stringify({ tauDebug: true }),
+    });
+    expect(isFeatureEnabled('tauDebug', storage)).toBe(true);
   });
 });
 
@@ -198,6 +227,7 @@ describe('zod schema fallback', () => {
     const storage = createMockStorage({
       'tau:flags': JSON.stringify({
         planMode: true,
+        pluginsStore: true,
         extra: 'data',
         another: 42,
       }),
@@ -205,5 +235,6 @@ describe('zod schema fallback', () => {
     const flags = getAllFlags(storage);
     expect(Object.keys(flags)).toStrictEqual(Object.keys(featureFlagDefaults));
     expect(flags.planMode).toBe(true);
+    expect(flags.pluginsStore).toBe(true);
   });
 });

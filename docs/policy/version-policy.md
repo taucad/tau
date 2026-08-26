@@ -3,10 +3,11 @@ title: 'Version Policy'
 description: 'Versioning, stability tiers, breaking change management, and developer experience for @taucad/* packages. SemVer, experimental/future-flag/stable tiers, deprecation protocol, codemods.'
 status: active
 created: '2026-03-10'
-updated: '2026-03-10'
+updated: '2026-08-23'
 related:
   - docs/policy/release-policy.md
   - docs/policy/library-api-policy.md
+  - docs/policy/public-surface-policy.md
 ---
 
 # Version Policy
@@ -45,7 +46,7 @@ All `@taucad/*` packages follow [SemVer 2.0.0](https://semver.org/) with [semver
 
 ### Pre-1.0 Convention
 
-While packages are below `1.0.0`, minor versions may include breaking changes. The API is not considered stable until `1.0.0`. Even during pre-1.0, breaking changes are communicated via deprecation warnings and changelog entries.
+While published packages are below `1.0.0`, minor versions may include breaking changes. The API is not considered stable until `1.0.0`; published beta changes are communicated in the release version plan/changelog. A contract that has never shipped may be replaced atomically across the repository without deprecation aliases, codemods, or a consumer migration guide. Do not create compatibility machinery for users who cannot exist; record the resulting API in the first applicable beta release note instead.
 
 ### TypeScript Version Support
 
@@ -78,9 +79,13 @@ Experimental APIs use the `unstable_` prefix in both code and configuration. The
 
 ```typescript
 import { unstable_streamingExport } from '@taucad/runtime';
+import { replicad } from '@taucad/replicad';
 
+const runtime = defineRuntime({
+  plugins: [replicad()],
+});
 const client = createRuntimeClient({
-  kernels: [replicad()],
+  transport: inProcessTransport({ runtime }),
   future: {
     unstable_parallelTessellation: true,
   },
@@ -115,8 +120,13 @@ The deprecated alias is kept for one major cycle, then removed. A codemod handle
 Future flags are **stabilized breaking changes** that consumers opt into before the next major release. They allow gradual migration instead of big-bang upgrades.
 
 ```typescript
+import { replicad } from '@taucad/replicad';
+
+const runtime = defineRuntime({
+  plugins: [replicad()],
+});
 const client = createRuntimeClient({
-  kernels: [replicad()],
+  transport: inProcessTransport({ runtime }),
   future: {
     v2_middlewareApi: true,
     v2_newTransportProtocol: true,
@@ -237,7 +247,7 @@ APIs intended for framework-internal use or advanced escape hatches use specific
 | ----------------------- | ------------------------------------------ | -------------------------------- |
 | `@internal` JSDoc       | Framework code only, never consumer-facing | None — may change in any release |
 | `UNSAFE_` export prefix | Advanced consumers who accept the risk     | None — may change in any release |
-| `/internal` subpath     | Framework-level integration code           | None — may change in any release |
+| `-internals` subpath    | Framework-level integration code           | None — may change in any release |
 
 From React Router's `UNSAFE_` pattern:
 
@@ -248,7 +258,7 @@ From React Router's `UNSAFE_` pattern:
 export { createMemoryHistory as UNSAFE_createMemoryHistory } from './history';
 ```
 
-Tau uses `@internal` JSDoc for non-exported internals and the `/internal` subpath export (if needed) for cross-package framework code. The `UNSAFE_` prefix is reserved for exported escape hatches that consumers may need but that carry no stability guarantee.
+Tau uses `@internal` JSDoc for non-exported internals and a `-internals` subpath export (if needed) for cross-package framework code. `@internal` is never the sole boundary for a declaration reachable from a public export. The `UNSAFE_` prefix is reserved for exported escape hatches that consumers may need but that carry no stability guarantee. See [Public Surface Policy](public-surface-policy.md).
 
 ## Pre-Release Strategy
 
@@ -312,7 +322,7 @@ Adapted from Stripe's "safe changes" definition:
 - Adding new optional fields to option objects
 - Adding new properties to response/result objects
 - Adding new event types
-- Adding new export subpaths
+- Adding new export subpaths after satisfying Public Surface Policy's admission gate
 - Adding new kernels, middleware, or bundler plugins
 - Widening a type (accepting more inputs)
 - Performance improvements

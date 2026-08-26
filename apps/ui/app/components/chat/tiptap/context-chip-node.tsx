@@ -42,6 +42,8 @@ export const ContextChipNode = Node.create({
       label: { default: undefined },
       chipType: { default: 'file' as ChipType },
       path: { default: undefined },
+      referenceToken: { default: undefined },
+      geometryReference: { default: undefined },
     };
   },
 
@@ -56,6 +58,8 @@ export const ContextChipNode = Node.create({
           'data-label': HTMLAttributes['label'] as string,
           'data-chip-type': HTMLAttributes['chipType'] as string,
           'data-path': HTMLAttributes['path'] as string,
+          'data-reference-token': HTMLAttributes['referenceToken'] as string,
+          'data-geometry-reference': HTMLAttributes['geometryReference'] as string,
         },
         HTMLAttributes,
       ),
@@ -73,6 +77,8 @@ export const ContextChipNode = Node.create({
           label: element.dataset['label'],
           chipType: element.dataset['chipType'] ?? 'file',
           path: element.dataset['path'],
+          referenceToken: element.dataset['referenceToken'],
+          geometryReference: element.dataset['geometryReference'],
         }),
       },
     ];
@@ -80,7 +86,8 @@ export const ContextChipNode = Node.create({
 
   renderText({ node }) {
     const path = node.attrs['path'] as string | undefined;
-    return path ? `@${path}` : String(node.attrs['label'] ?? '');
+    const referenceToken = node.attrs['referenceToken'] as string | undefined;
+    return referenceToken ?? (path ? `@${path}` : String(node.attrs['label'] ?? ''));
   },
 
   addNodeView() {

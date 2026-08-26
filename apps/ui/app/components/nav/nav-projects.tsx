@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { Folder, Forward, MoreHorizontal, Trash2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router';
@@ -18,9 +19,16 @@ import {
   useSidebar,
 } from '#components/ui/sidebar.js';
 import { Loader } from '#components/ui/loader.js';
+import { useProjects } from '#hooks/use-projects.js';
+import { ProjectShareDialog } from '#components/publish/project-share-dialog.js';
+
+function projectIdFromProjectsUrl(url: string): string | undefined {
+  const match = /^\/projects\/([^/]+)\/?$/u.exec(url);
+  return match?.[1];
+}
 
 export function NavProjects({
-  projects,
+  projects: pinnedProjects,
 }: {
   readonly projects: Array<{
     name: string;
@@ -29,12 +37,23 @@ export function NavProjects({
   }>;
 }): React.JSX.Element {
   const { isMobile } = useSidebar();
+  const { projects: indexedProjects } = useProjects();
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishTargetId, setPublishTargetId] = useState<string | undefined>(undefined);
+
+  const publishTarget = useMemo(() => {
+    if (!publishTargetId) {
+      return undefined;
+    }
+
+    return indexedProjects.find((project) => project.id === publishTargetId);
+  }, [indexedProjects, publishTargetId]);
 
   return (
     <SidebarGroup className='group-data-[collapsible=icon]:hidden'>
       <SidebarGroupLabel>Projects</SidebarGroupLabel>
       <SidebarMenu>
-        {projects.map((item) => (
+        {pinnedProjects.map((item) => (
           <SidebarMenuItem key={item.name}>
             <NavLink to={item.url}>
               {({ isPending, isActive }) => (
@@ -62,7 +81,16 @@ export function NavProjects({
                   <Folder />
                   <span>View Project</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                <DropdownMenuItem
+                  data-testid='share-project'
+                  onClick={() => {
+                    const id = projectIdFromProjectsUrl(item.url);
+                    if (id) {
+                      setPublishTargetId(id);
+                      setPublishOpen(true);
+                    }
+                  }}
+                >
                   <Forward />
                   <span>Share Project</span>
                 </DropdownMenuItem>
@@ -82,6 +110,23 @@ export function NavProjects({
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
+      {publishTarget ? (
+        <ProjectShareDialog
+          open={publishOpen}
+          onOpenChange={(next) => {
+            setPublishOpen(next);
+            if (!next) {
+              setPublishTargetId(undefined);
+            }
+          }}
+          projectId={publishTarget.id}
+          projectName={publishTarget.name}
+          projectDescription={publishTarget.description}
+          projectUpdatedAt={publishTarget.lastActivityAt}
+          entryPath={publishTarget.assets.main.entryPath}
+          parameters={{}}
+        />
+      ) : null}
     </SidebarGroup>
   );
 }

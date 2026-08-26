@@ -2,7 +2,8 @@ import { describe, expect, it, vi, beforeEach, beforeAll } from 'vitest';
 import { act } from '@testing-library/react';
 import type { WebGLRenderer } from 'three';
 import * as ActualThree from 'three';
-import { createRoot, extend } from '@react-three/fiber';
+import { createRoot, extend, useThree } from '@react-three/fiber';
+import type { RootState } from '@react-three/fiber';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 
@@ -20,19 +21,16 @@ vi.mock('@react-three/drei', () => ({
 const line2WebGpuSpy = vi.fn();
 
 vi.mock('three/addons/lines/webgpu/Line2.js', () => ({
-  Line2: class Line2Stub {
-    public geometry: { dispose(): void };
+  Line2: class Line2Stub extends ActualThree.Object3D {
+    public geometry: unknown;
 
-    public material: { dispose(): void };
+    public material: unknown;
 
     public constructor(geometry: unknown, material: unknown) {
+      super();
       line2WebGpuSpy(geometry, material);
-      this.geometry = {
-        dispose: vi.fn(),
-      };
-      this.material = {
-        dispose: vi.fn(),
-      };
+      this.geometry = geometry;
+      this.material = material;
     }
   },
 }));
@@ -66,7 +64,10 @@ describe('AxesHelper', () => {
     line2WebGpuSpy.mockClear();
   });
 
-  async function mountAxes(backend: 'webgl' | 'webgpu'): Promise<{ unmountScene: () => void }> {
+  async function mountAxes(backend: 'webgl' | 'webgpu'): Promise<{
+    getInteractionCount: () => number;
+    unmountScene: () => void;
+  }> {
     const stubGl = createStubWebGlRenderer();
     const canvas = stubGl.domElement;
 
@@ -75,6 +76,12 @@ describe('AxesHelper', () => {
     document.body.append(canvas);
 
     const root = createRoot(canvas);
+    let rootState: RootState | undefined;
+
+    const CaptureRootState = () => {
+      rootState = useThree();
+      return null;
+    };
 
     await act(async () => {
       await root.configure({
@@ -87,12 +94,14 @@ describe('AxesHelper', () => {
 
       root.render(
         <ThreeGraphicsBackendProvider value={backend}>
+          <CaptureRootState />
           <AxesHelper />
         </ThreeGraphicsBackendProvider>,
       );
     });
 
     return {
+      getInteractionCount: () => rootState?.internal.interaction.length ?? 0,
       unmountScene: (): void => {
         act(() => {
           root.unmount();
@@ -106,23 +115,18 @@ describe('AxesHelper', () => {
     const harness = await mountAxes('webgpu');
 
     expect(dreiLineSpy).not.toHaveBeenCalled();
-    // Each axis owns two persistent `Line2WebGpu` meshes (positive + negative half) that
-    // share a single material. Three axes × two halves = six Line2 constructor calls,
-    // each receiving the same per-axis Tau `Line2NodeMaterial` instance — the architectural
-    // shape that lets hover transitions toggle visibility without rebuilding pipelines.
-    expect(line2WebGpuSpy).toHaveBeenCalledTimes(6);
+    // Each axis owns one static `Line2WebGpu` mesh and material.
+    expect(line2WebGpuSpy).toHaveBeenCalledTimes(3);
     expect(line2WebGpuSpy.mock.calls.every(([, material]) => material instanceof Line2NodeMaterial)).toBe(true);
 
-    // The two meshes per axis MUST share one material so a single uniform write
-    // (`material.linewidth`) covers both halves. We collect the material reference
-    // out of the spy and confirm it appears in exactly two consecutive calls.
+    // No materials are shared between axes, preserving independent axis colors.
     const materialCounts = new Map<Line2NodeMaterial, number>();
     for (const [, material] of line2WebGpuSpy.mock.calls) {
       const typedMaterial = material as Line2NodeMaterial;
       materialCounts.set(typedMaterial, (materialCounts.get(typedMaterial) ?? 0) + 1);
     }
     expect(materialCounts.size).toBe(3);
-    expect([...materialCounts.values()].every((count) => count === 2)).toBe(true);
+    expect([...materialCounts.values()].every((count) => count === 1)).toBe(true);
 
     harness.unmountScene();
   });
@@ -135,6 +139,17 @@ describe('AxesHelper', () => {
 
     harness.unmountScene();
   });
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'does not register decorative axes for pointer interaction on %s',
+    async (backend) => {
+      const harness = await mountAxes(backend);
+
+      expect(harness.getInteractionCount()).toBe(0);
+
+      harness.unmountScene();
+    },
+  );
 
   /**
    * Drei `<Line>` defaults its underlying `LineMaterial.transparent` to `false` (it is

@@ -1,45 +1,57 @@
 ---
 title: 'Filesystem Policy'
-description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers ZenFS, bridge RPC, and kernel/UI watch planes.'
+description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-05-19'
+updated: '2026-07-22'
 related:
+  - docs/policy/compatibility-policy.md
+  - docs/policy/filesystem-authority-policy.md
+  - docs/policy/runtime-api-policy.md
+  - docs/research/runtime-model-load-project-root-regression-v3.md
+  - docs/research/runtime-rooted-filesystem-residual-migration.md
   - docs/research/filesystem-architecture.md
   - docs/research/fs-capabilities.md
   - docs/research/large-repo-import-performance.md
   - docs/research/vscode-fs-performance.md
   - docs/research/origin-client-id-propagation-audit.md
+  - docs/research/project-updated-at-activity-boundary.md
+  - docs/research/revision-restore-runtime-watcher-gap.md
+  - docs/research/pending-project-import-recovery-bootstrap-isolation.md
+  - docs/research/filesystem-post-implementation-congruency-audit.md
 ---
 
 # Filesystem Policy
 
-Internal reference for filesystem access, data transfer, caching, and concurrency in the Tau application. Applies to all code that reads or writes user project data, cache files, or metadata through ZenFS.
+Internal reference for filesystem access, data transfer, caching, and concurrency in the Tau application. Applies to all code that reads or writes user project data, cache files, or metadata through the file-manager worker's provider stack. Topology — authority, providers, mounts, discovery, cross-tab coherence — lives in `docs/policy/filesystem-authority-policy.md`.
 
 ## Rationale
 
-A single-writer topology with zero-copy binary transfer and bounded caches prevents ZenFS directory corruption and memory bloat. Separate kernel and UI watch planes avoid coupling render invalidation to tree refresh, and explicit overflow handling ensures deterministic behavior under load.
+A single-writer topology with zero-copy binary transfer and bounded caches prevents backend index corruption and memory bloat. Separate kernel and UI watch planes avoid coupling render invalidation to tree refresh, and explicit overflow handling ensures deterministic behavior under load.
 
 ## Core Principles
 
-1. **Single writer, many readers** — all mutating FS operations flow through one worker with one serialization queue
-2. **Zero-copy binary transfer** — `Uint8Array` payloads must use `postMessage` transfer lists, never structured clone alone
+1. **Registry-owned providers, one mutation authority** — `ProviderRegistry` is the sole provider owner; non-owning mounts only route; all mutations flow through `WorkspaceFileService` queues
+2. **Transfer only owned binary buffers** — use transfer lists for disposable boundary-owned bytes; clone borrowed provider storage before transfer so reads never detach authority state
 3. **Lazy loading over eager recursion** — never traverse a directory tree deeper than the consumer needs
 4. **Bounded caches** — every in-memory cache must have an eviction policy (TTL, max size, or LRU)
 5. **Debounce refresh, don't spam** — background tree refreshes must be debounced; rapid mutations must coalesce
 6. **Kernel watcher fast path first** — file change -> kernel invalidation must not route through `use-project.tsx` fanout
-7. **Server-side watch filtering** — path/include/exclude/event filtering happens in the worker, not in clients
+7. **Server-side watch matching** — path/include/exclude matching happens in the worker, not in clients; do not expose unused event-kind filters
 8. **Loss-aware event streams** — watcher overflow/dropped-event conditions must trigger explicit resync behavior
-9. **Bridge skip-originator is internal** — when a filesystem bridge port initiates a mutation, the resulting `ChangeEvent` may carry an originating port id for intra-process routing only (`tagEventOrigin` / `getEventOrigin` on `@taucad/filesystem`). The runtime bridge (`exposeFileSystem`) skips delivering `fileChanged` back to that port. This metadata is **not** part of the wire shape of `ChangeEvent`, is **not** passed as a second argument to `ChangeEventBus.emit`, and **must not** surface in consumer-facing UI APIs.
+9. **Bridge skip-originator is internal** — when a filesystem bridge port initiates a mutation, the resulting `ChangeEvent` may carry an originating port id for intra-process routing only (`tagEventOrigin` / `getEventOrigin` on `@taucad/filesystem`). The filesystem bridge adapter (`@taucad/fs-bridge` `exposeFileSystem`) skips delivering `fileChanged` back to that port. This metadata is **not** part of the wire shape of `ChangeEvent`, is **not** passed as a second argument to `ChangeEventBus.emit`, and **must not** surface in consumer-facing UI APIs.
+10. **Filesystem transport reports facts, not project recency** — filesystem APIs emit typed content-change facts; project-domain participants and machines decide whether those facts are activity.
+11. **Virtual routes are projections, not physical identity** — `/projects/<id>` resolves through a persisted locator; provider paths come from `{ storageRootKey, providerBasePath }`, never from manifest fields.
+12. **Runtime reachability is filesystem-owned** — issue one fully writable rooted view per selected project; runtime receives only that filesystem and local paths.
 
 ## Bridge self-write suppression (skip-originator)
 
-Self-write suppression (so an editor port does not receive its own `fileChanged` echo) is enforced in `packages/runtime` at `filesystem-bridge.exposeFileSystem`: `deliverToHandles` reads the origin via `getEventOrigin(event)` and skips the recipient whose port id matches.
+Self-write suppression (so an editor port does not receive its own `fileChanged` echo) is enforced in `libs/fs-bridge` at `filesystem-bridge.exposeFileSystem`: `deliverToHandles` reads the origin via `getEventOrigin(event)` and skips the recipient whose port id matches.
 
 - **Author boundary:** `WorkspaceFileService` mutating methods accept optional `context?: { originClientId?: string }`. Context is bound at port-connect time via `bindMutationContextForPort` (in `filesystem-bridge.ts`), which wraps each connection's handler with a per-port closure that injects `{ originClientId: portId }` as the trailing argument on every mutating call. Before `ChangeEventBus.emit(event)`, the worker calls `tagEventOrigin(event, id)` when context is present. The bridge primitive (`createBridgeServer`) is unaware of context — it dispatches user args verbatim.
 - **Merge rule:** `EventCoalescer` / `coalesceChangeEvents` reads origins via `getEventOrigin` so mixed-origin batches clear the tag (every port receives the merged event), matching the blueprint Finding 14 rule.
-- **Forwarders:** `ChangeEventBus`, `WatchRegistry`, and `ThrottledWorker` chunk paths do not take a parallel `originClientId` parameter; the event object is the sole carrier.
-- **Registry:** `packages/filesystem/src/event-origin-registry.ts` (`WeakMap<ChangeEvent, string>`) plus `clearEventOrigin` when a coalesced survivor must lose its tag.
+- **Forwarders:** `ChangeEventBus` and `WatchRegistry` do not take a parallel `originClientId` parameter; the event object is the sole carrier.
+- **Registry:** `libs/filesystem/src/event-origin-registry.ts` stores origin metadata in a `WeakMap`; coalescing creates an untagged survivor when the merged path history has mixed origins.
 
 For rationale and alternatives considered, see [`docs/research/origin-client-id-propagation-audit.md`](../research/origin-client-id-propagation-audit.md).
 
@@ -51,19 +63,37 @@ Main Thread                       File Manager Worker              Kernel Worker
      │    (MessagePort)                  │              (MessagePort)        │
      │   readFile, writeFile, stat       │   readFile, readFiles, stat   │
      │   readShallowDirectory            │   exists, readdir             │
-     │   mount, readBackendFileTree      │   writeFile (cache only)      │
+     │   configureProjectRoots           │   full read/write/watch       │
      │                                   │                               │
-     │                                   │         ZenFS                 │
-     │                                   │   IndexedDB / WebAccess /    │
-     │                                   │   OPFS / Memory              │
+     │                                   │   MountTable + providers      │
+     │                                   │   (DirectIdb / WebAccess /   │
+     │                                   │   OPFS / Memory)             │
 ```
 
-All filesystem I/O runs on the file manager worker. The main thread and kernel workers access it exclusively via MessagePort RPC using the **same bridge mechanism** (`createFileSystemBridge` → `MessageChannel` → `createBridgeProxy`). The only difference is the TypeScript type used for the proxy:
+All browser filesystem I/O runs on the file manager worker. The main thread and kernel workers access it via the **same bridge mechanism** (`createFileSystemBridge` → `MessageChannel` → `createBridgeProxy`), but not through the same namespace:
 
-- **Main thread**: `createBridgeProxy<FileManagerProtocol>` — full API including worker management (`mount(prefix, MountConfig)`, `unmount`, `invalidateStandaloneProvider`), workspace-scoped operations via the `{ scope }` options bag (`readFile`, `unlink`, `rmdir`, `getZippedDirectory`, `readShallowDirectory`), diagnostics (`readBackendFileTree`), and higher-level operations (`copyDirectory`)
-- **Kernel worker**: `createBridgeProxy<RuntimeFileSystemBase>` — 11 base primitives only (`readFile`, `writeFile`, `stat`, `readdir`, `exists`, etc.)
+- **Main thread**: `createBridgeProxy<FileManagerProtocol>` — full API including root configuration (`configureProjectRoots`), discovery (`listProjectManifests`), canonical-root disposal (`disposeStorageRoot`), workspace-scoped operations via the `{ scope }` options bag, diagnostics, and higher-level copy/move operations
+- **Kernel worker**: `createBridgeProxy<RuntimeFileSystemBase>` over a `WorkspaceFileService.createRootedFileSystem('/projects/<id>')` handler — full primitive read/write/watch access, with `/` rebased to that project and no global file-pool shortcut
 
-This is the Interface Segregation Principle (ISP): kernels receive a narrow API surface matching their needs. Both proxies talk to the same worker, same `fileManager` object, same bridge server. No thread may import or use ZenFS directly outside the worker.
+This is both interface segregation and reachability confinement: kernels receive the narrow API surface they need, and every path they can express resolves only inside the captured project mount. Both proxies talk to the same worker and provider authority, but scoped connections dispatch to a rooted handler instead of the global `fileManager`. No thread may instantiate providers or touch backing stores outside the worker (`docs/policy/filesystem-authority-policy.md` Rules 1 and 15).
+
+## Rooted runtime filesystem rules
+
+### Rule 0a: Canonicalize before routing or provider I/O
+
+Use `resolveVirtualPath` as the single virtual-path boundary. Require an absolute POSIX path; reject URLs, backslashes, drive-like paths, control characters, and traversal above `/`. Apply the same contract in `MountTable`, WFS, fs-bridge root selection, browser adapters, Node adapters, and fs-client path resolution.
+
+### Rule 0b: Capture one exact mount for each rooted view
+
+`createRootedFileSystem(authorityRoot)` resolves the selected mount once and captures its provider and base path. Every operation joins a canonical local path to that captured base directly; it must not call the global mount table again. If the mount is replaced, reject later admissions with `ESTALE` instead of silently switching storage. Rename validates both local operands before either provider call.
+
+### Rule 0c: Preserve full write and watch semantics inside the view
+
+A rooted view supports the same writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or path allowlists. Rebase watch requests and emitted events to local `/`, and never deliver sibling-project events. Scoped runtime bridges use transfer/copy delivery and must not receive the authority-global shared file pool, because a pool hit would bypass rooted RPC dispatch.
+
+A rooted view preserves the exact canonical virtual paths carried by concrete create, change, delete, and rename events regardless of backing-filesystem naming semantics. It must not lowercase, normalize Unicode, infer aliases, or widen a concrete event to `reset`. Only explicit information-loss signals—such as overflow, observer `unknown`/`errored`, stale-root detection, backend replacement, or an irreducibly summarized change—use reset recovery. Preserve the hidden mutation origin through rooted writes and suppress only the originating scoped port's echo.
+
+Every admitted operation retains the exact captured mount entry through provider I/O and every resulting cache, tree, event, and watch side effect. After suspension, do not attribute old-provider work to a replacement or nested route. Cross-tab facts carry the existing physical identity `{ storageRootKey, providerBasePath }` and refresh only a matching projection before delivery.
 
 ## Read Rules
 
@@ -71,44 +101,25 @@ This is the Interface Segregation Principle (ISP): kernels receive a narrow API 
 
 Always read a single directory level unless the consumer provably needs deep recursion.
 
-```typescript
-// CORRECT: Shallow read for tree display
-readShallowDirectory(path, backend);
-
-// INCORRECT: Full recursive read for tree display
-readBackendFileTree(backend); // Traverses entire FS depth-first
-```
-
 Deep reads are permitted only for: `getDirectoryContents` (ZIP/copy), startup-only `getDirectoryStat` hydration, and `readFiles` (kernel dependency batch). Deep reads are forbidden in mutation-triggered refresh paths.
 
 ### Rule 2: Parallel stat, sequential traversal
 
 When listing a single directory, `readdir` + parallel `Promise.all(stat(...))` is preferred over sequential `stat` calls. Recursive traversal (when needed) should be sequential at the directory level to avoid overwhelming the storage backend.
 
-**ZenFS performance context:** Each `StoreFS.stat()` creates a new `WrappedTransaction` → `IndexedDBStore.transaction()` → `db.transaction('tau-fs', 'readwrite')`. Even though `IndexedDBStore.cache` serves data from memory (populated during mount preload), IDB transaction creation has fixed overhead (~0.1–0.3ms each). Parallelizing stat calls within a directory allows the browser to pipeline IDB transactions instead of sequentially awaiting each one.
+**Backend performance context:** IndexedDB transaction creation has fixed overhead (~0.1–0.3ms each) regardless of payload size. Parallelizing stat calls within a directory lets the browser pipeline IDB transactions instead of sequentially awaiting each one.
 
-```typescript
-// CORRECT: Parallel stat for one directory
-const entries = await fs.readdir(path);
-const stats = await Promise.all(entries.map((e) => fs.stat(joinPath(path, e))));
-
-// INCORRECT: Sequential stat for one directory
-for (const entry of entries) {
-  const stat = await fs.stat(joinPath(path, entry)); // Sequential IDB transactions
-}
-```
-
-**For metadata-only queries (tree display, file counts):** Prefer the in-memory tree at the `FileService` layer over ZenFS stat calls. See Rule 33.
+**For metadata-only queries (tree display, file counts):** Prefer the in-memory tree in `WorkspaceFileService` over provider stat calls. See Rule 33.
 
 ### Rule 3: Read caching expectations
 
-| Layer                    | Cache                          | Eviction                      | Notes                                  |
-| ------------------------ | ------------------------------ | ----------------------------- | -------------------------------------- |
-| File manager `openFiles` | `Map<path, Uint8Array>`        | Must have max size + TTL      | Stores recently accessed file contents |
-| Monaco `syncedPaths`     | Internal set                   | TTL 1h, max 200               | Background-synced JS/TS models         |
-| Kernel geometry cache    | `.tau/cache/geometry/*.bin`    | Max age + max entries         | MessagePack serialized meshes          |
-| Kernel parameter cache   | `.tau/cache/parameters/*.json` | None currently                | JSON parameter snapshots               |
-| Standalone FS instances  | Per-backend                    | Must be reused, not recreated | One per backend, cached in worker      |
+| Layer                    | Cache                          | Eviction                      | Notes                                       |
+| ------------------------ | ------------------------------ | ----------------------------- | ------------------------------------------- |
+| File manager `openFiles` | `Map<path, Uint8Array>`        | Must have max size + TTL      | Stores recently accessed file contents      |
+| Monaco `syncedPaths`     | Internal set                   | TTL 1h, max 200               | Background-synced JS/TS models              |
+| Kernel geometry cache    | `.tau/cache/geometry/*.bin`    | Max age + max entries         | MessagePack serialized meshes               |
+| Kernel parameter cache   | `.tau/cache/parameters/*.json` | None currently                | JSON parameter snapshots                    |
+| Standalone providers     | Per storage root               | Must be reused, not recreated | `filesystem-authority-policy.md` Rules 8/14 |
 
 ### Rule 4: File size awareness
 
@@ -122,47 +133,53 @@ Source files are typically <100 KB. Binary CAD files (STL, STEP, glTF) can be 10
 
 ### Rule 5: Write serialization scope
 
-All mutating operations (`writeFile`, `writeFiles`, `mkdir`, `rename`, `unlink`, `rmdir`) must be serialized to prevent ZenFS directory listing corruption (zen-fs/core#256).
+All mutating operations (`writeFile`, `writeFiles`, `mkdir`, `rename`, `unlink`, `rmdir`) must route through `ResourceQueue` and cross-tab locks using the narrowest **physical** conflict key. Mount resolution retains `storageRootKey`, `providerBasePath`, and the resolved provider path so mounted and named authority operations touching the same bytes acquire the same token. A subtree/composite operation acquires every owner/path token needed for its admitted mutation set before the first mutation. Named project operations also retain their logical-project token.
 
-**Verified TOCTOU scope (from ZenFS source audit):** The race condition is in `StoreFS.commitNew` — a read-modify-write on the parent directory's listing blob (`Record<string, number>` in JSON). Two concurrent `commitNew` calls to the **same parent directory** can lose entries. Writes to files in **different parent directories** are independent and safe to parallelize.
+Generic scoped mutation APIs are forbidden. Ordinary mutation uses a mounted authority path; only the named project commit and permanent-delete operations may mutate an unmounted physical locator, after re-establishing identity under the shared physical lock.
 
-**Current implementation:** Global `WriteCoordinator` — a single FIFO promise chain (`_writeQueue: Promise<void>`). This is overly conservative.
+**Why**: A logical route and a physical locator may name the same bytes; exact virtual-path locks alone do not serialize them, while a global lock blocks unrelated files.
 
-**Target implementation:** Per-parent-directory serialization. Serialize writes that share a parent directory; parallelize writes to different parent directories. This is safe today — it does not require a ZenFS fix.
+If a future backend reintroduces parent-directory read-modify-write metadata, use the parent directory as the queue key for that backend. Do not reintroduce a global write queue.
 
-```typescript
-// CORRECT: Per-parent-directory serialization (safe now)
-const parentDir = path.substring(0, path.lastIndexOf('/')) || '/';
-await resourceQueue.queueFor(parentDir, () => provider.writeFile(path, data));
+### Rule 5a: Batch mutations preserve canonical per-resource semantics
 
-// INCORRECT: Global serialization (unnecessarily blocks independent writes)
-await globalQueue.serialized(() => provider.writeFile(path, data));
-```
+Implement batch and composite mutations by delegating each resource to the canonical primitive mutation unless the provider exposes a real transaction contract. Every committed resource must retain the primitive's path normalization, mount/backend resolution, queue and cross-tab lock, writer-owned cache invalidation, in-memory index update, exact change event, and origin metadata.
 
-### Rule 6: Transfer, don't clone
+Delivery coalescers may batch exact mutation facts after commit. They must not replace affected paths with a lossy root-directory summary.
 
-Binary data sent to the worker for writes must use `extractTransferables` to build a transfer list. The sender's buffer is detached after transfer — do not reference it after `postMessage`.
+**Why**: A successful provider write is incomplete while writer caches retain old bytes or exact-path watchers cannot observe the committed path.
 
-```typescript
-// CORRECT: Transfer
-port.postMessage(response, extractTransferables(response));
+Batch results must be truthful. Without a provider transaction, wait for every admitted operation, report every completed and failed resource, and invalidate every resource whose commit state may have changed. Never claim atomicity, reverse completed operations with overwrite rollback, or reject while sibling writes continue in the background.
 
-// INCORRECT: Structured clone (double memory, double copy)
-port.postMessage(response);
-```
+### Rule 5b: Provider projections change only after durable commit
+
+Providers that maintain in-memory path, directory, size, mtime, or content-metadata projections update them only after the backing mutation commits. `FileSystemAccessProvider` aborts the writable stream when write or close fails. `DirectIdbProvider` performs same-store file rename as one put+delete transaction and stages write and rename projection changes until transaction completion. A failed or aborted transaction leaves the prior projection intact; if commit state is uncertain, rehydrate before serving another metadata read.
+
+**Why**: Mutating the projection before durable completion turns a failed write into a false successful `stat`/`readdir`, which is data corruption at the API boundary.
+
+### Rule 5c: Providers expose one valid path tree
+
+Every provider must independently enforce one entry kind per canonical path. A file cannot be an ancestor or directory, `mkdir` cannot replace a file, `writeFile` cannot replace a directory, and `unlink`/`rmdir` must reject the wrong kind. Exact self-rename is a no-op; moving a directory beneath itself fails before mutation. A persistent provider must preserve explicit empty directories across reopen.
+
+All fallible validation and serialization for a destructive multi-path ingress completes before the first provider mutation. Use an inline `Set` parent walk for small payload preflights; do not add a trie or second metadata authority.
+
+### Rule 6: Transfer only bytes owned by the sending boundary
+
+Use `extractTransferables` when the sending boundary owns a disposable byte buffer. If a provider, cache, or caller retains the bytes, clone once at the boundary and transfer that owned clone. The transferred buffer is detached; no retained state may reference it.
 
 ### Rule 7: Mutation → targeted invalidation
 
 After a mutation (delete, rename, upload), invalidate only the parent directory of the affected path, not the entire tree. The caller must provide the affected path so the UI can selectively refresh.
 
-```typescript
-// CORRECT: Invalidate parent
-const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
-reloadDirectory(parentPath, backend);
+### Rule 7a: No project-recency flags in filesystem APIs
 
-// INCORRECT: Reload entire tree
-loadColumnTree(backend); // Full recursive traversal
-```
+Filesystem packages and UI file facades must not accept options that decide whether `ProjectLibraryState.lastActivityAt` changes. They should emit precise events (`written`, `batchWritten`, `fileCopied`, `directoryCopied`, `renamed`, `deleted`, etc.) with workspace-relative affected paths. The project route participant forwards those facts to `project.machine`, and the project machine applies the content-path classifier and owns the activity decision.
+
+**Why**: A filesystem layer cannot distinguish navigation repair, derived metadata, hydration, housekeeping, and user-visible content activity reliably after intent has been erased. Pushing project recency into file APIs creates per-callsite debate and reintroduces recent-project list jumps.
+
+### Rule 7b: System-artifact visibility is a UI projection
+
+`tau.json`, `thumbnail.webp`, and `.tau/**` are real filesystem entries and remain readable through ordinary APIs. File-tree presentation may hide or decorate them as system artifacts, but must do so in its projection layer. Providers, discovery, copy/export, and publication code must not pretend these files do not exist; callers that omit them do so through explicit artifact filters.
 
 ## Tree Refresh Rules
 
@@ -176,97 +193,13 @@ Recommended debounce: 300-500ms after the last mutation event. VS Code uses 500m
 
 Use a synchronous `Map<key, Promise>` (not React state) to deduplicate concurrent requests for the same directory. This prevents race conditions across render cycles.
 
-```typescript
-// CORRECT: Synchronous dedup via ref
-const inflightRef = useRef(new Map<string, Promise>());
-if (inflightRef.current.has(key)) return inflightRef.current.get(key);
-const promise = readShallowDirectory(path, backend);
-inflightRef.current.set(key, promise);
-
-// INCORRECT: React state check (async, racy)
-if (loadingPaths.has(path)) return; // State may be stale
-```
-
 ### Rule 10: Error recovery on expand
 
 If a directory load fails, do not cache the failure. Allow retry on the next expand attempt. Optionally collapse the failed node (VS Code pattern).
 
-## Backend & Provider Rules
+## Backend & Provider Rules (moved)
 
-### Rule 11: Backend isolation
-
-Each backend (`indexeddb`, `webaccess`, `opfs`, `memory`) is an independent storage system. Operations on one backend must not affect another. The files route shows backends side-by-side; each column maintains its own state.
-
-### Rule 12: Standalone FS instance safety and reuse
-
-Standalone `FileSystem` instances (created via `resolveMountConfig`) are used to read from specific backends without affecting the main mount (e.g., the files route grid showing all backends side-by-side).
-
-**Safety**: Standalone read-only instances are safe to use alongside the main mounted FS. ZenFS's TOCTOU bug (zen-fs/core#256) only affects concurrent _writers_ — the read-modify-write cycle on directory listings. A standalone instance that only calls `readdir` + `stat` cannot trigger this corruption. The main risk is stale reads (file deleted between `readdir` and `stat`), which is handled by try/catch around individual stat calls.
-
-**Reuse**: Cache the standalone `FileSystem` instance per backend in the worker. Each `resolveMountConfig` call creates a new `IDBDatabase` connection via `indexedDB.open('tau-fs')` and then **preloads every key-value pair** (`getAllKeys()` + `get(id)` for each key) into `IndexedDBStore.cache`. For a project with 6265 files, this means ~12,530 `get` operations on mount (inode + data per file). Creating one per call is extremely wasteful — each instance pays this full preload cost. (Set `disableAsyncCache: true` in options to skip preload, but then every read hits IDB.)
-
-```typescript
-// CORRECT: Cache and reuse
-const standaloneInstances = new Map<string, FileSystem>();
-function getStandaloneFs(backend): FileSystem {
-  /* create or reuse */
-}
-
-// INCORRECT: Create per call
-const fs = await resolveMountConfig({ backend: IndexedDB, storeName }); // New connection + full preload
-```
-
-**Write prohibition**: Standalone instances must never be used for writes. All writes must go through the main mounted FS and its serialization queue.
-
-### Rule 13: WebAccess handle lifecycle is workspace-scoped
-
-The `webaccess` backend is multi-workspace: every `FileSystemDirectoryHandle` lives behind a first-class `workspaceId` (plain `string`, `wsp_*` prefix) and is owned by the multi-store `tau-fs-handles` IndexedDB schema (`workspaces`, `handles`, `configs`, `meta`). The legacy single-`'root'` handle pattern is forbidden.
-
-- Hand-off to the worker still uses structured clone (handles are not transferable). The FM machine resolves the project's bound `workspaceId` from `configs[projectId]`, reads its handle from `handles[workspaceId]`, then mounts the webaccess prefix in a single discriminated call: `proxy.mount(prefix, { backend: 'webaccess', directoryHandle, workspaceId, preservePath: true })`. The worker is stateless w.r.t. webaccess identity — there is no `setDirectoryHandle` knob and no ambient "active handle" between RPCs.
-- Permission must be re-requested from a user gesture after page reload. The FM machine surfaces a structured `unavailableReason` (`'missing' | 'permission'`) — silent downgrade to IndexedDB is forbidden (see Rule 13a).
-- Cross-workspace project access is forbidden. If a project's bound `workspaceId` does not match the currently active workspace, the FM machine must refuse to open and route through the `webAccessUnavailable` state (no implicit re-binding).
-
-### Rule 13a: No silent backend downgrade
-
-Every code path that fails to resolve a webaccess workspace (handle missing from IDB, permission revoked, `showDirectoryPicker` unsupported, picker aborted) must throw `WorkspaceDirectoryRequiredError` with one of the typed `code`s (`'missing' | 'permission' | 'unsupported'`). Call sites translate the error to actionable UI:
-
-- `/projects/new`: `toast.error` with a "Manage Workspaces" action, plus an inline `WorkspaceDirectoryPanel` that prevents submission until the workspace is connected.
-- `/projects/$id`: the `ProjectUnavailableOverlay` indirection renders `WorkspaceUnavailableRecovery` (full-shell overlay, not a banner — the dockview underneath must be fully covered).
-- Settings + `/files`: the relevant workspace row renders `WorkspaceDirectoryPanel` (row / banner variant) with `[Connect]` / `[Grant Access]` / `[Change Folder]` controls scoped to that workspace.
-
-It is forbidden to catch a `WorkspaceDirectoryRequiredError` and fall back to `indexeddb` — a project's backend binding is immutable once written to `configs[projectId]`.
-
-### Rule 13b: Workspace IDs are generated; project bindings live in one place
-
-Workspace identifiers must be minted via `generatePrefixedId(idPrefix.workspace)` from `@taucad/utils`. They are plain `string`s — there is no branded `WorkspaceId` type. Treat them as opaque identifiers: do not derive them from `handle.name`, content hashes, or any other property of the underlying directory (those values change as the user re-points or renames the folder).
-
-`ProjectFileSystemConfig.workspaceId` is the **single source of truth** for the project ↔ workspace binding. The `fileManagerMachine` MUST NOT carry that identity as ambient context; the machine's `activeWorkspaceId` / `activeWorkspaceName` fields are per-init _outputs_ populated by `initializeServicesActor` and cleared on every `setRoot` transition. The machine MUST NOT mutate `ProjectFileSystemConfig` directly — there is no actor-side self-persist branch.
-
-Any user-driven workspace change MUST go through the binding-transaction helper `bindProjectToWorkspace` on `useFileManager` (currently the only caller is `WorkspaceUnavailableRecovery`; the deferred Phase 10 per-project switcher will use the same helper). The helper performs three steps in order: (1) write `ProjectFileSystemConfig` with the new `{ projectId, backend: 'webaccess', workspaceId }`, (2) emit the `workspaceSwap` telemetry event, (3) dispatch `reloadWorkspace` (no payload) on the FM machine. The machine then re-runs `initializeServicesActor`, which reads the fresh persistent record. Subsequent project loads (or back-nav across projects) are silent because the persistent record already has the right binding.
-
-Missing or stale bindings surface `WorkspaceDirectoryRequiredError('missing')` via the recovery overlay; legacy projects without an explicit `workspaceId` are prompted on first load. The v2 → v3 IDB migration only promotes the legacy `'root'` handle to a regular workspace row — it does not auto-bind projects.
-
-### Rule 13c: Project creation is a single mount → write → unmount transaction
-
-Project creation MUST mount the project prefix on the workspace's storage, persist the file set, then unmount — atomically, inside `useProjectManager.createProject`. Webaccess creation MUST pass `(directoryHandle, workspaceId)` together via `MountConfig`; there is no separate handle-priming step. `memory` is rejected outright with `WorkspaceDirectoryRequiredError('unsupported')` — projects must commit to a durable backend at creation.
-
-The transaction is the only legitimate way to write a project's seed files. UI surfaces (`/projects/new`, "duplicate", remix-from-publication) MUST go through `createProject`; ad-hoc `fileManager.mount` + `writeFiles` flows from non-creation call sites are forbidden because they don't perform the `setProjectFileSystemConfig` write that binds the project to its backend.
-
-### Rule 13d: Root FM is pinned to `indexeddb`; `initialBackend` is required
-
-The root `<FileManagerProvider rootDirectory='/'>` MUST be instantiated with `initialBackend='indexeddb'`. `initialBackend` is a required prop; the provider's TypeScript surface compile-time-rejects `webaccess` without an accompanying `projectId` (Audit R15) so a workspace-bound FM can only be mounted inside a project route.
-
-The root provider MUST NOT consume the `filesystem-backend` cookie at mount time. The cookie is a _project-creation default_ read by `/projects/new` and `/files`, never the seed for the root machine. Cross-tab cookie flips therefore cannot break the root FM, and a stale `memory` cookie value is coerced back to `indexeddb` via `coerceFilesystemBackendCookie` at every selector read site.
-
-### Rule 13e: Standalone provider cache is keyed by `workspaceId`; invalidation has a typed contract
-
-`ProviderRegistry` caches one standalone provider per `(backend, workspaceId)` pair. Webaccess entries MUST NOT be keyed by `handle.name` — two workspaces pointing at folders with the same name would collide. The registry exposes `invalidateStandaloneProvider(backend, workspaceId?)`:
-
-- `invalidateStandaloneProvider('webaccess', workspaceId)` drops exactly one entry; required by `/files` "Change Folder", `forgetWorkspace`, and `bindProjectToWorkspace` (recovery binding) so the next standalone read uses the fresh handle.
-- `invalidateStandaloneProvider('webaccess')` drops every webaccess entry; reserved for the worker boot path.
-- `invalidateStandaloneProvider(non-webaccess)` drops the single backend entry.
-
-Failure to invalidate after a handle swap is a bug — the registry will silently serve reads against the previous handle until the cache entry is replaced by reload.
+Former Rules 11–13e (backend isolation, standalone instance safety and reuse, webaccess handle lifecycle, backend downgrade, workspace binding, creation transaction, root FM pinning, provider cache keying) live in `docs/policy/filesystem-authority-policy.md`, which also states the single-filesystem-authority invariant they serve; a rule-number mapping table there resolves old citations. The ZenFS-era mechanics formerly prescribed by Rules 11–12 (`resolveMountConfig`, full-data mount preload) are retired — the live architecture is `MountTable` + `ProviderRegistry` + direct providers.
 
 ## RPC Pattern Rules
 
@@ -315,7 +248,7 @@ Do not mix these planes into a single coarse "watch everything" stream.
 
 ```mermaid
 flowchart LR
-    FileServiceWrite["FileService mutation"]
+    FileServiceWrite["WorkspaceFileService mutation"]
     EventBus["ChangeEventBus"]
     KernelWatchRouter["Kernel watch router"]
     TreeWatchRouter["Tree watch router"]
@@ -333,14 +266,12 @@ flowchart LR
 
 ### Rule 19: Watch API contract is first-class and explicit
 
-`FileService.watch(...)` must support an explicit request contract:
+`WorkspaceFileService.watch(...)` must support an explicit request contract:
 
 - `paths`: absolute normalized watch roots
 - `recursive`: default `false`
 - `includes`: optional include patterns
 - `excludes`: optional exclude patterns
-- `filter`: optional event type mask (`added|updated|deleted|renamed`)
-- `correlationId`: optional identifier echoed in outgoing events
 
 `watch()` must return an unsubscribe function (`() => void`) and be wrappable into `Disposable` via `toDisposable`, per `library-api-policy.md`.
 
@@ -353,27 +284,29 @@ Identical watch requests must share one underlying subscription. Keep:
 
 Unsubscribe decrements ref count. Actual disposal happens only when ref count reaches zero.
 
-### Rule 21: Event pipeline requires normalize -> coalesce -> filter -> deliver
+### Rule 21: Event pipeline requires normalize -> coalesce -> match -> deliver
 
 Before delivery, watcher events must pass this worker-side pipeline:
 
 1. **Normalize** paths and event shapes.
 2. **Coalesce** short bursts into canonical events.
-3. **Filter** by path scope, include/exclude globs, and event type mask.
-4. **Deliver** only matched events to subscribed ports.
+3. **Match** concrete events by canonical requested paths, recursion, includes, and excludes.
+4. **Classify explicit loss** — overflow, observer `unknown`/`errored`, stale-root, backend replacement, or an irreducibly summarized directory change — as reset only for affected watch scopes.
+5. **Deliver** the resulting concrete event or explicit loss signal to subscribed ports.
 
 Coalescing requirements:
 
-- `added -> deleted` within the same window cancels out.
-- `deleted -> added` within the same window collapses to `updated`.
-- Parent directory delete suppresses child delete spam.
-- Rename emits both old/new path invalidation semantics.
+- A write does not prove creation; write followed by delete retains the final delete.
+- Delete followed by write collapses to change.
+- A typed ancestor-directory delete or rename resets exact descendant watches instead of guessing child facts.
+- Rename preserves both old/new path invalidation semantics.
+- Coalescing must clone a survivor before changing hidden origin metadata; subscriptions never mutate one shared event.
 
 ### Rule 22: Kernel path is direct and low-latency
 
 For render reactivity, use this path only:
 
-`FileService change event -> runtime worker watch handler -> worker cache invalidation -> worker emits filesChanged -> CadMachine debounce -> render`
+`WorkspaceFileService change event -> runtime worker watch handler -> serialized cache/current-preview router -> worker debounce -> autonomous render`
 
 INCORRECT:
 
@@ -381,21 +314,25 @@ INCORRECT:
 - Sending `changedPaths` on each render command as the primary invalidation mechanism
 - A separate `fileChanged` command from main thread to worker for every edit
 
-### Rule 23: Watch set updates must be incremental
+### Rule 23: Complete watch replacement must preserve continuous coverage
 
-After each successful render/compile, compute the dependency set and diff it against the previous set:
+Current-preview observation is independent of successful artifact publication. A fresh entry is observed and acknowledged before dependency discovery. When a generation produces a complete dependency candidate:
 
-- add newly required paths
-- remove stale paths
-- keep unchanged paths subscribed
+- keep the old complete multi-path request live
+- subscribe the complete replacement and await one registration acknowledgement
+- batch-revalidate only paths added relative to the old request
+- route candidate-only events during validation as dirty handoff mismatches
+- commit the preview map and replacement handle atomically only when the candidate remains current and clean
+- dispose the old handle only after commitment; dispose only the replacement when dirty or superseded
 
-Avoid full unsubscribe/resubscribe when only a small subset changed.
+The steady state is one multi-path subscription, not one stream per dependency. Unchanged paths stay continuously covered by the overlapping old request; no filesystem revision protocol or permanent root watch is required.
 
 ### Rule 24: Overflow and dropped-event handling is mandatory
 
 Watcher streams are not lossless under all conditions. Define explicit overflow behavior:
 
-- emit an overflow/reset event to subscribers
+- emit internal `WatchEvent { type: 'reset' }` to watch subscribers
+- map worker-to-client overflow or refresh failure to the existing transport-wide `ChangeEvent { type: 'backendChanged' }`; do not add another wire variant
 - kernel subscribers clear dependency-related caches and request a fresh dependency pass on next render
 - tree subscribers trigger targeted parent/subtree resync (not blind full tree unless required)
 
@@ -407,28 +344,34 @@ External changes (outside Tau writes) are handled in this order:
 
 1. `FileSystemObserver` when available and stable for the active backend/browser
 2. visibility-aware polling fallback when observer is unavailable
-3. periodic reconcile scan only when event quality is uncertain (`unknown`/overflow paths)
+3. one coalesced root reconcile scan whenever event quality is uncertain (`unknown`, `errored`, reset, or overflow)
 
 Treat `FileSystemObserver` as progressive enhancement, not a universal baseline.
 
+Every successful local or remote mutation, and every concrete observer event, enters the same invalidation plane: invalidate shared file-pool bytes and provider/file-tree projections, repair a DirectIDB index miss from backing storage when necessary, emit the ordinary change event, and refresh discovery when a project manifest may have appeared or disappeared. Web Locks serialize multi-path mutations when available; BroadcastChannel notification and invalidation still occur when locks are unavailable.
+
+Apply remote facts in arrival order. Resolve only an already registry-owned provider by `storageRootKey`; notification data must not instantiate a provider. Build refreshed provider metadata off to the side and swap it only after successful hydration; a refresh failure emits `backendChanged` through the same channel consumed by kernel, tree, and fs-client caches. One `EventCoalescer` is the only bounded queue in the worker delivery path.
+
 ### Rule 26: Exclude self-generated churn from kernel watch streams
 
-Kernel watchers must exclude non-user-source churn paths, at minimum:
+Runtime dependency watchers must exclude only the runtime cache namespace:
 
-- `.tau/cache/**`
-- other generated internal artifacts
+- `/.tau/cache/**`
 
-`node_modules/**` may be excluded from kernel watch streams when dependency resolution does not require runtime file-level invalidation there.
+The exclusion applies to concrete cache-path events, including peer writes. It must not suppress genuine reset or overflow signals because those signals no longer contain a complete path set. Do not treat `/src/.tau/cache/**` as cache. Do not exclude `/node_modules/**`; installed or vendored package files may be live bundle inputs.
 
-### Rule 27: Path canonicalization and case behavior must be explicit
+### Rule 27: Concrete paths remain exact
 
-All watch matching must use canonical absolute paths:
+All watch matching must use normalized paths in the namespace owned by the watched filesystem. Runtime watches therefore use runtime paths beginning with `/`; authority-global watches use explicitly qualified authority-global paths:
 
 - normalize separators and duplicate slashes
-- define case handling by backend capability (case-sensitive vs insensitive)
-- preserve old/new path semantics for case-only renames on insensitive backends
+- preserve the exact spelling carried by every concrete provider event
+- preserve both old and new canonical paths for renames, matching a request when either endpoint qualifies
+- reserve reset for explicit information loss rather than backing-filesystem case or Unicode behavior
 
-Do not compare raw incoming paths directly.
+Do not lowercase, Unicode-normalize, or synthesize equivalence keys in the registry or runtime.
+
+Tau accepts that a rare out-of-band case-only or Unicode-equivalent edit may not match a differently spelled dependency path on some Web Access roots. A refresh or project reopen may be required in that case. If measured product behavior later requires alias-aware matching, add a provider-native canonical identity contract; do not reintroduce a speculative case-sensitivity boolean or broaden ordinary concrete events.
 
 ### Rule 28: Lifecycle safety for ports and watches
 
@@ -440,8 +383,8 @@ On port disconnect/dispose:
 
 On backend mount change:
 
-- invalidate watch subscriptions tied to old backend
-- emit backend reset events so clients can resync
+- make previously materialized rooted views reject new admissions with `ESTALE`
+- dispose old service/client/watch ownership once and create a fresh rooted binding from the new successful service identity
 
 ### Rule 29: Tree refresh remains incremental after startup
 
@@ -463,30 +406,13 @@ Expose watcher diagnostics from worker internals:
 
 A watcher path that cannot be observed cannot be trusted at scale.
 
-## Plan Update Requirements (for next implementation plan)
-
-The next implementation plan is incomplete unless all of the following are explicitly covered:
-
-1. **Watch contract upgrade**: request shape includes `recursive/includes/excludes/filter/correlationId`.
-2. **Ref-counted watch dedup**: identical requests share one subscription.
-3. **Event coalescer**: canonicalization rules for add/delete/update/rename bursts.
-4. **Overflow protocol**: explicit reset/resync event and consumer behavior.
-5. **Kernel fast-path migration**: remove `use-project.tsx` relay and render-time `changedPaths` dependency.
-6. **Incremental dependency watch set diffing**: avoid full resubscribe churn.
-7. **Incremental tree patching**: no mutation-triggered full recursive tree scans.
-8. **Self-churn exclusion**: explicit ignore patterns for generated cache paths.
-9. **Lifecycle cleanup guarantees**: disconnect/unmount cleanup of watches and queues.
-10. **Performance acceptance gates**: concrete watch latency/throughput/flood tests.
-
-If one of these items is absent, the plan is not ready for "best-in-class" watcher implementation.
-
 ## Required Watch Test Matrix
 
 Minimum required test coverage for watcher correctness and performance:
 
-- **Contract tests**: `watch` request parsing, include/exclude/filter matching, recursive behavior.
+- **Contract tests**: `watch` request parsing, include/exclude matching, recursive behavior, and structural request identity.
 - **Dedup tests**: N identical requests -> 1 underlying subscription; proper ref-count disposal.
-- **Coalescing tests**: add-delete, delete-add, rename bursts, parent delete child suppression.
+- **Coalescing tests**: overwrite-delete, delete-write, rename bursts, typed ancestor-directory reset, and origin isolation.
 - **Overflow tests**: forced queue overflow emits reset and triggers deterministic resync path.
 - **Kernel integration tests**: file change invalidates caches and emits `filesChanged` without main-thread relay.
 - **Tree integration tests**: mutation updates only affected directory/subtree entries.
@@ -500,77 +426,70 @@ Minimum required test coverage for watcher correctness and performance:
 
 When a bridge proxy is disposed, the main-thread port (`port2`) is closed. The worker-side port (`port1`) should also be cleaned up. Each `exposeFileSystem` handler should track active ports and close them when the counterpart disconnects.
 
-### Rule 32: Timeout awareness
+### Rule 32: Report mutation deadlines causally
 
-All bridge calls have a 30-second timeout. Long-running operations (large file writes, directory copies) should not exceed this. If they might, the operation should be split into chunks or the timeout extended per-call.
+A bridge client may report that a mutation timed out only when the server-side operation is causally cancelled before that result is returned. Never reject a mutation locally while allowing the authority to continue writing in the background.
 
-## ZenFS Performance Rules
+Keep the 30-second default for ordinary bridge calls. A journal-backed, idempotent authority command may explicitly opt out of the wall-clock client timer when its durable operation can be replayed and its caller does not place unrelated discovery or navigation behind completion. Configure that exception by method identity; do not add a generic “disable timeouts” option.
+
+CORRECT:
+
+```typescript
+createBridgeProxy(port, {
+  resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : undefined),
+});
+```
+
+INCORRECT:
+
+```typescript
+await Promise.race([authorityMutation(), rejectAfter(30_000)]);
+// The authority mutation continues after the caller reports failure.
+```
+
+**Why**: A client-only deadline creates split truth: durable storage may commit after the journal owner has already classified the same operation as failed.
+
+## Provider Performance Rules
 
 ### Rule 33: In-memory file tree for metadata queries
 
-`FileService.getDirectoryStat` and related metadata queries must use an in-memory file tree at the `FileService` layer, not ZenFS stat/readdir calls. ZenFS's `StoreFS.stat()` and `StoreFS.readdir()` each create a new browser `IDBTransaction` via `IndexedDBStore.transaction()` → `db.transaction('tau-fs', 'readwrite')`, even though data is served from the in-memory `IndexedDBStore.cache`. IDB transaction creation has fixed overhead (~0.1–0.3ms each); for 6265 files this accumulates to ~2 seconds.
+`WorkspaceFileService.getDirectoryStat` and related metadata queries must use its in-memory file tree, not per-path provider stat/readdir calls. Backend metadata calls pay per-operation IndexedDB transaction overhead (~0.1–0.3ms each); for 6265 files this accumulates to seconds.
 
-The in-memory tree should be built from ZenFS's internal `StoreFS._ids: Map<string, number>` (path → inode ID map, always in memory) or by reading all directory listing blobs on init. It should be maintained incrementally on writes (not rebuilt).
+The in-memory tree seeds from the provider's hydrated path index (`DirectIdbProvider._paths`) and is maintained incrementally on writes (not rebuilt).
 
 ```typescript
 // CORRECT: Metadata from in-memory tree (O(1))
 const stat = inMemoryTree.stat(path);
 const entries = inMemoryTree.readdir(path);
 
-// INCORRECT: Metadata via ZenFS (1 IDB transaction per call)
+// INCORRECT: Metadata via provider (1 IDB transaction per call)
 const stat = await provider.stat(path);
 const entries = await provider.readdir(path);
 ```
 
-### Rule 34: Bulk import bypasses ZenFS
+### Rule 34: Bulk writes use provider-native batching
 
-For bulk import operations (GitHub import, ZIP upload), bypass ZenFS and write directly to the `tau-fs` IndexedDB object store in a single `IDBTransaction`. ZenFS produces ~5 IDB transactions per `writeFile` call (exists + stat + createFile/commitNew + write + touch), totaling ~25,000–30,000 IDB transactions for 6265 files. A single batched IDB transaction with ~12,530 `put` requests (inode + data per file, plus directory listings) reduces this by 4 orders of magnitude.
+For bulk writes (GitHub import, ZIP upload), the canonical `writeFiles` path may let the IndexedDB provider drain admitted writes in as few native transactions as possible — per-transaction overhead dominates at thousands of files. Do not expose a second provider `bulkImport` mutation path. After commit, update the provider path index and `WorkspaceFileService` tree before the next read; after uncertain failure, refresh before serving metadata.
 
-After bulk write, invalidate `StoreFS._ids` and `IndexedDBStore.cache` (or remount the filesystem). The in-memory file tree (Rule 33) must also be rebuilt.
+### Rule 35: Provider hydration awareness
 
-### Rule 35: ZenFS mount preload awareness
+`DirectIdbProvider` hydrates a path index once per instance at initialization (`getAllKeys()`, ~26ms for 10k entries) — a metadata index, not a full-data preload. Hydration cost and index divergence are why provider instances are per-storage-root singletons (`filesystem-authority-policy.md` Rule 2): every extra instance repeats hydration and holds an index that never learns of the others' writes. (The ZenFS-era full-data mount preload this rule previously described is retired.)
 
-ZenFS's `@zenfs/dom` IndexedDB backend **eagerly preloads all data** on mount: `getAllKeys()` + `get(id)` for every key in the store, populating `IndexedDBStore.cache`. For a project with 6265 files, this reads ~12,530 key-value pairs (inode + data per file). This preload is the reason subsequent reads are fast (cache hit), but it also means:
+## Project-root configuration sync
 
-- Mount time scales linearly with total stored data
-- Creating standalone `FileSystem` instances (Rule 12) repeats this preload
-- The `disableAsyncCache` option skips preload but makes every read hit IDB
-
-Design decisions should account for this preload cost when considering multiple mounts, backend switches, or standalone instances.
-
-## ZenFS Internals Reference
-
-Quick reference for ZenFS internals that affect performance decisions. Verified from `repos/zenfs/core` and `repos/zenfs/dom` source.
-
-| Aspect                                 | Fact                                                                                                                                                   |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **IDB key format**                     | Numeric inode IDs (not path strings). `put(data, id)` / `get(id)`                                                                                      |
-| **IDB value format**                   | `Uint8Array` — packed binary inodes and raw file content                                                                                               |
-| **Directory listings**                 | UTF-8 JSON blob at key `inode.data`: `Record<string, number>` (filename → child inode ID)                                                              |
-| **In-memory path map**                 | `StoreFS._ids: Map<string, number>` (path → inode ID). Always in memory.                                                                               |
-| **In-memory data cache**               | `IndexedDBStore.cache: Map<number, Uint8Array>`. Populated during mount preload.                                                                       |
-| **`findInode` (with id tables)**       | `_ids.get(path)` → `tx.get(ino)` — 1 store read. O(1) path resolution.                                                                                 |
-| **`findInode` (no id tables)**         | Recursive walk from `/` via parent dir listings. Multiple store reads.                                                                                 |
-| **IDB tx per `stat()`**                | 1 new `db.transaction('tau-fs', 'readwrite')` + 1 `get` for inode bytes                                                                                |
-| **IDB tx per `readdir()`**             | 1 new `IDBTransaction` + 2 `get` ops (inode + directory listing blob)                                                                                  |
-| **IDB tx per `writeFile()`**           | ~5 transactions: exists/stat(1) + stat(1) + commitNew(1, 3 puts) + write(1) + touch(1)                                                                 |
-| **`WrappedTransaction.commit()`**      | Only sets `done = true`. Does NOT flush to IDB. Persistence is via IDB request completion.                                                             |
-| **`IndexedDBTransaction` sync bridge** | `setSync`/`removeSync` queue async IDB ops on a chained `asyncDone` promise                                                                            |
-| **Mount preload**                      | `getAllKeys()` + `get(id)` for every key → fills `IndexedDBStore.cache`                                                                                |
-| **DB/store name**                      | Both database and object store are named `storeName` param (Tau: `'tau-fs'`)                                                                           |
-| **TOCTOU scope**                       | `commitNew` read-modify-writes parent directory listing. Concurrent writes to same parent dir can lose entries. Different parent dirs are independent. |
+The main thread owns persisted `ProjectFileSystemConfig` and storage-root handles. It sends a cloneable `ProjectRootConfiguration` to the file-manager worker at boot and after a binding/discovery change. The worker atomically replaces non-owning project routes while reusing registry-owned providers. Reads and writes may proceed only after that sync resolves; page navigation is not a configuration event.
 
 ## Performance Budget
 
-| Operation                           | Target              | Current                     |
-| ----------------------------------- | ------------------- | --------------------------- |
-| Shallow directory read (20 entries) | < 50ms              | ~30ms (IndexedDB)           |
-| Single file read (source, <100KB)   | < 20ms              | ~10ms (IndexedDB)           |
-| File tree initial load (root only)  | < 100ms             | ~2s (full recursive)        |
-| Background refresh after mutation   | < 200ms (debounced) | ~500ms-5s (immediate, full) |
-| Folder expand (lazy load)           | < 100ms perceived   | N/A (not implemented)       |
-| Watch event -> kernel invalidate    | < 25ms p95          | N/A (not implemented)       |
-| Watch event -> UI tree patch        | < 75ms p95          | N/A (not implemented)       |
-| Sustained edit burst (100 events)   | 0 silent drops      | N/A (not implemented)       |
-| Bulk import (6265 files)            | < 5s                | ~143s (sequential ZenFS)    |
-| `getDirectoryStat` (6265 files)     | < 10ms (in-memory)  | ~2s (sequential IDB tx)     |
+| Operation                           | Target              | Current                           |
+| ----------------------------------- | ------------------- | --------------------------------- |
+| Shallow directory read (20 entries) | < 50ms              | ~30ms (IndexedDB)                 |
+| Single file read (source, <100KB)   | < 20ms              | ~10ms (IndexedDB)                 |
+| File tree initial load (root only)  | < 100ms             | ~2s (full recursive)              |
+| Background refresh after mutation   | < 200ms (debounced) | ~500ms-5s (immediate, full)       |
+| Folder expand (lazy load)           | < 100ms perceived   | N/A (not implemented)             |
+| Watch event -> kernel invalidate    | < 25ms p95          | N/A (not implemented)             |
+| Watch event -> UI tree patch        | < 75ms p95          | N/A (not implemented)             |
+| Sustained edit burst (100 events)   | 0 silent drops      | N/A (not implemented)             |
+| Bulk import (6265 files)            | < 5s                | ~143s (sequential, pre-DirectIdb) |
+| `getDirectoryStat` (6265 files)     | < 10ms (in-memory)  | ~2s (sequential IDB tx)           |

@@ -4,22 +4,50 @@
  */
 
 import type { FileExtension } from '@taucad/types';
+import type { RuntimeContentKey } from '#types/runtime-content.types.js';
 
-/** Phantom type brand for carrying per-format export option type information. */
-declare const __exportSchemas: unique symbol;
+/** Capability discriminants used by the runtime manifest. @public */
+export const runtimeCapabilityKinds = ['kernel', 'middleware', 'bundler', 'transcoder'] as const;
 
-/** Phantom type brand for carrying kernel render option type information. */
-declare const __renderSchema: unique symbol;
+/** Capability discriminant used by runtime registrations. @public */
+export type RuntimePluginKind = (typeof runtimeCapabilityKinds)[number];
 
-/** Phantom type brand for carrying the kernel's literal identifier. */
+declare const __exportFormats: unique symbol;
+declare const __renderOptions: unique symbol;
 declare const __kernelId: unique symbol;
+declare const __renderContent: unique symbol;
+declare const __exportContent: unique symbol;
+declare const __middlewareRenderContent: unique symbol;
+declare const __middlewareExportContent: unique symbol;
+declare const __transcodeEdges: unique symbol;
+declare const __transcodeFrom: unique symbol;
+declare const __transcoderId: unique symbol;
+declare const __transcodeContent: unique symbol;
+declare const __transcodePinnedSourceOptions: unique symbol;
 
 /**
- * Registration object for a kernel plugin. Returned by factory functions like `replicad()`.
+ * Permissions declared by a runtime plugin for store and host review.
+ * This metadata is declarative only; the runtime does not enforce it.
+ * @public
+ */
+export type RuntimePluginPermissions = {
+  readonly network?: readonly string[];
+  readonly filesystemWrite?: boolean;
+};
+
+/** Shared declaration metadata carried by every runtime plugin registration. @public */
+export type RuntimePluginDeclaration = {
+  /** Declarative review metadata; runtime execution does not enforce these permissions. */
+  readonly permissions?: RuntimePluginPermissions;
+};
+
+/**
+ * Registration object for a kernel plugin. Returned by the package-named alias such as `replicad` from
+ * `@taucad/replicad`, bound to the canonical `plugin` export.
  *
  * The `FormatMap` phantom type parameter carries compile-time type information
  * about the per-format export option schemas. The `RenderOptions` phantom carries
- * the kernel's render option types from its `renderSchema`. The `Id` phantom
+ * the kernel's render option types from its `render.optionsSchema`. The `Id` phantom
  * carries the literal kernel identifier so consumers can derive
  * {@link CollectKernelIds} via {@link createRuntimeClient}'s plugin tuple,
  * keeping {@link RuntimeClient.bestRouteFor} type-safe end-to-end.
@@ -27,8 +55,9 @@ declare const __kernelId: unique symbol;
  * None of the phantoms are stored at runtime.
  *
  * @template FormatMap - Mapping from format strings to their inferred option types
- * @template RenderOptions - Kernel render option types inferred from renderSchema
+ * @template RenderOptions - Kernel render option types inferred from render.optionsSchema
  * @template Id - Literal kernel identifier (e.g. `'replicad'`, `'jscad'`)
+ * @template Extensions - Literal source-extension tuple declared by the kernel
  * @public
  */
 export type KernelPlugin<
@@ -36,13 +65,16 @@ export type KernelPlugin<
   FormatMap extends Record<string, unknown> = {},
   RenderOptions = Record<string, unknown>,
   Id extends string = string,
-> = {
+  RenderContent extends RuntimeContentKey = RuntimeContentKey,
+  ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
+  Extensions extends readonly string[] = readonly string[],
+> = RuntimePluginDeclaration & {
   /** Unique identifier for this kernel */
   id: Id;
-  /** URL of the kernel module (resolved via import.meta.url) */
-  moduleUrl: string;
   /** File extensions this kernel handles (e.g., ['scad'], ['ts', 'js']). '*' is a catch-all. */
-  extensions: string[];
+  extensions: Extensions;
+  /** Export formats declared by the kernel definition. */
+  exportFormats?: readonly string[];
   /** Regex to match against file content for kernel selection */
   detectImport?: RegExp;
   /** Bare-specifier module names this kernel provides for bundler-assisted detection */
@@ -52,67 +84,66 @@ export type KernelPlugin<
   /**
    * Phantom type brand — carries format-to-options type information at
    * compile time only. Marked `@internal` so doc generators filter it
-   * before serialization (the symbol's TS-internal display name
-   * contains literal `@` characters that break MDX/JSX parsers).
+   * before serialization.
    *
    * @internal
    */
-  readonly [__exportSchemas]?: FormatMap;
+  readonly [__exportFormats]?: FormatMap;
   /**
    * Phantom type brand — carries render option type information at
-   * compile time only. See `[__exportSchemas]` for `@internal` rationale.
+   * compile time only. See `[__exportFormats]` for `@internal` rationale.
    *
    * @internal
    */
-  readonly [__renderSchema]?: RenderOptions;
+  readonly [__renderOptions]?: RenderOptions;
   /**
    * Phantom type brand — carries the kernel's literal identifier at
-   * compile time only. See `[__exportSchemas]` for `@internal` rationale.
+   * compile time only. See `[__exportFormats]` for `@internal` rationale.
    *
    * @internal
    */
   readonly [__kernelId]?: Id;
+  /** @internal */
+  readonly [__renderContent]?: { readonly keys: RenderContent };
+  /** @internal */
+  readonly [__exportContent]?: ExportContent;
 };
 
 /**
  * Registration object for a middleware plugin. Returned by factory functions like `parameterCache()`.
  * @public
  */
-export type MiddlewarePlugin = {
+export type MiddlewarePlugin<
+  Id extends string = string,
+  RenderContent extends RuntimeContentKey = RuntimeContentKey,
+  ExportContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
+> = RuntimePluginDeclaration & {
   /** Unique identifier for this middleware */
-  id: string;
-  /** URL of the middleware module */
-  moduleUrl: string;
+  id: Id;
   /** Middleware-specific options */
   options?: Record<string, unknown>;
+  /** @internal */
+  readonly [__middlewareRenderContent]?: { readonly keys: RenderContent };
+  /** @internal */
+  readonly [__middlewareExportContent]?: ExportContent;
 };
 
 /**
- * Registration object for a bundler plugin. Returned by factory functions like `esbuild()`.
+ * Registration object for a bundler plugin. Returned by the package-named alias such as `esbuild` from
+ * `@taucad/esbuild`, bound to the canonical `plugin` export.
  * @public
  */
-export type BundlerPlugin = {
+export type BundlerPlugin<Id extends string = string> = RuntimePluginDeclaration & {
   /** Unique identifier for this bundler */
-  id: string;
-  /** URL of the bundler module */
-  moduleUrl: string;
+  id: Id;
   /** File extensions this bundler handles */
-  extensions: string[];
+  extensions: readonly string[];
   /** Bundler-specific options */
   options?: Record<string, unknown>;
 };
 
-/** Phantom type brand for carrying transcoder edge option type information. */
-declare const __transcodeEdges: unique symbol;
-
-/** Phantom type brand for carrying the transcoder's source format. */
-declare const __transcodeFrom: unique symbol;
-
-/** Phantom type brand for carrying the transcoder's literal identifier. */
-declare const __transcoderId: unique symbol;
-
 /**
- * Registration object for a transcoder plugin. Returned by factory functions like `converterTranscoder()`.
+ * Registration object for a transcoder plugin. Returned by `defineTranscoder(...)` factories.
  *
  * The `EdgeMap` phantom type parameter carries compile-time type information
  * about per-target-format option schemas from statically declared edges.
@@ -134,18 +165,19 @@ export type TranscoderPlugin<
   EdgeMap extends Record<string, unknown> = {},
   From extends string = string,
   Id extends string = string,
-> = {
+  EdgeContent extends Record<string, RuntimeContentKey> = Record<string, RuntimeContentKey>,
+  PinnedSourceOptions extends Record<string, PropertyKey> = Record<string, PropertyKey>,
+> = RuntimePluginDeclaration & {
   /** Unique identifier for this transcoder */
   id: Id;
-  /** URL of the transcoder module */
-  moduleUrl: string;
+  /** Single-hop format edges declared by the transcoder definition. */
+  edges?: ReadonlyArray<{ readonly from: string; readonly to: string }>;
   /** Transcoder-specific options */
   options?: Record<string, unknown>;
   /**
    * Phantom type brand — carries edge option type information at
    * compile time only. Marked `@internal` so doc generators filter it
-   * before serialization (the symbol's TS-internal display name
-   * contains literal `@` characters that break MDX/JSX parsers).
+   * before serialization.
    *
    * @internal
    */
@@ -165,12 +197,67 @@ export type TranscoderPlugin<
    * @internal
    */
   readonly [__transcoderId]?: Id;
+  /** @internal */
+  readonly [__transcodeContent]?: EdgeContent;
+  /** @internal */
+  readonly [__transcodePinnedSourceOptions]?: PinnedSourceOptions;
 };
+
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type projections intentionally accept any plugin generic instantiation
+type AnyKernelPlugin = KernelPlugin<any, any, any, any, any, any>;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type projections intentionally accept any plugin generic instantiation
+type AnyTranscoderPlugin = TranscoderPlugin<any, any, any, any, any>;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- type projections intentionally accept any plugin generic instantiation
+type AnyMiddlewarePlugin = MiddlewarePlugin<any, any, any>;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary kernel plugin generics
+type KernelFormatMapOf<P> = P extends KernelPlugin<infer FormatMap, any, any, any, any> ? FormatMap : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary kernel plugin generics
+type KernelRenderOptionsOf<P> = P extends KernelPlugin<any, infer RenderOptions, any, any, any> ? RenderOptions : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary kernel plugin generics
+type KernelIdOf<P> = P extends KernelPlugin<any, any, infer Id, any, any> ? Id : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary kernel plugin generics
+type KernelExtensionsOf<P> = P extends KernelPlugin<any, any, any, any, any, infer Extensions> ? Extensions : never;
+type KernelRenderContentOf<P> = P extends {
+  readonly [__renderContent]?: { readonly keys: infer Content };
+}
+  ? Extract<Content, RuntimeContentKey>
+  : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary kernel plugin generics
+type KernelExportContentMapOf<P> = P extends KernelPlugin<any, any, any, any, infer Content> ? Content : never;
+type MiddlewareRenderContentOf<P> = P extends {
+  readonly [__middlewareRenderContent]?: { readonly keys: infer Content };
+}
+  ? Extract<Content, RuntimeContentKey>
+  : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary middleware plugin generics
+type MiddlewareExportContentMapOf<P> = P extends MiddlewarePlugin<any, any, infer Content> ? Content : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary transcoder plugin generics
+type TranscoderEdgeMapOf<T> = T extends TranscoderPlugin<infer EdgeMap, any, any, any, any> ? EdgeMap : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary transcoder plugin generics
+type TranscoderFromOf<T> = T extends TranscoderPlugin<any, infer From, any, any, any> ? From : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary transcoder plugin generics
+type TranscoderIdOf<T> = T extends TranscoderPlugin<any, any, infer Id, any, any> ? Id : never;
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- conditional inference over arbitrary transcoder plugin generics
+type TranscoderContentMapOf<T> = T extends TranscoderPlugin<any, any, any, infer Content, any> ? Content : never;
+type TranscoderPinnedSourceOptionsMapOf<T> =
+  T extends TranscoderPlugin<
+    // oxlint-disable-next-line typescript/no-explicit-any -- Conditional inference over arbitrary transcoder plugin generics.
+    any,
+    // oxlint-disable-next-line typescript/no-explicit-any -- Conditional inference over arbitrary transcoder plugin generics.
+    any,
+    // oxlint-disable-next-line typescript/no-explicit-any -- Conditional inference over arbitrary transcoder plugin generics.
+    any,
+    // oxlint-disable-next-line typescript/no-explicit-any -- Conditional inference over arbitrary transcoder plugin generics.
+    any,
+    infer Pinned
+  >
+    ? Pinned
+    : never;
 
 /**
  * Collects the union of all export format string literals from an array of kernel plugins.
  * Derives formats from the phantom `FormatMap` type parameter. Falls back to `string` when
- * no kernel declares `exportSchemas`.
+ * no kernel declares `exportFormats`.
  *
  * @public
  *
@@ -186,8 +273,7 @@ export type TranscoderPlugin<
  * // 'stl' | 'step' | 'glb' | 'gltf'
  * ```
  */
-// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- variance: accepts any KernelPlugin generic
-export type CollectExportFormats<Plugins extends readonly KernelPlugin<any, any, any>[]> =
+export type CollectExportFormats<Plugins extends readonly AnyKernelPlugin[]> =
   keyof CollectFormatMap<Plugins> extends never ? FileExtension : FileExtension & keyof CollectFormatMap<Plugins>;
 
 /**
@@ -196,7 +282,7 @@ export type CollectExportFormats<Plugins extends readonly KernelPlugin<any, any,
  * distributive conditional behavior so a union value type does not split
  * the test.
  *
- * @internal
+ * @public
  */
 type IsRecordStringNever<T> = string extends keyof T ? ([T[string]] extends [never] ? true : false) : false;
 
@@ -209,7 +295,7 @@ type IsRecordStringNever<T> = string extends keyof T ? ([T[string]] extends [nev
  * shape — concrete schemas, `Record<string, unknown>`, `{}`, indexed types —
  * is passed through untouched.
  *
- * @internal
+ * @public
  */
 type FilterEmpty<T> = IsRecordStringNever<T> extends true ? never : T;
 
@@ -230,40 +316,33 @@ type FilterEmpty<T> = IsRecordStringNever<T> extends true ? never : T;
  *
  * @internal
  */
-/* oxlint-disable @typescript-eslint/no-explicit-any -- variance: matches arbitrary KernelPlugin generics */
-type ContributorFor<P, K extends string> =
-  P extends KernelPlugin<infer M, any, any> ? (K extends keyof M ? FilterEmpty<M[K]> : never) : never;
-/* oxlint-enable @typescript-eslint/no-explicit-any */
+type ContributorFor<P, K extends string> = K extends keyof KernelFormatMapOf<P>
+  ? FilterEmpty<KernelFormatMapOf<P>[K]>
+  : never;
 
 /**
  * Collects the unified format-to-options map from an array of kernel plugins.
  *
- * For each format key, intersects the option types contributed by every kernel
- * that declares that format. Empty placeholders that resolve to
+ * For each format key, unions the option types contributed by every kernel
+ * that declares that format. A client call does not statically identify the
+ * active kernel, so requiring the intersection would incorrectly require one
+ * bag to satisfy every kernel route at once. Empty placeholders that resolve to
  * `Record<string, never>` (typically `z.object({})` in Zod 4) are filtered
  * out via `FilterEmpty<T>` before reaching the union — they would
  * otherwise annihilate concrete contributors at the intersection step. When
  * every contributor is the placeholder, the per-key union collapses to `never`
  * and `UnionToIntersection<never>` falls back to `unknown`.
  *
- * Works uniformly for tuple inputs (e.g. inline plugin arrays passed directly
- * to `createRuntimeClient`) and for general array inputs (e.g.
- * `presets.all().kernels` typed as `(PluginA | PluginB | …)[]`) because the
+ * Works uniformly for tuple inputs and for widened application-owned plugin
+ * arrays typed as `(PluginA | PluginB | …)[]` because the
  * per-plugin filter is dispatched through `ContributorFor`, whose naked type
  * parameter forces the conditional to distribute over the union.
  *
  * @public
  */
-/* oxlint-disable @typescript-eslint/no-explicit-any -- variance: accepts any KernelPlugin generic */
-/**
- *
- */
-export type CollectFormatMap<Plugins extends readonly KernelPlugin<any, any, any>[]> = {
-  [K in keyof UnionToIntersection<
-    Plugins[number] extends KernelPlugin<infer M, any, any> ? M : never
-  >]: UnionToIntersection<ContributorFor<Plugins[number], K & string>>;
+export type CollectFormatMap<Plugins extends readonly AnyKernelPlugin[]> = {
+  [K in keyof UnionToIntersection<KernelFormatMapOf<Plugins[number]>>]: ContributorFor<Plugins[number], K & string>;
 };
-/* oxlint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * Drops the default `Record<string, unknown>` phantom from a render-options
@@ -280,23 +359,26 @@ type FilterDefaultRender<T> = T extends Record<string, unknown> ? (Record<string
  * Each kernel's `RenderOptions` phantom type is extracted and combined as a union,
  * so consumers can pass any registered kernel's render options.
  *
- * The default `Record<string, unknown>` phantom (kernels without `renderSchema`)
+ * The default `Record<string, unknown>` phantom (kernels without `render.optionsSchema`)
  * is filtered from the union via `FilterDefaultRender<T>` to prevent it from
  * swallowing concrete contributors via index-signature subsumption. When every
  * contributor is the default phantom, the result falls back to
- * `Record<string, unknown>` so no-renderSchema setups still typecheck.
+ * `Record<string, unknown>` so no-render-options-schema setups still typecheck.
  *
  * @public
  */
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: conditional inference over heterogeneous plugin tuples
-export type CollectRenderOptions<Plugins extends readonly KernelPlugin<any, any, any>[]> = [
-  Plugins[number] extends KernelPlugin<any, infer R, any> ? FilterDefaultRender<R> : never,
+type CollectSingletonRenderOptions<Plugins extends readonly AnyKernelPlugin[]> = [
+  FilterDefaultRender<KernelRenderOptionsOf<Plugins[number]>>,
 ] extends [never]
   ? Record<string, unknown>
-  : Plugins[number] extends KernelPlugin<any, infer R, any>
-    ? FilterDefaultRender<R>
-    : never;
-// oxlint-enable @typescript-eslint/no-explicit-any
+  : FilterDefaultRender<KernelRenderOptionsOf<Plugins[number]>>;
+
+/** @public */
+export type CollectRenderOptions<Plugins extends readonly AnyKernelPlugin[]> = Plugins extends readonly [
+  AnyKernelPlugin,
+]
+  ? CollectSingletonRenderOptions<Plugins>
+  : Record<string, unknown>;
 
 /**
  * Collects the union of all literal kernel ids declared by an array of kernel
@@ -323,15 +405,16 @@ export type CollectRenderOptions<Plugins extends readonly KernelPlugin<any, any,
  * // 'replicad' | 'jscad'
  * ```
  */
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: conditional inference over heterogeneous plugin tuples
-export type CollectKernelIds<Plugins extends readonly KernelPlugin<any, any, any>[]> = [
-  Plugins[number] extends KernelPlugin<any, any, infer Id> ? FilterDefaultKernelId<Id> : never,
+export type CollectKernelIds<Plugins extends readonly AnyKernelPlugin[]> = [
+  FilterDefaultKernelId<KernelIdOf<Plugins[number]>>,
 ] extends [never]
   ? string
-  : Plugins[number] extends KernelPlugin<any, any, infer Id>
-    ? FilterDefaultKernelId<Id>
-    : never;
-// oxlint-enable @typescript-eslint/no-explicit-any
+  : FilterDefaultKernelId<KernelIdOf<Plugins[number]>>;
+
+/** Collects the source-extension literals declared by a kernel tuple. @public */
+export type CollectKernelExtensions<Plugins extends readonly AnyKernelPlugin[]> = KernelExtensionsOf<
+  Plugins[number]
+>[number];
 
 /**
  * Collapses the default `string` `Id` generic to `never` so erased plugins do
@@ -342,7 +425,6 @@ export type CollectKernelIds<Plugins extends readonly KernelPlugin<any, any, any
  */
 type FilterDefaultKernelId<T> = string extends T ? never : T;
 
-// oxlint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-restricted-types, @typescript-eslint/no-empty-object-type -- variance + empty-tuple sentinel
 /**
  * Collects the unified edge-to-options map from an array of transcoder plugins.
  * Merges all phantom `EdgeMap` types into a single map via intersection then simplification.
@@ -353,24 +435,21 @@ type FilterDefaultKernelId<T> = string extends T ? never : T;
  *
  * @public
  */
-export type CollectTranscodeMap<Transcoders extends readonly TranscoderPlugin<any, any, any>[]> =
-  Transcoders extends readonly [] ? {} : CollectTranscodeMapInner<Transcoders>;
+export type CollectTranscodeMap<Transcoders extends readonly AnyTranscoderPlugin[]> = Transcoders['length'] extends 0
+  ? Record<never, never>
+  : CollectTranscodeMapInner<Transcoders>;
 
-type CollectTranscodeMapInner<Transcoders extends readonly TranscoderPlugin<any, any, any>[]> = {
-  [K in keyof UnionToIntersection<
-    Transcoders[number] extends TranscoderPlugin<infer E, any, any> ? E : never
-  >]: UnionToIntersection<Transcoders[number] extends TranscoderPlugin<infer E, any, any> ? E : never>[K];
+type CollectTranscodeMapInner<Transcoders extends readonly AnyTranscoderPlugin[]> = {
+  [K in keyof UnionToIntersection<TranscoderEdgeMapOf<Transcoders[number]>>]: UnionToIntersection<
+    TranscoderEdgeMapOf<Transcoders[number]>
+  >[K];
 };
-// oxlint-enable @typescript-eslint/no-explicit-any
-
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: conditional inference over heterogeneous transcoder tuples
 
 /** Extract the `EdgeMap` phantom from a `TranscoderPlugin`. */
-type ExtractEdgeMap<T extends TranscoderPlugin<any, any, any>> =
-  T extends TranscoderPlugin<infer E, any, any> ? E : never;
+type ExtractEdgeMap<T extends AnyTranscoderPlugin> = TranscoderEdgeMapOf<T>;
 
 /** Extract the `From` phantom from a `TranscoderPlugin`. */
-type ExtractFrom<T extends TranscoderPlugin<any, any, any>> = T extends TranscoderPlugin<any, infer F, any> ? F : never;
+type ExtractFrom<T extends AnyTranscoderPlugin> = TranscoderFromOf<T>;
 
 /**
  * For a single transcoder, compute merged target options.
@@ -384,9 +463,18 @@ type ExtractFrom<T extends TranscoderPlugin<any, any, any>> = T extends Transcod
  * this layer, so transcoded targets see a usable intersection rather than the
  * `Record<string, never>` annihilator.
  */
-type MergedEdgesForTranscoder<FormatMap extends Record<string, unknown>, T extends TranscoderPlugin<any, any, any>> = {
+type PinnedSourceOptionKeys<
+  T extends AnyTranscoderPlugin,
+  Target,
+> = Target extends keyof TranscoderPinnedSourceOptionsMapOf<T>
+  ? Extract<TranscoderPinnedSourceOptionsMapOf<T>[Target], PropertyKey>
+  : never;
+
+type OmitPinnedSourceOptions<Source, Keys extends PropertyKey> = Source extends unknown ? Omit<Source, Keys> : never;
+
+type MergedEdgesForTranscoder<FormatMap extends Record<string, unknown>, T extends AnyTranscoderPlugin> = {
   [Target in keyof ExtractEdgeMap<T>]: ExtractFrom<T> extends keyof FormatMap
-    ? FormatMap[ExtractFrom<T>] & ExtractEdgeMap<T>[Target]
+    ? OmitPinnedSourceOptions<FormatMap[ExtractFrom<T>], PinnedSourceOptionKeys<T, Target>> & ExtractEdgeMap<T>[Target]
     : ExtractEdgeMap<T>[Target];
 };
 
@@ -396,10 +484,10 @@ type MergedEdgesForTranscoder<FormatMap extends Record<string, unknown>, T exten
  */
 type MergedTranscoderEdges<
   FormatMap extends Record<string, unknown>,
-  Transcoders extends readonly TranscoderPlugin<any, any, any>[],
+  Transcoders extends readonly AnyTranscoderPlugin[],
 > = UnionToIntersection<
   Transcoders[number] extends infer T
-    ? T extends TranscoderPlugin<any, any, any>
+    ? T extends AnyTranscoderPlugin
       ? MergedEdgesForTranscoder<FormatMap, T>
       : never
     : never
@@ -420,13 +508,10 @@ type MergedTranscoderEdges<
  *
  * @public
  */
-// oxlint-disable-next-line @typescript-eslint/no-restricted-types, @typescript-eslint/no-empty-object-type -- empty-tuple sentinel
 export type MergeExportMap<
   FormatMap extends Record<string, unknown>,
-  Transcoders extends readonly TranscoderPlugin<any, any, any>[],
-> = Transcoders extends readonly [] ? FormatMap : FormatMap & MergedTranscoderEdges<FormatMap, Transcoders>;
-
-// oxlint-enable @typescript-eslint/no-explicit-any
+  Transcoders extends readonly AnyTranscoderPlugin[],
+> = Transcoders['length'] extends 0 ? FormatMap : FormatMap & MergedTranscoderEdges<FormatMap, Transcoders>;
 
 type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (x: infer I) => void ? I : never;
 
@@ -466,15 +551,11 @@ type FilterDefaultTranscoderId<T> = string extends T ? never : T;
  * // 'converter'
  * ```
  */
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: conditional inference over heterogeneous transcoder tuples
-export type KnownTranscoderIds<Transcoders extends readonly TranscoderPlugin<any, any, any>[]> = [
-  Transcoders[number] extends TranscoderPlugin<any, any, infer Id> ? FilterDefaultTranscoderId<Id> : never,
+export type KnownTranscoderIds<Transcoders extends readonly AnyTranscoderPlugin[]> = [
+  FilterDefaultTranscoderId<TranscoderIdOf<Transcoders[number]>>,
 ] extends [never]
   ? string
-  : Transcoders[number] extends TranscoderPlugin<any, any, infer Id>
-    ? FilterDefaultTranscoderId<Id>
-    : never;
-// oxlint-enable @typescript-eslint/no-explicit-any
+  : FilterDefaultTranscoderId<TranscoderIdOf<Transcoders[number]>>;
 
 /**
  * Collects the union of all target formats declared by an array of transcoder
@@ -483,14 +564,12 @@ export type KnownTranscoderIds<Transcoders extends readonly TranscoderPlugin<any
  *
  * @public
  */
-// oxlint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-restricted-types -- variance + empty-tuple sentinel
-export type CollectTranscoderTargets<Transcoders extends readonly TranscoderPlugin<any, any, any>[]> =
-  Transcoders extends readonly []
+export type CollectTranscoderTargets<Transcoders extends readonly AnyTranscoderPlugin[]> =
+  Transcoders['length'] extends 0
     ? never
     : keyof CollectTranscodeMap<Transcoders> extends never
       ? FileExtension
       : FileExtension & keyof CollectTranscodeMap<Transcoders>;
-// oxlint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-restricted-types
 
 /**
  * Resolves to the union of every target format reachable from the given
@@ -500,12 +579,10 @@ export type CollectTranscoderTargets<Transcoders extends readonly TranscoderPlug
  *
  * @public
  */
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type KnownTargetFormats<
-  Kernels extends readonly KernelPlugin<any, any, any>[],
-  Transcoders extends readonly TranscoderPlugin<any, any, any>[],
+  Kernels extends readonly AnyKernelPlugin[],
+  Transcoders extends readonly AnyTranscoderPlugin[],
 > = CollectExportFormats<Kernels> | CollectTranscoderTargets<Transcoders>;
-// oxlint-enable @typescript-eslint/no-explicit-any
 
 /**
  * Resolves to the union of every source format the registered kernels can
@@ -515,9 +592,7 @@ export type KnownTargetFormats<
  *
  * @public
  */
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: alias over heterogeneous kernel tuples
-export type KnownSourceFormats<Kernels extends readonly KernelPlugin<any, any, any>[]> = CollectExportFormats<Kernels>;
-// oxlint-enable @typescript-eslint/no-explicit-any
+export type KnownSourceFormats<Kernels extends readonly AnyKernelPlugin[]> = CollectExportFormats<Kernels>;
 
 /**
  * Projects the typed-options key union for {@link RuntimeClient.export}. When
@@ -527,16 +602,14 @@ export type KnownSourceFormats<Kernels extends readonly KernelPlugin<any, any, a
  * falls back to {@link KnownTargetFormats} so the wide-default client still
  * accepts any `FileExtension` on `export`.
  *
- * @internal
+ * @public
  */
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type ExportFormatsFor<
-  Kernels extends readonly KernelPlugin<any, any, any>[],
-  Transcoders extends readonly TranscoderPlugin<any, any, any>[],
+  Kernels extends readonly AnyKernelPlugin[],
+  Transcoders extends readonly AnyTranscoderPlugin[],
 > = keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders> & string extends never
   ? KnownTargetFormats<Kernels, Transcoders>
   : keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders> & string;
-// oxlint-enable @typescript-eslint/no-explicit-any
 
 /**
  * Projects the per-format options type for {@link RuntimeClient.export}. When
@@ -544,21 +617,21 @@ export type ExportFormatsFor<
  * options. Otherwise falls back to `Record<string, unknown> | undefined` so the
  * wide-default client still accepts arbitrary options.
  *
- * @internal
+ * @public
  */
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: bag projection over heterogeneous tuples
 export type ExportOptionsFor<
-  Kernels extends readonly KernelPlugin<any, any, any>[],
-  Transcoders extends readonly TranscoderPlugin<any, any, any>[],
+  Kernels extends readonly AnyKernelPlugin[],
+  Transcoders extends readonly AnyTranscoderPlugin[],
   F,
-> = F extends keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders>
-  ? MergeExportMap<CollectFormatMap<Kernels>, Transcoders>[F]
-  : Record<string, unknown> | undefined;
-// oxlint-enable @typescript-eslint/no-explicit-any
+> = Kernels extends readonly [AnyKernelPlugin]
+  ? F extends keyof MergeExportMap<CollectFormatMap<Kernels>, Transcoders>
+    ? MergeExportMap<CollectFormatMap<Kernels>, Transcoders>[F]
+    : Record<string, unknown> | undefined
+  : Record<string, unknown>;
 
 /**
  * Resolves the render-options input type for a specific kernel id within a
- * `Kernels` bag. Used by {@link KernelRenderSchema} to narrow `defaults` per
+ * `Kernels` bag. Used by {@link RenderCapability} to narrow `defaults` per
  * kernel rather than collapsing every kernel's render options into a single
  * union via {@link CollectRenderOptions}.
  *
@@ -567,9 +640,112 @@ export type ExportOptionsFor<
  *
  * @public
  */
-// oxlint-disable @typescript-eslint/no-explicit-any -- variance: per-kernel projection over heterogeneous tuples
-export type RenderOptionsFor<Kernels extends readonly KernelPlugin<any, any, any>[], Kernel extends string> =
-  Extract<Kernels[number], KernelPlugin<any, any, Kernel>> extends KernelPlugin<any, infer R, Kernel>
+export type RenderOptionsFor<Kernels extends readonly AnyKernelPlugin[], Kernel extends string> =
+  Extract<Kernels[number], KernelPlugin<Record<string, unknown>, unknown, Kernel>> extends KernelPlugin<
+    Record<string, unknown>,
+    infer R,
+    Kernel
+  >
     ? R
     : Record<string, unknown>;
-// oxlint-enable @typescript-eslint/no-explicit-any
+
+/* oxlint-disable typescript/no-explicit-any -- Conditional extraction needs wildcard instantiations of the public plugin phantom types. */
+/** Content keys contributed by one concrete kernel render route. @public */
+export type KernelRenderContentFor<Kernels extends readonly AnyKernelPlugin[], Kernel extends string> =
+  Extract<Kernels[number], KernelPlugin<any, any, Kernel, any, any>> extends infer Plugin
+    ? Plugin extends AnyKernelPlugin
+      ? KernelRenderContentOf<Plugin>
+      : never
+    : never;
+
+/** Content keys contributed by enabled middleware to every render route. @public */
+export type MiddlewareRenderContentFor<Middleware extends readonly AnyMiddlewarePlugin[]> = MiddlewareRenderContentOf<
+  Middleware[number]
+>;
+
+/** Content keys supported by one composed render route. @public */
+export type RenderContentFor<
+  Kernels extends readonly AnyKernelPlugin[],
+  Middleware extends readonly AnyMiddlewarePlugin[],
+  Kernel extends string = CollectKernelIds<Kernels>,
+> = string extends Kernel
+  ? RuntimeContentKey
+  : KernelRenderContentFor<Kernels, Kernel> | MiddlewareRenderContentFor<Middleware>;
+
+type NativeExportContentForPlugin<Plugin, Format extends string> = Plugin extends AnyKernelPlugin
+  ? Format extends keyof KernelFormatMapOf<Plugin>
+    ? Format extends keyof KernelExportContentMapOf<Plugin>
+      ? Extract<KernelExportContentMapOf<Plugin>[Format], RuntimeContentKey>
+      : never
+    : never
+  : never;
+
+/** Content keys contributed by native kernel exports for a source format. @public */
+export type KernelExportContentFor<
+  Kernels extends readonly AnyKernelPlugin[],
+  Format extends string,
+  Kernel extends string = CollectKernelIds<Kernels>,
+> = NativeExportContentForPlugin<Extract<Kernels[number], KernelPlugin<any, any, Kernel, any, any>>, Format>;
+/* oxlint-enable typescript/no-explicit-any -- End wildcard phantom-type extraction. */
+
+type MiddlewareExportContentForPlugin<Plugin, Format extends string> = Plugin extends AnyMiddlewarePlugin
+  ? Format extends keyof MiddlewareExportContentMapOf<Plugin>
+    ? Extract<MiddlewareExportContentMapOf<Plugin>[Format], RuntimeContentKey>
+    : never
+  : never;
+
+/** Content keys contributed by middleware to a source export format. @public */
+export type MiddlewareExportContentFor<
+  Middleware extends readonly AnyMiddlewarePlugin[],
+  Format extends string,
+> = MiddlewareExportContentForPlugin<Middleware[number], Format>;
+
+/** Content keys available after producing one source-format artifact. @public */
+export type SourceContentFor<
+  Kernels extends readonly AnyKernelPlugin[],
+  Middleware extends readonly AnyMiddlewarePlugin[],
+  Format extends string,
+  Kernel extends string = CollectKernelIds<Kernels>,
+> = KernelExportContentFor<Kernels, Format, Kernel> | MiddlewareExportContentFor<Middleware, Format>;
+
+type DirectContentFor<
+  Kernels extends readonly AnyKernelPlugin[],
+  Middleware extends readonly AnyMiddlewarePlugin[],
+  Target extends string,
+  Kernel extends string,
+> = Target extends keyof CollectFormatMap<Kernels> ? SourceContentFor<Kernels, Middleware, Target, Kernel> : never;
+
+type TranscodedContentForPlugin<
+  Kernels extends readonly AnyKernelPlugin[],
+  Middleware extends readonly AnyMiddlewarePlugin[],
+  Plugin,
+  Target extends string,
+  Kernel extends string,
+> = Plugin extends AnyTranscoderPlugin
+  ? Target extends keyof TranscoderEdgeMapOf<Plugin>
+    ? Extract<
+        SourceContentFor<Kernels, Middleware, ExtractFrom<Plugin>, Kernel>,
+        Target extends keyof TranscoderContentMapOf<Plugin>
+          ? Extract<TranscoderContentMapOf<Plugin>[Target], RuntimeContentKey>
+          : never
+      >
+    : never
+  : never;
+
+/**
+ * Content keys supported by at least one concrete route to a target format.
+ * Runtime selection still validates the requested subset against the chosen
+ * concrete route before any parameter extraction or geometry work.
+ * @public
+ */
+export type ExportContentFor<
+  Kernels extends readonly AnyKernelPlugin[],
+  Middleware extends readonly AnyMiddlewarePlugin[],
+  Transcoders extends readonly AnyTranscoderPlugin[],
+  Target extends string,
+  Kernel extends string = CollectKernelIds<Kernels>,
+> = string extends Kernel
+  ? RuntimeContentKey
+  :
+      | DirectContentFor<Kernels, Middleware, Target, Kernel>
+      | TranscodedContentForPlugin<Kernels, Middleware, Transcoders[number], Target, Kernel>;

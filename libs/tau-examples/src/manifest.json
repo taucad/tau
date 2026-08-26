@@ -1,7 +1,19 @@
 [
   {
+    "kernel": "build123d",
+    "name": "v8-engine-brep",
+    "mainFile": "main.py",
+    "files": ["main.py"]
+  },
+  {
     "kernel": "jscad",
     "name": "cube",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "cube-cylinder-section-fixture",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
@@ -13,7 +25,79 @@
   },
   {
     "kernel": "jscad",
+    "name": "edge-occlusion-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
     "name": "gear",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "non-manifold-section-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-cap-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-overlap-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-overlap-heavy-planetary-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-overlap-heavy-v8-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "jscad",
+    "name": "section-picking-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "manifold",
+    "name": "manifold-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "main.ts", "manifold.svg"]
+  },
+  {
+    "kernel": "occt",
+    "name": "v8-engine-brep",
+    "mainFile": "main.cpp",
+    "files": ["Makefile", "main.cpp", "v8-engine-brep-native"]
+  },
+  {
+    "kernel": "opencascade",
+    "name": "v8-engine-brep",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "openscad",
+    "name": "kitchen-sink",
+    "mainFile": "main.scad",
+    "files": ["main.scad"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "bambu-plate",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
@@ -61,7 +145,19 @@
   },
   {
     "kernel": "replicad",
+    "name": "flower-attachment-section-outline-fixture",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
     "name": "gridfinity-box",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "helical-gear",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   },
@@ -85,9 +181,39 @@
   },
   {
     "kernel": "replicad",
+    "name": "jscad-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "jscad.svg", "main.ts"]
+  },
+  {
+    "kernel": "replicad",
     "name": "lego",
     "mainFile": "main.ts",
     "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "logo.svg", "main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "logo-keychain",
+    "mainFile": "main.ts",
+    "files": ["assets/logo.svg", "logo-keychain.geospec.ts", "main.ts", "params.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "nanoraster-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "banner.svg", "generate-logo.ts", "main.ts", "nanoraster.svg", "wordmark.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "picovoxel-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "main.ts", "picovoxel.svg"]
   },
   {
     "kernel": "replicad",
@@ -100,6 +226,18 @@
     "name": "projection-test",
     "mainFile": "main.ts",
     "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "rao-nozzle",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "replicad-logo",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-logo.ts", "main.ts", "replicad.svg"]
   },
   {
     "kernel": "replicad",
@@ -133,9 +271,66 @@
   },
   {
     "kernel": "replicad",
+    "name": "tau-wordmark",
+    "mainFile": "main.ts",
+    "files": ["README.md", "generate-wordmark.ts", "main.ts", "wordmark.svg"]
+  },
+  {
+    "kernel": "replicad",
     "name": "tray",
     "mainFile": "main.ts",
     "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "v8-engine-rev2",
+    "files": [
+      "README.md",
+      "geospec/census.geospec.ts",
+      "geospec/deferred-frontiers.geospec.ts",
+      "geospec/dfm-structure.geospec.ts",
+      "geospec/fits.geospec.ts",
+      "geospec/flow-paths.geospec.ts",
+      "geospec/pin-retention.geospec.ts",
+      "geospec/sealing.geospec.ts",
+      "geospec/split-lines-fasteners.geospec.ts",
+      "geospec/valvetrain-drive.geospec.ts",
+      "lib/annotate.ts",
+      "lib/assembly.ts",
+      "lib/block.ts",
+      "lib/covers.ts",
+      "lib/crank.ts",
+      "lib/cranktrain.ts",
+      "lib/exhaust.ts",
+      "lib/fasteners.ts",
+      "lib/frame.ts",
+      "lib/head.ts",
+      "lib/induction.ts",
+      "lib/kinematics.ts",
+      "lib/params.ts",
+      "lib/piston-group.ts",
+      "lib/rod.ts",
+      "lib/valve-parts.ts",
+      "lib/valvetrain.ts",
+      "spec/census.ts",
+      "spec/contract-base.ts",
+      "spec/contract-motion.ts",
+      "spec/contract-structure.ts",
+      "spec/deferrals.ts",
+      "spec/fits.ts",
+      "spec/requirements.ts",
+      "test-exports/assembly.ts",
+      "test-exports/block.ts",
+      "test-exports/camshaft.ts",
+      "test-exports/connecting-rod.ts",
+      "test-exports/crankshaft.ts",
+      "test-exports/cylinder-head.ts",
+      "test-exports/exhaust-gasket.ts",
+      "test-exports/exhaust-header.ts",
+      "test-exports/front-cover.ts",
+      "test-exports/head-gasket.ts",
+      "test-exports/piston.ts"
+    ]
   },
   {
     "kernel": "replicad",
@@ -146,6 +341,12 @@
   {
     "kernel": "replicad",
     "name": "wavy-vase",
+    "mainFile": "main.ts",
+    "files": ["main.ts"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "wedge-door-stopper",
     "mainFile": "main.ts",
     "files": ["main.ts"]
   }

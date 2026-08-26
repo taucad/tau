@@ -6,20 +6,20 @@ import type { TestingModule } from '@nestjs/testing';
 import { Reflector } from '@nestjs/core';
 import type { FastifyReply } from 'fastify';
 import type { StreamTextResult as StreamTextResultType, ToolSet, UIMessage, UIMessageChunk } from 'ai';
+import { convertToModelMessages } from 'ai';
 import { toBaseMessages, toUIMessageStream } from '@ai-sdk/langchain';
 import type { ChatUsageTokens, MyUIMessage, ChatSnapshot, AgentConfig } from '@taucad/chat';
-import { ToolMessage } from '@langchain/core/messages';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { ModelService } from '#api/models/model.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
-import { GeometryAnalysisService } from '#api/analysis/geometry-analysis.service.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import type { CreateChatDto } from '#api/chat/chat.dto.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { CheckpointerService } from '#api/chat/checkpointer.service.js';
 import { EagerToolDispatchHandler } from '#api/chat/eager-dispatch/eager-tool-dispatch.handler.js';
+import { ProviderRequestRecorder } from '#api/chat/utils/provider-request-recorder.js';
 
 // Mock the @ai-sdk/langchain module
 vi.mock('@ai-sdk/langchain', () => ({
@@ -95,6 +95,8 @@ const commitNameAgent: AgentConfig = { profile: 'commit_name' };
 function createMockAgent(): {
   graph: {
     stream: ReturnType<typeof vi.fn>;
+    getState: ReturnType<typeof vi.fn>;
+    updateState: ReturnType<typeof vi.fn>;
   };
 } {
   const mockStream = new ReadableStream({
@@ -106,6 +108,8 @@ function createMockAgent(): {
   return {
     graph: {
       stream: vi.fn().mockResolvedValue(mockStream),
+      getState: vi.fn().mockResolvedValue({ values: { messages: [] } }),
+      updateState: vi.fn().mockImplementation(async (config: unknown) => config),
     },
   };
 }
@@ -151,13 +155,10 @@ describe('ChatController', () => {
   let chatService: ChatService;
   let module: TestingModule;
   let mockAgent: ReturnType<typeof createMockAgent>;
-  let checkpointGetTupleMock: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     // Reset all mocks before each test
     vi.clearAllMocks();
-
-    checkpointGetTupleMock = vi.fn().mockResolvedValue(null);
 
     mockAgent = createMockAgent();
 
@@ -168,6 +169,12 @@ describe('ChatController', () => {
     };
 
     const mockModelService = {
+      getProviderId: vi.fn().mockReturnValue('test-provider'),
+      getModelSupport: vi.fn().mockReturnValue({
+        tools: true,
+        toolChoice: true,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+      }),
       normalizeUsageTokens: vi.fn().mockImplementation((_modelId, usage) => usage as ChatUsageTokens),
       getModelCost: vi.fn().mockReturnValue({
         inputTokensCost: 0,
@@ -184,11 +191,9 @@ describe('ChatController', () => {
 
     const mockFileEditService = {};
 
-    const mockGeometryAnalysisService = {};
-
     const mockCheckpointerService = {
       getCheckpointer: vi.fn(() => ({
-        getTuple: checkpointGetTupleMock,
+        getTuple: vi.fn().mockResolvedValue(null),
       })),
     };
 
@@ -212,10 +217,6 @@ describe('ChatController', () => {
           useValue: mockFileEditService,
         },
         {
-          provide: GeometryAnalysisService,
-          useValue: mockGeometryAnalysisService,
-        },
-        {
           provide: MetricsService,
           useValue: new MetricsService(),
         },
@@ -223,6 +224,7 @@ describe('ChatController', () => {
           provide: CheckpointerService,
           useValue: mockCheckpointerService,
         },
+        ProviderRequestRecorder,
         Reflector,
       ],
     })
@@ -273,13 +275,15 @@ describe('ChatController', () => {
         {
           configurable: { thread_id: string };
           callbacks?: unknown[];
+          durability?: string;
           streamMode?: unknown;
           maxConcurrency?: number;
         },
       ];
       expect(streamArguments).toHaveProperty('messages');
       expect(Array.isArray(streamArguments.messages)).toBe(true);
-      expect(streamConfig.callbacks?.length).toBe(2);
+      expect(streamConfig.callbacks?.length).toBe(3);
+      expect(streamConfig.durability).toBe('exit');
       expect(streamConfig.streamMode).toEqual(['values', 'messages', 'custom']);
       expect(streamConfig.configurable.thread_id).toBe('chat_123');
       // Parallel tool calls run unthrottled. `maxConcurrency: 1` triggers an
@@ -289,67 +293,6 @@ describe('ChatController', () => {
       expect(streamConfig.maxConcurrency).toBeUndefined();
 
       expect(mockResponse.send).toHaveBeenCalled();
-    });
-
-    it('splices Postgres checkpoint ToolMessage values into stale assistant tool parts before toBaseMessages', async () => {
-      checkpointGetTupleMock.mockResolvedValueOnce({
-        checkpoint: {
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- LangGraph wire shape uses snake_case
-          channel_values: {
-            messages: [
-              new ToolMessage({
-                content: JSON.stringify({ merged: true }),
-                // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain wire shape uses snake_case
-                tool_call_id: 'cid_ck_merge_controller',
-              }),
-            ],
-          },
-        },
-      });
-
-      vi.mocked(toBaseMessages).mockClear();
-
-      const assistantMessage: MyUIMessage = {
-        id: 'm_as',
-        role: 'assistant',
-        parts: [
-          {
-            type: 'tool-create_file',
-            toolCallId: 'cid_ck_merge_controller',
-            state: 'input-available',
-            input: { targetFile: 'z.scad', content: '//' },
-          },
-        ],
-        metadata: { createdAt: 1 },
-      };
-
-      // Order matches the new chat-request contract: the assistant turn whose
-      // stale tool part the checkpoint splice repairs sits before the trailing
-      // user message that drives the current turn. Per-turn config lives on
-      // `body.agent`, not on the user message itself.
-      await controller.createChat(
-        {
-          id: 'chat_ck_merge_integration',
-          messages: [createMockUserMessage(), assistantMessage, createMockUserMessage()],
-          agent: cadAgent(),
-        } satisfies CreateChatDto,
-        createMockResponse(),
-      );
-
-      expect(checkpointGetTupleMock).toHaveBeenCalledTimes(1);
-      expect(checkpointGetTupleMock).toHaveBeenCalledWith({
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangGraph configurable uses snake_case
-        configurable: { thread_id: 'chat_ck_merge_integration' },
-      });
-
-      expect(vi.mocked(toBaseMessages)).toHaveBeenCalledTimes(1);
-      const passedIntoBase = vi.mocked(toBaseMessages).mock.calls[0]?.[0] as MyUIMessage[];
-      const splicedAssistant = passedIntoBase.find((message) => message.id === 'm_as');
-      expect(splicedAssistant?.parts[0]).toMatchObject({
-        toolCallId: 'cid_ck_merge_controller',
-        state: 'output-available',
-        output: { merged: true },
-      });
     });
 
     it('should use custom tool choice when provided', async () => {
@@ -401,6 +344,62 @@ describe('ChatController', () => {
       expect(chatService.getBuildNameGenerator).toHaveBeenCalled();
       expect(chatService.createAgent).not.toHaveBeenCalled();
       expect(mockResponse.send).toHaveBeenCalled();
+    });
+
+    it('should preserve image-only prompt parts through the project-name conversion boundary', async () => {
+      const mockResponse = createMockResponse();
+      const imageMessage: MyUIMessage = {
+        id: 'msg_image_name',
+        role: 'user',
+        parts: [
+          {
+            type: 'file',
+            mediaType: 'image/webp',
+            filename: 'reference.webp',
+            url: 'data:image/webp;base64,UklGRg==',
+          },
+        ],
+      };
+      const body = {
+        id: 'chat_image_name_gen',
+        messages: [imageMessage],
+        agent: projectNameAgent,
+      } satisfies CreateChatDto;
+      vi.mocked(chatService.getBuildNameGenerator).mockReturnValue(createMockStreamResult());
+
+      await controller.createChat(body, mockResponse);
+
+      expect(convertToModelMessages).toHaveBeenCalledWith([imageMessage]);
+      expect(chatService.getBuildNameGenerator).toHaveBeenCalledWith([{ role: 'user', content: 'test' }]);
+      expect(mockResponse.send).toHaveBeenCalled();
+    });
+
+    it('should reject an oversized project-name image before conversion or model invocation', async () => {
+      const mockResponse = createMockResponse();
+      const body = {
+        id: 'chat_oversized_image_name_gen',
+        messages: [
+          {
+            id: 'msg_oversized_image_name',
+            role: 'user',
+            parts: [
+              {
+                type: 'file',
+                mediaType: 'image/webp',
+                filename: 'oversized.webp',
+                url: `data:image/webp;base64,${'A'.repeat(5 * 1024 * 1024 + 1)}`,
+              },
+            ],
+          },
+        ],
+        agent: projectNameAgent,
+      } satisfies CreateChatDto;
+
+      await expect(controller.createChat(body, mockResponse)).rejects.toThrow('Image exceeds 5 MB');
+
+      expect(convertToModelMessages).not.toHaveBeenCalled();
+      expect(chatService.getBuildNameGenerator).not.toHaveBeenCalled();
+      expect(mockResponse.send).not.toHaveBeenCalled();
     });
 
     it('should use commit message generator when agent.profile is commit_name', async () => {
@@ -476,14 +475,29 @@ describe('ChatController', () => {
   });
 
   describe('createChat - Snapshot Context Injection', () => {
-    it('should inject snapshot context into messages passed to toBaseMessages', async () => {
+    const getStreamMessages = (): unknown[] => {
+      const lastCall = mockAgent.graph.stream.mock.calls.at(-1) as [{ messages: unknown[] }] | undefined;
+      const [streamArguments] = lastCall ?? [];
+      return streamArguments?.messages ?? [];
+    };
+
+    const findSnapshotContextMessage = ():
+      | { id?: string; content?: unknown; additional_kwargs?: Record<string, unknown> }
+      | undefined =>
+      getStreamMessages().find(
+        (message): message is { id?: string; content?: unknown; additional_kwargs?: Record<string, unknown> } => {
+          return (message as { id?: unknown } | undefined)?.id === 'tau:snapshot-context:chat_snapshot';
+        },
+      );
+
+    it('should add snapshot context as a tagged internal graph message without mutating UI messages', async () => {
       // Arrange
       const mockResponse = createMockResponse();
 
       const snapshot = {
         fileTree: [
           { path: 'src', name: 'src', type: 'dir', size: 0 },
-          { path: 'src/main.scad', name: 'main.scad', type: 'file', size: 1024 },
+          { path: 'src/main.scad', name: 'main.scad', type: 'file', size: 1024, contentKind: 'text', lineCount: 64 },
         ],
         activeFile: { path: 'src/main.scad', name: 'main.scad' },
         openFiles: [{ path: 'src/main.scad', name: 'main.scad' }],
@@ -504,28 +518,27 @@ describe('ChatController', () => {
       // Act
       await controller.createChat(body, mockResponse);
 
-      // Assert - Verify toBaseMessages was called with messages containing injected context
+      // Assert - Verify toBaseMessages still receives the original client-visible message.
       expect(toBaseMessages).toHaveBeenCalledTimes(1);
       const [messagesArgument] = vi.mocked(toBaseMessages).mock.calls[0] as [UIMessage[]];
-
-      // The message should have 2 parts: injected context + original text
       expect(messagesArgument).toHaveLength(1);
-      expect(messagesArgument[0]?.parts).toHaveLength(2);
-
-      // First part should be the injected editor context
-      const contextPart = messagesArgument[0]?.parts[0] as { type: 'text'; text: string };
-      expect(contextPart.type).toBe('text');
-      expect(contextPart.text).toContain('<system-reminder>');
-      expect(contextPart.text).toContain('<active_file>');
-      expect(contextPart.text).toContain('src/main.scad');
-      expect(contextPart.text).toContain('<project_layout>');
-      expect(contextPart.text).toContain('main.scad (1KB)');
-      expect(contextPart.text).toContain('</system-reminder>');
-
-      // Second part should be the original user message
-      const originalPart = messagesArgument[0]?.parts[1] as { type: 'text'; text: string };
+      expect(messagesArgument[0]?.parts).toHaveLength(1);
+      const originalPart = messagesArgument[0]?.parts[0] as { type: 'text'; text: string };
       expect(originalPart.type).toBe('text');
       expect(originalPart.text).toBe('Create a cube');
+
+      const snapshotMessage = findSnapshotContextMessage();
+      expect(snapshotMessage).toBeDefined();
+      expect(snapshotMessage?.additional_kwargs?.['tau_internal']).toMatchObject({
+        kind: 'snapshot-context',
+        anchorId: 'chat_snapshot',
+      });
+      expect(snapshotMessage?.content as string).toContain('<system-reminder>');
+      expect(snapshotMessage?.content as string).toContain('<active_file>');
+      expect(snapshotMessage?.content as string).toContain('src/main.scad');
+      expect(snapshotMessage?.content as string).toContain('<project_layout>');
+      expect(snapshotMessage?.content as string).toContain('main.scad (64 lines, 1KB)');
+      expect(snapshotMessage?.content as string).toContain('</system-reminder>');
     });
 
     it('should pass original messages unchanged when no snapshot is provided', async () => {
@@ -559,9 +572,14 @@ describe('ChatController', () => {
       expect(originalPart.type).toBe('text');
       expect(originalPart.text).toBe('Create a sphere');
       expect(originalPart.text).not.toContain('<system-reminder>');
+      expect(
+        getStreamMessages().some(
+          (message) => (message as { id?: unknown }).id === 'tau:snapshot-context:chat_no_snapshot',
+        ),
+      ).toBe(false);
     });
 
-    it('should inject only activeFile context when only activeFile is provided', async () => {
+    it('should add only activeFile context when only activeFile is provided', async () => {
       // Arrange
       const mockResponse = createMockResponse();
 
@@ -584,18 +602,16 @@ describe('ChatController', () => {
       // Act
       await controller.createChat(body, mockResponse);
 
-      // Assert - Verify context contains only activeFile (no fileTree, no openFiles)
-      expect(toBaseMessages).toHaveBeenCalledTimes(1);
-      const [messagesArgument] = vi.mocked(toBaseMessages).mock.calls[0] as [UIMessage[]];
+      const snapshotMessage = getStreamMessages().find(
+        (message): message is { id?: string; content?: unknown } =>
+          (message as { id?: unknown } | undefined)?.id === 'tau:snapshot-context:chat_partial_snapshot',
+      );
 
-      expect(messagesArgument[0]?.parts).toHaveLength(2);
-      const contextPart = messagesArgument[0]?.parts[0] as { type: 'text'; text: string };
-
-      expect(contextPart.text).toContain('<system-reminder>');
-      expect(contextPart.text).toContain('<active_file>');
-      expect(contextPart.text).toContain('main.scad');
-      expect(contextPart.text).not.toContain('<project_layout>');
-      expect(contextPart.text).not.toContain('<open_files>');
+      expect(snapshotMessage?.content as string).toContain('<system-reminder>');
+      expect(snapshotMessage?.content as string).toContain('<active_file>');
+      expect(snapshotMessage?.content as string).toContain('main.scad');
+      expect(snapshotMessage?.content as string).not.toContain('<project_layout>');
+      expect(snapshotMessage?.content as string).not.toContain('<open_files>');
     });
 
     it('should not inject context when snapshot has only empty arrays', async () => {
@@ -631,6 +647,11 @@ describe('ChatController', () => {
       const originalPart = messagesArgument[0]?.parts[0] as { type: 'text'; text: string };
       expect(originalPart.text).toBe('Test');
       expect(originalPart.text).not.toContain('<system-reminder>');
+      expect(
+        getStreamMessages().some(
+          (message) => (message as { id?: unknown }).id === 'tau:snapshot-context:chat_empty_snapshot',
+        ),
+      ).toBe(false);
     });
   });
 

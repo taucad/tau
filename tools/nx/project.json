@@ -1,0 +1,7 @@
+{
+  "name": "nx",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "tools/nx",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:tool"]
+}

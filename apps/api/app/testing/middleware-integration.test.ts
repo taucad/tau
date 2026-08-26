@@ -1,7 +1,20 @@
 // @vitest-environment node
+/* eslint-disable @typescript-eslint/naming-convention -- Scripted LangChain model fixtures use BaseChatModel's required underscore methods and usage_metadata fields. */
+/* oxlint-disable @typescript-eslint/class-literal-property-style -- LangChain BaseChatModel pattern. */
 import process from 'node:process';
+import IORedisMock from 'ioredis-mock';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { RpcGraphicsClient } from '@taucad/chat/rpc';
+import type { Redis } from 'ioredis';
+import { AIMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
+import type { ChatResult } from '@langchain/core/outputs';
+import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
+import type { RpcGeoSpecClient } from '@taucad/chat/rpc';
+import { toolName } from '@taucad/chat/constants';
+import type { ChatUsageCost, ChatUsageTokens } from '#api/chat/chat.schema.js';
+import { MorphCompactionContractError } from '#api/chat/utils/compaction-errors.js';
+import { RedisReadDedupStore } from '#api/chat/redis-read-dedup-store.js';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
 import {
   expectNoErrors,
@@ -9,11 +22,234 @@ import {
   extractContextCompactionData,
   expectHasTextContent,
 } from '#testing/stream-assertions.js';
-import { createTestApp } from '#testing/create-test-app.js';
-import type { TestApp } from '#testing/create-test-app.js';
+import { createTestApp, createTestModel } from '#testing/create-test-app.js';
+import type { CreateTestAppOptions, TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent, providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
 
 const modelId = process.env['TEST_MODEL_ID'] ?? 'anthropic-claude-sonnet-4.6';
+
+class ScriptedGeoSpecLoopModel extends BaseChatModel {
+  private callCount = 0;
+
+  public constructor() {
+    super({});
+  }
+
+  public override _llmType(): string {
+    return 'scripted-geospec-loop-model';
+  }
+
+  public override _combineLLMOutput(): Record<string, unknown> {
+    return {};
+  }
+
+  public override bindTools(): this {
+    return this;
+  }
+
+  public override async _generate(
+    _messages: BaseMessage[],
+    _options: this['ParsedCallOptions'],
+    _runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult> {
+    this.callCount += 1;
+
+    if (this.callCount <= 3) {
+      const message = new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: `call_test_model_${this.callCount}`,
+            name: toolName.testModel,
+            args: { files: ['main.geospec.ts'] },
+            type: 'tool_call',
+          },
+        ],
+        usage_metadata: { input_tokens: 100, output_tokens: 1, total_tokens: 101 },
+        response_metadata: { model: 'scripted-geospec-loop-model' },
+      });
+      return { generations: [{ text: '', message }] };
+    }
+
+    const message = new AIMessage({
+      content: 'Stopped after the safeguard reminder.',
+      usage_metadata: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
+      response_metadata: { model: 'scripted-geospec-loop-model' },
+    });
+    return { generations: [{ text: message.content as string, message }] };
+  }
+}
+
+class RecordingCompactionModel extends BaseChatModel {
+  public readonly calls: BaseMessage[][] = [];
+
+  public constructor() {
+    super({});
+  }
+
+  public override _llmType(): string {
+    return 'recording-compaction-model';
+  }
+
+  public override _combineLLMOutput(): Record<string, unknown> {
+    return {};
+  }
+
+  public override bindTools(): this {
+    return this;
+  }
+
+  public override async _generate(
+    messages: BaseMessage[],
+    _options: this['ParsedCallOptions'],
+    _runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult> {
+    this.calls.push(messages);
+    const message = new AIMessage({
+      content: `recorded turn ${this.calls.length}`,
+      usage_metadata: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
+      response_metadata: { model: 'recording-compaction-model' },
+    });
+    return { generations: [{ text: message.content as string, message }] };
+  }
+}
+
+class RedisMockStoreService {
+  public readonly redis = new IORedisMock() as unknown as Redis;
+
+  private readonly store = new RedisReadDedupStore({ redis: this.redis, ttlSeconds: 60 });
+
+  public getStore(): RedisReadDedupStore {
+    return this.store;
+  }
+
+  public getReadDedupClearer(): RedisReadDedupStore {
+    return this.store;
+  }
+
+  public async quit(): Promise<void> {
+    await this.redis.quit();
+  }
+}
+
+class GeminiStreamingSignatureReplayModel extends BaseChatModel {
+  public readonly calls: BaseMessage[][] = [];
+
+  public constructor() {
+    super({});
+  }
+
+  public override _llmType(): string {
+    return 'gemini-streaming-signature-replay-model';
+  }
+
+  public override _combineLLMOutput(): Record<string, unknown> {
+    return {};
+  }
+
+  public override bindTools(): this {
+    return this;
+  }
+
+  public override async _generate(
+    messages: BaseMessage[],
+    _options: this['ParsedCallOptions'],
+    _runManager?: CallbackManagerForLLMRun,
+  ): Promise<ChatResult> {
+    this.calls.push(messages);
+
+    if (this.calls.length === 1) {
+      const message = new AIMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'call_create_file_signed_by_gemini',
+            name: toolName.createFile,
+            args: {
+              targetFile: 'main.ts',
+              content: 'export default function main() { return "hello"; }\n',
+            },
+            type: 'tool_call',
+          },
+        ],
+        additional_kwargs: {
+          // LangChain's Gemini formatter accepts this positional signature
+          // carrier when it matches the final generated parts array. Tau
+          // middleware must preserve it without adding a parallel Gemini
+          // signature normalizer or preflight validator.
+          signatures: ['sig_google_function_call_step_1'],
+        },
+        usage_metadata: { input_tokens: 100, output_tokens: 5, total_tokens: 105 },
+        response_metadata: { model: 'google-gemini-3.5-flash', model_provider: 'google-vertexai' },
+      });
+      return { generations: [{ text: '', message }] };
+    }
+
+    const message = new AIMessage({
+      content: 'Created main.ts.',
+      usage_metadata: { input_tokens: 120, output_tokens: 5, total_tokens: 125 },
+      response_metadata: { model: 'google-gemini-3.5-flash', model_provider: 'google-vertexai' },
+    });
+    return { generations: [{ text: message.content as string, message }] };
+  }
+}
+
+const scriptedModelService = {
+  models: [createTestModel({ id: modelId, providerId: 'anthropic', family: 'claude' })],
+  buildModel() {
+    return {
+      model: new ScriptedGeoSpecLoopModel(),
+      support: {
+        tools: true,
+        toolChoice: true,
+        modalities: { input: ['text', 'image'], output: ['text'] },
+      },
+    };
+  },
+  getProviderId() {
+    return 'anthropic';
+  },
+  createProviderDiagnosticsContext(options) {
+    return {
+      ...options,
+      verbose: false,
+      nextProviderAttemptId: () => 1,
+      setLatestModelCallSummary: () => undefined,
+      getLatestModelCallSummary: () => undefined,
+    };
+  },
+  getContextWindow() {
+    return 200_000;
+  },
+  getKnowledgeCutoff() {
+    return '2026-01-01';
+  },
+  getModelSupport() {
+    return {
+      tools: true,
+      toolChoice: true,
+      modalities: { input: ['text', 'image'], output: ['text'] },
+    };
+  },
+  filterProviderToolNamesForModel({ toolNames }) {
+    return [...toolNames];
+  },
+  getOtelProviderName() {
+    return 'test';
+  },
+  normalizeUsageTokens(_modelId: string, usage: ChatUsageTokens): ChatUsageTokens {
+    return usage;
+  },
+  getModelCost(_modelId: string, _usage: ChatUsageTokens): ChatUsageCost {
+    return {
+      inputTokensCost: 0,
+      outputTokensCost: 0,
+      cacheReadTokensCost: 0,
+      cacheWriteTokensCost: 0,
+      totalCost: 0,
+    };
+  },
+} satisfies CreateTestAppOptions['modelService'];
 
 // Live test — requires `MORPH_API_KEY` (tool-offloading) plus the provider
 // key derived from `TEST_MODEL_ID`. Skips cleanly when either is missing.
@@ -136,20 +372,20 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
     it('should emit data-context-compaction when context exceeds threshold', async () => {
       const threadId = `test-compaction-${Date.now()}`;
 
-      const longContent = 'A'.repeat(100_000);
+      const longContent = 'A'.repeat(9000);
       const messages = [];
 
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 40; i++) {
         messages.push({
           id: `msg_user_${i}`,
           role: 'user',
-          parts: [{ type: 'text', text: `Turn ${i}: ${longContent.slice(0, 5000)}` }],
+          parts: [{ type: 'text', text: `Turn ${i}: ${longContent}` }],
           metadata: { model: modelId, kernel: 'replicad' },
         });
         messages.push({
           id: `msg_assistant_${i}`,
           role: 'assistant',
-          parts: [{ type: 'text', text: `Response ${i}: ${longContent.slice(0, 5000)}` }],
+          parts: [{ type: 'text', text: `Response ${i}: ${longContent}` }],
           metadata: { model: modelId, kernel: 'replicad' },
         });
       }
@@ -174,17 +410,20 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
 
       const compactionData = extractContextCompactionData(chunks);
 
-      if (compactionData.length > 0) {
-        const first = compactionData[0]!;
-        expect(first).toHaveProperty('tokensBeforeCompaction');
-        expect(first).toHaveProperty('tokensAfterCompaction');
-        expect(first).toHaveProperty('compressionRatio');
-        expect(first).toHaveProperty('messagesEvicted');
+      expect(compactionData.length, 'Expected context compaction data to be emitted').toBeGreaterThan(0);
+      const first = compactionData[0]!;
+      expect(first).toHaveProperty('tokensBeforeCompaction');
+      expect(first).toHaveProperty('tokensAfterCompaction');
+      expect(first).toHaveProperty('compressionRatio');
+      expect(first).toHaveProperty('messagesEvicted');
+      expect(first).toMatchObject({
+        status: 'compacted',
+        budgetKind: 'estimated',
+      });
 
-        const transcriptPath = `.tau/transcripts/${threadId}.jsonl`;
-        const transcriptExists = await testApp.memFs.exists(transcriptPath);
-        expect(transcriptExists, `Expected transcript at ${transcriptPath}`).toBe(true);
-      }
+      const transcriptPath = `.tau/transcripts/${threadId}.jsonl`;
+      const transcriptExists = await testApp.memFs.exists(transcriptPath);
+      expect(transcriptExists, `Expected transcript at ${transcriptPath}`).toBe(true);
     }, 120_000);
 
     // ===========================================================================
@@ -232,8 +471,8 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
     // ===========================================================================
     // Agent loop safeguards — end-to-end integration
     //
-    // Drives the screenshot prompt against a deterministic broken `fetchGeometry`
-    // RPC handler. The model is forced to repeat `fetch_geometry` -> identical
+    // Drives the test_model prompt against a deterministic broken GeoSpec
+    // RPC handler. The model is forced to repeat `run_geospec_tests` -> identical
     // error, and the safeguards middleware MUST fire AP1 (identical_error) within
     // a small bounded number of agent iterations.
     //
@@ -244,44 +483,38 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
     // cache prefix.
     // ===========================================================================
 
-    it('should fire AP1 (identical_error) within 8 iterations against a deterministic broken fetch_geometry', async () => {
+    it('should fire AP1 (identical_error) within 8 iterations against a deterministic broken GeoSpec runner', async () => {
       const threadId = `test-safeguard-loop-${Date.now()}`;
 
-      const brokenGraphics: RpcGraphicsClient = {
-        async fetchGeometry() {
+      const brokenGeoSpec: RpcGeoSpecClient = {
+        async runTests() {
           return {
             success: false,
             errorCode: 'IO_ERROR',
-            message: 'Deterministic broken fetch_geometry: geometry unavailable',
-          };
-        },
-        async exportGeometry() {
-          return {
-            success: false,
-            errorCode: 'IO_ERROR',
-            message: 'Deterministic broken exportGeometry: graphics surface offline',
-          };
-        },
-        async captureScreenshot() {
-          return {
-            success: false,
-            errorCode: 'IO_ERROR',
-            message: 'Deterministic broken captureScreenshot: graphics surface offline',
-          };
-        },
-        async captureObservations() {
-          return {
-            success: false,
-            errorCode: 'IO_ERROR',
-            message: 'Deterministic broken captureObservations',
+            message: 'Deterministic broken run_geospec_tests: GeoSpec runner unavailable',
           };
         },
       };
 
       await testApp.app.close();
-      testApp = await createTestApp({ graphicsStub: brokenGraphics });
+      testApp = await createTestApp({ geospecStub: brokenGeoSpec, modelService: scriptedModelService });
 
       await testApp.memFs.writeFile('main.scad', 'cube([10, 10, 10]);');
+      await testApp.memFs.writeFile(
+        'main.geospec.ts',
+        [
+          "import { describe, expectGeo, it } from 'geospec';",
+          "import { loadModel } from 'geospec/model';",
+          '',
+          "describe('main model', () => {",
+          "  it('should render', async () => {",
+          "    const model = await loadModel({ file: 'main.scad' });",
+          '    expectGeo(model).toHaveBoundingBox({ size: { x: 10 }, tolerance: 1 });',
+          '  });',
+          '});',
+          '',
+        ].join('\n'),
+      );
 
       const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
         method: 'POST',
@@ -295,13 +528,13 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               parts: [
                 {
                   type: 'text',
-                  text: 'Take a screenshot of main.scad. Keep retrying until you succeed; do not give up.',
+                  text: 'Call test_model four times in a row with the same arguments, even if the first call returns an error. Do not inspect files first and do not stop after the first failure.',
                 },
               ],
               metadata: { model: modelId, kernel: 'openscad' },
             },
           ],
-          agent: buildCadAgent(modelId, 'openscad'),
+          agent: buildCadAgent(modelId, 'openscad', { testingEnabled: true }),
         }),
       });
 
@@ -322,7 +555,6 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
         .filter((line) => line.trim().length > 0)
         .map((line) => JSON.parse(line) as Record<string, unknown>)
         .filter((entry) => entry['role'] === 'safeguard');
-
       expect(safeguardLines.length, 'Expected at least one safeguard intervention').toBeGreaterThanOrEqual(1);
       expect(safeguardLines[0]?.['pattern']).toBe('identical_error');
 
@@ -372,3 +604,427 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
     }, 180_000);
   },
 );
+
+describe('Middleware Integration: deterministic compaction state rewrite', () => {
+  let testApp: TestApp;
+  let recordingModel: RecordingCompactionModel;
+
+  beforeAll(async () => {
+    recordingModel = new RecordingCompactionModel();
+    testApp = await createTestApp({
+      modelService: {
+        ...scriptedModelService,
+        buildModel() {
+          return { model: recordingModel };
+        },
+        getContextWindow() {
+          return 1000;
+        },
+      },
+      compactionService: {
+        async compact() {
+          return {
+            compactedMessages: [new AIMessage('[Compacted conversation history]\nSummary without raw evicted text')],
+            stats: {
+              tokensBeforeCompaction: 2000,
+              tokensAfterCompaction: 25,
+              compressionRatio: 0.0125,
+              messagesEvicted: 4,
+            },
+          };
+        },
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await testApp.app.close();
+  });
+
+  it('compacts one turn and succeeds on the following turn without resending evicted raw strings', async () => {
+    const threadId = `test-deterministic-compaction-${Date.now()}`;
+    const evictedText = `EVICT_ME_${Date.now()} ${'A'.repeat(8000)}`;
+
+    const firstResponse = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_evicted_user',
+            role: 'user',
+            parts: [{ type: 'text', text: evictedText }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'old assistant without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_user_2',
+            role: 'user',
+            parts: [{ type: 'text', text: 'more old context without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant_2',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'more old assistant context without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_user',
+            role: 'user',
+            parts: [{ type: 'text', text: 'recent question' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent(modelId, 'replicad'),
+      }),
+    });
+
+    expect(firstResponse.ok, `HTTP ${firstResponse.status}: ${firstResponse.statusText}`).toBe(true);
+    const firstChunks = await collectStreamChunks(firstResponse);
+    expectNoErrors(firstChunks);
+    const compactionData = extractContextCompactionData(firstChunks);
+    expect(compactionData.length, 'Expected first turn to compact').toBeGreaterThan(0);
+    const compaction = compactionData[0]!;
+    expect(compaction['status']).toBe('compacted');
+
+    const secondResponse = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_evicted_user',
+            role: 'user',
+            parts: [{ type: 'text', text: evictedText }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'old assistant without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_user_2',
+            role: 'user',
+            parts: [{ type: 'text', text: 'more old context without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant_2',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'more old assistant context without sentinel' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_user',
+            role: 'user',
+            parts: [{ type: 'text', text: 'recent question' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_assistant_after_compaction',
+            role: 'assistant',
+            parts: [
+              { type: 'text', text: 'recorded turn 1' },
+              { type: 'data-context-compaction', id: compaction['id'], data: compaction },
+            ],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_followup',
+            role: 'user',
+            parts: [{ type: 'text', text: 'continue without old raw context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent(modelId, 'replicad'),
+      }),
+    });
+
+    expect(secondResponse.ok, `HTTP ${secondResponse.status}: ${secondResponse.statusText}`).toBe(true);
+    const secondChunks = await collectStreamChunks(secondResponse);
+    expectNoErrors(secondChunks);
+
+    const secondProviderPayload = recordingModel.calls[1] ?? [];
+    expect(recordingModel.calls.length).toBeGreaterThanOrEqual(2);
+    expect(providerPayloadText(secondProviderPayload)).not.toContain(evictedText);
+    expect(providerPayloadText(secondProviderPayload)).toContain('Summary without raw evicted text');
+  }, 60_000);
+});
+
+describe('Middleware Integration: Redis read-dedup compaction clear', () => {
+  let testApp: TestApp;
+  let recordingModel: RecordingCompactionModel;
+  let storeService: RedisMockStoreService;
+
+  beforeAll(async () => {
+    recordingModel = new RecordingCompactionModel();
+    storeService = new RedisMockStoreService();
+    testApp = await createTestApp({
+      storeService,
+      modelService: {
+        ...scriptedModelService,
+        buildModel() {
+          return { model: recordingModel };
+        },
+        getContextWindow() {
+          return 1000;
+        },
+      },
+      compactionService: {
+        async compact() {
+          return {
+            compactedMessages: [new AIMessage('[Compacted conversation history]\nRedis read-dedup clear summary')],
+            stats: {
+              tokensBeforeCompaction: 2000,
+              tokensAfterCompaction: 25,
+              compressionRatio: 0.0125,
+              messagesEvicted: 4,
+            },
+          };
+        },
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await testApp.app.close();
+    await storeService.quit();
+  });
+
+  it('clears Redis read-dedup pointers after compaction through production store wiring', async () => {
+    const threadId = `test-redis-dedup-clear-${Date.now()}`;
+    const otherThreadId = `test-redis-dedup-clear-other-${Date.now()}`;
+    const store = storeService.getStore();
+
+    await store.put(['recent_reads', threadId], 'fp-1', { priorToolCallId: 'tc-1', modifiedAt: 1 });
+    await store.put(['recent_reads', threadId], 'fp-2', { priorToolCallId: 'tc-2', modifiedAt: 2 });
+    await store.put(['recent_reads', otherThreadId], 'fp-3', { priorToolCallId: 'tc-3', modifiedAt: 3 });
+
+    const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_evicted_user',
+            role: 'user',
+            parts: [{ type: 'text', text: `old context ${'A'.repeat(8000)}` }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'old assistant context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_user_2',
+            role: 'user',
+            parts: [{ type: 'text', text: `more old context ${'B'.repeat(8000)}` }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant_2',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'more old assistant context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_user',
+            role: 'user',
+            parts: [{ type: 'text', text: 'recent question' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent(modelId, 'replicad'),
+      }),
+    });
+
+    expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
+    const chunks = await collectStreamChunks(response);
+    expectNoErrors(chunks);
+
+    const compactionData = extractContextCompactionData(chunks);
+    expect(compactionData[0]).toMatchObject({ status: 'compacted' });
+    expect(recordingModel.calls).toHaveLength(1);
+
+    expect(await store.get(['recent_reads', threadId], 'fp-1')).toBeNull();
+    expect(await store.get(['recent_reads', threadId], 'fp-2')).toBeNull();
+    expect(await store.get(['recent_reads', otherThreadId], 'fp-3')).not.toBeNull();
+  }, 60_000);
+});
+
+describe('Middleware Integration: Gemini streaming function-call signature replay', () => {
+  let testApp: TestApp;
+  let replayModel: GeminiStreamingSignatureReplayModel;
+
+  beforeAll(async () => {
+    replayModel = new GeminiStreamingSignatureReplayModel();
+    testApp = await createTestApp({
+      modelService: {
+        ...scriptedModelService,
+        buildModel() {
+          return { model: replayModel };
+        },
+        getProviderId() {
+          return 'vertexai';
+        },
+        getOtelProviderName() {
+          return 'gcp.vertex_ai';
+        },
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await testApp.app.close();
+  });
+
+  it('replays a fresh Gemini streaming tool call with its thought signature into the immediate second provider step', async () => {
+    const threadId = `test-gemini-signature-replay-${Date.now()}`;
+
+    const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_user_create_file',
+            role: 'user',
+            parts: [{ type: 'text', text: 'Create main.ts and then confirm it was created.' }],
+            metadata: { model: 'google-gemini-3.5-flash', kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent('google-gemini-3.5-flash', 'replicad'),
+      }),
+    });
+
+    expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
+    const chunks = await collectStreamChunks(response);
+    expectNoErrors(chunks);
+
+    expect(replayModel.calls).toHaveLength(2);
+    expect(await testApp.memFs.exists('main.ts')).toBe(true);
+  }, 60_000);
+});
+
+describe('Middleware Integration: deterministic compaction failures', () => {
+  let testApp: TestApp;
+  let recordingModel: RecordingCompactionModel;
+  let compactCalls = 0;
+
+  beforeAll(async () => {
+    recordingModel = new RecordingCompactionModel();
+    testApp = await createTestApp({
+      modelService: {
+        ...scriptedModelService,
+        buildModel() {
+          return { model: recordingModel };
+        },
+        getContextWindow() {
+          return 1000;
+        },
+      },
+      compactionService: {
+        async compact() {
+          compactCalls += 1;
+          throw new MorphCompactionContractError('Morph compact response missing output');
+        },
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await testApp.app.close();
+  });
+
+  it('emits a failed compaction event and blocks provider dispatch when required compaction fails', async () => {
+    const threadId = `test-deterministic-compaction-failure-${Date.now()}`;
+    compactCalls = 0;
+
+    const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        id: threadId,
+        messages: [
+          {
+            id: 'msg_evicted_user',
+            role: 'user',
+            parts: [{ type: 'text', text: `old context ${'A'.repeat(8000)}` }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'old assistant context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_user_2',
+            role: 'user',
+            parts: [{ type: 'text', text: `more old context ${'B'.repeat(8000)}` }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_evicted_assistant_2',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'more old assistant context' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_user',
+            role: 'user',
+            parts: [{ type: 'text', text: 'recent question' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+          {
+            id: 'msg_recent_assistant',
+            role: 'assistant',
+            parts: [{ type: 'text', text: 'recent answer' }],
+            metadata: { model: modelId, kernel: 'replicad' },
+          },
+        ],
+        agent: buildCadAgent(modelId, 'replicad'),
+      }),
+    });
+
+    expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
+    const chunks = await collectStreamChunks(response);
+    const compactionData = extractContextCompactionData(chunks);
+    const errorChunk = chunks.find((chunk) => chunk.type === 'error') as { errorText?: string } | undefined;
+    const error = JSON.parse(errorChunk?.errorText ?? '{}') as Record<string, unknown>;
+
+    expect(compactCalls).toBe(1);
+    expect(recordingModel.calls).toHaveLength(0);
+    expect(compactionData[0]).toMatchObject({
+      status: 'failed',
+      compactionFailureKind: 'morph_contract_error',
+      failureDisposition: 'blocked_before_provider',
+      transcriptFilePath: null,
+    });
+    expect(error).toMatchObject({
+      code: 'CONTEXT_COMPACTION_FAILED',
+      category: 'tool_error',
+    });
+    expect(error['message']).toContain('Failure kind: morph_contract_error');
+  }, 60_000);
+});
+
+function providerPayloadText(messages: readonly BaseMessage[]): string {
+  return messages
+    .map((message) => (typeof message.content === 'string' ? message.content : JSON.stringify(message.content)))
+    .join('\n');
+}

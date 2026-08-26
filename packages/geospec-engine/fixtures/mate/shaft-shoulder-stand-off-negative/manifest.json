@@ -1,0 +1,58 @@
+{
+  "family": "mate",
+  "fixture": "mate.shaft-shoulder-stand-off-negative",
+  "generator": {
+    "script": "scripts/mate/shaft-shoulder/main.ts",
+    "parameters": {
+      "standOff": 1
+    }
+  },
+  "tolerances": {
+    "contact": 0.02
+  },
+  "selectors": [
+    {
+      "selector": "pulley.back",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "offset": -21
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "coaxial",
+      "subject": "pulley.bore",
+      "target": "shaft.journal",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "contact",
+      "subject": "pulley.back",
+      "target": "shaft.shoulder",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": false
+        },
+        "final": {
+          "method": "extrema",
+          "measured": {
+            "distance": 1
+          }
+        },
+        "mentions": ["pulley.back", "shaft.shoulder"]
+      }
+    }
+  ],
+  "notes": "Coaxiality passes; the pulley stands off the shoulder by 1.00 along the shaft axis, failing axial seating."
+}

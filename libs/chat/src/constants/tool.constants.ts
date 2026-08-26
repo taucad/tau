@@ -3,7 +3,7 @@ export const toolName = {
   webSearch: 'web_search',
   webBrowser: 'web_browser',
   testModel: 'test_model',
-  editTests: 'edit_tests',
+  useSkill: 'use_skill',
   readFile: 'read_file',
   editFile: 'edit_file',
   listDirectory: 'list_directory',

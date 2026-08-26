@@ -3,9 +3,9 @@ import { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
-import type { ChangeEvent, FileEntry, FileStatEntry } from '@taucad/types';
+import { parametersDirectory } from '@taucad/types';
+import type { ChangeEvent, FileEntry, FileStat, FileStatEntry } from '@taucad/types';
 import type { FileTreeNode } from '@taucad/filesystem';
-import { parametersDirectory } from '#utils/parameter-config.utils.js';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { headlessVisibilityProvider } from '@taucad/fs-client/visibility-provider';
@@ -63,8 +63,7 @@ function createMockProxy(overrides?: Partial<FileManagerProxy>): FileManagerProx
     readFile: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFiles: vi.fn().mockResolvedValue(undefined),
-    rename: vi.fn().mockResolvedValue(undefined),
-    move: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+    move: vi.fn().mockResolvedValue(textFileStat(0, 0)),
     unlink: vi.fn().mockResolvedValue(undefined),
     copyDirectory: vi.fn().mockResolvedValue(undefined),
     getZippedDirectory: vi.fn().mockResolvedValue(new Blob()),
@@ -72,7 +71,7 @@ function createMockProxy(overrides?: Partial<FileManagerProxy>): FileManagerProx
     getDirectoryStat: vi.fn().mockResolvedValue([]),
     readDirectory: vi.fn().mockResolvedValue([]),
     readdir: vi.fn().mockResolvedValue([]),
-    stat: vi.fn().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
+    stat: vi.fn().mockResolvedValue(textFileStat(0, 0)),
     rmdir: vi.fn().mockResolvedValue(undefined),
     readShallowDirectory: vi.fn().mockResolvedValue([]),
     dispose: vi.fn(),
@@ -82,7 +81,44 @@ function createMockProxy(overrides?: Partial<FileManagerProxy>): FileManagerProx
 
 function createEntry(path: string, type: 'file' | 'dir' = 'file', size = 100): FileEntry {
   const parts = path.split('/');
-  return { path, name: parts.at(-1) ?? path, type, size, mtimeMs: 0, isLoaded: false };
+  const name = parts.at(-1) ?? path;
+  if (type === 'dir') {
+    return { path, name, type: 'dir', size, mtimeMs: 0, isLoaded: false };
+  }
+
+  return { path, name, type: 'file', size, mtimeMs: 0, isLoaded: false, contentKind: 'text', lineCount: 1 };
+}
+
+function textFileStat(size: number, mtimeMs: number, lineCount = 1): FileStat {
+  return { type: 'file', size, mtimeMs, contentKind: 'text', lineCount };
+}
+
+function textFileNode(
+  id: string,
+  size: number,
+  metadata: number | { readonly mtimeMs: number; readonly lineCount?: number },
+): FileTreeNode {
+  const mtimeMs = typeof metadata === 'number' ? metadata : metadata.mtimeMs;
+  const lineCount = typeof metadata === 'number' ? 1 : (metadata.lineCount ?? 1);
+  return { id, name: id, size, mtimeMs, contentKind: 'text', lineCount };
+}
+
+function textFileStatEntry(
+  path: string,
+  size: number,
+  metadata: number | { readonly mtimeMs: number; readonly lineCount?: number },
+): FileStatEntry {
+  const mtimeMs = typeof metadata === 'number' ? metadata : metadata.mtimeMs;
+  const lineCount = typeof metadata === 'number' ? 1 : (metadata.lineCount ?? 1);
+  return {
+    path,
+    name: path.split('/').pop() ?? path,
+    type: 'file',
+    size,
+    mtimeMs,
+    contentKind: 'text',
+    lineCount,
+  };
 }
 
 describe('FileTreeService', () => {
@@ -119,8 +155,8 @@ describe('FileTreeService', () => {
 
   it('should return child names from listDirectory for a path', async () => {
     vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
-      { id: 'utils.ts', name: 'utils.ts', size: 1, mtimeMs: 0 },
-      { id: 'helpers.ts', name: 'helpers.ts', size: 2, mtimeMs: 0 },
+      textFileNode('utils.ts', 1, 0),
+      textFileNode('helpers.ts', 2, 0),
     ]);
     const entries = await service.listDirectory('lib');
     const names = entries.map((entry) => entry.name);
@@ -145,9 +181,9 @@ describe('FileTreeService', () => {
     vi.useRealTimers();
 
     const readDirectoryNodes: FileTreeNode[] = [
-      { id: 'utils.ts', name: 'utils.ts', size: 1, mtimeMs: 0 },
-      { id: 'helpers.ts', name: 'helpers.ts', size: 1, mtimeMs: 0 },
-      { id: 'new-file.ts', name: 'new-file.ts', size: 1, mtimeMs: 0 },
+      textFileNode('utils.ts', 1, 0),
+      textFileNode('helpers.ts', 1, 0),
+      textFileNode('new-file.ts', 1, 0),
     ];
     const localProxy = createMockProxy({
       readDirectory: vi.fn().mockResolvedValue(readDirectoryNodes),
@@ -222,8 +258,8 @@ describe('FileTreeService', () => {
     const contentService = createContentServiceForTree(contentProxy);
     service.connectToContentService(contentService);
 
-    vi.mocked(contentProxy.rename).mockResolvedValue(undefined);
-    await contentService.rename('main.ts', 'app.ts');
+    vi.mocked(contentProxy.move).mockResolvedValue(textFileStat(0, 0));
+    await contentService.move('main.ts', 'app.ts');
 
     expect(service.getTreeSnapshot().has('main.ts')).toBe(false);
     expect(service.getTreeSnapshot().has('app.ts')).toBe(true);
@@ -288,7 +324,7 @@ describe('FileTreeService', () => {
             name: 'parameters',
             size: 0,
             mtimeMs: 0,
-            children: [{ id: 'main.ts.json', name: 'main.ts.json', size: 0, mtimeMs: 0 }],
+            children: [textFileNode('main.ts.json', 0, 0)],
           },
           { id: 'cache', name: 'cache', size: 0, mtimeMs: 0, children: [] },
         ]),
@@ -317,7 +353,7 @@ describe('FileTreeService', () => {
             name: 'parameters',
             size: 0,
             mtimeMs: 0,
-            children: [{ id: 'main.ts.json', name: 'main.ts.json', size: 0, mtimeMs: 0 }],
+            children: [textFileNode('main.ts.json', 0, 0)],
           },
         ]),
       });
@@ -347,7 +383,7 @@ describe('FileTreeService', () => {
             name: 'parameters',
             size: 0,
             mtimeMs: 0,
-            children: [{ id: 'main.ts.json', name: 'main.ts.json', size: 0, mtimeMs: 0 }],
+            children: [textFileNode('main.ts.json', 0, 0)],
           },
           { id: 'cache', name: 'cache', size: 0, mtimeMs: 0, children: [] },
           { id: 'artifacts', name: 'artifacts', size: 0, mtimeMs: 0, children: [] },
@@ -385,7 +421,7 @@ describe('FileTreeService', () => {
             name: 'parameters',
             size: 0,
             mtimeMs: 0,
-            children: [{ id: 'main.ts.json', name: 'main.ts.json', size: 0, mtimeMs: 0 }],
+            children: [textFileNode('main.ts.json', 0, 0)],
           },
           { id: 'cache', name: 'cache', size: 0, mtimeMs: 0, children: [] },
         ]),
@@ -421,7 +457,7 @@ describe('FileTreeService', () => {
             name: 'parameters',
             size: 0,
             mtimeMs: 0,
-            children: [{ id: 'main.ts.json', name: 'main.ts.json', size: 0, mtimeMs: 0 }],
+            children: [textFileNode('main.ts.json', 0, 0)],
           },
           { id: 'cache', name: 'cache', size: 0, mtimeMs: 0, children: [] },
         ]),
@@ -454,7 +490,7 @@ describe('FileTreeService', () => {
     });
 
     it('should return true for paths not in local tree but found via proxy.stat', async () => {
-      vi.mocked(proxy.stat).mockResolvedValueOnce({ type: 'file', size: 42, mtimeMs: 1000 });
+      vi.mocked(proxy.stat).mockResolvedValueOnce(textFileStat(42, 1000));
 
       expect(await service.exists('deep/nested/file.ts')).toBe(true);
       expect(proxy.stat).toHaveBeenCalledWith('/project/deep/nested/file.ts');
@@ -479,7 +515,7 @@ describe('FileTreeService', () => {
     });
 
     it('should return entry from proxy.stat for paths not in local tree', async () => {
-      vi.mocked(proxy.stat).mockResolvedValueOnce({ type: 'file', size: 42, mtimeMs: 1000 });
+      vi.mocked(proxy.stat).mockResolvedValueOnce(textFileStat(42, 1000));
 
       const entry = await service.getEntry('deep/file.ts');
 
@@ -527,9 +563,9 @@ describe('FileTreeService', () => {
       expect(items).toHaveLength(3);
       expect(items).toEqual(
         expect.arrayContaining([
-          { path: 'main.ts', size: 100 },
-          { path: 'lib/utils.ts', size: 100 },
-          { path: 'lib/helpers.ts', size: 100 },
+          { path: 'main.ts', size: 100, contentKind: 'text', lineCount: 1 },
+          { path: 'lib/utils.ts', size: 100, contentKind: 'text', lineCount: 1 },
+          { path: 'lib/helpers.ts', size: 100, contentKind: 'text', lineCount: 1 },
         ]),
       );
       expect(proxy.getDirectoryStat).not.toHaveBeenCalled();
@@ -570,7 +606,12 @@ describe('FileTreeService', () => {
       const after = service.getCachedFileItems();
       expect(after).not.toBe(before);
       expect(after).toHaveLength(4);
-      expect(after.find((item) => item.path === 'new.ts')).toEqual({ path: 'new.ts', size: 3 });
+      expect(after.find((item) => item.path === 'new.ts')).toEqual({
+        path: 'new.ts',
+        size: 3,
+        contentKind: 'text',
+        lineCount: 1,
+      });
 
       contentService.dispose();
     });
@@ -596,10 +637,12 @@ describe('FileTreeService', () => {
     it('should reflect newly loaded directories after listDirectory', async () => {
       vi.useRealTimers();
       const localProxy = createMockProxy({
-        readDirectory: vi.fn().mockResolvedValue([
-          { id: 'cache', name: 'cache', size: 0, mtimeMs: 0, children: [] },
-          { id: 'params.json', name: 'params.json', size: 10, mtimeMs: 0 },
-        ]),
+        readDirectory: vi
+          .fn()
+          .mockResolvedValue([
+            { id: 'cache', name: 'cache', size: 0, mtimeMs: 0, children: [] },
+            textFileNode('params.json', 10, 0),
+          ]),
       });
       const { service: localService } = createTreeHarness({
         proxy: localProxy,
@@ -639,7 +682,7 @@ describe('FileTreeService', () => {
 
       const after = service.getCachedFileItems();
       expect(after).toHaveLength(1);
-      expect(after[0]).toEqual({ path: 'x.ts', size: 42 });
+      expect(after[0]).toEqual({ path: 'x.ts', size: 42, contentKind: 'text', lineCount: 1 });
     });
 
     it('should expose completeTreeVersion that increments on change', async () => {
@@ -660,10 +703,8 @@ describe('FileTreeService', () => {
   });
 
   describe('searchFiles', () => {
-    it('should delegate to proxy.searchFiles with correct root path', async () => {
-      const mockResults: FileStatEntry[] = [
-        { path: 'src/main.ts', name: 'main.ts', type: 'file', size: 100, mtimeMs: 1000 },
-      ];
+    it('should delegate to proxy.searchFiles with the captured root', async () => {
+      const mockResults: FileStatEntry[] = [textFileStatEntry('src/main.ts', 100, 1000)];
       const searchProxy = createMockProxy({
         searchFiles: vi.fn().mockReturnValue(mockResults) as unknown as FileSystemClient['searchFiles'],
       });
@@ -692,10 +733,7 @@ describe('FileTreeService', () => {
     });
 
     it('should return FileStatEntry[] from proxy', async () => {
-      const expected: FileStatEntry[] = [
-        { path: 'a.ts', name: 'a.ts', type: 'file', size: 10, mtimeMs: 100 },
-        { path: 'b.ts', name: 'b.ts', type: 'file', size: 20, mtimeMs: 200 },
-      ];
+      const expected: FileStatEntry[] = [textFileStatEntry('a.ts', 10, 100), textFileStatEntry('b.ts', 20, 200)];
       const searchProxy = createMockProxy({
         searchFiles: vi.fn().mockReturnValue(expected) as unknown as FileSystemClient['searchFiles'],
       });
@@ -708,48 +746,31 @@ describe('FileTreeService', () => {
       searchService.dispose();
     });
 
-    it('should warm the worker search index via getDirectoryStat on first call', async () => {
-      const warmProxy = createMockProxy({
+    it('should use the current root after reset without a client-side warm RPC', async () => {
+      const rootedProxy = createMockProxy({
         getDirectoryStat: vi.fn().mockResolvedValue([]),
         searchFiles: vi.fn().mockReturnValue([]) as unknown as FileSystemClient['searchFiles'],
       });
-      const warmService = createTreeHarness({ proxy: warmProxy }).service;
+      const rootedService = createTreeHarness({ proxy: rootedProxy }).service;
 
-      await warmService.searchFiles('main');
-      expect(warmProxy.getDirectoryStat).toHaveBeenCalledWith('/project');
+      await rootedService.searchFiles('main');
+      rootedService.reset('/new-project');
+      await rootedService.searchFiles('utils');
 
-      await warmService.searchFiles('utils');
-      expect(warmProxy.getDirectoryStat).toHaveBeenCalledOnce();
+      expect(rootedProxy.searchFiles).toHaveBeenNthCalledWith(1, '/project', 'main', undefined);
+      expect(rootedProxy.searchFiles).toHaveBeenNthCalledWith(2, '/new-project', 'utils', undefined);
+      expect(rootedProxy.getDirectoryStat).not.toHaveBeenCalled();
 
-      warmService.dispose();
-    });
-
-    it('should re-warm the search index after reset()', async () => {
-      const resetProxy = createMockProxy({
-        getDirectoryStat: vi.fn().mockResolvedValue([]),
-        searchFiles: vi.fn().mockReturnValue([]) as unknown as FileSystemClient['searchFiles'],
-      });
-      const resetService = createTreeHarness({ proxy: resetProxy }).service;
-
-      await resetService.searchFiles('main');
-      expect(resetProxy.getDirectoryStat).toHaveBeenCalledOnce();
-
-      resetService.reset('/new-project');
-
-      await resetService.searchFiles('main');
-      expect(resetProxy.getDirectoryStat).toHaveBeenCalledTimes(2);
-      expect(resetProxy.getDirectoryStat).toHaveBeenLastCalledWith('/new-project');
-
-      resetService.dispose();
+      rootedService.dispose();
     });
   });
 
   // === handleWorkerFileChanged (structured incremental tree events) ===
 
   describe('handleWorkerFileChanged', () => {
-    // ── fileWritten — optimistic add when parent loaded, skip when not ──
+    // ── fileWritten — refresh when parent loaded, skip when not ──
 
-    it('should optimistically add file to tree on fileWritten when parent is loaded', () => {
+    it('should schedule refresh instead of creating a size-only file on fileWritten when parent is loaded', async () => {
       const event: ChangeEvent = {
         type: 'fileWritten',
         path: '/project/newfile.ts',
@@ -758,9 +779,12 @@ describe('FileTreeService', () => {
 
       emitWorker(event);
 
-      expect(service.getTreeSnapshot().has('newfile.ts')).toBe(true);
-      expect(service.getTreeSnapshot().get('newfile.ts')?.type).toBe('file');
+      expect(service.getTreeSnapshot().has('newfile.ts')).toBe(false);
       expect(proxy.readDirectory).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(proxy.readDirectory).toHaveBeenCalledWith('/project');
     });
 
     it('should skip fileWritten when parent directory is not loaded', async () => {
@@ -785,8 +809,13 @@ describe('FileTreeService', () => {
       localService.dispose();
     });
 
-    it('should notify subscribers on fileWritten optimistic add', () => {
+    it('should notify subscribers when fileWritten refresh merges metadata', async () => {
       const subscriber = vi.fn();
+      vi.mocked(proxy.readDirectory).mockResolvedValueOnce([
+        textFileNode('added.ts', 7, { mtimeMs: 0, lineCount: 2 }),
+        textFileNode('main.ts', 100, 0),
+        { id: 'lib', name: 'lib', size: 0, mtimeMs: 0, children: [] },
+      ]);
       service.subscribeTree(subscriber);
 
       const event: ChangeEvent = {
@@ -795,8 +824,12 @@ describe('FileTreeService', () => {
         backend: 'indexeddb',
       };
       emitWorker(event);
+      await vi.advanceTimersByTimeAsync(100);
 
       expect(subscriber).toHaveBeenCalledOnce();
+      expect(service.getTreeSnapshot().get('added.ts')).toEqual(
+        expect.objectContaining({ type: 'file', contentKind: 'text', lineCount: 2 }),
+      );
     });
 
     // ── fileDeleted — optimistic delete ──

@@ -1,0 +1,11 @@
+{
+  "name": "require-public-export-jsdoc-fixture",
+  "type": "module",
+  "imports": {
+    "#*": "./*"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./types": "./type-index.ts"
+  }
+}

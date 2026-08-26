@@ -18,6 +18,7 @@
  * @param defaultUrl - bundler-friendly default URL (typically from `import.meta.url`)
  * @param override - optional runtime override for testing or custom builds
  * @returns the resolved WASM URL
+ * @public
  */
 export function resolveWasmUrl(defaultUrl: string, override?: string): string {
   return override ?? defaultUrl;

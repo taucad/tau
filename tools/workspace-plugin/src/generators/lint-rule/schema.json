@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/schema",
+  "$id": "TauLintRule",
+  "title": "Create a tau-lint oxlint rule",
+  "description": "Scaffolds a tau-lint custom oxlint rule plus a RuleTester test under libs/oxlint/src/rules/, following Tau conventions.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Rule name in kebab-case, no plugin prefix (e.g. 'no-impl-in-index' → tau-lint/no-impl-in-index)",
+      "$default": { "$source": "argv", "index": 0 },
+      "x-prompt": "What is the rule name (kebab-case, e.g. no-impl-in-index)?",
+      "x-priority": "important"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line rule description for meta.docs.description",
+      "default": ""
+    }
+  },
+  "required": ["name"]
+}

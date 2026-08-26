@@ -1,0 +1,50 @@
+{
+  "family": "containment",
+  "fixture": "containment.pin-partial-insertion-negative",
+  "generator": {
+    "script": "scripts/containment/pin-through-boss/main.ts",
+    "parameters": {
+      "pinLength": 20
+    }
+  },
+  "tolerances": {},
+  "selectors": [
+    {
+      "selector": "wristPin.body",
+      "status": "resolved",
+      "entityCount": 1
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "containment",
+      "subject": "wristPin.body",
+      "target": "bossA.bore",
+      "options": {},
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "containment",
+      "subject": "wristPin.body",
+      "target": "bossB.bore",
+      "options": {},
+      "expected": {
+        "verdict": "fail",
+        "mentions": ["bossB.bore"]
+      }
+    },
+    {
+      "kind": "containment",
+      "subject": "wristPin.body",
+      "target": "rodSmallEnd.bore",
+      "options": {},
+      "expected": {
+        "verdict": "fail",
+        "mentions": ["rodSmallEnd.bore"]
+      }
+    }
+  ],
+  "notes": "The 20 mm pin (x in [-32, -12]) reaches only bossA; the diagnostic must report the missed bores. The bossA row passes under SB4's bore-void containment (radial fit + engaged span in the bore band); the missed-bore rows fail with a zero engaged span."
+}

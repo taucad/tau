@@ -1,46 +1,28 @@
+import { fileParameterEntrySchema } from '@taucad/types';
 import type { FileParameterEntry } from '@taucad/types';
 
 const defaultParameterGroupName = 'default';
 
 /**
- * Canonical project-relative directory where per-geometry-unit parameter files are stored.
- * All parameter file paths in the UI app must derive from this constant so that
- * the middleware, watchers, and persistence layers stay in sync.
- */
-export const parametersDirectory = '.tau/parameters';
-
-/**
  * Parse a JSON string into a validated FileParameterEntry.
- * Throws on invalid JSON or missing required fields.
+ * Throws on invalid JSON or schema-invalid content.
  */
-export const parseParameterEntry = (json: string): FileParameterEntry => {
-  const parsed: unknown = JSON.parse(json);
-  if (typeof parsed !== 'object' || parsed === null || !('activeGroup' in parsed) || !('groups' in parsed)) {
-    throw new Error('Invalid parameter entry: missing activeGroup or groups');
-  }
-  return parsed as FileParameterEntry;
-};
+export const parseParameterEntry = (json: string): FileParameterEntry =>
+  fileParameterEntrySchema.parse(JSON.parse(json));
 
 /**
  * Create a default entry with a single empty default group.
  */
-export const createDefaultEntry = (): FileParameterEntry => ({
-  activeGroup: defaultParameterGroupName,
-  groups: {
-    [defaultParameterGroupName]: { values: {} },
-  },
-});
+export const createDefaultEntry = (): FileParameterEntry => createParameterEntry({});
 
-/**
- * Get the active parameter group values for an entry.
- * Returns an empty object if the entry is undefined or the active group is missing.
- */
-export const getActiveGroupValues = (entry: FileParameterEntry | undefined): Record<string, unknown> => {
-  if (!entry) {
-    return {};
-  }
-  return entry.groups[entry.activeGroup]?.values ?? {};
-};
+/** Create the canonical default parameter group populated with values. */
+export const createParameterEntry = (values: Record<string, unknown>): FileParameterEntry =>
+  fileParameterEntrySchema.parse({
+    activeGroup: defaultParameterGroupName,
+    groups: {
+      [defaultParameterGroupName]: { values },
+    },
+  });
 
 /**
  * Return a new entry with updated values for a specific group.
@@ -51,13 +33,13 @@ export const updateGroupValues = (
   options: { groupName: string; values: Record<string, unknown> },
 ): FileParameterEntry => {
   const { groupName, values } = options;
-  return {
+  return fileParameterEntrySchema.parse({
     ...entry,
     groups: {
       ...entry.groups,
       [groupName]: { values },
     },
-  };
+  });
 };
 
 /**
@@ -88,10 +70,12 @@ export const deleteGroup = (entry: FileParameterEntry, groupName: string): FileP
   }
 
   const { [groupName]: _, ...remainingGroups } = entry.groups;
-  return {
+  const updatedOrder = entry.order?.filter((name) => name !== groupName);
+  return fileParameterEntrySchema.parse({
     ...entry,
+    ...(updatedOrder ? { order: updatedOrder } : {}),
     groups: remainingGroups,
-  };
+  });
 };
 
 /**
@@ -114,7 +98,7 @@ export const renameGroup = (
   const { [oldName]: groupToRename, ...remainingGroups } = entry.groups;
   const updatedOrder = entry.order?.map((name) => (name === oldName ? newName : name));
 
-  return {
+  return fileParameterEntrySchema.parse({
     ...entry,
     activeGroup: entry.activeGroup === oldName ? newName : entry.activeGroup,
     ...(updatedOrder ? { order: updatedOrder } : {}),
@@ -122,7 +106,7 @@ export const renameGroup = (
       ...remainingGroups,
       [newName]: groupToRename!,
     },
-  };
+  });
 };
 
 /**
@@ -140,41 +124,9 @@ export const switchActiveGroup = (entry: FileParameterEntry, groupName: string):
 };
 
 /**
- * Validate that a value is a structurally sound FileParameterEntry.
- * Throws with a descriptive message on any structural issue.
- */
-export function validateParameterEntry(entry: unknown): asserts entry is FileParameterEntry {
-  if (typeof entry !== 'object' || entry === null) {
-    throw new Error('Invalid parameter entry: expected a non-null object');
-  }
-  if (!('activeGroup' in entry) || typeof (entry as { activeGroup: unknown }).activeGroup !== 'string') {
-    throw new Error('Invalid parameter entry: missing or invalid activeGroup');
-  }
-  if (
-    !('groups' in entry) ||
-    typeof (entry as { groups: unknown }).groups !== 'object' ||
-    (entry as { groups: unknown }).groups === null
-  ) {
-    throw new Error('Invalid parameter entry: missing or invalid groups object');
-  }
-}
-
-/**
  * Serialize a FileParameterEntry to a formatted JSON string.
  *
- * Validates the entry structure before serializing and round-trip
- * parses the output to guarantee the written content is recoverable.
- * Throws if validation or round-trip parsing fails.
+ * Throws before writing schema-invalid or JSON-unsafe content.
  */
-export const serializeParameterEntry = (entry: FileParameterEntry): string => {
-  validateParameterEntry(entry);
-  const json = JSON.stringify(entry, null, 2);
-  parseParameterEntry(json);
-  return json;
-};
-
-/**
- * Compute the parameter file path for a given entry file.
- * Returns a project-relative path under `parametersDirectory`.
- */
-export const parameterEntryPath = (entryFile: string): string => `${parametersDirectory}/${entryFile}.json`;
+export const serializeParameterEntry = (entry: FileParameterEntry): string =>
+  JSON.stringify(fileParameterEntrySchema.parse(entry), null, 2);

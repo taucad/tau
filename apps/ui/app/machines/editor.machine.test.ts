@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import type { EditorState } from '#types/editor.types.js';
-import { defaultPanelState } from '#constants/editor.constants.js';
+import { defaultGraphicsSettings, defaultPanelState } from '#constants/editor.constants.js';
 import { editorMachine } from '#machines/editor.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
@@ -157,20 +157,6 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
-    it('should emit editorStateLoaded on successful load', async () => {
-      const actor = createTestActor({ loadResult: stubEditorState });
-      actor.start();
-      const emitted: unknown[] = [];
-      actor.on('editorStateLoaded', (event) => emitted.push(event));
-
-      actor.send({ type: 'load' });
-      await waitFor(actor, (s) => s.matches({ ready: {} }));
-
-      expect(emitted).toHaveLength(1);
-      expect(emitted[0]).toMatchObject({ type: 'editorStateLoaded' });
-      actor.stop();
-    });
-
     it('should transition to ready even on load error (graceful degradation)', async () => {
       const actor = createTestActor({
         loadResult: async () => {
@@ -240,6 +226,45 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
+    it('should rekey viewer entry paths and component display units on rename', async () => {
+      const oldMainUnitId = 'file:src/main.ts';
+      const newMainUnitId = 'file:src/index.ts';
+      const otherUnitId = 'file:src/other.ts';
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/main.ts',
+              graphicsSettings: {
+                ...defaultGraphicsSettings,
+                componentDisplay: {
+                  schemaVersion: 1,
+                  unitsById: {
+                    [oldMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
+                    [otherUnitId]: { hiddenComponentIds: ['component:Other'] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      actor.send({ type: 'renameFile', oldPath: 'src/main.ts', newPath: 'src/index.ts' });
+
+      const settings = actor.getSnapshot().context.viewSettings['view1'];
+      expect(settings?.entryPath).toBe('src/index.ts');
+      expect(settings?.graphicsSettings.componentDisplay).toEqual({
+        schemaVersion: 1,
+        unitsById: {
+          [newMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
+          [otherUnitId]: { hiddenComponentIds: ['component:Other'] },
+        },
+      });
+      actor.stop();
+    });
+
     it('should emit fileOpened event', async () => {
       const actor = await startAndLoad({ loadResult: undefined });
       const emitted: unknown[] = [];
@@ -248,6 +273,105 @@ describe('editorMachine', () => {
       actor.send({ type: 'openFile', path: 'src/test.ts', source: 'user' });
       expect(emitted).toHaveLength(1);
       expect(emitted[0]).toMatchObject({ type: 'fileOpened', path: 'src/test.ts' });
+      actor.stop();
+    });
+
+    it('should emit model component reveal requests', async () => {
+      const actor = await startAndLoad({ loadResult: undefined });
+      const emitted: unknown[] = [];
+      actor.on('modelComponentRevealRequested', (event) => emitted.push(event));
+
+      actor.send({
+        type: 'revealModelComponentInExplorer',
+        entryPath: 'src/main.ts',
+        unitId: 'file:src/main.ts',
+        componentId: 'component:housing',
+      });
+      expect(emitted).toEqual([
+        {
+          type: 'modelComponentRevealRequested',
+          entryPath: 'src/main.ts',
+          unitId: 'file:src/main.ts',
+          componentId: 'component:housing',
+        },
+      ]);
+      actor.stop();
+    });
+
+    it('should rekey nested component display units on directory rename', async () => {
+      const oldMainUnitId = 'file:src/foo/main.ts';
+      const oldNestedUnitId = 'file:src/foo/nested/part.ts';
+      const newMainUnitId = 'file:src/bar/main.ts';
+      const newNestedUnitId = 'file:src/bar/nested/part.ts';
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/foo/main.ts',
+              graphicsSettings: {
+                ...defaultGraphicsSettings,
+                componentDisplay: {
+                  schemaVersion: 1,
+                  unitsById: {
+                    [oldMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
+                    [oldNestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      actor.send({ type: 'renameFile', oldPath: 'src/foo', newPath: 'src/bar' });
+
+      const settings = actor.getSnapshot().context.viewSettings['view1'];
+      expect(settings?.entryPath).toBe('src/bar/main.ts');
+      expect(settings?.graphicsSettings.componentDisplay).toEqual({
+        schemaVersion: 1,
+        unitsById: {
+          [newMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
+          [newNestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
+        },
+      });
+      actor.stop();
+    });
+
+    it('should prune component display units for deleted files and directories', async () => {
+      const mainUnitId = 'file:src/foo/main.ts';
+      const nestedUnitId = 'file:src/foo/nested/part.ts';
+      const keepUnitId = 'file:src/keep.ts';
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/foo/main.ts',
+              graphicsSettings: {
+                ...defaultGraphicsSettings,
+                componentDisplay: {
+                  schemaVersion: 1,
+                  unitsById: {
+                    [mainUnitId]: { hiddenComponentIds: ['component:Housing'] },
+                    [nestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
+                    [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      actor.send({ type: 'pruneComponentDisplayForDeletedPath', path: 'src/foo' });
+
+      expect(actor.getSnapshot().context.viewSettings['view1']?.graphicsSettings.componentDisplay).toEqual({
+        schemaVersion: 1,
+        unitsById: {
+          [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
+        },
+      });
       actor.stop();
     });
 
@@ -519,26 +643,6 @@ describe('editorMachine', () => {
       } finally {
         vi.useRealTimers();
       }
-    });
-  });
-
-  // =========================================================================
-  // State: ready – reload
-  // =========================================================================
-  describe('ready – reload', () => {
-    it('should reload with new projectId', async () => {
-      const loadResults = [stubEditorState, { ...stubEditorState, projectId: 'new-build', openFiles: [] }];
-      let loadIndex = 0;
-      const actor = await startAndLoad({
-        loadResult: async () => loadResults[loadIndex++],
-      });
-
-      expect(actor.getSnapshot().context.projectId).toBe('test-build');
-      actor.send({ type: 'reload', projectId: 'new-build' });
-      await waitFor(actor, (s) => s.matches({ ready: {} }));
-      expect(actor.getSnapshot().context.projectId).toBe('new-build');
-      expect(actor.getSnapshot().context.openFiles).toEqual([]);
-      actor.stop();
     });
   });
 

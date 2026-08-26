@@ -2,57 +2,43 @@
  * Web-worker transport — client factory.
  *
  * Owns the consumer-facing client handle, the `Worker` constructor
- * lookup, the SAB pool allocator, the FS bridge plumbing, and the
- * single `new URL('../worker/web.js', import.meta.url)` literal that
- * tells the bundler to emit the bundled worker entry chunk.
- *
- * Per `docs/research/runtime-transport-authoring-simplification.md` (R1):
- * the chunk-emit literal lives **here**, in a file the worker entry
- * never reaches. The host file (`web-worker-host.ts`) is bundled into
- * the worker entry chunk and must remain free of `new URL` literals
- * so Rolldown's chunk planner has no static path back to the
- * chunk-emitter.
+ * lookup, the SAB pool allocator, and the FS bridge plumbing.
+ * Application code owns the worker module URL so framework bundlers
+ * can see the native `new Worker(new URL(...), { type: 'module' })`
+ * expression in the app graph.
  *
  * @public
  */
 
 import { createChannelClient } from '@taucad/rpc';
 import type { Channel, Port } from '@taucad/rpc';
+import { Topic } from '@taucad/events';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import type { Geometry } from '@taucad/types';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
+  RuntimeTransportCloseResult,
   RuntimeTransportClient,
   TransportClientReady,
-  TransportDescriptor,
 } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import { isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import type { GeometryTransport, RuntimeInitializeResult, RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import { materialiseExportResult } from '#transport/_internal/export-materialiser.js';
+import type {
+  GeometryTransport,
+  RuntimeExportResultTransport,
+  RuntimeInitializeResult,
+  RuntimeProtocol,
+} from '#types/runtime-protocol.types.js';
 import { allocatePools } from '#transport/_internal/sab-pools.js';
-import { triggerAbort } from '#transport/_internal/abort-channel.js';
-import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
+import { reservePreview, triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import type { WebWorkerId } from '#transport/_internal/web-worker-id.js';
-
-/**
- * Default URL of the bundled web-worker entry. Resolved at module-load
- * via `new URL('../worker/web.js', import.meta.url)` so consumers no
- * longer have to write a `new URL('@taucad/runtime/worker/web', ...)`
- * literal at every callsite.
- *
- * The relative `.js` reference is the form `tsModuleUrlBuildPlugin`
- * handles via its synchronous fast path. Hoisting the URL into the
- * runtime package keeps the only `new URL(...)` instance in source we
- * control.
- *
- * @internal
- */
-const defaultWebWorkerUrl = new URL('../worker/web.js', import.meta.url);
 
 /**
  * Subset of the DOM `Worker` surface the transport depends on. Tests
@@ -69,27 +55,43 @@ export type WebWorkerLike = {
 };
 
 /**
- * Options accepted by {@link webWorkerClient}.
+ * Options accepted by {@link webWorkerClient} and {@link webWorkerTransport}.
  *
  * @public
  */
-export type WebWorkerClientOptions = {
+export type WebWorkerTransportOptions = {
   /**
-   * URL of the worker module entry. Optional — when omitted the
-   * transport defaults to the bundled
-   * `@taucad/runtime/worker/web` entry. Override only when hosting a
-   * custom worker module that composes `KernelRuntimeWorker` with
-   * `webWorkerHost` directly.
+   * URL of the worker module entry. Must resolve to a `type: 'module'`
+   * worker that composes `createRuntimeWorker({ runtime })` with
+   * `webWorkerHost(...)`. Required unless `createWorker` is supplied.
    */
   readonly url?: string | URL;
+  /**
+   * Override for the global `Worker` constructor — primary use is
+   * unit-test injection of a fake worker.
+   */
   readonly workerCtor?: typeof Worker;
+  /**
+   * Create an app-owned worker instance. Use this in frameworks whose bundler
+   * requires the native worker expression at the app callsite, for example
+   * `new Worker(new URL('./runtime.worker.ts', import.meta.url), { type:
+   * 'module' })` in Next/Turbopack.
+   */
+  readonly createWorker?: () => WebWorkerLike;
   readonly sharedMemory?: { readonly geometry?: { readonly bytes: number } };
   readonly fileSystem?: RuntimeFileSystem;
-  readonly filePoolBuffer?: SharedArrayBuffer;
+  /** Mirror runtime spans into the worker Performance Timeline for DevTools. */
+  readonly devtoolsTelemetry?: boolean;
+  /** Host-compiled WASM modules cloned into the worker during initialization. */
+  readonly compiledWasmModules?: RuntimeInitializeMemoryHandle['compiledWasmModules'];
 };
 
-const wrapWorkerAsPort = (worker: WebWorkerLike, label: string): Port<unknown> => {
-  const listeners = new Set<(event: { data: unknown }) => void>();
+const wrapWorkerAsPort = (worker: WebWorkerLike): Port<unknown> => {
+  const messages = new Topic<unknown>({ name: 'web-worker-port' });
+  const listener = (event: { data: unknown }): void => {
+    messages.emit(event.data);
+  };
+  let listening = false;
   let closed = false;
   return {
     postMessage(data, transfer) {
@@ -99,14 +101,17 @@ const wrapWorkerAsPort = (worker: WebWorkerLike, label: string): Port<unknown> =
       worker.postMessage(data, transfer);
     },
     onMessage(handler) {
-      const listener = (event: { data: unknown }): void => {
-        handler(event.data);
-      };
-      worker.addEventListener('message', listener);
-      listeners.add(listener);
+      if (!listening) {
+        listening = true;
+        worker.addEventListener('message', listener);
+      }
+      const unsubscribe = messages.subscribe(handler);
       return () => {
-        listeners.delete(listener);
-        worker.removeEventListener('message', listener);
+        unsubscribe();
+        if (messages.size === 0 && listening) {
+          listening = false;
+          worker.removeEventListener('message', listener);
+        }
       };
     },
     close() {
@@ -114,15 +119,11 @@ const wrapWorkerAsPort = (worker: WebWorkerLike, label: string): Port<unknown> =
         return;
       }
       closed = true;
-      for (const listener of listeners) {
+      if (listening) {
         worker.removeEventListener('message', listener);
       }
-      listeners.clear();
-      try {
-        worker.terminate();
-      } catch (error) {
-        throw new Error(`${label}: terminate failed`, { cause: error });
-      }
+      listening = false;
+      messages.dispose();
     },
   };
 };
@@ -135,11 +136,10 @@ const wrapWorkerAsPort = (worker: WebWorkerLike, label: string): Port<unknown> =
  * @returns Diagnostic {@link TransportDescriptor}.
  * @public
  */
-export const webWorkerClientDescribe = (options: WebWorkerClientOptions): TransportDescriptor<WebWorkerId> => {
+export const webWorkerClientDescribe = (options: WebWorkerTransportOptions): TransportDescriptor<WebWorkerId> => {
   const fsKind = options.fileSystem ? 'inline' : 'unbound';
   const sabAvailable = typeof SharedArrayBuffer === 'function';
   const geometryDelivery = sabAvailable && options.sharedMemory?.geometry !== undefined ? 'pool' : 'transfer';
-  const fileDelivery = sabAvailable && options.filePoolBuffer !== undefined ? 'pool' : 'transfer';
   const abortSignal = sabAvailable ? 'sab-atomics' : 'wire-notify';
 
   return {
@@ -147,7 +147,6 @@ export const webWorkerClientDescribe = (options: WebWorkerClientOptions): Transp
     wire: 'web-worker',
     memory: {
       geometryDelivery,
-      fileDelivery,
       abortSignal,
     },
     fileSystem: fsKind,
@@ -159,15 +158,16 @@ export const webWorkerClientDescribe = (options: WebWorkerClientOptions): Transp
  * Compose into {@link defineRuntimeTransport} via
  * {@link web-worker-transport.ts}.
  *
- * @param options - Client options; see {@link WebWorkerClientOptions}.
+ * @param options - Transport options; see {@link WebWorkerTransportOptions}.
  * @returns The {@link RuntimeTransportClient} fat handle for the web-worker wire.
  * @public
  */
 export const webWorkerClient = (
-  options: WebWorkerClientOptions,
+  options: WebWorkerTransportOptions,
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, WebWorkerId> => {
-  const ctor: typeof Worker | undefined = options.workerCtor ?? (typeof Worker === 'function' ? Worker : undefined);
-  if (typeof ctor !== 'function') {
+  const workerCtor: typeof Worker | undefined =
+    options.workerCtor ?? (typeof Worker === 'function' ? Worker : undefined);
+  if (typeof options.createWorker !== 'function' && typeof workerCtor !== 'function') {
     throw new TypeError('webWorkerTransport: requires a `Worker` constructor (browser context or `workerCtor` option)');
   }
   if (options.fileSystem !== undefined && !isRuntimeFileSystem(options.fileSystem)) {
@@ -179,7 +179,6 @@ export const webWorkerClient = (
   const ensurePools = (): ReturnType<typeof allocatePools> => {
     pools ??= allocatePools({
       geometry: options.sharedMemory?.geometry,
-      filePoolBuffer: options.filePoolBuffer,
     });
     return pools;
   };
@@ -189,12 +188,43 @@ export const webWorkerClient = (
   let worker: WebWorkerLike | undefined;
   let port: Port<unknown> | undefined;
   let channel: Channel<RuntimeProtocol> | undefined;
+  let removeWorkerFailureListeners: (() => void) | undefined;
   let isClosed = false;
 
-  let resolveClosed: (() => void) | undefined;
-  const closed = new Promise<void>((resolve) => {
+  let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
+  const closed = new Promise<RuntimeTransportCloseResult>((resolve) => {
     resolveClosed = resolve;
   });
+
+  const finish = async (result: RuntimeTransportCloseResult): Promise<void> => {
+    if (isClosed) {
+      return;
+    }
+    isClosed = true;
+    try {
+      channel?.close(result.cause);
+    } catch {
+      /* Best-effort */
+    }
+    try {
+      port?.close();
+    } catch {
+      /* Best-effort */
+    }
+    removeWorkerFailureListeners?.();
+    removeWorkerFailureListeners = undefined;
+    try {
+      worker?.terminate();
+    } catch {
+      /* Best-effort */
+    }
+    try {
+      bridge?.dispose();
+    } catch {
+      /* Best-effort */
+    }
+    resolveClosed?.(result);
+  };
 
   const open = async (): Promise<TransportClientReady> => {
     if (openPromise) {
@@ -205,10 +235,39 @@ export const webWorkerClient = (
         throw new Error('webWorkerTransport: client closed before open()');
       }
       void ensurePools();
-      const resolvedUrl = options.url ?? defaultWebWorkerUrl;
-      const url = typeof resolvedUrl === 'string' ? resolvedUrl : resolvedUrl.href;
-      worker = Reflect.construct(ctor, [url, { type: 'module' }]) as WebWorkerLike;
-      port = wrapWorkerAsPort(worker, `web-worker:${webWorkerId}`);
+      if (typeof options.createWorker === 'function') {
+        worker = options.createWorker();
+      } else {
+        if (typeof workerCtor !== 'function') {
+          throw new TypeError('webWorkerTransport: requires a `Worker` constructor');
+        }
+        if (!options.url) {
+          throw new TypeError('webWorkerTransport: requires `createWorker` or an explicit worker `url`');
+        }
+        const url = typeof options.url === 'string' ? options.url : options.url.href;
+        worker = Reflect.construct(workerCtor, [url, { type: 'module' }]) as WebWorkerLike;
+      }
+      const eventWorker = worker as WebWorkerLike & {
+        addEventListener(
+          type: 'error' | 'messageerror',
+          listener: (event: { error?: unknown; message?: string }) => void,
+        ): void;
+        removeEventListener(
+          type: 'error' | 'messageerror',
+          listener: (event: { error?: unknown; message?: string }) => void,
+        ): void;
+      };
+      const onWorkerFailure = (event: { error?: unknown; message?: string }): void => {
+        const error = event.error instanceof Error ? event.error : new Error(event.message ?? 'Web Worker failed');
+        void finish({ cause: 'wire-failure', error });
+      };
+      eventWorker.addEventListener('error', onWorkerFailure);
+      eventWorker.addEventListener('messageerror', onWorkerFailure);
+      removeWorkerFailureListeners = () => {
+        eventWorker.removeEventListener('error', onWorkerFailure);
+        eventWorker.removeEventListener('messageerror', onWorkerFailure);
+      };
+      port = wrapWorkerAsPort(worker);
       channel = createChannelClient<RuntimeProtocol>({
         port,
         sessionKey: runtimeChannelSessionKey,
@@ -218,16 +277,27 @@ export const webWorkerClient = (
       // worker used in unit tests never replies. The runtime client
       // will await readiness before issuing any RPC. Production
       // workers reply with `lh` on module load.
-      return {
-        channel,
-        hello: buildHelloPayload(webWorkerId),
-      };
+      return { channel };
     })();
     return openPromise;
   };
 
   return {
     id: webWorkerId,
+    reservePreview() {
+      return reservePreview(ensurePools().signalBuffer);
+    },
+    renderTimeoutRecovery: {
+      kind: 'terminable',
+      abortRender(target): void {
+        if (channel) {
+          triggerRenderTimeout(channel, ensurePools().signalBuffer, target);
+        }
+      },
+      async terminate(): Promise<void> {
+        await finish({ cause: 'render-timeout' });
+      },
+    },
     describe(): TransportDescriptor<WebWorkerId> {
       return webWorkerClientDescribe(options);
     },
@@ -244,48 +314,41 @@ export const webWorkerClient = (
       const memoryHandle: RuntimeInitializeMemoryHandle = {
         ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
         ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
-        ...(pooled.filePoolBuffer ? { filePoolBuffer: pooled.filePoolBuffer } : {}),
         ...(bridge ? { fileSystemPort: bridge.port } : {}),
+        ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
+        ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
       };
       const transferables: Transferable[] = bridge ? [bridge.port] : [];
       const args = { ...input, memoryHandle };
-      return channel.call('initialize', transferables.length > 0 ? { value: args, transferables } : args);
-    },
-    abort(reason): void {
-      if (!channel) {
-        return;
+      try {
+        const result = await channel.call(
+          'initialize',
+          transferables.length > 0 ? { value: args, transferables } : args,
+        );
+        return result;
+      } catch (error) {
+        if (bridge) {
+          try {
+            bridge.dispose();
+          } finally {
+            bridge = undefined;
+          }
+        }
+        throw error;
       }
-      triggerAbort(channel, ensurePools().signalBuffer, reason);
     },
     async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      return materialiseGeometry(transport, ensurePools().geometryPool);
+      return materialiseGeometry(transport, ensurePools().geometryPool, (key) => {
+        channel?.notify('binaryMaterialised', { key });
+      });
     },
-    async close(reason?: string): Promise<void> {
-      if (isClosed) {
-        return;
-      }
-      isClosed = true;
-      try {
-        channel?.close(reason);
-      } catch {
-        /* Best-effort */
-      }
-      try {
-        port?.close();
-      } catch {
-        /* Best-effort */
-      }
-      try {
-        worker?.terminate();
-      } catch {
-        /* Best-effort */
-      }
-      try {
-        bridge?.dispose();
-      } catch {
-        /* Best-effort */
-      }
-      resolveClosed?.();
+    async resolveExport(transport: RuntimeExportResultTransport) {
+      return materialiseExportResult(transport, ensurePools().geometryPool, (key) => {
+        channel?.notify('binaryMaterialised', { key });
+      });
+    },
+    async close(): Promise<void> {
+      await finish({ cause: 'requested' });
     },
     closed,
   };

@@ -13,8 +13,8 @@ export const cookieName = {
   /* Theme */
   // The color hue.
   colorHue: 'color-hue',
-  // The theme mode.
-  colorTheme: 'color-theme',
+  // Whether code editors show parameter-name inlay hints.
+  codeInlayHints: 'code-inlay-hints',
 
   /* Layout */
   // Whether the sidebar is open.
@@ -58,7 +58,7 @@ export const cookieName = {
   chatToolAnalysisImages: 'chat-tool-analysis-images',
   // The quality of the screenshots in the chat.
   chatScreenshotQuality: 'chat-screenshot-quality',
-  // Whether testing tools (test_model, edit_tests) are enabled.
+  // Whether GeoSpec testing tools are enabled.
   chatTestingEnabled: 'chat-testing-enabled',
 
   /* Projects */
@@ -88,10 +88,6 @@ export const cookieName = {
   /* Privacy */
   // The user's cookie consent choice.
   cookieConsent: 'cookie-consent',
-
-  /* Filesystem */
-  // The last selected filesystem backend.
-  filesystemBackend: 'filesystem-backend',
 } as const;
 
 /**

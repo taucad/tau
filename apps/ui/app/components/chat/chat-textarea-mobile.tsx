@@ -15,6 +15,7 @@ import { ChatTextareaMobileImages } from '#components/chat/chat-textarea-mobile-
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
 import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '#components/ui/drawer.js';
 import { Command, CommandGroup, CommandItem, CommandList } from '#components/ui/command.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -50,6 +51,7 @@ type ChatTextareaMobileProperties = {
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
   readonly status: string;
   readonly selectedModel: ResolvedModel;
+  readonly imageInputSupported: boolean;
   readonly formattedCancelKeyCombination: string;
 
   // Refs
@@ -67,6 +69,7 @@ type ChatTextareaMobileProperties = {
   readonly handleDragOver: (event: React.DragEvent) => void;
   readonly handleDragLeave: () => void;
   readonly handleDrop: (event: React.DragEvent) => Promise<void>;
+  readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly handleTextChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
@@ -127,6 +130,7 @@ export const ChatTextareaMobile = memo(function ({
   setDraftToolChoice,
   status,
   selectedModel,
+  imageInputSupported,
   formattedCancelKeyCombination,
 
   // Refs
@@ -141,6 +145,7 @@ export const ChatTextareaMobile = memo(function ({
   handleDragOver,
   handleDragLeave,
   handleDrop,
+  handlePaste,
   handleFileSelect,
   handleFileChange,
   handleTextChange,
@@ -298,7 +303,12 @@ export const ChatTextareaMobile = memo(function ({
                 {/* Actions Group */}
                 <CommandGroup heading='Actions'>
                   {/* Upload Image */}
-                  <CommandItem value='upload-image' onSelect={handleDrawerFileSelect}>
+                  <CommandItem
+                    value='upload-image'
+                    aria-disabled={!imageInputSupported}
+                    className={cn(!imageInputSupported && 'opacity-50')}
+                    onSelect={handleDrawerFileSelect}
+                  >
                     <span className='flex w-full items-center justify-between'>
                       <div className='flex items-center gap-2'>
                         <Paperclip className='size-4' />
@@ -315,6 +325,7 @@ export const ChatTextareaMobile = memo(function ({
                     <ChatContextActions
                       asPopoverMenu
                       data-chat-textarea-focustrap={focusTrapAttribute}
+                      imageInputSupported={imageInputSupported}
                       addImage={handleDrawerAddImage}
                       addText={handleDrawerAddText}
                       onClose={() => {
@@ -330,7 +341,7 @@ export const ChatTextareaMobile = memo(function ({
 
         {/* Textarea area */}
         <div
-          className={cn('flex flex-1 flex-col overflow-auto')}
+          className={cn('flex min-w-0 flex-1 flex-col overflow-auto')}
           onClick={(event) => {
             if (event.target !== textareaReference.current) {
               focusInput();
@@ -375,6 +386,7 @@ export const ChatTextareaMobile = memo(function ({
               disabled={isSubmitting}
               onChange={handleTextChange}
               onKeyDown={handleTextareaKeyDown}
+              onPaste={handlePaste}
             />
           </div>
         </div>
@@ -387,6 +399,7 @@ export const ChatTextareaMobile = memo(function ({
               searchQuery={contextSearchQuery}
               selectedIndex={selectedMenuIndex}
               onSelectedIndexChange={setSelectedMenuIndex}
+              imageInputSupported={imageInputSupported}
               addImage={handleContextImageAdd}
               addText={handleContextMenuSelect}
               onSelectItem={handleContextMenuSelect}

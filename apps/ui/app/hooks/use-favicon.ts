@@ -1,8 +1,9 @@
 import { useCallback, useEffect } from 'react';
 import { stringToBase64 } from 'uint8array-extras';
+import { tauLogoPathData } from '#components/icons/tau.js';
 import { useColor } from '#hooks/use-color.js';
 
-const faviconBase = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="{color}" d="M256 37.873 392.533 2.622l102.4 26.441L256 90.754 17.067 29.063l102.4-26.441L256 37.873ZM0 59.906l238.933 61.692v387.78l-51.2-13.218V161.261L0 112.792V59.906Zm512 0-238.933 61.692v387.78l51.2-13.218V161.261L512 112.787V59.906Z"/></svg>`;
+const faviconBase = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="{color}" d="${tauLogoPathData}"/></svg>`;
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- infer type for hooks
 export function useFavicon() {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { MyUIMessage } from '@taucad/chat';
+import type { MyUIMessage, ScreenshotView } from '@taucad/chat';
 import { fileUnchangedMarker } from '@taucad/chat/constants';
 import type { ActivityGroup, FoldableRun, StandaloneRun } from '#utils/assistant-message-activity.js';
 import {
@@ -36,7 +36,6 @@ const globPart = (state?: string) => toolPart('tool-glob_search', state);
 const editFilePart = (state?: string) => toolPart('tool-edit_file', state);
 const createFilePart = (state?: string) => toolPart('tool-create_file', state);
 const deleteFilePart = (state?: string) => toolPart('tool-delete_file', state);
-const editTestsPart = (state?: string) => toolPart('tool-edit_tests', state);
 const exportGeometryPart = (state?: string) => toolPart('tool-export_geometry', state);
 const webSearchPart = (state?: string) => toolPart('tool-web_search', state);
 const webBrowserPart = (state?: string) => toolPart('tool-web_browser', state);
@@ -53,7 +52,7 @@ const testModelPart = (state?: string): Part =>
   }) as unknown as Part;
 const transferPart = (state?: string) => toolPart('tool-transfer_to_cad_expert', state);
 
-type ScreenshotImage = { view: string; dataUrl: string };
+type ScreenshotImage = { view: ScreenshotView; dataUrl: string };
 
 const screenshotPartWithImages = (images: readonly ScreenshotImage[]): Part =>
   ({
@@ -62,8 +61,13 @@ const screenshotPartWithImages = (images: readonly ScreenshotImage[]): Part =>
     output: { images },
   }) as unknown as Part;
 
-const compositeScreenshotPart = (): Part =>
-  screenshotPartWithImages([{ view: 'composite', dataUrl: 'data:image/png;base64,AAAA' }]);
+const sixViewScreenshotPart = (): Part =>
+  screenshotPartWithImages(
+    (['front', 'back', 'right', 'left', 'top', 'bottom'] as const).map((view) => ({
+      view,
+      dataUrl: `data:image/webp;base64,${view}`,
+    })),
+  );
 
 const testModelPartWithCounts = (passes: number, failures: number): Part =>
   ({
@@ -162,6 +166,12 @@ describe('classifyActivityPart', () => {
     expect(classifyActivityPart(part)).toBe('skip');
   });
 
+  it('should classify use_skill tool parts as visible data singletons', () => {
+    const useSkillToolPart = { type: 'tool-use_skill', state: 'output-available' } as unknown as Part;
+
+    expect(classifyActivityPart(useSkillToolPart)).toBe('data');
+  });
+
   it('should classify web_search and web_browser into research category', () => {
     expect(classifyActivityPart(webSearchPart())).toBe('research');
     expect(classifyActivityPart(webBrowserPart())).toBe('research');
@@ -174,11 +184,10 @@ describe('classifyActivityPart', () => {
     expect(classifyActivityPart(globPart())).toBe('research');
   });
 
-  it('should classify edit_file, create_file, delete_file, edit_tests, export_geometry into write category', () => {
+  it('should classify edit_file, create_file, delete_file, export_geometry into write category', () => {
     expect(classifyActivityPart(editFilePart())).toBe('write');
     expect(classifyActivityPart(createFilePart())).toBe('write');
     expect(classifyActivityPart(deleteFilePart())).toBe('write');
-    expect(classifyActivityPart(editTestsPart())).toBe('write');
     expect(classifyActivityPart(exportGeometryPart())).toBe('write');
   });
 
@@ -251,6 +260,15 @@ describe('groupAssistantParts', () => {
 
       expect(groups).toHaveLength(1);
       expect(groups[0]!.kind).toBe('singleton');
+    });
+
+    it('should pass use_skill tool parts as visible singletons', () => {
+      const parts: Parts = [{ type: 'tool-use_skill', state: 'output-available' } as unknown as Part];
+      const groups = groupAssistantParts(parts);
+
+      expect(groups).toHaveLength(1);
+      expect(groups[0]!.kind).toBe('singleton');
+      expect(groups[0]!.category).toBe('data');
     });
 
     it('should pass transfer tools as singletons', () => {
@@ -520,7 +538,7 @@ describe('groupAssistantParts', () => {
         reasoningPart('R-mid-1'),
         testModelPartWithCounts(2, 2),
         reasoningPart('R-mid-2'),
-        compositeScreenshotPart(),
+        sixViewScreenshotPart(),
         reasoningPart('R-trail'),
       ];
       const groups = groupAssistantParts(parts);
@@ -770,17 +788,17 @@ describe('groupAssistantParts', () => {
       expect(group.summary).toBe('Explored 2 screenshots');
     });
 
-    it('should expand a composite multi-angle screenshot to 6 screenshots', () => {
-      const groups = groupAssistantParts([compositeScreenshotPart()]);
+    it('should count all six ordered multi-angle images', () => {
+      const groups = groupAssistantParts([sixViewScreenshotPart()]);
 
       const group = expectAggregated(groups[0]!);
       expect(group.summary).toBe('Explored 6 screenshots');
     });
 
-    it('should sum image counts across multiple screenshot calls (composite + single)', () => {
+    it('should sum image counts across multiple screenshot calls', () => {
       const parts: Parts = [
-        compositeScreenshotPart(),
-        screenshotPartWithImages([{ view: 'current', dataUrl: 'data:image/png;base64,CCCC' }]),
+        sixViewScreenshotPart(),
+        screenshotPartWithImages([{ view: 'isometric', dataUrl: 'data:image/webp;base64,CCCC' }]),
       ];
       const groups = groupAssistantParts(parts);
 
@@ -828,7 +846,7 @@ describe('groupAssistantParts', () => {
       const parts: Parts = [
         webBrowserPart(),
         testModelPartWithCounts(2, 1),
-        compositeScreenshotPart(),
+        sixViewScreenshotPart(),
         kernelResultPart(),
         grepPart(),
         readFilePart(),
@@ -840,7 +858,7 @@ describe('groupAssistantParts', () => {
     });
 
     it('should produce the screenshot-scenario summary "Explored 1 render, 6 screenshots, 4 tests"', () => {
-      const parts: Parts = [kernelResultPart(), testModelPartWithCounts(4, 0), compositeScreenshotPart()];
+      const parts: Parts = [kernelResultPart(), testModelPartWithCounts(4, 0), sixViewScreenshotPart()];
       const groups = groupAssistantParts(parts);
 
       const group = expectAggregated(groups[0]!);

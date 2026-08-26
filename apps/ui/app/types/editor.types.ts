@@ -64,9 +64,9 @@ export type PanelState = {
   panelSizes: Record<PanelId, number>;
   /** Mobile active tab ID */
   mobileActiveTab: PanelId;
-  /** Kernel paneview panel states (keyed by entry file path) */
+  /** Kernel paneview panel states (keyed by entry path) */
   kernelPaneview: Record<string, PaneviewPanelState>;
-  /** Parameters paneview panel states (keyed by entry file path) */
+  /** Parameters paneview panel states (keyed by entry path) */
   parametersPaneview: Record<string, PaneviewPanelState>;
 };
 
@@ -95,11 +95,11 @@ export function fromAllotmentSizes(sizes: readonly number[]): Record<PanelId, nu
 
 /**
  * Per-viewer-panel state. Each viewer panel in the Dockview layout has its own
- * entry file binding and graphics settings.
+ * entry path binding and graphics settings.
  */
 export type ViewState = {
   /** Which file this viewer panel is displaying (undefined = no file selected, show empty state) */
-  entryFile: string | undefined;
+  entryPath: string | undefined;
   /** Per-view graphics settings (surfaces, lines, grid, FOV, etc.) */
   graphicsSettings: GraphicsViewSettings;
 };

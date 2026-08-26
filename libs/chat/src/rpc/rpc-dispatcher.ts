@@ -9,12 +9,12 @@ import { handleListDirectory } from '#rpc/handlers/handle-list-directory.js';
 import { handleGrep } from '#rpc/handlers/handle-grep.js';
 import { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
 import { handleGetKernelResult } from '#rpc/handlers/handle-get-kernel-result.js';
-import { handleCaptureObservations } from '#rpc/handlers/handle-capture-observations.js';
-import { handleFetchGeometry } from '#rpc/handlers/handle-fetch-geometry.js';
+import { handleCaptureImages } from '#rpc/handlers/handle-capture-images.js';
+import { handleRunGeoSpecTests } from '#rpc/handlers/handle-run-geospec-tests.js';
 import { handleExportGeometry } from '#rpc/handlers/handle-export-geometry.js';
-import { handleCaptureScreenshot } from '#rpc/handlers/handle-capture-screenshot.js';
 import { handleAppendFile } from '#rpc/handlers/handle-append-file.js';
 import { handleEditFile } from '#rpc/handlers/handle-edit-file.js';
+import { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 
 type RpcHandlerMap = {
   [K in RpcName]: (args: RpcInput<K>) => Promise<RpcResult<K>>;
@@ -45,12 +45,12 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.grep]: async (args) => handleGrep(args, deps.fileSystem),
     [rpcName.globSearch]: async (args) => handleGlobSearch(args, deps.fileSystem),
     [rpcName.getKernelResult]: async (args) => handleGetKernelResult(args, deps.kernelClient),
-    [rpcName.captureObservations]: async (args) => handleCaptureObservations(args, deps.graphics),
-    [rpcName.fetchGeometry]: async (args) => handleFetchGeometry(args, deps.graphics, deps.fileSystem),
+    [rpcName.captureImages]: async (args) => handleCaptureImages(args, deps.images),
+    [rpcName.runGeoSpecTests]: async (args) => handleRunGeoSpecTests(args, deps.geospec),
     [rpcName.exportGeometry]: async (args) => handleExportGeometry(args, deps.graphics, deps.fileSystem),
-    [rpcName.captureScreenshot]: async (args) => handleCaptureScreenshot(args, deps.graphics),
     [rpcName.appendFile]: async (args) => handleAppendFile(args, deps.fileSystem),
     [rpcName.editFile]: async (args) => handleEditFile(args, deps.fileSystem),
+    [rpcName.resolveSkill]: async (args) => handleResolveSkill(args, deps.skillResolver),
   };
 
   const dispatch = async <K extends keyof RpcSchemasRegistry>(call: RpcCall<K>): Promise<RpcResult<K>> => {

@@ -3,6 +3,17 @@
   "files.watcherExclude": {
     "**/repos/**": true
   },
+  "git.autoRepositoryDetection": "subFolders",
+  "git.scanRepositories": [
+    "repos/tau-brain",
+    "repos/cloud-infra",
+    "repos/opencascade.js",
+    "repos/replicad",
+    "repos/openrscad",
+    "repos/libassimp",
+    "repos/nanoraster",
+    "repos/picovoxel"
+  ],
   "javascript.preferences.importModuleSpecifierEnding": "js",
   "typescript.preferences.importModuleSpecifierEnding": "js",
   "typescript.preferences.importModuleSpecifier": "non-relative",
@@ -39,13 +50,12 @@
   // Keep repos visible in Explorer; exclude them only from Tailwind IntelliSense.
   "tailwindCSS.files.exclude": [
     "repos/**",
-    "tarballs/**",
     "experiments/**",
     "**/repos/**",
-    "**/tarballs/**",
     "**/experiments/**",
     "**/node_modules/**",
     "**/.git/**",
     "**/dist/**"
-  ]
+  ],
+  "js/ts.tsdk.path": "node_modules/@typescript/native-preview"
 }

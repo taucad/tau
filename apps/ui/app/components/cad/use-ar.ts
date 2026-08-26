@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Geometry } from '@taucad/types';
+import { mimeTypes } from '@taucad/types/constants';
 import { toast } from '#components/ui/sonner.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 
@@ -61,13 +62,13 @@ function launchQuickLook(usdzBlobUrl: string): void {
  * Hook providing iOS Quick Look AR capability detection and launch.
  *
  * Returns `canActivateAr: true` only when the device supports Quick Look
- * and geometry is available. Call `activateAr()` from a user click handler
+ * and GLTF geometry is available. Call `activateAr()` from a user click handler
  * to export the model to USDZ via the runtime client and open AR Quick Look.
  */
-export function useAr(geometries: readonly Geometry[], kernelClient?: AppRuntimeClient): ArCapability {
+export function useAr(geometry: Geometry | undefined, kernelClient?: AppRuntimeClient): ArCapability {
   const [isConverting, setIsConverting] = useState(false);
 
-  const hasGltfGeometry = geometries.some((g) => g.format === 'gltf');
+  const hasGltfGeometry = geometry?.format === 'gltf';
   const canActivateAr = isQuickLookSupported && hasGltfGeometry && Boolean(kernelClient);
 
   const activateAr = useCallback(async () => {
@@ -84,8 +85,18 @@ export function useAr(geometries: readonly Geometry[], kernelClient?: AppRuntime
         throw new Error(result.issues[0]?.message ?? 'USDZ export failed');
       }
 
-      const { data } = result;
-      blobUrl = URL.createObjectURL(new Blob([data.bytes], { type: data.mimeType }));
+      if (
+        result.data.length !== 1 ||
+        result.data[0]?.name.endsWith('.usdz') !== true ||
+        result.data[0].mimeType !== mimeTypes.usdz
+      ) {
+        throw new Error(
+          `USDZ export expected exactly one .usdz artifact (${mimeTypes.usdz}), received ${result.data.length}: ${result.data.map((file) => `${file.name} (${file.mimeType})`).join(', ')}`,
+        );
+      }
+
+      const file = result.data[0];
+      blobUrl = URL.createObjectURL(new Blob([file.bytes], { type: file.mimeType }));
 
       launchQuickLook(blobUrl);
     } catch (error) {

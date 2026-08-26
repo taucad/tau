@@ -19,11 +19,3 @@ const kernelConfigs: Record<KernelProvider, KernelConfig> = {
 export function getKernelConfig(kernel: KernelProvider): KernelConfig {
   return kernelConfigs[kernel];
 }
-
-/**
- * Format the `NO_TOP_LEVEL_GEOMETRY` recovery sentence for a given kernel.
- * Centralises the wording so every consumer (tool errors, system prompts)
- * surfaces the same imperative without per-kernel string drift.
- */
-export const formatAddTopLevelExportRecovery = (kernel: KernelConfig): string =>
-  `Add \`${kernel.topLevelExportExample}\` so the file renders standalone.`;

@@ -16,10 +16,16 @@ import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { NavChat } from '#components/nav/nav-chat.js';
 import { navRoutes } from '#constants/route.constants.js';
 import { NavFooter } from '#components/nav/nav-footer.js';
+import { useFeatureFlags } from '#flags/use-feature.js';
 
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   const { state, isMobile, openMobile } = useSidebar();
+  const flags = useFeatureFlags();
   const showAlphaBadge = isMobile ? openMobile : state === 'expanded';
+  const navMainItems = React.useMemo(
+    () => navRoutes.navMain.filter((item) => item.featureFlag === undefined || flags[item.featureFlag]),
+    [flags],
+  );
 
   return (
     <Sidebar variant='floating' collapsible='offcanvas' {...properties}>
@@ -43,7 +49,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         <div className='flex-1 overflow-y-auto'>
           <div className='flex flex-col justify-between'>
             <NavHistory />
-            <NavMain items={navRoutes.navMain} groupLabel='Platform' />
+            <NavMain items={navMainItems} groupLabel='Platform' />
           </div>
         </div>
         <div className='sticky bottom-0 z-10'>

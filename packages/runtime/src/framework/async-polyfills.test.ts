@@ -95,4 +95,33 @@ describe('cooperativeYield', () => {
       globalThis.scheduler = originalScheduler;
     }
   });
+
+  it('should call scheduler.yield with the native scheduler receiver', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'scheduler');
+    const receiverToken = Symbol('scheduler-receiver');
+    const observedReceivers: unknown[] = [];
+    const scheduler = {
+      receiverToken,
+      async yield(this: unknown) {
+        observedReceivers.push(this);
+      },
+    };
+
+    try {
+      Object.defineProperty(globalThis, 'scheduler', {
+        configurable: true,
+        value: scheduler,
+      });
+
+      await cooperativeYield();
+
+      expect(observedReceivers).toEqual([scheduler]);
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, 'scheduler', originalDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, 'scheduler');
+      }
+    }
+  });
 });

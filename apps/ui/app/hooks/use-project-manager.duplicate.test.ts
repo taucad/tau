@@ -1,152 +1,156 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
-import type { Project } from '@taucad/types';
+import { projectToManifest, serializeProjectManifest } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
+import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 
-/**
- * Duplicate-project tests for {@link useProjectManager} covering Audit R8 /
- * Finding 5 (same-workspace, same-backend duplication).
- *
- * The duplicate path:
- *   1. Reads the source project's `ProjectFileSystemConfig` from IDB.
- *   2. Creates the duplicate via the object-store worker.
- *   3. For `webaccess` sources, re-validates the workspace handle and
- *      permission, persists the duplicate's binding, mounts the
- *      workspace `/projects` parent ONCE with the resolved
- *      `(directoryHandle, workspaceId)`, copies through the facade,
- *      and unmounts in `finally`.
- *   4. For `memory` sources, raises `WorkspaceDirectoryRequiredError('unsupported')`.
- *   5. For `indexeddb` / `opfs` sources, copies via the existing root
- *      mount (no per-call mount).
- *
- * These behaviours are the contract of "no ambient workspace state
- * survives between calls".
- */
+const sourceProject: ProjectManifest = projectToManifest({
+  id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
+  name: 'Source',
+  description: '',
+  tags: [],
+  assets: { main: { entryPath: 'main.ts' } },
+});
+const duplicateProject: ProjectManifest = projectToManifest({
+  ...sourceProject,
+  id: 'proj_ccccccccccccccccccccc',
+  name: 'Source (Copy)',
+});
+const operationId = 'req_bbbbbbbbbbbbbbbbbbbbb';
+let lastManifest = serializeProjectManifest(projectToManifest(sourceProject));
+const phases: string[] = [];
 
-const mockMount = vi.fn<(prefix: string, config: unknown) => Promise<void>>();
-const mockUnmount = vi.fn<(prefix: string) => void>();
-const mockCopyDirectory = vi.fn<(source: string, destination: string) => Promise<void>>();
+const mockGetDirectoryContents = vi.fn(async () => ({
+  'main.ts': new Uint8Array([1]),
+  'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
+}));
+const mockSyncProjectRoots = vi.fn(async () => {
+  phases.push('roots');
+});
+const mockCommitPendingProjectDirectory = vi.fn(async () => {
+  phases.push('commit');
+  return { status: 'committed' } as const;
+});
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    backendType: 'indexeddb',
-    writeFiles: vi.fn(),
-    workspace: {
-      mount: mockMount,
-      unmount: mockUnmount,
-      invalidateStandaloneProvider: vi.fn(async () => undefined),
+    client: {
+      readFile: vi.fn(async () => lastManifest),
+      writeFiles: vi.fn(async () => {
+        phases.push('files');
+      }),
+      writeFile: vi.fn(async (_path: string, bytes: Uint8Array<ArrayBuffer>) => {
+        phases.push('manifest');
+        lastManifest = bytes;
+      }),
+      getDirectoryContents: mockGetDirectoryContents,
+      exists: vi.fn(async () => false),
+      rmdir: vi.fn(async () => undefined),
+      listProjectManifests: vi.fn(async () => ({ roots: [], entries: [] })),
+      commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
     },
-    copyDirectory: mockCopyDirectory,
-    fileManagerRef: { getSnapshot: () => ({ matches: () => true }) },
+    workspace: { syncProjectRoots: mockSyncProjectRoots },
   }),
 }));
 
-type ProjectFsConfigInput =
-  | { projectId: string; backend: 'indexeddb' | 'opfs' | 'memory' }
-  | { projectId: string; backend: 'webaccess'; workspaceId: string };
-
-const mockSetProjectFileSystemConfig = vi.fn<(config: ProjectFsConfigInput) => Promise<void>>();
-const mockGetProjectFileSystemConfig = vi.fn<(projectId: string) => Promise<ProjectFsConfigInput | undefined>>();
-const mockGetWorkspace =
-  vi.fn<
-    (
-      workspaceId: string,
-    ) => Promise<{ workspace: { workspaceId: string; name: string }; handle: FileSystemDirectoryHandle } | undefined>
-  >();
-const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
-
+const mockGetProjectFileSystemConfig = vi.fn();
+const mockGetWorkspace = vi.fn();
+const mockListWorkspaces = vi.fn(async (): Promise<Array<{ workspaceId: string }>> => []);
+const mockCheckHandlePermission = vi.fn(async () => 'granted');
+const mockSetProjectFileSystemConfig = vi.fn(async () => {
+  phases.push('locator');
+});
+const mockPinHomeStorageBackend = vi.fn(async (backend: 'indexeddb' | 'opfs') => backend);
+const mockGetProjectCreationLocation = vi.fn();
+const mockSetProjectCreationLocation = vi.fn();
 vi.mock('#filesystem/handle-store.js', () => ({
-  setProjectFileSystemConfig: async (...args: unknown[]) =>
-    mockSetProjectFileSystemConfig(...(args as [ProjectFsConfigInput])),
-  getProjectFileSystemConfig: async (...args: unknown[]) => mockGetProjectFileSystemConfig(...(args as [string])),
-  getDefaultWorkspace: vi.fn(async () => undefined),
-  getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),
-  checkHandlePermission: async () => mockCheckHandlePermission(),
+  pinHomeStorageBackend: mockPinHomeStorageBackend,
+  getHomeStorageBackend: vi.fn(async () => 'opfs'),
+  getProjectCreationLocation: mockGetProjectCreationLocation,
+  setProjectCreationLocation: mockSetProjectCreationLocation,
+  getProjectFileSystemConfig: mockGetProjectFileSystemConfig,
+  getWorkspace: mockGetWorkspace,
+  checkHandlePermission: mockCheckHandlePermission,
+  setProjectFileSystemConfig: mockSetProjectFileSystemConfig,
+  deleteProjectFileSystemConfig: vi.fn(async () => undefined),
+  getAllProjectFileSystemConfigs: vi.fn(async () => []),
+  listWorkspaces: mockListWorkspaces,
+  subscribeProjectRootConfigurationChanges: vi.fn(() => vi.fn()),
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({
-  isFileSystemAccessSupported: true,
-}));
-
-const fakeSourceProjectId = 'src-proj-id';
-const fakeDuplicate: Project = {
-  id: 'dup-proj-id',
-  name: 'Duplicate',
-  description: '',
-  author: { name: '', avatar: '' },
-  tags: [],
-  thumbnail: '',
-  createdAt: Date.now(),
-  updatedAt: Date.now(),
-  assets: {},
-};
-
-const mockDuplicateProject = vi.fn(async () => fakeDuplicate);
-
-vi.mock('#hooks/project-manager.machine.js', async () => {
-  const xstate = await import('xstate');
-  const machine = xstate.setup({}).createMachine({
-    id: 'projectManager',
-    initial: 'ready',
-    context: {
-      worker: undefined as Worker | undefined,
-      wrappedWorker: undefined as unknown,
-      error: undefined as Error | undefined,
-    },
-    states: { ready: {} },
-  });
-  return { projectManagerMachine: machine };
-});
-
-vi.mock('xstate', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return {
-    ...actual,
-    waitFor: vi.fn().mockResolvedValue({
-      matches: (state: string) => state === 'ready',
-      context: {
-        wrappedWorker: {
-          duplicateProject: mockDuplicateProject,
-          createProjectWithResources: vi.fn(),
-        },
-      },
-    }),
-  };
-});
-
+vi.mock('#constants/browser.constants.js', () => ({ isFileSystemAccessSupported: true }));
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (_name: string, defaultValue: string) => [defaultValue, vi.fn()],
 }));
-
-vi.mock('#constants/project.constants.js', () => ({
-  createInitialProject: () => ({ projectData: {}, files: {} }),
-}));
-
-vi.mock('#utils/kernel.utils.js', () => ({
-  getMainFile: () => 'main.ts',
-  getEmptyCode: () => 'export default {};',
-}));
-
-vi.mock('#utils/filesystem.utils.js', () => ({
-  encodeTextFile: (text: string) => new TextEncoder().encode(text),
-}));
-
 vi.mock('#utils/chat.utils.js', () => ({
   createMessage: (options: Record<string, unknown>) => ({ id: 'msg-1', ...options }),
 }));
 
-vi.mock('#constants/project-names.js', () => ({
-  defaultProjectName: 'Untitled Project',
-}));
+const pendingDuplicate: Extract<PendingProjectOperation, { kind: 'duplicate' }> = {
+  operationId,
+  kind: 'duplicate',
+  backend: 'indexeddb',
+  providerBasePath: '/source-copy',
+  sourceProjectId: sourceProject.id,
+  manifest: duplicateProject,
+  library: { projectId: duplicateProject.id, lastActivityAt: 3 },
+  files: { 'main.ts': { content: new Uint8Array([1]) } },
+  chats: [],
+};
+type PrepareDuplicateInput = {
+  readonly sourceManifest: ProjectManifest;
+  readonly targetManifest: ProjectManifest;
+  readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
+  readonly storage: PendingProjectStorage;
+};
+const mockDuplicate = vi.fn<
+  (input: PrepareDuplicateInput) => Promise<Extract<PendingProjectOperation, { kind: 'duplicate' }>>
+>(async () => {
+  phases.push('pending');
+  return pendingDuplicate;
+});
 
-// eslint-disable-next-line @typescript-eslint/naming-convention -- React component export
+vi.mock('#hooks/project-manager.machine.js', async () => {
+  const xstate = await import('xstate');
+  return {
+    projectManagerMachine: xstate.setup({}).createMachine({
+      id: 'projectManager',
+      initial: 'ready',
+      context: { worker: undefined, wrappedWorker: undefined, error: undefined },
+      states: { ready: {} },
+    }),
+  };
+});
+vi.mock('xstate', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    waitFor: vi.fn(async () => ({
+      matches: (state: string) => state === 'ready',
+      context: {
+        wrappedWorker: {
+          getPendingProjectOperations: vi.fn(async () => []),
+          prepareProjectDuplicate: mockDuplicate,
+          resumePendingProjectOperationResources: vi.fn(async () => {
+            phases.push('resources');
+          }),
+          completePendingProjectOperation: vi.fn(async () => {
+            phases.push('complete');
+          }),
+        },
+      },
+    })),
+  };
+});
+
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
 
-function createWrapper() {
+const createWrapper = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React component export
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return createElement(
       QueryClientProvider,
@@ -154,154 +158,92 @@ function createWrapper() {
       createElement(ProjectManagerProvider, undefined, children),
     );
   };
-}
+};
 
 describe('useProjectManager.duplicateProject', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockMount.mockResolvedValue(undefined);
-    mockUnmount.mockReturnValue(undefined);
-    mockCopyDirectory.mockResolvedValue(undefined);
-    mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
-    mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
-    mockGetWorkspace.mockResolvedValue(undefined);
-    mockCheckHandlePermission.mockResolvedValue('granted');
-  });
-
-  it('mounts webaccess workspace ONCE with explicit handle + workspaceId, then unmounts', async () => {
-    const handle = { kind: 'directory', name: 'WS' } as unknown as FileSystemDirectoryHandle;
+    phases.length = 0;
+    lastManifest = serializeProjectManifest(projectToManifest(sourceProject));
     mockGetProjectFileSystemConfig.mockResolvedValue({
-      projectId: fakeSourceProjectId,
-      backend: 'webaccess',
-      workspaceId: 'wsp_alpha',
-    });
-    mockGetWorkspace.mockResolvedValue({
-      workspace: { workspaceId: 'wsp_alpha', name: 'Alpha' },
-      handle,
-    });
-
-    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-    await act(async () => {
-      await result.current.duplicateProject(fakeSourceProjectId);
-    });
-
-    // Audit R8: a single mount of `/projects` carries (directoryHandle,
-    // workspaceId) atomically — both source and destination resolve
-    // through it via `preservePath: true`.
-    expect(mockMount).toHaveBeenCalledExactlyOnceWith('/projects', {
-      backend: 'webaccess',
-      directoryHandle: handle,
-      workspaceId: 'wsp_alpha',
-      preservePath: true,
-    });
-    expect(mockSetProjectFileSystemConfig).toHaveBeenCalledExactlyOnceWith({
-      projectId: fakeDuplicate.id,
-      backend: 'webaccess',
-      workspaceId: 'wsp_alpha',
-    });
-    expect(mockCopyDirectory).toHaveBeenCalledExactlyOnceWith(
-      `/projects/${fakeSourceProjectId}`,
-      `/projects/${fakeDuplicate.id}`,
-    );
-    // `finally` block must always unmount even on success.
-    expect(mockUnmount).toHaveBeenCalledExactlyOnceWith('/projects');
-  });
-
-  it('unmounts even when the underlying copy fails', async () => {
-    const handle = { kind: 'directory', name: 'WS' } as unknown as FileSystemDirectoryHandle;
-    mockGetProjectFileSystemConfig.mockResolvedValue({
-      projectId: fakeSourceProjectId,
-      backend: 'webaccess',
-      workspaceId: 'wsp_alpha',
-    });
-    mockGetWorkspace.mockResolvedValue({
-      workspace: { workspaceId: 'wsp_alpha', name: 'Alpha' },
-      handle,
-    });
-    mockCopyDirectory.mockRejectedValueOnce(new Error('copy boom'));
-
-    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-    await expect(
-      act(async () => {
-        await result.current.duplicateProject(fakeSourceProjectId);
-      }),
-    ).rejects.toThrow('copy boom');
-
-    expect(mockUnmount).toHaveBeenCalledExactlyOnceWith('/projects');
-  });
-
-  it('rejects with WorkspaceDirectoryRequiredError(missing) when the workspace row is gone', async () => {
-    mockGetProjectFileSystemConfig.mockResolvedValue({
-      projectId: fakeSourceProjectId,
-      backend: 'webaccess',
-      workspaceId: 'wsp_gone',
-    });
-    mockGetWorkspace.mockResolvedValue(undefined);
-
-    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-    await expect(
-      act(async () => {
-        await result.current.duplicateProject(fakeSourceProjectId);
-      }),
-    ).rejects.toMatchObject({
-      name: 'WorkspaceDirectoryRequiredError',
-      code: 'missing',
-    });
-
-    expect(mockMount).not.toHaveBeenCalled();
-    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
-  });
-
-  it('rejects with WorkspaceDirectoryRequiredError(permission) when permission is revoked', async () => {
-    const handle = { kind: 'directory', name: 'WS' } as unknown as FileSystemDirectoryHandle;
-    mockGetProjectFileSystemConfig.mockResolvedValue({
-      projectId: fakeSourceProjectId,
-      backend: 'webaccess',
-      workspaceId: 'wsp_revoked',
-    });
-    mockGetWorkspace.mockResolvedValue({
-      workspace: { workspaceId: 'wsp_revoked', name: 'Revoked' },
-      handle,
-    });
-    mockCheckHandlePermission.mockResolvedValue('prompt');
-
-    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-    await expect(
-      act(async () => {
-        await result.current.duplicateProject(fakeSourceProjectId);
-      }),
-    ).rejects.toMatchObject({
-      name: 'WorkspaceDirectoryRequiredError',
-      code: 'permission',
-    });
-
-    expect(mockMount).not.toHaveBeenCalled();
-    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
-  });
-
-  it('does not mount per-call for non-webaccess sources', async () => {
-    mockGetProjectFileSystemConfig.mockResolvedValue({
-      projectId: fakeSourceProjectId,
+      projectId: sourceProject.id,
       backend: 'indexeddb',
+      providerBasePath: '/source',
+    });
+    mockListWorkspaces.mockResolvedValue([]);
+  });
+
+  it('copies source files without tau.json and writes the fresh manifest last', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await act(async () => result.current.duplicateProject(sourceProject.id));
+
+    const duplicateInput = mockDuplicate.mock.calls[0]?.[0];
+    expect(duplicateInput?.sourceManifest).toEqual(sourceProject);
+    expect(duplicateInput?.targetManifest.name).toBe('Source (Copy)');
+    expect(duplicateInput?.files).toEqual({ 'main.ts': { content: new Uint8Array([1]) } });
+    expect(duplicateInput?.storage).toMatchObject({ backend: 'indexeddb' });
+    expect(mockPinHomeStorageBackend).toHaveBeenCalledWith('indexeddb');
+    expect(mockCommitPendingProjectDirectory).toHaveBeenCalledWith({
+      providerBasePath: pendingDuplicate.providerBasePath,
+      scope: { backend: 'indexeddb' },
+      files: pendingDuplicate.files,
+      manifest: serializeProjectManifest(duplicateProject),
+    });
+    expect(phases).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete']);
+    expect(mockGetDirectoryContents).toHaveBeenCalledWith(`/projects/${sourceProject.id}`);
+  });
+
+  it('records the same webaccess workspace on the duplicate', async () => {
+    const handle = { kind: 'directory', name: 'Workspace' };
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: sourceProject.id,
+      backend: 'webaccess',
+      workspaceId: 'wsp_alpha',
+      providerBasePath: '/source',
+    });
+    mockGetWorkspace.mockResolvedValue({ workspace: { workspaceId: 'wsp_alpha', name: 'Workspace' }, handle });
+    mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_alpha' }]);
+    mockDuplicate.mockResolvedValueOnce({
+      ...pendingDuplicate,
+      backend: 'webaccess',
+      workspaceId: 'wsp_alpha',
     });
 
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
-
-    await act(async () => {
-      await result.current.duplicateProject(fakeSourceProjectId);
+    await act(async () => result.current.duplicateProject(sourceProject.id));
+    const duplicateInput = mockDuplicate.mock.calls[0]?.[0];
+    expect(duplicateInput?.sourceManifest).toEqual(sourceProject);
+    expect(duplicateInput?.targetManifest.name).toBe('Source (Copy)');
+    expect(duplicateInput?.files).toEqual({ 'main.ts': { content: new Uint8Array([1]) } });
+    expect(duplicateInput?.storage).toMatchObject({
+      backend: 'webaccess',
+      workspaceId: 'wsp_alpha',
     });
+    expect(mockPinHomeStorageBackend).not.toHaveBeenCalled();
+    expect(mockGetProjectCreationLocation).not.toHaveBeenCalled();
+    expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
+  });
 
-    // Non-webaccess sources reuse the existing root mount; no
-    // per-duplicate mount round-trip.
-    expect(mockMount).not.toHaveBeenCalled();
-    expect(mockUnmount).not.toHaveBeenCalled();
-    expect(mockCopyDirectory).toHaveBeenCalledExactlyOnceWith(
-      `/projects/${fakeSourceProjectId}`,
-      `/projects/${fakeDuplicate.id}`,
-    );
+  it('leaves the duplicate pending when source-file copying fails', async () => {
+    mockGetDirectoryContents.mockRejectedValueOnce(new Error('copy failed'));
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(act(async () => result.current.duplicateProject(sourceProject.id))).rejects.toThrow('copy failed');
+    expect(phases).toEqual([]);
+  });
+
+  it('rejects memory-backed sources before preparing a duplicate', async () => {
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: sourceProject.id,
+      backend: 'memory',
+      storageRootKey: 'memory:test',
+      providerBasePath: '/source',
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(act(async () => result.current.duplicateProject(sourceProject.id))).rejects.toMatchObject({
+      name: 'WorkspaceDirectoryRequiredError',
+      code: 'unsupported',
+    });
+    expect(mockDuplicate).not.toHaveBeenCalled();
   });
 });

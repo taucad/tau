@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self' blob:;"
+    />
+    <title>Tau Electron Example</title>
+  </head>
+  <body
+    class="m-0 h-screen w-screen overflow-hidden bg-[#070b0f] font-sans text-[#eef2f7] antialiased [color-scheme:dark]"
+  >
+    <div id="root" class="h-full w-full"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

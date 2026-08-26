@@ -1,0 +1,83 @@
+{
+  "family": "containment",
+  "fixture": "containment.valve-stem-guide-positive",
+  "generator": {
+    "script": "scripts/containment/valve-stem-guide/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "clearanceMin": 0.015,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "guide.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 4.03
+      }
+    },
+    {
+      "selector": "valve.stem",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 4
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "containment",
+      "subject": "valve.stem",
+      "target": "guide.bore",
+      "options": {},
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "clearance",
+      "subject": "valve.stem",
+      "target": "guide.bore",
+      "options": {
+        "min": 0.015,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0.03
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "valve.stem",
+      "target": "guide.bore",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0
+          }
+        }
+      }
+    }
+  ],
+  "notes": "Insertion length 35 (stem z [10, 70] against guide bore z [0, 45])."
+}

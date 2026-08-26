@@ -1,25 +1,18 @@
 /**
  * Node-worker transport — host factory.
  *
- * Bundled into the worker entry chunk via
- * `@taucad/runtime/worker/node`. Owns the `parentPort` acquisition,
- * the worker-side channel server, the crash trap, and the
+ * Imported by an application-owned worker entry. Owns the `parentPort`
+ * acquisition, the worker-side channel server, the crash trap, and the
  * `adoptInitialize` bindings the dispatcher relies on. **Must not**
- * import from `node-worker-client.ts` or `node-worker-transport.ts` —
- * the client owns the
- * `new URL('../worker/node.js', import.meta.url)` chunk-emit literal,
- * and a static path back from the worker chunk to the chunk-emitter
- * deadlocks Rolldown's chunk planner.
+ * import from `node-worker-client.ts` or `node-worker-transport.ts` so the
+ * worker entry never reaches the client-side graph that spawned it.
  *
- * Per `docs/research/runtime-transport-authoring-simplification.md` (R2).
+ * The consuming application owns the executable worker URL.
  *
  * @public
  */
 
-import { collectWireTransferables } from '#transport/_internal/wire-transferables.js';
 import type {
-  EncodedFileBytes,
-  EncodedGeometry,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
   RuntimeTransportHost,
@@ -27,9 +20,9 @@ import type {
 } from '#transport/runtime-transport.types.js';
 import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
-import { adoptHostAbort } from '#transport/_internal/abort-channel.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { createWorkerHostBindings } from '#transport/_internal/worker-host-bindings.js';
+import { encodeGeometryAsOwnedTransfer } from '#transport/_internal/owned-transfer-bytes.js';
 import { acquireNodeParentPort } from '#transport/_internal/node-parent-port.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
@@ -47,11 +40,9 @@ export type NodeWorkerHostOptions = {
 };
 
 /**
- * Standalone host factory for the node-worker transport. Identical
- * shape to `nodeWorkerTransport.host`, but lives in its own module so
- * the worker entry can static-import the host without dragging the
- * client's `new URL(...)` chunk-emit literal back into the worker
- * chunk's transitive graph.
+ * Standalone host factory for the node-worker transport. It lives in its own
+ * module so an application-owned worker entry can import the host without
+ * pulling the client transport into the worker graph.
  *
  * @param options - Host options; see {@link NodeWorkerHostOptions}.
  * @returns The {@link RuntimeTransportHost} fat handle for the node-worker wire.
@@ -87,40 +78,10 @@ export const nodeWorkerHost = (
       };
     },
     adoptInitialize(handle: RuntimeInitializeMemoryHandle): HostInitializeBindings {
-      const abortSurface = adoptHostAbort(handle.signalBuffer);
-      const geomTier: 'pool' | 'transfer' = handle.geometryPoolBuffer ? 'pool' : 'transfer';
-      const fileTier: 'pool' | 'transfer' = handle.filePoolBuffer ? 'pool' : 'transfer';
-      return {
-        abort: { signal: abortSurface.controller.signal, strategy: abortSurface.strategy },
-        geometryDelivery: {
-          publish(geometry): EncodedGeometry {
-            const transferables = collectWireTransferables(geometry);
-            return { value: geometry, transferables, tier: geomTier };
-          },
-          tier: geomTier,
-        },
-        fileDelivery: {
-          publish(file): EncodedFileBytes {
-            return {
-              value: file,
-              transferables: file.buffer instanceof ArrayBuffer ? [file.buffer] : [],
-              tier: fileTier,
-            };
-          },
-          tier: fileTier,
-        },
-      };
+      return createWorkerHostBindings(handle);
     },
-    encodeGeometry(geometry): EncodedGeometry {
-      const transferables = collectWireTransferables(geometry);
-      return { value: geometry, transferables, tier: 'transfer' };
-    },
-    encodeFile(file): EncodedFileBytes {
-      return {
-        value: file,
-        transferables: file.buffer instanceof ArrayBuffer ? [file.buffer] : [],
-        tier: 'transfer',
-      };
+    encodeGeometry(geometry) {
+      return encodeGeometryAsOwnedTransfer(geometry);
     },
     async close(reason?: string): Promise<void> {
       if (isClosed) {

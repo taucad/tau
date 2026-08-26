@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import * as THREE from 'three';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
+import { defaultRaycastClipEpsilon } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 
 export type SectionViewState = {
   /** The computed clipping plane for the active section view. */
@@ -25,6 +27,20 @@ export type SectionViewState = {
 };
 
 const defaultPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+export function createSectionViewRaycastClipState(
+  sectionView: Pick<SectionViewState, 'enableMesh' | 'isActive' | 'plane'>,
+): RaycastClipState | undefined {
+  if (!sectionView.isActive || !sectionView.enableMesh) {
+    return undefined;
+  }
+
+  return {
+    enabled: true,
+    planes: [sectionView.plane],
+    epsilon: defaultRaycastClipEpsilon,
+  };
+}
 
 /**
  * Reads section view state from the graphics context and computes the derived THREE.Plane

@@ -7,6 +7,25 @@ import { dirname, join } from 'node:path';
 import { readJsonFile } from '@nx/devkit';
 import type { CreateNodesResult, CreateNodesV2 } from '@nx/devkit';
 
+/** One `from` → `to` copy, with `to` normalised out of its object form. */
+export type CopyFilesEntry = { readonly from: string; readonly to: string };
+
+/**
+ * Every copy a project's config declares, in declaration order. `readJsonFile`
+ * parses JSONC, which the configs use for provenance comments; a config without
+ * `copyFiles` throws, and every caller treats that as "no recipe".
+ *
+ * The pkgcheck `tau-vendored-assets` rule reads the recipes through this
+ * function, so the gate and the inferred `copy-assets` target cannot disagree
+ * about what a config declares. It lives here rather than in a module of its own
+ * because Nx loads this plugin through a CommonJS `require`, which cannot map a
+ * relative `./x.js` specifier onto a `.ts` file.
+ */
+export const readCopyFilesConfig = (configFilePath: string): CopyFilesEntry[] => {
+  const json = readJsonFile<{ copyFiles: Array<{ from: string; to: string | { dest: string } }> }>(configFilePath);
+  return json.copyFiles.map(({ from, to }) => ({ from, to: typeof to === 'string' ? to : to.dest }));
+};
+
 const createCopyTarget = (configFilePath: string): CreateNodesResult | undefined => {
   const projectRoot = dirname(configFilePath);
 
@@ -14,11 +33,7 @@ const createCopyTarget = (configFilePath: string): CreateNodesResult | undefined
     return undefined;
   }
 
-  const json: { copyFiles: Array<{ to: string | { dest: string } }> } = readJsonFile(configFilePath);
-  const outputs = json.copyFiles.map((file) => {
-    const to = typeof file.to === 'string' ? file.to : file.to.dest;
-    return join('{projectRoot}', to).replaceAll('\\', '/');
-  });
+  const outputs = readCopyFilesConfig(configFilePath).map(({ to }) => join('{projectRoot}', to).replaceAll('\\', '/'));
 
   const copyAssetsDependsOn = { dependsOn: ['copy-assets', '^copy-assets'] };
 
@@ -31,7 +46,7 @@ const createCopyTarget = (configFilePath: string): CreateNodesResult | undefined
             outputs,
             cache: false,
             options: {
-              command: 'pnpm copy-files-from-to --when-file-exists overwrite',
+              command: 'copy-files-from-to --when-file-exists overwrite',
               cwd: projectRoot,
             },
           },

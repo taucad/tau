@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useThree } from '@react-three/fiber';
-import type { OrbitControls } from 'three/addons';
 import { ControlsListenerBridge } from '#components/geometry/graphics/three/controls-listener-bridge.js';
 import { updateCameraFov } from '#components/geometry/graphics/three/utils/camera.utils.js';
 import { useGraphics, useGraphicsSelector, useScreenshotCapability } from '#hooks/use-graphics.js';
+import type { CameraControlsAdapter } from '#machines/controls-listener.machine.js';
 
 /**
  * Component that bridges Three.js context with XState actors
@@ -36,12 +36,12 @@ export function ActorBridge(): ReactNode {
   // Update camera FOV when angle changes, without resetting position
   // This preserves user's zoom and viewing angle while updating the FOV
   useEffect(() => {
-    updateCameraFov({ camera, cameraFovAngle, invalidate });
-  }, [cameraFovAngle, camera, invalidate]);
+    updateCameraFov({ camera, cameraFovAngle, invalidate, controls: controls ?? undefined });
+  }, [cameraFovAngle, camera, controls, invalidate]);
 
   if (!controls) {
     return null;
   }
 
-  return <ControlsListenerBridge controls={controls as OrbitControls} graphicsActor={graphicsActor} />;
+  return <ControlsListenerBridge controls={controls as CameraControlsAdapter} graphicsActor={graphicsActor} />;
 }

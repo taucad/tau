@@ -4,7 +4,7 @@
  * Used to automatically infer pkgcheck targets for all publishable packages.
  * Discovers packages by looking for tsdown.config.ts (the build tool for publishable packages).
  */
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { readJsonFile } from '@nx/devkit';
 import type {
@@ -26,6 +26,7 @@ type InputDefinition =
   | { env: string };
 
 type PackageJson = {
+  private?: boolean;
   nx?: {
     namedInputs?: Record<string, Array<string | InputDefinition>>;
   };
@@ -60,7 +61,13 @@ const createPkgcheckTarget = (
     return undefined;
   }
 
-  if (!existsSync(join(projectRoot, 'package.json'))) {
+  const packageJsonPath = join(projectRoot, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    return undefined;
+  }
+
+  const packageJson = readJsonFile<PackageJson>(packageJsonPath);
+  if (packageJson.private === true) {
     return undefined;
   }
 
@@ -73,7 +80,7 @@ const createPkgcheckTarget = (
           pkgcheck: {
             executor: 'nx:run-commands',
             cache: true,
-            dependsOn: ['generate-cjs-dts'],
+            dependsOn: ['build', '^build'],
             options: {
               command: `tsx tools/pkgcheck.ts ${projectRoot}`,
               cwd: '.',
@@ -94,14 +101,42 @@ const createPkgcheckTarget = (
   };
 };
 
+const createSizeTarget = (configFilePath: string): CreateNodesResult | undefined => {
+  const projectRoot = dirname(configFilePath);
+  return projectRoot === '.'
+    ? undefined
+    : {
+        projects: {
+          [projectRoot]: {
+            targets: {
+              size: {
+                executor: 'nx:run-commands',
+                cache: true,
+                dependsOn: ['build'],
+                options: { command: 'size-limit', cwd: projectRoot },
+                inputs: [
+                  '{projectRoot}/.size-limit.json',
+                  '{projectRoot}/dist/**/*',
+                  { externalDependencies: ['size-limit'] },
+                ],
+              },
+            },
+          },
+        },
+      };
+};
+
 export const createNodesV2: CreateNodesV2 = [
-  '**/tsdown.config.ts',
+  '**/{tsdown.config.ts,.size-limit.json}',
   // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- not necessary as already has an explicit return type
   (configFiles, _options, context) => {
     const results: Array<[string, CreateNodesResult]> = [];
 
     for (const configFile of configFiles) {
-      const target = createPkgcheckTarget(configFile, context);
+      const target =
+        basename(configFile) === '.size-limit.json'
+          ? createSizeTarget(configFile)
+          : createPkgcheckTarget(configFile, context);
       if (target) {
         results.push([configFile, target]);
       }

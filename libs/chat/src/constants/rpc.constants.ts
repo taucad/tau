@@ -19,12 +19,12 @@ export const rpcName = {
   grep: 'grep',
   globSearch: 'glob_search',
   getKernelResult: 'get_kernel_result',
-  captureObservations: 'capture_observations',
-  fetchGeometry: 'fetch_geometry',
+  captureImages: 'capture_images',
+  runGeoSpecTests: 'run_geospec_tests',
   exportGeometry: 'export_geometry',
-  captureScreenshot: 'capture_screenshot',
   appendFile: 'append_file',
   editFile: 'edit_file',
+  resolveSkill: 'resolve_skill',
 } as const satisfies Record<string, string>;
 
 /**
@@ -42,7 +42,7 @@ export const rpcNames = Object.values(rpcName) as [(typeof rpcName)[keyof typeof
  * the matching `tool-output-available` chunk arrives.
  *
  * Read-only RPCs (`readFile`, `grep`, `globSearch`, `listDirectory`,
- * `getKernelResult`, `captureScreenshot`, etc.) intentionally bypass the
+ * `getKernelResult`, `captureImages`, etc.) intentionally bypass the
  * ledger — re-issuing them after an interrupt is harmless.
  *
  * Adding a new mutating RPC requires adding it here; the partition invariant
@@ -70,11 +70,25 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.grep,
   rpcName.globSearch,
   rpcName.getKernelResult,
-  rpcName.captureObservations,
-  rpcName.fetchGeometry,
+  rpcName.captureImages,
+  rpcName.runGeoSpecTests,
   rpcName.exportGeometry,
-  rpcName.captureScreenshot,
+  rpcName.resolveSkill,
 ]);
+
+/**
+ * How long the server waits for a client to answer one RPC, in milliseconds.
+ *
+ * This is the outermost budget in the chain, and it is deliberately shared: a
+ * client-side timeout that outlives it never reaches the user, because the
+ * server has already answered with the generic
+ * `RPC execution timed out … the client may be disconnected or unresponsive`.
+ * Every client budget — worker startup, a test run, an abort grace period —
+ * must therefore be sized to expire inside this one.
+ *
+ * @public
+ */
+export const rpcExecutionTimeout = 60_000;
 
 /**
  * Error codes for RPC infrastructure failures.

@@ -11,6 +11,7 @@
 import { useMemo } from 'react';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import type { Analytics } from '#hooks/use-analytics.js';
+import type { ExternalPollTelemetry } from '@taucad/fs-client/file-tree-service';
 
 export const workspaceEventName = {
   created: 'workspace.created',
@@ -20,6 +21,7 @@ export const workspaceEventName = {
   openFailed: 'workspace.open_failed',
   unmountFailed: 'workspace.unmount_failed',
   projectCreateWebaccessBlocked: 'project.create.webaccess_blocked',
+  externalPoll: 'workspace.external_poll',
 } as const;
 
 export type WorkspaceEventName = (typeof workspaceEventName)[keyof typeof workspaceEventName];
@@ -50,6 +52,7 @@ export type WorkspaceTelemetry = {
     readonly reason: 'dispose-failed' | 'unknown';
   }) => void;
   readonly projectCreateWebaccessBlocked: (input: { readonly reason: WorkspaceFailureReason }) => void;
+  readonly workspaceExternalPoll: (input: ExternalPollTelemetry) => void;
 };
 
 const emit = (analytics: Analytics, name: WorkspaceEventName, properties: Record<string, unknown>): void => {
@@ -80,6 +83,9 @@ export const buildWorkspaceTelemetry = (analytics: Analytics): WorkspaceTelemetr
   },
   projectCreateWebaccessBlocked: ({ reason }) => {
     emit(analytics, workspaceEventName.projectCreateWebaccessBlocked, { reason });
+  },
+  workspaceExternalPoll: (aggregate) => {
+    emit(analytics, workspaceEventName.externalPoll, aggregate);
   },
 });
 

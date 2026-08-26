@@ -9,26 +9,21 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { definePassthroughTransport } from '#transport/define-runtime-transport.js';
-import type {
-  RuntimeTransportClient,
-  TransportClientReady,
-  TransportDescriptor,
-} from '#transport/runtime-transport.types.js';
+import type { RuntimeTransportClient, TransportClientReady } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 
 const stubClient = <const Id extends 'foo' | 'bar'>(
   id: Id,
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, Id> => {
-  const closed = new Promise<void>((resolve) => {
-    resolve();
-  });
+  const closed = Promise.resolve({ cause: 'requested' } as const);
   return {
     id,
     describe(): TransportDescriptor<Id> {
       return {
         id,
         wire: 'in-process',
-        memory: { geometryDelivery: 'copy', fileDelivery: 'copy', abortSignal: 'wire-notify' },
+        memory: { geometryDelivery: 'copy', abortSignal: 'wire-notify' },
         fileSystem: 'unbound',
       };
     },
@@ -38,9 +33,8 @@ const stubClient = <const Id extends 'foo' | 'bar'>(
     async initialize() {
       throw new Error('stub');
     },
-    abort() {
-      /* Noop */
-    },
+    reservePreview: () => ({}),
+    renderTimeoutRecovery: { kind: 'unsupported' },
     async resolveGeometry() {
       throw new Error('stub');
     },

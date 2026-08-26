@@ -1,58 +1,68 @@
 {
   "name": "@taucad/react",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "React hooks for @taucad/runtime",
   "type": "module",
   "private": false,
+  "sideEffects": false,
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/react"
   },
-  "main": "./dist/cjs/index.cjs",
-  "types": "./dist/cjs/index.d.cts",
-  "module": "./dist/esm/index.js",
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/react#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "files": [
     "dist",
-    "README.md"
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "cad",
     "typescript"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
     "exports": {
       ".": {
-        "require": {
-          "types": "./dist/cjs/index.d.cts",
-          "default": "./dist/cjs/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/index.d.ts",
-          "default": "./dist/esm/index.js"
-        }
-      }
-    }
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
-  "dependencies": {
-    "@taucad/json-schema": "workspace:*",
-    "@taucad/runtime": "workspace:*",
-    "@taucad/types": "workspace:*"
-  },
   "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
     "react": ">=18.0.0"
   },
   "devDependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/replicad": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
     "@testing-library/react": "catalog:",
-    "@types/react": "catalog:"
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
   }
 }

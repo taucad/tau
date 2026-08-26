@@ -4,7 +4,7 @@
  * Subscribes to {@link FileContentService.onDidContentChange} and
  * routes filesystem events into editor + project state machine
  * intents. This is the single funnel that keeps **every** UI store
- * (open tabs, geometry actors, parameter entries, main entry file
+ * (open tabs, geometry actors, parameter entries, main entry path
  * pointer) consistent with the filesystem.
  *
  * Design (mirrors VS Code's `IWorkingCopyFileService` participants):
@@ -27,7 +27,15 @@
 import type { ContentChangeEvent, FileContentService } from '@taucad/fs-client/file-content-service';
 import type { ActorRefFrom } from 'xstate';
 import type { editorMachine } from '#machines/editor.machine.js';
-import type { projectMachine } from '#machines/project.machine.js';
+import type { ProjectFileActivityOperation, projectMachine } from '#machines/project.machine.js';
+
+const sendProjectFileActivity = (
+  projectRef: ActorRefFrom<typeof projectMachine>,
+  operation: ProjectFileActivityOperation,
+  paths: readonly string[],
+): void => {
+  projectRef.send({ type: 'projectFileActivity', operation, paths });
+};
 
 /**
  * Wire participants for a project's editor + project machine pair.
@@ -49,22 +57,45 @@ export function mountFileOperationParticipants(init: {
 
   return contentService.onDidContentChange((event: ContentChangeEvent) => {
     switch (event.type) {
+      case 'written': {
+        sendProjectFileActivity(projectRef, 'written', [event.path]);
+        return;
+      }
+      case 'batchWritten': {
+        sendProjectFileActivity(projectRef, 'batchWritten', event.paths);
+        return;
+      }
+      case 'directoryCreated': {
+        sendProjectFileActivity(projectRef, 'directoryCreated', [event.path]);
+        return;
+      }
+      case 'fileCopied': {
+        sendProjectFileActivity(projectRef, 'fileCopied', [event.targetPath]);
+        return;
+      }
+      case 'directoryCopied': {
+        sendProjectFileActivity(projectRef, 'directoryCopied', [event.targetPath]);
+        return;
+      }
       case 'renamed':
       case 'directoryRenamed': {
         // Editor: re-write path in place on every affected tab. The
         // existing `renameFile` action handles both single-file and
         // prefix (directory) renames in one pass.
         editorRef.send({ type: 'renameFile', oldPath: event.oldPath, newPath: event.newPath });
-        // Project: rewrite path-keyed maps and `mainEntryFile` so
+        // Project: rewrite path-keyed maps and `mainEntryPath` so
         // open viewers / CAD actors / parameters survive the move.
         projectRef.send({ type: 'fileMoved', oldPath: event.oldPath, newPath: event.newPath });
+        sendProjectFileActivity(projectRef, event.type, [event.oldPath, event.newPath]);
         return;
       }
       case 'deleted': {
         // Editor: close the matching tab if any. Path is exact, no
         // prefix scan needed for single-file deletes.
         editorRef.send({ type: 'closeFile', path: event.path });
+        editorRef.send({ type: 'pruneComponentDisplayForDeletedPath', path: event.path });
         projectRef.send({ type: 'fileDeleted', path: event.path });
+        sendProjectFileActivity(projectRef, 'deleted', [event.path]);
         return;
       }
       case 'directoryDeleted': {
@@ -79,12 +110,12 @@ export function mountFileOperationParticipants(init: {
             editorRef.send({ type: 'closeFile', path: file.path });
           }
         }
+        editorRef.send({ type: 'pruneComponentDisplayForDeletedPath', path: event.path });
         projectRef.send({ type: 'directoryDeleted', path: event.path });
+        sendProjectFileActivity(projectRef, 'directoryDeleted', [event.path]);
         return;
       }
-      // 'written' / 'read' / 'batchWritten' / 'directoryCreated' are
-      // not in scope for participants — they do not invalidate any
-      // tab identity or actor key.
+      // 'read' does not represent a project mutation.
       default: {
         break;
       }

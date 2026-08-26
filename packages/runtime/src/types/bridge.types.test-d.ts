@@ -11,14 +11,23 @@
 import { assertType, describe, expectTypeOf, it } from 'vitest';
 import type { Port } from '@taucad/rpc';
 
+import type { BridgePort, BridgeServerHandle } from '#filesystem/index.js';
 import type { StringKeyedObject } from '#types/bridge.types.js';
-import { createBridgeServer } from '#transport/_internal/runtime-filesystem-bridge.js';
+import { createBridgeServer } from '@taucad/rpc/bridge';
 
 // =============================================================================
 // StringKeyedObject constraint
 // =============================================================================
 
 describe('StringKeyedObject', () => {
+  it('exposes filesystem bridge handles without exposing RPC values', () => {
+    expectTypeOf<BridgePort>().toMatchObjectType<{ port: MessagePort; dispose(): void }>();
+    expectTypeOf<BridgeServerHandle>().toMatchObjectType<{
+      emit(event: string, data: unknown): void;
+      dispose(): void;
+    }>();
+  });
+
   it('should accept plain objects', () => {
     expectTypeOf<{ foo: string; bar: number }>().toExtend<StringKeyedObject>();
   });

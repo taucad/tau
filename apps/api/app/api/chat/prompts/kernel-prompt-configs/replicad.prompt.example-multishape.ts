@@ -9,7 +9,7 @@ export default function main(p = defaultParams): ShapeConfig[] {
   const wheelR = makeCylinder(p.wheelRadius, 6).translate([p.bodyLength / 3, p.bodyWidth / 2, 0]);
   return [
     { shape: body, color: '#1E90FF', name: 'Body' },
-    { shape: wheelL, color: '#222222', name: 'WheelLeft' },
-    { shape: wheelR, color: '#222222', name: 'WheelRight' },
+    { shape: wheelL, color: '#222222', name: 'Wheel Left' },
+    { shape: wheelR, color: '#222222', name: 'Wheel Right' },
   ];
 }

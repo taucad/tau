@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { AlertCircle, X, XCircle } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+// oxlint-disable-next-line import/extensions -- React Router generates this virtual route-type module.
 import type { Route } from './+types/route.js';
 import type { Handle } from '#types/matches.types.js';
 import { importGitHubMachine } from '#machines/import-github.machine.js';
@@ -15,6 +16,7 @@ import { Input } from '#components/ui/input.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
 import { BranchSelector } from '#routes/import.$/branch-selector.js';
 import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
@@ -27,6 +29,9 @@ import { ImportProcessingView } from '#routes/import.$/import-processing-view.js
 import { ImportMainFileView } from '#routes/import.$/import-main-file-view.js';
 import { inspect } from '#machines/inspector.js';
 import { CopyButton } from '#components/copy-button.js';
+import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
+import { projectUrl } from '#utils/project-url.utils.js';
+import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -87,6 +92,7 @@ export default function ImportRoute(): React.JSX.Element {
   const { owner, repo, ref, mainFile } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const presentLocationError = useProjectCreationLocationError();
 
   // Track active import mode
   const [activeMode, setActiveMode] = useState<ImportMode | undefined>(undefined);
@@ -96,32 +102,28 @@ export default function ImportRoute(): React.JSX.Element {
     importGitHubMachine.provide({
       actors: {
         createProjectActor: fromSafeAsync(async ({ input }) => {
-          const projectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};
-          for (const [path, file] of input.files) {
-            projectFiles[path] = { content: file.content };
-          }
+          const projectFiles = createImportedProjectFiles(input.files, input.mainFile);
 
-          const project = await projectManager.createProject({
-            project: {
-              name: `${input.owner}/${input.repo}`,
-              description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}`,
-              author: {
-                name: 'You',
-                avatar: '/avatar-sample.png',
-              },
-              tags: [],
-              thumbnail: '',
-              assets: {
-                mechanical: {
-                  main: input.mainFile,
-                  parameters: {},
+          try {
+            const project = await projectManager.createProject({
+              project: {
+                name: `${input.owner}/${input.repo}`,
+                description: `Imported from GitHub: https://github.com/${input.owner}/${input.repo}`,
+                tags: [],
+                assets: {
+                  main: {
+                    entryPath: input.mainFile,
+                  },
                 },
               },
-            },
-            files: projectFiles,
-          });
+              files: projectFiles,
+            });
 
-          return { type: 'projectCreated', projectId: project.id };
+            return { type: 'projectCreated', projectId: project.id };
+          } catch (error) {
+            presentLocationError(error);
+            throw error;
+          }
         }),
       },
     }),
@@ -141,32 +143,28 @@ export default function ImportRoute(): React.JSX.Element {
     importDiskMachine.provide({
       actors: {
         createProjectActor: fromSafeAsync(async ({ input }) => {
-          const projectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};
-          for (const [path, file] of input.files) {
-            projectFiles[path] = { content: file.content };
-          }
+          const projectFiles = createImportedProjectFiles(input.files, input.mainFile);
 
-          const project = await projectManager.createProject({
-            project: {
-              name: input.importName,
-              description: `Imported from disk`,
-              author: {
-                name: 'You',
-                avatar: '/avatar-sample.png',
-              },
-              tags: [],
-              thumbnail: '',
-              assets: {
-                mechanical: {
-                  main: input.mainFile,
-                  parameters: {},
+          try {
+            const project = await projectManager.createProject({
+              project: {
+                name: input.importName,
+                description: `Imported from disk`,
+                tags: [],
+                assets: {
+                  main: {
+                    entryPath: input.mainFile,
+                  },
                 },
               },
-            },
-            files: projectFiles,
-          });
+              files: projectFiles,
+            });
 
-          return { type: 'projectCreated', projectId: project.id };
+            return { type: 'projectCreated', projectId: project.id };
+          } catch (error) {
+            presentLocationError(error);
+            throw error;
+          }
         }),
       },
     }),
@@ -291,19 +289,23 @@ export default function ImportRoute(): React.JSX.Element {
     };
   }, [gitHubActorRef]);
 
-  // Navigate when GitHub project is created
+  // Navigate when GitHub project is created. The import machines carry only the
+  // `proj_` id, so the canonical URL comes from the listing once discovery has
+  // published the new directory (L1) — there is no id-addressed URL to ride.
+  const gitHubSlugs = useProjectSlugs(gitHubProjectId);
   useEffect(() => {
-    if (gitHubState.matches('success') && gitHubProjectId) {
-      void navigate(`/projects/${gitHubProjectId}`);
+    if (gitHubState.matches('success') && gitHubSlugs.status === 'resolved') {
+      void navigate(projectUrl(gitHubSlugs.value));
     }
-  }, [gitHubState, gitHubProjectId, navigate]);
+  }, [gitHubState, gitHubSlugs, navigate]);
 
   // Navigate when Disk project is created
+  const diskSlugs = useProjectSlugs(diskProjectId);
   useEffect(() => {
-    if (diskState.matches('success') && diskProjectId) {
-      void navigate(`/projects/${diskProjectId}`);
+    if (diskState.matches('success') && diskSlugs.status === 'resolved') {
+      void navigate(projectUrl(diskSlugs.value));
     }
-  }, [diskState, diskProjectId, navigate]);
+  }, [diskState, diskSlugs, navigate]);
 
   // Disk import handlers
   const handleFilesSelected = useCallback(

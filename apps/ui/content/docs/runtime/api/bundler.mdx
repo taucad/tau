@@ -16,34 +16,44 @@ Use the bundler API when configuring how JS/TS kernel inputs are bundled and exe
 
 <auto-type-table path='./props/bundler.ts' name='BundlerDefinition' />
 
+<auto-type-table path='./props/bundler.ts' name='BundlerRuntime' />
+
 <auto-type-table path='./props/bundler.ts' name='KernelBundler' />
 
 <auto-type-table path='./props/bundler.ts' name='BundleResult' />
 
 ## esbuild
 
-`esbuild()` returns a `BundlerPlugin` that uses esbuild-wasm for bundling. Handles `ts`, `js`, `tsx`, `jsx` by default.
+`esbuild()` installs the default esbuild-wasm bundler toolkit. Use `esbuildBundler(options)` only when configuring the role factory directly. Both handle `ts`, `js`, `tsx`, `jsx` by default.
 
 ## defineBundler
 
 `defineBundler` creates a bundler definition from a configuration object. Required methods: `initialize`, `detectImports`, `bundle`, `execute`, `registerModule`. Optional: `resolveDependencies`, `cleanup`.
 
+Bundler operation methods use `(input, runtime, context)`. The runtime contains a fresh operation-scoped `AbortSignal`; the persistent context is the value returned by `initialize`. Methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces) beginning with `/`. Returned dependency paths use the same namespace. The leading slash refers to the supplied runtime filesystem, not the host operating system.
+
 ## Usage
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
 
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
 ## Related
 
 - [Configure the Bundler](../guides/bundler-configuration)
+- [Cooperate with Cancellation](../guides/cooperate-with-cancellation)
 - [Plugin System](../concepts/plugin-system)
+- [Path Namespaces](../concepts/path-namespaces)

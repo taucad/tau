@@ -33,7 +33,11 @@ vi.mock('#components/ui/sonner.js', () => ({
 const { useExportToDisk } = await import('./use-export-to-disk.js');
 
 type ExportResult =
-  | { success: true; data: { bytes: Uint8Array<ArrayBuffer>; name: string; mimeType: string }; issues: never[] }
+  | {
+      success: true;
+      data: Array<{ bytes: Uint8Array<ArrayBuffer>; name: string; mimeType: string }>;
+      issues: never[];
+    }
   | { success: false; issues: Array<{ message: string }> };
 
 function createCapabilities(): CapabilitiesManifest {
@@ -44,19 +48,21 @@ function createCapabilities(): CapabilitiesManifest {
         kernelId: 'replicad',
         sourceFormat: 'glb',
         fidelity: 'mesh',
-        schema: {},
-        defaults: {},
+        exportOptions: { schema: {}, defaults: {} },
       },
       {
         targetFormat: 'stl',
         kernelId: 'replicad',
         sourceFormat: 'stl',
         fidelity: 'mesh',
-        schema: { type: 'object', properties: { binary: { type: 'boolean', default: true } } },
-        defaults: { binary: true },
+        exportOptions: {
+          schema: { type: 'object', properties: { binary: { type: 'boolean', default: true } } },
+          defaults: { binary: true },
+        },
       },
     ],
-    renderSchemas: {},
+    renderCapabilities: {},
+    registrations: [],
   };
 }
 
@@ -70,7 +76,7 @@ function createCadActor(options: {
   const defaultExport = vi.fn(
     async (): Promise<ExportResult> => ({
       success: true,
-      data: { bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' },
+      data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
       issues: [],
     }),
   );
@@ -106,7 +112,7 @@ describe('useExportToDisk', () => {
       await result.current.exportToDisk(actor, 'stl');
     });
 
-    expect(mockExport).toHaveBeenCalledWith('stl', { binary: true });
+    expect(mockExport).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
   });
 
   // oxlint-disable-next-line no-template-curly-in-string -- documenting the produced filename pattern in a sentence
@@ -164,7 +170,7 @@ describe('useExportToDisk', () => {
         });
         return {
           success: true,
-          data: { bytes: new Uint8Array([1]), name: 'model.glb', mimeType: 'model/gltf-binary' },
+          data: [{ bytes: new Uint8Array([1]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
           issues: [],
         };
       },

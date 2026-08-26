@@ -12,22 +12,21 @@ describe('deriveExportFormatOptions', () => {
       routes: [
         {
           targetFormat: 'glb',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'glb',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
         {
           targetFormat: 'stl',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'stl',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
       ],
-      renderSchemas: {},
+      renderCapabilities: {},
+      registrations: [],
     };
 
     expect(deriveExportFormatOptions(capabilities)).toEqual([
@@ -41,12 +40,11 @@ describe('deriveExportFormatOptions', () => {
       routes: [
         {
           targetFormat: 'usdz',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'glb',
           transcoderId: 'converter',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
         {
           targetFormat: 'usdz',
@@ -54,11 +52,11 @@ describe('deriveExportFormatOptions', () => {
           sourceFormat: 'glb',
           transcoderId: 'converter',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
       ],
-      renderSchemas: {},
+      renderCapabilities: {},
+      registrations: [],
     };
 
     expect(deriveExportFormatOptions(capabilities)).toEqual([{ format: 'usdz', label: 'USDZ' }]);
@@ -69,31 +67,29 @@ describe('deriveExportFormatOptions', () => {
       routes: [
         {
           targetFormat: 'stl',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'stl',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
         {
           targetFormat: 'glb',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'glb',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
         {
           targetFormat: '3mf',
-          kernelId: 'openscad',
+          kernelId: 'openrscad',
           sourceFormat: 'glb',
           transcoderId: 'converter',
           fidelity: 'mesh',
-          schema: {},
-          defaults: {},
+          exportOptions: { schema: {}, defaults: {} },
         },
       ],
-      renderSchemas: {},
+      renderCapabilities: {},
+      registrations: [],
     };
 
     expect(deriveExportFormatOptions(capabilities).map((o) => o.format)).toEqual(['stl', 'glb', '3mf']);

@@ -126,14 +126,9 @@ Verify listing: `package/kcl_wasm_lib.js`, `.d.ts`, `.wasm`, `package/bindings/*
 npm publish --access=public
 ```
 
-## 6. Wire tarball into Tau (pre-registry)
+## 6. Validate before registry wiring
 
-Until `npm publish` completes, pnpm **catalog** cannot use `file:` tarballs. Typical pattern:
-
-1. Copy `taucad-kcl-wasm-lib-<version>.tgz` to workspace **`tarballs/`**.
-2. Set **`pnpm-workspace.yaml`** catalog pin: `'@taucad/kcl-wasm-lib': '<version>'`.
-3. Add root **`package.json`** → **`pnpm.overrides`**: `'@taucad/kcl-wasm-lib': 'file:tarballs/taucad-kcl-wasm-lib-<version>.tgz'` so resolution wins before the registry.
-4. After the package is on npm, remove the override and rely on catalog + lockfile only.
+Do not add a tarball dependency to Tau. Install the packed artifact in an isolated operating-system temporary directory, publish it, verify the exact registry version, then update the `pnpm-workspace.yaml` catalog pin and regenerate the lockfile. This keeps fresh installation registry-resolvable and avoids recreating a top-level `tarballs/` input directory.
 
 ## 7. ESM `.js` extensions on `bindings/*.ts`
 
@@ -141,7 +136,7 @@ ts-rs emits extensionless relative imports (`from "./Foo"`). Node ESM + tsgo exp
 
 - **Before `npm pack` / `npm publish`**: run the `perl` rewrite in `rust/kcl-wasm-lib/pkg/bindings` (same one-liner as below) so the **published** tarball ships correct imports. Tau then consumes the registry build with **no** `patches/@taucad__kcl-wasm-lib.patch` and **no** `pnpm.overrides` for this package — only the catalog pin in `pnpm-workspace.yaml`.
 
-- **Local `file:` tarball only** (pre-publish): you can temporarily add a pnpm patch if needed; remove both override and patch entry once the version is on npm.
+- **Local tarball validation** (pre-publish): install the tarball only in an isolated temporary consumer. Apply required fixes before packing; do not add a temporary Tau override.
 
 ```bash
 find rust/kcl-wasm-lib/pkg/bindings -name '*.ts' -exec perl -i -pe 's{from "\./([^"\.]+)"}{from "./\1.js"}g' {} +

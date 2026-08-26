@@ -19,8 +19,13 @@ import { ContextChipNode } from '#components/chat/tiptap/context-chip-node.js';
 import { SubmitOnEnter } from '#components/chat/tiptap/submit-on-enter.js';
 import { ChatInputDropHandler } from '#components/chat/tiptap/chat-input-drop-handler.js';
 import { ContextMention } from '#components/chat/tiptap/context-suggestion.js';
-import { SlashCommand, defaultSkills } from '#components/chat/tiptap/slash-command-suggestion.js';
+import {
+  SlashCommand,
+  defaultCommands,
+  getEnabledSlashCommandItems,
+} from '#components/chat/tiptap/slash-command-suggestion.js';
 import { buildContextItemsFromSearch } from '#components/chat/tiptap/context-suggestion.utils.js';
+import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import type {
   ContextSuggestionItem,
   SlashCommandItem,
@@ -28,13 +33,13 @@ import type {
   SuggestionRenderCallbacks,
 } from '#components/chat/tiptap/suggestion-types.js';
 
-const knownSkillIds = new Set(defaultSkills.map((s) => s.id));
-
 export type ContextChip = {
   id: string;
   label: string;
   chipType: ChipType;
   path?: string;
+  referenceToken?: string;
+  geometryReference?: string;
 };
 
 export type ChatInputContent = {
@@ -87,6 +92,8 @@ export function buildEditorContentJson(segments: PastedContentSegment[]): JSONCo
           label: segment.label,
           chipType: segment.chipType,
           path: segment.path,
+          referenceToken: segment.referenceToken,
+          geometryReference: segment.geometryReference,
         },
       });
     }
@@ -119,9 +126,12 @@ export function extractContent(editor: Editor): ChatInputContent {
         label: attributes?.['label'] ?? '',
         chipType: (attributes?.['chipType'] as ChipType | undefined) ?? 'file',
         path: attributes?.['path'],
+        referenceToken: attributes?.['referenceToken'],
+        geometryReference: attributes?.['geometryReference'],
       });
       const chipPath = attributes?.['path'];
-      textParts.push(chipPath ? `@${chipPath}` : (attributes?.['label'] ?? ''));
+      const referenceToken = attributes?.['referenceToken'];
+      textParts.push(referenceToken ?? (chipPath ? `@${chipPath}` : (attributes?.['label'] ?? '')));
       return;
     }
     if (node.type === 'text') {
@@ -150,10 +160,11 @@ export type UseChatEditorOptions = {
   onSubmit: () => void;
   onEscape?: () => void;
   onUpdate?: (content: ChatInputContent) => void;
-  onImagePaste?: (dataUrl: string) => void;
+  handleImagePaste?: (event: ClipboardPasteEvent) => boolean;
   treeService: FileTreeService | undefined;
   chats: Chat[];
   actionItems?: ContextSuggestionItem[];
+  slashCommandItems?: SlashCommandItem[];
   onSlashCommand?: (item: SlashCommandItem) => void;
   onContextAction?: (item: ContextSuggestionItem) => void;
   placeholder?: string;
@@ -175,10 +186,11 @@ export function useChatEditor({
   onSubmit,
   onEscape,
   onUpdate,
-  onImagePaste,
+  handleImagePaste,
   treeService,
   chats,
   actionItems,
+  slashCommandItems,
   onSlashCommand,
   onContextAction,
   placeholder = 'Ask Tau to build anything...',
@@ -198,6 +210,8 @@ export function useChatEditor({
   chatsRef.current = chats;
   const actionItemsRef = useRef(actionItems);
   actionItemsRef.current = actionItems;
+  const slashCommandItemsRef = useRef(slashCommandItems);
+  slashCommandItemsRef.current = slashCommandItems;
   const onContextActionRef = useRef(onContextAction);
   onContextActionRef.current = onContextAction;
   const onSlashCommandRef = useRef(onSlashCommand);
@@ -244,14 +258,23 @@ export function useChatEditor({
     onSlashCommandRef.current?.(item);
   }, []);
 
+  const getSlashCommandItems = useCallback((query: string): SlashCommandItem[] => {
+    const all = getEnabledSlashCommandItems([...(slashCommandItemsRef.current ?? []), ...defaultCommands]);
+    if (!query) {
+      return all;
+    }
+    const q = query.toLowerCase();
+    return all.filter((item) => item.label.toLowerCase().includes(q) || item.description.toLowerCase().includes(q));
+  }, []);
+
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
-  const onImagePasteRef = useRef(onImagePaste);
-  onImagePasteRef.current = onImagePaste;
+  const handleImagePasteRef = useRef(handleImagePaste);
+  handleImagePasteRef.current = handleImagePaste;
 
   const editor = useEditor({
     extensions: [
@@ -277,6 +300,7 @@ export function useChatEditor({
         onAction: handleContextAction,
       }),
       SlashCommand.configure({
+        getItems: getSlashCommandItems,
         renderCallbacks: slashRenderCallbacks,
         onCommand: handleSlashCommand,
       }),
@@ -287,30 +311,14 @@ export function useChatEditor({
         'aria-label': placeholder,
       },
       handlePaste: (_view: EditorView, event: ClipboardEvent) => {
-        const items = event.clipboardData?.items;
-        if (items) {
-          for (const item of items) {
-            if (item.type.startsWith('image/')) {
-              const file = item.getAsFile();
-              if (file) {
-                const reader = new FileReader();
-                reader.addEventListener('load', (readerEvent) => {
-                  const result = readerEvent.target?.result;
-                  if (typeof result === 'string' && result !== '') {
-                    // Hand the raw data URL to the draft machine — the
-                    // `imageProcessing` chokepoint resizes it and surfaces
-                    // any failure via the `<ActiveChatProvider>` toast
-                    // subscriber. Eliminates the prior silent-paste bug
-                    // where Tiptap paste called `resizeImageForChat`
-                    // directly and dropped failures on the floor.
-                    onImagePasteRef.current?.(result);
-                  }
-                });
-                reader.readAsDataURL(file);
-              }
-              return true;
-            }
-          }
+        const imagePasteEvent: ClipboardPasteEvent = {
+          clipboardData: event.clipboardData ?? undefined,
+          preventDefault: () => {
+            event.preventDefault();
+          },
+        };
+        if (handleImagePasteRef.current?.(imagePasteEvent)) {
+          return true;
         }
 
         const text = event.clipboardData?.getData('text/plain');
@@ -327,6 +335,9 @@ export function useChatEditor({
 
         const lazyTree: Map<string, FileEntry> =
           treeServiceRef.current?.getTreeSnapshot() ?? new Map<string, FileEntry>();
+        const knownSkillIds = new Set(
+          getEnabledSlashCommandItems(slashCommandItemsRef.current ?? []).map((item) => item.id),
+        );
         const segments = buildPastedContent(text, {
           fileTree: lazyTree,
           chats: chatsRef.current,

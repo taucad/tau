@@ -21,6 +21,8 @@ export const readFileInputSchema = z.object({
 /** @public */
 export const readFileOutputSchema = z.object({
   content: z.string().describe('The raw content of the file.'),
+  size: z.number().int().nonnegative().describe('The file size in bytes.'),
+  contentKind: z.literal('text').describe('The file content classification.'),
   totalLines: z.number().describe('The total number of lines in the file.'),
   startLine: z.number().optional().describe('The starting line number (1-based) of the returned content.'),
   truncated: z

@@ -21,7 +21,7 @@ Returns:
 
 Best Practice: Always call this tool after making file changes to ensure the model renders correctly before proceeding.
 
-After compilation succeeds, use \`test_model\` to measure geometry against \`test.json\` requirements.`,
+After compilation succeeds, use \`test_model\` to run GeoSpec geometry tests.`,
   schema: getKernelResultInputSchema,
 } as const;
 

@@ -1,0 +1,16 @@
+{
+  "name": "geometry-core",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/core/geometry",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "performance-gate": {
+      "command": "vitest run src/utils/glb-writer.bench.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    }
+  }
+}

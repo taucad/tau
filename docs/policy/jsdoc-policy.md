@@ -3,7 +3,7 @@ title: 'JSDoc Policy'
 description: 'Standards for JSDoc documentation: @public/@internal visibility, compilable examples, real-world usage, language tags, and @example <caption> requirements.'
 status: active
 created: '2026-03-11'
-updated: '2026-03-11'
+updated: '2026-08-23'
 related:
   - docs/policy/documentation-policy.md
   - docs/policy/library-api-policy.md
@@ -14,7 +14,7 @@ related:
 Internal reference for writing JSDoc documentation on exported functions, types, and classes in `packages/` and `libs/`. Enforced by two tau-lint rules:
 
 - **`tau-lint/validate-jsdoc-codeblocks`** — validates codeblock formatting (language tags, shorthand expansion) and type-checks `@public` TypeScript codeblocks inline via `tsgolint` (typescript-go).
-- **`tau-lint/require-public-export-jsdoc`** — requires `@public` on symbols exported from package.json export entry files.
+- **`tau-lint/require-public-export-jsdoc`** — requires `@public` on symbols exported from package.json export entry paths.
 
 Both rules are **disabled for `apps/`** — only library and package code is enforced.
 
@@ -52,7 +52,14 @@ Add `@public` or `@internal` as the last line of the description section, before
 
 ### Enforcement
 
-- **`tau-lint/require-public-export-jsdoc`** (`warn`) resolves which files are publicly reachable from `package.json` exports by following barrel re-exports. Exported declarations in those files must have `@public` in their JSDoc.
+**`tau-lint/require-public-export-jsdoc`** resolves which declarations are publicly reachable from `package.json` exports by following barrel and local export lists. Public declarations must have `@public` in their JSDoc. Apply these severities:
+
+| Scope                            | Severity |
+| -------------------------------- | -------- |
+| `packages/**/*.{ts,tsx,mts,cts}` | error    |
+| `libs/**/*.{ts,tsx,mts,cts}`     | warning  |
+| `apps/**`                        | off      |
+
 - **`tau-lint/validate-jsdoc-codeblocks`** type-checks `@public` TypeScript codeblocks inline by spawning `tsgolint headless` per-file with `source_overrides`. Diagnostics flow through oxlint's native pipeline and appear in the IDE. Without `@public`, examples still get syntax highlighting in editors but are not type-checked.
 
 ### Why not just use `text` tags for internal code?
@@ -63,9 +70,9 @@ Using `text` instead of `ts` for internal TypeScript examples sacrifices DX: dev
 
 ### 1. Examples Must Show Real-World Usage
 
-Write the code a developer would actually write. If a function is always composed inside another (e.g., `replicad()` inside `createRuntimeClient`), the example must show that composition.
+Write the code a developer would actually write. If a function is always composed inside another (e.g., `replicad()` from `@taucad/replicad` inside `defineRuntime`), the example must show that composition.
 
-**Why**: An example of `replicad()` called in isolation is never how it is used — it only appears inside `createRuntimeClient({ kernels: [replicad()] })`.
+**Why**: An example of `replicad()` called in isolation is never how it is used — it appears inside a worker- or host-owned `defineRuntime({ plugins: [replicad()] })` after `import { replicad } from '@taucad/replicad'`.
 
 ### 2. No Synthetic Stubs
 
@@ -149,8 +156,9 @@ CORRECT:
  *
  * @example <caption>Browser setup</caption>
  * ```typescript
- * import { createRuntimeClient } from '@taucad/runtime';
- * const client = createRuntimeClient({ kernels: [replicad()] });
+ * import { defineRuntime } from '@taucad/runtime/worker';
+ * import { replicadKernel } from '@taucad/replicad';
+ * export const runtime = defineRuntime({ kernels: [replicadKernel()] });
  * ```
  */
 ````
@@ -164,7 +172,7 @@ INCORRECT:
  * @example Browser setup
  * ```typescript
  * import { createRuntimeClient } from '@taucad/runtime';
- * const client = createRuntimeClient({ kernels: [replicad()] });
+ * const client = createRuntimeClient({ transport });
  * ```
  */
 ````
@@ -250,8 +258,8 @@ Any other use of an `Ms` suffix should be renamed and documented via JSDoc inste
 
 ### Applies to
 
-- `packages/**/*.{ts,tsx}` — published npm packages
-- `libs/**/*.{ts,tsx}` — workspace-internal libraries
+- `packages/**/*.{ts,tsx,mts,cts}` — published npm packages
+- `libs/**/*.{ts,tsx,mts,cts}` — workspace-internal libraries
 
 ### Excluded
 

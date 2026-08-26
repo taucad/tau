@@ -7,6 +7,8 @@ description: Investigate dependency source code and manage external repos via re
 
 Tau tracks ~47 external dependency repos via `repos.yaml` at the workspace root. Repos are cloned into `repos/` (gitignored). The manifest defines upstream URLs, taucad forks, branches, groups, and descriptions.
 
+**Git LFS:** some repos track large binaries via Git LFS — notably `tau-brain` (backs `docs/research` and `docs/reference`), whose reference PDFs are LFS-tracked. Run `git lfs install` once before cloning, or pointers won't rehydrate. `tau-brain` ships a `.lfsconfig` with `lfs.fetchexclude` so clones stay light (PDFs come down as pointers); fetch one to read it with `git lfs pull --include="reference/pdf/<slug>.pdf"`. See `docs/research/tau-brain-pdf-git-lfs-migration.md`.
+
 ## Quick Reference
 
 ```bash
@@ -63,12 +65,12 @@ repos:
     branch: feat/...
     description: LangChain.js - LLM framework
   three.js:
-    upstream: mrdoob/three.js # no fork = read-only
+    upstream: mrdoob/three.js # no fork = origin is upstream
     branch: dev
 ```
 
 - Repos with `fork` field: you can push to origin (the fork). Upstream is read-only.
-- Repos without `fork`: origin points to upstream. Read-only exploration.
+- Repos without `fork`: origin points to upstream. Write access depends on repository ownership and permissions.
 - Repos with `commit` field: pinned to a specific commit hash. Clone checks out that commit; sync verifies/restores it instead of pulling latest.
 
 ## Commit Pinning
@@ -123,7 +125,7 @@ Run `pnpm repos` with no arguments to launch the interactive terminal UI:
 
 ## Build
 
-The repos CLI is a bundled single-file script at `scripts/dist/repos.js` (checked into git). CLI commands work immediately with no build step.
+The repos CLI is a bundled single-file script at `scripts/dist/repos.mjs` (checked into git). CLI commands work immediately with no build step.
 
 The interactive TUI (`pnpm repos` with no args) requires a separate bundle with React/ink that is gitignored:
 
@@ -133,8 +135,8 @@ pnpm nx build scripts   # Build both CLI + TUI bundles
 
 Source files live in `scripts/src/repos/`. The tsdown config at `scripts/tsdown.config.ts` produces two bundles:
 
-- `dist/repos.js` — CLI bundle (~98 KB, checked in)
-- `dist/repos-tui.js` — TUI bundle (~1.7 MB, gitignored, needs build)
+- `dist/repos.mjs` — CLI bundle (~98 KB, checked in)
+- `dist/repos-tui.mjs` — TUI bundle (~1.7 MB, gitignored, needs build)
 
 ## For Agents
 

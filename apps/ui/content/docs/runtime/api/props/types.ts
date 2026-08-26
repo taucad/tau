@@ -9,6 +9,7 @@ export type {
   SpanHandle,
   RuntimeSpanTracer,
   RuntimeFileSystemBase,
+  KernelFileSystem,
   KernelDefinition,
   FileDependency,
   MiddlewareDependency,
@@ -26,5 +27,12 @@ export type {
   HashedGeometryResult,
   GetParametersResult,
   ExportGeometryResult,
+  CapabilitiesManifest,
+  RuntimeCapabilityRegistration,
+  ExportRoute,
+  RenderCapability,
+  ContentCapability,
+  RuntimeContentInput,
+  RuntimeContentKey,
 } from '@taucad/runtime/types';
 export type { RuntimeFileSystem } from '@taucad/runtime';

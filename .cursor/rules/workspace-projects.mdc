@@ -1,0 +1,18 @@
+---
+description: Placement and layering rules for private application libraries
+globs:
+  - "apps/libs/**/project.json"
+  - "apps/libs/**/package.json"
+alwaysApply: false
+---
+
+# Workspace Projects
+
+Follow `docs/policy/workspace-project-policy.md`.
+
+- UI-only app-libs use `scope:ui type:app-lib layer:<feature|ui|data-access|util>`.
+- Shared app-libs require named UI and API consumers.
+- App-libs are source-consumed: no tsdown, build tsconfig, or publishConfig.
+- Export one module per singular subpath; pin the exports map in a test.
+- Inject app concerns; never import UI app aliases from an app-lib.
+- Generate projects with `package --scope=apps/libs --scope-tag=<scope> --layer=<layer> [--react]`.

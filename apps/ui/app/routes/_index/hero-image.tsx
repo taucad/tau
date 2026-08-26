@@ -2,8 +2,8 @@ import { MessageSquare, Code2, Lock, SlidersHorizontal, Ruler } from 'lucide-rea
 import { BorderBeam } from '#components/magicui/border-beam.js';
 import { Safari } from '#components/magicui/safari.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import tauDesktopDark from '#routes/_index/tau-desktop-dark.jpg';
-import tauDesktopLight from '#routes/_index/tau-desktop-light.jpg';
+import tauDesktopDark from '#routes/_index/tau-desktop-dark.webp';
+import tauDesktopLight from '#routes/_index/tau-desktop-light.webp';
 
 const features = [
   {

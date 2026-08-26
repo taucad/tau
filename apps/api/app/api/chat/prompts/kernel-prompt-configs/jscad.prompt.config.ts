@@ -17,11 +17,16 @@ ${jscadModelingTypes}
 </jscad_api>`,
 
   commonErrorPatterns:
-    'incorrect import paths, invalid dimensions, failed boolean operations, malformed vector arrays, segments proliferation, polygon-from-points loops where circle/extrudeRotate exists',
+    'incorrect import paths, invalid dimensions, failed boolean operations, malformed vector arrays, segments proliferation, polygon-from-points loops where circle/extrudeRotate exists, 3D mesh CSG with overlapping/touching/contained primitives producing native non-manifold geom3s',
 
-  topologyHints: `- No analytical curves — all geometry is mesh. Choose segment count, not curve form.
+  testingProfile: { includeBrepFeatureExamples: false },
+
+  topologyHints: `- Curves are tessellated mesh evidence. Choose segment count, not curve form, deliberately.
 - \`primitives.circle({ segments })\`, \`primitives.cylinder({ segments })\`, \`extrusions.extrudeRotate({ segments })\` — segments ≈ \`max(16, π · diameter / 0.3)\` for visible parts.
-- Prefer \`extrudeRotate\` or \`extrudeLinear\` over hand-built polygon-from-points loops when the profile has a regular form.`,
+- Prefer \`extrudeRotate\` or \`extrudeLinear\` over hand-built polygon-from-points loops when the profile has a regular form.
+- For prismatic parts with holes, slots, ears, sockets, or gear teeth, compose the 2D profile with \`circle\`, \`polygon\`, \`union\`, and \`subtract\` first, then call \`extrudeLinear\` once.
+- Avoid 3D mesh CSG between overlapping, touching, or contained primitives when a 2D profile operation is possible; it can produce native non-manifold \`geom3\` output even when the preview looks plausible.
+- Name every returned part with \`named(shape, 'Part Name')\``,
 
   fileLayoutMode: 'full-nesting',
   canonicalExample,

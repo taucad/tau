@@ -1,16 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
+import type { RpcDirectoryEntry, RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
+
+const textEntry = (
+  name: string,
+  size: number,
+  options?: { modifiedAt?: string; lineCount?: number },
+): RpcDirectoryEntry => ({
+  name,
+  type: 'file',
+  size,
+  contentKind: 'text',
+  lineCount: options?.lineCount ?? 1,
+  ...(options?.modifiedAt ? { modifiedAt: options.modifiedAt } : {}),
+});
 
 describe('handleGlobSearch', () => {
   it('should return matching files with metadata entries', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readdir.mockResolvedValue([
-      { name: 'index.ts', type: 'file', size: 100, modifiedAt: '2026-01-15T10:00:00.000Z' },
-      { name: 'utils.ts', type: 'file', size: 200, modifiedAt: '2026-02-20T14:00:00.000Z' },
-      { name: 'readme.md', type: 'file', size: 50 },
+      textEntry('index.ts', 100, { modifiedAt: '2026-01-15T10:00:00.000Z', lineCount: 10 }),
+      textEntry('utils.ts', 200, { modifiedAt: '2026-02-20T14:00:00.000Z', lineCount: 20 }),
+      textEntry('readme.md', 50, { lineCount: 3 }),
     ]);
 
     const result = await handleGlobSearch({ pattern: '*.ts' }, fileSystem);
@@ -21,14 +34,28 @@ describe('handleGlobSearch', () => {
       files: ['index.ts', 'utils.ts'],
     });
     expect(result.success && result.entries).toEqual([
-      { path: 'index.ts', isDirectory: false, size: 100, modifiedAt: '2026-01-15T10:00:00.000Z' },
-      { path: 'utils.ts', isDirectory: false, size: 200, modifiedAt: '2026-02-20T14:00:00.000Z' },
+      {
+        path: 'index.ts',
+        isDirectory: false,
+        size: 100,
+        contentKind: 'text',
+        lineCount: 10,
+        modifiedAt: '2026-01-15T10:00:00.000Z',
+      },
+      {
+        path: 'utils.ts',
+        isDirectory: false,
+        size: 200,
+        contentKind: 'text',
+        lineCount: 20,
+        modifiedAt: '2026-02-20T14:00:00.000Z',
+      },
     ]);
   });
 
   it('should return empty results for no matches', async () => {
     const fileSystem = mock<RpcFileSystem>();
-    fileSystem.readdir.mockResolvedValue([{ name: 'readme.md', type: 'file', size: 50 }]);
+    fileSystem.readdir.mockResolvedValue([textEntry('readme.md', 50)]);
 
     const result = await handleGlobSearch({ pattern: '*.py' }, fileSystem);
 
@@ -43,11 +70,8 @@ describe('handleGlobSearch', () => {
   it('should recursively search subdirectories', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readdir
-      .mockResolvedValueOnce([
-        { name: 'src', type: 'dir', size: 0 },
-        { name: 'package.json', type: 'file', size: 300 },
-      ])
-      .mockResolvedValueOnce([{ name: 'app.ts', type: 'file', size: 150, modifiedAt: '2026-03-01T00:00:00.000Z' }]);
+      .mockResolvedValueOnce([{ name: 'src', type: 'dir', size: 0 }, textEntry('package.json', 300, { lineCount: 15 })])
+      .mockResolvedValueOnce([textEntry('app.ts', 150, { modifiedAt: '2026-03-01T00:00:00.000Z', lineCount: 7 })]);
 
     const result = await handleGlobSearch({ pattern: '**/*.ts' }, fileSystem);
 
@@ -56,6 +80,48 @@ describe('handleGlobSearch', () => {
       files: ['src/app.ts'],
       totalFiles: 1,
     });
+  });
+
+  it.each(['', '.', './', '/'] as const)(
+    'should resolve root alias %j before recursively walking project-relative paths',
+    async (rootAlias) => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.readdir.mockImplementation(async (path) => {
+        if (path === '') {
+          return [{ name: 'checks', type: 'dir', size: 0 }];
+        }
+        if (path === 'checks') {
+          return [textEntry('existing.geospec.ts', 120, { lineCount: 4 })];
+        }
+        throw new Error(`Unexpected non-canonical project path: ${path}`);
+      });
+
+      const result = await handleGlobSearch({ pattern: '**/*.geospec.ts', path: rootAlias }, fileSystem);
+
+      expect(result).toEqual({
+        success: true,
+        files: ['checks/existing.geospec.ts'],
+        entries: [
+          {
+            path: 'checks/existing.geospec.ts',
+            isDirectory: false,
+            size: 120,
+            contentKind: 'text',
+            lineCount: 4,
+          },
+        ],
+        totalFiles: 1,
+      });
+    },
+  );
+
+  it('should reject paths outside the project before filesystem access', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleGlobSearch({ pattern: '*.ts', path: '../secret' }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.readdir).not.toHaveBeenCalled();
   });
 
   it('should return FILE_NOT_FOUND when readdir fails with ENOENT', async () => {

@@ -7,31 +7,33 @@ import { FastifyAdapter } from '@nestjs/platform-fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { MemorySaver } from '@langchain/langgraph-checkpoint';
 import { InMemoryStore } from '@langchain/langgraph';
-import { createRuntimeFileSystem } from '@taucad/runtime/filesystem';
-// eslint-disable-next-line no-restricted-imports -- this is a test file.
-import { getTestFileSystem } from '@taucad/runtime/testing';
+import { createMemoryProvider } from '@taucad/filesystem/backend';
 import type { RuntimeFileSystemBase } from '@taucad/runtime';
 import { createRpcDispatcher } from '@taucad/chat/rpc';
-import type { RpcGraphicsClient } from '@taucad/chat/rpc';
+import type { RpcGeoSpecClient, RpcGraphicsClient, RpcImageClient } from '@taucad/chat/rpc';
 import { getEnvironment } from '#config/environment.config.js';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { CheckpointerService } from '#api/chat/checkpointer.service.js';
 import { StoreService } from '#api/chat/store.service.js';
+import type { ReadDedupClearer } from '#api/chat/clear-recent-reads.js';
+import { recentReadsRootNamespace } from '#api/chat/recent-reads-namespace.js';
 import { ModelService } from '#api/models/model.service.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import { ToolService } from '#api/tools/tool.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
-import { GeometryAnalysisService } from '#api/analysis/geometry-analysis.service.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { TracerService } from '#telemetry/tracer.service.js';
 import { CompactionService } from '#api/chat/compaction.service.js';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
+import { TokenBudgetService } from '#api/chat/token-budget.service.js';
 import { HeadlessChatRpcService } from '#testing/headless-chat-rpc.service.js';
 import { createHeadlessRpcFileSystem } from '#testing/headless-rpc-filesystem.js';
 import { createHeadlessRuntimeClient } from '#testing/headless-runtime-client.js';
+import { ProviderRequestRecorder } from '#api/chat/utils/provider-request-recorder.js';
+import type { Model } from '#api/models/model.schema.js';
 
 /**
  * In-memory checkpointer service that replaces the PostgreSQL-backed one.
@@ -44,16 +46,28 @@ class MemoryCheckpointerService {
   }
 }
 
+class ClearableInMemoryStore extends InMemoryStore implements ReadDedupClearer {
+  public async clearChat(chatId: string): Promise<number> {
+    const namespace = [...recentReadsRootNamespace, chatId];
+    const items = await this.search(namespace);
+    await Promise.all(items.map(async (item) => this.delete(item.namespace, item.key)));
+    return items.length;
+  }
+}
+
 /**
- * In-memory LangGraph `BaseStore` that replaces the Redis-backed
- * {@link StoreService} during tests. Mirrors the
- * {@link MemoryCheckpointerService} pattern so the `read_file` dedup cache
- * exercises real `BaseStore` semantics without a Redis dependency.
+ * In-memory LangGraph store service that replaces the Redis-backed
+ * {@link StoreService} during tests. Mirrors production by exposing normal
+ * `BaseStore` operations separately from the read-dedup bulk clearer.
  */
 class MemoryStoreService {
-  private readonly store = new InMemoryStore();
+  private readonly store = new ClearableInMemoryStore();
 
-  public getStore(): InMemoryStore {
+  public getStore(): ClearableInMemoryStore {
+    return this.store;
+  }
+
+  public getReadDedupClearer(): ReadDedupClearer {
     return this.store;
   }
 }
@@ -92,13 +106,14 @@ const mockAuthInstance = {
     ProviderService,
     ToolService,
     FileEditService,
-    GeometryAnalysisService,
     MetricsService,
     TracerService,
     CheckpointerService,
     StoreService,
     CompactionService,
+    TokenBudgetService,
     TauRpcBackendFactory,
+    ProviderRequestRecorder,
     { provide: authInstanceKey, useValue: mockAuthInstance },
     { provide: APP_PIPE, useClass: ZodValidationPipe },
   ],
@@ -108,20 +123,65 @@ class TestChatModule {}
 export type TestApp = {
   app: NestFastifyApplication;
   baseUrl: string;
+  checkpointer: MemorySaver;
   memFs: RuntimeFileSystemBase;
   headlessRpc: HeadlessChatRpcService;
+  providerRequestRecorder: ProviderRequestRecorder;
+};
+
+export const createTestModel = (options: {
+  id: string;
+  providerId?: Model['provider']['id'];
+  family?: Model['details']['family'];
+}): Model => {
+  const { id, providerId = 'openai', family = 'gpt' } = options;
+  return {
+    id,
+    name: id,
+    slug: id,
+    model: id,
+    provider: { id: providerId, name: providerId },
+    details: {
+      family,
+      families: [family],
+      contextWindow: 200_000,
+      maxTokens: 16_000,
+      cost: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 1, cacheWriteTokens: 1 },
+    },
+    configuration: { streaming: true },
+  };
 };
 
 /**
  * Optional overrides for {@link createTestApp}.
  *
- * - `graphicsStub`: replace the default (omitted) graphics client. Used by EVAL
- *   tests for the agent-loop safeguards middleware that need to inject
- *   deterministic `fetch_geometry` / `screenshot` failures so the model is
- *   forced to repeat the same tool call.
+ * - `graphicsStub`: replace the default (omitted) geometry client.
+ * - `imagesStub`: replace the default (omitted) headless image client.
+ * - `geospecStub`: replace the default (omitted) GeoSpec client. Used by
+ *   agent-loop safeguards tests to inject deterministic `test_model` failures.
+ * - `storeService`: replace the default in-memory store service. Used by
+ *   compaction tests to exercise Redis-backed read-dedup clearing.
  */
 export type CreateTestAppOptions = {
   graphicsStub?: RpcGraphicsClient;
+  imagesStub?: RpcImageClient;
+  geospecStub?: RpcGeoSpecClient;
+  storeService?: Pick<StoreService, 'getStore' | 'getReadDedupClearer'>;
+  modelService?: Pick<
+    ModelService,
+    | 'models'
+    | 'buildModel'
+    | 'createProviderDiagnosticsContext'
+    | 'filterProviderToolNamesForModel'
+    | 'getContextWindow'
+    | 'getKnowledgeCutoff'
+    | 'getModelSupport'
+    | 'getModelCost'
+    | 'getOtelProviderName'
+    | 'getProviderId'
+    | 'normalizeUsageTokens'
+  >;
+  compactionService?: Pick<CompactionService, 'compact'>;
 };
 
 /**
@@ -137,16 +197,26 @@ export type CreateTestAppOptions = {
 export async function createTestApp(options: CreateTestAppOptions = {}): Promise<TestApp> {
   const logger = new Logger('TestApp');
 
-  const moduleRef = await Test.createTestingModule({
+  let builder = Test.createTestingModule({
     imports: [TestChatModule],
   })
     .overrideProvider(ChatRpcService)
     .useClass(HeadlessChatRpcService)
     .overrideProvider(CheckpointerService)
-    .useClass(MemoryCheckpointerService)
-    .overrideProvider(StoreService)
-    .useClass(MemoryStoreService)
-    .compile();
+    .useClass(MemoryCheckpointerService);
+
+  builder = options.storeService
+    ? builder.overrideProvider(StoreService).useValue(options.storeService)
+    : builder.overrideProvider(StoreService).useClass(MemoryStoreService);
+
+  if (options.modelService) {
+    builder = builder.overrideProvider(ModelService).useValue(options.modelService);
+  }
+  if (options.compactionService) {
+    builder = builder.overrideProvider(CompactionService).useValue(options.compactionService);
+  }
+
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
   app.enableVersioning({ type: VersioningType.URI });
@@ -161,15 +231,19 @@ export async function createTestApp(options: CreateTestAppOptions = {}): Promise
 
   logger.log(`Test app listening on ${baseUrl}`);
 
-  const memFs = getTestFileSystem();
+  const memFs = await createMemoryProvider();
+  const checkpointer = moduleRef.get(CheckpointerService).getCheckpointer() as unknown as MemorySaver;
   const headlessRpc: HeadlessChatRpcService = moduleRef.get(ChatRpcService);
+  const providerRequestRecorder = moduleRef.get(ProviderRequestRecorder);
 
   const dispatcher = createRpcDispatcher({
-    fileSystem: createHeadlessRpcFileSystem(createRuntimeFileSystem(memFs)),
+    fileSystem: createHeadlessRpcFileSystem(memFs),
     kernelClient: createHeadlessRuntimeClient({ createGeometry: async () => ({ success: true, issues: [] }) }),
     ...(options.graphicsStub ? { graphics: options.graphicsStub } : {}),
+    ...(options.imagesStub ? { images: options.imagesStub } : {}),
+    ...(options.geospecStub ? { geospec: options.geospecStub } : {}),
   });
   headlessRpc.setDispatcher(dispatcher);
 
-  return { app, baseUrl, memFs, headlessRpc };
+  return { app, baseUrl, checkpointer, memFs, headlessRpc, providerRequestRecorder };
 }

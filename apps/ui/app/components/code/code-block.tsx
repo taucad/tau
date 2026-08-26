@@ -1,7 +1,6 @@
 import type { ComponentProps } from 'react';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
-import type { CodeLanguage } from '@taucad/types';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { cn } from '#utils/ui.utils.js';
 
@@ -148,7 +147,7 @@ export function Pre({ children, language, className, ...rest }: PreProps): React
 
   // Render with syntax highlighting if language is detected
   if (language) {
-    return <CodeViewer language={language as CodeLanguage} text={text} className={className} />;
+    return <CodeViewer language={language} text={text} className={className} />;
   }
 
   // Fallback to regular pre element

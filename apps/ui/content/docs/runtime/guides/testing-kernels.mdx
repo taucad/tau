@@ -1,156 +1,168 @@
 ---
 title: Test Kernels
-description: Use testing utilities to write unit tests for custom kernels and middleware.
+description: Test runtime plugins through the public client path and unit-test definitions with focused mocks.
 icon: lucide:flask-conical
 ---
 
 # Test Kernels
 
-Use the `@taucad/runtime/testing` utilities to write unit tests for custom kernels and middleware. The package provides worker setup, mock runtimes, filesystem seeding, and geometry validation helpers.
+Use `@taucad/runtime-testing` for runtime harnesses, mocks, and geometry assertions. The testing package is not part of the production runtime payload.
 
 ## Prerequisites
 
 - [Install @taucad/runtime](../getting-started/installation)
-- Completed the [Quick Start](../getting-started/quick-start)
-- Vitest configured in your project (peer dependency of `@taucad/runtime`)
+- Install `@taucad/runtime-testing` and Vitest as development dependencies
+- Compose the same kernel and bundler plugins your host uses
 
-## Goal
+## 1. Define the Test Runtime
 
-Write unit tests that exercise kernel logic, middleware hooks, and geometry output using `createTestWorker`, mock runtimes, and geometry validation helpers.
-
-## Steps
-
-### 1. Import Testing Utilities from @taucad/runtime/testing
-
-All testing helpers are exported from the testing subpath:
+The harness accepts a normal [`defineRuntime`](../api/client) result. JavaScript and TypeScript kernels compose `esbuildBundler()` normally; there is no testing-only esbuild entry.
 
 ```typescript
-import {
-  createTestWorker,
-  initializeWorkerForTesting,
-  seedTestFileSystem,
-  clearTestFileSystem,
-  createMockLogger,
-  createMockFileSystem,
-  createMockRuntime,
-  createMockRuntimeClient,
-  createMockDependencies,
-  createMockCreateGeometryHandler,
-  createMockGetParametersHandler,
-  createSuccessResult,
-  createErrorResult,
-  createMockInput,
-  createMockResponse,
-  MockKernelWorker,
-  validateGlbData,
-  getInspectReport,
-  createGeometryTestHelpers,
-} from '@taucad/runtime/testing';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { defineRuntime } from '@taucad/runtime/worker';
+
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
 ```
 
-### 2. Use createTestWorker for Kernel Integration Tests
+## 2. Render Through a Real Client
 
-`createTestWorker` creates and initializes a [`KernelRuntimeWorker`](../concepts/worker-model) with a kernel definition and seeded files. It uses the production code path:
+`createTestRuntimeClient` uses the production `createRuntimeClient` and `inProcessTransport` path with an isolated `fromMemoryFs` filesystem. Use public `render`, `export`, and event APIs. The caller owns shutdown.
 
 ```typescript
-import { describe, it, expect } from 'vitest';
-import { createTestWorker, createGeometryFile } from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
+import { afterEach, describe, expect, it } from 'vitest';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { assertSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { defineRuntime } from '@taucad/runtime/worker';
+
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
 
 describe('Replicad kernel', () => {
-  it('creates geometry from TypeScript', async () => {
-    const worker = await createTestWorker(replicadDefinition, {
-      'main.ts': `
-        import { drawRoundedRectangle } from 'replicad';
-        export default function main() {
-          return drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
-        }
-      `,
-    });
-
-    const result = await worker.createGeometry({
-      file: createGeometryFile('main.ts'),
-      parameters: {},
-    });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data).toHaveLength(1);
-    }
-  });
-});
-```
-
-### 3. Use initializeWorkerForTesting for Custom Worker Setup
-
-When you need more control over worker initialization (e.g., custom middleware, telemetry):
-
-```typescript
-import { KernelRuntimeWorker } from '@taucad/runtime/worker-internals';
-import { initializeWorkerForTesting, seedTestFileSystem } from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
-
-await seedTestFileSystem({
-  '/projects/test/main.ts': `export default function main() { return null; }`,
-});
-
-const worker = new KernelRuntimeWorker();
-await initializeWorkerForTesting(worker, {
-  onLog: ({ message }) => console.log(message),
-  workerOptions: {
-    kernelModules: [
-      {
-        id: replicadDefinition.name,
-        moduleUrl: 'test://replicad',
-        extensions: ['ts'],
-        definition: replicadDefinition,
-      },
-    ],
-  },
-});
-```
-
-### 4. Seed and Clear the Test Filesystem
-
-`seedTestFileSystem` resets the in-memory filesystem and writes files. `clearTestFileSystem` resets without seeding:
-
-```typescript
-import { describe, beforeEach, afterEach, it, expect } from 'vitest';
-import { seedTestFileSystem, clearTestFileSystem } from '@taucad/runtime/testing';
-
-describe('my kernel', () => {
-  beforeEach(async () => {
-    await seedTestFileSystem({
-      '/projects/test/main.ts': 'export default function main() { return null; }',
-      '/projects/test/lib/utils.ts': 'export const x = 1;',
-    });
-  });
+  const clients = new Set<ReturnType<typeof createTestRuntimeClient>>();
 
   afterEach(async () => {
-    await clearTestFileSystem();
+    await Promise.all([...clients].map((client) => client.shutdown()));
+    clients.clear();
   });
 
-  it('runs against the seeded filesystem', () => {
-    expect(true).toBe(true);
+  it('renders and exports a box', async () => {
+    const client = createTestRuntimeClient({
+      runtime,
+      files: {
+        'main.ts': `
+          import { makeBaseBox } from 'replicad';
+          export default () => makeBaseBox(30, 50, 10);
+        `,
+      },
+    });
+    clients.add(client);
+
+    const outcome = await client.render({ source: { path: 'main.ts' } });
+    expect(outcome.superseded).toBe(false);
+    if (outcome.superseded) return;
+    assertSuccess(outcome.geometry);
+
+    const exported = await client.export('step');
+    assertSuccess(exported);
+    expect(exported.data[0]?.bytes.byteLength).toBeGreaterThan(0);
   });
 });
 ```
 
-### 5. Use Mock Utilities for Middleware Tests
+Passing `source` to `client.export(format, { source })` performs a request-scoped render and export. Calling `client.export(format)` reuses the last settled render and rejects with `NoRenderOutcomeError` when no render has settled.
 
-For middleware unit tests, use mocks to avoid a real worker:
+## 3. Use Convenience Helpers for One-Shot Tests
+
+`createTestGeometry` and `getTestParameters` create and close their own clients.
 
 ```typescript
-import { it, expect } from 'vitest';
-import { defineMiddleware } from '@taucad/runtime/middleware';
-import {
-  createMockRuntime,
-  createMockInput,
-  createMockCreateGeometryHandler,
-  createSuccessResult,
-} from '@taucad/runtime/testing';
+import { expect, it } from 'vitest';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { assertSuccess, createTestGeometry, getTestParameters } from '@taucad/runtime-testing';
+import { defineRuntime } from '@taucad/runtime/worker';
 
-const myMiddleware = defineMiddleware({
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
+
+const files = {
+  'main.ts': `
+    import { makeBaseBox } from 'replicad';
+    export const defaultParams = { width: 10 };
+    export default (params = defaultParams) => makeBaseBox(params.width, 20, 30);
+  `,
+};
+
+it('exposes parameters and geometry', async () => {
+  const parameters = await getTestParameters({ runtime, files, mainFile: 'main.ts' });
+  expect(parameters.defaultParameters).toEqual({ width: 10 });
+
+  const result = await createTestGeometry({ runtime, files, mainFile: 'main.ts', parameters: { width: 25 } });
+  assertSuccess(result);
+});
+```
+
+## 4. Observe Public Runtime Events
+
+Subscribe before rendering when the assertion depends on parameters, telemetry, progress, state, or errors.
+
+```typescript
+import { expect, it } from 'vitest';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { createTestRuntimeClient } from '@taucad/runtime-testing';
+import { defineRuntime } from '@taucad/runtime/worker';
+
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
+
+it('observes telemetry', async () => {
+  const client = createTestRuntimeClient({
+    runtime,
+    files: {
+      'main.ts': `
+        import { makeBaseBox } from 'replicad';
+        export default () => makeBaseBox(10, 20, 30);
+      `,
+    },
+  });
+  const telemetry: unknown[] = [];
+  const unsubscribe = client.on('telemetry', (entries) => telemetry.push(...entries));
+  try {
+    await client.render({ source: { path: 'main.ts' } });
+    expect(telemetry.length).toBeGreaterThan(0);
+  } finally {
+    unsubscribe();
+    await client.shutdown();
+  }
+});
+```
+
+## 5. Unit-Test Plugin Definitions
+
+Use `resolveRuntimePluginDefinition` from `@taucad/runtime/plugin` with `createMockKernelRuntime` or `createMockRuntime`. This is appropriate for a plugin's own hooks; runtime worker cache, filesystem watch, disposal, and transport invariants remain runtime-owned tests.
+
+```typescript
+import { expect, it } from 'vitest';
+import { defineMiddleware } from '@taucad/runtime/middleware';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import {
+  createMockCreateGeometryHandler,
+  createMockInput,
+  createMockRuntime,
+  createSuccessResult,
+} from '@taucad/runtime-testing';
+
+const passThrough = defineMiddleware({
+  id: 'pass-through',
   name: 'PassThrough',
   async wrapCreateGeometry(input, handler) {
     return handler(input);
@@ -158,115 +170,52 @@ const myMiddleware = defineMiddleware({
 });
 
 it('passes geometry through unchanged', async () => {
-  const runtime = createMockRuntime({
-    filesystemOverrides: { existsResult: true },
-    dependencies: [],
-    dependencyHash: 'abc123',
-  });
-  const input = createMockInput({ filePath: '/projects/test/main.ts' });
-  const handler = createMockCreateGeometryHandler(createSuccessResult([]));
-
-  const result = await myMiddleware.wrapCreateGeometry!(input, handler, runtime);
-  expect(result.success).toBe(true);
+  const definition = await resolveRuntimePluginDefinition('middleware', passThrough());
+  const runtime = createMockRuntime();
+  const input = createMockInput();
+  const expected = createSuccessResult({ format: 'gltf', content: new Uint8Array() });
+  const result = await definition.wrapCreateGeometry!(input, createMockCreateGeometryHandler(expected), runtime);
+  expect(result).toBe(expected);
 });
 ```
 
-**`createMockRuntimeClient()`** -- Returns a [`RuntimeClient`](../api/client) mock for transport-level testing.
+## 6. Assert Geometry
 
-**`MockKernelWorker`** -- A worker-shaped mock class for middleware integration tests.
-
-**`createMockResponse(body, headers?)`** -- Creates a mock `Response` object for testing HTTP-dependent kernels (e.g., Zoo).
-
-### 6. Validate Geometry with validateGlbData and getInspectReport
-
-Use `validateGlbData` to assert GLB format and `getInspectReport` for detailed geometry stats:
-
-```typescript
-import { it, expect } from 'vitest';
-import {
-  createTestWorker,
-  createGeometryFile,
-  validateGlbData,
-  getInspectReport,
-  extractGltfFromResult,
-  getGeometryStatsFromInspect,
-  getBoundingBoxFromInspect,
-} from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
-
-it('produces a valid GLB with the expected geometry', async () => {
-  const worker = await createTestWorker(replicadDefinition, {
-    'main.ts': `
-      import { drawRoundedRectangle } from 'replicad';
-      export default function main() {
-        return drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
-      }
-    `,
-  });
-
-  const result = await worker.createGeometry({
-    file: createGeometryFile('main.ts'),
-    parameters: {},
-  });
-
-  const glb = extractGltfFromResult(result);
-  expect(glb).toBeDefined();
-  validateGlbData(glb!);
-
-  const report = await getInspectReport(glb!);
-  const stats = getGeometryStatsFromInspect(report);
-  console.log(`Vertices: ${stats.vertexCount}, Faces: ${stats.faceCount}, Meshes: ${stats.meshCount}`);
-
-  const bbox = getBoundingBoxFromInspect(report);
-  if (bbox) {
-    console.log(`Size: ${bbox.size}, Center: ${bbox.center}`);
-  }
-});
-```
-
-### 7. Use createGeometryTestHelpers for Geometry Assertions
-
-`createGeometryTestHelpers` provides helpers for common geometry assertions:
+Geometry helpers accept the public render result shape and do not import runtime internals.
 
 ```typescript
 import { it } from 'vitest';
-import { createTestWorker, createGeometryFile, createGeometryTestHelpers } from '@taucad/runtime/testing';
-import replicadDefinition from '@taucad/runtime/kernels/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { assertSuccess, createGeometryTestHelpers, createTestGeometry } from '@taucad/runtime-testing';
+import { defineRuntime } from '@taucad/runtime/worker';
 
-it('matches expected mesh, vertex count, and bounding box', async () => {
-  const worker = await createTestWorker(replicadDefinition, {
-    'main.ts': `
-      import { drawRoundedRectangle } from 'replicad';
-      export default function main() {
-        return drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
-      }
-    `,
-  });
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
 
-  const result = await worker.createGeometry({
-    file: createGeometryFile('main.ts'),
-    parameters: {},
+it('checks the rendered mesh', async () => {
+  const result = await createTestGeometry({
+    runtime,
+    files: {
+      'main.ts': `
+        import { makeBaseBox } from 'replicad';
+        export default () => makeBaseBox(30, 50, 10);
+      `,
+    },
+    mainFile: 'main.ts',
   });
+  assertSuccess(result);
 
   const helpers = createGeometryTestHelpers();
   await helpers.expectValidGltf(result);
   await helpers.expectMeshCount(result, 1);
-  await helpers.expectVertexCount(result, 24);
-  await helpers.expectBoundingBoxSize(result, [30, 50, 10], 0.1);
+  await helpers.expectBoundingBoxSize(result, [0.03, 0.01, 0.05], 0.001);
 });
 ```
 
-**`createGeometryVariant(base, overrides)`** -- Create variant `GeometryExpectation` objects from a base for parametric testing.
-
-## Variations
-
-- **`createSuccessResult` / `createErrorResult`**: Build `CreateGeometryResult` values for middleware tests without running a kernel.
-- **`createMockDependencies(overrides?)`**: Create mock `Dependency[]` arrays for dependency hash testing.
-- **`createMockGetParametersHandler(result?)`**: Create a mock handler for `wrapGetParameters` tests.
-- **Skip bundler in tests**: Use `skipBundler: true` in `createTestWorker` for kernels that do not need bundling.
-
 ## Related
 
-- [Create a Custom Kernel](./custom-kernel) -- Test custom kernel definitions
-- [Create Custom Middleware](./custom-middleware) -- Test middleware with createMockRuntime
-- [API Reference: Testing](../api/testing) -- Full testing utility documentation
+- [Create a Custom Kernel](./custom-kernel)
+- [Create Custom Middleware](./custom-middleware)
+- [API Reference: Testing](../api/testing)

@@ -6,99 +6,44 @@
  */
 
 import type { z } from 'zod';
-import type { KernelIssue } from '#types/runtime.types.js';
-import type { KernelFileSystem, GetDependenciesResult } from '#types/runtime-kernel.types.js';
-
-// =============================================================================
-// Bundler Result Types
-// =============================================================================
-
-/**
- * Result of bundling a file and its dependencies via esbuild.
- * Used by JS/TS kernels through runtime.bundler.
- * @public
- */
-export type BundleResult = {
-  /** The bundled code as a string */
-  code: string;
-  /** Source map (if enabled) */
-  sourceMap?: string;
-  /** Compilation issues (errors, warnings) */
-  issues: KernelIssue[];
-  /** Whether bundling succeeded */
-  success: boolean;
-  /** Absolute paths of all project files that were resolved during bundling (transitive dependencies). */
-  dependencies: string[];
-  /** Absolute paths of imports that could not be resolved during bundling — used for watch-set expansion. */
-  unresolvedPaths: string[];
-};
-
-/**
- * Result of executing bundled code via dynamic import.
- * Used by JS/TS kernels through runtime.execute().
- * @public
- */
-export type ExecuteResult<T = unknown> =
-  | { success: true; value: T; entryUrl?: string }
-  | { success: false; issues: KernelIssue[] };
-
-/**
- * A built-in module registered on the bundler for pre-loaded libraries.
- * These modules are served directly from memory without filesystem I/O.
- * @public
- */
-export type BuiltinModule = {
-  /** Pre-bundled ESM code string */
-  code: string;
-  /** Package version */
-  version: string;
-  /** Optional CommonJS global variable name for banner injection */
-  globalName?: string;
-};
-
-/**
- * Bundler service provided to kernel modules via KernelRuntime.
- * Wraps esbuild-wasm with virtual filesystem integration and CDN module resolution.
- * Created lazily on first access -- non-JS kernels incur zero cost.
- * @public
- */
-export type KernelBundler = {
-  /** Bundle a file and all its transitive dependencies. */
-  bundle(entryPath: string): Promise<BundleResult>;
-  /**
-   * Resolve all transitive dependencies without generating output code.
-   * Returns both resolved dependencies and unresolved import paths.
-   */
-  resolveDependencies(entryPath: string): Promise<GetDependenciesResult>;
-  /**
-   * Register a built-in module that will be served from memory during bundling.
-   * Used by JS/TS kernels to register WASM-loaded libraries (replicad, @jscad/modeling).
-   * Must be called before the first bundle() call.
-   */
-  registerModule(name: string, entry: BuiltinModule): void;
-};
+import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
+import type { BuiltinModule, BundleResult, ExecuteResult } from '#types/runtime-bundler-service.types.js';
+import type { BundlerPlugin, RuntimePluginDeclaration } from '#plugins/plugin-types.js';
+import {
+  attachRuntimePluginDefinition,
+  attachRuntimePluginFactoryOptions,
+} from '#plugins/plugin-runtime-definition.js';
+import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 
 // =============================================================================
 // defineBundler API Types
 // =============================================================================
 
 /**
- * Filesystem and project path context for bundler initialization.
+ * Runtime filesystem context for bundler initialization. Runtime `/` is the
+ * supplied filesystem root, not the host operating system root.
  * @public
  */
-export type BundlerInitOptions = {
-  /** Filesystem interface for reading project files */
+export type BundlerInitRuntime = {
+  /** Filesystem interface for reading files by runtime path. */
   filesystem: KernelFileSystem;
-  /** Base path for the project (e.g., /projects/project) */
-  projectPath: string;
+};
+
+/** Operation-scoped services supplied to bundler work. @public */
+export type BundlerRuntime = {
+  /**
+   * Cancellation signal owned by the active runtime operation. Fresh for each
+   * operation; pass it to cancellable APIs and do not retain it.
+   */
+  readonly signal: AbortSignal;
 };
 
 /**
- * Entry file path for bundler operations (detectImports, bundle, resolveDependencies).
+ * Entry path for bundler operations (detectImports and bundle).
  * @public
  */
 export type BundleInput = {
-  /** Absolute path to the entry file */
+  /** Path of the entry within the runtime filesystem. The normalized path begins with `/`. */
   entryPath: string;
 };
 
@@ -110,7 +55,7 @@ export type BundleInput = {
 export type DetectImportsResult = {
   /** Bare specifiers imported transitively (e.g., 'replicad', '@jscad/modeling') */
   detectedModules: string[];
-  /** Project file dependencies discovered during detection (reusable by getDependencies) */
+  /** Runtime paths discovered during detection (reusable by getDependencies). */
   dependencies: string[];
 };
 
@@ -147,8 +92,8 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
   /** Zod schema for validating and typing bundler options. Options type is inferred from this schema. */
   optionsSchema?: z.ZodType<Options>;
 
-  /** Initialize the bundler. Receives framework init options plus user-provided options. */
-  initialize(initOptions: BundlerInitOptions, options: Options): Promise<Context>;
+  /** Initialize the bundler. Receives user-provided options plus framework runtime services. */
+  initialize(options: Options, runtime: BundlerInitRuntime): Promise<Context>;
 
   /**
    * Detect which bare-specifier modules are imported transitively.
@@ -156,29 +101,70 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
    * Returns detected modules and project dependencies without producing runnable code.
    * This is the primary mechanism for kernel selection -- no module stubs required.
    */
-  detectImports(input: BundleInput, context: Context): Promise<DetectImportsResult>;
+  detectImports(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<DetectImportsResult>;
 
   /**
    * Produce runnable code with all registered modules resolved.
    * Called AFTER kernel selection and initialization (modules are registered).
    */
-  bundle(input: BundleInput, context: Context): Promise<BundleResult>;
+  bundle(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<BundleResult>;
 
   /** Execute bundled code (tied to this bundler's output format). */
-  execute(code: string, context: Context): Promise<ExecuteResult>;
+  execute(input: { code: string }, runtime: BundlerRuntime, context: Context): Promise<ExecuteResult>;
 
   /** Register a builtin module for resolution during bundle(). */
-  registerModule(name: string, builtinModule: BuiltinModule, context: Context): void;
+  registerModule(input: { name: string; module: BuiltinModule }, context: Context): void;
 
-  /**
-   * Optional fast-path dependency resolution without full bundling.
-   * Falls back to bundle().dependencies when not implemented.
-   */
-  resolveDependencies?(input: BundleInput, context: Context): Promise<GetDependenciesResult>;
+  /** Invalidate cached execution results after source changes. */
+  clearExecutionCache?(code: string | undefined, context: Context): void;
 
   /** Clean up bundler resources (e.g., esbuild.stop()). */
   cleanup?(context: Context): Promise<void>;
 };
+
+type BundlerExtensions<Options> = string[] | ((options: Options | undefined) => string[]);
+
+type BundlerDefinitionConfig<
+  Id extends string,
+  Context,
+  Options extends Record<string, unknown>,
+> = RuntimePluginDeclaration & {
+  /** Unique identifier for this bundler plugin. */
+  id: Id;
+  /** Human-readable bundler name, used in logs and error messages */
+  name: string;
+  /** Semantic version string for cache-key computation and diagnostics */
+  version: string;
+  /** File extensions handled by this bundler, static or derived from plugin options. */
+  extensions: BundlerExtensions<Options>;
+  /** Initialize the bundler. Receives user-provided options plus framework runtime services. */
+  initialize(options: Options, runtime: BundlerInitRuntime): Promise<Context>;
+  /** Detect which bare-specifier modules are imported transitively. */
+  detectImports(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<DetectImportsResult>;
+  /** Produce runnable code with all registered modules resolved. */
+  bundle(input: BundleInput, runtime: BundlerRuntime, context: Context): Promise<BundleResult>;
+  /** Execute bundled code (tied to this bundler's output format). */
+  execute(input: { code: string }, runtime: BundlerRuntime, context: Context): Promise<ExecuteResult>;
+  /** Register a builtin module for resolution during bundle(). */
+  registerModule(input: { name: string; module: BuiltinModule }, context: Context): void;
+  /** Invalidate cached execution results after source changes. */
+  clearExecutionCache?(code: string | undefined, context: Context): void;
+  /** Clean up bundler resources (e.g., esbuild.stop()). */
+  cleanup?(context: Context): Promise<void>;
+};
+
+/* oxlint-disable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types -- Named callable type keeps private unique-symbol carriers nameable in emitted declarations; [] is the exact no-options tuple. */
+/** @public */
+export interface BundlerPluginFactory<Id extends string, Options = undefined> {
+  (
+    ...options: Options extends undefined
+      ? []
+      : Partial<Options> extends Options
+        ? [options?: Options]
+        : [options: Options]
+  ): BundlerPlugin<Id> & RuntimePluginDefinitionCarrier<BundlerDefinition>;
+}
+/* oxlint-enable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types */
 
 /**
  * Define a bundler module with full type inference.
@@ -193,28 +179,62 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
  * ```typescript
  * import { defineBundler } from '@taucad/runtime/bundler';
  *
- * export default defineBundler({
+ * export const myBundler = defineBundler({
+ *   id: 'my-bundler',
  *   name: 'MyBundler',
  *   version: '1.0.0',
  *   extensions: ['ts', 'js'],
- *   async initialize({ filesystem, projectPath }) {
- *     return { projectPath };
+ *   async initialize({ filesystem }) {
+ *     return { filesystem };
  *   },
- *   async detectImports({ entryPath }, context) {
+ *   async detectImports({ entryPath }, { signal }, context) {
+ *     await fetch('/bundler/detect-imports', { method: 'POST', body: entryPath, signal });
  *     return { detectedModules: [], dependencies: [entryPath] };
  *   },
- *   async bundle({ entryPath }, context) {
+ *   async bundle({ entryPath }, { signal }, context) {
+ *     await fetch('/bundler/bundle', { method: 'POST', body: entryPath, signal });
  *     return { code: '', sourceMap: undefined, issues: [], success: true, dependencies: [], unresolvedPaths: [] };
  *   },
- *   async execute(code, context) {
+ *   async execute({ code }, { signal }, context) {
+ *     await fetch('/bundler/execute', { method: 'POST', body: code, signal });
  *     return { success: true, value: undefined };
  *   },
- *   registerModule(name, builtinModule, context) {},
+ *   registerModule({ name, module }, context) {},
  * });
  * ```
  */
-export function defineBundler<Context, Options extends Record<string, unknown> = Record<string, unknown>>(
-  definition: BundlerDefinition<Context, Options>,
-): BundlerDefinition<Context, Options> {
-  return definition;
+export function defineBundler<const Id extends string, Context, OptionsSchema extends z.ZodType = z.ZodType>(
+  definition: BundlerDefinitionConfig<Id, Context, z.output<OptionsSchema> & Record<string, unknown>> & {
+    optionsSchema: OptionsSchema;
+  },
+): BundlerPluginFactory<Id, z.input<OptionsSchema>>;
+export function defineBundler<const Id extends string, Context>(
+  definition: BundlerDefinitionConfig<Id, Context, Record<string, unknown>> & { optionsSchema?: undefined },
+): BundlerPluginFactory<Id>;
+/** @public */
+export function defineBundler(
+  definition: BundlerDefinitionConfig<string, unknown, Record<string, unknown>>,
+): BundlerPluginFactory<string, Record<string, unknown>> {
+  const acceptsOptions =
+    Object.hasOwn(definition, 'optionsSchema') && Reflect.get(definition, 'optionsSchema') !== undefined;
+  const { id, extensions, permissions, ...bundlerDefinition } = definition;
+  const factory = ((options?: Record<string, unknown>) => {
+    if (options !== undefined && !acceptsOptions) {
+      throw new TypeError(`Bundler "${id}" does not accept options.`);
+    }
+    const resolvedExtensions = typeof extensions === 'function' ? extensions(options) : extensions;
+    return attachRuntimePluginDefinition(
+      {
+        id,
+        extensions: resolvedExtensions,
+        ...(permissions === undefined ? {} : { permissions }),
+        options,
+      },
+      () => ({
+        ...bundlerDefinition,
+        extensions: resolvedExtensions,
+      }),
+    );
+  }) as BundlerPluginFactory<string, Record<string, unknown>>;
+  return attachRuntimePluginFactoryOptions(factory, acceptsOptions);
 }

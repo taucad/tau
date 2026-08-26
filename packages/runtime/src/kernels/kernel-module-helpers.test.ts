@@ -1,13 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { fileURLToPath } from 'node:url';
-import { resolve, join, dirname } from 'node:path';
 import {
   KERNEL_MODULES_KEY,
   isRecordObject,
   getModuleRegistry,
+  createKernelModuleShim,
   extractDefaultParameters,
-  resolveToRelative,
+  toVmEntryPath,
   convertRawIssuesToKernelIssues,
   enrichIssueLocation,
   loadBinaryFile,
@@ -51,6 +50,36 @@ describe('getModuleRegistry', () => {
   });
 });
 
+describe('createKernelModuleShim', () => {
+  it('preserves public export names as local bindings for readable runtime diagnostics', () => {
+    const code = createKernelModuleShim({
+      moduleExpression: 'globalThis.__testModule',
+      exports: {
+        primitives: {},
+        transforms: {},
+      },
+    });
+
+    expect(code).toContain('const primitives = __mod["primitives"];');
+    expect(code).toContain('export { primitives };');
+    expect(code).toContain('const transforms = __mod["transforms"];');
+    expect(code).toContain('export { transforms };');
+    expect(code).not.toContain('__kernel_export');
+  });
+
+  it('uses a generated local binding when the export name cannot be a safe local identifier', () => {
+    const code = createKernelModuleShim({
+      moduleExpression: 'globalThis.__testModule',
+      exports: {
+        class: {},
+      },
+    });
+
+    expect(code).toContain('const __kernel_export_0 = __mod["class"];');
+    expect(code).toContain('export { __kernel_export_0 as class };');
+  });
+});
+
 describe('extractDefaultParameters', () => {
   it('should extract defaultParams from a module', () => {
     const result = extractDefaultParameters({ defaultParams: { width: 10 } });
@@ -82,21 +111,13 @@ describe('extractDefaultParameters', () => {
   });
 });
 
-describe('resolveToRelative', () => {
-  it('should strip the base path prefix', () => {
-    expect(resolveToRelative('/project/src/main.ts', '/project')).toBe('src/main.ts');
+describe('toVmEntryPath', () => {
+  it('converts a canonical local path to the VM entry spelling', () => {
+    expect(toVmEntryPath('/src/main.ts')).toBe('src/main.ts');
   });
 
-  it('should handle base paths with trailing slash', () => {
-    expect(resolveToRelative('/project/src/main.ts', '/project/')).toBe('src/main.ts');
-  });
-
-  it('should return original path when base does not match', () => {
-    expect(resolveToRelative('/other/file.ts', '/project')).toBe('/other/file.ts');
-  });
-
-  it('should handle root base path', () => {
-    expect(resolveToRelative('/file.ts', '/')).toBe('file.ts');
+  it('rejects traversal above the virtual root', () => {
+    expect(() => toVmEntryPath('/../secret.ts')).toThrow('escapes');
   });
 });
 
@@ -106,7 +127,7 @@ describe('convertRawIssuesToKernelIssues', () => {
     const result = convertRawIssuesToKernelIssues(raw, 'main.ts');
     expect(result).toEqual([
       {
-        code: 'RUNTIME',
+        code: 'UNKNOWN',
         message: 'syntax error',
         severity: 'error',
         type: 'runtime',
@@ -126,6 +147,19 @@ describe('convertRawIssuesToKernelIssues', () => {
     const raw = [{ message: 'error', severity: 'error', location }];
     const result = convertRawIssuesToKernelIssues(raw, 'main.ts');
     expect(result[0]!.location).toEqual(location);
+  });
+
+  it('should validate issue codes without legacy alias rewriting', () => {
+    const legacyGeometryCode = `JSCAD_${'GEOMETRY'}_INVALID`;
+    const result = convertRawIssuesToKernelIssues(
+      [
+        { message: 'generic geometry issue', severity: 'warning', code: 'GEOMETRY_INVALID' },
+        { message: 'legacy provider-specific issue', severity: 'warning', code: legacyGeometryCode },
+      ],
+      'main.ts',
+    );
+
+    expect(result.map((issue) => issue.code)).toEqual(['GEOMETRY_INVALID', 'UNKNOWN']);
   });
 });
 
@@ -150,10 +184,7 @@ describe('enrichIssueLocation', () => {
 
 describe('loadBinaryFile', () => {
   it('should load a file via file: URL in Node.js', async () => {
-    const currentDirectory = dirname(fileURLToPath(import.meta.url));
-    const fontPath = resolve(join(currentDirectory, 'replicad', 'fonts', 'Geist-Regular.ttf'));
-    const url = `file://${fontPath}`;
-    const result = await loadBinaryFile(url);
+    const result = await loadBinaryFile(new URL('kernel-module-helpers.test.ts', import.meta.url).href);
     expect(result).toBeInstanceOf(ArrayBuffer);
     expect(result!.byteLength).toBeGreaterThan(0);
   });

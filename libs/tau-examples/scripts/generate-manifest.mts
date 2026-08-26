@@ -17,15 +17,45 @@ const kernelsDirectory = join(sourceDirectory, 'kernels');
 type ManifestEntry = {
   kernel: string;
   name: string;
-  mainFile: string;
+  mainFile?: string;
   files: string[];
 };
+
+const candidateMainFiles = ['main.ts', 'main.py', 'main.scad', 'main.cpp'] as const;
+const excludedDirectories = new Set(['.tau', '__pycache__']);
+const excludedFiles = new Set(['thumbnail.webp']);
+
+function scanFiles(directory: string, prefix = ''): string[] {
+  const files: string[] = [];
+
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') || excludedDirectories.has(entry.name)) {
+      continue;
+    }
+
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const absolutePath = join(directory, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...scanFiles(absolutePath, relativePath));
+      continue;
+    }
+
+    if (entry.isFile() && !excludedFiles.has(entry.name)) {
+      files.push(relativePath);
+    }
+  }
+
+  return files.sort();
+}
 
 function scanFixtures(): ManifestEntry[] {
   const entries: ManifestEntry[] = [];
 
   for (const kernelEntry of readdirSync(kernelsDirectory, { withFileTypes: true })) {
-    if (!kernelEntry.isDirectory()) {
+    // Skip dot/cache directories at the kernel level too: a `.tau/` runtime
+    // cache at the kernels root would otherwise register as a kernel.
+    if (!kernelEntry.isDirectory() || kernelEntry.name.startsWith('.') || excludedDirectories.has(kernelEntry.name)) {
       continue;
     }
 
@@ -34,23 +64,26 @@ function scanFixtures(): ManifestEntry[] {
     for (const exampleEntry of readdirSync(kernelDirectory, {
       withFileTypes: true,
     })) {
-      if (!exampleEntry.isDirectory()) {
+      if (
+        !exampleEntry.isDirectory() ||
+        exampleEntry.name.startsWith('.') ||
+        excludedDirectories.has(exampleEntry.name)
+      ) {
         continue;
       }
 
       const exampleDirectory = join(kernelDirectory, exampleEntry.name);
-      const files = readdirSync(exampleDirectory)
-        .filter((f) => !f.startsWith('.'))
-        .sort();
+      const files = scanFiles(exampleDirectory);
 
       if (files.length === 0) {
         continue;
       }
 
+      const mainFile = candidateMainFiles.find((candidate) => files.includes(candidate));
       entries.push({
         kernel: kernelEntry.name,
         name: exampleEntry.name,
-        mainFile: 'main.ts',
+        ...(mainFile ? { mainFile } : {}),
         files,
       });
     }

@@ -7,17 +7,17 @@
  * The core handler logic lives in libs/chat/src/rpc/handlers/. This module only
  * adapts browser-specific deps into the abstract RpcDependencies interface.
  */
-import { createActor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
+import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-fresh-render.js';
 import type {
   RpcCall,
   RpcClientErrorCode,
   RpcResult,
   GetKernelResultRpcResult,
-  CaptureObservationsRpcResult,
-  CaptureScreenshotRpcResult,
-  FetchGeometryRpcResult,
+  CaptureImagesRpcResult,
+  CaptureImagesRpcInput,
+  RunGeoSpecTestsRpcResult,
 } from '@taucad/chat';
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
@@ -28,34 +28,28 @@ import type {
   RpcFileStat,
   RpcRuntimeClient,
   RpcGraphicsClient,
+  RpcImageClient,
+  RpcGeoSpecClient,
   RpcGraphicsExportGeometryResult,
+  RpcDirectoryEntry,
 } from '@taucad/chat/rpc';
-import type { FileExtension } from '@taucad/types';
-import { idPrefix } from '@taucad/types/constants';
-import { generatePrefixedId } from '@taucad/utils/id';
+import type { ExportFile, FileExtension, FileStat } from '@taucad/types';
+import type { KernelIssue } from '@taucad/runtime';
 import { DirectoryListingFailedError, DirectoryListingErrorCode } from '@taucad/fs-client/directory-listing';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-
+import { getErrno } from '@taucad/utils/error';
 import { recordRpcOutcome } from '#services/rpc-ledger.js';
-import { screenshotRequestMachine, orthographicViews } from '#machines/screenshot-request.machine.js';
-import { buildScreenshotOverlayForPath } from '#machines/resolve-screenshot-overlay.js';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
+import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
+import { createSkillResolver } from '#lib/skill-resolver.js';
+import type { HeadlessImageService } from '#services/headless-image.service.js';
+import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 
 /** Source of file write operations */
 type FileWriteSource = 'editor' | 'user' | 'machine';
-
-/**
- * Resolves the per-viewer-panel graphics actor displaying a given source file.
- * Returns undefined if no panel currently displays that file.
- *
- * Multi-file aware: every agent-facing screenshot/observation flow looks up
- * the targeted geometry unit explicitly — there is no project-level
- * `mainEntryFile` fallback.
- */
-export type ResolveGraphicsForFile = (targetFile: string) => ActorRefFrom<typeof graphicsMachine> | undefined;
 
 /**
  * Tree facade surface used by {@link createBrowserRpcFileSystem} after {@link RpcHandlerDependencies.fileManager.whenServicesReady}.
@@ -95,16 +89,19 @@ export type RpcHandlerDependencies = {
     readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
     writeFile: (path: string, data: Uint8Array<ArrayBuffer>, options: { source: FileWriteSource }) => Promise<void>;
     deleteFile: (path: string, options: { source: FileWriteSource }) => Promise<void>;
-    stat: (path: string) => Promise<{ type: 'file' | 'dir'; size: number; mtimeMs: number }>;
+    stat: (path: string) => Promise<FileStat>;
     whenServicesReady: () => Promise<{ treeService: RpcHandlerTreeService }>;
+    runtimeFileSystem: RuntimeFileSystem;
   };
-  /**
-   * Function that maps a source file path to its viewer panel's graphics actor.
-   * Pass `undefined` in headless modes where no view is mounted.
-   */
-  resolveGraphicsForFile: ResolveGraphicsForFile | undefined;
   projectRef: ActorRefFrom<typeof projectMachine>;
-  screenshotQuality: number;
+  headlessImageService?: Pick<HeadlessImageService, 'export'>;
+  /**
+   * Creates a runtime client owned by the GeoSpec test runner.
+   *
+   * The client must be backed by the project filesystem and shared geometry
+   * cache, but must not be the active preview runtime client.
+   */
+  createGeoSpecClient?: () => RpcGeoSpecClient;
 };
 export type RpcCallInput = RpcCall & {
   toolCallId: string;
@@ -134,23 +131,30 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     async deleteFile(path: string): Promise<void> {
       await fileManager.deleteFile(path, { source: 'machine' });
     },
-    async readdir(path: string): Promise<
-      Array<{
-        name: string;
-        type: 'file' | 'dir';
-        size: number;
-        modifiedAt?: string;
-      }>
-    > {
+    async readdir(path: string): Promise<RpcDirectoryEntry[]> {
       const { treeService } = await fileManager.whenServicesReady();
       try {
         const entries = await treeService.listDirectory(path);
-        return entries.map((entry) => ({
-          name: entry.name,
-          type: entry.isFolder ? 'dir' : 'file',
-          size: entry.size,
-          ...(entry.mtimeMs > 0 ? { modifiedAt: new Date(entry.mtimeMs).toISOString() } : {}),
-        }));
+        return entries.map((entry) => {
+          const modifiedAt = entry.mtimeMs > 0 ? new Date(entry.mtimeMs).toISOString() : undefined;
+          if (entry.isFolder) {
+            return {
+              name: entry.name,
+              type: 'dir',
+              size: entry.size,
+              ...(modifiedAt ? { modifiedAt } : {}),
+            };
+          }
+          return {
+            name: entry.name,
+            type: 'file',
+            size: entry.size,
+            ...(entry.contentKind === 'text'
+              ? { contentKind: 'text', lineCount: entry.lineCount }
+              : { contentKind: 'binary' }),
+            ...(modifiedAt ? { modifiedAt } : {}),
+          };
+        });
       } catch (error) {
         if (error instanceof DirectoryListingFailedError) {
           const mappedError = new Error(error.message) as Error & { code?: string };
@@ -171,8 +175,10 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
       try {
         const data = await fileManager.readFile(path);
         existing = decodeTextFile(data);
-      } catch {
-        // File doesn't exist yet — will be created
+      } catch (error) {
+        if (!(error instanceof FileNotFoundError) && getErrno(error) !== 'ENOENT') {
+          throw error;
+        }
       }
 
       await fileManager.writeFile(path, encodeTextFile(existing + content), {
@@ -210,12 +216,30 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
     async stat(path: string): Promise<RpcFileStat> {
       const s = await fileManager.stat(path);
       const isoDate = new Date(s.mtimeMs).toISOString();
-      return {
-        size: s.size,
-        isDirectory: s.type === 'dir',
-        createdAt: isoDate,
-        modifiedAt: isoDate,
-      };
+      if (s.type === 'dir') {
+        return {
+          size: s.size,
+          isDirectory: true,
+          createdAt: isoDate,
+          modifiedAt: isoDate,
+        };
+      }
+      return s.contentKind === 'text'
+        ? {
+            size: s.size,
+            isDirectory: false,
+            createdAt: isoDate,
+            modifiedAt: isoDate,
+            contentKind: 'text',
+            lineCount: s.lineCount,
+          }
+        : {
+            size: s.size,
+            isDirectory: false,
+            createdAt: isoDate,
+            modifiedAt: isoDate,
+            contentKind: 'binary',
+          };
     },
   };
 }
@@ -225,10 +249,9 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
  * `createGeometryUnit` if it does not already exist, then awaits a *fresh*
  * render to settle (per `awaitFreshRender` in `apps/ui/app/lib/`).
  *
- * Both `getKernelResult` and `fetchGeometry` route through this helper so they
- * share a single bootstrap contract — the agent never sees a missing-geometry
- * unit error for a path it just asked the harness to evaluate, and never sees
- * a stale geometry from a prior render generation.
+ * Runtime, export, and image operations route through this helper so they
+ * share one bootstrap contract and never observe stale geometry from a prior
+ * render generation.
  */
 /** Subset of {@link RpcClientErrorCode} emitted by `ensureGeometryUnit` only. */
 export type EnsureGeometryUnitErrorCode = Extract<RpcClientErrorCode, 'UNKNOWN' | 'RENDER_TIMEOUT'>;
@@ -257,7 +280,7 @@ async function ensureGeometryUnit(
     if (!cadUnit) {
       projectRef.send({
         type: 'createGeometryUnit',
-        entryFile: targetFile,
+        entryPath: targetFile,
       });
       const refreshed = projectRef.getSnapshot();
       cadUnit = refreshed.context.geometryUnits.get(targetFile);
@@ -279,7 +302,7 @@ async function ensureGeometryUnit(
       return {
         ok: false,
         errorCode: rpcClientErrorCode.renderTimeout,
-        message: `Render for ${targetFile} did not settle in time. Try a simpler model or wait and retry.`,
+        message: `Render for ${targetFile} did not settle in time. Inspect recent model changes, kernel diagnostics, and parameter values; fix the render blocker or increase render timeout for legitimately long operations.`,
       };
     }
     return {
@@ -290,17 +313,18 @@ async function ensureGeometryUnit(
   }
 }
 
-/**
- * Heuristic check: does a kernelIssue message look like a "file not found"
- * diagnostic for the file the agent asked about? Kept permissive on purpose —
- * different kernels word the failure differently (Node `ENOENT`, OpenSCAD
- * `does not exist`, generic `not found`). Falls back to UNKNOWN if no signal.
- */
-function isFileNotFoundMessage(message: string, targetFile: string): boolean {
-  if (!/enoent|not found|does not exist/i.test(message)) {
-    return false;
+function getLatestGeometryFailure(
+  cadSnapshot: SnapshotFrom<typeof cadMachine>,
+  targetFile: string,
+): KernelIssue[] | undefined {
+  if (cadSnapshot.context.latestGeometryOutcome !== 'failure') {
+    return undefined;
   }
-  return message.toLowerCase().includes(targetFile.toLowerCase());
+  return cadSnapshot.context.kernelIssues.get(targetFile) ?? [];
+}
+
+function geometryFailureMessage(issues: KernelIssue[], targetFile: string): string {
+  return issues.map((issue) => issue.message).join('; ') || `Render for ${targetFile} failed`;
 }
 
 function createBrowserRuntimeClient(projectRef: ActorRefFrom<typeof projectMachine>): RpcRuntimeClient {
@@ -325,53 +349,27 @@ function createBrowserRuntimeClient(projectRef: ActorRefFrom<typeof projectMachi
   };
 }
 
-function createBrowserGraphicsClient(
-  resolveGraphicsForFile: ResolveGraphicsForFile,
-  projectRef: ActorRefFrom<typeof projectMachine>,
-  screenshotQuality: number,
-): RpcGraphicsClient {
+function createBrowserGeoSpecClient(createGeoSpecClient: (() => RpcGeoSpecClient) | undefined): RpcGeoSpecClient {
   return {
-    async fetchGeometry({ targetFile }): Promise<FetchGeometryRpcResult> {
-      const resolved = await ensureGeometryUnit(projectRef, targetFile);
-      if (!resolved.ok) {
-        return { success: false, errorCode: resolved.errorCode, message: resolved.message };
-      }
-
-      const { cadSnapshot } = resolved;
-      const geometry = cadSnapshot.context.geometries.find((g) => g.format === 'gltf');
-
-      if (geometry?.format !== 'gltf') {
-        const issues = cadSnapshot.context.kernelIssues.get(targetFile) ?? [];
-        const fileNotFoundIssue = issues.find(
-          (issue) => issue.severity === 'error' && isFileNotFoundMessage(issue.message, targetFile),
-        );
-
-        if (fileNotFoundIssue) {
-          return {
-            success: false,
-            errorCode: rpcClientErrorCode.fileNotFound,
-            message: `${targetFile} does not exist on disk. Create it with create_file before testing or fix the path.`,
-          };
+    async runTests(args): Promise<RunGeoSpecTestsRpcResult> {
+      try {
+        if (!createGeoSpecClient) {
+          throw new Error('GeoSpec browser worker runner is not configured.');
         }
-
-        if (cadSnapshot.value === 'idle') {
-          return {
-            success: false,
-            errorCode: rpcClientErrorCode.noTopLevelGeometry,
-            message: `${targetFile} compiled but produced no top-level geometry to render.`,
-          };
-        }
-
+        return await createGeoSpecClient().runTests(args);
+      } catch (error) {
         return {
           success: false,
           errorCode: rpcClientErrorCode.unknown,
-          message: `No GLTF geometry available for ${targetFile}`,
+          message: error instanceof Error ? error.message : 'GeoSpec tests failed to run.',
         };
       }
-
-      return { success: true, glb: geometry.content };
     },
+  };
+}
 
+function createBrowserGraphicsClient(projectRef: ActorRefFrom<typeof projectMachine>): RpcGraphicsClient {
+  return {
     async exportGeometry({
       targetFile,
       format,
@@ -394,15 +392,43 @@ function createBrowserGraphicsClient(
         };
       }
 
+      const failedIssues = getLatestGeometryFailure(cadSnapshot, targetFile);
+      if (failedIssues) {
+        return {
+          success: false,
+          errorCode: rpcClientErrorCode.unknown,
+          message: geometryFailureMessage(failedIssues, targetFile),
+        };
+      }
+      if (cadSnapshot.context.latestGeometryOutcome !== 'success') {
+        return {
+          success: false,
+          errorCode: rpcClientErrorCode.unknown,
+          message: `No current successful geometry is available for ${targetFile}`,
+        };
+      }
+
       try {
-        const exportResult = await kernelClient.export(format as FileExtension);
+        const route = bestRouteForActiveKernel(
+          kernelClient,
+          format as FileExtension,
+          cadSnapshot.context.activeKernelId,
+        );
+        if (!route) {
+          return {
+            success: false,
+            errorCode: rpcClientErrorCode.unknown,
+            message: `Export format ${format} is not available for ${targetFile}`,
+          };
+        }
+
+        const exportResult = await exportWithRuntimeValidatedInput(kernelClient, route);
         if (!exportResult.success) {
           const message = exportResult.issues.map((issue) => issue.message).join('; ') || 'Geometry export failed';
           return { success: false, errorCode: rpcClientErrorCode.unknown, message };
         }
 
-        const { bytes, mimeType } = exportResult.data;
-        return { success: true, bytes, mimeType };
+        return { success: true, files: exportResult.data };
       } catch (error) {
         return {
           success: false,
@@ -411,131 +437,118 @@ function createBrowserGraphicsClient(
         };
       }
     },
+  };
+}
 
-    async captureScreenshot({ targetFile }): Promise<CaptureScreenshotRpcResult> {
-      const graphicsRef = resolveGraphicsForFile(targetFile);
-      if (!graphicsRef) {
+const captureViews = {
+  single: [{ id: 'isometric', label: 'Isometric', phi: 60, theta: -45 }],
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- RPC wire value is part of the public capture-mode contract.
+  multi_angle: [
+    { id: 'front', label: 'Front — View From −Y', phi: 90, theta: 270 },
+    { id: 'back', label: 'Back — View From +Y', phi: 90, theta: 90 },
+    { id: 'right', label: 'Right — View From +X', phi: 90, theta: 0 },
+    { id: 'left', label: 'Left — View From −X', phi: 90, theta: 180 },
+    { id: 'top', label: 'Top — View From +Z', phi: 0, theta: 0 },
+    { id: 'bottom', label: 'Bottom — View From −Z', phi: 180, theta: 0 },
+  ],
+} as const;
+
+const bytesToWebpDataUrl = (bytes: Uint8Array<ArrayBuffer>): string => {
+  return `data:image/webp;base64,${uint8ArrayToBase64(bytes)}`;
+};
+
+/**
+ * Match the renderer's artifacts to the requested views by position: nanoraster
+ * documents result order as an API guarantee (one result per view, in view
+ * order; the singular request yields exactly one). Filenames are the renderer's
+ * to choose — Tau's own `thumbnail.webp` storage naming is applied downstream at
+ * write time — so only the count and the payloads are checked here.
+ */
+const requireCapturedWebps = (files: ExportFile[], expectedCount: number): ExportFile[] => {
+  if (
+    files.length !== expectedCount ||
+    files.some((file) => file.mimeType !== 'image/webp' || file.bytes.length === 0)
+  ) {
+    const actual = files.map((file) => `${file.mimeType} ${file.bytes.length}B`);
+    throw new Error(
+      `Image capture expected ${expectedCount} non-empty WebP artifact(s), received ${files.length} [${actual.join(', ')}]`,
+    );
+  }
+  return files;
+};
+
+function createBrowserImageClient(
+  projectRef: ActorRefFrom<typeof projectMachine>,
+  imageService: Pick<HeadlessImageService, 'export'>,
+  fileSystem: RuntimeFileSystem,
+): RpcImageClient {
+  return {
+    async captureImages(input: CaptureImagesRpcInput): Promise<CaptureImagesRpcResult> {
+      const resolved = await ensureGeometryUnit(projectRef, input.targetFile);
+      if (!resolved.ok) {
+        return { success: false, errorCode: resolved.errorCode, message: resolved.message };
+      }
+
+      const { entryPath, parameters } = resolved.cadSnapshot.context;
+      if (!entryPath) {
         return {
           success: false,
-          errorCode: rpcClientErrorCode.unknownGeometryUnit,
-          message: `No viewer panel currently displays ${targetFile}`,
+          errorCode: rpcClientErrorCode.unknown,
+          message: `Settled geometry unit for ${input.targetFile} has no entry path`,
         };
       }
 
+      const includeEdges = input.includeEdges ?? true;
       try {
-        const source = await new Promise<string>((resolve, reject) => {
-          const screenshotActor = createActor(screenshotRequestMachine, {
-            input: { graphicsRef },
-          }).start();
-
-          screenshotActor.send({
-            type: 'requestScreenshot',
-            options: {
-              output: {
-                format: 'image/webp',
-                quality: screenshotQuality,
-                isPreview: true,
-              },
-              cameraAngles: [orthographicViews[0]!],
-              aspectRatio: 1,
-              maxResolution: 800,
-              zoomLevel: 1.2,
-              overlay: buildScreenshotOverlayForPath(targetFile),
-            },
-            onSuccess(dataUrls) {
-              screenshotActor.stop();
-              const capturedScreenshot = dataUrls[0];
-              if (!capturedScreenshot) {
-                reject(new Error('No screenshot data received'));
-                return;
-              }
-
-              resolve(capturedScreenshot);
-            },
-            onError(errorMessage) {
-              screenshotActor.stop();
-              reject(new Error(errorMessage));
-            },
-          });
+        const views = captureViews[input.mode];
+        const files = await imageService.export({
+          kind: 'capture',
+          identity: `capture:${input.targetFile}:${input.mode}:${includeEdges}`,
+          fileSystem,
+          format: 'webp',
+          source: { path: entryPath },
+          parameters,
+          includeEdges,
+          exportOptions:
+            input.mode === 'single'
+              ? {
+                  mode: 'single',
+                  width: 800,
+                  height: 800,
+                  margin: 0.1,
+                  phi: views[0].phi,
+                  theta: views[0].theta,
+                  projection: 'perspective',
+                  label: views[0].label,
+                  axes: true,
+                  scaleBar: true,
+                }
+              : {
+                  mode: 'batch',
+                  width: 800,
+                  height: 800,
+                  margin: 0.1,
+                  projection: 'orthographic',
+                  axes: true,
+                  scaleBar: true,
+                  views,
+                },
         });
+        if (!files) {
+          throw new Error('Image capture returned no artifacts');
+        }
 
-        return {
-          success: true,
-          images: [{ view: 'current', dataUrl: source }],
-        };
+        const webps = requireCapturedWebps(files, views.length);
+        const images = views.map((view, index) => ({
+          view: view.id,
+          dataUrl: bytesToWebpDataUrl(webps[index]!.bytes),
+        }));
+        return { success: true, images };
       } catch (error) {
         return {
           success: false,
-          errorCode: error instanceof Error ? rpcClientErrorCode.ioError : rpcClientErrorCode.unknown,
-          message: error instanceof Error ? error.message : 'Unknown error',
-        };
-      }
-    },
-
-    async captureObservations({ targetFile }): Promise<CaptureObservationsRpcResult> {
-      const graphicsRef = resolveGraphicsForFile(targetFile);
-      if (!graphicsRef) {
-        return {
-          success: false,
-          errorCode: rpcClientErrorCode.unknownGeometryUnit,
-          message: `No viewer panel currently displays ${targetFile}`,
-        };
-      }
-
-      try {
-        const viewAngles = orthographicViews.slice(0, 6);
-
-        const compositeDataUrl = await new Promise<string>((resolve, reject) => {
-          const screenshotActor = createActor(screenshotRequestMachine, {
-            input: { graphicsRef },
-          }).start();
-
-          screenshotActor.send({
-            type: 'requestCompositeScreenshot',
-            options: {
-              output: {
-                format: 'image/webp',
-                quality: screenshotQuality,
-                isPreview: true,
-              },
-              cameraAngles: viewAngles,
-              overlay: buildScreenshotOverlayForPath(targetFile),
-              aspectRatio: 1,
-              maxResolution: 800,
-              zoomLevel: 1.2,
-            },
-            onSuccess(dataUrls) {
-              screenshotActor.stop();
-              const compositeUrl = dataUrls[0];
-              if (!compositeUrl) {
-                reject(new Error('No composite screenshot data received'));
-                return;
-              }
-
-              resolve(compositeUrl);
-            },
-            onError(errorMessage) {
-              screenshotActor.stop();
-              reject(new Error(errorMessage));
-            },
-          });
-        });
-
-        return {
-          success: true,
-          observations: [
-            {
-              id: generatePrefixedId(idPrefix.observation),
-              side: 'composite',
-              src: compositeDataUrl,
-            },
-          ],
-        };
-      } catch (error) {
-        return {
-          success: false,
-          errorCode: error instanceof Error ? rpcClientErrorCode.ioError : rpcClientErrorCode.unknown,
-          message: error instanceof Error ? error.message : 'Unknown error',
+          errorCode: rpcClientErrorCode.ioError,
+          message: error instanceof Error ? error.message : 'Image capture failed',
         };
       }
     },
@@ -548,13 +561,26 @@ function createBrowserGraphicsClient(
  * to createRpcDispatcher from @taucad/chat/rpc.
  */
 export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
-  const { chatId, fileManager, resolveGraphicsForFile, projectRef, screenshotQuality } = deps;
+  const { chatId, fileManager, projectRef, headlessImageService, createGeoSpecClient } = deps;
+  const fileSystem = createBrowserRpcFileSystem(fileManager);
+  const skillResolver = createSkillResolver({
+    async readFile(path) {
+      return fileManager.readFile(path);
+    },
+    async listDirectory(path) {
+      const { treeService } = await fileManager.whenServicesReady();
+      return treeService.listDirectory(path);
+    },
+  });
 
   const rpcDeps: RpcDependencies = {
-    fileSystem: createBrowserRpcFileSystem(fileManager),
+    fileSystem,
     kernelClient: createBrowserRuntimeClient(projectRef),
-    graphics: resolveGraphicsForFile
-      ? createBrowserGraphicsClient(resolveGraphicsForFile, projectRef, screenshotQuality)
+    geospec: createBrowserGeoSpecClient(createGeoSpecClient),
+    skillResolver,
+    graphics: createBrowserGraphicsClient(projectRef),
+    images: headlessImageService
+      ? createBrowserImageClient(projectRef, headlessImageService, fileManager.runtimeFileSystem)
       : undefined,
   };
 

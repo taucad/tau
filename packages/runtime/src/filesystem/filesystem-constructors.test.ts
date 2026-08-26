@@ -9,8 +9,8 @@ import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
  * directly against the FS contract without sprinkling `.fs` accessors at
  * every call site.
  */
-function makeFs(): RuntimeFileSystemBase {
-  const handle = fromMemoryFS();
+function makeFs(files?: Record<string, string | Uint8Array<ArrayBuffer>>): RuntimeFileSystemBase {
+  const handle = fromMemoryFS(files);
   if (handle.kind !== 'inline') {
     throw new Error('fromMemoryFS() must return the inline-kind handle.');
   }
@@ -19,10 +19,16 @@ function makeFs(): RuntimeFileSystemBase {
 
 describe('filesystem constructors', () => {
   describe('fromMemoryFS', () => {
+    it('should not fabricate watch support', () => {
+      const fileSystem = makeFs();
+
+      expect(fileSystem.watch).toBeUndefined();
+    });
+
     it('should mkdir and create all parent directories', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/a/b/c');
+      await fileSystem.mkdir('/a/b/c', { recursive: true });
 
       expect(await fileSystem.exists('/a/b/c')).toBe(true);
       expect(await fileSystem.exists('/a/b')).toBe(true);
@@ -32,7 +38,7 @@ describe('filesystem constructors', () => {
     it('should make parent directories visible via stat', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/x/y/z');
+      await fileSystem.mkdir('/x/y/z', { recursive: true });
 
       const statX = await fileSystem.stat('/x');
       expect(statX.type).toBe('dir');
@@ -44,7 +50,7 @@ describe('filesystem constructors', () => {
     it('should list children created by mkdir in readdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/parent/child');
+      await fileSystem.mkdir('/parent/child', { recursive: true });
 
       const entries = await fileSystem.readdir('/parent');
       expect(entries).toContain('child');
@@ -53,7 +59,7 @@ describe('filesystem constructors', () => {
     it('should list deeply nested mkdir directories via readdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/a/b/c/d');
+      await fileSystem.mkdir('/a/b/c/d', { recursive: true });
 
       expect(await fileSystem.readdir('/a')).toContain('b');
       expect(await fileSystem.readdir('/a/b')).toContain('c');
@@ -63,7 +69,7 @@ describe('filesystem constructors', () => {
     it('should read and write files in directories created by mkdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/project/src');
+      await fileSystem.mkdir('/project/src', { recursive: true });
       await fileSystem.writeFile('/project/src/index.ts', 'export {}');
 
       const content = await fileSystem.readFile('/project/src/index.ts', 'utf8');
@@ -85,6 +91,13 @@ describe('filesystem constructors', () => {
       const content = await fileSystem.readFile('/bin.txt');
       expect(content).toBeInstanceOf(Uint8Array);
       expect(new TextDecoder().decode(content)).toBe('binary');
+    });
+
+    it('should preserve Uint8Array seed bytes', async () => {
+      const binaryPath = '/binary.step';
+      const fileSystem = makeFs({ [binaryPath]: new Uint8Array([0, 255, 1]) });
+
+      await expect(fileSystem.readFile(binaryPath)).resolves.toEqual(new Uint8Array([0, 255, 1]));
     });
 
     it('should remove a directory via rmdir', async () => {
@@ -110,11 +123,14 @@ describe('filesystem constructors', () => {
     it('should rename a directory', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/old-dir');
+      await fileSystem.mkdir('/old-dir/nested', { recursive: true });
+      await fileSystem.writeFile('/old-dir/nested/child.txt', 'child');
       await fileSystem.rename('/old-dir', '/new-dir');
 
       expect(await fileSystem.exists('/old-dir')).toBe(false);
       expect(await fileSystem.exists('/new-dir')).toBe(true);
+      expect(await fileSystem.exists('/old-dir/nested/child.txt')).toBe(false);
+      await expect(fileSystem.readFile('/new-dir/nested/child.txt', 'utf8')).resolves.toBe('child');
     });
 
     it('should throw ENOENT when renaming nonexistent path', async () => {

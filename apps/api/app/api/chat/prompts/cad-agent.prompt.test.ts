@@ -1,7 +1,37 @@
 import type { KernelProvider } from '@taucad/runtime';
+import { toolName } from '@taucad/chat/constants';
 import { describe, it, expect, vi } from 'vitest';
 import { getCadSystemPrompt } from '#api/chat/prompts/cad-agent.prompt.js';
 import { getKernelConfig } from '#api/chat/prompts/kernel-prompt-configs/kernel.prompt.config.js';
+
+const allKernelProviders: readonly KernelProvider[] = [
+  'openscad',
+  'replicad',
+  'jscad',
+  'manifold',
+  'opencascadejs',
+  'zoo',
+];
+
+const bannedSimplificationGuidancePatterns = [
+  /try a simpler model/i,
+  /simplify the model/i,
+  /compare simpler mesh evidence/i,
+  /too complex to verify/i,
+] as const;
+
+const extractSection = (prompt: string, name: string): string => {
+  const startTag = `<${name}>`;
+  const endTag = `</${name}>`;
+  const start = prompt.indexOf(startTag);
+  const end = prompt.indexOf(endTag);
+  if (start === -1 || end === -1) {
+    throw new Error(`Missing <${name}> section`);
+  }
+  return prompt.slice(start, end + endTag.length);
+};
+
+const countOccurrences = (text: string, needle: string): number => text.split(needle).length - 1;
 
 describe('getCadSystemPrompt', () => {
   // ===================================================================
@@ -23,7 +53,7 @@ describe('getCadSystemPrompt', () => {
       );
       expect(block).toMatch(/anti-gold-plating applies to code, not to geometry/i);
       expect(block).toMatch(/do not add unrelated code features/i);
-      expect(block).toMatch(/implicit ask for a CAD deliverable/i);
+      expect(block).toMatch(/implicit ask for a cad deliverable/i);
       expect(block).toMatch(/modelling a real fastener, fillet, or sub-component is the task/i);
     });
 
@@ -99,13 +129,50 @@ describe('getCadSystemPrompt', () => {
       const result = await getCadSystemPrompt('openscad');
       expect(result.static).toContain('approximately right');
       expect(result.static).toContain("hasn't complained");
-      expect(result.static).toContain('too complex to verify');
+      expect(result.static).toContain('Verification is incomplete');
+      expect(result.static).not.toContain('too complex to verify');
       expect(result.static).toContain('Tests are passing');
     });
 
     it('should instruct to call screenshot if about to write explanation', async () => {
       const result = await getCadSystemPrompt('openscad');
       expect(result.static).toMatch(/catch yourself writing an explanation.*call screenshot/i);
+    });
+
+    it('should not include model-simplification failure guidance in any kernel prompt', async () => {
+      for (const kernel of allKernelProviders) {
+        // oxlint-disable-next-line no-await-in-loop -- intentional sequential loop
+        const result = await getCadSystemPrompt(kernel, 'agent', true);
+        const corpus = `${result.static}\n${result.dynamic}`;
+        for (const pattern of bannedSimplificationGuidancePatterns) {
+          expect(corpus).not.toMatch(pattern);
+        }
+      }
+    });
+  });
+
+  describe('text-only spatial awareness', () => {
+    it('should replace screenshot inspection guidance with GeoSpec-focused spatial feedback', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true, {
+        supportsImageInput: false,
+      });
+
+      expect(result.static).toContain('<text_only_spatial_awareness>');
+      expect(result.static).toContain('This model cannot receive images');
+      expect(result.static).toContain('Use GeoSpec as the spatial feedback channel');
+      expect(result.static).toContain('Do not claim visual inspection');
+      expect(result.static).not.toContain('<visual_inspection>');
+      expect(result.static).not.toContain(`\`${toolName.screenshot}\``);
+    });
+
+    it('should keep visual inspection guidance for image-capable models', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true, {
+        supportsImageInput: true,
+      });
+
+      expect(result.static).toContain('<visual_inspection>');
+      expect(result.static).toContain(`\`${toolName.screenshot}\``);
+      expect(result.static).not.toContain('<text_only_spatial_awareness>');
     });
   });
 
@@ -135,6 +202,14 @@ describe('getCadSystemPrompt', () => {
     it('should place <code_standards> in static section', async () => {
       const result = await getCadSystemPrompt('openscad');
       expect(result.static).toContain('<code_standards>');
+    });
+
+    it('should place <display_names> in static section only', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      expect(result.static).toContain('<display_names>');
+      expect(result.static).toContain('</display_names>');
+      expect(result.dynamic).not.toContain('<display_names>');
+      expect(result.dynamic).not.toContain('</display_names>');
     });
 
     it('should place <canonical_example> in static section', async () => {
@@ -268,6 +343,8 @@ describe('getCadSystemPrompt', () => {
         '</visual_inspection>',
         '<code_standards>',
         '</code_standards>',
+        '<display_names>',
+        '</display_names>',
         '<topology_hints>',
         '</topology_hints>',
         '<error_handling>',
@@ -435,14 +512,14 @@ describe('getCadSystemPrompt', () => {
         expect(block).toContain(config.topLevelExportExample);
       });
 
-      it('should NOT instruct the agent to remove files from test.json', async () => {
+      it('should NOT mention legacy test-file editing', async () => {
         const result = await getCadSystemPrompt(kernel, 'agent', true);
         const block = extractTestRequirementsBlock(result.static);
-        expect(block).not.toMatch(/remove .* from test\.json/i);
+        expect(block).not.toMatch(/test\.json|edit_tests/i);
         expect(block).not.toMatch(/skip(?:ping)? the test/i);
       });
 
-      it('should NOT bake in OpenSCAD-only "modules / functions" copy on non-OpenSCAD kernels', async () => {
+      it('should NOT bake in OpenSCAD-only "modules / functions" copy on non-OpenSCAD-language kernels', async () => {
         if (kernel === 'openscad') {
           return;
         }
@@ -484,12 +561,21 @@ describe('getCadSystemPrompt', () => {
       expect(result.static).toContain('ShapeConfig[]');
     });
 
+    it('should use Title Case labels in the Replicad multi-shape example', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+      const block = extractSection(result.static, 'multi_shape_pattern');
+      const legacyWheelLeftLabel = `name: '${['Wheel', 'Left'].join('')}'`;
+      const legacyWheelRightLabel = `name: '${['Wheel', 'Right'].join('')}'`;
+
+      expect(block).toContain("name: 'Wheel Left'");
+      expect(block).toContain("name: 'Wheel Right'");
+      expect(block).not.toContain(legacyWheelLeftLabel);
+      expect(block).not.toContain(legacyWheelRightLabel);
+    });
+
     it('should explicitly note that connectedComponents:1 is appropriate when ShapeConfig parts touch', async () => {
       const result = await getCadSystemPrompt('replicad', 'agent', true);
-      const block = result.static.slice(
-        result.static.indexOf('<multi_shape_pattern>'),
-        result.static.indexOf('</multi_shape_pattern>'),
-      );
+      const block = extractSection(result.static, 'multi_shape_pattern');
       expect(block).toContain('connectedComponents');
       expect(block).toMatch(/touch/i);
       expect(block).toMatch(/count":\s*1|count: 1/);
@@ -575,6 +661,46 @@ describe('getCadSystemPrompt', () => {
       );
       expect(block).not.toContain('lib/');
       expect(block).toMatch(/import\s+\w+\s+from\s+"[^"]+\.kcl"/);
+    });
+  });
+
+  // ===================================================================
+  // Display-name casing contract
+  // ===================================================================
+
+  describe('<display_names> display-label casing contract', () => {
+    it('should define Title Case examples and non-examples for authored display labels', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+      const block = extractSection(result.static, 'display_names');
+
+      expect(block).toContain('Title Case words with spaces');
+      expect(block).toContain('Valve Cover Left');
+      expect(block).toContain('Bank Angle');
+      expect(block).toContain('Shape 1');
+      expect(block).toContain('ValveCover_L');
+      expect(block).toContain('wheelLeft');
+      expect(block).toContain('bank_angle');
+      expect(block).toContain('BankAngle');
+    });
+
+    it('should scope Title Case to display labels and preserve kernel-native code identifiers', async () => {
+      const replicad = await getCadSystemPrompt('replicad', 'agent', true);
+      const openscad = await getCadSystemPrompt('openscad', 'agent', true);
+      const zoo = await getCadSystemPrompt('zoo', 'agent', true);
+
+      expect(extractSection(replicad.static, 'display_names')).toContain('Keep code identifiers idiomatic');
+      expect(extractSection(replicad.static, 'code_standards')).toContain('Use camelCase for variables');
+      expect(extractSection(zoo.static, 'code_standards')).toContain('Use camelCase for variables');
+      expect(extractSection(openscad.static, 'code_standards')).toContain('Use snake_case for variables');
+    });
+
+    it('should carry the display-label rule once in the CAD static prompt and never in dynamic context', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+
+      expect(countOccurrences(result.static, '<display_names>')).toBe(1);
+      expect(countOccurrences(result.static, '</display_names>')).toBe(1);
+      expect(countOccurrences(result.static, 'Title Case words with spaces')).toBe(1);
+      expect(result.dynamic).not.toContain('Title Case words with spaces');
     });
   });
 
@@ -694,6 +820,18 @@ describe('getCadSystemPrompt', () => {
   // ===================================================================
 
   describe('diagnose-before-switching tactics', () => {
+    it('should map render timeouts to source-level cost diagnosis without degrading design intent', async () => {
+      const result = await getCadSystemPrompt('openscad');
+      const errorBlock = result.static.slice(
+        result.static.indexOf('<error_handling>'),
+        result.static.indexOf('</error_handling>'),
+      );
+      expect(errorBlock).toContain('RENDER_TIMEOUT');
+      expect(errorBlock).toMatch(/recent edits.*parameter values.*tessellation-heavy/i);
+      expect(errorBlock).toMatch(/never reduce modeled detail or degrade design intent/i);
+      expect(errorBlock).toMatch(/ask the user/i);
+    });
+
     it('should tell the model to diagnose before switching tactics inside <error_handling>', async () => {
       const result = await getCadSystemPrompt('openscad');
       const errorBlock = result.static.slice(
@@ -928,6 +1066,10 @@ describe('getCadSystemPrompt', () => {
         const block = extractBlock(result.static);
         expect(block).toMatch(/segment count, not curve form/i);
         expect(block).toMatch(/extrudeRotate/);
+        expect(block).toContain('compose the 2D profile');
+        expect(block).toContain('call `extrudeLinear` once');
+        expect(block).toMatch(/non-manifold `geom3`/i);
+        expect(block).toMatch(/named\(shape, 'Part Name'\)/);
       });
 
       it('openscad should prefer $fa/$fs over $fn and warn on hull/minkowski misuse', async () => {
@@ -1001,7 +1143,7 @@ describe('getCadSystemPrompt', () => {
     it('should encode largest-fillets-first ordering', async () => {
       const result = await getCadSystemPrompt('replicad');
       const block = extractBlock(result.static);
-      expect(block).toMatch(/Largest fillets first/i);
+      expect(block).toMatch(/largest fillets first/i);
       expect(block).toMatch(/part-vs-part shared boundary last/i);
     });
   });
@@ -1165,6 +1307,17 @@ describe('getCadSystemPrompt', () => {
       expect(workflow).toMatch(/multi-component/i);
     });
 
+    it('should require a mini design brief for complex/high-fidelity requests before code', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const workflow = result.static.slice(result.static.indexOf('<workflow>'), result.static.indexOf('</workflow>'));
+      expect(workflow).toMatch(/mini design brief/i);
+      expect(workflow).toMatch(/assembly tree/i);
+      expect(workflow).toMatch(/major visible features/i);
+      expect(workflow).toMatch(/key dimensions\/assumptions/i);
+      expect(workflow).toMatch(/materials\/surface treatments/i);
+      expect(workflow).toMatch(/verification targets/i);
+    });
+
     it('should preserve workflow numbering through step 6 when testing enabled', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const workflow = result.static.slice(result.static.indexOf('<workflow>'), result.static.indexOf('</workflow>'));
@@ -1228,52 +1381,128 @@ describe('getCadSystemPrompt', () => {
   });
 
   // ===================================================================
-  // Multi-file test.json migration
+  // GeoSpec test file migration
   // ===================================================================
 
-  describe('multi-file test.json shape in <test_requirements>', () => {
+  describe('GeoSpec test file shape in <test_requirements>', () => {
     const extractTestRequirements = (prompt: string) =>
       /<test_requirements>([\S\s]*?)<\/test_requirements>/.exec(prompt)?.[1] ?? '';
 
-    it('should embed the multi-file test.json shape in <test_requirements>', async () => {
+    it('should embed the GeoSpec authoring shape in <test_requirements>', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const block = extractTestRequirements(result.static);
 
-      // The fenced JSON example must contain a quoted source-path key
-      // (e.g. "main.ts" / "main.scad") at the top level
-      expect(block).toMatch(/"main\.\w+"\s*:\s*{/);
-      // The JSON example must NOT start with a flat top-level { "requirements": [...] }
-      // — every example requires a source-file-path key at the top.
-      const jsonExample = /```json\s*([\S\s]*?)```/.exec(block)?.[1] ?? '';
-      expect(jsonExample).not.toMatch(/^\s*{\s*"requirements"\s*:/);
+      expect(block).toContain('*.geospec.ts');
+      expect(block).toContain("import { describe, expectGeo, it } from 'geospec'");
+      expect(block).toContain("import { loadModel } from 'geospec/model'");
+      expect(block).toContain('parameters: { width, height }');
+      expect(countOccurrences(block, 'parameters: { width, height }')).toBe(1);
+      expect(block).not.toMatch(/^\s*{\s*"requirements"\s*:/);
     });
 
-    it('should explain that adding a new file requires a new key, not deleting existing ones', async () => {
+    it('should route BRep feature examples only to BRep-capable kernels', async () => {
+      const replicad = await getCadSystemPrompt('replicad', 'agent', true);
+      const openscad = await getCadSystemPrompt('openscad', 'agent', true);
+      const opencascade = await getCadSystemPrompt('opencascadejs', 'agent', true);
+
+      expect(extractTestRequirements(replicad.static)).toContain('toHavePlanarFace');
+      expect(extractTestRequirements(replicad.static)).toContain('toBeValidBrep');
+      expect(extractTestRequirements(replicad.static)).toContain('toHaveChamferFeature');
+      expect(extractTestRequirements(replicad.static)).toContain('toHaveMinimumWallThickness');
+      expect(extractTestRequirements(replicad.static)).toContain("loadModel({ file: 'main.ts', format: 'step' })");
+      expect(extractTestRequirements(opencascade.static)).toContain('toHavePlanarFace');
+      expect(extractTestRequirements(opencascade.static)).toContain('toBeValidBrep');
+      expect(extractTestRequirements(opencascade.static)).toContain('toHaveChamferFeature');
+      expect(extractTestRequirements(opencascade.static)).toContain('toHaveMinimumWallThickness');
+      expect(extractTestRequirements(opencascade.static)).toContain("loadModel({ file: 'main.ts', format: 'step' })");
+      expect(extractTestRequirements(openscad.static)).not.toContain('toHavePlanarFace');
+      expect(extractTestRequirements(openscad.static)).not.toContain('toBeValidBrep');
+      expect(extractTestRequirements(openscad.static)).not.toContain('toHaveChamferFeature');
+      expect(extractTestRequirements(openscad.static)).not.toContain("format: 'step'");
+    });
+
+    it('should teach OpenSCAD tests to load source files directly without wrapper workarounds', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const block = extractTestRequirements(result.static);
-      expect(block).toMatch(/per[ -]file|keyed by source file/i);
+
+      expect(block).toContain("loadModel({ file: 'main.scad' })");
+      expect(block).not.toMatch(/\.ts wrapper|typescript wrapper|fake wrapper/i);
+    });
+
+    it('should explain that adding a new file requires preserving sibling GeoSpec coverage', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+      expect(block).toMatch(/geospec test|matching geospec/i);
       expect(block).toMatch(/preserve|never delete|do not delete|keep sibling/i);
     });
 
-    it('should embed exactly the 3-check vocabulary in the canonical example (no meshCount/vertexCount)', async () => {
+    it('should reject whole-model bounding box plus physical properties as sufficient for high-fidelity assemblies', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+      expect(block).toMatch(/coverage floor/i);
+      expect(block).toMatch(/whole-model bounding box plus physical properties is never sufficient/i);
+      expect(block).toMatch(/every major component and named visible feature/i);
+      expect(block).toMatch(/per-component dimensions or positions/i);
+      expect(block).toMatch(/state the missing coverage explicitly/i);
+    });
+
+    it('should embed the mesh-capable GeoSpec vocabulary in the canonical example', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const block = extractTestRequirements(result.static);
       expect(block).toContain('boundingBox');
       expect(block).toContain('connectedComponents');
       expect(block).toContain('watertight');
+      expect(block).toContain('toHaveNoComponentInterference');
+      expect(block).toContain('surfaceArea');
+      expect(block).toContain('volume');
+      expect(block).toContain('centerOfMass');
       expect(block).not.toContain('meshCount');
       expect(block).not.toContain('vertexCount');
     });
 
-    it('should describe the 3 checks with their unique-question framing and the connectedComponents tolerance knob', async () => {
+    it('should describe the mesh checks with their unique-question framing and the connectedComponents tolerance knob', async () => {
       const result = await getCadSystemPrompt('openscad', 'agent', true);
       const block = extractTestRequirements(result.static);
       expect(block).toMatch(/Available checks/);
       expect(block).toContain('SIZE / POSITION');
       expect(block).toContain('SPATIALLY-DISJOINT CHUNKS');
-      expect(block).toContain('CLOSED (manifold / 3D-printable)');
+      expect(block).toContain('CLOSED (strict manifold topology)');
+      expect(block).toContain('separate assembly components occupy the same solid volume');
       expect(block).toContain('tolerance');
       expect(block).toContain('default 0.1');
+    });
+
+    it('should not expose shortcut component-overlap knobs or AABB/envelope guidance', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+
+      expect(block).not.toContain('components:');
+      expect(block).not.toContain('volumeTolerance');
+      expect(block).not.toContain('sampleCount');
+      expect(block).not.toContain('AABB');
+      expect(block).not.toContain('envelope');
+      expect(block).not.toContain('toHaveNoInterference');
+    });
+
+    it('should teach agents to assert through expectGeo instead of GeometrySubject internals', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+      expect(block).toContain('opaque `GeometrySubject`');
+      expect(block).toContain('model.boundingBox.bounds');
+      expect(block).toContain('model.volume()');
+      expect(block).toContain('expectGeo(model)');
+    });
+
+    it('should not expose unit or preview workarounds in model-facing GeoSpec guidance', async () => {
+      const result = await getCadSystemPrompt('openscad', 'agent', true);
+      const block = extractTestRequirements(result.static);
+
+      expect(block).not.toContain('S = 1000');
+      expect(block).not.toContain('previewGeometry');
+      expect(block).not.toContain('test.json');
+      expect(block).not.toMatch(/loadModel\([^)]*(?:scale|sourceUnit|coordinateSystem)/);
+      expect(block).not.toMatch(/loadModel\([^)]*unit\s*:/);
+      expect(block).not.toMatch(/loadModel\([^)]*kernel\s*:/);
     });
   });
 
@@ -1297,6 +1526,17 @@ describe('getCadSystemPrompt', () => {
       const block = extractErrorHandling(result.static);
       expect(block).toMatch(/intent|tolerance/i);
     });
+
+    it('should treat GeoSpec failures as model-code evidence before changing tests', async () => {
+      const result = await getCadSystemPrompt('replicad', 'agent', true);
+      const block = extractErrorHandling(result.static);
+      expect(block).toMatch(/model code first/i);
+      expect(block).toMatch(/fix the modeled geometry at the root cause/i);
+      expect(block).toMatch(
+        /do not remove detail, reduce geometry, weaken tolerances, drop assertions, or delete coverage/i,
+      );
+      expect(block).toMatch(/only update a geospec assertion.*contradicts the user's stated intent/i);
+    });
   });
 
   // ===================================================================
@@ -1315,6 +1555,7 @@ describe('getCadSystemPrompt', () => {
       expect(names).toContain('workflow');
       expect(names).toContain('constraints');
       expect(names).toContain('tone');
+      expect(names).toContain('display_names');
     });
 
     it('should tag dynamic sections with cacheBreak: true and static ones with cacheBreak: false', async () => {
@@ -1328,10 +1569,12 @@ describe('getCadSystemPrompt', () => {
 
       const calls = onSectionResolved.mock.calls.map(([resolved]) => resolved as { name: string; cacheBreak: boolean });
       const role = calls.find((c) => c.name === 'role');
+      const displayNames = calls.find((c) => c.name === 'display_names');
       const environment = calls.find((c) => c.name === 'environment');
       const transcriptPath = calls.find((c) => c.name === 'transcript_path');
 
       expect(role?.cacheBreak).toBe(false);
+      expect(displayNames?.cacheBreak).toBe(false);
       expect(environment?.cacheBreak).toBe(true);
       expect(transcriptPath?.cacheBreak).toBe(true);
     });

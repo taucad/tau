@@ -6,14 +6,44 @@ import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments
 import type { Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
+import {
+  cameraFar,
+  cameraNear,
+  cameraProjectionMatrix,
+  depth,
+  float,
+  positionView,
+  viewZToReversedPerspectiveDepth,
+} from 'three/tsl';
+import {
+  gltfEdgeDepthBiasFactor,
+  gltfEdgeDepthBiasReferenceTanHalfFov,
+} from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import {
   applyFatLineSegments,
+  createGltfFatLineMaterial,
+  createGltfFatLineSegmentsFromPositions,
   createWebGpuGltfFatLineMaterial,
+  setGltfFatLineMaterialColor,
+  updateGltfEdgeColor,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import { serialiseStrippedTslGraph } from '#components/geometry/graphics/three/utils/tsl-node-graph-snapshot.js';
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url));
+
+type TslNode = Parameters<typeof viewZToReversedPerspectiveDepth>[0];
+type TslScalarNode = TslNode & {
+  div(operand: unknown): TslScalarNode;
+  element(index: number): TslScalarNode;
+  mul(operand: unknown): TslScalarNode;
+  pow(operand: unknown): TslScalarNode;
+  reciprocal(): TslScalarNode;
+};
+
+function asTslScalarNode(node: unknown): TslScalarNode {
+  return node as TslScalarNode;
+}
 
 /**
  * Build a minimal GLTF-like object with `lineSegmentsCount` `LineSegments` children attached
@@ -49,6 +79,46 @@ function collectFatLineMaterials(scene: Object3D): unknown[] {
   return materials;
 }
 
+type DepthAssignDescriptor = PropertyDescriptor | undefined;
+
+/* eslint-disable @typescript-eslint/naming-convention -- mirrors three.js external API names (`getMRT`, `toJSON`) inside test stubs */
+function captureDepthAssign(): { restore: () => void; captured: { node: unknown } } {
+  const captured = { node: undefined as unknown };
+  const fakeChain = { toStack: () => undefined };
+  const originalDescriptor: DepthAssignDescriptor = Object.getOwnPropertyDescriptor(depth, 'assign');
+  Object.defineProperty(depth, 'assign', {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: (node: unknown): { toStack: () => undefined } => {
+      captured.node = node;
+      return fakeChain;
+    },
+  });
+
+  return {
+    captured,
+    restore: () => {
+      if (originalDescriptor) {
+        Object.defineProperty(depth, 'assign', originalDescriptor);
+      } else {
+        delete (depth as { assign?: unknown }).assign;
+      }
+    },
+  };
+}
+
+function fingerprint(node: unknown): string {
+  return serialiseStrippedTslGraph((node as { toJSON: () => unknown }).toJSON());
+}
+
+function buildFovAdaptiveBiasedZ(depthBias: number): TslNode {
+  const tanHalfFov = asTslScalarNode(cameraProjectionMatrix).element(1).element(1).reciprocal();
+  const fovScale = tanHalfFov.div(gltfEdgeDepthBiasReferenceTanHalfFov);
+
+  return asTslScalarNode(positionView.z).mul(asTslScalarNode(float(depthBias)).pow(fovScale));
+}
+
 describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
   /**
    * Smoking-gun regression: the WebGPU fat-line material must apply a coplanar bias so edge
@@ -60,10 +130,9 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
    * inside `Line2NodeMaterial.setupDepth(builder)` per-frame. See
    * `docs/research/webgpu-fat-line-renderer-aware-depth.md`.
    */
-  it('forwards a non-identity depthBias to Line2NodeMaterial.setupDepth (regression guard)', () => {
+  it('forwards the shared base depthBias to Line2NodeMaterial.setupDepth (regression guard)', () => {
     const material = createWebGpuGltfFatLineMaterial();
-    expect(material.depthBias).toBeGreaterThan(0);
-    expect(material.depthBias).toBeLessThan(1);
+    expect(material.depthBias).toBe(gltfEdgeDepthBiasFactor);
   });
 
   /**
@@ -77,6 +146,29 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
     const material = createWebGpuGltfFatLineMaterial();
     expect(material).toBeInstanceOf(Line2NodeMaterial);
     expect(material.constructor).not.toBe(ThreeLine2NodeMaterial);
+  });
+
+  it('routes the factory material through Tau setupDepth with adaptive perspective bias', () => {
+    const material = createWebGpuGltfFatLineMaterial();
+    const stubBuilder = {
+      renderer: { reversedDepthBuffer: true, getMRT: () => null },
+      camera: { isPerspectiveCamera: true },
+    };
+
+    const { captured, restore } = captureDepthAssign();
+    try {
+      material.setupDepth(stubBuilder);
+    } finally {
+      restore();
+    }
+
+    const expected = viewZToReversedPerspectiveDepth(
+      buildFovAdaptiveBiasedZ(gltfEdgeDepthBiasFactor),
+      cameraNear,
+      cameraFar,
+    );
+    expect(captured.node).toBeDefined();
+    expect(fingerprint(captured.node)).toBe(fingerprint(expected));
   });
 
   /**
@@ -103,6 +195,7 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
     );
   });
 });
+/* eslint-enable @typescript-eslint/naming-convention -- restore default naming-convention enforcement after three.js API-name test stubs */
 
 describe('applyFatLineSegments WebGPU material allocation (R1 perf guard)', () => {
   /**
@@ -115,7 +208,7 @@ describe('applyFatLineSegments WebGPU material allocation (R1 perf guard)', () =
    */
   it('allocates exactly one Line2NodeMaterial for a single LineSegments source', () => {
     const gltf = makeGltfWithLineSegments(1);
-    applyFatLineSegments(gltf, new Vector2(1024, 768), 'webgpu');
+    applyFatLineSegments(gltf, { resolution: new Vector2(1024, 768), backend: 'webgpu' });
 
     const materials = collectFatLineMaterials(gltf.scene);
     expect(materials).toHaveLength(1);
@@ -128,11 +221,81 @@ describe('applyFatLineSegments WebGPU material allocation (R1 perf guard)', () =
     // fixtures, future kernels that bypass the middleware). When that fan-out occurs, every
     // wrapped mesh must point at the same material so we still get one pipeline.
     const gltf = makeGltfWithLineSegments(5);
-    applyFatLineSegments(gltf, new Vector2(1024, 768), 'webgpu');
+    applyFatLineSegments(gltf, { resolution: new Vector2(1024, 768), backend: 'webgpu' });
 
     const materials = collectFatLineMaterials(gltf.scene);
     expect(materials).toHaveLength(5);
     const unique = new Set(materials);
     expect(unique.size).toBe(1);
+  });
+});
+
+describe('raw endpoint WebGPU fat-line helper', () => {
+  it('should create WebGPU LineSegments2 from raw endpoint positions with Tau Line2NodeMaterial', () => {
+    const material = createGltfFatLineMaterial({
+      backend: 'webgpu',
+      resolution: new Vector2(1024, 768),
+      edgeColor: 0x11_22_33,
+    });
+    const fatLine = createGltfFatLineSegmentsFromPositions({
+      backend: 'webgpu',
+      material,
+      positions: new Float32Array([0, 0, 0, 1, 0, 0]),
+    });
+
+    expect(fatLine).toBeDefined();
+    expect(fatLine!.type).toBe('LineSegments2');
+    expect(fatLine!.material).toBe(material);
+    expect(material).toBeInstanceOf(Line2NodeMaterial);
+    expect(material.constructor).not.toBe(ThreeLine2NodeMaterial);
+  });
+
+  it('should update the shared WebGPU material color without rebuilding geometry', () => {
+    const material = createGltfFatLineMaterial({
+      backend: 'webgpu',
+      resolution: new Vector2(1024, 768),
+      edgeColor: 0x11_22_33,
+    });
+    const fatLine = createGltfFatLineSegmentsFromPositions({
+      backend: 'webgpu',
+      material,
+      positions: new Float32Array([0, 0, 0, 1, 0, 0]),
+    })!;
+    const { geometry } = fatLine;
+
+    setGltfFatLineMaterialColor(material, 0xaa_bb_cc);
+
+    expect((material as Line2NodeMaterial).color.getHex()).toBe(0xaa_bb_cc);
+    expect(fatLine.geometry).toBe(geometry);
+  });
+
+  it('should return deduped WebGPU materials touched by a scene edge color update', () => {
+    const material = createGltfFatLineMaterial({
+      backend: 'webgpu',
+      resolution: new Vector2(1024, 768),
+      edgeColor: 0x11_22_33,
+    });
+    const firstFatLine = createGltfFatLineSegmentsFromPositions({
+      backend: 'webgpu',
+      material,
+      positions: new Float32Array([0, 0, 0, 1, 0, 0]),
+    })!;
+    const secondFatLine = createGltfFatLineSegmentsFromPositions({
+      backend: 'webgpu',
+      material,
+      positions: new Float32Array([1, 0, 0, 1, 1, 0]),
+    })!;
+    const scene = new Group();
+    scene.add(firstFatLine, secondFatLine);
+    const firstGeometry = firstFatLine.geometry;
+    const secondGeometry = secondFatLine.geometry;
+
+    const updatedMaterials = updateGltfEdgeColor(scene, 0xaa_bb_cc);
+
+    expect(updatedMaterials.size).toBe(1);
+    expect(updatedMaterials.has(material)).toBe(true);
+    expect((material as Line2NodeMaterial).color.getHex()).toBe(0xaa_bb_cc);
+    expect(firstFatLine.geometry).toBe(firstGeometry);
+    expect(secondFatLine.geometry).toBe(secondGeometry);
   });
 });

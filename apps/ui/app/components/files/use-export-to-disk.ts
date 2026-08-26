@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { FileExtension } from '@taucad/types';
-import { asBuffer, downloadBlob } from '@taucad/utils/file';
 import { toast } from '#components/ui/sonner.js';
 import type { cadMachine } from '#machines/cad.machine.js';
+import type { AppRuntimeExportFormat } from '#types/runtime-client.alias.js';
+import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 
 export type UseExportToDiskResult = {
   /**
@@ -40,8 +41,13 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
       setIsExporting(true);
       try {
         const route = kernelClient.bestRouteFor(format, activeKernelId);
-        const options = route?.defaults ?? {};
-        const result = await kernelClient.export(format, options);
+        if (!route || route.kernelId !== activeKernelId) {
+          toast.error(`Export failed: ${format.toUpperCase()} is not available for this model`);
+          return;
+        }
+        const exportFormat = route.targetFormat as AppRuntimeExportFormat;
+        const options = route.defaults;
+        const result = await kernelClient.export(exportFormat, { exportOptions: options });
 
         if (!result.success) {
           const message = result.issues[0]?.message ?? 'Export failed';
@@ -49,9 +55,11 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
           return;
         }
 
-        const blob = new Blob([asBuffer(result.data.bytes)]);
-        downloadBlob(blob, `${filenameBase}.${format}`);
-        toast.success(`Exported ${format.toUpperCase()}`);
+        await downloadExportArtifactSet(result.data, {
+          singleFileName: `${filenameBase}.${exportFormat}`,
+          archiveName: `${filenameBase}-${exportFormat}.zip`,
+        });
+        toast.success(`Exported ${exportFormat.toUpperCase()}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Export failed';
         toast.error(message);

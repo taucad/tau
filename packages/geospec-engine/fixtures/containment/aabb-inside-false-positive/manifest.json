@@ -1,0 +1,44 @@
+{
+  "family": "containment",
+  "fixture": "containment.aabb-inside-false-positive",
+  "generator": {
+    "script": "scripts/containment/filter-inside-housing/main.ts",
+    "parameters": {
+      "cornerPlacement": true
+    }
+  },
+  "tolerances": {},
+  "adversarialAabb": {
+    "subject": "cartridge",
+    "target": "housing"
+  },
+  "selectors": [
+    {
+      "selector": "cartridge.body",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 2
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "containment",
+      "subject": "cartridge",
+      "target": "housing",
+      "options": {},
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "method": "classification"
+        },
+        "mentions": ["cartridge"]
+      }
+    }
+  ],
+  "notes": "Master acceptance case 6 (containment form): the small cartridge sits in the housing AABB's corner region — subject AABB fully inside target AABB (adversarialAabb premise, broadPhase.candidate true) while the subject geometry is entirely outside the cylindrical housing volume; the exact classification proof must fail."
+}

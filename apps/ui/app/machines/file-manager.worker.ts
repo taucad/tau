@@ -3,29 +3,31 @@
  *
  * Single entry point for all filesystem access. Every connection (main thread,
  * kernel workers, git) receives a MessagePort that is served by the same
- * WorkspaceFileService instance. Writes to the same file are serialized via a per-file
- * ResourceQueue (VS Code pattern); writes to different files run in parallel.
+ * WorkspaceFileService instance. Mutations serialize on their logical and physical
+ * conflict paths; independent authority subtrees can still run in parallel.
  */
 
-import { exposeFileSystem, workerReadyMessageType } from '@taucad/runtime/transport-internals';
+import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
 
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
 import type { BundledTypesMountEntry } from '@taucad/filesystem/bundled-types-mount';
-import { FileSystemAccessProvider } from '@taucad/filesystem/backend';
 import {
   ChangeEventBus,
   EventCoalescer,
   MountTable,
   ProviderRegistry,
   ResourceQueue,
-  ThrottledWorker,
   WorkspaceFileService,
 } from '@taucad/filesystem';
 import { SharedPool } from '@taucad/memory';
-import { kernelTypeMaps } from '@taucad/api-extractor/kernel-types';
+import { authoringTypeMaps } from '@taucad/api-extractor/authoring-types';
+import { kernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
+import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
+import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
+import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
 
 const providerRegistry = new ProviderRegistry({ databasePrefix: metaConfig.databasePrefix });
 const resourceQueue = new ResourceQueue();
@@ -107,36 +109,25 @@ self.addEventListener('unhandledrejection', (event) => {
 });
 
 async function createNodeModulesMount(): Promise<void> {
-  if (!('storage' in navigator) || !('getDirectory' in navigator.storage)) {
-    console.debug('[FM-Worker] OPFS not available, /node_modules falls through to root mount');
-    return;
-  }
   try {
-    const opfsRoot = await navigator.storage.getDirectory();
-    const nodeModulesHandle = await opfsRoot.getDirectoryHandle('tau-node-modules', { create: true });
-    const nodeModulesProvider = new FileSystemAccessProvider(nodeModulesHandle);
-    // Worker-internal OPFS-backed mount — no workspaceId because the
-    // backing storage isn't user-pickable. The discriminated
-    // `MountConfig` accepts `backend: 'opfs'` without the webaccess
-    // identity fields.
-    mountTable.mount('/node_modules', nodeModulesProvider, { backend: 'opfs' });
+    await fileService.mount('/node_modules', { backend: 'opfs', providerBasePath: '/tau-node-modules' });
     console.debug('[FM-Worker] /node_modules mounted on OPFS');
   } catch (error) {
     console.warn('[FM-Worker] Failed to mount OPFS /node_modules, falling through to root', error);
   }
 }
 
-function buildBundledTypesPayload(): readonly BundledTypesMountEntry[] {
-  return kernelTypeMaps.flatMap((typesMap) =>
+const buildBundledTypesPayload = (): readonly BundledTypesMountEntry[] =>
+  [...kernelTypePackageMaps, ...authoringTypeMaps].flatMap((typesMap) =>
     Object.entries(typesMap).map(
-      (entry): BundledTypesMountEntry => ({
-        packageName: entry[0],
-        content: entry[1],
-        prewrapped: true,
+      ([packageName, entry]): BundledTypesMountEntry => ({
+        packageName,
+        content: entry.content,
+        files: entry.files,
+        packageJson: entry.packageJson,
       }),
     ),
   );
-}
 
 const fileService = new WorkspaceFileService({
   providerRegistry,
@@ -148,10 +139,31 @@ const fileService = new WorkspaceFileService({
 const t0 = performance.now();
 console.debug(`[FM-Worker] module evaluated in ${t0.toFixed(1)}ms`);
 
+/**
+ * Physical engine of the system-owned Home workspace, pinned per browser
+ * profile and handed over by the FM machine as this worker's name (see
+ * `file-manager-worker-name.ts`). The pin itself is owned by main-thread-only
+ * `handle-store.ts`, and the root mount below runs during module evaluation,
+ * so the name is the only channel that is both authoritative and readable in
+ * time.
+ */
+const homeStorageBackend = homeBackendFromWorkerName(self.name);
+
+// `/` is Home's workspace root: everything the app persists outside a
+// configured mount (`/projects/<id>` routes, `/previews/<instance>`,
+// `/node_modules`) lands here, so it must follow the same engine pin that
+// project discovery scans — otherwise an OPFS-pinned profile would keep
+// writing Home-level state (`/.agents/…`) into IndexedDB where nothing looks
+// for it.
 try {
-  await fileService.mount('/', { backend: 'indexeddb' });
+  const rootScope = { backend: homeStorageBackend } as const;
+  const rootProvider = await providerRegistry.getProvider(rootScope);
+  mountTable.mount('/', rootProvider, {
+    backend: homeStorageBackend,
+    storageRootKey: providerRegistry.resolveStorageRootKey(rootScope),
+  });
 } catch (error) {
-  postWorkerInitError("mount('/', 'indexeddb')", error);
+  postWorkerInitError(`mount root ${homeStorageBackend} provider`, error);
   throw error;
 }
 
@@ -163,25 +175,21 @@ try {
 }
 
 try {
-  await populateBundledTypesMount(fileService, buildBundledTypesPayload());
-  console.debug(`[FM-Worker] bundled types populated +${(performance.now() - t0).toFixed(1)}ms`);
+  const outcome = await ensureBundledTypesMount(fileService, buildBundledTypesPayload(), async (payload) =>
+    populateBundledTypesMount(fileService, payload),
+  );
+  const populationLabel = outcome === 'skipped' ? 'bundled types current, skipped' : 'bundled types populated';
+  console.debug(`[FM-Worker] ${populationLabel} +${(performance.now() - t0).toFixed(1)}ms`);
 } catch (error) {
   postWorkerInitError('populateBundledTypesMount', error);
   throw error;
 }
 
 exposeFileSystem(fileService, {
-  watchHandler: {
-    watch(request, handler, ownerId) {
-      return fileService.watch(request, handler, ownerId);
-    },
-    cleanupWatches(ownerId) {
-      fileService.cleanupWatches(ownerId);
-    },
-  },
+  handlerForRoot: (root, context) => fileService.createRootedFileSystem(root, context),
   changeEventBus: eventBus,
-  createCoalescer: (deliver, coalescingWindow) => new EventCoalescer(deliver, { coalescingWindow }),
-  createThrottledWorker: (handler) => new ThrottledWorker(handler),
+  createCoalescer: (deliver, coalescingWindow, onOverflow) =>
+    new EventCoalescer(deliver, { coalescingWindow, onOverflow }),
 });
 
 let languageFsSyncDispose: { dispose(): void } | undefined;
@@ -223,7 +231,7 @@ self.addEventListener(
           const stat = await fileService.stat(path);
           return { mtimeMs: stat.mtimeMs, isDirectory: stat.type === 'dir' };
         },
-        readdir: async (path) => fileService.readdir(path),
+        listDirectories: async (path) => listWorkspaceDirectories(fileService, path),
       };
       languageFsSyncDispose = attachSyncFsServer({
         port: data.port,

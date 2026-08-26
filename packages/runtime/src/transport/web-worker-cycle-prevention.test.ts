@@ -7,7 +7,7 @@
  * of the chunk it emits (`worker/web.ts`):
  *
  *   - `web-worker-host.ts`     ← host() factory only; NO `new URL` literals
- *   - `web-worker-client.ts`   ← client() factory + `DEFAULT_WEB_WORKER_URL`
+ *   - `web-worker-client.ts`   ← client() factory; app code owns worker URLs
  *   - `web-worker-transport.ts`← thin composition via `defineRuntimeTransport`
  *   - `worker/web.ts`          ← bundled worker entry; static-imports the host only
  *
@@ -51,17 +51,19 @@ describe('web-worker transport split — cycle prevention (R1)', () => {
     expect(source).not.toMatch(/from ["']#transport\/web-worker-client/);
   });
 
-  it('`web-worker-client.ts` exports `webWorkerClient` and owns the `new URL(../worker/web.js, import.meta.url)` chunk-emit literal', () => {
-    const source = read(clientPath);
+  it('`web-worker-client.ts` exports `webWorkerClient` and contains NO runtime-owned worker URL literal', () => {
+    const source = stripComments(read(clientPath));
     expect(source).toMatch(/export const webWorkerClient\b/);
-    expect(source).toMatch(/new URL\(\s*["']\.\.\/worker\/web\.js["']\s*,\s*import\.meta\.url\s*\)/);
+    expect(source).toMatch(/\bcreateWorker\b/);
+    expect(source).toMatch(/\burl\b/);
+    expect(source).not.toMatch(/new URL\(\s*["']\.\.\/worker\/web\.js["']\s*,\s*import\.meta\.url\s*\)/);
   });
 
-  it('`web-worker-transport.ts` composes via `defineRuntimeTransport` and does NOT redeclare `client`/`host` bodies', () => {
+  it('`web-worker-transport.ts` defines only the client via `defineRuntimeTransport`', () => {
     const source = read(compositionPath);
     expect(source).toMatch(/defineRuntimeTransport\(/);
     expect(source).toMatch(/client:\s*webWorkerClient/);
-    expect(source).toMatch(/host:\s*webWorkerHost/);
+    expect(source).not.toMatch(/host:\s*webWorkerHost/);
     /* Composition file must not own a `new URL(` literal in code (chunk-emitter belongs in client only). */
     const stripped = stripComments(source);
     expect(stripped).not.toMatch(/new URL\(\s*["'][^"']*["']\s*,\s*import\.meta\.url/);

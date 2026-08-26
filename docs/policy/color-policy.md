@@ -3,7 +3,7 @@ title: 'Color Policy'
 description: 'OKLCH color system rules: hue architecture, lightness levels, chroma ranges, semantic tokens, contrast requirements, colorblind safety, dark mode, and anti-patterns for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-03-14'
+updated: '2026-08-24'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/diagram-policy.md
@@ -48,54 +48,60 @@ INCORRECT:
 
 ## 2. Hue Architecture
 
-A single `--hue-primary` variable (default: 180deg, user-customizable via cookie) cascades to derive all related hues.
+Treat `--hue-primary` as the user-customizable accent hue, not as a generator for structural colors. A user's accent choice may recolor primary actions, focus, geometry selection, and explicitly chromatic component tokens. It must never recolor page, panel, navigation, input, border, card, popover, or ordinary selected-state tokens.
 
-| Variable            | Derivation                         | Default       | Purpose                   |
-| ------------------- | ---------------------------------- | ------------- | ------------------------- |
-| `--hue-primary`     | Base                               | 180deg (teal) | Primary brand color       |
-| `--hue-secondary`   | `calc(var(--hue-primary) - 10deg)` | 170deg        | Secondary accents         |
-| `--hue-neutral`     | `calc(var(--hue-primary) - 10deg)` | 170deg        | Neutral surfaces, borders |
-| `--hue-destructive` | Fixed                              | 15deg         | Error, delete, danger     |
-| `--hue-success`     | Fixed                              | 150deg        | Success, complete         |
-| `--hue-warning`     | Fixed                              | 70deg         | Warning, caution          |
-| `--hue-information` | Fixed                              | 250deg        | Informational             |
-| `--hue-feature`     | Fixed                              | 280deg        | Feature highlights        |
-| `--hue-highlighted` | Fixed                              | 330deg        | Highlighted/flagged       |
+| Variable            | Derivation                         | Default       | Purpose                      |
+| ------------------- | ---------------------------------- | ------------- | ---------------------------- |
+| `--hue-primary`     | Base                               | 180deg (teal) | Brand accent and focus       |
+| `--hue-secondary`   | `calc(var(--hue-primary) - 10deg)` | 170deg        | Explicitly chromatic accents |
+| `--hue-destructive` | Fixed                              | 15deg         | Error, delete, danger        |
+| `--hue-success`     | Fixed                              | 150deg        | Success, complete            |
+| `--hue-warning`     | Fixed                              | 70deg         | Warning, caution             |
+| `--hue-information` | Fixed                              | 250deg        | Informational                |
+| `--hue-feature`     | Fixed                              | 280deg        | Feature highlights           |
+| `--hue-highlighted` | Fixed                              | 330deg        | Highlighted/flagged          |
 
-Status hues are fixed (not derived from primary) to maintain consistent semantic meaning regardless of the user's brand color choice.
+Do not define a neutral hue. Achromatic colors have no meaningful hue, and every structural neutral uses chroma `0`. Status hues remain fixed so their meaning does not change with the user's accent choice.
+
+### Structural neutral invariant
+
+The following tokens must use chroma `0` in light and dark mode and must remain byte-for-byte independent of `--hue-primary`: `background`, `foreground`, `muted`, `muted-foreground`, `secondary`, `secondary-foreground`, `neutral`, `neutral-foreground`, `accent`, `accent-foreground`, `border`, `input`, `popover`, `popover-foreground`, `card`, `card-foreground`, and all sidebar surface, foreground, border, and selected-state tokens.
+
+Primary actions, `ring`, semantic statuses, charts, diagrams, highlighters, and geometry-specific selection may remain chromatic when color carries meaning. Ordinary active tabs, project rows, hover states, and layout chrome are structural neutrals, not brand accents.
 
 ## 3. Lightness Levels
 
-A shared lightness scale from `--l-base` through `--l-deepest` defines the tonal range. Dark mode inverts these values — never author separate dark palettes.
+A shared lightness scale from `--l-base` through `--l-deepest` defines the tonal range. Dark mode overrides the same scale variables rather than introducing a parallel palette.
 
 | Variable         | Light Mode | Dark Mode | Purpose                            |
 | ---------------- | ---------- | --------- | ---------------------------------- |
-| `--l-base`       | 1.0        | 0.21      | Page background                    |
-| `--l-surface`    | 0.96       | 0.28      | Cards, sidebars                    |
-| `--l-subtle`     | 0.90       | 0.33      | Borders, dividers                  |
+| `--l-base`       | 1.0        | 0.19      | Page and panel backgrounds         |
+| `--l-surface`    | 0.965      | 0.245     | Muted and secondary surfaces       |
+| `--l-subtle`     | 0.90       | 0.315     | Borders and inputs                 |
 | `--l-element`    | 0.85       | 0.35      | Input backgrounds                  |
 | `--l-medium`     | 0.55       | 0.55      | Semantic status colors (unchanged) |
-| `--l-emphasized` | 0.45       | 0.58      | Stronger emphasis                  |
-| `--l-high`       | 0.25       | 0.78      | High-contrast elements             |
-| `--l-intense`    | 0.15       | 0.88      | Near-foreground                    |
-| `--l-deepest`    | 0.08       | 0.95      | Primary text                       |
+| `--l-emphasized` | 0.47       | 0.67      | Muted foreground                   |
+| `--l-high`       | 0.25       | 0.82      | Sidebar foreground                 |
+| `--l-intense`    | 0.16       | 0.95      | Primary foreground                 |
+| `--l-deepest`    | 0.16       | 0.95      | Primary text                       |
 
-Dark mode background uses `--l-base * 0.85 = ~0.178`, avoiding pure black (which causes OLED smearing and halation for users with astigmatism).
+Dark mode uses `--l-base: 0.19`, avoiding pure black (which causes OLED smearing and halation for users with astigmatism).
 
 ## 4. Chroma Ranges
 
 Chroma determines saturation intensity. Use the appropriate range for the token's purpose. Higher chroma should be reserved for elements that need to draw attention.
 
-| Context              | Chroma       | Examples                                  | Rationale                               |
-| -------------------- | ------------ | ----------------------------------------- | --------------------------------------- |
-| Background / surface | 0.00 - 0.01  | `--background`, `--muted`, `--card`       | Near-achromatic; any tint is subliminal |
-| Borders / dividers   | 0.005 - 0.02 | `--border`, `--sidebar-border`            | Barely perceptible tint                 |
-| Muted UI chrome      | 0.01 - 0.04  | `--accent`, `--diagram-node`              | Visible tint but subdued                |
-| Interactive elements | 0.05 - 0.12  | `--diagram-node-border`, `--ring`         | Clear color without being dominant      |
-| Primary / branded    | 0.15 - 0.22  | `--primary` (C=0.1898)                    | Strong, recognizable hue identity       |
-| Status / semantic    | 0.18 - 0.25  | `--destructive`, `--success`, `--warning` | Must stand out from surrounding UI      |
-| Data visualization   | 0.12 - 0.20  | `--chart-1` through `--chart-5`           | Distinct categories within a chart      |
-| Vibrant / marketing  | 0.22 - 0.32  | Hero sections, promotional elements       | Requires P3 `@media` check above C=0.25 |
+| Context              | Chroma      | Examples                                  | Rationale                                    |
+| -------------------- | ----------- | ----------------------------------------- | -------------------------------------------- |
+| Structural surfaces  | 0 exactly   | `--background`, `--muted`, `--card`       | Accent choice cannot tint application chrome |
+| Borders / dividers   | 0 exactly   | `--border`, `--sidebar-border`            | Structure is expressed through lightness     |
+| Muted UI chrome      | 0 exactly   | `--accent`, ordinary selected states      | Selection remains neutral                    |
+| Chromatic components | 0.01 - 0.04 | `--diagram-node`, highlighter treatments  | Color is allowed only for a named purpose    |
+| Interactive elements | 0.05 - 0.12 | `--diagram-node-border`, `--ring`         | Clear color without being dominant           |
+| Primary / branded    | 0.15 - 0.22 | `--primary` (C=0.1898)                    | Strong, recognizable hue identity            |
+| Status / semantic    | 0.18 - 0.25 | `--destructive`, `--success`, `--warning` | Must stand out from surrounding UI           |
+| Data visualization   | 0.12 - 0.20 | `--chart-1` through `--chart-5`           | Distinct categories within a chart           |
+| Vibrant / marketing  | 0.22 - 0.32 | Hero sections, promotional elements       | Requires P3 `@media` check above C=0.25      |
 
 ### Chroma and Lightness Interaction
 
@@ -115,18 +121,19 @@ Chroma peaks at mid-lightness and drops at extremes. Very light and very dark co
 
 Components always use semantic Tailwind classes. The mapping from CSS variable to utility class happens in `@theme inline` in `global.css`.
 
-| Need              | Token                | Tailwind Class                       |
-| ----------------- | -------------------- | ------------------------------------ |
-| Page background   | `--background`       | `bg-background`                      |
-| Primary text      | `--foreground`       | `text-foreground`                    |
-| Secondary text    | `--muted-foreground` | `text-muted-foreground`              |
-| Primary action    | `--primary`          | `bg-primary`                         |
-| Subtle background | `--muted`            | `bg-muted`                           |
-| Border            | `--border`           | `border-border`                      |
-| Input field       | `--input`            | `border-input`                       |
-| Focus ring        | `--ring`             | `ring-ring`                          |
-| Error state       | `--destructive`      | `bg-destructive`, `text-destructive` |
-| Success state     | `--success`          | `bg-success`, `text-success`         |
+| Need                 | Token                | Tailwind Class                        |
+| -------------------- | -------------------- | ------------------------------------- |
+| Page background      | `--background`       | `bg-background`                       |
+| Primary text         | `--foreground`       | `text-foreground`                     |
+| Secondary text       | `--muted-foreground` | `text-muted-foreground`               |
+| Primary action       | `--primary`          | `bg-primary`                          |
+| Subtle background    | `--muted`            | `bg-muted`                            |
+| Structural selection | `--accent`           | `bg-accent`, `text-accent-foreground` |
+| Border               | `--border`           | `border-border`                       |
+| Input field          | `--input`            | `border-input`                        |
+| Focus ring           | `--ring`             | `ring-ring`                           |
+| Error state          | `--destructive`      | `bg-destructive`, `text-destructive`  |
+| Success state        | `--success`          | `bg-success`, `text-success`          |
 
 ### Opacity Modifiers
 
@@ -200,7 +207,7 @@ The current `--chart-1` through `--chart-5` palette (Blue 250deg, Purple 290deg,
 
 ## 8. Dark Mode
 
-Dark mode uses lightness inversion — the same `--l-*` variables with swapped values. Never author separate dark-mode color palettes.
+Dark mode reuses the same `--l-*` variables with mode-specific values. Never introduce separate token names for a dark palette.
 
 ### Rules
 
@@ -243,10 +250,15 @@ Never create standalone dark-mode colors. The lightness inversion system ensures
 
 **Exception**: Component-scoped tokens like `--diagram-*` may define explicit dark-mode values when the inversion formula produces suboptimal results. These must be documented in the relevant component policy.
 
+### Brand-Derived Structural Neutrals
+
+Never derive structural surface, foreground, input, border, card, popover, or sidebar tokens from `--hue-primary` or `--hue-secondary`, even at low chroma. Use chroma `0` and express hierarchy through lightness.
+
 ## Summary Checklist
 
 - [ ] All new tokens use `oklch(L C H)` format in `global.css`
 - [ ] Chroma value falls within the range for the token's purpose (see Section 4)
+- [ ] Every structural neutral has chroma exactly `0` and is independent of `--hue-primary`
 - [ ] Both light and dark mode values defined (or derived via `--l-*` inversion)
 - [ ] Text contrast >= 4.5:1 (normal) or >= 3:1 (large)
 - [ ] Non-text graphical elements contrast >= 3:1

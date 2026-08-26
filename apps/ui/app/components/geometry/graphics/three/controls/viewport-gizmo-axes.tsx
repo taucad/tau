@@ -1,14 +1,21 @@
 /* oxlint-disable @typescript-eslint/no-unnecessary-condition -- TODO: review these types, some are actually required */
-import { useThree, useFrame } from '@react-three/fiber';
+import { useThree } from '@react-three/fiber';
 import type { GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
-import { useEffect, useCallback, useRef } from 'react';
-import * as THREE from 'three';
-import type { OrbitControls } from 'three/addons';
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
+import type * as THREE from 'three';
 import { useColor } from '#hooks/use-color.js';
 import { useTheme } from '#hooks/use-theme.js';
+import { bindViewportGizmoControls } from '#components/geometry/graphics/three/controls/viewport-gizmo-controls-adapter.js';
+import type { ViewportGizmoControlsBinding } from '#components/geometry/graphics/three/controls/viewport-gizmo-controls-adapter.js';
+import { useViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
+import {
+  bindViewportGizmoInvalidationEvents,
+  useViewportGizmoRenderLoop,
+} from '#components/geometry/graphics/three/controls/viewport-gizmo-render-loop.js';
 import { resolveGizmoContainer, useGizmoResizeSync } from '#components/geometry/graphics/three/utils/gizmo.utils.js';
+import { useGraphics } from '#hooks/use-graphics.js';
 
 type ViewportGizmoAxesProps = {
   readonly size?: number;
@@ -35,38 +42,20 @@ export function ViewportGizmoAxes({
 }: ViewportGizmoAxesProps): ReactNode {
   const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera;
   const gl = useThree((state) => state.gl);
-  const controls = useThree((state) => state.controls) as OrbitControls;
+  const controls = useThree((state) => state.controls);
   const scene = useThree((state) => state.scene);
   const invalidate = useThree((state) => state.invalidate);
+  const interactionLock = useViewportGizmoInteractionLock();
+  const graphicsActor = useGraphics();
 
   const { serialized } = useColor();
   const { theme } = useTheme();
 
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref
   const gizmoRef = useRef<ViewportGizmo | undefined>(undefined);
+  const controlsBindingRef = useRef<ViewportGizmoControlsBinding | undefined>(undefined);
 
-  const handleChange = useCallback((): void => {
-    invalidate();
-  }, [invalidate]);
-
-  useFrame(() => {
-    const gizmo = gizmoRef.current;
-    if (!gizmo) {
-      return;
-    }
-
-    const supportsTone = 'toneMapping' in gl;
-    const previousTone = supportsTone ? gl.toneMapping : undefined;
-    if (supportsTone) {
-      gl.toneMapping = THREE.NoToneMapping;
-    }
-
-    gizmo.render();
-
-    if (supportsTone && previousTone !== undefined) {
-      gl.toneMapping = previousTone;
-    }
-  }, 3);
+  useViewportGizmoRenderLoop({ gizmoRef, renderer: gl, controlsBindingRef, invalidate });
 
   useGizmoResizeSync(gizmoRef);
 
@@ -100,27 +89,71 @@ export function ViewportGizmoAxes({
     const gizmo = new ViewportGizmo(camera, gl, gizmoConfig);
     gizmoRef.current = gizmo;
 
-    gizmo.addEventListener('change', handleChange);
-    gizmo.addEventListener('hoverchange', handleChange);
+    const removeInvalidationListeners = bindViewportGizmoInvalidationEvents({ gizmo, invalidate });
 
     gizmo.scale.multiplyScalar(0.7);
 
-    gizmo.attachControls(controls);
+    const controlsBinding = bindViewportGizmoControls({
+      camera,
+      controls,
+      gizmo,
+      interactionLock,
+      modelPointerInteraction: {
+        onStart: () => {
+          graphicsActor.send({
+            type: 'beginViewerModelHoverSuppression',
+            reason: 'viewportGizmo',
+            source: 'viewer',
+          });
+        },
+        onMove: () => {
+          graphicsActor.send({ type: 'markModelPointerGestureMoved' });
+        },
+        onEnd: () => {
+          graphicsActor.send({
+            type: 'endViewerModelHoverSuppression',
+            reason: 'viewportGizmo',
+            source: 'viewer',
+          });
+        },
+      },
+    });
+    if (!controlsBinding) {
+      gizmoRef.current = undefined;
+      removeInvalidationListeners();
+      gizmo.dispose();
+      return;
+    }
+    controlsBindingRef.current = controlsBinding;
 
     invalidate();
 
     return () => {
       const existing = gizmoRef.current;
       gizmoRef.current = undefined;
+      controlsBindingRef.current = undefined;
 
       if (existing) {
-        existing.removeEventListener('change', handleChange);
-        existing.removeEventListener('hoverchange', handleChange);
+        controlsBinding.detach();
+        removeInvalidationListeners();
         existing.dispose();
       }
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- dependencies array is user-provided for custom recreation triggers
-  }, [camera, gl, controls, scene, serialized.hex, theme, size, handleChange, container, invalidate, ...dependencies]);
+  }, [
+    camera,
+    gl,
+    controls,
+    scene,
+    serialized.hex,
+    theme,
+    size,
+    container,
+    invalidate,
+    interactionLock,
+    graphicsActor,
+    ...dependencies,
+  ]);
 
   return null;
 }

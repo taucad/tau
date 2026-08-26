@@ -1,61 +1,82 @@
 packages:
   - apps/*
+  - apps/libs/*
+  - apps/react-e2e/apps/*
   - examples/*
-  - kernels/*
   - libs/*
   - packages/*
+  - packages/plugins/*
+  - packages/core/*
   - scripts
   - tools/*
 
+allowBuilds:
+  '@datadog/pprof': false
+  '@parcel/watcher': true
+  '@swc/core': true
+  canvas: true
+  core-js: true
+  electron: true
+  esbuild: true
+  less: false
+  netlify-cli: false
+  nx: true
+  protobufjs: true
+  sharp: true
+  unix-dgram: false
+  unrs-resolver: true
+  '@nestjs/core': true
+  nestjs-pino: true
+
 catalog:
-  '@ai-sdk/provider-utils': ^4.0.15
+  '@ai-sdk/provider-utils': ^4.0.30
   '@arethetypeswrong/cli': ^0.18.3
-  '@aws-sdk/client-s3': ^3.1057.0
-  '@aws-sdk/lib-storage': ^3.1057.0
-  '@aws-sdk/s3-request-presigner': ^3.1057.0
-  '@axe-core/playwright': ^4.11.3
-  '@base-ui/react': ^1.5.0
+  '@aws-sdk/client-s3': ^3.1073.0
+  '@aws-sdk/lib-storage': ^3.1073.0
+  '@aws-sdk/s3-request-presigner': ^3.1073.0
+  '@base-ui/react': ^1.6.0
   '@better-auth-ui/core': ^1.6.8
   '@better-auth-ui/react': ^1.6.8
-  '@better-auth/api-key': ^1.6.12
+  '@better-auth/api-key': ^1.6.19
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
   '@fastify/multipart': ^10.0.0
   '@fastify/otel': ^0.17.1
-  '@gltf-transform/core': ^4.3.0
-  '@gltf-transform/extensions': ^4.3.0
-  '@gltf-transform/functions': ^4.3.0
+  '@gltf-transform/core': ^4.4.0
+  '@gltf-transform/extensions': ^4.4.0
+  '@gltf-transform/functions': ^4.4.0
   '@inkjs/ui': ^2.0.0
   '@jscad/modeling': ^2.13.0
   '@kittycad/lib': ^2.0.48
-  '@langchain/anthropic': ^1.3.28
+  '@langchain/anthropic': ^1.5.0
   '@langchain/cerebras': ^1.0.4
-  '@langchain/classic': ^1.0.32
-  '@langchain/community': ^1.1.28
-  '@langchain/core': ^1.1.44
-  '@langchain/google-vertexai': ^2.1.20
-  '@langchain/langgraph': ^1.3.0
-  '@langchain/langgraph-checkpoint': ^1.0.2
-  '@langchain/langgraph-checkpoint-postgres': ^1.0.1
-  '@langchain/ollama': ^1.2.7
-  '@langchain/openai': ^1.4.5
+  '@langchain/classic': ^1.0.36
+  '@langchain/community': ^1.1.29
+  '@langchain/core': ^1.2.0
+  '@langchain/google-vertexai': ^2.2.0
+  '@langchain/langgraph': ^1.4.4
+  '@langchain/langgraph-checkpoint': ^1.1.2
+  '@langchain/langgraph-checkpoint-postgres': ^1.0.3
+  '@langchain/ollama': ^1.3.0
+  '@langchain/openai': ^1.5.1
   '@langchain/tavily': ^1.2.0
+  '@langchain/xai': ^1.4.3
   '@msgpack/msgpack': ^3.1.3
-  '@nestjs/common': ^11.1.24
-  '@nestjs/core': ^11.1.24
-  '@nestjs/platform-fastify': ^11.1.24
-  '@nestjs/platform-socket.io': ^11.1.24
-  '@nestjs/platform-ws': ^11.1.24
+  '@libcascade/toolchain': 3.0.2
+  '@nestjs/common': ^11.1.27
+  '@nestjs/core': ^11.1.27
+  '@nestjs/platform-fastify': ^11.1.27
+  '@nestjs/platform-socket.io': ^11.1.27
+  '@nestjs/platform-ws': ^11.1.27
   '@nestjs/terminus': ^11.1.1
-  '@nestjs/testing': ^11.1.24
-  '@nestjs/websockets': ^11.1.24
+  '@nestjs/testing': ^11.1.27
+  '@nestjs/websockets': ^11.1.27
   '@nx/devkit': 22.7.1
   '@nx/eslint': 22.7.1
   '@nx/eslint-plugin': 22.7.1
   '@nx/js': 22.7.1
   '@nx/nest': 22.7.1
   '@nx/node': 22.7.1
-  '@nx/playwright': 22.7.1
   '@nx/react': 22.7.1
   '@nx/vite': 22.7.1
   '@nx/web': 22.7.1
@@ -67,13 +88,13 @@ catalog:
   '@opentelemetry/exporter-trace-otlp-http': ^0.213.0
   '@opentelemetry/instrumentation-pino': ^0.59.0
   '@opentelemetry/instrumentation-socket.io': ^0.60.0
-  '@opentelemetry/resources': ^2.7.1
+  '@opentelemetry/resources': ^2.8.0
   '@opentelemetry/sdk-logs': ^0.213.0
-  '@opentelemetry/sdk-metrics': ^2.7.1
+  '@opentelemetry/sdk-metrics': ^2.8.0
   '@opentelemetry/sdk-node': ^0.213.0
   '@oxc-node/core': ^0.0.35
-  '@playwright/test': ^1.60.0
-  '@pyroscope/nodejs': ^0.4.11
+  playwright: ^1.61.0
+  '@pyroscope/nodejs': ^0.4.13
   '@react-router/dev': 7.14.2
   '@react-router/express': 7.14.2
   '@react-router/fs-routes': 7.14.2
@@ -81,23 +102,22 @@ catalog:
   '@size-limit/file': ^12.1.0
   '@socket.io/redis-streams-adapter': ^0.3.1
   '@tanstack/react-pacer': ^0.22.1
-  '@tanstack/react-query': ^5.100.14
+  '@tanstack/react-query': ^5.101.0
   '@taucad/kcl-wasm-lib': 0.1.148
-  '@taucad/opencascade.js': beta
   '@testing-library/dom': ^10.4.1
   '@testing-library/jest-dom': 6.6.3
   '@testing-library/react': 16.2.0
-  '@tiptap/core': ^3.24.0
-  '@tiptap/extension-document': ^3.24.0
-  '@tiptap/extension-hard-break': ^3.24.0
-  '@tiptap/extension-history': ^3.24.0
-  '@tiptap/extension-mention': ^3.24.0
-  '@tiptap/extension-paragraph': ^3.24.0
-  '@tiptap/extension-placeholder': ^3.24.0
-  '@tiptap/extension-text': ^3.24.0
-  '@tiptap/pm': ^3.24.0
-  '@tiptap/react': ^3.24.0
-  '@tiptap/suggestion': ^3.24.0
+  '@tiptap/core': ^3.27.1
+  '@tiptap/extension-document': ^3.27.1
+  '@tiptap/extension-hard-break': ^3.27.1
+  '@tiptap/extension-history': ^3.27.1
+  '@tiptap/extension-mention': ^3.27.1
+  '@tiptap/extension-paragraph': ^3.27.1
+  '@tiptap/extension-placeholder': ^3.27.1
+  '@tiptap/extension-text': ^3.27.1
+  '@tiptap/pm': ^3.27.1
+  '@tiptap/react': ^3.27.1
+  '@tiptap/suggestion': ^3.27.1
   '@traceloop/instrumentation-langchain': ^0.22.6
   '@types/express': ^5.0.0
   '@types/ioredis-mock': ^8.2.7
@@ -107,24 +127,29 @@ catalog:
   '@types/node': ~24.0.15
   '@types/react': 19.0.12
   '@types/react-dom': 19.0.4
+  '@types/semver': ^7.5.8
   '@types/three': ^0.184.1
   '@types/turndown': ^5.0.6
   '@typescript/native-preview': 7.0.0-dev.20260223.1
   '@typescript/vfs': ^1.6.4
-  '@vitest/coverage-v8': 4.1.5
-  '@vitest/ui': 4.1.5
-  '@xyflow/react': ^12.10.2
-  better-auth: ^1.6.12
+  '@vitest/coverage-v8': 4.1.11
+  '@vitest/browser-playwright': 4.1.11
+  '@vitest/ui': 4.1.11
+  '@xyflow/react': ^12.11.0
+  axe-core: ^4.12.1
+  better-auth: ^1.6.19
   bowser: ^2.14.1
   cdn-resolve: ^2.1.2
   chrome-launcher: ^1.2.1
   citty: ^0.2.2
   class-variance-authority: ^0.7.1
+  clipper2-ts: 2.0.1-17
+  clipper2-wasm: ^0.4.0
   comlink: ^4.4.2
   consola: ^3.4.2
   culori: ^4.0.2
   date-fns: ^4.4.0
-  deepagents: ^1.10.2
+  deepagents: ^1.10.5
   deepmerge: ^4.3.1
   dotenv: ^17.4.2
   es-module-lexer: ^2.1.0
@@ -141,76 +166,176 @@ catalog:
   express: ^5.2.1
   fake-indexeddb: ^6.2.5
   fastify: ^5.8.5
-  geist: ^1.7.1
+  geist: ^1.7.2
   gray-matter: ^4.0.3
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
   ink: ^6.8.0
   ioredis-mock: ^8.13.1
-  isbot: ^5.1.40
-  js-yaml: ^4.1.1
+  ipaddr.js: 2.4.0
+  isbot: ^5.1.43
+  js-yaml: 4.3.0
   jsdom: ~26.0.0
+  '@types/jsdom': ^21.1.7
   json-schema: ^0.4.0
   json-schema-default: ^1.0.2
   katex: ^0.16.47
-  knip: ^6.14.2
-  langchain: ^1.4.0
-  lighthouse: ^13.3.0
+  knip: ^6.17.1
+  langchain: ^1.5.0
+  libcascade: 3.0.2
+  lighthouse: ^13.4.0
   lint-staged: ^16.4.0
   lucide-react: ^0.552.0
   madge: ^8.0.0
-  manifold-3d: 3.3.2
+  manifold-3d: 3.4.1
   mermaid: ^11.15.0
+  nanoid: ^5.1.14
   netlify-cli: ^25.6.2
+  next: ^16.2.12
   next-themes: ^0.4.6
   nx: 22.7.1
-  openscad-wasm-prebuilt: ^1.2.0
+  '@taulabs/openrscad-engine': 0.11.0-beta.2
   oxfmt: ^0.36.0
-  oxlint: ^1.67.0
+  oxlint: ^1.70.0
   oxlint-tsgolint: ^0.16.0
-  pdf-parse: ^2.4.5
+  pdf-parse: 2.4.5
+  polygon-clipping: ^0.15.7
+  replicad: npm:@taulabs/replicad@0.23.4-beta.2
+  replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0
-  radix-ui: ^1.4.3
-  react: ^19.2.6
+  radix-ui: ^1.6.0
+  react: 19.2.7
   react-day-picker: ^10.0.0
-  react-dom: ^19.2.6
-  react-email: ^6.5.0
+  react-dom: 19.2.7
+  react-email: ^6.6.3
   react-router: 7.14.2
   rehype-sanitize: ^6.0.0
   rehype-stringify: ^10.0.1
+  remark-gfm: 4.0.1
   remark-math: ^6.0.0
   remark-parse: ^11.0.0
   remark-rehype: ^11.1.2
-  resend: ^6.12.4
-  rolldown: 1.0.0-rc.17
+  remark-stringify: 11.0.0
+  resend: ^6.14.0
+  rolldown: 1.2.3
+  semver: ^7.8.5
   size-limit: ^12.1.0
   socket.io-prometheus-metrics: ^1.0.6
   sonner: ^2.0.7
   source-map-explorer: ^2.5.3
   source-map-js: ^1.2.1
   strip-literal: ^3.1.0
+  tailwindcss: ^4.3.3
   three: ^0.184.0
-  tsdown: ^0.15.12
+  tsdown: ^0.22.14
   tslib: ^2.8.1
   turndown: ^7.2.4
+  tsx: ^4.22.4
   type-fest: ^4.41.0
   typedoc: ^0.28.19
   typescript: ~5.9.3
-  typescript-eslint: ^8.60.0
+  typescript-eslint: ^8.61.1
   uint8array-extras: ^1.5.0
   unified: ^11.0.5
   unist-util-visit: ^5.1.0
   uzip: ^0.20201231.0
   vite: 8.0.10
-  vite-plugin-mkcert: ^2.0.0
-  vite-plugin-static-copy: ^4.1.0
-  vitest: 4.1.5
+  vite-plugin-mkcert: 2.0.0
+  vite-plugin-static-copy: ^4.1.1
+  vitest: 4.1.11
   vitest-mock-extended: ^3.1.1
   vscode-uri: 3.1.0
   web-vitals: ^5.3.0
   ws: ^8.21.0
-  xstate: ^5.32.0
+  xstate: ^5.32.1
   zod: ^4.4.3
-
+catalogs:
+  electron-vite7:
+    electron-vite: 5.0.0
+    vite: 7.3.6
+  electron-vite8:
+    electron-vite: 6.0.0-beta.1
+    vite: 8.0.10
+  react-router7:
+    '@react-router/dev': 7.18.2
+    '@react-router/node': 7.18.2
+    react-router: 7.18.2
+    vite: 7.3.6
+  react-router8:
+    '@react-router/dev': 8.3.0
+    '@react-router/node': 8.3.0
+    react-router: 8.3.0
+    vite: 8.0.10
+  next15:
+    next: 15.5.22
+  next16:
+    next: 16.3.0
 catalogMode: prefer
+minimumReleaseAgeExclude:
+  - '@taucad/*'
+  - '@taulabs/*'
+  - geospec
+  - nanoraster
+  - nanoraster-darwin-arm64
+  - nanoraster-darwin-x64
+  - nanoraster-win32-arm64-msvc
+  - nanoraster-win32-ia32-msvc
+  - nanoraster-linux-x64-gnu
+  - nanoraster-linux-arm64-gnu
+  - nanoraster-linux-arm-gnueabihf
+  - nanoraster-linux-ppc64-gnu
+  - nanoraster-linux-s390x-gnu
+  - nanoraster-linux-x64-musl
+  - nanoraster-linux-arm64-musl
+  - nanoraster-linux-arm-musleabihf
+  - nanoraster-android-arm64
+  - nanoraster-android-arm-eabi
+  - nanoraster-freebsd-x64
+  - nanoraster-win32-x64-msvc
+  # First-party too — we publish these, so they never need to age. The bare
+  # name and the scope are both ours (libcascade, @libcascade/toolchain).
+  - libcascade
+  - '@libcascade/*'
+  - '@next/env@16.3.0'
+  - '@next/swc-darwin-arm64@16.3.0'
+  - '@next/swc-darwin-x64@16.3.0'
+  - '@next/swc-linux-arm64-gnu@16.3.0'
+  - '@next/swc-linux-arm64-musl@16.3.0'
+  - '@next/swc-linux-x64-gnu@16.3.0'
+  - '@next/swc-linux-x64-musl@16.3.0'
+  - '@next/swc-win32-arm64-msvc@16.3.0'
+  - '@next/swc-win32-x64-msvc@16.3.0'
+  - next@16.3.0
+  - '@rolldown/binding-android-arm64@1.2.3'
+  - '@rolldown/binding-darwin-arm64@1.2.3'
+  - '@rolldown/binding-darwin-x64@1.2.3'
+  - '@rolldown/binding-freebsd-x64@1.2.3'
+  - '@rolldown/binding-linux-arm-gnueabihf@1.2.3'
+  - '@rolldown/binding-linux-arm64-gnu@1.2.3'
+  - '@rolldown/binding-linux-arm64-musl@1.2.3'
+  - '@rolldown/binding-linux-ppc64-gnu@1.2.3'
+  - '@rolldown/binding-linux-s390x-gnu@1.2.3'
+  - '@rolldown/binding-linux-x64-gnu@1.2.3'
+  - '@rolldown/binding-linux-x64-musl@1.2.3'
+  - '@rolldown/binding-openharmony-arm64@1.2.3'
+  - '@rolldown/binding-win32-arm64-msvc@1.2.3'
+  - '@rolldown/binding-win32-x64-msvc@1.2.3'
+  - rolldown@1.2.3
+  - libassimp@0.1.0
+peerDependencyRules:
+  allowedVersions:
+    fumadocs-mdx>vite: ^8.0.0
+    vite-svg-sprite-wrapper>vite: ^8.0.0
+patchedDependencies:
+  '@ai-sdk/langchain@2.0.181': patches/@ai-sdk__langchain@2.0.181.patch
+  '@kittycad/lib@2.0.48': patches/@kittycad__lib@2.0.48.patch
+  vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
+overrides:
+  '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
+  '@types/express': 'catalog:'
+  replicad: 'catalog:'
+  replicad-opencascadejs: 'catalog:'
+  vitest: 'catalog:'
+ignoreWorkspaceRootCheck: true
+pmOnFail: error

@@ -22,6 +22,7 @@ import type {
   runtimeInitializeArgsSchema,
   runtimeInitializeResultSchema,
   runtimeExportArgsSchema,
+  runtimeExportModelArgsSchema,
   runtimeExportResultSchema,
   runtimeOpenFileArgsSchema,
   runtimeStageAndRenderArgsSchema,
@@ -30,22 +31,43 @@ import type {
   runtimeParametersResolvedArgsSchema,
   runtimeErrorEventArgsSchema,
   runtimeStateChangedArgsSchema,
+  runtimeActiveKernelChangedArgsSchema,
   runtimeAbortArgsSchema,
+  runtimeBinaryMaterialisedArgsSchema,
+  runtimeUpdateParametersArgsSchema,
+  runtimeSetOptionsArgsSchema,
+  runtimeLogArgsSchema,
+  runtimeLogBatchArgsSchema,
+  runtimeTelemetryArgsSchema,
+  runtimeCapabilitiesUpdatedArgsSchema,
+  runtimeKernelCommandArgsSchema,
+  runtimeKernelEventArgsSchema,
   transportHelloPayloadSchema,
 } from '#types/runtime-protocol.schemas.js';
 import type {
   RuntimeInitializeArgs,
   RuntimeExportArgs,
+  RuntimeExportModelArgs,
   RuntimeOpenFileArgs,
   RuntimeStageAndRenderArgs,
   RuntimeProgressArgs,
+  RuntimeUpdateParametersArgs,
+  RuntimeSetOptionsArgs,
+  RuntimeBinaryMaterialisedArgs,
   RuntimeStateChangedArgs,
-  AbortReasonCode,
+  RuntimeProtocol,
+  WireAbortReasonCode,
 } from '#types/runtime-protocol.types.js';
 
 const branded = <T>(): T => undefined as unknown as T;
 
 describe('runtime-protocol types derive from schemas (C16)', () => {
+  it('RuntimeBinaryMaterialisedArgs derives from its strict schema', () => {
+    type Derived = z.input<typeof runtimeBinaryMaterialisedArgsSchema>;
+    assertType<RuntimeBinaryMaterialisedArgs>(branded<Derived>());
+    assertType<Derived>(branded<RuntimeBinaryMaterialisedArgs>());
+  });
+
   it('RuntimeInitializeArgs is structurally z.input<typeof runtimeInitializeArgsSchema>', () => {
     type Derived = z.input<typeof runtimeInitializeArgsSchema>;
     assertType<RuntimeInitializeArgs>(branded<Derived>());
@@ -63,6 +85,11 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
     assertType<Derived>(branded<RuntimeExportArgs>());
   });
 
+  it('RuntimeExportModelArgs is structurally z.input<typeof runtimeExportModelArgsSchema>', () => {
+    type Derived = z.input<typeof runtimeExportModelArgsSchema>;
+    assertType<RuntimeExportModelArgs>(branded<Derived>());
+  });
+
   it('export result schema envelope exposes a discriminated success/issues shape', () => {
     type Derived = z.output<typeof runtimeExportResultSchema>;
     assertType<Derived>(branded<{ success: false; issues: never[] }>());
@@ -78,24 +105,36 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
     assertType<RuntimeStageAndRenderArgs>(branded<Derived>());
   });
 
+  it('RuntimeUpdateParametersArgs is structurally z.input<typeof runtimeUpdateParametersArgsSchema>', () => {
+    type Derived = z.input<typeof runtimeUpdateParametersArgsSchema>;
+    assertType<RuntimeUpdateParametersArgs>(branded<Derived>());
+    assertType<Derived>(branded<RuntimeUpdateParametersArgs>());
+  });
+
+  it('RuntimeSetOptionsArgs is structurally z.input<typeof runtimeSetOptionsArgsSchema>', () => {
+    type Derived = z.input<typeof runtimeSetOptionsArgsSchema>;
+    assertType<RuntimeSetOptionsArgs>(branded<Derived>());
+    assertType<Derived>(branded<RuntimeSetOptionsArgs>());
+  });
+
   it('RuntimeProgressArgs is structurally z.input<typeof runtimeProgressArgsSchema>', () => {
     type Derived = z.input<typeof runtimeProgressArgsSchema>;
     assertType<RuntimeProgressArgs>(branded<Derived>());
   });
 
-  it('RuntimeGeometryComputedArgs envelope exposes result + rgen', () => {
+  it('RuntimeGeometryComputedArgs envelope exposes result + renderId', () => {
     type Derived = z.input<typeof runtimeGeometryComputedArgsSchema>;
-    assertType<{ result: unknown; rgen: number }>(branded<Derived>());
+    assertType<{ result: unknown; renderId: string }>(branded<Derived>());
   });
 
-  it('RuntimeParametersResolvedArgs envelope exposes result + rgen', () => {
+  it('RuntimeParametersResolvedArgs envelope exposes result + renderId', () => {
     type Derived = z.input<typeof runtimeParametersResolvedArgsSchema>;
-    assertType<{ result: unknown; rgen: number }>(branded<Derived>());
+    assertType<{ result: unknown; renderId: string }>(branded<Derived>());
   });
 
-  it('RuntimeErrorEventArgs envelope exposes issues + optional rgen', () => {
+  it('RuntimeErrorEventArgs envelope exposes issues + optional renderId', () => {
     type Derived = z.input<typeof runtimeErrorEventArgsSchema>;
-    assertType<{ issues: unknown[]; rgen?: number }>(branded<Derived>());
+    assertType<{ issues: unknown[]; renderId?: string }>(branded<Derived>());
   });
 
   it('RuntimeStateChangedArgs is structurally z.input<typeof runtimeStateChangedArgsSchema>', () => {
@@ -103,14 +142,62 @@ describe('runtime-protocol types derive from schemas (C16)', () => {
     assertType<RuntimeStateChangedArgs>(branded<Derived>());
   });
 
-  it('AbortReasonCode is structurally compatible with the abort args schema reason field', () => {
-    type Derived = z.input<typeof runtimeAbortArgsSchema>;
-    assertType<{ reason: AbortReasonCode }>(branded<Derived>());
+  it('activeKernelChanged args agree with the schema on key presence (F12)', () => {
+    type Derived = z.input<typeof runtimeActiveKernelChangedArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['activeKernelChanged']['args'];
+    assertType<Declared>(branded<Derived>());
+    assertType<Derived>(branded<Declared>());
   });
 
-  it('TransportHelloPayload schema declares server, runtimeVersion, and transportId', () => {
+  it('log args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeLogArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['log']['args'];
+    assertType<{ entry: unknown }>(branded<Derived>());
+    assertType<Derived>(branded<Declared>());
+  });
+
+  it('logBatch args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeLogBatchArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['logBatch']['args'];
+    assertType<{ entries: unknown[] }>(branded<Derived>());
+    assertType<{ readonly entries: readonly unknown[] }>(branded<Declared>());
+  });
+
+  it('telemetry args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeTelemetryArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['telemetry']['args'];
+    assertType<Declared>(branded<Derived>());
+  });
+
+  it('capabilitiesUpdated args agree with the schema', () => {
+    type Derived = z.output<typeof runtimeCapabilitiesUpdatedArgsSchema>;
+    // The wire schema deliberately accepts future capability kinds that the current public union cannot name.
+    assertType<{ capabilities: unknown }>(branded<Derived>());
+  });
+
+  it('kernelCommand args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeKernelCommandArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['kernelCommand']['args'];
+    assertType<Declared>(branded<Derived>());
+    assertType<Derived>(branded<Declared>());
+  });
+
+  it('kernelEvent args agree with the schema', () => {
+    type Derived = z.input<typeof runtimeKernelEventArgsSchema>;
+    type Declared = RuntimeProtocol['notifies']['kernelEvent']['args'];
+    assertType<Declared>(branded<Derived>());
+    assertType<Derived>(branded<Declared>());
+  });
+
+  it('WireAbortReasonCode is structurally compatible with the targeted abort args schema', () => {
+    type Derived = z.input<typeof runtimeAbortArgsSchema>;
+    assertType<{ renderId: string; reason: WireAbortReasonCode }>(branded<Derived>());
+  });
+
+  it('TransportHelloPayload schema declares the versioned wire hello', () => {
     type Derived = z.input<typeof transportHelloPayloadSchema>;
-    type Expected = { server: 'kernel-runtime-worker'; runtimeVersion: string; transportId: string };
+    type Expected = { server: 'kernel-runtime-worker'; runtimeVersion: string; protocolVersion: number };
     assertType<Expected>(branded<Derived>());
+    assertType<Derived>(branded<Expected>());
   });
 });

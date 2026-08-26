@@ -1,143 +1,98 @@
 ---
 title: Plugin System
-description: How defineKernel, defineMiddleware, and defineBundler create an extensible runtime.
-icon: lucide:puzzle
+description: Toolkit factories, presets, capability expansion, and direct buckets.
+icon: lucide:plug
 ---
 
 # Plugin System
 
-The @taucad/runtime is extensible through a plugin system. Instead of inheritance hierarchies or configuration files, three plugin types compose via factory functions. This design keeps the core small, enables tree-shaking, and makes the extension surface explicit.
+A Tau plugin toolkit groups related kernel, middleware, bundler, and transcoder factories. Applications compose toolkits into an app-owned runtime definition.
 
-## Context and Motivation
+## Canonical package surface
 
-CAD runtimes must support multiple engines (Replicad, OpenCASCADE, Manifold, OpenSCAD, JSCAD, Zoo), multiple preprocessing steps (caching, coordinate transforms), and multiple bundling strategies (esbuild for JS/TS, none for OpenSCAD). Inheritance would force a rigid class hierarchy; configuration files would push logic into strings. Plugins offer a middle path: typed, composable extensions that the framework discovers at runtime through explicit registration.
-
-## How It Works
-
-Three plugin types exist: [`KernelPlugin`](../api/kernels), [`MiddlewarePlugin`](../api/middleware), and [`BundlerPlugin`](../api/bundler). Each is a plain object returned by a factory function. The factory pattern allows options validation and lazy URL resolution.
-
-```mermaid
-flowchart LR
-    subgraph Factories["Factory Functions"]
-        KF["replicad()"]
-        MF["geometryCache()"]
-        BF["esbuild()"]
-    end
-
-    subgraph Plugins["Plugin Objects"]
-        KP["KernelPlugin"]
-        MP["MiddlewarePlugin"]
-        BP["BundlerPlugin"]
-    end
-
-    subgraph Client["createRuntimeClient"]
-        KC["RuntimeClient"]
-    end
-
-    KF --> KP
-    MF --> MP
-    BF --> BP
-    KP --> KC
-    MP --> KC
-    BP --> KC
-```
-
-### KernelPlugin
-
-A [KernelPlugin](../api/kernels) describes a CAD engine. Factory functions like `replicad()`, `opencascade()`, `manifold()`, `jscad()`, `zoo()`, and `tau()` from `@taucad/runtime/kernels` -- plus `openscad()` from the separately-published `@taucad/openscad` package -- return a registration object:
-
-- `id` -- Unique identifier (e.g., `'replicad'`)
-- `moduleUrl` -- URL of the `defineKernel` module (resolved via `import.meta.url`)
-- `extensions` -- File extensions this kernel handles (`['ts', 'js']`, `['scad']`, or `['*']` for catch-all)
-- `detectImport` -- Optional regex for content-based selection (e.g., `import.*from\s+['"]replicad['"]`)
-- `builtinModuleNames` -- Module names for bundler-assisted transitive import detection
-- `options` -- Kernel-specific options passed to `initialize()`
-
-The factory accepts options and merges them into the plugin. For example, `replicad({ withBrepEdges: true })` produces a plugin with `options: { withBrepEdges: true }`.
-
-### MiddlewarePlugin
-
-A [MiddlewarePlugin](../api/middleware) describes an interceptor. Factory functions like `geometryCache()` and `parameterCache()` return:
-
-- `id` -- Unique identifier
-- `moduleUrl` -- URL of the `defineMiddleware` module
-- `options` -- Middleware-specific options
-
-Middleware order matters: first registered is the outermost layer in the onion model. See [Middleware Model](./middleware-model) for details.
-
-### BundlerPlugin
-
-A [BundlerPlugin](../api/bundler) describes a bundler for specific file extensions. The built-in `esbuild()` handles `['ts', 'js', 'tsx', 'jsx']`:
-
-- `id` -- Unique identifier
-- `moduleUrl` -- URL of the `defineBundler` module
-- `extensions` -- File extensions this bundler handles
-- `options` -- Bundler-specific options (e.g., esbuild target)
-
-Multiple bundlers can be registered; the framework routes by extension. A kernel that does not use the bundler (e.g., OpenSCAD) never loads it.
-
-### Presets for Zero-Config Setup
-
-The `presets.all()` function returns a `PresetOptions` object containing all built-in kernels, middleware, and bundlers:
+Every toolkit declares its package-named factory as the canonical authoring symbol and re-exports the same binding as `plugin` for mechanical loaders. There is no default export:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { gltf } from '@taucad/gltf';
 
-const client = createRuntimeClient(presets.all());
+const toolkit = gltf();
 ```
 
-`PresetOptions` has `{ kernels, middleware, bundlers }` which can be spread into [`createRuntimeClient`](../api/client) alongside other options like `fileSystem`.
+Calling the toolkit factory selects its default preset. Presets select capability paths; role-nested options configure the factories selected by that preset.
 
-### Composition in createRuntimeClient
+## Define a toolkit
 
-When you call `createRuntimeClient({ kernels, middleware, bundlers })`, the client does not instantiate plugins immediately. It stores the plugin objects and passes them to the worker during `initialize()`. The worker then:
+```typescript
+import { definePlugin } from '@taucad/runtime/plugin';
+import { myKernel } from './my-kernel.js';
+import { myTranscoder } from './my-transcoder.js';
 
-1. Loads kernel modules from `moduleUrl` and registers them in [`KernelRuntimeWorker`](./worker-model)
-2. Loads middleware modules and builds the onion chain
-3. Loads bundler modules and registers them by extension
+export const myToolkit = definePlugin({
+  meta: { name: '@scope/my-toolkit' },
+  kernels: { default: myKernel },
+  transcoders: { export: myTranscoder },
+  presets: {
+    default: ['kernels.default'],
+    all: ['kernels.default', 'transcoders.export'],
+  },
+});
 
-Plugins are plain data; no class instances cross the main-thread/worker boundary. Only URLs and options are serialized.
+export { myToolkit, myToolkit as plugin } from './my-toolkit.js';
+```
 
-## The Factory Function Pattern
+Preset paths are validated against the declared capability buckets. Expansion preserves plugin order, preset path order, then direct bucket order.
 
-Each plugin type uses a factory rather than a constructor or static method. Benefits:
+## Compose a runtime
 
-- **Options validation** -- Factories can validate and default options before returning the plugin. Zod schemas (when used) run at factory call time.
-- **URL resolution** -- `import.meta.url` is resolved in the factory's module context, so each plugin knows its own script location.
-- **Immutability** -- The returned object is a snapshot. Callers cannot mutate shared state.
-- **Tree-shaking** -- Unused plugins are never imported; the factory is the single entry point.
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { gltf } from '@taucad/gltf';
+import { image } from '@taucad/image';
 
-Under the hood, factories are built with `createKernelPlugin`, `createMiddlewarePlugin`, and `createBundlerPlugin` helpers that handle URL resolution and options merging.
+export const runtime = defineRuntime({ plugins: [gltf(), image()] });
+```
 
-## Why Zod Schemas for Validation
+Configure packaged capabilities through their toolkit. Direct buckets remain for app-local capabilities, isolated tests, or whole-role ordering that must interleave outside plugin expansion:
 
-Kernels, middleware, and bundlers can define `optionsSchema` (a Zod object schema). When provided:
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { middleware } from '@taucad/middleware';
 
-- **Type safety** -- `z.infer<typeof optionsSchema>` gives TypeScript the options type.
-- **Runtime validation** -- Invalid options throw at initialization, not during a render.
-- **Defaults** -- `.default()` on schema fields supplies missing values.
+export const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'auto' } } }), middleware({ preset: 'cache' })],
+});
+```
 
-The framework calls `optionsSchema.parse(rawOptions)` before passing options to `initialize()`. This keeps validation in one place and avoids scattered type checks.
+## Identity and collisions
 
-## Key Relationships
+Capability IDs are flat and author-declared. `meta.name` identifies the toolkit, and diagnostics qualify selected capabilities as `<name>/<preset-path>` without rewriting their IDs. A duplicate kernel, middleware, bundler, or transcoder ID is rejected deterministically with diagnostics naming the first and second origins.
 
-- **Plugins and Client**: The client aggregates plugins and forwards them to the worker. The client does not interpret plugin contents.
-- **Plugins and Worker**: The worker dynamically imports modules from `moduleUrl` and instantiates them. Kernel definitions implement `KernelDefinition`; middleware implements wrap hooks via `defineMiddleware`; bundlers implement `BundlerDefinition`.
-- **Plugins and Selection**: Kernel plugins drive [kernel selection](./kernel-selection). Extension lists, `detectImport`, and `builtinModuleNames` determine which kernel runs for a given file.
+## Live capability manifest
 
-## Implications
+`RuntimeClient` reports a discriminated `capabilities.registrations` list. Kernel entries include their exact source `extensions`; middleware, bundler, and transcoder entries do not. Additive fields are preserved and unknown future `kind` values are tolerated. Consumers such as language selection should read the current manifest instead of recreating a static runtime or maintaining a second extension table.
 
-- **No inheritance** -- Kernel authors use `defineKernel`, not `extends KernelWorker`. This reduces coupling and simplifies testing.
-- **Lazy loading** -- Modules load on first use. A client with Replicad and OpenSCAD only loads the kernel for the file being rendered.
-- **Explicit dependencies** -- Plugins declare what they need. The framework wires them together; there is no magic injection.
+## Compatibility at load boundaries
 
-## Further Reading
+Published toolkits declare `@taucad/runtime` in `peerDependencies`. Dynamic loaders warn when that range misses their bundled runtime; runtime composition itself never reads package manifests. Path-loaded modules without a resolvable package manifest skip this check by design.
 
-- [Architecture](./architecture) -- How layers compose
-- [Middleware Model](./middleware-model) -- How middleware wraps kernel operations
-- [Kernel Selection](./kernel-selection) -- How plugins influence selection
-- [API: Kernels](../api/kernels) -- Kernel factory functions and `KernelPlugin`
-- [API: Middleware](../api/middleware) -- `defineMiddleware` and middleware types
-- [API: Bundler](../api/bundler) -- `defineBundler` and `BundlerDefinition`
-- [Create Custom Kernel](../guides/custom-kernel) -- Implement a kernel with `defineKernel`
-- [Create Custom Middleware](../guides/custom-middleware) -- Implement middleware with `defineMiddleware`
+Plugin factories and instances carry the exact `runtimePluginAbiVersion` in frozen global-registry slots so duplicate runtime copies can interoperate in one realm. These brands are construction markers, not a security boundary, and structured clone drops them; the validated capabilities manifest is the worker/process compatibility contract.
+
+## Backend lifecycle
+
+Executable definitions stay worker-owned. Heavy backends load in `defineKernel` or `defineTranscoder` `initialize()` and remain in the returned context. Module-level backend caches are not part of the capability model.
+
+Root-importing a toolkit exposes descriptors without fetching its WASM payload. Kernels and transcoders initialize when their selected route first executes, once per worker.
+
+## Capability-derived formats
+
+Static runtime definitions can expose their actual matrix without a separate registry. The derivation helpers preserve the concrete extension and target literals in their return types:
+
+```typescript
+import { deriveExportTargets, deriveImportExtensions } from '@taucad/runtime/plugin';
+
+const imports = deriveImportExtensions(runtime);
+const exports = deriveExportTargets(runtime);
+```
+
+The export helper follows the same direct and single-hop route semantics as the worker capabilities manifest.

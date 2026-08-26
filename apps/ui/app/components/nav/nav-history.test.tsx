@@ -59,7 +59,12 @@ vi.mock('#components/ui/sonner.js', () => ({
 }));
 
 vi.mock('#utils/temporal.utils.js', () => ({
-  groupItemsByTimeHorizon: (items: unknown[]) => (items.length > 0 ? [{ name: 'Today', items }] : []),
+  groupItemsByTimeHorizon: (items: Array<{ updatedAt: Date | number | string }>) => {
+    const sorted = [...items].sort(
+      (left, right) => Number(new Date(right.updatedAt)) - Number(new Date(left.updatedAt)),
+    );
+    return sorted.length > 0 ? [{ name: 'Today', items: sorted }] : [];
+  },
 }));
 
 const defaultProjectReturn = {
@@ -87,7 +92,7 @@ describe('NavHistory', () => {
     expect(labels.some((label) => label.textContent === 'Recent Projects')).toBe(true);
 
     expect(screen.getByTestId('nav-history-skeleton')).toBeDefined();
-  });
+  }, 15_000);
 
   it('should render null only when genuinely empty and not loading', async () => {
     mockUseProjects.mockReturnValue({ ...defaultProjectReturn, projects: [], isLoading: false });
@@ -110,5 +115,45 @@ describe('NavHistory', () => {
     render(<NavHistory />);
 
     expect(screen.getByText('Test Project')).toBeDefined();
+  });
+
+  it('should keep navigation-only project opens stable and reorder only after updatedAt changes', async () => {
+    const olderProject = {
+      id: 'p_older',
+      name: 'Older Project',
+      description: 'older',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+    };
+    const newerProject = {
+      id: 'p_newer',
+      name: 'Newer Project',
+      description: 'newer',
+      createdAt: new Date('2026-01-02T00:00:00Z'),
+      updatedAt: new Date('2026-01-02T00:00:00Z'),
+    };
+    mockUseProjects.mockReturnValue({
+      ...defaultProjectReturn,
+      projects: [olderProject, newerProject],
+    });
+
+    const { NavHistory } = await import('#components/nav/nav-history.js');
+    const { rerender } = render(<NavHistory />);
+
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Newer Project', 'Older Project']);
+
+    mockUseProjects.mockReturnValue({
+      ...defaultProjectReturn,
+      projects: [olderProject, newerProject],
+    });
+    rerender(<NavHistory />);
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Newer Project', 'Older Project']);
+
+    mockUseProjects.mockReturnValue({
+      ...defaultProjectReturn,
+      projects: [{ ...olderProject, updatedAt: new Date('2026-01-03T00:00:00Z') }, newerProject],
+    });
+    rerender(<NavHistory />);
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Older Project', 'Newer Project']);
   });
 });

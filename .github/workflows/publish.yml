@@ -11,6 +11,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      GEOSPEC_WORKERS: 1
+      NPM_CONFIG_PROVENANCE: true
+      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -20,11 +24,24 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
-      - name: Build packages
-        run: pnpm nx run-many -t build --projects=packages/*
+      - name: Run the release gate
+        run: pnpm nx run scripts:release-gate
 
-      - name: Publish to npm
-        run: pnpm nx release publish
-        env:
-          NPM_CONFIG_PROVENANCE: true
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Nx delegates `nx-release-publish` to the workspace package manager, and only
+      # pnpm applies `publishConfig` field overrides. Under npm every package would
+      # ship `exports` pointing at `./src/*.ts`, which `files` excludes.
+      - name: Assert pnpm is the publisher
+        run: |
+          pnpm --version
+          test -f pnpm-lock.yaml
+          node -e "if (!require('./package.json').packageManager.startsWith('pnpm@')) process.exit(1)"
+
+      # No batches: Nx synthesises `nx-release-publish` for every publishable with
+      # `dependsOn: ['^nx-release-publish', 'pkgcheck']` (the second from nx.json
+      # targetDefaults), so one command orders the whole fixed group, gates each
+      # package on its own pkgcheck, and skips the dependents of a failed publish.
+      - name: Dry-run the dependency-ordered publish
+        run: pnpm nx release publish --dry-run --tag=beta
+
+      - name: Publish the release train
+        run: pnpm nx release publish --tag=beta

@@ -1,10 +1,12 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "rewriteRelativeImportExtensions": true,
     "outDir": "./out-tsc/spec",
+    "types": ["node", "vitest", "vitest/browser"],
     "paths": {
       "#*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "playwright.config.ts"]
+  "include": ["src/**/*.ts", "global-setup.ts", "vitest.config.ts"]
 }

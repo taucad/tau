@@ -1,9 +1,15 @@
 import { createMiddleware } from 'langchain';
+import type { AgentMiddleware } from 'langchain';
 import { ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import type { PartialDeep } from 'type-fest';
 import { toolName } from '@taucad/chat/constants';
 import type { ToolOutputRegistry } from '@taucad/chat';
+import {
+  isScreenshotResultContent,
+  isScreenshotResultMessage,
+  parseToolContent,
+} from '#api/chat/middleware/tool-result-retention.js';
 
 // =============================================================================
 // Configuration
@@ -57,6 +63,79 @@ function isObject(value: unknown): value is Record<string, unknown> {
  */
 function hasDefined<K extends string>(object: unknown, key: K): boolean {
   return isObject(object) && object[key] !== undefined;
+}
+
+const kernelIssueDetailsMaxChars = 6000;
+const geometryInvalidDetailKeys = [
+  'partName',
+  'partIndex',
+  'sourceName',
+  'nativeValidation',
+  'exportValidation',
+  'topology',
+  'hints',
+] as const;
+
+function estimateJsonLength(value: unknown): number {
+  try {
+    return JSON.stringify(value).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function assignIfPresent(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (value === undefined) {
+    return;
+  }
+
+  target[key] = value;
+}
+
+function pickPresentFields(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): Record<string, unknown> | undefined {
+  const picked: Record<string, unknown> = {};
+
+  for (const key of keys) {
+    assignIfPresent(picked, key, source[key]);
+  }
+
+  if (Object.keys(picked).length === 0) {
+    return undefined;
+  }
+
+  return picked;
+}
+
+function trimKernelIssueDetails(issue: { code: string; details?: unknown }): unknown | undefined {
+  const { code, details } = issue;
+  if (details === undefined) {
+    return undefined;
+  }
+
+  if (estimateJsonLength(details) <= kernelIssueDetailsMaxChars) {
+    return details;
+  }
+
+  if (code !== 'GEOMETRY_INVALID' || !isObject(details)) {
+    return { _trimmed: true, reason: `details exceeded ${kernelIssueDetailsMaxChars} characters` };
+  }
+
+  const { geometry, producer } = details;
+  const trimmedDetails: Record<string, unknown> = {
+    _trimmed: true,
+  };
+  const trimmedGeometry = isObject(geometry) ? pickPresentFields(geometry, geometryInvalidDetailKeys) : undefined;
+  assignIfPresent(trimmedDetails, 'producer', producer);
+  assignIfPresent(trimmedDetails, 'geometry', trimmedGeometry);
+
+  if (estimateJsonLength(trimmedDetails) <= kernelIssueDetailsMaxChars) {
+    return trimmedDetails;
+  }
+
+  return { _trimmed: true, reason: `details exceeded ${kernelIssueDetailsMaxChars} characters` };
 }
 
 /**
@@ -160,18 +239,6 @@ function isGlobSearchShape(content: unknown): boolean {
 }
 
 /**
- * Checks if content has the shape of ScreenshotOutput.
- * Unique: has images array.
- */
-function isScreenshotShape(content: unknown): boolean {
-  if (!isObject(content)) {
-    return false;
-  }
-
-  return Array.isArray(content['images']);
-}
-
-/**
  * Registry of content shape detectors.
  * Maps tool names to functions that detect if content matches that tool's output shape.
  * Used as a fallback when message.name is undefined.
@@ -188,7 +255,7 @@ const contentShapeDetectors: Record<string, ContentShapeDetector> = {
   [toolName.listDirectory]: isListDirectoryShape,
   [toolName.grep]: isGrepShape,
   [toolName.globSearch]: isGlobSearchShape,
-  [toolName.screenshot]: isScreenshotShape,
+  [toolName.screenshot]: isScreenshotResultContent,
 };
 
 /**
@@ -225,13 +292,11 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
    * Trims the test model result down to its diagnostic essentials.
    *
    * - `failures` is preserved verbatim (each entry already carries `targetFile`
-   *   from the multi-file test.json migration so the LLM can attribute each
-   *   failure to its geometry unit).
+   *   from the GeoSpec runner so the LLM can attribute each failure to its test
+   *   file).
    * - `total` is preserved.
-   * - `passes`, `passed`, and `geometryArtifactPaths` are dropped: pass count
-   *   is inferable as `total - failures.length`, and the artifact-path map is
-   *   only useful at the moment of capture (the UI/UX layer reads it before
-   *   trimming).
+   * - `passes` and `passed` are dropped because the pass count is inferable as
+   *   `total - failures.length`.
    */
   [toolName.testModel]: createTrimmer(toolName.testModel, (result) => {
     // Guard: return unchanged if expected structure is missing (error/malformed response)
@@ -278,20 +343,46 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
     if (!hasDefined(result, 'diffStats')) {
       return result;
     }
+    const diffStats = result.diffStats;
+    if (!diffStats) {
+      return result;
+    }
 
     return {
       diffStats: {
-        linesAdded: result.diffStats.linesAdded,
-        linesRemoved: result.diffStats.linesRemoved,
+        linesAdded: diffStats.linesAdded,
+        linesRemoved: diffStats.linesRemoved,
         // REMOVED: originalContent, modifiedContent - LLM just wrote this
       },
     };
   }),
 
   /**
-   * Trims get_kernel_result by removing verbose stack traces.
-   * The message and location are sufficient for debugging.
+   * Trims delete_file result by removing the captured pre-deletion content from
+   * diffStats. The full content is retained on the persisted record for the
+   * restore timeline (R7), but the LLM doesn't need to re-read a file it just
+   * deleted — only the line counts. diffStats is absent for missing/binary/
+   * legacy deletes, in which case the result is returned unchanged.
    */
+  [toolName.deleteFile]: createTrimmer(toolName.deleteFile, (result) => {
+    if (!hasDefined(result, 'diffStats')) {
+      return result;
+    }
+    const diffStats = result.diffStats;
+    if (!diffStats) {
+      return result;
+    }
+
+    return {
+      message: result.message,
+      diffStats: {
+        linesAdded: diffStats.linesAdded,
+        linesRemoved: diffStats.linesRemoved,
+        // REMOVED: originalContent, modifiedContent - captured for restore, not for the LLM
+      },
+    };
+  }),
+
   /**
    * Trims screenshot results by stripping base64 dataUrl from each image.
    * Older screenshots don't need the full image data — only view names are kept.
@@ -318,16 +409,25 @@ const toolResultTrimmers: Record<string, (result: unknown) => unknown> = {
       status: result.status,
       ...(result.kernelIssues
         ? {
-            kernelIssues: result.kernelIssues.map((issue) => ({
-              code: issue.code,
-              message: issue.message,
-              ...(issue.location ? { location: issue.location } : {}),
-              severity: issue.severity,
-              ...(issue.type ? { type: issue.type } : {}),
-              // Keep stack and stackFrames - important for LLM to debug error origins
-              ...(issue.stack ? { stack: issue.stack } : {}),
-              ...(issue.stackFrames ? { stackFrames: issue.stackFrames } : {}),
-            })),
+            kernelIssues: result.kernelIssues.map((issue) => {
+              const details = trimKernelIssueDetails(issue);
+              const trimmedIssue = {
+                code: issue.code,
+                message: issue.message,
+                ...(issue.location ? { location: issue.location } : {}),
+                severity: issue.severity,
+                ...(issue.type ? { type: issue.type } : {}),
+                // Keep stack and stackFrames - important for LLM to debug error origins
+                ...(issue.stack ? { stack: issue.stack } : {}),
+                ...(issue.stackFrames ? { stackFrames: issue.stackFrames } : {}),
+              };
+
+              if (details === undefined) {
+                return trimmedIssue;
+              }
+
+              return { ...trimmedIssue, details };
+            }),
           }
         : {}),
     };
@@ -353,18 +453,6 @@ function isToolMessage(message: BaseMessage): message is ToolMessage {
   // These lose their prototype chain when stored/loaded from PostgresSaver
   // but retain data properties like `type`
   return message.type === 'tool';
-}
-
-/**
- * Attempts to parse JSON content from a tool message.
- * Returns undefined if parsing fails.
- */
-function parseToolContent(content: string): unknown | undefined {
-  try {
-    return JSON.parse(content) as unknown;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -450,7 +538,7 @@ function injectScreenshotImages(message: ToolMessage): ToolMessage {
   }
 
   const parsed = parseToolContent(content);
-  if (!isObject(parsed) || !Array.isArray(parsed['images'])) {
+  if (!isScreenshotResultContent(parsed) || !isObject(parsed)) {
     return message;
   }
 
@@ -495,16 +583,8 @@ function findLastScreenshotIndex(messages: BaseMessage[]): number {
       continue;
     }
 
-    if (message.name === toolName.screenshot) {
+    if (isScreenshotResultMessage(message)) {
       return index;
-    }
-
-    const { content } = message;
-    if (typeof content === 'string') {
-      const parsed = parseToolContent(content);
-      if (isObject(parsed) && Array.isArray(parsed['images'])) {
-        return index;
-      }
     }
   }
 
@@ -528,30 +608,31 @@ function findLastScreenshotIndex(messages: BaseMessage[]): number {
  * for Anthropic prompt caching. Consistent content enables cache hits
  * across conversation turns.
  */
-export const toolResultTrimmerMiddleware = createMiddleware({
-  name: 'ToolResultTrimmer',
+export const createToolResultTrimmerMiddleware = ({ allowImageBlocks = true } = {}): AgentMiddleware =>
+  createMiddleware({
+    name: 'ToolResultTrimmer',
 
-  async wrapModelCall(request, handler) {
-    const { messages } = request;
+    async wrapModelCall(request, handler) {
+      const { messages } = request;
 
-    const lastScreenshotIndex = findLastScreenshotIndex(messages);
+      const lastScreenshotIndex = allowImageBlocks ? findLastScreenshotIndex(messages) : -1;
 
-    const trimmedMessages = messages.map((message, index) => {
-      if (!isToolMessage(message)) {
-        return message;
-      }
+      const trimmedMessages = messages.map((message, index) => {
+        if (!isToolMessage(message)) {
+          return message;
+        }
 
-      // Inject images for the latest screenshot tool result so LLM can see them
-      if (index === lastScreenshotIndex) {
-        return injectScreenshotImages(message);
-      }
+        // Inject images for the latest screenshot tool result so LLM can see them
+        if (index === lastScreenshotIndex) {
+          return injectScreenshotImages(message);
+        }
 
-      return trimToolMessage(message);
-    });
+        return trimToolMessage(message);
+      });
 
-    return handler({
-      ...request,
-      messages: trimmedMessages,
-    });
-  },
-});
+      return handler({
+        ...request,
+        messages: trimmedMessages,
+      });
+    },
+  });

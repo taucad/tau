@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import {
+  calculatePositionFromSphericalCoordinates,
   computeViewFittingZoom,
   updateCameraFov,
   resetCamera,
@@ -10,6 +11,37 @@ import {
   calculateFovDistanceCompensation,
   tanEpsilon,
 } from '#components/geometry/graphics/three/utils/math.utils.js';
+import type { CameraControlSurface } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
+
+describe('calculatePositionFromSphericalCoordinates', () => {
+  it.each([
+    ['X-up', new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 10)],
+    ['Y-up', new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -10)],
+    ['Z-up', new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 10, 0)],
+  ])('uses right-handed azimuth for %s', (_name, up, expected) => {
+    const actual = calculatePositionFromSphericalCoordinates({
+      distance: 10,
+      horizontalAngle: Math.PI / 2,
+      verticalAngle: 0,
+      up,
+    });
+
+    expect(actual.distanceTo(expected)).toBeLessThan(1e-10);
+  });
+
+  it('converts polar angle to elevation without changing the distance', () => {
+    const phi = THREE.MathUtils.degToRad(37);
+    const actual = calculatePositionFromSphericalCoordinates({
+      distance: 8,
+      horizontalAngle: THREE.MathUtils.degToRad(23),
+      verticalAngle: Math.PI / 2 - phi,
+      up: new THREE.Vector3(0, 1, 0),
+    });
+
+    expect(actual.length()).toBeCloseTo(8, 10);
+    expect(actual.y).toBeCloseTo(8 * Math.cos(phi), 10);
+  });
+});
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -57,6 +89,54 @@ function defaultPerspective(
   };
 }
 
+class TestCameraControls {
+  public enabled = true;
+
+  public readonly target: THREE.Vector3;
+
+  public readonly setLookAt = vi.fn((...args: [number, number, number, number, number, number, boolean?]) => {
+    const [positionX, positionY, positionZ, targetX, targetY, targetZ] = args;
+    this.camera.position.set(positionX, positionY, positionZ);
+    this.target.set(targetX, targetY, targetZ);
+    this.distance = this.camera.position.distanceTo(this.target);
+    this.camera.lookAt(this.target);
+  });
+
+  // oxlint-disable-next-line @typescript-eslint/parameter-properties -- `erasableSyntaxOnly` forbids constructor parameter properties in Vitest specs
+  private readonly camera: THREE.PerspectiveCamera;
+
+  private distance: number;
+
+  public constructor(camera: THREE.PerspectiveCamera, target = new THREE.Vector3(0, 0, 0)) {
+    this.camera = camera;
+    this.target = target.clone();
+    this.distance = camera.position.distanceTo(this.target);
+  }
+
+  public getTarget(target: THREE.Vector3): THREE.Vector3 {
+    return target.copy(this.target);
+  }
+
+  public getDistance(): number {
+    return this.distance;
+  }
+
+  public update(): void {
+    const direction = this.camera.position.clone().sub(this.target);
+    if (direction.lengthSq() < tanEpsilon) {
+      return;
+    }
+
+    this.camera.position.copy(this.target).add(direction.normalize().multiplyScalar(this.distance));
+    this.camera.lookAt(this.target);
+  }
+}
+
+function projectedScaleAtTarget(camera: THREE.PerspectiveCamera, target: THREE.Vector3): number {
+  const distance = camera.position.distanceTo(target);
+  return camera.zoom / (distance * Math.tan(THREE.MathUtils.DEG2RAD * camera.fov * 0.5));
+}
+
 // ── computeViewFittingZoom ──────────────────────────────────────────────────
 
 describe('computeViewFittingZoom', () => {
@@ -77,6 +157,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: tallBox,
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -101,6 +182,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: flatBox,
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -123,6 +205,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: makeBox(new THREE.Vector3(0, 0, 0), halfExtent, halfExtent, halfExtent),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -142,6 +225,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: box,
         fovDeg: fov,
         aspectRatio: 16 / 9,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -151,6 +235,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: box,
         fovDeg: fov,
         aspectRatio: 9 / 16,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -167,6 +252,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: wideBox,
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -189,6 +275,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: tallBox,
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -198,6 +285,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: tallBox,
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -216,6 +304,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: makeBox(new THREE.Vector3(0, 0, 0), halfExtent, halfExtent, halfExtent),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -226,10 +315,25 @@ describe('computeViewFittingZoom', () => {
         boundingBox: makeBox(offset.clone(), halfExtent, halfExtent, halfExtent),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
       expect(offCenterZoom).toBeCloseTo(centeredZoom, 5);
+    });
+
+    it('agrees with the Rust fit for the shared asymmetric fixture', () => {
+      const zoom = computeViewFittingZoom({
+        cameraPosition: new THREE.Vector3(6, 7, 8),
+        target: new THREE.Vector3(1, -2, 0.5),
+        boundingBox: new THREE.Box3(new THREE.Vector3(-3, -1, -2), new THREE.Vector3(4, 5, 3)),
+        fovDeg: 47,
+        aspectRatio: 4 / 3,
+        up: new THREE.Vector3(0, 0, 1),
+        paddingFactor: 0.9,
+      });
+
+      expect(zoom).toBeCloseTo(0.488_220_08, 6);
     });
   });
 
@@ -241,6 +345,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: makeBox(new THREE.Vector3(0, 0, 0), 1, 1, 1),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
       };
 
       const zoomFull = computeViewFittingZoom({
@@ -262,6 +367,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: makeBox(new THREE.Vector3(0, 0, 0), 1, 1, 1),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
       };
 
       const zoomDefault = computeViewFittingZoom(baseParameters);
@@ -282,6 +388,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: makeBox(new THREE.Vector3(5, 5, 5), 1, 1, 1),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
       });
 
       expect(zoom).toBe(1);
@@ -294,6 +401,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0)),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
       });
 
       expect(zoom).toBe(1);
@@ -306,6 +414,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: makeBox(new THREE.Vector3(0, 0, 0), 2, 3, 1),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -321,6 +430,7 @@ describe('computeViewFittingZoom', () => {
         boundingBox: makeBox(new THREE.Vector3(0, 0, 0), 1, 1, 5),
         fovDeg: fov,
         aspectRatio: squareAspect,
+        up: new THREE.Vector3(0, 1, 0),
         paddingFactor: 1,
       });
 
@@ -328,6 +438,55 @@ describe('computeViewFittingZoom', () => {
       // Should still produce a valid positive zoom based on the visible corners.
       expect(zoom).toBeGreaterThan(0);
       expect(Number.isFinite(zoom)).toBe(true);
+    });
+
+    it.each([
+      ['vertical', new THREE.Box3(new THREE.Vector3(0, -2, 0), new THREE.Vector3(0, 2, 0))],
+      ['horizontal', new THREE.Box3(new THREE.Vector3(-2, 0, 0), new THREE.Vector3(2, 0, 0))],
+    ])('should fit a %s line by its non-degenerate projected axis', (_name, boundingBox) => {
+      const zoom = computeViewFittingZoom({
+        cameraPosition: new THREE.Vector3(0, 0, 10),
+        target: new THREE.Vector3(),
+        boundingBox,
+        fovDeg: fov,
+        aspectRatio: 1,
+        up: new THREE.Vector3(0, 1, 0),
+        paddingFactor: 1,
+      });
+
+      expect(zoom).toBeCloseTo((10 * Math.tan(THREE.MathUtils.degToRad(fov / 2))) / 2, 5);
+    });
+
+    it('should use the explicit non-default up axis', () => {
+      const zoom = computeViewFittingZoom({
+        cameraPosition: new THREE.Vector3(0, 0, 10),
+        target: new THREE.Vector3(),
+        boundingBox: makeBox(new THREE.Vector3(), 2, 1, 0),
+        fovDeg: fov,
+        aspectRatio: 1,
+        up: new THREE.Vector3(1, 0, 0),
+        paddingFactor: 1,
+      });
+
+      expect(zoom).toBeCloseTo((10 * Math.tan(THREE.MathUtils.degToRad(fov / 2))) / 2, 5);
+    });
+
+    it.each([
+      ['zero FOV', 0, 1],
+      ['invalid FOV', Number.NaN, 1],
+      ['zero aspect', fov, 0],
+      ['invalid aspect', fov, Number.NaN],
+    ])('should use the safe fallback for %s', (_name, fovDeg, aspectRatio) => {
+      expect(
+        computeViewFittingZoom({
+          cameraPosition: new THREE.Vector3(0, 0, 10),
+          target: new THREE.Vector3(),
+          boundingBox: makeBox(new THREE.Vector3(), 1, 1, 1),
+          fovDeg,
+          aspectRatio,
+          up: new THREE.Vector3(0, 1, 0),
+        }),
+      ).toBe(1);
     });
   });
 });
@@ -355,6 +514,54 @@ describe('updateCameraFov', () => {
     const newFov = camera.fov;
     const expectedDistance = calculateFovDistanceCompensation(oldFov, newFov, oldDistance);
     expect(camera.position.length()).toBeCloseTo(expectedDistance, 5);
+  });
+
+  it('should maintain projected size after CameraControls updates the next frame', () => {
+    const camera = createTestCamera(54, 100);
+    const target = new THREE.Vector3(0, 0, 0);
+    const controls = new TestCameraControls(camera, target);
+    const invalidate = vi.fn();
+    const scaleBefore = projectedScaleAtTarget(camera, target);
+
+    updateCameraFov({
+      camera,
+      cameraFovAngle: 2,
+      invalidate,
+      controls,
+    });
+    controls.update();
+
+    expect(projectedScaleAtTarget(camera, target)).toBeCloseTo(scaleBefore, 8);
+  });
+
+  it('should compensate distance relative to an off-origin CameraControls target', () => {
+    const target = new THREE.Vector3(100, 50, -20);
+    const camera = createTestCamera(54, 100);
+    camera.position.copy(target).add(new THREE.Vector3(0, 0, 100));
+    camera.lookAt(target);
+    const controls = new TestCameraControls(camera, target);
+    const invalidate = vi.fn();
+    const oldDistance = camera.position.distanceTo(target);
+    const oldFov = camera.fov;
+    const directionBefore = camera.position.clone().sub(target).normalize();
+    const scaleBefore = projectedScaleAtTarget(camera, target);
+
+    updateCameraFov({
+      camera,
+      cameraFovAngle: 30,
+      invalidate,
+      controls,
+    });
+
+    const expectedDistance = calculateFovDistanceCompensation(oldFov, camera.fov, oldDistance);
+    const directionAfter = camera.position.clone().sub(target).normalize();
+
+    expect(camera.position.distanceTo(target)).toBeCloseTo(expectedDistance, 5);
+    expect(directionAfter.x).toBeCloseTo(directionBefore.x, 10);
+    expect(directionAfter.y).toBeCloseTo(directionBefore.y, 10);
+    expect(directionAfter.z).toBeCloseTo(directionBefore.z, 10);
+    expect(projectedScaleAtTarget(camera, target)).toBeCloseTo(scaleBefore, 8);
+    expect(camera.position.length()).not.toBeCloseTo(expectedDistance, 5);
   });
 
   it('should preserve camera direction after FOV change', () => {
@@ -424,8 +631,10 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 100,
       geometryCenter: center,
+      geometryBounds: makeBox(center, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
@@ -445,8 +654,10 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 100,
       geometryCenter: origin,
+      geometryBounds: makeBox(origin, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 45,
@@ -455,7 +666,7 @@ describe('resetCamera', () => {
     expect(camera.fov).toBeCloseTo(calculateFovFromAngle(45), 10);
   });
 
-  it('should set zoom from perspective.zoomLevel', () => {
+  it('should use perspective.zoomLevel to select distance before final fitting', () => {
     const camera = createTestCamera();
     const invalidate = vi.fn();
     const setSceneRadius = vi.fn();
@@ -464,14 +675,22 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 100,
       geometryCenter: origin,
+      geometryBounds: makeBox(origin, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective({ zoomLevel: 2.5 }),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
     });
 
-    expect(camera.zoom).toBe(2.5);
+    const effectiveFov =
+      THREE.MathUtils.RAD2DEG * 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / 2.5);
+    const expectedDistance =
+      100 * defaultPerspective().offsetRatio * calculateFovDistanceCompensation(60, effectiveFov, 1);
+
+    expect(camera.position.distanceTo(origin)).toBeCloseTo(expectedDistance, 5);
+    expect(camera.zoom).not.toBe(2.5);
   });
 
   it('should look at geometry center, not origin', () => {
@@ -484,8 +703,10 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 100,
       geometryCenter: center,
+      geometryBounds: makeBox(center, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
@@ -512,8 +733,10 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 100,
       geometryCenter: center,
+      geometryBounds: makeBox(center, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
@@ -526,7 +749,43 @@ describe('resetCamera', () => {
     expect(controls.update).toHaveBeenCalledOnce();
   });
 
-  it('should increase distance for portrait viewport aspect', () => {
+  it('should sync CameraControls up before setLookAt during reset', () => {
+    const camera = createTestCamera();
+    camera.up.set(1, 0, 0);
+    const center = new THREE.Vector3(10, 20, 30);
+    const invalidate = vi.fn();
+    const setSceneRadius = vi.fn();
+    const calls: string[] = [];
+    const controls = {
+      getTarget: (target: THREE.Vector3): THREE.Vector3 => target.copy(center),
+      updateCameraUp: vi.fn(() => {
+        calls.push('updateCameraUp');
+      }),
+      setLookAt: vi.fn(() => {
+        calls.push('setLookAt');
+      }),
+    } satisfies CameraControlSurface;
+
+    resetCamera({
+      camera,
+      geometryRadius: 100,
+      geometryCenter: center,
+      geometryBounds: makeBox(center, 100, 100, 100),
+      rotation: defaultRotation,
+      perspective: defaultPerspective(),
+      fitMargin: 0.1,
+      setSceneRadius,
+      invalidate,
+      cameraFovAngle: 60,
+      controls,
+    });
+
+    expect(controls.updateCameraUp).toHaveBeenCalledOnce();
+    expect(controls.setLookAt).toHaveBeenCalledOnce();
+    expect(calls).toEqual(['updateCameraUp', 'setLookAt']);
+  });
+
+  it('should keep sphere-derived distance stable across viewport aspects', () => {
     const camera1 = createTestCamera();
     const camera2 = createTestCamera();
     const invalidate = vi.fn();
@@ -537,8 +796,10 @@ describe('resetCamera', () => {
       camera: camera1,
       geometryRadius: 100,
       geometryCenter: origin,
+      geometryBounds: makeBox(origin, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
@@ -550,8 +811,10 @@ describe('resetCamera', () => {
       camera: camera2,
       geometryRadius: 100,
       geometryCenter: origin,
+      geometryBounds: makeBox(origin, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
@@ -560,7 +823,66 @@ describe('resetCamera', () => {
 
     const distanceLandscape = camera1.position.distanceTo(origin);
     const distancePortrait = camera2.position.distanceTo(origin);
-    expect(distancePortrait).toBeGreaterThan(distanceLandscape);
+    expect(distancePortrait).toBeCloseTo(distanceLandscape, 10);
+    expect(camera1.zoom).not.toBeCloseTo(camera2.zoom, 10);
+  });
+
+  it('should use projected corners and fitMargin for final zoom', () => {
+    const camera = createTestCamera();
+    const bounds = makeBox(origin, 4, 2, 1);
+    const invalidate = vi.fn();
+    const setSceneRadius = vi.fn();
+
+    resetCamera({
+      camera,
+      geometryRadius: bounds.getBoundingSphere(new THREE.Sphere()).radius,
+      geometryCenter: origin,
+      geometryBounds: bounds,
+      rotation: defaultRotation,
+      perspective: defaultPerspective(),
+      fitMargin: 0.1,
+      setSceneRadius,
+      invalidate,
+      cameraFovAngle: 60,
+      viewportAspect: 4 / 3,
+    });
+
+    expect(camera.zoom).toBeCloseTo(
+      computeViewFittingZoom({
+        cameraPosition: camera.position,
+        target: origin,
+        boundingBox: bounds,
+        fovDeg: camera.fov,
+        aspectRatio: 4 / 3,
+        up: camera.up,
+        paddingFactor: 0.9,
+      }),
+      10,
+    );
+  });
+
+  it('should keep exact fitting active when fitMargin is zero', () => {
+    const bounds = makeBox(origin, 4, 2, 1);
+    const cameras = [createTestCamera(), createTestCamera()];
+
+    for (const [index, fitMargin] of [0, 0.1].entries()) {
+      resetCamera({
+        camera: cameras[index]!,
+        geometryRadius: bounds.getBoundingSphere(new THREE.Sphere()).radius,
+        geometryCenter: origin,
+        geometryBounds: bounds,
+        rotation: defaultRotation,
+        perspective: defaultPerspective(),
+        fitMargin,
+        setSceneRadius: vi.fn(),
+        invalidate: vi.fn(),
+        cameraFovAngle: 60,
+        viewportAspect: 4 / 3,
+      });
+    }
+
+    expect(cameras[0]!.zoom).not.toBe(1);
+    expect(cameras[1]!.zoom).toBeCloseTo(cameras[0]!.zoom * 0.9, 10);
   });
 
   it('should maintain current direction when enableConfiguredAngles is false', () => {
@@ -575,8 +897,10 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 100,
       geometryCenter: origin,
+      geometryBounds: makeBox(origin, 100, 100, 100),
       rotation: defaultRotation,
-      perspective: defaultPerspective(),
+      perspective: defaultPerspective({ zoomLevel: 2 }),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
@@ -587,6 +911,12 @@ describe('resetCamera', () => {
     expect(directionAfter.x).toBeCloseTo(directionBefore.x, 5);
     expect(directionAfter.y).toBeCloseTo(directionBefore.y, 5);
     expect(directionAfter.z).toBeCloseTo(directionBefore.z, 5);
+    const effectiveFov =
+      THREE.MathUtils.RAD2DEG * 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / 2);
+    expect(camera.position.distanceTo(origin)).toBeCloseTo(
+      100 * defaultPerspective().offsetRatio * calculateFovDistanceCompensation(60, effectiveFov, 1),
+      5,
+    );
   });
 
   it('should default geometry radius to 1000 when radius is 0', () => {
@@ -598,8 +928,10 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 0,
       geometryCenter: origin,
+      geometryBounds: makeBox(origin, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
@@ -621,8 +953,10 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 100,
       geometryCenter: origin,
+      geometryBounds: makeBox(origin, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,
@@ -642,8 +976,10 @@ describe('resetCamera', () => {
       camera,
       geometryRadius: 42,
       geometryCenter: origin,
+      geometryBounds: makeBox(origin, 100, 100, 100),
       rotation: defaultRotation,
       perspective: defaultPerspective(),
+      fitMargin: 0.1,
       setSceneRadius,
       invalidate,
       cameraFovAngle: 60,

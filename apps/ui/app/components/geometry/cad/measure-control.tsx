@@ -7,9 +7,7 @@ import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 export function MeasureControl(): React.JSX.Element {
   const graphicsRef = useGraphics();
   const isMeasureActive = useGraphicsSelector((state) => state.matches({ operational: 'measure' }));
-  const is2dGeometry = useGraphicsSelector((state) =>
-    state.context.geometries.some((geometry) => geometry.format === 'svg'),
-  );
+  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
 
   const handleClick = (): void => {
     graphicsRef.send({

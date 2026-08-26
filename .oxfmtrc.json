@@ -12,7 +12,7 @@
   "sortPackageJson": false,
   "ignorePatterns": [
     "**/dist/**",
-    "/coverage",
+    "/out",
     "/.nx/cache",
     "/.nx/workspace-data",
     ".cursor/plans/**",
@@ -20,7 +20,7 @@
     "/tarballs/**",
     "/experiments/**",
     "/packages/runtime/occt-reports/**",
-    "/packages/converter/src/assets/**",
+    "/libs/converter/src/assets/**",
     "**/generated/**",
     "**/assets/**",
     "**/public/*.js",

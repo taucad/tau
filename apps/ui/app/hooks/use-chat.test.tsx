@@ -51,6 +51,8 @@ const harness = vi.hoisted(() => ({
   setMessageEdit: vi.fn(),
   clearMessageEdit: vi.fn(),
   getChat: vi.fn(),
+  consumeChatStartupRequest: vi.fn(),
+  commitCancelledDraftRestore: vi.fn(),
 }));
 
 function getFake(chatId: string): FakeChat {
@@ -149,6 +151,8 @@ vi.mock('#hooks/use-project-manager.js', () => ({
     setMessageEdit: harness.setMessageEdit,
     clearMessageEdit: harness.clearMessageEdit,
     getChat: harness.getChat,
+    consumeChatStartupRequest: harness.consumeChatStartupRequest,
+    commitCancelledDraftRestore: harness.commitCancelledDraftRestore,
   }),
 }));
 
@@ -193,8 +197,8 @@ function makeUserMessage(id: string, text: string): MyUIMessage {
 }
 
 /**
- * `loadChatActor` auto-regenerates when the trailing user message is
- * `pending`, which would unintentionally clear `persistedError` mid-test.
+ * `loadChatActor` heals plain trailing pending user messages back into the
+ * composer, which would unintentionally clear `persistedError` mid-test.
  * Tests that pre-load a chat use this `success`-status variant instead.
  */
 function makeLoadedUserMessage(id: string, text: string): MyUIMessage {
@@ -275,6 +279,8 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     harness.patchChat.mockReset().mockResolvedValue(undefined);
     harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
+    harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
+    harness.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -573,11 +579,11 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
   });
 
   // ===========================================================================
-  // Pure-stop cancellation: stopping with no queued request marks the trailing
-  // pending user message as `cancelled` so reload doesn't auto-regenerate.
+  // Pure-stop cancellation: stopping with no queued request and no assistant
+  // content restores the trailing user prompt to the composer draft.
   // ===========================================================================
 
-  it('marks the trailing pending user message as cancelled on a pure stop', async () => {
+  it('restores the trailing pending user message to draft on a pure stop', async () => {
     const pending = makeUserMessage('msg_pending', 'in flight');
     const { result } = renderProvider();
 
@@ -602,11 +608,15 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     });
     await Promise.resolve();
 
-    // Store's `applyStoppedRequest` listener marks the trailing pending
-    // user message as `cancelled` and writes back to chat.messages.
-    expect(fake.messages).toHaveLength(1);
-    expect(fake.messages[0]!.metadata?.status).toBe('cancelled');
-    expect(result.current.context.persistenceActorRef!.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
+    // Store's `restoreCancelledDraft` listener removes the aborted turn
+    // from chat.messages and hands the user prompt back to the composer.
+    await waitFor(() => {
+      expect(fake.messages).toEqual([]);
+      expect(result.current.context.draftActorRef.getSnapshot().context.draftText).toBe('in flight');
+      expect(result.current.context.persistenceActorRef!.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(
+        true,
+      );
+    });
   });
 
   // ===========================================================================
@@ -854,6 +864,8 @@ describe('hooks resolution rules', () => {
     harness.patchChat.mockReset().mockResolvedValue(undefined);
     harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
+    harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
+    harness.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {

@@ -2,16 +2,11 @@
  * `defineRuntimeTransport` — author-facing factory for runtime
  * transports.
  *
- * Authors supply paired `client` / `host` factories plus optional Zod
- * schemas for the consumer-facing options shape; the function returns
+ * Authors supply a client factory plus a Zod schema for the
+ * consumer-facing options shape; the function returns
  * a **callable** `(options) => TransportPlugin` consumed by
- * `createRuntimeClient`. The `host` factory is for type inference and
- * co-location with the client only — consumers reach it via standalone
- * exports such as {@link webWorkerHost}.
- *
- * Three overloads — no schemas, client-only schema, and both
- * schemas — mirror the `createKernelPlugin` overload pattern that
- * handles TypeScript's partial-inference limitation.
+ * `createRuntimeClient`. Hosts remain standalone process-specific exports
+ * such as {@link webWorkerHost}; they are not part of a renderer/client graph.
  *
  * @public
  */
@@ -19,12 +14,8 @@
 import type { z } from 'zod';
 import type { RpcProtocol } from '@taucad/rpc';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
-import type {
-  RuntimeTransportClient,
-  RuntimeTransportHost,
-  TransportDescriptor,
-  TransportPlugin,
-} from '#transport/runtime-transport.types.js';
+import type { RuntimeTransportClient, TransportPlugin } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 
 /** */
 type ClientLike<
@@ -58,32 +49,8 @@ const synthTransportCallable = <
   });
 };
 
-/* ----- Overloads (most-specific first) ----------------------- */
-
 /**
- * Define a transport whose client and host options are both inferred
- * from Zod schemas.
- *
- * @public
- */
-export function defineRuntimeTransport<
-  const Id extends string,
-  ClientOptionsSchema extends z.ZodType,
-  HostOptionsSchema extends z.ZodType,
-  Protocol extends RpcProtocol = RuntimeProtocol,
-  BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
->(definition: {
-  readonly id: Id;
-  readonly protocol?: Protocol;
-  readonly clientOptionsSchema: ClientOptionsSchema;
-  readonly hostOptionsSchema: HostOptionsSchema;
-  readonly client: ClientLike<Protocol, BindingsExtra, Id, z.input<ClientOptionsSchema>>;
-  readonly host: (options: z.input<HostOptionsSchema>) => RuntimeTransportHost<Protocol, BindingsExtra, Id>;
-}): (options: z.input<ClientOptionsSchema>) => TransportPlugin<Protocol, BindingsExtra, Id>;
-
-/**
- * Define a transport whose client options are inferred from a Zod
- * schema; the host accepts opaque `Record<string, unknown>`.
+ * Define a transport whose client options are inferred from a Zod schema.
  *
  * @public
  */
@@ -97,7 +64,6 @@ export function defineRuntimeTransport<
   readonly protocol?: Protocol;
   readonly clientOptionsSchema: ClientOptionsSchema;
   readonly client: ClientLike<Protocol, BindingsExtra, Id, z.input<ClientOptionsSchema>>;
-  readonly host: (options: Readonly<Record<string, unknown>>) => RuntimeTransportHost<Protocol, BindingsExtra, Id>;
 }): (options: z.input<ClientOptionsSchema>) => TransportPlugin<Protocol, BindingsExtra, Id>;
 
 /* ----- Implementation ---------------------------------------- */
@@ -107,7 +73,7 @@ export function defineRuntimeTransport<
 /* oxlint-disable @typescript-eslint/explicit-module-boundary-types -- runtime impl: type is provided by the public overloads above */
 
 /**
- * Strips the schema fields (consumed only at type-inference time and
+ * Strips the schema and protocol fields (consumed only at type-inference time and
  * by tooling) and returns a callable `(options) =>
  * {@link TransportPlugin}`.
  *
@@ -117,10 +83,7 @@ export function defineRuntimeTransport<
  * @public
  */
 export function defineRuntimeTransport(definition: any): any {
-  const { clientOptionsSchema: _cs, hostOptionsSchema: _hs, protocol: _p, host: _h, ...rest } = definition;
-
-  /* `host` is intentionally dropped at runtime — consumer host entry scripts
-   * import standalone {@link RuntimeTransportHost} factories from sibling modules. */
+  const { clientOptionsSchema: _cs, protocol: _p, ...rest } = definition;
 
   /* oxlint-disable @typescript-eslint/consistent-type-assertions -- split definition for synth */
   return synthTransportCallable(rest as { readonly id: string; readonly client: ClientLike<any, any, any, any> });

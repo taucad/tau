@@ -9,6 +9,19 @@ const ruleTester = new RuleTester({
   },
 });
 
+const publicTypescriptBlock = (code) => `
+/**
+ * @public
+ * \`\`\`typescript
+${code
+  .split('\n')
+  .map((line) => ` * ${line}`)
+  .join('\n')}
+ * \`\`\`
+ */
+export const foo = 1;
+`;
+
 describe('validate-jsdoc-codeblocks', () => {
   describe('language tag requirement', () => {
     it('should report codeblocks without a language tag', () => {
@@ -174,6 +187,311 @@ export const foo = 1;
 export const foo = 1;
 `,
             errors: [{ messageId: 'invalidCodeblock' }, { messageId: 'invalidCodeblock' }],
+          },
+        ],
+      });
+    });
+  });
+
+  describe('duplicate imports', () => {
+    it('should report same-kind imports from the same module', () => {
+      ruleTester.run('validate-jsdoc-codeblocks', validateJsdocCodeblocksRule, {
+        valid: [
+          {
+            name: 'same-module imports are co-located',
+            code: `
+/**
+ * @public
+ * \`\`\`typescript
+ * import { createRuntimeClient, defineRuntime } from '@taucad/runtime';
+ * \`\`\`
+ */
+export const foo = 1;
+`,
+          },
+          {
+            name: 'type and value imports remain separate',
+            code: `
+/**
+ * @public
+ * \`\`\`typescript
+ * import type { ParsedPath } from 'node:path';
+ * import { parse } from 'node:path';
+ * \`\`\`
+ */
+export const foo = 1;
+`,
+          },
+        ],
+        invalid: [
+          {
+            name: 'screenshot case imports the runtime root twice',
+            code: `
+/**
+ * @public
+ * \`\`\`typescript
+ * import { createRuntimeClient } from '@taucad/runtime';
+ * import { defineRuntime } from '@taucad/runtime';
+ * \`\`\`
+ */
+export const foo = 1;
+`,
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage: "import/no-duplicates: '@taucad/runtime' imported multiple times.",
+                },
+              },
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage: "import/no-duplicates: '@taucad/runtime' imported multiple times.",
+                },
+              },
+            ],
+          },
+        ],
+      });
+    });
+  });
+
+  describe('syntax-only lint profile', () => {
+    it('should apply the selected Tau rules with their existing options', () => {
+      ruleTester.run('validate-jsdoc-codeblocks', validateJsdocCodeblocksRule, {
+        valid: [
+          {
+            name: 'type-only imports use a top-level import type declaration',
+            code: publicTypescriptBlock("import type { ParsedPath } from 'node:path';\nexport type Path = ParsedPath;"),
+          },
+          {
+            name: 'imports precede executable statements',
+            code: publicTypescriptBlock("import { parse } from 'node:path';\nparse('value');"),
+          },
+          {
+            name: 'const replaces var and never-reassigned let',
+            code: publicTypescriptBlock('const value = 1;\nconsole.log(value);'),
+          },
+          {
+            name: 'reassigned bindings remain let',
+            code: publicTypescriptBlock('let value = 1;\nvalue += 1;'),
+          },
+          {
+            name: 'control flow uses braces',
+            code: publicTypescriptBlock("if (true) {\n  console.log('value');\n}"),
+          },
+          {
+            name: 'equality is strict',
+            code: publicTypescriptBlock('const value: string | undefined = undefined;\nvalue === undefined;'),
+          },
+          {
+            name: 'unknown replaces explicit any',
+            code: publicTypescriptBlock('const value: unknown = 1;\nconsole.log(value);'),
+          },
+          {
+            name: 'type assertions use as syntax',
+            code: publicTypescriptBlock("const value = 'value' as string;\nconsole.log(value);"),
+          },
+          {
+            name: 'Node built-ins use the node protocol',
+            code: publicTypescriptBlock("import { join } from 'node:path';\njoin('directory', 'file');"),
+          },
+        ],
+        invalid: [
+          {
+            name: 'value import used only as a type',
+            code: publicTypescriptBlock("import { ParsedPath } from 'node:path';\nexport type Path = ParsedPath;"),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage:
+                    '@typescript-eslint/consistent-type-imports: All imports in the declaration are only used as types. Use `import type`.',
+                },
+              },
+            ],
+          },
+          {
+            name: 'inline type import specifier',
+            code: publicTypescriptBlock("import { type ParsedPath } from 'node:path';\nexport type Path = ParsedPath;"),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage:
+                    'import/consistent-type-specifier-style: Prefer using a top-level type-only import instead of inline type specifiers.',
+                },
+              },
+            ],
+          },
+          {
+            name: 'import after executable statement',
+            code: publicTypescriptBlock("const value = 1;\nimport { parse } from 'node:path';\nparse(String(value));"),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: { errorMessage: 'import/first: Import in body of module; reorder to top.' },
+              },
+            ],
+          },
+          {
+            name: 'var declaration',
+            code: publicTypescriptBlock('var value = 1;\nconsole.log(value);'),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: { errorMessage: 'no-var: Unexpected var, use let or const instead.' },
+                line: 5,
+              },
+            ],
+          },
+          {
+            name: 'never-reassigned let declaration',
+            code: publicTypescriptBlock('let value = 1;\nconsole.log(value);'),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: { errorMessage: "prefer-const: 'value' is never reassigned. Use 'const' instead." },
+              },
+            ],
+          },
+          {
+            name: 'unbraced control flow',
+            code: publicTypescriptBlock("if (true) console.log('value');"),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: { errorMessage: "curly: Expected { after 'if' condition." },
+              },
+            ],
+          },
+          {
+            name: 'coercive equality',
+            code: publicTypescriptBlock('const value: string | undefined = undefined;\nvalue == null;'),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: { errorMessage: "eqeqeq: Expected '===' and instead saw '=='." },
+              },
+            ],
+          },
+          {
+            name: 'explicit any annotation',
+            code: publicTypescriptBlock('const value: any = 1;\nconsole.log(value);'),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage: '@typescript-eslint/no-explicit-any: Unexpected any. Specify a different type.',
+                },
+              },
+            ],
+          },
+          {
+            name: 'angle-bracket type assertion',
+            code: publicTypescriptBlock("const value = <string>'value';\nconsole.log(value);"),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage: "@typescript-eslint/consistent-type-assertions: Use 'as string' instead of '<string>'.",
+                },
+              },
+            ],
+          },
+          {
+            name: 'bare Node built-in import',
+            code: publicTypescriptBlock("import { parse } from 'path';\nparse('value');"),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage: 'unicorn/prefer-node-protocol: Prefer `node:path` over `path`.',
+                },
+              },
+            ],
+          },
+        ],
+      });
+    });
+  });
+
+  describe('type-aware lint profile', () => {
+    it('should apply the selected tsgolint rules with their existing options', () => {
+      ruleTester.run('validate-jsdoc-codeblocks', validateJsdocCodeblocksRule, {
+        valid: [
+          {
+            name: 'promise is explicitly ignored',
+            code: publicTypescriptBlock('void Promise.resolve();'),
+          },
+          {
+            name: 'promise is awaited before use as a condition',
+            code: publicTypescriptBlock(
+              'const check = async () => {\n  if (await Promise.resolve(true)) {}\n};\nvoid check();',
+            ),
+          },
+          {
+            name: 'Error object is thrown',
+            code: publicTypescriptBlock("throw new Error('failure');"),
+          },
+          {
+            name: 'non-deprecated declaration is called',
+            code: publicTypescriptBlock('const currentApi = () => {};\ncurrentApi();'),
+          },
+        ],
+        invalid: [
+          {
+            name: 'floating promise',
+            code: publicTypescriptBlock('Promise.resolve();'),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage: 'no-floating-promises: Promises must be awaited, add void operator to ignore.',
+                },
+              },
+            ],
+          },
+          {
+            name: 'promise used as a condition',
+            code: publicTypescriptBlock('if (Promise.resolve(true)) {}'),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage:
+                    "TS2801: This condition will always return true since this 'Promise<boolean>' is always defined.",
+                },
+              },
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage: 'no-misused-promises: Expected non-Promise value in a boolean conditional.',
+                },
+              },
+            ],
+          },
+          {
+            name: 'non-error value is thrown',
+            code: publicTypescriptBlock("throw 'failure';"),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: { errorMessage: 'only-throw-error: Expected an error object to be thrown.' },
+              },
+            ],
+          },
+          {
+            name: 'deprecated Node declaration is called',
+            code: publicTypescriptBlock("import { parse } from 'node:url';\nparse('https://example.com');"),
+            errors: [
+              {
+                messageId: 'invalidCodeblock',
+                data: {
+                  errorMessage: 'no-deprecated: `parse` is deprecated. Use the WHATWG URL API instead.',
+                },
+              },
+            ],
           },
         ],
       });

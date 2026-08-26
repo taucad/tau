@@ -1,5 +1,5 @@
 import { defineConfig } from 'tsdown';
-import type { Options } from 'tsdown';
+import type { UserConfig } from 'tsdown';
 
 /*
  * Packages that must remain external from the CLI bin bundle. Bundling them
@@ -14,50 +14,43 @@ const cliExternals: Array<RegExp | string> = [
   /^@taucad\//,
   'replicad',
   'replicad-opencascadejs',
-  'opencascade.js',
+  'libcascade',
   'manifold-3d',
   '@kittycad/lib',
   'esbuild-wasm',
-  'openscad-wasm-prebuilt',
+  '@taulabs/openrscad-engine',
   'jszip',
 ];
 
-const baseConfig: Options = {
+const baseConfig: UserConfig = {
   entry: ['src/index.ts'],
   sourcemap: false,
-  clean: true,
+  clean: ['dist'],
   dts: true,
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };
 
-const cjsConfig: Options = {
-  ...baseConfig,
-  format: 'cjs',
-  outDir: 'dist/cjs',
-  dts: false,
-};
-
-const esmConfig: Options = {
+const packageConfig: UserConfig = {
   ...baseConfig,
   format: 'esm',
-  outDir: 'dist/esm',
+  outDir: 'dist',
 };
 
-const cliConfig: Options = {
+const cliConfig: UserConfig = {
   entry: { taucad: 'src/bin.ts' },
   format: 'esm',
   outDir: 'dist/bin',
   platform: 'node',
   target: 'node22',
-  clean: true,
+  clean: ['dist/bin'],
   dts: false,
   minify: false,
   sourcemap: false,
   tsconfig: 'tsconfig.build.json',
-  external: cliExternals,
+  deps: { neverBundle: cliExternals },
   banner: { js: '#!/usr/bin/env node' },
 };
 
-export default defineConfig([esmConfig, cjsConfig, cliConfig]);
+export default defineConfig([packageConfig, cliConfig]);

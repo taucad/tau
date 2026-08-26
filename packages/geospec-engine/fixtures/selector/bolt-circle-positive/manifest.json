@@ -1,0 +1,26 @@
+{
+  "family": "selector",
+  "fixture": "selector.bolt-circle-positive",
+  "generator": {
+    "script": "scripts/selector/bolt-circle/main.ts",
+    "parameters": {}
+  },
+  "selectors": [
+    {
+      "selector": {
+        "kind": "group",
+        "name": "flange.boltHole",
+        "expect": {
+          "exactly": 8
+        }
+      },
+      "status": "resolved",
+      "entityCount": 8
+    },
+    {
+      "selector": "flange.boltHole[*]",
+      "status": "resolved",
+      "entityCount": 8
+    }
+  ]
+}

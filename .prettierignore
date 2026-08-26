@@ -1,0 +1,5 @@
+# Byte-locked vitest file snapshots (toMatchFileSnapshot): the stored bytes are
+# the test's spec — formatters must never rewrite them. oxfmt reads this file by
+# default (no --ignore-path needed).
+**/__evidence-snapshots__/
+**/__shader-snapshots__/

@@ -16,8 +16,13 @@
 
 import type * as Monaco from 'monaco-editor';
 import type { MonacoMarkerService } from '#lib/monaco-marker-service.js';
-import type { FileContentService, ContentChangeEvent } from '@taucad/fs-client/file-content-service';
+import type {
+  FileContentService,
+  ContentChangeEvent,
+  OutcomeChangeEvent,
+} from '@taucad/fs-client/file-content-service';
 import type { MonacoWorkspaceFs } from '#lib/monaco-workspace-fs/monaco-workspace-fs.types.js';
+import { canonicalWorkspacePath } from '#lib/monaco-workspace-fs/workspace-file-system-provider.js';
 import { workspaceRelativePathFromFileUri } from '#lib/monaco-workspace-fs/workspace-path-from-uri.js';
 import { getMonacoLanguage } from '#lib/monaco.constants.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
@@ -35,6 +40,17 @@ export type ServiceDiagnostics = {
   editorHeldCount: number;
   backgroundCount: number;
   currentModelCount: number;
+};
+
+export const createWorkspaceContentBinding = (modelService: MonacoModelService) => ({
+  refreshContent: (uri: Monaco.Uri): Promise<void> => modelService.refreshContent(uri),
+  applyContentChange: (event: ContentChangeEvent): void => modelService.applyContentChange(event),
+  applyOutcomeChange: (event: OutcomeChangeEvent): void => modelService.applyOutcomeChange(event),
+});
+
+type EditorModelSave = {
+  path: string;
+  completion: Promise<void>;
 };
 
 export class MonacoModelService {
@@ -57,6 +73,11 @@ export class MonacoModelService {
 
   /** Set of paths that have been touched in the current session */
   private readonly syncedPaths = new Set<string>();
+
+  /** Workspace path whose filesystem content is synchronously mutating a model. */
+  private currentFilesystemContentPath: string | undefined;
+
+  private readonly editorSaves = new Map<string, EditorModelSave>();
 
   /** Dev-mode metrics */
   private readonly metrics = {
@@ -88,6 +109,7 @@ export class MonacoModelService {
     this.editorHolds.clear();
     this.backgroundAccessTimes.clear();
     this.syncedPaths.clear();
+    this.editorSaves.clear();
 
     this.monaco = undefined;
     this.workspaceFs = undefined;
@@ -111,6 +133,7 @@ export class MonacoModelService {
     this.editorHolds.clear();
     this.backgroundAccessTimes.clear();
     this.syncedPaths.clear();
+    this.editorSaves.clear();
   }
 
   /**
@@ -190,7 +213,7 @@ export class MonacoModelService {
     }
 
     if (uri.scheme === 'file') {
-      const path = workspaceRelativePathFromFileUri(uri.path);
+      const path = canonicalWorkspacePath(uri.path);
       const result = await this.contentService.resolve(path);
       if (result.kind !== 'text') {
         model.dispose();
@@ -201,7 +224,7 @@ export class MonacoModelService {
         return;
       }
       const newContent = decodeTextFile(result.content);
-      this.applyNewContentToModel(model, newContent, this.editorHolds.has(path));
+      this.applyWorkspaceContentToModel(path, model, newContent);
       return;
     }
 
@@ -239,6 +262,56 @@ export class MonacoModelService {
     this.handleContentChange(event);
   }
 
+  /** Apply an authoritative content outcome produced by a reread. */
+  public applyOutcomeChange(event: OutcomeChangeEvent): void {
+    if (!this.monaco || this.editorSaves.has(event.path)) {
+      return;
+    }
+    const uri = this.createUri(event.path);
+    const model = this.monaco.editor.getModel(uri);
+    if (!model) {
+      return;
+    }
+    if (event.result.kind === 'text') {
+      this.applyWorkspaceContentToModel(event.path, model, decodeTextFile(event.result.content));
+      return;
+    }
+    model.dispose();
+    this.editorHolds.delete(event.path);
+    this.backgroundAccessTimes.delete(event.path);
+    this.syncedPaths.delete(event.path);
+    this.markerService?.removeUri(uri.toString());
+  }
+
+  /** Submit the latest Monaco value to the bounded editor-save queue. */
+  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- Callers compare the shared queue promise by identity.
+  public saveEditor(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
+    const { contentService } = this;
+    if (!contentService) {
+      return Promise.resolve();
+    }
+    const completion = contentService.saveEditor(path, data);
+    const existing = this.editorSaves.get(path);
+    if (existing?.completion === completion) {
+      return completion;
+    }
+    const state = existing ?? { path, completion };
+    state.path = path;
+    state.completion = completion;
+    this.editorSaves.set(path, state);
+    // async-iife: bootstrap — the returned completion remains the caller-owned durability signal.
+    void this.finalizeEditorSave(state, completion, contentService);
+    return completion;
+  }
+
+  /**
+   * Whether the current synchronous Monaco callback for `path` was caused by
+   * filesystem content already being applied by this service.
+   */
+  public isApplyingFilesystemContent(path: string): boolean {
+    return this.currentFilesystemContentPath === path;
+  }
+
   /**
    * Get diagnostics for dev-mode observability.
    */
@@ -249,6 +322,28 @@ export class MonacoModelService {
       backgroundCount: this.backgroundAccessTimes.size,
       currentModelCount: this.monaco?.editor.getModels().length ?? 0,
     };
+  }
+
+  private async finalizeEditorSave(
+    state: EditorModelSave,
+    completion: Promise<void>,
+    contentService: FileContentService,
+  ): Promise<void> {
+    let failed = false;
+    try {
+      await completion;
+    } catch {
+      failed = true;
+      // The caller owns persistence errors; this branch only maintains model state.
+    }
+    if (state.completion !== completion || this.editorSaves.get(state.path) !== state) {
+      return;
+    }
+    const currentPath = state.path;
+    this.editorSaves.delete(currentPath);
+    if (!failed) {
+      this.applyOutcomeChange({ path: currentPath, result: contentService.peekOutcome(currentPath) });
+    }
   }
 
   private registerEditorModel(path: string): void {
@@ -291,16 +386,30 @@ export class MonacoModelService {
         }
         break;
       }
+      case 'fileCopied': {
+        const cached = this.contentService?.peek(event.targetPath);
+        if (cached) {
+          this.applyWritten(event.targetPath, cached, 'user');
+        }
+        break;
+      }
       case 'deleted': {
         const uri = this.createUri(event.path);
         this.monaco.editor.getModel(uri)?.dispose();
         this.editorHolds.delete(event.path);
         this.backgroundAccessTimes.delete(event.path);
         this.syncedPaths.delete(event.path);
+        this.editorSaves.delete(event.path);
         this.markerService?.removeUri(uri.toString());
         break;
       }
       case 'renamed': {
+        const save = this.editorSaves.get(event.oldPath);
+        if (save !== undefined) {
+          this.editorSaves.delete(event.oldPath);
+          save.path = event.newPath;
+          this.editorSaves.set(event.newPath, save);
+        }
         const oldUri = this.createUri(event.oldPath);
         const newUri = this.createUri(event.newPath);
         const oldModel = this.monaco.editor.getModel(oldUri);
@@ -317,7 +426,7 @@ export class MonacoModelService {
         this.syncedPaths.delete(event.oldPath);
 
         const language = this.detectLanguage(event.newPath);
-        if (language && content) {
+        if (language && oldModel) {
           this.monaco.editor.createModel(content, language, newUri);
           this.trackModelCreated();
           this.syncedPaths.add(event.newPath);
@@ -331,14 +440,17 @@ export class MonacoModelService {
         break;
       }
       case 'directoryDeleted': {
+        this.deleteEditorSavesUnderPrefix(event.path);
         this.disposeModelsUnderPrefix(event.path);
         break;
       }
       case 'directoryRenamed': {
+        this.rekeyEditorSavesUnderPrefix(event.oldPath, event.newPath);
         this.migrateModelsUnderPrefix(event.oldPath, event.newPath);
         break;
       }
       case 'directoryCreated':
+      case 'directoryCopied':
       case 'read': {
         break;
       }
@@ -363,6 +475,30 @@ export class MonacoModelService {
       this.backgroundAccessTimes.delete(path);
       this.syncedPaths.delete(path);
       this.markerService?.removeUri(uri.toString());
+    }
+  }
+
+  private deleteEditorSavesUnderPrefix(directoryPath: string): void {
+    const prefix = directoryPath === '' ? '' : `${directoryPath}/`;
+    for (const path of this.editorSaves.keys()) {
+      if (path === directoryPath || path.startsWith(prefix)) {
+        this.editorSaves.delete(path);
+      }
+    }
+  }
+
+  private rekeyEditorSavesUnderPrefix(oldDirectoryPath: string, newDirectoryPath: string): void {
+    const oldPrefix = oldDirectoryPath === '' ? '' : `${oldDirectoryPath}/`;
+    const newPrefix = newDirectoryPath === '' ? '' : `${newDirectoryPath}/`;
+    for (const [oldPath, save] of this.editorSaves) {
+      if (oldPath !== oldDirectoryPath && !oldPath.startsWith(oldPrefix)) {
+        continue;
+      }
+      const newPath =
+        oldPath === oldDirectoryPath ? newDirectoryPath : `${newPrefix}${oldPath.slice(oldPrefix.length)}`;
+      this.editorSaves.delete(oldPath);
+      save.path = newPath;
+      this.editorSaves.set(newPath, save);
     }
   }
 
@@ -395,7 +531,7 @@ export class MonacoModelService {
     const existingModel = this.monaco.editor.getModel(uri);
 
     if (existingModel) {
-      this.applyNewContentToModel(existingModel, newContent, this.editorHolds.has(path));
+      this.applyWorkspaceContentToModel(path, existingModel, newContent);
     } else if (source === 'user') {
       const language = this.detectLanguage(path);
       if (language) {
@@ -415,6 +551,20 @@ export class MonacoModelService {
         this.syncedPaths.add(path);
         this.backgroundAccessTimes.set(path, Date.now());
       }
+    }
+  }
+
+  private applyWorkspaceContentToModel(
+    path: string,
+    existingModel: Monaco.editor.ITextModel,
+    newContent: string,
+  ): void {
+    const previousPath = this.currentFilesystemContentPath;
+    this.currentFilesystemContentPath = path;
+    try {
+      this.applyNewContentToModel(existingModel, newContent, this.editorHolds.has(path));
+    } finally {
+      this.currentFilesystemContentPath = previousPath;
     }
   }
 

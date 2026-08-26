@@ -113,8 +113,8 @@ describe('C4 — runtime layers above transport do not value-import @taucad/rpc'
   /**
    * `framework/` hosts the kernel-execution wrapper that consumes
    * channels and pools but never opens them; the wire-layer files
-   * (`runtime-filesystem-bridge`, `wire-transferables`,
-   * `geometry-materialiser`, `shared-pool-errors`) now live in
+   * (`wire-transferables`,
+   * `geometry-materialiser`) now live in
    * `transport/_internal/`. Type-only imports from `@taucad/rpc` (e.g.
    * `Channel<P>` shape carriers) remain permitted by the value-import
    * regex above.

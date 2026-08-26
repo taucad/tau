@@ -75,6 +75,7 @@ describe('ChatRpcSocketService', () => {
     socketHandlers.clear();
     managerHandlers.clear();
     vi.clearAllMocks();
+    mockSocket.emit = vi.fn() as unknown as Socket['emit'];
     mockSocket.connected = false;
     capturedOptions = undefined;
 
@@ -162,7 +163,11 @@ describe('ChatRpcSocketService', () => {
       mockSocket.connected = true;
       emitSocketEvent('connect');
 
-      expect(mockSocket.emit).toHaveBeenCalledWith('join', { chatId: 'chat_1' }, expect.any(Function));
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'join',
+        expect.objectContaining({ chatId: 'chat_1', rpcProtocolVersion: expect.any(String) }),
+        expect.any(Function),
+      );
     });
 
     it('should emit join with callback ack on reconnect', () => {
@@ -174,7 +179,11 @@ describe('ChatRpcSocketService', () => {
       mockSocket.connected = true;
       emitManagerEvent('reconnect');
 
-      expect(mockSocket.emit).toHaveBeenCalledWith('join', { chatId: 'chat_1' }, expect.any(Function));
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'join',
+        expect.objectContaining({ chatId: 'chat_1', rpcProtocolVersion: expect.any(String) }),
+        expect.any(Function),
+      );
     });
 
     it('should emit join with callback when joinChat is called while connected', () => {
@@ -183,7 +192,34 @@ describe('ChatRpcSocketService', () => {
 
       service.joinChat('chat_new', vi.fn());
 
-      expect(mockSocket.emit).toHaveBeenCalledWith('join', { chatId: 'chat_new' }, expect.any(Function));
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'join',
+        expect.objectContaining({ chatId: 'chat_new', rpcProtocolVersion: expect.any(String) }),
+        expect.any(Function),
+      );
+    });
+
+    it('should stop retrying and disconnect when join reports protocol mismatch', async () => {
+      service.connect();
+      const listener = vi.fn();
+      service.subscribe(listener);
+      mockSocket.connected = true;
+      mockSocket.emit = vi.fn((_event: string, _payload: unknown, callback: (ack: unknown) => void) => {
+        callback({
+          success: false,
+          code: 'PROTOCOL_VERSION_MISMATCH',
+          message: 'Chat RPC protocol changed. Reload this page to reconnect.',
+        });
+      }) as unknown as Socket['emit'];
+
+      service.joinChat('chat_1', vi.fn());
+
+      await vi.waitFor(() => {
+        expect(listener).toHaveBeenCalledWith('error', 'Chat RPC protocol changed. Reload this page to reconnect.');
+      });
+
+      expect(mockSocket.emit).toHaveBeenCalledTimes(1);
+      expect(mockSocket.disconnect).toHaveBeenCalled();
     });
   });
 

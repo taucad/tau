@@ -1,10 +1,11 @@
 import { createMiddleware } from 'langchain';
 import type { AgentMiddleware } from 'langchain';
-import { SystemMessage, HumanMessage } from '@langchain/core/messages';
+import { SystemMessage } from '@langchain/core/messages';
 import type { ContentBlock } from '@langchain/core/messages';
 import type { ContextPayload, SkillMetadata } from '@taucad/chat';
+import { createTauInternalHumanMessage } from '#api/chat/utils/tau-internal-message.js';
 
-const skillsSources = ['.tau/skills/'];
+const skillsSources = ['.agents/skills/'];
 
 const skillsSystemPrompt = `
 ## Skills System
@@ -22,10 +23,10 @@ You have access to a skills library that provides specialized capabilities and d
 Skills follow a **progressive disclosure** pattern - you know they exist (name + description above), but you only read the full instructions when needed:
 
 1. **Recognize when a skill applies**: Check if the user's task matches any skill's description
-2. **Read the skill file**: Use the \`read_file\` tool to read the skill's SKILL.md for full instructions
+2. **Activate the skill**: Call the \`use_skill\` tool with the skill name before applying its instructions
 3. **Follow the instructions**: The skill file contains step-by-step guidance for the task
 
-Only read a skill file when you're about to perform that task. Don't read all skills upfront.`;
+Only activate a skill when you're about to perform that task. Don't activate all skills upfront.`;
 
 const memorySystemPrompt = `<agent_memory>
 {memory_contents}
@@ -79,7 +80,7 @@ export function formatSkillsList(skills: SkillMetadata[], sources: string[]): st
   const lines: string[] = [];
   for (const skill of skills) {
     lines.push(`- **${skill.name}**: ${skill.description}`);
-    lines.push(`  → Read \`${skill.path}/SKILL.md\` for full instructions`);
+    lines.push(`  → Activate with \`use_skill({ skillName: "${skill.name}" })\` before applying`);
   }
 
   return lines.join('\n');
@@ -178,13 +179,16 @@ export const createClientContextMiddleware = (contextPayload?: ContextPayload): 
 
       if (contextPayload.memory && Object.keys(contextPayload.memory).length > 0) {
         const memorySection = formatMemoryPrompt(contextPayload.memory, Object.keys(contextPayload.memory));
-        const memoryMessage = new HumanMessage(
-          `<system-reminder>
+        const memoryMessage = createTauInternalHumanMessage({
+          id: 'tau:client-memory',
+          kind: 'client-memory',
+          metadata: { pruning: 'replace-by-id' },
+          content: `<system-reminder>
 IMPORTANT: this context may or may not be relevant to your current task.
 
 ${memorySection}
 </system-reminder>`,
-        );
+        });
         messages = [memoryMessage, ...messages];
       }
 

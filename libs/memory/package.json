@@ -1,0 +1,44 @@
+{
+  "name": "@taucad/memory",
+  "version": "0.1.0-beta.1",
+  "description": "Zero-dependency shared-memory primitives (SharedPool, SharedMemoryArena) over SharedArrayBuffer with Atomics",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/memory"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "shared-memory",
+    "shared-array-buffer",
+    "atomics",
+    "pool",
+    "lru"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      }
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  }
+}

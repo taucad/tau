@@ -81,32 +81,36 @@ Investigation narrative: **[docs/research/netlify-ui-deployment-strategy.md](../
 
 ## Environment Variables (UI)
 
-**Single** [`apps/ui/netlify.toml`](../../apps/ui/netlify.toml) holds build commands + security headers. **Per-site** `TAU_API_URL`, `TAU_WEBSOCKET_URL`, `TAU_FRONTEND_URL`, `NODE_ENV`, and `POSTHOG_CLI_*` are written to each Netlify site by Terraform `plain_environment_variables` / `secret_environment_variables` in:
+**Single** [`apps/ui/netlify.toml`](../../apps/ui/netlify.toml) holds build commands + security headers. **Per-site** `TAU_API_URL`, `TAU_WEBSOCKET_URL`, `TAU_FRONTEND_URL`, `NODE_ENV`, `POSTHOG_CLI_*`, and build-only `NX_CLOUD_ACCESS_TOKEN` are written to each Netlify site by Terraform from committed non-secret tfvars plus HCP Sensitive variables in:
 
 - `repos/cloud-infra/stacks/cloud/staging/terraform.auto.tfvars`
 - `repos/cloud-infra/stacks/cloud/prod-us/terraform.auto.tfvars`
 
-`NODE_ENV` for Functions/SSR is **never** scoped to `builds` (pnpm would skip devDependencies and break the Vite build). `TAU_*` URLs use `builds+functions+runtime` so server pre-render matches runtime.
+`NODE_ENV` for Functions/SSR is **never** scoped to `builds` (pnpm would skip devDependencies and break the Vite build). `TAU_*` URLs use `builds+functions+runtime` so server pre-render matches runtime. Deploy previews do not get a static `TAU_FRONTEND_URL`; the UI build derives and embeds the preview origin from Netlify's `DEPLOY_PRIME_URL`.
+
+`NX_CLOUD_ACCESS_TOKEN` comes from HCP variable `nx_cloud_access_token_read_only`; Terraform exposes it as a read-only Netlify Builds-only secret. Netlify deploy previews may read Nx Cloud cache, but remote-cache writes stay with GitHub protected-branch CI.
 
 ### Staging site (`taucad`)
 
-| Variable            | Notes                                                                |
-| ------------------- | -------------------------------------------------------------------- |
-| `TAU_API_URL`       | `https://api.taucad.dev` (`context = all` in tfvars)                 |
-| `TAU_WEBSOCKET_URL` | `wss://api.taucad.dev`                                               |
-| `TAU_FRONTEND_URL`  | `https://taucad.dev` for production context; previews derive per-URL |
-| `NODE_ENV`          | `production` for Functions + runtime only                            |
-| `POSTHOG_CLI_*`     | Source maps on **main** builds (same toml includes `ui:sourcemaps`)  |
+| Variable                | Notes                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `TAU_API_URL`           | `https://api.taucad.dev` (`context = all` in tfvars)                                 |
+| `TAU_WEBSOCKET_URL`     | `wss://api.taucad.dev`                                                               |
+| `TAU_FRONTEND_URL`      | `https://taucad.dev` for production context; previews derive from `DEPLOY_PRIME_URL` |
+| `NODE_ENV`              | `production` for Functions + runtime only                                            |
+| `POSTHOG_CLI_*`         | Source maps on **main** builds (same toml includes `ui:sourcemaps`)                  |
+| `NX_CLOUD_ACCESS_TOKEN` | Read-only Nx Cloud token, Builds scope only                                          |
 
 ### Production site (`taucad-prod-us`)
 
-| Variable            | Notes                                 |
-| ------------------- | ------------------------------------- |
-| `TAU_API_URL`       | `https://api.tau.new`                 |
-| `TAU_WEBSOCKET_URL` | `wss://api.tau.new`                   |
-| `TAU_FRONTEND_URL`  | `https://tau.new`                     |
-| `NODE_ENV`          | `production` (functions + runtime)    |
-| `POSTHOG_CLI_*`     | Source maps in production Netlify ctx |
+| Variable                | Notes                                       |
+| ----------------------- | ------------------------------------------- |
+| `TAU_API_URL`           | `https://api.tau.new`                       |
+| `TAU_WEBSOCKET_URL`     | `wss://api.tau.new`                         |
+| `TAU_FRONTEND_URL`      | `https://tau.new`                           |
+| `NODE_ENV`              | `production` (functions + runtime)          |
+| `POSTHOG_CLI_*`         | Source maps in production Netlify ctx       |
+| `NX_CLOUD_ACCESS_TOKEN` | Read-only Nx Cloud token, Builds scope only |
 
 ---
 
@@ -116,6 +120,7 @@ Investigation narrative: **[docs/research/netlify-ui-deployment-strategy.md](../
 | ------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | `TAU_FRONTEND_URL`        | `https://taucad.dev`                                                            | `https://tau.new`                                                 |
 | `AUTH_URL`                | `https://api.taucad.dev`                                                        | `https://api.tau.new`                                             |
+| `TAU_API_URL`             | `https://api.taucad.dev`                                                        | `https://api.tau.new`                                             |
 | `ADDITIONAL_CORS_ORIGINS` | `["https://deploy-preview-*--taucad.netlify.app","https://taucad.netlify.app"]` | _(unset — `https://tau.new` matches `TAU_FRONTEND_URL` directly)_ |
 
 Do **not** broaden the deploy-preview glob beyond that pattern — it would allow unintentional Netlify host classes.

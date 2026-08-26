@@ -29,7 +29,7 @@ describe('rpc.constants', () => {
       expect(mutatingRpcNames.size + readOnlyRpcNames.size).toBe(rpcNames.length);
     });
 
-    it('classifies the four canonical mutating RPCs', () => {
+    it('classifies every canonical mutating RPC', () => {
       expect(mutatingRpcNames.has(rpcName.createFile)).toBe(true);
       expect(mutatingRpcNames.has(rpcName.deleteFile)).toBe(true);
       expect(mutatingRpcNames.has(rpcName.appendFile)).toBe(true);
@@ -41,6 +41,7 @@ describe('rpc.constants', () => {
       expect(mutatingRpcNames.has(rpcName.grep)).toBe(false);
       expect(mutatingRpcNames.has(rpcName.listDirectory)).toBe(false);
       expect(mutatingRpcNames.has(rpcName.getKernelResult)).toBe(false);
+      expect(readOnlyRpcNames.has(rpcName.resolveSkill)).toBe(true);
     });
   });
 });

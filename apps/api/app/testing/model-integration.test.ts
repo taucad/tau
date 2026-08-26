@@ -3,7 +3,9 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { Server as SocketIoServer } from 'socket.io';
+import type { ServerOptions, Socket } from 'socket.io';
 import { io as ioClient } from 'socket.io-client';
+import type { ManagerOptions } from 'socket.io-client';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
@@ -11,6 +13,7 @@ import {
   expectHasToolCall,
   expectToolCallSucceeded,
   expectIncrementalToolInput,
+  expectCompleteToolInput,
   expectNoErrors,
   expectMultipleSteps,
   extractUsageData,
@@ -21,6 +24,7 @@ import type { TestApp } from '#testing/create-test-app.js';
 import { buildCadAgent, providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
 
 const modelId = process.env['TEST_MODEL_ID'] ?? 'anthropic-claude-sonnet-4.6';
+const modelStreamsToolInputDeltas = !modelId.startsWith('xai-');
 
 // Live test — requires the provider key derived from `TEST_MODEL_ID` (default
 // `anthropic-claude-sonnet-4.6` => `ANTHROPIC_API_KEY`). Skips cleanly when
@@ -74,12 +78,11 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       expectHasToolCall(message, 'create_file');
       expectToolCallSucceeded(message, 'create_file');
 
-      // The model may write to 'main.ts' or '/main.ts' - check both
-      const fileExists = (await testApp.memFs.exists('main.ts')) || (await testApp.memFs.exists('/main.ts'));
-      expect(fileExists, 'Expected main.ts to exist in the in-memory filesystem').toBe(true);
+      expect(await testApp.memFs.exists('/main.ts'), 'Expected /main.ts to exist in the in-memory filesystem').toBe(
+        true,
+      );
 
-      const path = (await testApp.memFs.exists('main.ts')) ? 'main.ts' : '/main.ts';
-      const mainTs = await testApp.memFs.readFile(path, 'utf8');
+      const mainTs = await testApp.memFs.readFile('/main.ts', 'utf8');
       expect(mainTs).toBeTruthy();
     });
 
@@ -198,7 +201,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       }
     }, 120_000);
 
-    it('should stream tool call arguments incrementally', async () => {
+    it('should surface provider-supported streamed tool call arguments', async () => {
       const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -255,7 +258,11 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       const message = await collectFinalMessage(chunks);
 
       expectHasToolCall(message, 'create_file');
-      expectIncrementalToolInput(chunks, 'create_file');
+      if (modelStreamsToolInputDeltas) {
+        expectIncrementalToolInput(chunks, 'create_file');
+      } else {
+        expectCompleteToolInput(chunks, 'create_file');
+      }
     });
 
     it('should normalize cache tokens in usage data (inputTokens excludes cached)', async () => {
@@ -358,11 +365,10 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
  *
  * These tests reproduce the exact failure conditions observed in production:
  *
- * 1. maxHttpBufferSize (Socket.IO default: 1MB) is too small for geometry payloads.
- *    The fetchGeometry RPC returns GLB data (Uint8Array) from the client to the server.
- *    Complex models (e.g. a detailed OpenSCAD helicopter, $fn=48, 7 files) produce
- *    2-5MB GLB. When the rpc_response message exceeds maxHttpBufferSize, Socket.IO's
- *    ws library closes the connection with code 1009 (Message Too Big).
+ * 1. GeoSpec test_model execution now returns compact pass/fail results from
+ *    the browser-side Tau runner instead of shipping GLB bytes back to the API.
+ *    This test locks in the transport shape that prevents large geometry
+ *    payloads from crossing chat RPC in browser-connected sessions.
  *
  * 2. Dev mode handleDevConnection registers Socket.IO event handlers AFTER an async
  *    auth check (await auth.api.getSession()). The client's connect handler emits
@@ -383,7 +389,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     await Promise.all(pending.map(async (teardown) => teardown()));
   });
 
-  const createTestServer = (options?: Partial<import('socket.io').ServerOptions>) => {
+  const createTestServer = (options?: Partial<ServerOptions>) => {
     const httpServer = createServer();
     const serverIo = new SocketIoServer(httpServer, {
       transports: ['websocket'],
@@ -416,7 +422,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     return { httpServer, serverIo, listen };
   };
 
-  const createTestClient = (port: number, options?: Partial<import('socket.io-client').ManagerOptions>) => {
+  const createTestClient = (port: number, options?: Partial<ManagerOptions>) => {
     const client = ioClient(`http://localhost:${port}`, {
       transports: ['websocket'],
       autoConnect: false,
@@ -428,14 +434,14 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     return client;
   };
 
-  it('should maintain connection when RPC response contains large geometry payload (>1MB)', async () => {
-    const { serverIo, listen } = createTestServer({ maxHttpBufferSize: 10e6 });
+  it('should keep GeoSpec test_model RPC responses compact instead of returning geometry payloads', async () => {
+    const { serverIo, listen } = createTestServer();
 
-    let serverReceivedResponse = false;
+    let receivedResult: unknown;
     const responseReceived = new Promise<void>((resolve) => {
       serverIo.on('connection', (socket) => {
-        socket.on('rpc_response', () => {
-          serverReceivedResponse = true;
+        socket.on('rpc_response', (message: { result?: unknown }) => {
+          receivedResult = message.result;
           resolve();
         });
       });
@@ -453,12 +459,6 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     await connected;
     expect(client.connected).toBe(true);
 
-    // Simulate fetchGeometry RPC response with realistic GLB payload.
-    // A detailed OpenSCAD helicopter model ($fn=48, 7 component files)
-    // produces 2-5MB of GLB geometry data.
-    const twoMegabytes = 2 * 1024 * 1024;
-    const largeGlb = new Uint8Array(twoMegabytes);
-
     const disconnectPromise = new Promise<string>((resolve) => {
       client.on('disconnect', (reason) => {
         resolve(reason);
@@ -467,10 +467,22 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
 
     client.emit('rpc_response', {
       type: 'rpc_response',
-      rpcName: 'fetch_geometry',
-      requestId: 'req_geometry_001',
+      rpcName: 'run_geospec_tests',
+      requestId: 'req_geospec_001',
       toolCallId: 'tool_test_model_001',
-      result: { success: true, glb: largeGlb },
+      result: {
+        success: true,
+        failures: [],
+        passes: [
+          {
+            id: 'main.geospec.ts:main dimensions > width',
+            requirement: 'main dimensions > width',
+            targetFile: 'main.geospec.ts',
+          },
+        ],
+        passed: 1,
+        total: 1,
+      },
     });
 
     const outcome = await Promise.race([
@@ -483,12 +495,15 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
       }),
     ]);
 
-    expect(
-      outcome,
-      'Socket.IO killed the connection because the payload exceeded maxHttpBufferSize (1MB default)',
-    ).toBe('received');
+    expect(outcome, 'GeoSpec test_model should return compact results rather than large geometry payloads').toBe(
+      'received',
+    );
     expect(client.connected).toBe(true);
-    expect(serverReceivedResponse).toBe(true);
+    expect(receivedResult).toEqual(
+      expect.not.objectContaining({
+        glb: expect.any(Uint8Array) as unknown,
+      }),
+    );
   });
 
   it('should process join event when auth middleware runs before connection handler', async () => {
@@ -581,7 +596,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
   it('should receive disconnect reason when server force-disconnects', async () => {
     const { serverIo, listen } = createTestServer();
 
-    let serverSocket: import('socket.io').Socket | undefined;
+    let serverSocket: Socket | undefined;
 
     serverIo.on('connection', (socket) => {
       serverSocket = socket;
@@ -690,73 +705,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     expect(joinAttempts).toBe(2);
   });
 
-  it('should complete RPC round-trip with large geometry payload over real Socket.IO', async () => {
-    const { serverIo, listen } = createTestServer({ maxHttpBufferSize: 10e6 });
-
-    const chatRpcService = new ChatRpcService(new MetricsService());
-    const chatId = 'chat_rpc_test_001';
-
-    serverIo.on('connection', (socket) => {
-      socket.on('join', () => {
-        chatRpcService.registerConnection(chatId, socket, 'test_user');
-      });
-
-      socket.on('disconnect', () => {
-        chatRpcService.handleSocketDisconnect(socket);
-      });
-
-      // EmitWithAck handles responses via ack callback — no rpc_response handler needed
-    });
-
-    const port = await listen();
-    const client = createTestClient(port);
-
-    const connected = new Promise<void>((resolve) => {
-      client.on('connect', () => {
-        client.emit('join', { chatId });
-        resolve();
-      });
-    });
-
-    const twoMegabytes = 2 * 1024 * 1024;
-    const largeGlb = new Uint8Array(twoMegabytes);
-
-    client.on('rpc_request', (request: { requestId: string }, ack: (response: unknown) => void) => {
-      ack({
-        type: 'rpc_response',
-        rpcName: 'fetch_geometry',
-        requestId: request.requestId,
-        toolCallId: 'tool_001',
-        result: { success: true, glb: largeGlb },
-      });
-    });
-
-    client.connect();
-    await connected;
-
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, 100);
-    });
-
-    expect(chatRpcService.isConnected(chatId)).toBe(true);
-
-    const rpcResult = await chatRpcService.sendRpcRequest({
-      chatId,
-      toolCallId: 'tool_fetch_geometry_001',
-      rpcName: 'fetch_geometry',
-      args: { targetFile: 'main.ts' },
-    });
-
-    expect(rpcResult, 'RPC failed — the response payload may have exceeded maxHttpBufferSize').toMatchObject({
-      success: true,
-    });
-    expect(rpcResult).toHaveProperty('glb');
-    expect((rpcResult as { glb: unknown }).glb).toBeInstanceOf(Uint8Array);
-  });
-
-  it('should complete emitWithAck round-trip with geometry payload', async () => {
+  it('should complete emitWithAck RPC round-trip', async () => {
     const { serverIo, listen } = createTestServer({ maxHttpBufferSize: 10e6 });
 
     const chatRpcService = new ChatRpcService(new MetricsService());
@@ -781,15 +730,13 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
       });
     });
 
-    const glbPayload = new Uint8Array(1024);
-
     client.on('rpc_request', (request: { requestId: string; toolCallId: string }, ack: (response: unknown) => void) => {
       ack({
         type: 'rpc_response',
-        rpcName: 'fetch_geometry',
+        rpcName: 'read_file',
         requestId: request.requestId,
         toolCallId: request.toolCallId,
-        result: { success: true, glb: glbPayload },
+        result: { success: true, content: 'ok', size: 2, contentKind: 'text', totalLines: 1 },
       });
     });
 
@@ -803,12 +750,11 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     const result = await chatRpcService.sendRpcRequest({
       chatId,
       toolCallId: 'tool_001',
-      rpcName: 'fetch_geometry',
+      rpcName: 'read_file',
       args: { targetFile: 'main.ts' },
     });
 
-    expect(result).toMatchObject({ success: true });
-    expect(result).toHaveProperty('glb');
+    expect(result).toMatchObject({ success: true, content: 'ok' });
     chatRpcService.onModuleDestroy();
   });
 
@@ -848,7 +794,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     const result = await chatRpcService.sendRpcRequest({
       chatId,
       toolCallId: 'tool_timeout',
-      rpcName: 'fetch_geometry',
+      rpcName: 'read_file',
       args: { targetFile: 'main.ts' },
     });
 
@@ -895,7 +841,7 @@ describe('Chat RPC WebSocket Transport Resilience', () => {
     const result = await chatRpcService.sendRpcRequest({
       chatId,
       toolCallId: 'tool_disconnect',
-      rpcName: 'fetch_geometry',
+      rpcName: 'read_file',
       args: { targetFile: 'main.ts' },
     });
 

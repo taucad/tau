@@ -16,6 +16,8 @@ ${kclStdlibReference}
 
   commonErrorPatterns: 'missing pipe operators, unclosed sketches, undefined variables, invalid geometric parameters',
 
+  testingProfile: { includeBrepFeatureExamples: false },
+
   topologyHints: `- Curves: \`arc\`, \`tangentialArc\`, \`arcTo\`, \`tangentialArcTo\`, \`bezierCurve\`, \`circle\`, \`ellipse\`. Prefer \`tangentialArc\` when the next segment must continue smoothly.
 - Pipe operator chains keep the analytical structure visible — do not break a smooth chain into multiple sketches just to compute intermediate values.
 - Tessellation is handled by the runtime — do not expose it as a parameter.`,

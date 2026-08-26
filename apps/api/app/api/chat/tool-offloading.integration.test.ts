@@ -3,15 +3,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ToolMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
 import { toolName } from '@taucad/chat/constants';
+import { createCrossProviderContentNormalizerMiddleware } from '#api/chat/middleware/cross-provider-content-normalizer.middleware.js';
 import { createToolOffloadingMiddleware } from '#api/chat/middleware/tool-offloading.middleware.js';
 import { createToolResultBudgetMiddleware } from '#api/chat/middleware/tool-result-budget.middleware.js';
+import { createToolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
 import type { TauRpcBackendFactory, TauRpcBackend } from '#api/chat/tau-rpc-backend.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 import { invokeWrapToolCall, invokeWrapModelCall } from '#testing/middleware-testing.utils.js';
 
 /**
- * Integration: replay the eight `read_file node_modules/opencascade.js/index.d.ts`
+ * Integration: replay the eight `read_file node_modules/libcascade/index.d.ts`
  * tool calls from the involute-gear transcript through the full
  * tool-offloading + tool-result-budget middleware stack with a stub
  * `TauRpcBackend`. Validates the architectural fix from
@@ -32,7 +35,12 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
   let rpcBackendFactory: ReturnType<typeof mock<TauRpcBackendFactory>>;
   let mockBackend: ReturnType<typeof mock<TauRpcBackend>>;
   let metricsService: ReturnType<typeof mock<MetricsService>>;
-  let chatToolResultOffloadedAdd: ReturnType<typeof vi.fn>;
+  let chatToolResultOffloadedAdd: ReturnType<
+    typeof vi.fn<NonNullable<MetricsService['chatToolResultOffloaded']['add']>>
+  >;
+  let chatToolResultMediaPreservedAdd: ReturnType<
+    typeof vi.fn<NonNullable<MetricsService['chatToolResultMediaPreserved']['add']>>
+  >;
 
   const chatId = 'chat-involute-gear';
 
@@ -53,14 +61,87 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
     rpcBackendFactory.create.mockReturnValue(mockBackend);
     mockBackend.write.mockResolvedValue({ path: 'test', filesUpdate: null });
 
-    chatToolResultOffloadedAdd = vi.fn();
-    metricsService = mock<MetricsService>();
-    (
-      metricsService as unknown as { chatToolResultOffloaded: { add: typeof chatToolResultOffloadedAdd } }
-    ).chatToolResultOffloaded = {
-      add: chatToolResultOffloadedAdd,
-    };
+    chatToolResultOffloadedAdd = vi.fn<NonNullable<MetricsService['chatToolResultOffloaded']['add']>>();
+    chatToolResultMediaPreservedAdd = vi.fn<NonNullable<MetricsService['chatToolResultMediaPreserved']['add']>>();
+    metricsService = mock<MetricsService>({
+      chatToolResultOffloaded: mock<MetricsService['chatToolResultOffloaded']>({
+        add: chatToolResultOffloadedAdd,
+      }),
+      chatToolResultMediaPreserved: mock<MetricsService['chatToolResultMediaPreserved']>({
+        add: chatToolResultMediaPreservedAdd,
+      }),
+    });
   });
+
+  const buildScreenshotContent = (toolCallId: string, dataUrlChars = 211_135): string => {
+    const prefix = 'data:image/webp;base64,';
+    const dataUrl = prefix + 'A'.repeat(dataUrlChars - prefix.length);
+    return JSON.stringify({ images: [{ view: toolCallId, dataUrl }] });
+  };
+
+  const invokeModelMiddleware = async (
+    middleware: { wrapModelCall?: (...args: never[]) => unknown },
+    messages: BaseMessage[],
+    request: Record<string, unknown> = {},
+  ): Promise<BaseMessage[]> => {
+    const handler = vi.fn().mockImplementation(async (nextRequest: unknown): Promise<unknown> => nextRequest);
+    await invokeWrapModelCall(middleware, { ...request, messages }, handler);
+    return (handler.mock.calls[0]![0] as { messages: BaseMessage[] }).messages;
+  };
+
+  const runScreenshotPipeline = async (options: {
+    messages: BaseMessage[];
+    allowImageBlocks?: boolean;
+    targetProvider?: 'openai';
+  }): Promise<BaseMessage[]> => {
+    const offloading = createToolOffloadingMiddleware(rpcBackendFactory, metricsService);
+    const afterOffloading: BaseMessage[] = [];
+
+    for (const message of options.messages) {
+      if (!ToolMessage.isInstance(message)) {
+        afterOffloading.push(message);
+        continue;
+      }
+
+      // oxlint-disable-next-line no-await-in-loop -- mirrors serial tool-result middleware invocation
+      const replaced = await invokeWrapToolCall(
+        offloading,
+        {
+          toolCall: { name: message.name ?? toolName.screenshot, id: message.tool_call_id, args: {} },
+          runtime: { context: { chatId } },
+        },
+        vi.fn().mockResolvedValue(message),
+      );
+      afterOffloading.push(replaced as BaseMessage);
+    }
+
+    const budget = createToolResultBudgetMiddleware(rpcBackendFactory, metricsService);
+    const afterBudget = await invokeModelMiddleware(budget, afterOffloading, {
+      state: {},
+      runtime: { context: { chatId } },
+    });
+
+    const trimmer = createToolResultTrimmerMiddleware({ allowImageBlocks: options.allowImageBlocks ?? true });
+    const afterTrimmer = await invokeModelMiddleware(trimmer, afterBudget);
+
+    if (options.targetProvider !== 'openai') {
+      return afterTrimmer;
+    }
+
+    const normalizer = createCrossProviderContentNormalizerMiddleware('openai');
+    return invokeModelMiddleware(normalizer, afterTrimmer);
+  };
+
+  const findToolMessage = (messages: BaseMessage[], toolCallId: string): ToolMessage => {
+    const message = messages.find(
+      (candidate): candidate is ToolMessage =>
+        ToolMessage.isInstance(candidate) && candidate.tool_call_id === toolCallId,
+    );
+    if (!message) {
+      throw new Error(`expected ToolMessage ${toolCallId}`);
+    }
+    return message;
+  };
 
   it('should keep cumulative ToolMessage content well under 12 KB across the 8 transcript tool calls', async () => {
     const offloading = createToolOffloadingMiddleware(rpcBackendFactory, metricsService);
@@ -83,7 +164,7 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
           toolCall: {
             name: toolName.readFile,
             id: toolCallId,
-            args: { targetFile: 'node_modules/opencascade.js/index.d.ts' },
+            args: { targetFile: 'node_modules/libcascade/index.d.ts' },
           },
           runtime: { context: { chatId } },
         },
@@ -140,7 +221,7 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
       const replaced = await invokeWrapToolCall(
         offloading,
         {
-          toolCall: { name: toolName.readFile, id, args: { targetFile: 'node_modules/opencascade.js/index.d.ts' } },
+          toolCall: { name: toolName.readFile, id, args: { targetFile: 'node_modules/libcascade/index.d.ts' } },
           runtime: { context: { chatId } },
         },
         vi.fn().mockResolvedValue(original),
@@ -172,7 +253,7 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
       const replaced = await invokeWrapToolCall(
         offloading,
         {
-          toolCall: { name: toolName.readFile, id, args: { targetFile: 'node_modules/opencascade.js/index.d.ts' } },
+          toolCall: { name: toolName.readFile, id, args: { targetFile: 'node_modules/libcascade/index.d.ts' } },
           runtime: { context: { chatId } },
         },
         vi.fn().mockResolvedValue(original),
@@ -203,5 +284,114 @@ describe('Tool offloading middleware stack — involute-gear replay', () => {
       expect(content2).toBeDefined();
       expect(content2).toBe(content1);
     }
+  });
+
+  it('should preserve a 211135-char screenshot through the non-OpenAI vision path', async () => {
+    const screenshotContent = buildScreenshotContent('call_screenshot');
+    const messages: BaseMessage[] = [
+      new ToolMessage({
+        content: screenshotContent,
+        tool_call_id: 'call_screenshot',
+        name: toolName.screenshot,
+      }),
+    ];
+
+    const result = await runScreenshotPipeline({ messages });
+    const screenshot = findToolMessage(result, 'call_screenshot');
+    const content = screenshot.content as Array<Record<string, unknown>>;
+
+    expect(Array.isArray(content)).toBe(true);
+    expect(content.some((block) => block['type'] === 'image_url')).toBe(true);
+    expect(JSON.stringify(content)).not.toContain('<persisted-output>');
+    expect(mockBackend.write).not.toHaveBeenCalled();
+    expect(chatToolResultMediaPreservedAdd).toHaveBeenCalledOnce();
+  });
+
+  it('should preserve a 211135-char screenshot through the OpenAI vision path as input_image', async () => {
+    const screenshotContent = buildScreenshotContent('call_screenshot_openai');
+    const messages: BaseMessage[] = [
+      new ToolMessage({
+        content: screenshotContent,
+        tool_call_id: 'call_screenshot_openai',
+        name: toolName.screenshot,
+      }),
+    ];
+
+    const result = await runScreenshotPipeline({ messages, targetProvider: 'openai' });
+    const screenshot = findToolMessage(result, 'call_screenshot_openai');
+    const content = screenshot.content as Array<Record<string, unknown>>;
+    const imageBlock = content.find((block) => block['type'] === 'input_image');
+
+    expect(imageBlock).toEqual(
+      expect.objectContaining({
+        type: 'input_image',
+        detail: 'auto',
+      }),
+    );
+    expect(imageBlock?.['image_url']).toContain('data:image/webp;base64,');
+    expect(mockBackend.write).not.toHaveBeenCalled();
+  });
+
+  it('should strip a large screenshot on the non-vision path without text offload', async () => {
+    const screenshotContent = buildScreenshotContent('call_screenshot_text_only');
+    const messages: BaseMessage[] = [
+      new ToolMessage({
+        content: screenshotContent,
+        tool_call_id: 'call_screenshot_text_only',
+        name: toolName.screenshot,
+      }),
+    ];
+
+    const result = await runScreenshotPipeline({ messages, allowImageBlocks: false });
+    const screenshot = findToolMessage(result, 'call_screenshot_text_only');
+
+    expect(typeof screenshot.content).toBe('string');
+    expect(screenshot.content as string).not.toContain('data:image/webp;base64');
+    expect(JSON.parse(screenshot.content as string)).toEqual({
+      images: [{ view: 'call_screenshot_text_only' }],
+      _trimmed: true,
+    });
+    expect(mockBackend.write).not.toHaveBeenCalled();
+  });
+
+  it('should persist only text output when a large text result and screenshot share a turn', async () => {
+    const screenshotContent = buildScreenshotContent('call_screenshot_mixed');
+    const readFile = new ToolMessage({
+      content: buildLargeReadFileContent('call_read_mixed'),
+      tool_call_id: 'call_read_mixed',
+      name: toolName.readFile,
+    });
+    const screenshot = new ToolMessage({
+      content: screenshotContent,
+      tool_call_id: 'call_screenshot_mixed',
+      name: toolName.screenshot,
+    });
+
+    const result = await runScreenshotPipeline({ messages: [readFile, screenshot] });
+    const finalScreenshot = findToolMessage(result, 'call_screenshot_mixed');
+    const finalScreenshotContent = finalScreenshot.content as Array<Record<string, unknown>>;
+
+    expect(finalScreenshotContent.some((block) => block['type'] === 'image_url')).toBe(true);
+    expect(mockBackend.write).toHaveBeenCalledTimes(1);
+    expect(mockBackend.write.mock.calls[0]![0]).toBe('/.tau/tool-results/chat-involute-gear/call_read_mixed.txt');
+    expect(chatToolResultOffloadedAdd).toHaveBeenCalledOnce();
+    expect(chatToolResultMediaPreservedAdd).toHaveBeenCalledOnce();
+  });
+
+  it('should preserve screenshot-shaped content when the ToolMessage name is missing', async () => {
+    const screenshotContent = buildScreenshotContent('call_screenshot_no_name');
+    const messages: BaseMessage[] = [
+      new ToolMessage({
+        content: screenshotContent,
+        tool_call_id: 'call_screenshot_no_name',
+      }),
+    ];
+
+    const result = await runScreenshotPipeline({ messages });
+    const screenshot = findToolMessage(result, 'call_screenshot_no_name');
+    const content = screenshot.content as Array<Record<string, unknown>>;
+
+    expect(content.some((block) => block['type'] === 'image_url')).toBe(true);
+    expect(mockBackend.write).not.toHaveBeenCalled();
   });
 });

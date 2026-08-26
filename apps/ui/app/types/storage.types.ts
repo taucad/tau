@@ -3,6 +3,12 @@ import type { Project } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
 
+export type CommitCancelledDraftRestoreInput = {
+  messages: Chat['messages'];
+  draft: NonNullable<Chat['draft']>;
+  clearStartupRequestId?: string;
+};
+
 /**
  * Persistent storage contract for projects, chats, and editor state.
  *
@@ -20,11 +26,7 @@ export type StorageProvider = {
   // Project operations
   // ---------------------------------------------------------------------------
   createProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<Project>;
-  updateProject(
-    projectId: string,
-    update: PartialDeep<Project>,
-    options?: { noUpdatedAt?: boolean },
-  ): Promise<Project | undefined>;
+  updateProject(projectId: string, update: PartialDeep<Project>): Promise<Project | undefined>;
   /**
    * Bump `updatedAt` only — no field merges. No-op when the project is missing
    * or soft-deleted (`deletedAt` set).
@@ -41,17 +43,31 @@ export type StorageProvider = {
     resourceId: string,
     chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
   ): Promise<Chat>;
+  createNavigationRepairChat(resourceId: string): Promise<Chat>;
   /**
    * Legacy partial-merge update. Prefer the field-scoped helpers below for new
    * code; this is retained for the full-row replacement path.
    */
-  updateChat(chatId: string, update: PartialDeep<Chat>, options?: { noUpdatedAt?: boolean }): Promise<Chat | undefined>;
+  updateChat(chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined>;
+  applyGeneratedChatName(chatId: string, name: string): Promise<Chat | undefined>;
   /**
    * Atomic, field-scoped writer for a single top-level chat field. Preferred
    * over `updateChat` for all single-field writes — eliminates the
    * read-modify-write race that resurrects sent drafts.
    */
   patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined>;
+  /**
+   * Atomic one-shot startup request consumption. Clears the startup request
+   * only when the persisted id still matches `requestId`; returns undefined
+   * when the request is missing, already consumed, or stale.
+   */
+  consumeChatStartupRequest(chatId: string, requestId: string): Promise<Chat | undefined>;
+  /**
+   * Atomic empty-cancel restore. Replaces the transcript and composer draft
+   * together, optionally clearing the matching one-shot startup request in
+   * the same transaction.
+   */
+  commitCancelledDraftRestore(chatId: string, input: CommitCancelledDraftRestoreInput): Promise<Chat | undefined>;
   /**
    * Atomic insert/replace for a single message-edit draft entry.
    */

@@ -8,7 +8,7 @@
  * never from the public surface.
  *
  * Construct with one of the bundled `fromX` factories ({@link fromMemoryFs},
- * {@link fromFsLike}, {@link fromChannelFs}) or one of the subpath-exported
+ * {@link fromFsLike}, {@link fromFileSystemBridge}) or one of the subpath-exported
  * factories (`fromNodeFs` from `@taucad/runtime/filesystem/node`,
  * `fromBrowserFs` from `@taucad/runtime/filesystem/browser`).
  *
@@ -18,43 +18,17 @@
 import { _fromMemoryFsHandle } from '#transport/_internal/from-memory-fs-handle.js';
 import { _fromFsLikeHandle } from '#transport/_internal/from-fs-like-handle.js';
 import type { FsLike } from '#transport/_internal/from-fs-like-handle.js';
-import {
-  channelHandleFromWorker,
-  hasRuntimeFileSystemHandle,
-  wrapAsRuntimeFileSystem,
-} from '#transport/_internal/runtime-filesystem-handle.js';
+import { hasRuntimeFileSystemHandle, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.types.js';
+import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
 
-declare const __runtimeFileSystemBrand: unique symbol;
-
-/**
- * Opaque consumer-facing filesystem handle.
- *
- * Reaching into the value to inspect the underlying handle is a type
- * error — the `[__runtimeFileSystemBrand]` field is a phantom
- * discriminant exposed only to the type system, never assignable from
- * user code.
- *
- * @public
- */
-export type RuntimeFileSystem = {
-  /**
-   * Phantom brand carrier — the symbol is unexported so consumer code
-   * can never construct a value satisfying this slot. Marked `@internal`
-   * so doc generators (e.g. `fumadocs-typescript` `<auto-type-table>`)
-   * filter it out before serialization, instead of emitting the
-   * symbol's TS-internal display name (which contains literal `@`
-   * characters that break MDX/JSX parsers downstream).
-   *
-   * @internal
-   */
-  readonly [__runtimeFileSystemBrand]: true;
-};
+export type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.types.js';
 
 /**
  * Type guard: returns `true` when `value` is an opaque
  * {@link RuntimeFileSystem} produced by a `fromX` factory.
  *
- * @internal
+ * @public
  */
 export const isRuntimeFileSystem = (value: unknown): value is RuntimeFileSystem => hasRuntimeFileSystemHandle(value);
 
@@ -66,7 +40,8 @@ export const isRuntimeFileSystem = (value: unknown): value is RuntimeFileSystem 
  * Create an opaque {@link RuntimeFileSystem} backed by an in-memory
  * `Map`. Suitable for tests, fixtures, and lightweight playgrounds.
  *
- * @param files - Optional initial path → content map.
+ * @param files - Optional runtime-path-to-content map. Relative keys and keys
+ * beginning with `/` are normalized within the in-memory filesystem.
  * @public
  *
  * @example <caption>Seed a runtime client with an in-memory FS</caption>
@@ -78,40 +53,38 @@ export const isRuntimeFileSystem = (value: unknown): value is RuntimeFileSystem 
  * });
  * ```
  */
-export const fromMemoryFs = (files?: Record<string, string>): RuntimeFileSystem =>
+export const fromMemoryFs = (files?: Record<string, string | Uint8Array<ArrayBuffer>>): RuntimeFileSystem =>
   wrapAsRuntimeFileSystem(_fromMemoryFsHandle(files));
 
 /**
- * Create an opaque {@link RuntimeFileSystem} from any `fs.promises`-shaped
- * object (BrowserFS, memfs, Node `fs.promises`).
+ * Create an opaque {@link RuntimeFileSystem} from an already-confined
+ * `fs.promises`-shaped object such as BrowserFS or memfs. Use `fromNodeFs`
+ * for an unconfined Node.js filesystem so the adapter can establish runtime `/`.
  *
  * Renamed from `fromFsLikeOpaque` (R7) per v6 Appendix A — public `fromX`
  * factories are always opaque, no `Opaque` suffix.
  *
- * @param fsLike - Any object exposing the {@link FsLike} surface.
- * @param rootPath - Optional path prefix for all operations.
+ * @param fsLike - Already-confined object exposing the {@link FsLike} surface.
+ * Runtime paths are resolved within that object; `/` is its root.
  * @public
  */
-export const fromFsLike = (fsLike: FsLike, rootPath?: string): RuntimeFileSystem =>
-  wrapAsRuntimeFileSystem(_fromFsLikeHandle(fsLike, rootPath));
+export const fromFsLike = (fsLike: FsLike): RuntimeFileSystem => wrapAsRuntimeFileSystem(_fromFsLikeHandle(fsLike));
 
 /**
- * Create an opaque {@link RuntimeFileSystem} bridged to a remote
- * `Worker` exposing `FileSystemProvider` over `postMessage`. The
- * worker becomes the FS authority; calls dispatch through a
- * MessagePort created on first use.
+ * Create an opaque {@link RuntimeFileSystem} bridged to a remote filesystem
+ * authority through a filesystem bridge connection.
+ * The connection must already be rooted; its selected root is exposed to the
+ * runtime as `/` without exposing any authority-global or host path.
  *
- * Renamed from `fromWorkerOpaque` (R7) per v6 Appendix A — the v6 spec
- * names the channel-bridged factory `fromChannelFs` to reflect that it
- * wraps any FS-bridge channel (a Worker is one of several channel
- * sources; future host-process / iframe / Electron utility transports
- * supply their own pre-wired bridge channel).
- *
- * @param worker - Browser/Node `Worker` instance whose host hosts the FS.
+ * @param openConnection - Opens a fresh filesystem bridge connection for each
+ * runtime binding or initialize retry.
  * @public
  */
-export const fromChannelFs = (worker: Worker): RuntimeFileSystem =>
-  wrapAsRuntimeFileSystem(channelHandleFromWorker(worker));
+export const fromFileSystemBridge = (openConnection: () => FileSystemBridgeConnection): RuntimeFileSystem =>
+  wrapAsRuntimeFileSystem({
+    kind: 'channel',
+    create: openConnection,
+  });
 
 /* Re-export `FsLike` from this module so the `@taucad/runtime/filesystem`
  * subpath barrel exposes both the type and the factory next to

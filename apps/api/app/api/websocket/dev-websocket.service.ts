@@ -37,7 +37,9 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
   private io: SocketIoServer | undefined;
   private readonly wsPort: number;
   private readonly pathHandlers = new Map<string, WebSocketConnectionHandler>();
-  private initialized = false;
+  private started = false;
+  private startPromise: Promise<void> | undefined;
+  private stopPromise: Promise<void> | undefined;
   private adapterConstructor: ReturnType<typeof createAdapter> | undefined;
   private adapterClient: Redis | undefined;
 
@@ -99,12 +101,31 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
    * Get the Socket.IO server instance.
    * Initializes the server if not already done.
    */
-  public getSocketIoServer(): SocketIoServer {
-    if (!this.initialized) {
-      this.initServer();
+  public async ensureSocketIoServer(): Promise<SocketIoServer> {
+    await this.ensureStarted();
+    return this.io!;
+  }
+
+  /**
+   * Start the shared dev WebSocket server if it is not already running.
+   */
+  public async ensureStarted(): Promise<void> {
+    if (this.started) {
+      return;
     }
 
-    return this.io!;
+    if (this.startPromise) {
+      await this.startPromise;
+      return;
+    }
+
+    this.startPromise = this.initServer();
+
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = undefined;
+    }
   }
 
   /**
@@ -118,11 +139,6 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
 
     this.pathHandlers.set(path, handler);
     this.logger.debug(`Registered raw WebSocket handler for path: ${path}`);
-
-    // Initialize the server if not already done
-    if (!this.initialized) {
-      this.initServer();
-    }
   }
 
   /**
@@ -137,23 +153,62 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
    * Stop the servers when the module is destroyed.
    */
   public async onModuleDestroy(): Promise<void> {
-    if (this.io) {
-      void this.io.close();
+    await this.stop();
+  }
+
+  /**
+   * Stop the shared dev WebSocket server and all upgraded sockets.
+   */
+  public async stop(): Promise<void> {
+    if (this.stopPromise) {
+      await this.stopPromise;
+      return;
     }
 
-    if (this.wss) {
-      this.wss.close();
+    this.stopPromise = this.stopServer();
+
+    try {
+      await this.stopPromise;
+    } finally {
+      this.stopPromise = undefined;
+    }
+  }
+
+  private async stopServer(): Promise<void> {
+    if (this.startPromise) {
+      await this.startPromise.catch(() => undefined);
     }
 
-    if (this.httpServer) {
-      this.httpServer.close();
+    const { io, wss, httpServer, adapterClient } = this;
+
+    if (io) {
+      io.disconnectSockets(true);
+      await this.closeSocketIoServer(io);
     }
 
-    if (this.adapterClient) {
-      await this.adapterClient.quit();
+    if (wss) {
+      for (const client of wss.clients) {
+        client.terminate();
+      }
+
+      await this.closeWebSocketServer(wss);
+    }
+
+    if (httpServer) {
+      await this.closeHttpServer(httpServer);
+    }
+
+    if (adapterClient) {
+      await adapterClient.quit();
       this.adapterClient = undefined;
+      this.adapterConstructor = undefined;
       this.logger.debug('Redis adapter client disconnected');
     }
+
+    this.httpServer = undefined;
+    this.wss = undefined;
+    this.io = undefined;
+    this.started = false;
 
     this.logger.log('Dev WebSocket server stopped');
   }
@@ -161,13 +216,7 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
   /**
    * Initialize the combined HTTP/WebSocket/Socket.IO server.
    */
-  private initServer(): void {
-    if (this.initialized) {
-      return;
-    }
-
-    this.initialized = true;
-
+  private async initServer(): Promise<void> {
     // Create HTTP server
     this.httpServer = createServer((_request, response) => {
       response.writeHead(200);
@@ -227,10 +276,68 @@ export class DevWebSocketService implements OnModuleInit, OnModuleDestroy {
       socket.destroy();
     });
 
-    this.httpServer.listen(this.wsPort, () => {
-      this.logger.log(`Dev WebSocket server started on port ${this.wsPort}`);
-      this.logger.log(`  - Raw WebSocket: ws://localhost:${this.wsPort}/v1/kernels/zoo`);
-      this.logger.log(`  - Socket.IO: ws://localhost:${this.wsPort}${chatRpcPath}`);
+    try {
+      await this.listen(this.httpServer);
+      this.started = true;
+    } catch (error) {
+      this.httpServer = undefined;
+      this.wss = undefined;
+      this.io = undefined;
+      this.started = false;
+      throw error;
+    }
+  }
+
+  private async listen(httpServer: HttpServer): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error): void => {
+        httpServer.off('error', onError);
+        reject(error);
+      };
+
+      httpServer.once('error', onError);
+      httpServer.listen(this.wsPort, () => {
+        httpServer.off('error', onError);
+        this.logger.log(`Dev WebSocket server started on port ${this.wsPort}`);
+        this.logger.log(`  - Raw WebSocket: ws://localhost:${this.wsPort}/v1/kernels/zoo`);
+        this.logger.log(`  - Socket.IO: ws://localhost:${this.wsPort}${chatRpcPath}`);
+        resolve();
+      });
+    });
+  }
+
+  private async closeSocketIoServer(io: SocketIoServer): Promise<void> {
+    await io.close();
+  }
+
+  private async closeWebSocketServer(wss: WebSocketServer): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      wss.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+  }
+
+  private async closeHttpServer(httpServer: HttpServer): Promise<void> {
+    if (!httpServer.listening) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      httpServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+      httpServer.closeAllConnections();
     });
   }
 

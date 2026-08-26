@@ -1,0 +1,71 @@
+{
+  "name": "@taucad/filesystem",
+  "version": "0.1.0-beta.1",
+  "description": "Filesystem abstraction layer with watch-based reactivity for Tau (core / worker-facing; UI client facades live in @taucad/fs-client)",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/filesystem"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "filesystem",
+    "watch",
+    "reactive"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./backend": "./src/backend/index.ts",
+    "./bundled-types-mount": "./src/bundled-types-mount.ts",
+    "./storage-root-key": "./src/storage-root-key.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./backend": {
+        "types": "./dist/backend/index.d.mts",
+        "import": "./dist/backend/index.mjs",
+        "default": "./dist/backend/index.mjs"
+      },
+      "./bundled-types-mount": {
+        "types": "./dist/bundled-types-mount.d.mts",
+        "import": "./dist/bundled-types-mount.mjs",
+        "default": "./dist/bundled-types-mount.mjs"
+      },
+      "./storage-root-key": {
+        "types": "./dist/storage-root-key.d.mts",
+        "import": "./dist/storage-root-key.mjs",
+        "default": "./dist/storage-root-key.mjs"
+      }
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/events": "workspace:*",
+    "@taucad/memory": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

@@ -9,7 +9,8 @@
     "paths": {
       "package.json": ["./package.json"],
       "#*": ["./app/*"],
-      "fumadocs-mdx:collections/*": ["./.source/*"]
+      "#scripts/*": ["./scripts/*"],
+      "fumadocs-mdx:collections/*": ["../../node_modules/.cache/fumadocs/apps/ui/*"]
     },
     "outDir": "./out-tsc/spec",
     "rootDirs": [".", "./.react-router/types"],
@@ -32,8 +33,9 @@
     "server.ts",
     "server.test.ts",
     "scripts/**/*.ts",
+    "scripts/**/*.mts",
     "vite-environment.d.ts",
-    ".source/**/*", // Fumadocs collections
+    "../../node_modules/.cache/fumadocs/apps/ui/**/*", // Fumadocs collections
     "package.json"
   ]
 }

@@ -1,0 +1,57 @@
+{
+  "family": "selector",
+  "fixture": "selector.second-producer-transformed",
+  "generator": {
+    "script": "hand-authored"
+  },
+  "selectors": [
+    {
+      "selector": "cubeB.face.b",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 1, 0],
+        "offset": 5,
+        "area": 100,
+        "centroid": [30, 5, 0]
+      },
+      "factsTolerance": 0.000001
+    },
+    {
+      "selector": {
+        "kind": "datum",
+        "name": "cubeB.frame"
+      },
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "origin": [30, 0, 0],
+        "xAxis": [0, 1, 0],
+        "zAxis": [0, 0, 1]
+      },
+      "factsTolerance": 0.000001
+    },
+    {
+      "selector": "cubeA.face.a",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, 1],
+        "offset": 5,
+        "centroid": [0, 0, 5]
+      }
+    },
+    {
+      "selector": {
+        "kind": "datum",
+        "name": "cubeA.origin"
+      },
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "origin": [0, 0, 0]
+      }
+    }
+  ],
+  "notes": "Second-producer conformance fixture (R1): hand-authored AP242 text sharing zero code with tau's exporters. cubeB is placed under a NON-IDENTITY occurrence transform (rotate 90 deg about Z, translate +30 X) and carries native face and datum-placement evidence that must resolve in the subject frame."
+}

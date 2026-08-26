@@ -24,16 +24,21 @@ import { noTimeUnitSuffixRule } from './rules/no-time-unit-suffix.js';
 import { noBareTimeIdentifierRule } from './rules/no-bare-time-identifier.js';
 import { noAsyncIifeRule } from './rules/no-async-iife.js';
 import { noMonacoCreateModelRule } from './rules/no-monaco-create-model.js';
+import { noBareRandomUuidRule } from './rules/no-bare-random-uuid.js';
+import { noDirectIndexeddbRule } from './rules/no-direct-indexeddb.js';
+import { noBareRpcErrorCodeRule } from './rules/no-bare-rpc-error-code.js';
 import { noHandrolledFanoutRule } from './rules/no-handrolled-fanout.js';
 import { noSceneOverrideMaterialRule } from './rules/no-scene-override-material.js';
 import { staticImportMetaUrlRule } from './rules/static-import-meta-url.js';
 import { requireUsingOnDisposableRule } from './rules/require-using-on-disposable.js';
+import { noImplInIndexRule } from './rules/no-impl-in-index.js';
+import { pluginCapabilityFilenameRule } from './rules/plugin-capability-filename.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.14.0',
+    version: '1.19.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -53,10 +58,15 @@ const plugin = {
     'no-bare-time-identifier': noBareTimeIdentifierRule,
     'no-async-iife': noAsyncIifeRule,
     'no-monaco-create-model': noMonacoCreateModelRule,
+    'no-bare-random-uuid': noBareRandomUuidRule,
+    'no-direct-indexeddb': noDirectIndexeddbRule,
+    'no-bare-rpc-error-code': noBareRpcErrorCodeRule,
     'no-handrolled-fanout': noHandrolledFanoutRule,
     'no-scene-override-material': noSceneOverrideMaterialRule,
     'static-import-meta-url': staticImportMetaUrlRule,
     'require-using-on-disposable': requireUsingOnDisposableRule,
+    'no-impl-in-index': noImplInIndexRule,
+    'plugin-capability-filename': pluginCapabilityFilenameRule,
   },
 };
 

@@ -57,7 +57,7 @@ export class RedisIoAdapter extends IoAdapter {
       transports: ['websocket'],
       // CORS is handled by NestJS/Fastify
       cors: false,
-      // 50MB — accommodates binary GLB geometry from fetchGeometry RPC (default 1MB is too small)
+      // 50MB — accommodates multi-angle base64 image capture responses (default 1MB is too small)
       maxHttpBufferSize: 50e6,
       pingTimeout: 30_000,
       connectionStateRecovery: {

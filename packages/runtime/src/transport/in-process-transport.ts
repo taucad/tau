@@ -10,7 +10,11 @@
 
 import { definePassthroughTransport } from '#transport/define-runtime-transport.js';
 import { inProcessClient } from '#transport/in-process-client.js';
+import type { InProcessClientOptions, inProcessId } from '#transport/in-process-client.js';
 import { inProcessClientOptionsSchema } from '#transport/in-process-transport.schemas.js';
+import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { TransportPlugin } from '#transport/runtime-transport.types.js';
+import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
 /**
  * Bundled in-process transport.
@@ -25,23 +29,43 @@ import { inProcessClientOptionsSchema } from '#transport/in-process-transport.sc
  *
  * @example <caption>Spin up an in-process kernel for tests</caption>
  * ```typescript
- * import { createRuntimeClient, presets } from '@taucad/runtime';
+ * import { createRuntimeClient } from '@taucad/runtime';
+ * import { defineRuntime } from '@taucad/runtime/worker';
+ * import type { AnyPluginInstance } from '@taucad/runtime/plugin';
  * import { inProcessTransport } from '@taucad/runtime/transport/in-process';
  * import { fromMemoryFs } from '@taucad/runtime/filesystem';
  *
+ * declare const kernelPlugin: AnyPluginInstance;
+ * declare const bundlerPlugin: AnyPluginInstance;
+ * const runtime = defineRuntime({ plugins: [kernelPlugin, bundlerPlugin] });
  * const client = createRuntimeClient({
- *   ...presets.all(),
  *   transport: inProcessTransport({
+ *     runtime,
  *     fileSystem: fromMemoryFs({ '/main.ts': 'export default () => "hi";' }),
  *   }),
  * });
  * ```
  */
-export const inProcessTransport = definePassthroughTransport({
+const makeInProcessTransport = definePassthroughTransport({
   id: 'in-process',
   clientOptionsSchema: inProcessClientOptionsSchema,
   client: inProcessClient,
 });
+
+/**
+ * Create a same-isolate transport whose host owns the supplied runtime.
+ *
+ * @public
+ */
+export const inProcessTransport = <const Runtime extends AnyRuntimeDefinition>(
+  options: InProcessClientOptions<Runtime>,
+): TransportPlugin<RuntimeProtocol, Readonly<Record<never, never>>, typeof inProcessId, Runtime> =>
+  makeInProcessTransport(options) as unknown as TransportPlugin<
+    RuntimeProtocol,
+    Readonly<Record<never, never>>,
+    typeof inProcessId,
+    Runtime
+  >;
 
 export type { InProcessClientOptions } from '#transport/in-process-client.js';
 

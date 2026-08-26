@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -8,42 +9,103 @@ import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
 import mdx from 'fumadocs-mdx/vite';
-import svgSpriteWrapper from 'vite-svg-sprite-wrapper';
 import { defineConfig } from 'vite';
+import type { Plugin } from 'vite';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- allowed for Fumadocs; .js for ESM
 import * as MdxConfig from './app/lib/fumadocs/source.config.js';
-import { runtime } from '@taucad/runtime/vite';
-import { tsModuleUrlPlugin } from '@taucad/vite/ts-module-url';
+import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
-import { optimizeDepsFromCache } from '@taucad/vite/optimize-deps-from-cache';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const testScriptsAlias = '#scripts';
 
-// Sprite generation can slow down the build time, so we disable it by default.
-// Enable it when adding a new icon to regenerate the sprite.
-const enableSpriteGeneration = false;
+const toOriginOrRaw = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value;
+  }
+};
+
+const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undefined => {
+  if (environment.TAU_FRONTEND_URL) {
+    return undefined;
+  }
+
+  if (environment.NETLIFY !== 'true' || environment.CONTEXT === 'production') {
+    return undefined;
+  }
+
+  return (
+    toOriginOrRaw(environment.DEPLOY_PRIME_URL) ??
+    toOriginOrRaw(environment.DEPLOY_URL) ??
+    toOriginOrRaw(environment.NETLIFY_AI_GATEWAY_URL)
+  );
+};
+
+const createUiSourceAliasPlugin = (): Plugin => ({
+  name: 'tau-ui-source-alias',
+  enforce: 'pre',
+  resolveId(source, importer) {
+    if (!source.startsWith('#')) {
+      return null;
+    }
+
+    const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
+    if (importer !== undefined && !path.resolve(importer).startsWith(uiRoot)) {
+      return null;
+    }
+
+    const [specifier, query] = source.split('?', 2);
+    if (specifier === undefined) {
+      return null;
+    }
+
+    const appPath = path.resolve(__dirname, 'app', specifier.slice(1));
+    const candidatePaths = [appPath];
+    if (specifier.endsWith('.js')) {
+      const sourceBasePath = appPath.slice(0, -'.js'.length);
+      candidatePaths.push(
+        `${sourceBasePath}.ts`,
+        `${sourceBasePath}.tsx`,
+        `${sourceBasePath}.js`,
+        `${sourceBasePath}.jsx`,
+      );
+    }
+
+    for (const candidatePath of candidatePaths) {
+      if (existsSync(candidatePath)) {
+        return query === undefined ? candidatePath : `${candidatePath}?${query}`;
+      }
+    }
+
+    return null;
+  },
+});
 
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
   const isNetlify = process.env['NETLIFY'] === 'true';
+  const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
 
   return {
     root: __dirname,
     cacheDir: '../../node_modules/.vite/apps/ui',
+    define: {
+      tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
+    },
     plugins: [
-      // Pre-bundle all deps known from the previous dev session's cache,
-      // eliminating cascading "new dependencies optimized → reloading" on cold start.
-      optimizeDepsFromCache(),
+      createUiSourceAliasPlugin(),
 
       /*
-       * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, exclude the
-       * runtime + WASM-bearing deps from optimizeDeps, keep .wasm out of the
-       * inline path, force worker.format to 'es'. See docs/research/runtime-zero-config-bundling.md (R2).
+       * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
+       * out of the inline path, and force module-worker output.
        */
-      ...runtime(),
-
-      // Resolve .ts files referenced via new URL() in both build and serve modes
-      ...tsModuleUrlPlugin(),
+      tauRuntime(),
 
       // Base64 Loader
       base64Loader,
@@ -66,6 +128,7 @@ export default defineConfig(({ mode }) => {
       // Fumadocs
       mdx(MdxConfig, {
         configPath: path.resolve(__dirname, './app/lib/fumadocs/source.config.ts'),
+        outDir: path.resolve(__dirname, '../../node_modules/.cache/fumadocs/apps/ui'),
       }), // Fumadocs
 
       // Browser DevTools JSON plugin.
@@ -78,30 +141,18 @@ export default defineConfig(({ mode }) => {
             }),
           ]
         : []),
-
-      // This plugin generates an SVG sprite to reduce the number of requests to the server.
-      // An SVG sprite is a single SVG file that contains all the SVG icons,
-      // inlined as <use> elements.
-      // This provides better caching performance.
-      // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- allowed for quick switching of sprite generation.
-      ...(enableSpriteGeneration
-        ? [
-            svgSpriteWrapper({
-              icons: path.resolve(__dirname, './app/components/icons/raw/**/*.svg'),
-              outputDir: path.resolve(__dirname, './app/components/icons/generated'),
-              generateType: true,
-              typeOutputDir: path.resolve(__dirname, './app/components/icons/generated'),
-              // Ensure the sprite retains the original svg attributes
-              sprite: { shape: {} },
-            }),
-          ]
-        : []),
     ],
     worker: {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
-      plugins: () => [nxViteTsPaths()],
-      format: 'es',
+      plugins: () => [createUiSourceAliasPlugin(), nxViteTsPaths()],
+    },
+    resolve: {
+      alias: isTest
+        ? {
+            [testScriptsAlias]: path.resolve(__dirname, 'scripts'),
+          }
+        : {},
     },
 
     /*
@@ -115,7 +166,7 @@ export default defineConfig(({ mode }) => {
      */
     ssr: {
       noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
-      external: ['@taucad/runtime', '@taucad/openscad'],
+      external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
     },
 
     server: {
@@ -133,17 +184,11 @@ export default defineConfig(({ mode }) => {
        */
       /*
        * SVGs are forced out of the base64 inline path so the icon sprite
-       * pipeline can fingerprint them. WASM exclusion is the same invariant
-       * shipped by `@taucad/runtime/vite#runtime`; we mirror it here because
-       * Vite's user-config `build.assetsInlineLimit` wins over plugin-level
-       * defaults, and the SVG branch needs to coexist with the WASM rule.
-       * Inlining .wasm breaks worker V8 bytecode caching.
+       * pipeline can fingerprint them. `tauRuntime()` composes its WASM rule with
+       * this application-owned SVG policy.
        */
       assetsInlineLimit(file) {
         if (file.endsWith('.svg')) {
-          return false;
-        }
-        if (file.endsWith('.wasm')) {
           return false;
         }
         return undefined;
@@ -163,7 +208,7 @@ export default defineConfig(({ mode }) => {
       setupFiles: ['./vitest.setup.ts'],
       reporters: ['verbose'],
       coverage: {
-        reportsDirectory: '../../coverage/apps/ui',
+        reportsDirectory: '../../out/reports/coverage/apps/ui',
         provider: 'v8',
         include: ['app/**/*'],
         exclude: ['app/**/*.{test,spec}.{ts,tsx}', 'app/**/index.ts'],

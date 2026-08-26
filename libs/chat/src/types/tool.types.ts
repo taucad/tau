@@ -2,11 +2,11 @@ import type { DynamicStructuredTool } from '@langchain/core/tools';
 import type { InferUITools, Tool as AiTool, UIToolInvocation } from 'ai';
 import type { toolName, toolMode } from '#constants/tool.constants.js';
 import type { EditFileInput, EditFileOutput } from '#schemas/tools/edit-file.tool.schema.js';
-import type { TestModelOutput } from '@taucad/testing';
-import type { TestModelInput, EditTestsInput, EditTestsOutput } from '#schemas/tools/test-model.tool.schema.js';
+import type { TestModelInput, TestModelOutput } from '#schemas/tools/test-model.tool.schema.js';
 import type { WebBrowserInput, WebBrowserOutput } from '#schemas/tools/web-browser.tool.schema.js';
 import type { WebSearchInput, WebSearchOutput } from '#schemas/tools/web-search.tool.schema.js';
 import type { ReadFileInput, ReadFileOutput } from '#schemas/tools/read-file.tool.schema.js';
+import type { UseSkillInput, UseSkillOutput } from '#schemas/tools/use-skill.tool.schema.js';
 import type { ListDirectoryInput, ListDirectoryOutput } from '#schemas/tools/list-directory.tool.schema.js';
 import type { CreateFileInput, CreateFileOutput } from '#schemas/tools/create-file.tool.schema.js';
 import type { DeleteFileInput, DeleteFileOutput } from '#schemas/tools/delete-file.tool.schema.js';
@@ -136,6 +136,18 @@ export type ToolStreamError = {
 };
 
 /**
+ * Structured error for a streamed tool call whose input reached the UI but whose
+ * provider turn ended without a matching tool output.
+ * @public
+ */
+export type ToolOrphanedToolCallError = {
+  errorCode: 'ORPHANED_TOOL_CALL';
+  message: string;
+  toolName: string;
+  toolCallId: string;
+};
+
+/**
  * Structured error for when a tool completes successfully but returns no results.
  * Common with web extraction (blocked pages, JS-rendered content, auth-gated sites).
  * Treated as a recoverable, expected case rather than a failure.
@@ -161,6 +173,7 @@ export type ToolExecutionError =
   | ToolGenericExecutionError
   | ToolUserInterruptedError
   | ToolStreamError
+  | ToolOrphanedToolCallError
   | ToolNoResultsError;
 
 // =============================================================================
@@ -190,9 +203,9 @@ export type ToolSelection = ToolMode | ToolName[];
 export type MyTools = InferUITools<{
   [toolName.editFile]: AiTool<EditFileInput, EditFileOutput>;
   [toolName.testModel]: AiTool<TestModelInput, TestModelOutput>;
-  [toolName.editTests]: AiTool<EditTestsInput, EditTestsOutput>;
   [toolName.webBrowser]: AiTool<WebBrowserInput, WebBrowserOutput>;
   [toolName.webSearch]: AiTool<WebSearchInput, WebSearchOutput>;
+  [toolName.useSkill]: AiTool<UseSkillInput, UseSkillOutput>;
   [toolName.readFile]: AiTool<ReadFileInput, ReadFileOutput>;
   [toolName.listDirectory]: AiTool<ListDirectoryInput, ListDirectoryOutput>;
   [toolName.createFile]: AiTool<CreateFileInput, CreateFileOutput>;

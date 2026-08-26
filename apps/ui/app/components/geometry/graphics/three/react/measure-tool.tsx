@@ -1,7 +1,8 @@
 /* oxlint-disable complexity -- Label/line sizing and camera-facing math in a single component */
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, useReducer } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
+import { createActor } from 'xstate';
 import {
   LabelTextGeometry,
   LabelBackgroundGeometry,
@@ -13,8 +14,24 @@ import {
 import type { SnapPoint } from '#components/geometry/graphics/three/utils/snap-detection.utils.js';
 import { computeAxisRotationForCamera } from '#components/geometry/graphics/three/utils/rotation.utils.js';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
-import { sceneTag, sceneTagData, hasSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import {
+  sceneTag,
+  sceneTagData,
+  hasSceneTagInHierarchy,
+} from '#components/geometry/graphics/three/utils/scene-tags.js';
+import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
+import type { RafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
+import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import {
+  createSectionViewRaycastClipState,
+  useSectionView,
+} from '#components/geometry/graphics/three/use-section-view.js';
+import { measureInputMachine } from '#machines/measure-input.machine.js';
+
+const measurementPickBlockingSceneTags = new Set<SceneTagKey>([sceneTag.measurementUi, sceneTag.sectionViewHelper]);
 
 function calculateScaleFromCamera(position: THREE.Vector3, camera: THREE.Camera): number {
   const distanceToCamera = camera.position.distanceTo(position);
@@ -56,10 +73,54 @@ const _cameraUpProjected = new THREE.Vector3();
 const _lineDir = new THREE.Vector3();
 const _coneOffset = new THREE.Vector3();
 
+type MeasureHoverState = {
+  hoveredSnapPoints: SnapPoint[];
+  activeSnapPoint?: SnapPoint;
+  mousePosition?: THREE.Vector3;
+};
+
+type MeasureHoverAction =
+  | {
+      type: 'set';
+      hoveredSnapPoints: SnapPoint[];
+      activeSnapPoint?: SnapPoint;
+      mousePosition?: THREE.Vector3;
+    }
+  | { type: 'clear' };
+
+const measureHoverReducer = (_state: MeasureHoverState, action: MeasureHoverAction): MeasureHoverState => {
+  if (action.type === 'clear') {
+    return {
+      hoveredSnapPoints: [],
+      activeSnapPoint: undefined,
+      mousePosition: undefined,
+    };
+  }
+
+  return {
+    hoveredSnapPoints: action.hoveredSnapPoints,
+    activeSnapPoint: action.activeSnapPoint,
+    mousePosition: action.mousePosition,
+  };
+};
+
+type MeasurePointerCoordinates = {
+  readonly clientX: number;
+  readonly clientY: number;
+};
+
+type MeasurePointerSnapshot = {
+  readonly hasTarget: boolean;
+  readonly hasActiveSnapTarget: boolean;
+  readonly point?: THREE.Vector3;
+};
+
 export function MeasureTool(): React.JSX.Element {
-  const { camera, gl, scene } = useThree();
+  const { camera, gl, scene, invalidate } = useThree();
   const graphicsActor = useGraphics();
+  const sectionView = useSectionView();
   const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
+  const pickableMeshesVersion = useGraphicsSelector((state) => state.context.pickableMeshesVersion);
   const measurements = useGraphicsSelector((state) => state.context.measurements);
   const currentStart = useGraphicsSelector((state) => state.context.currentMeasurementStart);
   const snapDistance = useGraphicsSelector((state) => state.context.measureSnapDistance);
@@ -67,30 +128,29 @@ export function MeasureTool(): React.JSX.Element {
   const lengthSymbol = useGraphicsSelector((state) => state.context.units.length.symbol);
   const hoveredMeasurementId = useGraphicsSelector((state) => state.context.hoveredMeasurementId);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
+  const cameraInteracting = useGraphicsSelector((state) => state.context.cameraInteracting);
 
-  const [hoveredSnapPoints, setHoveredSnapPoints] = useState<SnapPoint[]>([]);
-  const [activeSnapPoint, setActiveSnapPoint] = useState<SnapPoint | undefined>();
-  const [mousePosition, setMousePosition] = useState<THREE.Vector3 | undefined>();
+  const [{ hoveredSnapPoints, activeSnapPoint, mousePosition }, dispatchHoverState] = useReducer(measureHoverReducer, {
+    hoveredSnapPoints: [],
+    activeSnapPoint: undefined,
+    mousePosition: undefined,
+  });
   const lastSnapPointsRef = useRef<SnapPoint[] | undefined>(undefined);
 
-  // Refs for values that change rapidly (every mouse move) so the event-listener
-  // effect doesn't tear down and re-add 4 DOM listeners per mouse event.
-  const activeSnapPointRef = useRef(activeSnapPoint);
-  activeSnapPointRef.current = activeSnapPoint;
-  const mousePositionRef = useRef(mousePosition);
-  mousePositionRef.current = mousePosition;
   const currentStartRef = useRef(currentStart);
   currentStartRef.current = currentStart;
 
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
-  const pointerDownOnMeshRef = useRef(false);
-  const mouseIsDownRef = useRef(false);
-  const startCameraQuatRef = useRef(new THREE.Quaternion());
-  const startCameraPosRef = useRef(new THREE.Vector3());
+  const measureInputActor = useMemo(() => createActor(measureInputMachine), []);
+  const raycastClipState = useMemo<RaycastClipState | undefined>(() => {
+    return createSectionViewRaycastClipState(sectionView);
+  }, [sectionView.enableMesh, sectionView.isActive, sectionView.plane]);
+  const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
+  const wasCameraInteractingRef = useRef(cameraInteracting);
 
   // Cache mesh list to avoid expensive scene.traverse() on every mouse event.
-  // Invalidated when geometryKey changes (new geometry loaded/unloaded).
+  // Invalidated when geometry or component display changes.
   const cachedMeshesRef = useRef<THREE.Mesh[]>([]);
   const cachedMeshKeyRef = useRef<string | undefined>(undefined);
   // Keep scene ref in sync for getCachedMeshes (stable callback reference)
@@ -98,20 +158,26 @@ export function MeasureTool(): React.JSX.Element {
   sceneRef.current = scene;
   const geometryKeyRef = useRef(geometryKey);
   geometryKeyRef.current = geometryKey;
+  const pickableMeshesVersionRef = useRef(pickableMeshesVersion);
+  pickableMeshesVersionRef.current = pickableMeshesVersion;
 
   // Cache detectSnapPoints results keyed by (mesh.id, faceIndex) to avoid
   // running the expensive geometry pipeline on every mouse move over the same face.
   const snapCacheRef = useRef(new Map<string, SnapPoint[]>());
 
   const getCachedMeshes = useRef((): THREE.Mesh[] => {
-    const currentKey = geometryKeyRef.current;
+    const currentKey = `${geometryKeyRef.current}:${pickableMeshesVersionRef.current}`;
     if (currentKey === cachedMeshKeyRef.current) {
       return cachedMeshesRef.current;
     }
 
     const meshes: THREE.Mesh[] = [];
     sceneRef.current.traverse((object) => {
-      if (object instanceof THREE.Mesh && object.visible && !hasSceneTag(object, sceneTag.measurementUi)) {
+      if (
+        object instanceof THREE.Mesh &&
+        object.visible &&
+        !hasSceneTagInHierarchy(object, measurementPickBlockingSceneTags)
+      ) {
         meshes.push(object as THREE.Mesh);
       }
     });
@@ -122,6 +188,98 @@ export function MeasureTool(): React.JSX.Element {
     return meshes;
   }).current;
 
+  useEffect(() => {
+    measureInputActor.start();
+    return () => {
+      measureInputActor.stop();
+    };
+  }, [measureInputActor]);
+
+  const updatePointerSnapshot = useCallback(
+    ({ clientX, clientY }: MeasurePointerCoordinates): MeasurePointerSnapshot => {
+      const rect = gl.domElement.getBoundingClientRect();
+      mouseRef.current.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      mouseRef.current.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycasterRef.current.setFromCamera(mouseRef.current, camera);
+
+      const firstIntersection = raycastFirstVisibleMeshHit({
+        raycaster: raycasterRef.current,
+        meshes: getCachedMeshes(),
+        clipping: raycastClipState,
+      });
+
+      let allSnapPoints: SnapPoint[] = [];
+      if (firstIntersection?.object) {
+        const topMesh = firstIntersection.object;
+        const cacheKey = `${topMesh.id}:${firstIntersection.faceIndex ?? -1}`;
+        const cached = snapCacheRef.current.get(cacheKey);
+        if (cached) {
+          allSnapPoints = cached;
+        } else {
+          allSnapPoints = detectSnapPoints(topMesh, firstIntersection);
+          snapCacheRef.current.set(cacheKey, allSnapPoints);
+        }
+
+        lastSnapPointsRef.current = allSnapPoints;
+      } else {
+        lastSnapPointsRef.current = undefined;
+      }
+
+      const closest = findClosestSnapPoint(allSnapPoints, {
+        mousePos: mouseRef.current,
+        camera,
+        canvas: gl.domElement,
+        snapDistancePx: snapDistance,
+        snapPointBufferPx: 15,
+      });
+      const nextMousePosition = closest?.position ?? firstIntersection?.point;
+
+      dispatchHoverState({
+        type: 'set',
+        hoveredSnapPoints: allSnapPoints,
+        activeSnapPoint: closest,
+        mousePosition: nextMousePosition,
+      });
+      invalidate();
+
+      return {
+        hasTarget: Boolean(firstIntersection),
+        hasActiveSnapTarget: Boolean(closest),
+        point: closest?.position ?? firstIntersection?.point,
+      };
+    },
+    [camera, getCachedMeshes, gl.domElement, invalidate, raycastClipState, snapDistance],
+  );
+
+  useEffect(() => {
+    pointerMoveCoalescerRef.current?.cancel();
+    pointerMoveCoalescerRef.current = createRafCoalescer((coordinates) => {
+      updatePointerSnapshot(coordinates);
+    });
+
+    return () => {
+      pointerMoveCoalescerRef.current?.cancel();
+      pointerMoveCoalescerRef.current = undefined;
+    };
+  }, [updatePointerSnapshot]);
+
+  useEffect(() => {
+    if (!isMeasureActive) {
+      pointerMoveCoalescerRef.current?.cancel();
+      dispatchHoverState({ type: 'clear' });
+      lastSnapPointsRef.current = undefined;
+    }
+  }, [isMeasureActive]);
+
+  useEffect(() => {
+    if (isMeasureActive && cameraInteracting && !wasCameraInteractingRef.current) {
+      measureInputActor.send({ type: 'cameraInteractionStart' });
+    }
+
+    wasCameraInteractingRef.current = cameraInteracting;
+  }, [cameraInteracting, isMeasureActive, measureInputActor]);
+
   // Handle mouse move for snapping
   useEffect(() => {
     // Only enable interactive listeners when measure mode is active
@@ -130,168 +288,59 @@ export function MeasureTool(): React.JSX.Element {
     }
 
     const handleMouseMove = (event: MouseEvent): void => {
-      const rect = gl.domElement.getBoundingClientRect();
-      mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-      raycasterRef.current.setFromCamera(mouseRef.current, camera);
-
-      // Get all meshes in scene, using cached list when geometry hasn't changed
-      const meshes = getCachedMeshes();
-
-      // Find the closest intersected mesh (top-most object)
-      const intersects = raycasterRef.current.intersectObjects(meshes, true);
-      const firstIntersection = intersects[0];
-
-      // Only show snap points for the closest/top-most intersected object.
-      // If there is no intersection, fall back to the last detected face's snap points.
-      let allSnapPoints: SnapPoint[] = [];
-      if (firstIntersection?.object) {
-        const topMesh = firstIntersection.object as THREE.Mesh;
-        // Cache by mesh ID + face index to avoid re-running the expensive geometry
-        // pipeline when hovering over the same face on consecutive mouse moves.
-        const cacheKey = `${topMesh.id}:${firstIntersection.faceIndex ?? -1}`;
-        const cached = snapCacheRef.current.get(cacheKey);
-        if (cached) {
-          allSnapPoints = cached;
-        } else {
-          allSnapPoints = detectSnapPoints(topMesh, raycasterRef.current);
-          snapCacheRef.current.set(cacheKey, allSnapPoints);
-        }
-
-        lastSnapPointsRef.current = allSnapPoints;
-      } else if (lastSnapPointsRef.current?.length) {
-        allSnapPoints = lastSnapPointsRef.current;
-      }
-
-      setHoveredSnapPoints(allSnapPoints);
-
-      const closest = findClosestSnapPoint(allSnapPoints, {
-        mousePos: mouseRef.current,
-        camera,
-        canvas: gl.domElement,
-        snapDistancePx: snapDistance,
-        snapPointBufferPx: 15, // Add buffer for hover persistence
+      pointerMoveCoalescerRef.current?.schedule({
+        clientX: event.clientX,
+        clientY: event.clientY,
       });
-      setActiveSnapPoint(closest);
-
-      // Update mouse position for preview line
-      if (closest) {
-        setMousePosition(closest.position);
-      } else if (firstIntersection) {
-        setMousePosition(firstIntersection.point);
-      } else if (lastSnapPointsRef.current?.[0]) {
-        // Use the first snap point as a stable mouse position proxy when off-face
-        setMousePosition(lastSnapPointsRef.current[0].position);
-      }
     };
 
     const handlePointerDown = (event: MouseEvent): void => {
-      // Track camera state at mouse down to detect rotations/translations during drag
-      if (event.button === 0 || event.button === 2) {
-        startCameraQuatRef.current.copy(camera.quaternion);
-        startCameraPosRef.current.copy(camera.position);
-        mouseIsDownRef.current = true;
-      }
-
-      // Only handle left clicks for measurement from here
-      if (event.button !== 0) {
-        return;
-      }
-
-      // Track if pointerdown happens on a mesh
-      raycasterRef.current.setFromCamera(mouseRef.current, camera);
-
-      const meshes = getCachedMeshes();
-      const intersects = raycasterRef.current.intersectObjects(meshes, true);
-      // Consider a valid pointerdown when either on a mesh or over a valid snap indicator
-      pointerDownOnMeshRef.current = intersects.length > 0 || Boolean(activeSnapPointRef.current);
+      const pointerSnapshot = updatePointerSnapshot({
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+      measureInputActor.send({
+        type: 'pointerDown',
+        button: event.button,
+        hasTarget: pointerSnapshot.hasTarget || pointerSnapshot.hasActiveSnapTarget,
+        cameraInteracting,
+      });
     };
 
     const handlePointerUp = (event: MouseEvent): void => {
-      // Handle right click - cancel current measurement only if no camera movement
-      if (event.button === 2) {
-        if (mouseIsDownRef.current) {
-          const endQuat = camera.quaternion.clone();
-          const endPos = camera.position.clone();
-          const dot = Math.abs(startCameraQuatRef.current.dot(endQuat));
-          const angle = 2 * Math.acos(Math.min(1, Math.max(-1, dot))); // Radians
-          const rotated = angle > 0.01; // ~0.57°
-          const translated = startCameraPosRef.current.distanceTo(endPos) > 1e-3;
+      const pointerSnapshot = updatePointerSnapshot({
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+      const { hasActiveSnapTarget, hasTarget, point } = pointerSnapshot;
+      const pointArray: [number, number, number] | undefined = point ? [point.x, point.y, point.z] : undefined;
+      const isZeroLength =
+        pointArray !== undefined && currentStartRef.current !== undefined
+          ? new THREE.Vector3(...currentStartRef.current).distanceTo(new THREE.Vector3(...pointArray)) <= 1e-4
+          : false;
 
-          if (!rotated && !translated && currentStartRef.current) {
-            // No camera movement: treat as explicit cancel
-            graphicsActor.send({ type: 'cancelCurrentMeasurement' });
-          }
-        }
+      measureInputActor.send({
+        type: 'pointerUp',
+        button: event.button,
+        hasTarget,
+        hasCurrentStart: Boolean(currentStartRef.current),
+        isZeroLength,
+        hasActiveSnapTarget,
+      });
 
-        pointerDownOnMeshRef.current = false;
-        mouseIsDownRef.current = false;
+      const { result } = measureInputActor.getSnapshot().context;
+      measureInputActor.send({ type: 'clearResult' });
+
+      if (result === 'cancelCurrent') {
+        graphicsActor.send({ type: 'cancelCurrentMeasurement' });
         return;
       }
 
-      // Only handle left clicks for measurement
-      if (event.button !== 0) {
+      if (result !== 'acceptPoint' || !pointArray) {
         return;
       }
-
-      // If the camera rotated or translated while the mouse was held down, treat this as a view manipulation,
-      // not a measurement click. This avoids registering a start/end point upon releasing the drag.
-      if (mouseIsDownRef.current) {
-        const endQuat = camera.quaternion.clone();
-        const endPos = camera.position.clone();
-
-        const dot = Math.abs(startCameraQuatRef.current.dot(endQuat));
-        const angle = 2 * Math.acos(Math.min(1, Math.max(-1, dot))); // Radians
-        const rotated = angle > 0.001; // ~0.057°
-
-        const translated = startCameraPosRef.current.distanceTo(endPos) > 1e-3;
-
-        if (rotated || translated) {
-          pointerDownOnMeshRef.current = false;
-          mouseIsDownRef.current = false;
-          return;
-        }
-      }
-
-      // Only process if interaction started on mesh OR we still have a valid snap indicator
-      if (!pointerDownOnMeshRef.current && !activeSnapPointRef.current) {
-        pointerDownOnMeshRef.current = false;
-        return;
-      }
-
-      // Verify pointerup is also on a mesh by performing a fresh raycast
-      raycasterRef.current.setFromCamera(mouseRef.current, camera);
-
-      const meshes = getCachedMeshes();
-      const intersects = raycasterRef.current.intersectObjects(meshes, true);
-      if (intersects.length === 0 && !activeSnapPointRef.current) {
-        // No intersection and no active snap target, ignore
-        pointerDownOnMeshRef.current = false;
-        return;
-      }
-
-      // Use snap point if available, otherwise use intersection point
-      const point = activeSnapPointRef.current?.position ?? intersects[0]?.point;
-      if (!point) {
-        pointerDownOnMeshRef.current = false;
-        return;
-      }
-
-      const pointArray: [number, number, number] = [point.x, point.y, point.z];
 
       if (currentStartRef.current) {
-        // Disallow 0-length measurements by ignoring a completion click
-        // that lands effectively on the start point (within a small epsilon)
-        const startVec = new THREE.Vector3(...currentStartRef.current);
-        const endVec = new THREE.Vector3(...pointArray);
-        const zeroLengthEpsilon = 1e-4; // Scene units
-        if (startVec.distanceTo(endVec) <= zeroLengthEpsilon) {
-          pointerDownOnMeshRef.current = false;
-          mouseIsDownRef.current = false;
-          return;
-        }
-
         graphicsActor.send({
           type: 'completeMeasurement',
           payload: pointArray,
@@ -299,10 +348,6 @@ export function MeasureTool(): React.JSX.Element {
       } else {
         graphicsActor.send({ type: 'startMeasurement', payload: pointArray });
       }
-
-      // Reset the pointerdown flag
-      pointerDownOnMeshRef.current = false;
-      mouseIsDownRef.current = false;
     };
 
     const handleContextMenu = (event: MouseEvent): void => {
@@ -321,7 +366,7 @@ export function MeasureTool(): React.JSX.Element {
       gl.domElement.removeEventListener('pointerup', handlePointerUp);
       gl.domElement.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [camera, gl, scene, snapDistance, isMeasureActive, graphicsActor, getCachedMeshes]);
+  }, [cameraInteracting, gl.domElement, isMeasureActive, graphicsActor, measureInputActor, updatePointerSnapshot]);
 
   // Choose which measurements to display: all during measure mode, otherwise only pinned
   const visibleMeasurements = isMeasureActive ? measurements : measurements.filter((m) => m.isPinned);
@@ -677,7 +722,7 @@ function MeasurementLine({
       _labelNormal.set(0, 0, 1).applyQuaternion(_finalQuat).normalize();
       _labelUp.set(0, 1, 0).applyQuaternion(_finalQuat).normalize();
 
-      _cameraUp.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+      _cameraUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
       _cameraUpProjected.copy(_cameraUp).addScaledVector(_labelNormal, -_cameraUp.dot(_labelNormal)).normalize();
 
       if (_labelUp.dot(_cameraUpProjected) < 0) {

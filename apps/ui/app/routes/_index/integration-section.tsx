@@ -14,7 +14,7 @@ export function IntegrationSection(): React.JSX.Element {
           <div className='mb-12 text-center'>
             <h2 className='text-3xl font-semibold tracking-tight md:text-4xl'>Integrate with Your Workflow</h2>
             <p className='mx-auto mt-4 max-w-2xl text-muted-foreground'>
-              Import projects from GitHub or use our converter package to transform CAD files in your own applications.
+              Import projects from GitHub or automate CAD exports with our published command-line tools.
             </p>
           </div>
 
@@ -39,19 +39,19 @@ export function IntegrationSection(): React.JSX.Element {
               </Button>
             </div>
 
-            {/* Converter Package */}
+            {/* CAD CLI */}
             <div className='rounded-xl border bg-background p-6'>
               <div className='mb-4 flex items-center gap-3'>
                 <div className='flex size-10 items-center justify-center rounded-lg bg-primary/10'>
                   <Package className='size-5 text-primary' />
                 </div>
-                <h3 className='text-lg font-semibold'>Converter Package</h3>
+                <h3 className='text-lg font-semibold'>CAD CLI</h3>
               </div>
               <p className='mb-4 text-sm text-muted-foreground'>
-                Convert between CAD formats programmatically. Supports STL, STEP, OBJ, GLTF, and more.
+                Render and export CAD files from scripts, CI, or your terminal.
               </p>
               <div className='rounded-lg bg-sidebar p-3 font-mono text-sm'>
-                <span className='text-muted-foreground'>$</span> pnpm add @taucad/converter
+                <span className='text-muted-foreground'>$</span> pnpm add @taucad/cli
               </div>
             </div>
           </div>

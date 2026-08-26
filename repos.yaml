@@ -32,6 +32,20 @@ groups:
       - build123d
       - FreeCAD
       - OCCT-Light
+      - OpenJSCAD.org
+      - PicoGK
+      - PicoGKRuntime
+      - openvdb
+      - picovoxel
+      - LEAP71_ShapeKernel
+      - LEAP71_RoverWheel
+      - LEAP71_HelixHeatX
+      - PicoGK_Examples
+      - LEAP71_LatticeLibrary
+      - PicoGKUnitTests
+      - LEAP71_QuasiCrystals
+      - PicoGK_SimulationExample
+      - openrscad
   slicers:
     description: 3D printer slicer applications
     repos:
@@ -65,10 +79,14 @@ groups:
       - three-gltf-viewer
       - Online3DViewer
       - glTF-Transform
-      - assimpjs
+      - libassimp
       - three-viewport-gizmo
       - three-mesh-bvh
       - three-cad-viewer
+      - drei
+      - gltf
+      - easy-gltf
+      - gltf_kun
   dev-tools:
     description: Development tools and frameworks
     repos:
@@ -103,6 +121,11 @@ groups:
       - elysia
       - VSCode_SysML_Extension
       - vscode-wasm
+      - isomorphic-git
+      - jj
+      - gitbutler
+      - wasm-git
+      - cdn-resolve
   tscircuit:
     description: tscircuit EDA ecosystem
     repos:
@@ -132,6 +155,13 @@ groups:
     repos:
       - cloud-infra
       - terraform-provider-netlify
+  brain:
+    repos:
+      - tau-brain
+  oss-biz:
+    repos:
+      - postiz-app
+      - carbon
 repos:
   langchainjs:
     upstream: langchain-ai/langchainjs
@@ -143,16 +173,20 @@ repos:
     fork: taucad/langgraphjs
     branch: main
     description: LangGraph.js - agent orchestration framework
-  assimpjs:
-    upstream: kovacsv/assimpjs
-    fork: taucad/assimpjs
+  libassimp:
+    upstream: taucad/libassimp
     branch: main
-    description: Assimp.js - 3D model importer compiled to WASM
+    description: Assimp compiled to WebAssembly with a unified import and export API
   opencascade.js:
     upstream: donalffons/opencascade.js
     fork: taucad/opencascade.js
     branch: master
     description: OpenCASCADE compiled to WASM via Emscripten
+  PicoGK:
+    upstream: leap71/PicoGK
+    fork: rifont/PicoGK
+    branch: main
+    description: PicoGK - compact geometry kernel for Computational Engineering
   zoo-modeling-app:
     upstream: KittyCAD/modeling-app
     fork: taucad/modeling-app
@@ -168,6 +202,7 @@ repos:
     upstream: sgenoud/replicad
     branch: main
     description: Replicad - CAD library built on OpenCASCADE
+    fork: taucad/replicad
   replicad-cli:
     upstream: sgenoud/replicad-cli
     branch: main
@@ -526,3 +561,88 @@ repos:
     upstream: openai/codex
     branch: main
     description: OpenAI Codex - terminal coding agent (Rust core in codex-rs + TS SDK)
+  OpenJSCAD.org:
+    upstream: jscad/OpenJSCAD.org
+    description: JSCAD is an open source set of modular, browser and command line tools for creating parametric 2D and 3D designs with JavaScript code. It provides a quick, precise and reproducible method for generating 3D models, and is especially useful for creating ready-to-print 3D designs.
+  drei:
+    upstream: pmndrs/drei
+    description: 🥉 useful helpers for react-three-fiber
+  tau-brain:
+    upstream: taucad/tau-brain
+    fork: taucad/tau-brain
+    branch: main
+    description: Private IP knowledge base — research + reference docs, symlinked into docs/
+  PicoGKRuntime:
+    upstream: leap71/PicoGKRuntime
+    description: PicoGK Runtime is the C++ framework behind PicoGK a compact and robust geometry kernel for Computational Engineering
+  openvdb:
+    upstream: mjurczyk/openvdb
+    description: Web implementation of volumetric grids
+  isomorphic-git:
+    upstream: isomorphic-git/isomorphic-git
+    description: A pure JavaScript implementation of git for node and browsers!
+  jj:
+    upstream: jj-vcs/jj
+    description: A Git-compatible VCS that is both simple and powerful
+  gitbutler:
+    upstream: gitbutlerapp/gitbutler
+    description: The GitButler version control client, backed by Git, powered by Tauri/Rust/Svelte
+  wasm-git:
+    upstream: petersalomonsen/wasm-git
+    description: WebAssembly build of libgit2 for browser Git
+    fork: taucad/wasm-git
+  gltf:
+    upstream: gltf-rs/gltf
+    description: gltf-rs — Rust glTF 2.0 loader and JSON model
+  easy-gltf:
+    upstream: flomonster/easy-gltf
+    description: easy-gltf — high-level Rust glTF scene loader built on gltf-rs
+  gltf_kun:
+    upstream: unavi-xyz/gltf_kun
+    description: gltf_kun — graph-based Rust glTF processing library
+  meshoptimizer:
+    upstream: zeux/meshoptimizer
+    description: meshoptimizer — glTF mesh optimization and EXT_meshopt_compression reference decoder
+  draco-rust:
+    upstream: Filyus/draco-rust
+    description: draco-rust — pure Rust Draco codec and glTF integration
+  postiz-app:
+    upstream: gitroomhq/postiz-app
+    description: 📨 The ultimate agentic social media scheduling tool 🤖
+  carbon:
+    upstream: crbnos/carbon
+    description: Carbon is an open source ERP, MES and QMS for manufacturing. Perfect for complex assembly, contract manufacturing, and configure to order manufacturing.
+  cdn-resolve:
+    upstream: luxass/cdn-resolve
+    branch: main
+    description: Resolve npm package specifiers and CDN URLs
+  picovoxel:
+    upstream: taucad/picovoxel
+    description: PicoGK compiled to WebAssembly - implicit/voxel CAD kernel for the browser
+  LEAP71_ShapeKernel:
+    upstream: leap71/LEAP71_ShapeKernel
+    description: A framework for building complex computational geometry based on PicoGK
+  LEAP71_RoverWheel:
+    upstream: leap71/LEAP71_RoverWheel
+    description: A library to create rover-wheel-like objects with several layers of structures
+  LEAP71_HelixHeatX:
+    upstream: leap71/LEAP71_HelixHeatX
+    description: A helical heat exchanger built on the LEAP 71 Shape Kernel and PicoGK
+  PicoGK_Examples:
+    upstream: leap71/PicoGK_Examples
+    description: A repository containing examples of how to use PicoGK
+  LEAP71_LatticeLibrary:
+    upstream: leap71/LEAP71_LatticeLibrary
+    description: A rich library for creating lattices using PicoGK and the LEAP71 ShapeKernel
+  PicoGKUnitTests:
+    upstream: leap71/PicoGKUnitTests
+    description: Suite of Unit Tests for PicoGK
+  LEAP71_QuasiCrystals:
+    upstream: leap71/LEAP71_QuasiCrystals
+  PicoGK_SimulationExample:
+    upstream: leap71/PicoGK_SimulationExample
+  openrscad:
+    upstream: matthova/openrscad
+    fork: taucad/openrscad
+    commit: a08461511ebd4c315be8b5cd83702187fbd0878e
+    description: Clean-room Rust implementation of the OpenSCAD language and geometry runtime

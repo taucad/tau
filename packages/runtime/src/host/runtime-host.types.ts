@@ -9,8 +9,6 @@
  * encoders); those live entirely inside the transport host.
  */
 
-// oxlint-disable-next-line @typescript-eslint/no-explicit-any -- variance: accepts any plugin generic
-import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- variance: accepts any transport host generic
 import type { RuntimeTransportHost } from '#transport/runtime-transport.types.js';
 
@@ -33,20 +31,6 @@ export type RuntimeFileCache = unknown;
  *   geometry/file delivery encoding, abort signalling and the
  *   filesystem strategy.
  *
- * Reserved (forward-compatibility):
- *
- * - {@link RuntimeHostConfig.kernels kernels} /
- *   {@link RuntimeHostConfig.bundlers bundlers} /
- *   {@link RuntimeHostConfig.transcoders transcoders} /
- *   {@link RuntimeHostConfig.middleware middleware} —
- *   per-host plugin overrides. Today every shipped transport
- *   bootstraps plugins inside the kernel runtime worker from the
- *   inbound `'initialize'` command, so these fields are accepted but
- *   unused; reserving them keeps the symmetric shape stable when
- *   out-of-process kernels begin to need host-side pre-registration.
- * - {@link RuntimeHostConfig.cache cache} — host-side file content
- *   cache.
- *
  * @public
  */
 export type RuntimeHostConfig = {
@@ -54,13 +38,6 @@ export type RuntimeHostConfig = {
    * Named host factory result (e.g. `nodeWorkerHost(...)`, `electronUtilityHost(...)`). Required.
    */
   readonly transport: RuntimeTransportHost;
-  // oxlint-disable @typescript-eslint/no-explicit-any -- variance: accepts any plugin generic
-  readonly kernels?: ReadonlyArray<KernelPlugin<any, any, any>>;
-  readonly bundlers?: readonly BundlerPlugin[];
-  readonly transcoders?: ReadonlyArray<TranscoderPlugin<any, any, any>>;
-  // oxlint-enable @typescript-eslint/no-explicit-any
-  readonly middleware?: readonly MiddlewarePlugin[];
-  readonly cache?: RuntimeFileCache;
 };
 
 /**

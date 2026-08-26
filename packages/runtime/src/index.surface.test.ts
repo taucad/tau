@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
 const sourcePath = join(dirname(fileURLToPath(import.meta.url)), 'index.ts');
 const source = readFileSync(sourcePath, 'utf8');
 
-const forbiddenExports = ['RuntimeWorkerClient'] as const;
+const forbiddenExports = ['RuntimeWorkerClient', 'presets'] as const;
 
 describe('@taucad/runtime public barrel — forbidden internals', () => {
   for (const symbol of forbiddenExports) {

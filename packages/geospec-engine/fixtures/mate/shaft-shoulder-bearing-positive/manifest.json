@@ -1,0 +1,111 @@
+{
+  "family": "mate",
+  "fixture": "mate.shaft-shoulder-bearing-positive",
+  "generator": {
+    "script": "scripts/mate/shaft-shoulder/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "contact": 0.02,
+    "clearanceMin": 0.015,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "shaft.journal",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 10
+      }
+    },
+    {
+      "selector": "shaft.shoulder",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, 1],
+        "offset": 20
+      }
+    },
+    {
+      "selector": "pulley.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 10.03
+      }
+    },
+    {
+      "selector": "pulley.back",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, -1],
+        "offset": -20
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "coaxial",
+      "subject": "pulley.bore",
+      "target": "shaft.journal",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "clearance",
+      "subject": "pulley.bore",
+      "target": "shaft.journal",
+      "options": {
+        "min": 0.015,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0.03
+          }
+        }
+      }
+    },
+    {
+      "kind": "contact",
+      "subject": "pulley.back",
+      "target": "shaft.shoulder",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    }
+  ]
+}

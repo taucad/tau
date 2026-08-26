@@ -12,7 +12,7 @@ export type FileLayoutMode = 'full-nesting' | 'assembly-only';
  * `assembly-only` layout) so the agent never has to guess between
  * `include` / `use`, deep-relative TypeScript imports, etc.
  *
- * Authoring rule: keep this DEMO-MINIMAL — one entry file plus one
+ * Authoring rule: keep this DEMO-MINIMAL — one entry path plus one
  * library file is sufficient. Each file must carry the import statement
  * the agent should mirror; complex parametric models belong in
  * {@link KernelConfig.canonicalExample} instead.
@@ -25,6 +25,17 @@ export type MultiFileExample = {
 };
 
 /**
+ * GeoSpec examples a kernel should see in the CAD agent prompt.
+ */
+export type KernelTestingProfile = {
+  /**
+   * True when the kernel can expose exact BRep evidence for GeoSpec feature
+   * matchers such as `toHavePlanarFace` and `toHaveCircularHole`.
+   */
+  includeBrepFeatureExamples: boolean;
+};
+
+/**
  * Configuration for a CAD kernel's system prompt.
  * Optimized per context-engineering.mdc: minimal fields, canonical example demonstrates behavior.
  */
@@ -32,7 +43,7 @@ export type KernelConfig = {
   /** File extension for this kernel (e.g., '.scad', '.ts', '.kcl', '.js') */
   fileExtension: string;
 
-  /** Human-readable name for the kernel (e.g., 'OpenSCAD', 'Replicad') */
+  /** Human-readable name for the kernel (e.g., 'OpenRSCAD', 'Replicad') */
   languageName: string;
 
   /** Code output requirements - format constraints only, no examples (example demonstrates) */
@@ -40,6 +51,9 @@ export type KernelConfig = {
 
   /** Common error patterns - terse, one-line descriptions */
   commonErrorPatterns: string;
+
+  /** GeoSpec testing examples and capabilities to show this kernel. */
+  testingProfile: KernelTestingProfile;
 
   /** How this kernel handles file organization */
   fileLayoutMode: FileLayoutMode;
@@ -63,8 +77,7 @@ export type KernelConfig = {
    * Single-line snippet demonstrating the minimal top-level construct that
    * makes a file render standalone (e.g. a default `main` export, an OpenSCAD
    * top-level invocation, a KCL `extrude` pipeline). Consumed by the
-   * `test_model` tool description, its `FILE_NOT_FOUND`/`NO_TOP_LEVEL_GEOMETRY`
-   * error messages, and the `<test_requirements>` system-prompt block.
+   * `<test_requirements>` system-prompt block.
    *
    * Snippets must carry the kernel's return-type vocabulary inline (e.g.
    * `: Shape3D`, `: Manifold`) so the agent receives the type contract from
@@ -87,7 +100,7 @@ export type KernelConfig = {
 
   /**
    * Minimal multi-file canonical example demonstrating the kernel's idiomatic
-   * library-import idiom (entry file + one library file). Wired into a
+   * library-import idiom (entry path + one library file). Wired into a
    * `<multi_file_pattern>` section in the system prompt so the agent mirrors
    * the correct import token instead of guessing between
    * `include <…>` / `use <…>` (OpenSCAD), `'./lib/x.js'` / `'./lib/x'` (TS),

@@ -1,26 +1,28 @@
-import type { Plugin } from 'vite';
-import { describe, it, expect } from 'vitest';
-import { runtime } from '#vite/index.js';
-import { wasmAssetsInlineLimit } from '#vite/runtime-invariants.js';
+import { resolveConfig } from 'vite';
+import type { Plugin, ResolvedConfig } from 'vite';
+import { describe, it, expect, vi } from 'vitest';
+import { tauRuntime } from '#vite/index.js';
+import type { RuntimeVitePlugin } from '#vite/index.js';
 
-type AssetsInlineLimit = number | boolean | ((file: string) => number | boolean | undefined);
+type AssetsInlineLimit = ResolvedConfig['build']['assetsInlineLimit'];
+type AssetsInlineLimitCallback = Exclude<AssetsInlineLimit, number | boolean>;
 
-const wasmInlineLimitOf = (limit: AssetsInlineLimit): ((file: string) => number | boolean | undefined) => {
+const wasmInlineLimitOf = (limit: AssetsInlineLimit): AssetsInlineLimitCallback => {
   if (typeof limit !== 'function') {
     throw new TypeError('expected assetsInlineLimit to be a callback');
   }
   return limit;
 };
 
-const findInvariants = (plugins: Plugin[]): Plugin => {
+const findInvariants = (plugins: RuntimeVitePlugin[]): Plugin => {
   const invariants = plugins.find((plugin) => plugin.name === 'taucad-runtime:invariants');
   if (!invariants) {
-    throw new TypeError('runtime() did not register the invariants plugin');
+    throw new TypeError('tauRuntime() did not register the invariants plugin');
   }
-  return invariants;
+  return invariants as Plugin;
 };
 
-const resolveConfig = (plugin: Plugin): Record<string, unknown> => {
+const resolvePluginConfig = (plugin: Plugin): Record<string, unknown> => {
   const { config } = plugin;
   if (typeof config !== 'function') {
     throw new TypeError('invariants plugin must expose a config() function');
@@ -38,48 +40,95 @@ const resolveConfig = (plugin: Plugin): Record<string, unknown> => {
   return result;
 };
 
-describe('runtime (vite plugin)', () => {
-  it('should return the cross-origin-isolation plugin first followed by the invariants plugin', () => {
-    const plugins = runtime();
+describe('tauRuntime (Vite plugin)', () => {
+  it('should return cross-origin isolation, assets, and invariants plugins in order', () => {
+    const plugins = tauRuntime();
 
-    expect(plugins).toHaveLength(2);
-    expect(plugins[0]?.name).toBe('taucad-runtime:cross-origin-isolation');
-    expect(plugins[1]?.name).toBe('taucad-runtime:invariants');
+    expect(plugins.map((plugin) => plugin.name)).toEqual([
+      'taucad-runtime:cross-origin-isolation',
+      'taucad-runtime:assets',
+      'taucad-runtime:invariants',
+    ]);
   });
 
   it('should omit the cross-origin-isolation plugin when crossOriginIsolation: false', () => {
-    const plugins = runtime({ crossOriginIsolation: false });
+    const plugins = tauRuntime({ crossOriginIsolation: false });
 
-    expect(plugins).toHaveLength(1);
-    expect(plugins[0]?.name).toBe('taucad-runtime:invariants');
+    expect(plugins.map((plugin) => plugin.name)).toEqual(['taucad-runtime:assets', 'taucad-runtime:invariants']);
   });
 
   it('should mark the invariants plugin with enforce: "pre" so it runs before user plugins', () => {
-    const invariants = findInvariants(runtime());
+    const invariants = findInvariants(tauRuntime());
 
     expect(invariants.enforce).toBe('pre');
   });
 
-  it('should not configure optimizeDeps (runtime invariants intentionally avoid externalizing WASM-bearing deps)', () => {
-    const config = resolveConfig(findInvariants(runtime()));
-
-    expect(config['optimizeDeps']).toBeUndefined();
-  });
-
   it('should force worker.format to "es" so workers preserve import.meta.url', () => {
-    const config = resolveConfig(findInvariants(runtime()));
+    const config = resolvePluginConfig(findInvariants(tauRuntime()));
 
-    expect(config['worker']).toEqual({ format: 'es' });
+    expect(config['worker']).toMatchObject({ format: 'es' });
   });
 
-  it('should expose an assetsInlineLimit callback that disables WASM inlining only', () => {
-    const config = resolveConfig(findInvariants(runtime()));
+  it('should install fresh Node builtin stubs in Vite worker builds', () => {
+    const config = resolvePluginConfig(findInvariants(tauRuntime()));
+    const worker = config['worker'] as { plugins?: () => Plugin[] };
 
-    const build = config['build'] as { assetsInlineLimit: AssetsInlineLimit };
-    const callback = wasmInlineLimitOf(build.assetsInlineLimit);
-    expect(callback('foo.wasm')).toBe(false);
-    expect(callback('foo.png')).toBeUndefined();
-    expect(callback('foo.wasm')).toBe(wasmAssetsInlineLimit('foo.wasm'));
-    expect(callback('foo.png')).toBe(wasmAssetsInlineLimit('foo.png'));
+    expect(worker.plugins?.().map((plugin) => plugin.name)).toEqual([
+      'taucad-runtime:assets',
+      'taucad-runtime:browser-node-builtins',
+    ]);
+    expect(worker.plugins?.()[0]).not.toBe(worker.plugins?.()[0]);
+  });
+
+  it('should leave Node builtins available to Vitest while stubbing browser builds', () => {
+    const invariants = findInvariants(tauRuntime());
+    const resolveId = invariants.resolveId as unknown as (
+      this: { environment: { config: { consumer: string; mode: string } } },
+      source: string,
+    ) => unknown;
+
+    expect(resolveId.call({ environment: { config: { consumer: 'client', mode: 'test' } } }, 'node:fs')).toBeNull();
+    expect(resolveId.call({ environment: { config: { consumer: 'client', mode: 'production' } } }, 'node:fs')).toBe(
+      '\0taucad-runtime:browser-node-builtins',
+    );
+  });
+
+  it('should compose the WASM invariant with a resolved numeric asset limit', async () => {
+    const config = await resolveConfig(
+      {
+        configFile: false,
+        plugins: [tauRuntime()],
+        build: { assetsInlineLimit: 10 },
+      },
+      'build',
+      'test',
+    );
+    const callback = wasmInlineLimitOf(config.build.assetsInlineLimit);
+
+    expect(callback('foo.wasm', Buffer.alloc(1))).toBe(false);
+    expect(callback('small.png', Buffer.alloc(9))).toBe(true);
+    expect(callback('large.png', Buffer.alloc(10))).toBe(false);
+    expect(callback('pointer.png', Buffer.from('version https://git-lfs.github.com/spec/v1'))).toBe(false);
+  });
+
+  it('should delegate every non-WASM asset to a resolved consumer callback', async () => {
+    const consumerLimit = vi.fn((filePath: string): false | undefined =>
+      filePath.endsWith('.svg') ? false : undefined,
+    );
+    const config = await resolveConfig(
+      {
+        configFile: false,
+        plugins: [tauRuntime()],
+        build: { assetsInlineLimit: consumerLimit },
+      },
+      'build',
+      'test',
+    );
+    const callback = wasmInlineLimitOf(config.build.assetsInlineLimit);
+
+    expect(callback('module.wasm', Buffer.alloc(1))).toBe(false);
+    expect(callback('icon.svg', Buffer.alloc(1))).toBe(false);
+    expect(callback('photo.png', Buffer.alloc(1))).toBeUndefined();
+    expect(consumerLimit).toHaveBeenCalledTimes(2);
   });
 });

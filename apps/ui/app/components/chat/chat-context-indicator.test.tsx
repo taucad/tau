@@ -70,6 +70,41 @@ describe('ChatContextIndicatorDisplay', () => {
     expect(details.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('should show compaction status details in the tooltip', async () => {
+    renderWithProviders(
+      <ChatContextIndicatorDisplay
+        data={createUsageData({
+          lastCompactionStatus: 'overflow_retry_succeeded',
+          triggerReason: 'overflow',
+        })}
+      />,
+    );
+
+    const meter = screen.getByRole('meter');
+    await userEvent.hover(meter);
+
+    expect((await screen.findAllByText('Overflow retry trimmed context')).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Trigger: provider overflow').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should show scheduled-next-turn compaction details in the tooltip', async () => {
+    renderWithProviders(
+      <ChatContextIndicatorDisplay
+        data={createUsageData({
+          percentUsed: 90,
+          compactionScheduleStatus: 'scheduled_next_turn',
+          scheduledTriggerReason: 'previous_usage',
+          scheduledInputTokens: 180_000,
+        })}
+      />,
+    );
+
+    const meter = screen.getByRole('meter');
+    await userEvent.hover(meter);
+
+    expect((await screen.findAllByText('Compaction scheduled next turn')).length).toBeGreaterThanOrEqual(1);
+  });
+
   it('should clamp aria-valuenow at 100 for overflow', () => {
     renderWithProviders(<ChatContextIndicatorDisplay data={createUsageData({ percentUsed: 120 })} />);
 
@@ -90,6 +125,14 @@ describe('getFillColor', () => {
   it('should return destructive stroke for high usage', () => {
     expect(getFillColor(85)).toContain('destructive');
   });
+
+  it('should return success stroke after compaction', () => {
+    expect(getFillColor(20, 'compacted')).toContain('success');
+  });
+
+  it('should return destructive stroke when compaction is scheduled', () => {
+    expect(getFillColor(20, 'compacted', 'scheduled_next_turn')).toContain('destructive');
+  });
 });
 
 describe('getTrackColor', () => {
@@ -103,6 +146,14 @@ describe('getTrackColor', () => {
 
   it('should return destructive track for high usage', () => {
     expect(getTrackColor(90)).toContain('destructive');
+  });
+
+  it('should return warning track after overflow retry', () => {
+    expect(getTrackColor(20, 'overflow_retry_succeeded')).toContain('warning');
+  });
+
+  it('should return destructive track when compaction is scheduled', () => {
+    expect(getTrackColor(20, 'compacted', 'scheduled_next_turn')).toContain('destructive');
   });
 });
 

@@ -6,6 +6,7 @@
  * Checks performed:
  * - Requires all fenced codeblocks to specify a language tag
  * - Enforces full language names (`typescript` over `ts`, `javascript` over `js`)
+ * - Rejects duplicate same-kind imports from one module
  * - Type-checks `typescript` codeblocks in `@public` JSDoc via tsgolint
  *
  * Note: tsgolint utilities are inlined here rather than imported from a shared
@@ -14,7 +15,7 @@
  *
  * @typedef {import('eslint').Rule.RuleModule} RuleModule
  * @typedef {import('eslint').Rule.RuleContext} RuleContext
- * @typedef {{ kind: number; range?: { pos: number; end: number }; message: { id: string; description: string }; file_path?: string }} TsgolintDiagnostic
+ * @typedef {{ kind: number; range?: { pos: number; end: number }; message: { id: string; description: string }; file_path?: string; rule?: string }} TsgolintDiagnostic
  * @typedef {{ virtualPath: string; strippedCode: string; codeStartIndex: number; mapToRaw: (offset: number) => number }} CodeblockEntry
  */
 
@@ -31,6 +32,40 @@ const SHORTHAND_LANGS = {
   ts: { full: 'typescript', messageId: 'preferTypescriptTag' },
   js: { full: 'javascript', messageId: 'preferJavascriptTag' },
 };
+const SYNTAX_LINT_RULES = {
+  'import/no-duplicates': ['error', { 'prefer-inline': false }],
+  '@typescript-eslint/consistent-type-imports': [
+    'error',
+    { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
+  ],
+  'import/consistent-type-specifier-style': ['error', 'prefer-top-level'],
+  'import/first': 'error',
+  'no-var': 'error',
+  'prefer-const': ['error', { destructuring: 'all' }],
+  curly: ['error', 'all'],
+  eqeqeq: 'error',
+  '@typescript-eslint/no-explicit-any': ['error', { fixToUnknown: true, ignoreRestArgs: true }],
+  '@typescript-eslint/consistent-type-assertions': [
+    'error',
+    { assertionStyle: 'as', objectLiteralTypeAssertions: 'allow-as-parameter' },
+  ],
+  'unicorn/prefer-node-protocol': 'error',
+};
+const TYPE_AWARE_LINT_RULES = [
+  {
+    name: 'no-floating-promises',
+    options: { checkThenables: true, ignoreVoid: true, ignoreIIFE: true },
+  },
+  {
+    name: 'no-misused-promises',
+    options: { checksConditionals: true, checksVoidReturn: false },
+  },
+  {
+    name: 'only-throw-error',
+    options: { allowThrowingUnknown: true, allowThrowingAny: false },
+  },
+  { name: 'no-deprecated' },
+];
 
 // ---------------------------------------------------------------------------
 // Star-prefix stripping
@@ -86,6 +121,8 @@ function stripStarPrefixes(rawCode) {
 /** @type {string | undefined} */
 let cachedTsgolintBinary;
 let tsgolintResolved = false;
+/** @type {{ linter: import('eslint').Linter; config: import('eslint').Linter.Config[] } | undefined} */
+let cachedSyntaxLinter;
 
 function resolveTsgolintBinary() {
   if (tsgolintResolved) {
@@ -159,7 +196,7 @@ function runTsgolint(binary, blocks) {
   const result = spawnSync(binary, ['headless'], {
     input: JSON.stringify({
       version: 2,
-      configs: [{ file_paths: filePaths, rules: [] }],
+      configs: [{ file_paths: filePaths, rules: TYPE_AWARE_LINT_RULES }],
       source_overrides: sourceOverrides,
       report_syntactic: true,
       report_semantic: true,
@@ -180,6 +217,101 @@ function runTsgolint(binary, blocks) {
 }
 
 /**
+ * @returns {{ linter: import('eslint').Linter; config: import('eslint').Linter.Config[] }}
+ */
+function getSyntaxLinter() {
+  if (!cachedSyntaxLinter) {
+    const require = createRequire(import.meta.url);
+    const { Linter } = require('eslint');
+    const tseslint = require('typescript-eslint');
+    const importPlugin = require('eslint-plugin-import-x').default;
+    const unicornPlugin = require('eslint-plugin-unicorn').default;
+
+    cachedSyntaxLinter = {
+      linter: new Linter(),
+      config: [
+        {
+          files: ['**/*.ts'],
+          languageOptions: {
+            parser: tseslint.parser,
+            sourceType: 'module',
+          },
+          plugins: {
+            '@typescript-eslint': tseslint.plugin,
+            import: importPlugin,
+            unicorn: unicornPlugin,
+          },
+          rules: SYNTAX_LINT_RULES,
+        },
+      ],
+    };
+  }
+  return cachedSyntaxLinter;
+}
+
+/**
+ * @param {string} code
+ * @param {number} line
+ * @param {number} column
+ */
+function lineColumnToOffset(code, line, column) {
+  const lines = code.split('\n');
+  let offset = 0;
+  for (let index = 0; index < line - 1; index++) {
+    offset += lines[index].length + 1;
+  }
+  return offset + column - 1;
+}
+
+/**
+ * @param {import('eslint').Linter.LintMessage} message
+ * @param {string} code
+ */
+function formatSyntaxLintMessage(message, code) {
+  if (message.ruleId !== 'import/no-duplicates' || !message.endLine || !message.endColumn) {
+    return message.message;
+  }
+
+  const start = lineColumnToOffset(code, message.line, message.column);
+  const end = lineColumnToOffset(code, message.endLine, message.endColumn);
+  return `${code.slice(start, end)} imported multiple times.`;
+}
+
+/**
+ * @param {RuleContext} context
+ * @param {CodeblockEntry[]} codeblocks
+ */
+function lintCodeblocks(context, codeblocks) {
+  const { linter, config } = getSyntaxLinter();
+
+  for (const block of codeblocks) {
+    const messages = linter.verify(block.strippedCode, config, { filename: block.virtualPath });
+    for (const message of messages) {
+      if (!message.ruleId) {
+        continue;
+      }
+
+      const strippedStart = lineColumnToOffset(block.strippedCode, message.line, message.column);
+      const strippedEnd =
+        message.endLine && message.endColumn
+          ? lineColumnToOffset(block.strippedCode, message.endLine, message.endColumn)
+          : strippedStart;
+
+      context.report({
+        loc: {
+          start: context.sourceCode.getLocFromIndex(block.codeStartIndex + block.mapToRaw(strippedStart)),
+          end: context.sourceCode.getLocFromIndex(block.codeStartIndex + block.mapToRaw(strippedEnd)),
+        },
+        messageId: 'invalidCodeblock',
+        data: {
+          errorMessage: `${message.ruleId}: ${formatSyntaxLintMessage(message, block.strippedCode)}`,
+        },
+      });
+    }
+  }
+}
+
+/**
  * Run tsgolint on extracted codeblocks and report diagnostics via context.report().
  *
  * @param {RuleContext} context
@@ -196,7 +328,7 @@ function typecheckCodeblocks(context, codeblocks) {
   const blockMap = new Map(codeblocks.map((block) => [block.virtualPath, block]));
 
   for (const diagnostic of diagnostics) {
-    if (diagnostic.kind !== 1 || !diagnostic.file_path) {
+    if ((diagnostic.kind !== 0 && diagnostic.kind !== 1) || !diagnostic.file_path) {
       continue;
     }
 
@@ -217,7 +349,7 @@ function typecheckCodeblocks(context, codeblocks) {
       },
       messageId: 'invalidCodeblock',
       data: {
-        errorMessage: `${diagnostic.message.id}: ${diagnostic.message.description}`,
+        errorMessage: `${diagnostic.rule ?? diagnostic.message.id}: ${diagnostic.message.description}`,
       },
     });
   }
@@ -345,7 +477,7 @@ export const validateJsdocCodeblocksRule = {
     type: 'suggestion',
     fixable: 'code',
     docs: {
-      description: 'Validates JSDoc codeblock formatting and type-checks @public TypeScript examples via tsgolint',
+      description: 'Validates JSDoc codeblock formatting, imports, and @public TypeScript examples via tsgolint',
     },
     messages: {
       invalidCodeblock: '{{errorMessage}}',
@@ -436,6 +568,7 @@ export const validateJsdocCodeblocksRule = {
         }
 
         if (codeblocks.length > 0) {
+          lintCodeblocks(context, codeblocks);
           typecheckCodeblocks(context, codeblocks);
         }
       },

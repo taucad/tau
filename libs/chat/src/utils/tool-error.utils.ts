@@ -16,6 +16,7 @@ export const toolErrorCodes = [
   'TOOL_EXECUTION_ERROR',
   'USER_INTERRUPTED',
   'STREAM_ERROR',
+  'ORPHANED_TOOL_CALL',
   'TOOL_NO_RESULTS',
 ] as const;
 
@@ -169,6 +170,10 @@ export function getToolErrorTitle(errorCode: ToolErrorCode): string {
       return 'Stream interrupted during';
     }
 
+    case 'ORPHANED_TOOL_CALL': {
+      return 'Incomplete tool call for';
+    }
+
     case 'TOOL_NO_RESULTS': {
       return 'No results from';
     }
@@ -211,6 +216,10 @@ export function getToolErrorDescription(errorCode: ToolErrorCode): string {
 
     case 'STREAM_ERROR': {
       return 'The chat stream ended before this tool could finish.';
+    }
+
+    case 'ORPHANED_TOOL_CALL': {
+      return 'The chat stream ended before this tool produced a result.';
     }
 
     case 'TOOL_NO_RESULTS': {

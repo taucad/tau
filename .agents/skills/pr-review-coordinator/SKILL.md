@@ -15,7 +15,7 @@ Fetches unresolved PR review threads from GitHub and dispatches fixes to `pr-iss
 Run from the workspace root:
 
 ```bash
-.agent/skills/pr-review-coordinator/scripts/fetch-pr-comments.sh [PR_NUMBER]
+.agents/skills/pr-review-coordinator/scripts/fetch-pr-comments.sh [PR_NUMBER]
 ```
 
 - Omit PR_NUMBER to auto-detect from the current git branch

@@ -1,23 +1,32 @@
 {
   "name": "@taucad/cli",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "CLI for @taucad/runtime",
   "type": "module",
+  "sideEffects": [
+    "./src/bin.ts",
+    "./dist/bin/taucad.mjs"
+  ],
   "private": false,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
     "directory": "packages/cli"
   },
-  "main": "./dist/cjs/index.cjs",
-  "types": "./dist/cjs/index.d.cts",
-  "module": "./dist/esm/index.js",
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/cli#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "bin": {
-    "taucad": "./dist/bin/taucad.js"
+    "taucad": "./dist/bin/taucad.mjs"
   },
   "files": [
     "dist",
-    "README.md"
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "cad",
@@ -29,35 +38,53 @@
     "step"
   ],
   "author": "Richard Fontein",
-  "license": "MIT",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
     "bin": {
-      "taucad": "./dist/bin/taucad.js"
+      "taucad": "./dist/bin/taucad.mjs"
     },
     "exports": {
       ".": {
-        "require": {
-          "types": "./dist/cjs/index.d.cts",
-          "default": "./dist/cjs/index.cjs"
-        },
-        "import": {
-          "types": "./dist/esm/index.d.ts",
-          "default": "./dist/esm/index.js"
-        }
-      }
-    }
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "dependencies": {
+    "@taucad/assimp": "workspace:*",
+    "@taucad/brep": "workspace:*",
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/gltf": "workspace:*",
+    "@taucad/image": "workspace:*",
+    "@taucad/jscad": "workspace:*",
+    "@taucad/manifold": "workspace:*",
+    "@taucad/middleware": "workspace:*",
+    "@taucad/opencascade": "workspace:*",
+    "@taucad/openrscad": "workspace:*",
+    "@taucad/replicad": "workspace:*",
+    "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
-    "@taucad/types": "workspace:*",
     "citty": "catalog:",
-    "consola": "catalog:"
+    "consola": "catalog:",
+    "semver": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/semver": "catalog:"
   }
 }

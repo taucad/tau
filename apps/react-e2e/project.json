@@ -1,0 +1,158 @@
+{
+  "name": "react-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/react-e2e",
+  "tags": ["scope:shared", "type:e2e"],
+  "implicitDependencies": ["react", "runtime"],
+  "targets": {
+    "test": {
+      "executor": "nx:noop"
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": true,
+        "commands": [
+          "tsgo -p apps/react-e2e/tsconfig.json --noEmit",
+          "tsgo -p apps/react-e2e/apps/electron/tsconfig.json --noEmit",
+          "tsgo -p apps/react-e2e/apps/nextjs/tsconfig.json --noEmit",
+          "tsgo -p apps/react-e2e/apps/react-router/tsconfig.json --noEmit"
+        ]
+      }
+    },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
+        ]
+      }
+    },
+    "test:e2e:development": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-development",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example-development",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-development",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example-development"
+        ]
+      }
+    },
+    "test:e2e:electron:development": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-development",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example-development"
+        ]
+      }
+    },
+    "test:e2e:nextjs": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
+        ]
+      }
+    },
+    "test:e2e:nextjs:isolated": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-isolated"
+      }
+    },
+    "test:e2e:nextjs:non-isolated": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-non-isolated"
+      }
+    },
+    "test:e2e:nextjs:example": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=nextjs-example"
+      }
+    },
+    "test:e2e:react-router": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example"
+        ]
+      }
+    },
+    "test:e2e:react-router:isolated": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-isolated"
+      }
+    },
+    "test:e2e:react-router:non-isolated": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-non-isolated"
+      }
+    },
+    "test:e2e:react-router:example": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=react-router-example"
+      }
+    },
+    "test:e2e:electron": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "parallel": false,
+        "commands": [
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron",
+          "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example"
+        ]
+      }
+    },
+    "test:e2e:electron:legacy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=electron"
+      }
+    },
+    "test:e2e:electron-example": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/react-e2e/vitest.config.ts --project=electron-example"
+      }
+    }
+  }
+}

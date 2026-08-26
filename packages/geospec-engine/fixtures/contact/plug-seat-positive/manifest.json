@@ -1,0 +1,88 @@
+{
+  "family": "contact",
+  "fixture": "contact.plug-seat-positive",
+  "generator": {
+    "script": "scripts/contact/plug-seat/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "contact": 0.02
+  },
+  "selectors": [
+    {
+      "selector": "head.plugBore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 6
+      }
+    },
+    {
+      "selector": "head.seat",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, 1],
+        "offset": 24
+      }
+    },
+    {
+      "selector": "plug.thread",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 5.95
+      }
+    },
+    {
+      "selector": "plug.washerSeat",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "normal": [0, 0, -1],
+        "offset": -24
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "coaxial",
+      "subject": "plug.thread",
+      "target": "head.plugBore",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0,
+            "angle": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "contact",
+      "subject": "plug.washerSeat",
+      "target": "head.seat",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    }
+  ]
+}

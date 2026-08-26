@@ -8,6 +8,8 @@ import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 
+const shiftKey = formatKeyCombination({ key: 'Shift' });
+
 type FovControlProps = {
   /**
    * Class name for the slider container (used to set width)
@@ -102,8 +104,16 @@ export function FovControl({ className, isCompact = false }: FovControlProps): R
         {/* Desktop only - shift key is usually not available on mobile */}
         <br className='max-md:hidden' />
         <span className='inline-flex items-center gap-1 text-neutral-foreground/60 max-md:hidden dark:text-foreground/50'>
-          <Info className='size-3 stroke-2' /> Hold{' '}
-          <KeyShortcut variant='tooltip'>{formatKeyCombination({ key: 'Shift' })}</KeyShortcut> for 5&deg; steps
+          <Info className='size-3 stroke-2' />{' '}
+          {isShiftHeld ? (
+            <>
+              Release <KeyShortcut variant='tooltip'>{shiftKey}</KeyShortcut> for 1&deg; steps
+            </>
+          ) : (
+            <>
+              Hold <KeyShortcut variant='tooltip'>{shiftKey}</KeyShortcut> for 5&deg; steps
+            </>
+          )}
         </span>
       </TooltipContent>
     </Tooltip>

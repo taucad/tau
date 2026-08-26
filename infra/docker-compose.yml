@@ -53,7 +53,57 @@ services:
       - ./grafana/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml
       - otel_lgtm_data:/data
 
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: tau-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tauminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-tauminio-dev-secret}
+      MINIO_SERVER_URL: http://localhost:9000
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:9001
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  minio-bootstrap:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: tau-minio-bootstrap
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tauminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-tauminio-dev-secret}
+    volumes:
+      - ./seed:/seed:ro
+    entrypoint: >
+      /bin/sh -c '
+        set -eu;
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD";
+        mc mb --ignore-existing local/tau-content;
+        mc anonymous set download local/tau-content;
+        mc mb --ignore-existing local/tau-content-private;
+        mc admin user add local tau-api tau-api-dev-secret || true;
+        mc admin policy attach local readwrite --user tau-api || true;
+        mc cp /seed/default-og.png local/tau-content/defaults/og.png;
+        mc cp /seed/default-thumb.webp local/tau-content/defaults/thumb.webp;
+        printf "ok\n" | mc cp - local/tau-content/__health/probe.txt;
+        echo "MinIO bootstrap complete";
+      '
+    restart: 'no'
+
 volumes:
   postgres_data:
   redis_data:
   otel_lgtm_data:
+  minio-data:

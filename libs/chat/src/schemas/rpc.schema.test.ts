@@ -7,10 +7,6 @@ describe('rpcClientErrorCodeSchema', () => {
     expect(rpcClientErrorCodeSchema.parse('FILE_NOT_FOUND')).toBe('FILE_NOT_FOUND');
   });
 
-  it('should parse NO_TOP_LEVEL_GEOMETRY', () => {
-    expect(rpcClientErrorCodeSchema.parse('NO_TOP_LEVEL_GEOMETRY')).toBe('NO_TOP_LEVEL_GEOMETRY');
-  });
-
   it('should parse RENDER_TIMEOUT for runtime render-timeout failures', () => {
     expect(rpcClientErrorCodeSchema.parse('RENDER_TIMEOUT')).toBe('RENDER_TIMEOUT');
   });
@@ -21,6 +17,10 @@ describe('rpcClientErrorCodeSchema', () => {
 
   it('should parse RESULT_TOO_LARGE for directive overflow errors', () => {
     expect(rpcClientErrorCodeSchema.parse('RESULT_TOO_LARGE')).toBe('RESULT_TOO_LARGE');
+  });
+
+  it('should parse SKILL_NOT_FOUND for missing skill resolution failures', () => {
+    expect(rpcClientErrorCodeSchema.parse('SKILL_NOT_FOUND')).toBe('SKILL_NOT_FOUND');
   });
 
   it('should still expose UNKNOWN as a generic catch-all', () => {
@@ -40,6 +40,15 @@ describe('rpcClientErrorCode', () => {
   it('should expose the new validationError and resultTooLarge keys', () => {
     expect(rpcClientErrorCode.validationError).toBe('VALIDATION_ERROR');
     expect(rpcClientErrorCode.resultTooLarge).toBe('RESULT_TOO_LARGE');
+    expect(rpcClientErrorCode.skillNotFound).toBe('SKILL_NOT_FOUND');
+  });
+});
+
+describe('list_directory RPC schema', () => {
+  const listDirectory = rpcSchemasRegistry[rpcName.listDirectory];
+
+  it('should accept an omitted path so the handler can use the project root', () => {
+    expect(listDirectory.inputSchema.safeParse({}).success).toBe(true);
   });
 });
 
@@ -79,14 +88,16 @@ describe('grep RPC schema — additive envelope fields', () => {
   });
 });
 
-describe('read_file RPC schema — additive envelope fields', () => {
+describe('read_file RPC schema — metadata envelope fields', () => {
   const readFile = rpcSchemasRegistry[rpcName.readFile];
 
-  it('should accept the existing success shape extended with optional truncated flag', () => {
+  it('should accept success payloads with required text metadata and optional truncated flag', () => {
     expect(
       readFile.resultSchema.parse({
         success: true,
         content: 'hi',
+        size: 2,
+        contentKind: 'text',
         totalLines: 1,
         startLine: 1,
         truncated: true,
@@ -94,11 +105,13 @@ describe('read_file RPC schema — additive envelope fields', () => {
     ).toMatchObject({ success: true, truncated: true });
   });
 
-  it('should still accept success payloads that omit truncated (additive contract)', () => {
+  it('should still accept success payloads that omit truncated', () => {
     expect(
       readFile.resultSchema.parse({
         success: true,
         content: 'hi',
+        size: 2,
+        contentKind: 'text',
         totalLines: 1,
         startLine: 1,
       }).success,
@@ -111,5 +124,92 @@ describe('read_file RPC schema — additive envelope fields', () => {
 
   it('should reject offset less than 1 at the schema layer', () => {
     expect(readFile.inputSchema.safeParse({ targetFile: 'a.ts', offset: 0 }).success).toBe(false);
+  });
+});
+
+describe('capture_images RPC schema', () => {
+  const captureImages = rpcSchemasRegistry[rpcName.captureImages];
+  const canonicalViews = ['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom'] as const;
+
+  it('should accept every canonical screenshot view', () => {
+    const parsed = captureImages.resultSchema.parse({
+      success: true,
+      images: canonicalViews.map((view) => ({ view, dataUrl: `data:image/webp;base64,${view}` })),
+    });
+
+    expect(parsed).toMatchObject({ success: true, images: canonicalViews.map((view) => ({ view })) });
+  });
+
+  it('should reject empty image sets, composite and unknown views, and unknown image keys', () => {
+    expect(captureImages.resultSchema.safeParse({ success: true, images: [] }).success).toBe(false);
+    for (const view of ['composite', 'current']) {
+      expect(
+        captureImages.resultSchema.safeParse({
+          success: true,
+          images: [{ view, dataUrl: 'data:image/webp;base64,AQ==' }],
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      captureImages.resultSchema.safeParse({
+        success: true,
+        images: [{ view: 'front', dataUrl: 'data:image/webp;base64,AQ==', unexpected: true }],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('resolve_skill RPC schema', () => {
+  const resolveSkill = rpcSchemasRegistry[rpcName.resolveSkill];
+
+  it('should accept a virtual system skill output without filesystem paths', () => {
+    const parsed = resolveSkill.resultSchema.parse({
+      success: true,
+      skillName: 'create-skill',
+      description: 'Create or update Tau agent skills',
+      source: 'system',
+      enabled: true,
+      resourceUri: 'system:skills/create-skill/SKILL.md',
+      fingerprint: 'systemhash',
+      frontmatter: { name: 'create-skill' },
+      content: '# Create Skill',
+      supportingFiles: [],
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.skillPath).toBeUndefined();
+      expect(parsed.resourceUri).toBe('system:skills/create-skill/SKILL.md');
+    }
+  });
+
+  it('should accept a filesystem skill output with supporting files and shadowed sources', () => {
+    const parsed = resolveSkill.resultSchema.parse({
+      success: true,
+      skillName: 'woodworking',
+      description: 'Woodworking help',
+      source: 'user',
+      enabled: true,
+      resourceUri: 'file:.agents/skills/woodworking/SKILL.md',
+      skillPath: '.agents/skills/woodworking/SKILL.md',
+      baseDirectory: '.agents/skills/woodworking',
+      fingerprint: 'woodhash',
+      frontmatter: { name: 'woodworking' },
+      content: '# Woodworking',
+      supportingFiles: ['.agents/skills/woodworking/references/table.md'],
+      shadowedSources: [{ source: 'system', resourceUri: 'system:skills/woodworking/SKILL.md' }],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('should accept a typed missing-skill error output', () => {
+    const parsed = resolveSkill.resultSchema.parse({
+      success: false,
+      errorCode: rpcClientErrorCode.skillNotFound,
+      message: 'Unknown skill: missing',
+    });
+
+    expect(parsed).toEqual({ success: false, errorCode: 'SKILL_NOT_FOUND', message: 'Unknown skill: missing' });
   });
 });

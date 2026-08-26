@@ -1,0 +1,62 @@
+{
+  "recordedAt": "2026-08-22T14:07:54.857Z",
+  "occt": "8.0.1",
+  "package": "0.1.0",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v24.10.0"
+  },
+  "note": "medians from a shared host; treat as a ceiling, not a spec",
+  "samples": {
+    "01_primitive_box": {
+      "medianMs": 0.017749999999978172,
+      "minMs": 0.015208000000029642,
+      "samples": 15
+    },
+    "02_primitive_cylinder": {
+      "medianMs": 0.007083999999849766,
+      "minMs": 0.0061670000000049185,
+      "samples": 15
+    },
+    "03_boolean_fuse": {
+      "medianMs": 1.5219579999998132,
+      "minMs": 1.3852919999999358,
+      "samples": 15
+    },
+    "04_boolean_cut_grid": {
+      "medianMs": 19.886708,
+      "minMs": 19.517916000000014,
+      "samples": 15
+    },
+    "05_loft_thru_sections": {
+      "medianMs": 0.6596250000000055,
+      "minMs": 0.6157080000000406,
+      "samples": 15
+    },
+    "06_pipe_shell_sweep": {
+      "medianMs": 0.1824159999996482,
+      "minMs": 0.16412500000001273,
+      "samples": 15
+    },
+    "08_fillet_all_edges": {
+      "medianMs": 3.1647500000000264,
+      "minMs": 3.0483330000001843,
+      "samples": 15
+    },
+    "09_fuse_many_boxes": {
+      "medianMs": 78.44520799999964,
+      "minMs": 76.06600000000003,
+      "samples": 15
+    },
+    "10_mesh_incremental": {
+      "medianMs": 89.63741699999991,
+      "minMs": 86.57783400000017,
+      "samples": 15
+    }
+  },
+  "fingerprints": {
+    "synthetic/40-box-fuse.glb": "3a252447c350ba4358f8219ef670c9f56b1951deac8f9769f4385393cfa10ce7",
+    "synthetic/40-box-fuse.brep": "347eb8ed5a4007c8dba851cea7b1bb3d4c15919a6a444e846b1f54f10f1285c2"
+  }
+}

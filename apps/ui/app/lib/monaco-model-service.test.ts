@@ -7,11 +7,22 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import type * as Monaco from 'monaco-editor';
-import { MonacoModelService } from '#lib/monaco-model-service.js';
+import { createWorkspaceContentBinding, MonacoModelService } from '#lib/monaco-model-service.js';
 import type { ModelServiceConfig } from '#lib/monaco-model-service.js';
-import type { ContentChangeEvent, FileContentResult } from '@taucad/fs-client/file-content-service';
-import { createMonacoWorkspaceFs, createWorkspaceFileSystemProvider } from '#lib/monaco-workspace-fs/index.js';
+import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '@taucad/fs-client/file-content-service';
+import { FileContentService } from '@taucad/fs-client/file-content-service';
+import type { FileSystemClient } from '@taucad/fs-client/file-system-client';
+import type { WorkspaceScope } from '@taucad/filesystem';
+import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
+import {
+  createMonacoWorkspaceFs,
+  createWorkspaceFileSystemProvider,
+  subscribeWorkspaceContentDispatch,
+} from '#lib/monaco-workspace-fs/index.js';
 
 function textResult(text: string): FileContentResult {
   return { kind: 'text', content: new TextEncoder().encode(text) };
@@ -47,7 +58,7 @@ type MockModel = {
   uri: { toString: () => string; path: string };
   dispose: ReturnType<typeof vi.fn>;
   getValue: () => string;
-  setValue: ReturnType<typeof vi.fn>;
+  setValue: ReturnType<typeof vi.fn<(value: string) => void>>;
   getFullModelRange: () => unknown;
   pushStackElement: ReturnType<typeof vi.fn>;
   pushEditOperations: ReturnType<typeof vi.fn>;
@@ -72,11 +83,20 @@ function createMockModel(uriPath: string, content = ''): MockModel {
     toString: () => `file://${uriPath}`,
     path: uriPath,
   };
+  const setValue = vi.fn((value: string) => {
+    content = value;
+  });
+  const pushEditOperations = vi.fn((_selections: unknown, edits: ReadonlyArray<{ text: string }>) => {
+    const latest = edits.at(-1);
+    if (latest !== undefined) {
+      content = latest.text;
+    }
+  });
   return {
     uri,
     dispose: vi.fn(),
     getValue: () => content,
-    setValue: vi.fn(),
+    setValue,
     getFullModelRange: () => ({
       startLineNumber: 1,
       startColumn: 1,
@@ -84,7 +104,7 @@ function createMockModel(uriPath: string, content = ''): MockModel {
       endColumn: 1,
     }),
     pushStackElement: vi.fn(),
-    pushEditOperations: vi.fn(),
+    pushEditOperations,
   };
 }
 
@@ -143,10 +163,13 @@ function createMockMarkerService(): MockMarkerService {
 
 type MockContentService = {
   onDidContentChange: ReturnType<typeof vi.fn>;
+  onDidChangeOutcome: ReturnType<typeof vi.fn>;
   resolve: ReturnType<typeof vi.fn>;
+  saveEditor: ReturnType<typeof vi.fn>;
   peek: ReturnType<typeof vi.fn>;
   peekOutcome: ReturnType<typeof vi.fn>;
   _handler?: (event: ContentChangeEvent) => void;
+  _outcomeHandler?: (event: OutcomeChangeEvent) => void;
 };
 
 function createMockContentService(): MockContentService {
@@ -157,7 +180,14 @@ function createMockContentService(): MockContentService {
         mock._handler = undefined;
       };
     }),
+    onDidChangeOutcome: vi.fn((handler: (event: OutcomeChangeEvent) => void) => {
+      mock._outcomeHandler = handler;
+      return () => {
+        mock._outcomeHandler = undefined;
+      };
+    }),
     resolve: vi.fn(async (): Promise<FileContentResult> => textResult('')),
+    saveEditor: vi.fn(async () => undefined),
     peek: vi.fn(() => undefined),
     peekOutcome: vi.fn(() => ({ kind: 'loading' })),
   };
@@ -199,6 +229,12 @@ describe('MonacoModelService', () => {
     ) => () => void;
     subscribeContentChanges((event: ContentChangeEvent) => {
       service.applyContentChange(event);
+    });
+    const subscribeOutcomeChanges = contentService.onDidChangeOutcome as unknown as (
+      handler: (event: OutcomeChangeEvent) => void,
+    ) => () => void;
+    subscribeOutcomeChanges((event) => {
+      service.applyOutcomeChange(event);
     });
     workspaceFs.bindModelService({
       refreshContent: async (uri) => service.refreshContent(uri),
@@ -382,6 +418,160 @@ describe('MonacoModelService', () => {
   });
 
   describe('handleContentChange', () => {
+    it('should preserve filesystem provenance during a machine-restored held-model edit', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('cube([20,20,20]);'));
+      await service.acquireModel('main.scad');
+
+      const model = models.get('file:///main.scad');
+      expect(model).toBeDefined();
+      let observedInboundRestore = false;
+      model?.pushEditOperations.mockImplementation(() => {
+        observedInboundRestore = service.isApplyingFilesystemContent('main.scad');
+      });
+
+      contentService.peek.mockReturnValueOnce(new TextEncoder().encode('cube([10,10,10]);'));
+      contentService._handler?.({
+        type: 'batchWritten',
+        paths: ['main.scad'],
+        source: 'machine',
+      });
+
+      expect(model?.pushEditOperations).toHaveBeenCalledOnce();
+      expect(observedInboundRestore).toBe(true);
+      expect(service.isApplyingFilesystemContent('main.scad')).toBe(false);
+    });
+
+    it('should preserve filesystem provenance while refreshing a held file model', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('cube([20,20,20]);'));
+      await service.acquireModel('main.scad');
+
+      const model = models.get('file:///main.scad');
+      let observedInboundRefresh = false;
+      model?.pushEditOperations.mockImplementation(() => {
+        observedInboundRefresh = service.isApplyingFilesystemContent('main.scad');
+      });
+      contentService.resolve.mockResolvedValueOnce(textResult('cube([10,10,10]);'));
+
+      await service.refreshContent(monaco.Uri.file('/main.scad'));
+
+      expect(model?.pushEditOperations).toHaveBeenCalledOnce();
+      expect(observedInboundRefresh).toBe(true);
+      expect(service.isApplyingFilesystemContent('main.scad')).toBe(false);
+    });
+
+    it('should clear filesystem provenance when a held-model mutation throws', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.acquireModel('main.scad');
+
+      const model = models.get('file:///main.scad');
+      model?.pushEditOperations.mockImplementation(() => {
+        expect(service.isApplyingFilesystemContent('main.scad')).toBe(true);
+        throw new Error('Monaco mutation failed');
+      });
+
+      expect(() => {
+        service.applyContentChange({
+          type: 'written',
+          path: 'main.scad',
+          data: new TextEncoder().encode('after'),
+          source: 'machine',
+        });
+      }).toThrow('Monaco mutation failed');
+      expect(service.isApplyingFilesystemContent('main.scad')).toBe(false);
+    });
+
+    it('should restore the outer path after nested filesystem model mutations', async () => {
+      contentService.resolve
+        .mockResolvedValueOnce(textResult('outer before'))
+        .mockResolvedValueOnce(textResult('inner before'));
+      await service.acquireModel('outer.ts');
+      await service.acquireModel('inner.ts');
+
+      const outerModel = models.get('file:///outer.ts');
+      const innerModel = models.get('file:///inner.ts');
+      innerModel?.pushEditOperations.mockImplementation(() => {
+        expect(service.isApplyingFilesystemContent('inner.ts')).toBe(true);
+        expect(service.isApplyingFilesystemContent('outer.ts')).toBe(false);
+      });
+      outerModel?.pushEditOperations.mockImplementation(() => {
+        expect(service.isApplyingFilesystemContent('outer.ts')).toBe(true);
+        service.applyContentChange({
+          type: 'written',
+          path: 'inner.ts',
+          data: new TextEncoder().encode('inner after'),
+          source: 'machine',
+        });
+        expect(service.isApplyingFilesystemContent('outer.ts')).toBe(true);
+        expect(service.isApplyingFilesystemContent('inner.ts')).toBe(false);
+      });
+
+      service.applyContentChange({
+        type: 'written',
+        path: 'outer.ts',
+        data: new TextEncoder().encode('outer after'),
+        source: 'machine',
+      });
+
+      expect(outerModel?.pushEditOperations).toHaveBeenCalledOnce();
+      expect(innerModel?.pushEditOperations).toHaveBeenCalledOnce();
+      expect(service.isApplyingFilesystemContent('outer.ts')).toBe(false);
+      expect(service.isApplyingFilesystemContent('inner.ts')).toBe(false);
+    });
+
+    it('should preserve the outer guard during a nested same-path mutation', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.acquireModel('main.ts');
+
+      const model = models.get('file:///main.ts');
+      let nested = false;
+      model?.pushEditOperations.mockImplementation(() => {
+        expect(service.isApplyingFilesystemContent('main.ts')).toBe(true);
+        if (!nested) {
+          nested = true;
+          service.applyContentChange({
+            type: 'written',
+            path: 'main.ts',
+            data: new TextEncoder().encode('nested'),
+            source: 'machine',
+          });
+          expect(service.isApplyingFilesystemContent('main.ts')).toBe(true);
+        }
+      });
+
+      service.applyContentChange({
+        type: 'written',
+        path: 'main.ts',
+        data: new TextEncoder().encode('outer'),
+        source: 'machine',
+      });
+
+      expect(model?.pushEditOperations).toHaveBeenCalledTimes(2);
+      expect(service.isApplyingFilesystemContent('main.ts')).toBe(false);
+    });
+
+    it('should retain background setValue synchronization with scoped provenance', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.getOrEnsureModel('background.ts');
+
+      const model = models.get('file:///background.ts');
+      let observedInboundUpdate = false;
+      model?.setValue.mockImplementation(() => {
+        observedInboundUpdate = service.isApplyingFilesystemContent('background.ts');
+      });
+
+      service.applyContentChange({
+        type: 'written',
+        path: 'background.ts',
+        data: new TextEncoder().encode('after'),
+        source: 'machine',
+      });
+
+      expect(model?.setValue).toHaveBeenCalledWith('after');
+      expect(model?.pushEditOperations).not.toHaveBeenCalled();
+      expect(observedInboundUpdate).toBe(true);
+      expect(service.isApplyingFilesystemContent('background.ts')).toBe(false);
+    });
+
     it('should create a model for machine-sourced .scad files', () => {
       contentService._handler?.({
         type: 'written',
@@ -459,5 +649,184 @@ describe('MonacoModelService', () => {
 
       expect(monaco.editor.createModel).not.toHaveBeenCalled();
     });
+
+    it('should apply a changed authoritative text outcome to an open model', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.acquireModel('main.ts');
+      const model = models.get('file:///main.ts');
+
+      contentService._outcomeHandler?.({ path: 'main.ts', result: textResult('after') });
+
+      expect(model?.pushEditOperations).toHaveBeenCalledWith(
+        [],
+        [expect.objectContaining({ text: 'after' })],
+        expect.any(Function),
+      );
+    });
+
+    it('should defer outcomes while an editor save is active and apply the final durable outcome', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.acquireModel('main.ts');
+      const model = models.get('file:///main.ts');
+      const save = Promise.withResolvers<void>();
+      contentService.saveEditor.mockReturnValueOnce(save.promise);
+      contentService.peekOutcome.mockReturnValue(textResult('latest durable'));
+
+      const completion = service.saveEditor('main.ts', new TextEncoder().encode('local'));
+      contentService._outcomeHandler?.({ path: 'main.ts', result: textResult('external during save') });
+      expect(model?.pushEditOperations).not.toHaveBeenCalled();
+
+      save.resolve();
+      await completion;
+      await vi.waitFor(() => {
+        expect(model?.pushEditOperations).toHaveBeenCalledWith(
+          [],
+          [expect.objectContaining({ text: 'latest durable' })],
+          expect.any(Function),
+        );
+      });
+    });
+
+    it('should preserve the newest model text after a rejected save and accept the next save', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.acquireModel('main.ts');
+      const model = models.get('file:///main.ts');
+      model?.setValue('newest local text');
+      const failedSave = Promise.withResolvers<void>();
+      contentService.saveEditor.mockReturnValueOnce(failedSave.promise).mockResolvedValueOnce(undefined);
+      contentService.peekOutcome.mockReturnValue(textResult('saved later'));
+
+      const failedCompletion = service.saveEditor('main.ts', new TextEncoder().encode('newest local text'));
+      failedSave.reject(new Error('disk full'));
+      await expect(failedCompletion).rejects.toThrow('disk full');
+      await vi.waitFor(() => {
+        expect(model?.getValue()).toBe('newest local text');
+      });
+      expect(model?.pushEditOperations).not.toHaveBeenCalled();
+
+      model?.setValue('saved later');
+      await service.saveEditor('main.ts', new TextEncoder().encode('saved later'));
+      await vi.waitFor(() => {
+        expect(model?.getValue()).toBe('saved later');
+      });
+      expect(contentService.saveEditor).toHaveBeenCalledTimes(2);
+    });
+
+    it('should dispose an open model when an authoritative outcome becomes non-text', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('before'));
+      await service.acquireModel('main.ts');
+      const model = models.get('file:///main.ts');
+
+      contentService._outcomeHandler?.({ path: 'main.ts', result: { kind: 'orphaned' } });
+
+      expect(model?.dispose).toHaveBeenCalledOnce();
+      expect(markerService.removeUri).toHaveBeenCalledWith('file:///main.ts');
+    });
+
+    it('should preserve an empty open model across rename', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult(''));
+      await service.acquireModel('empty.ts');
+      monaco.editor.createModel.mockClear();
+
+      service.applyContentChange({ type: 'renamed', oldPath: 'empty.ts', newPath: 'renamed.ts' });
+
+      expect(monaco.editor.createModel).toHaveBeenCalledWith(
+        '',
+        'typescript',
+        expect.objectContaining({ path: '/renamed.ts' }),
+      );
+    });
+  });
+});
+
+describe('Monaco external-content production wiring', () => {
+  it('delegates refresh, structural removal, and authoritative outcomes', async () => {
+    const modelService = {
+      refreshContent: vi.fn(async () => undefined),
+      applyContentChange: vi.fn(),
+      applyOutcomeChange: vi.fn(),
+    } as unknown as MonacoModelService;
+    const binding = createWorkspaceContentBinding(modelService);
+    const uri = { scheme: 'file', path: '/main.ts' } as Monaco.Uri;
+    const removal: ContentChangeEvent = { type: 'deleted', path: 'main.ts', source: 'user' };
+    const outcome: OutcomeChangeEvent = { path: 'main.ts', result: { kind: 'orphaned' } };
+
+    await binding.refreshContent(uri);
+    binding.applyContentChange(removal);
+    binding.applyOutcomeChange(outcome);
+
+    expect(modelService.refreshContent).toHaveBeenCalledWith(uri);
+    expect(modelService.applyContentChange).toHaveBeenCalledWith(removal);
+    expect(modelService.applyOutcomeChange).toHaveBeenCalledWith(outcome);
+  });
+
+  it('rereads an external fileWritten notification and updates an open model', async () => {
+    let bytes = new TextEncoder().encode('before');
+    const readFileMock = vi.fn(async () => bytes);
+    function readFile(
+      filepath: string,
+      options: 'utf8' | { encoding: 'utf8'; scope?: WorkspaceScope },
+    ): Promise<string>;
+    function readFile(filepath: string, options?: { scope?: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
+    async function readFile(
+      _filepath: string,
+      options?: 'utf8' | { encoding?: 'utf8'; scope?: WorkspaceScope },
+    ): Promise<string | Uint8Array<ArrayBuffer>> {
+      const data = await readFileMock();
+      return options === 'utf8' || options?.encoding === 'utf8' ? new TextDecoder().decode(data) : data;
+    }
+    const proxy = mock<FileSystemClient>({ readFile });
+    let emitWorkerChange: ((event: unknown) => void) | undefined;
+    const paths = new WorkspacePathResolver('/project');
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: (_event, handler) => {
+          emitWorkerChange = handler;
+          return vi.fn();
+        },
+      },
+      paths,
+    });
+    const contentService = new FileContentService({
+      proxy,
+      paths,
+      channel,
+      refreshGuard: new RefreshGenerationGuard(),
+    });
+    const { monaco, models } = createMockMonaco();
+    const markerService = createMockMarkerService();
+    const workspaceFs = createMonacoWorkspaceFs(monaco);
+    workspaceFs.registerFileSystemProvider(createWorkspaceFileSystemProvider({ monaco, contentService }));
+    const modelService = new MonacoModelService();
+    modelService.initialize({
+      monaco,
+      workspaceFs,
+      contentService,
+      markerService: markerService as unknown as ModelServiceConfig['markerService'],
+    });
+    const binding = createWorkspaceContentBinding(modelService);
+    const subscription = subscribeWorkspaceContentDispatch(
+      contentService,
+      binding.applyContentChange,
+      binding.applyOutcomeChange,
+    );
+
+    try {
+      await modelService.acquireModel('main.ts');
+      expect(models.get('file:///main.ts')?.getValue()).toBe('before');
+      bytes = new TextEncoder().encode('after');
+      emitWorkerChange?.({ type: 'fileWritten', path: '/project/main.ts', backend: 'indexeddb' });
+
+      await vi.waitFor(() => {
+        expect(models.get('file:///main.ts')?.getValue()).toBe('after');
+      });
+      expect(readFileMock).toHaveBeenCalledTimes(2);
+    } finally {
+      subscription.dispose();
+      modelService.dispose();
+      workspaceFs.dispose();
+      contentService.dispose();
+      channel.dispose();
+    }
   });
 });

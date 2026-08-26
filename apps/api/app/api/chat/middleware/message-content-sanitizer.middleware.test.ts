@@ -152,6 +152,29 @@ describe('messageContentSanitizerMiddleware', () => {
       expect(contentBlocks).toHaveLength(1);
       expect(contentBlocks[0]).toEqual({ type: 'text', text: '[interrupted]' });
     });
+
+    it('should preserve invalid_tool_calls when adding placeholder text', async () => {
+      const invalidToolCall: NonNullable<AIMessage['invalid_tool_calls']>[number] = {
+        id: 'call_bad_args',
+        name: 'read_file',
+        args: '{"limit":40}{"targetFile":"main.ts"}',
+        error: 'Malformed args.',
+        type: 'invalid_tool_call',
+      };
+      const aiMessage = new AIMessage({
+        content: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        invalid_tool_calls: [invalidToolCall],
+      });
+      const messages: BaseMessage[] = [aiMessage];
+
+      await invokeWrapModelCall(messageContentSanitizerMiddleware, { messages }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const sanitizedAiMessage = request.messages[0] as AIMessage;
+      expect(sanitizedAiMessage.content).toEqual([{ type: 'text', text: '[interrupted]' }]);
+      expect(sanitizedAiMessage.invalid_tool_calls).toEqual([invalidToolCall]);
+    });
   });
 
   describe('AIMessages that should not be modified', () => {
@@ -325,6 +348,34 @@ describe('messageContentSanitizerMiddleware', () => {
 
       const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
       expect(request.messages[0]?.additional_kwargs).toEqual({ custom: 'value' });
+    });
+
+    it('should drop provider-visible legacy tool metadata when adding interrupted placeholder', async () => {
+      const aiMessage = new AIMessage({
+        content: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: {
+          custom: 'value',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          tool_calls: [
+            {
+              id: 'call_empty_name',
+              type: 'function',
+              function: { name: '', arguments: '{}' },
+            },
+          ],
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          function_call: { name: '', arguments: '{}' },
+        },
+      });
+      const messages: BaseMessage[] = [aiMessage];
+
+      await invokeWrapModelCall(messageContentSanitizerMiddleware, { messages }, handler);
+
+      const [request] = handler.mock.calls[0] as [{ messages: BaseMessage[] }];
+      const result = request.messages[0] as AIMessage;
+      expect(result.content).toEqual([{ type: 'text', text: '[interrupted]' }]);
+      expect(result.additional_kwargs).toEqual({ custom: 'value' });
     });
 
     it('should preserve response_metadata when adding placeholder to array content', async () => {

@@ -1,0 +1,7 @@
+{
+  "name": "runtime-testing",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/runtime-testing",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { toolName, toolNames } from '#constants/tool.constants.js';
 import { toolInputSchemas, getToolInputSchema } from '#schemas/tool-input.registry.js';
+import { geoSpecRunFilterInputSchema } from '#schemas/tools/test-model.tool.schema.js';
 
 const requireSchema = (key: `tool-${string}`) => {
   const schema = getToolInputSchema(key);
@@ -36,8 +37,88 @@ describe('toolInputSchemas registry', () => {
     expect(result.error.issues.some((issue) => issue.path.includes('targetFile'))).toBe(true);
   });
 
-  it('should reject any non-empty input for empty-input tools (test_model)', () => {
+  it('should validate a well-formed test_model filter input as the strict per-tool schema', () => {
+    const result = requireSchema(`tool-${toolName.testModel}`).safeParse({
+      files: ['main.geospec.ts'],
+      include: ['**/*.geospec.ts'],
+      exclude: ['**/*.slow.geospec.ts'],
+      testNamePattern: '^(?!.*known failing check).*',
+      testTimeout: 5000,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should validate a directory-root test_model filter input', () => {
+    const result = requireSchema(`tool-${toolName.testModel}`).safeParse({
+      files: ['lib'],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should keep bracket-key test_model filters outside the canonical strict schema', () => {
+    const input = Object.fromEntries([['exclude[0]', '**/*.slow.geospec.ts']]);
+    const result = requireSchema(`tool-${toolName.testModel}`).safeParse(input);
+
+    expect(result.success).toBe(false);
+  });
+
+  it('should describe test_model files as a JSON array rather than bracket keys', () => {
+    expect(geoSpecRunFilterInputSchema.shape.files.description).toContain('["main.geospec.ts"]');
+    expect(geoSpecRunFilterInputSchema.shape.files.description).toContain('["lib"]');
+    expect(geoSpecRunFilterInputSchema.shape.files.description).toContain('files or directory roots');
+    expect(geoSpecRunFilterInputSchema.shape.files.description).not.toContain('files[0]');
+    expect(geoSpecRunFilterInputSchema.shape.files.description).not.toContain('Do not use bracket-key syntax');
+    expect(geoSpecRunFilterInputSchema.shape.include.description).toContain('["parts/**/*.geospec.ts"]');
+    expect(geoSpecRunFilterInputSchema.shape.exclude.description).toContain('["**/*.slow.geospec.ts"]');
+    expect(geoSpecRunFilterInputSchema.shape.testNamePattern.description).toContain('"^(?!.*known failing check).*"');
+  });
+
+  it('should reject stale custom GeoSpec filter fields', () => {
+    for (const field of ['pattern', 'excludeFiles', 'excludePattern', 'excludeTestNamePattern']) {
+      const result = requireSchema(`tool-${toolName.testModel}`).safeParse({ [field]: 'value' });
+      expect(result.success, `${field} should not parse`).toBe(false);
+    }
+  });
+
+  it('should reject unknown test_model input fields', () => {
     const result = requireSchema(`tool-${toolName.testModel}`).safeParse({ stray: 'value' });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('should expose only mode and targetFile for screenshot input', () => {
+    const schema = requireSchema(`tool-${toolName.screenshot}`);
+
+    expect(schema.safeParse({ mode: 'single', targetFile: 'main.ts' }).success).toBe(true);
+
+    for (const field of ['target', 'camera', 'display']) {
+      const result = schema.safeParse({
+        mode: 'single',
+        targetFile: 'main.ts',
+        [field]: {},
+      });
+
+      expect(result.success, `${field} should not parse`).toBe(false);
+    }
+  });
+
+  it('should reject stale tau-cad scheme payloads in screenshot input', () => {
+    const result = requireSchema(`tool-${toolName.screenshot}`).safeParse({
+      mode: 'single',
+      targetFile: 'main.ts',
+      target: {
+        component: {
+          scheme: 'tau-cad',
+          filePath: 'main.ts',
+          componentId: 'component:ring',
+          selector: 'model/ring',
+          label: 'Ring',
+          kind: 'part',
+        },
+      },
+    });
 
     expect(result.success).toBe(false);
   });

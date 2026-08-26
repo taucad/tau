@@ -19,34 +19,37 @@ Configure a runtime client with middleware plugins to cache geometry and paramet
 
 ## Steps
 
-### 1. Import Middleware from @taucad/runtime/middleware
+### 1. Import the Middleware Toolkit
 
-All built-in middleware is exported from the `@taucad/runtime/middleware` subpath:
+First-party middleware is exported from the `@taucad/middleware` toolkit. Use its default preset to install the standard middleware stack:
 
 ```typescript
-import { geometryCache, parameterCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
+import { middleware } from '@taucad/middleware';
 ```
 
-### 2. Add Middleware to createRuntimeClient
+### 2. Add Middleware to defineRuntime
 
-Pass the middleware array to the `middleware` option. Order matters: middleware runs in onion-model order (first registered = outermost layer):
+Pass the toolkit to `defineRuntime()`. Its preset fixes middleware order; middleware runs in onion-model order (first registered = outermost layer):
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
-import { geometryCache, parameterCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/runtime/middleware';
+import { middleware } from '@taucad/middleware';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild(), middleware()],
+});
 
 const client = createRuntimeClient({
-  transport: inProcessTransport({}),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
-  middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
 ```
 
-Inline `code:` calls run in an in-memory filesystem. Wire `inProcessTransport({ fileSystem: fromNodeFs(...) })` (see step 4) when geometry/parameter caches should persist on disk.
+Inline `source.files` calls are staged into the transport-owned filesystem. Use `fromMemoryFs()` for ephemeral editor-style source, or wire `inProcessTransport({ runtime, fileSystem: fromNodeFs(...) })` (see step 4) when geometry/parameter caches should persist on disk.
 
 ### 3. Understand Each Middleware
 
@@ -66,15 +69,17 @@ Geometry and parameter caches require a writable filesystem. Use `fromNodeFs` in
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
-import { geometryCache, parameterCache } from '@taucad/runtime/middleware';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { middleware } from '@taucad/middleware';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild(), middleware({ preset: 'cache' })],
+});
 
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromNodeFs('/path/to/project') }),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
-  middleware: [parameterCache(), geometryCache()],
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
 });
 ```
 
@@ -86,24 +91,34 @@ Drive `client.export(...)` as usual. Middleware runs automatically inside the
 worker -- nothing changes in the call site:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = defineRuntime({ plugins: [replicad()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
 
 const result = await client.export('glb', {
-  code: {
-    'main.ts': `
+  source: {
+    files: {
+      'main.ts': `
       import { drawRoundedRectangle } from 'replicad';
       export default function main() {
         return drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
       }
     `,
+    },
   },
-  file: 'main.ts',
 });
 
 if (result.success) {
-  console.log(`Exported ${result.data.bytes.byteLength} bytes`);
+  for (const file of result.data) {
+    console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes`);
+  }
 }
 ```
 
@@ -111,16 +126,19 @@ For UI viewers driving the autonomous render loop, see [Live Rendering](./live-r
 
 ## Variations
 
-- **Preset with all middleware**: Use `presets.all()` from `@taucad/runtime` to get all kernels, middleware, and bundlers. The preset returns `{ kernels, middleware, bundlers }` which you pass directly to [`createRuntimeClient`](../api/client). Add `transport` separately:
+- **Toolkit composition**: Use the middleware toolkit's default preset when all four first-party middleware roles are wanted:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { middleware } from '@taucad/middleware';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
+const runtime = defineRuntime({ plugins: [replicad(), middleware()] });
 const client = createRuntimeClient({
-  ...presets.all(),
-  transport: inProcessTransport({ fileSystem: fromNodeFs('/path/to/project') }),
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
 });
 ```
 

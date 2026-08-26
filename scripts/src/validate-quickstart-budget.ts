@@ -6,7 +6,17 @@ const root = resolve(import.meta.dirname, '../..');
 const quickstartPath = resolve(root, 'apps/ui/content/docs/runtime/getting-started/quick-start.mdx');
 
 const maxLines = 15;
-const maxImports = 3;
+/*
+ * Four is the architectural floor, not slack: the runtime ships no kernel and
+ * no default bundler (`kernel-worker.ts` throws `No bundler registered`), so the
+ * smallest working snippet needs `defineRuntime` + `createNodeClient` + one
+ * kernel + one bundler. The budget of 3 was calibrated against the withdrawn
+ * one-import `client.export('glb', { code, file })` API
+ * (`docs/research/runtime-quickstart-dx-regression.md:58`); the runtime's own
+ * README quick start carries the same four. Re-exporting `defineRuntime` from
+ * `@taucad/runtime/node` would restore 3.
+ */
+const maxImports = 4;
 
 const extractFirstTypescriptBlock = (mdx: string): { content: string; lineNumber: number } | undefined => {
   const lines = mdx.split('\n');

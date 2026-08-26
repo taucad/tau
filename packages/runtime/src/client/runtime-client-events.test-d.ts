@@ -5,13 +5,21 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { RuntimeClient } from '#client/runtime-client.js';
+import type { RenderStatus, RuntimeClient } from '#client/runtime-client.js';
 import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
 
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- pure type testing
 const client = {} as RuntimeClient;
 
 describe('RuntimeClient event surface', () => {
+  it('should expose current renderStatus and accept "renderStatus" subscriptions', () => {
+    expectTypeOf(client.renderStatus).toEqualTypeOf<RenderStatus>();
+    const off = client.on('renderStatus', (status) => {
+      expectTypeOf(status).toEqualTypeOf<RenderStatus>();
+    });
+    expectTypeOf(off).toEqualTypeOf<() => void>();
+  });
+
   it('should accept "activeKernelChanged" with typed payload', () => {
     const off = client.on('activeKernelChanged', (kernelId) => {
       expectTypeOf(kernelId).toEqualTypeOf<string | undefined>();

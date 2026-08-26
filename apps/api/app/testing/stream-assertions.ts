@@ -84,6 +84,21 @@ export function expectIncrementalToolInput(chunks: UIMessageChunk[], _toolName: 
 }
 
 /**
+ * Assert that a provider surfaced a complete tool input, used by providers that
+ * return function-call arguments whole rather than as deltas.
+ */
+export function expectCompleteToolInput(chunks: UIMessageChunk[], toolName: string): void {
+  const found = chunks.some((chunk) => {
+    if (chunk.type !== 'tool-input-available') {
+      return false;
+    }
+
+    return chunk.toolName === toolName && chunk.input !== undefined;
+  });
+  expect(found, `Expected complete tool input for '${toolName}'`).toBe(true);
+}
+
+/**
  * Assert that no error chunks were emitted in the stream.
  * Extracts the errorText from any error chunks for clear failure messages.
  */

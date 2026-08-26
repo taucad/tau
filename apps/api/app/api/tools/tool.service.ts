@@ -8,7 +8,6 @@ import type { Environment } from '#config/environment.config.js';
 import { createWebBrowserTool } from '#api/tools/tools/tool-web-browser.js';
 import { editFileTool } from '#api/tools/tools/tool-edit-file.js';
 import { createTestModelTool } from '#api/tools/tools/tool-test-model.js';
-import { createEditTestsTool } from '#api/tools/tools/tool-edit-tests.js';
 import { createWebSearchTool } from '#api/tools/tools/tool-web-search.js';
 import { readFileTool } from '#api/tools/tools/tool-read-file.js';
 import { listDirectoryTool } from '#api/tools/tools/tool-list-directory.js';
@@ -19,6 +18,7 @@ import { globSearchTool } from '#api/tools/tools/tool-glob-search.js';
 import { getKernelResultTool } from '#api/tools/tools/tool-get-kernel-result.js';
 import { screenshotTool } from '#api/tools/tools/tool-screenshot.js';
 import { exportGeometryTool } from '#api/tools/tools/tool-export-geometry.js';
+import { createUseSkillTool } from '#api/tools/tools/tool-use-skill.js';
 
 export const toolChoiceFromToolName = {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Tavily search tool name
@@ -27,7 +27,6 @@ export const toolChoiceFromToolName = {
 
 type KernelScopedTools = {
   testModel: StructuredTool;
-  editTests: StructuredTool;
 };
 
 @Injectable()
@@ -50,13 +49,13 @@ export class ToolService {
     tools: Partial<Record<ToolName, StructuredTool>>;
     resolvedToolChoice: string;
   } {
-    const { testModel, editTests } = this.getKernelScopedTools(kernel);
+    const { testModel } = this.getKernelScopedTools(kernel);
     const toolCategoryToTool = {
       [toolName.webSearch]: this.getWebSearchTool(),
       [toolName.webBrowser]: this.getWebBrowserTool(),
       [toolName.editFile]: editFileTool,
       [toolName.testModel]: testModel,
-      [toolName.editTests]: editTests,
+      [toolName.useSkill]: createUseSkillTool(),
       [toolName.readFile]: readFileTool,
       [toolName.listDirectory]: listDirectoryTool,
       [toolName.createFile]: createFileTool,
@@ -73,7 +72,7 @@ export class ToolService {
       [toolName.webBrowser]: toolCategoryToTool[toolName.webBrowser].name,
       [toolName.editFile]: toolCategoryToTool[toolName.editFile].name,
       [toolName.testModel]: toolCategoryToTool[toolName.testModel].name,
-      [toolName.editTests]: toolCategoryToTool[toolName.editTests].name,
+      [toolName.useSkill]: toolCategoryToTool[toolName.useSkill].name,
       [toolName.readFile]: toolCategoryToTool[toolName.readFile].name,
       [toolName.listDirectory]: toolCategoryToTool[toolName.listDirectory].name,
       [toolName.createFile]: toolCategoryToTool[toolName.createFile].name,
@@ -113,7 +112,6 @@ export class ToolService {
     }
     const built: KernelScopedTools = {
       testModel: createTestModelTool(kernel) as StructuredTool,
-      editTests: createEditTestsTool(kernel) as StructuredTool,
     };
     this.kernelToolCache.set(kernel, built);
     return built;

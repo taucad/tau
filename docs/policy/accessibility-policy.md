@@ -1,9 +1,9 @@
 ---
 title: 'Accessibility Policy'
-description: 'Guidelines for accessible UI and ARIA-driven E2E testing across the Tau codebase. Covers semantic HTML, ARIA conventions, Playwright selector strategy, and snapshot tests.'
+description: 'Guidelines for accessible UI and ARIA-driven E2E testing across the Tau codebase. Covers semantic HTML, ARIA conventions, Vitest Browser selectors, and screenshot tests.'
 status: active
 created: '2026-03-09'
-updated: '2026-03-09'
+updated: '2026-08-21'
 related: []
 ---
 
@@ -44,7 +44,7 @@ Accessible UI ensures all users, including those using assistive technology, can
 
 ## E2E Test Selector Strategy
 
-All Playwright selectors must use Playwright's built-in accessibility locators:
+All Vitest Browser selectors must use the shared browser facade's accessibility locators:
 
 ```typescript
 // Preferred -- accessible and resilient
@@ -62,18 +62,18 @@ page.locator('div > span:nth-child(2)');
 
 Rationale: accessible locators mirror how real users (and assistive technology) find elements. They remain stable across refactors and enforce accessibility compliance as a side effect of testing.
 
-### Visual snapshot tests
+### Visual screenshot tests
 
-Use `toHaveScreenshot` for validating rendered output that cannot be asserted via DOM (e.g. WebGL canvases):
+Capture and inspect screenshots when rendered output cannot be asserted via the DOM (for example, WebGL canvases):
 
 ```typescript
 const canvas = page.getByRole('img', { name: /3D model preview/i });
-await expect(canvas).toHaveScreenshot('model-name.png', {
-  maxDiffPixelRatio: 0.02,
-});
+const screenshot = await canvas.screenshot({ animations: 'disabled' });
+const pixels = await analyseScreenshot(screenshot);
+expect(pixels.foregroundRatio).toBeGreaterThan(0.02);
 ```
 
-Snapshot baselines are stored alongside tests and updated via `npx playwright test --update-snapshots`.
+Use a deterministic pixel assertion or a Vitest file snapshot appropriate to the visual contract. Keep any baseline alongside the test and update Vitest snapshots with `pnpm exec vitest run --update`.
 
 ## Adding Accessibility to New Components
 
@@ -87,5 +87,5 @@ When creating a new UI component:
 ## References
 
 - [WAI-ARIA 1.2 Specification](https://www.w3.org/TR/wai-aria-1.2/)
-- [Playwright Accessibility Locators](https://playwright.dev/docs/locators#locate-by-role)
+- [Vitest Browser locators](https://vitest.dev/api/browser/locators)
 - [ARIA Authoring Practices Guide](https://www.w3.org/WAI/ARIA/apg/)

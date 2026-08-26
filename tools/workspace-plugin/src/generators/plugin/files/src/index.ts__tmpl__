@@ -1,0 +1,7 @@
+/* oxlint-disable no-barrel-files/no-barrel-files -- public package entry */
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
+export { <%= alias %>, <%= alias %> as plugin } from '#<%= sourceName %>.plugin.js';
+<% for (const capability of capabilities) { %>
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
+export { <%= capability.factoryName %> } from '#<%= capability.fileName %>.js';
+<% } %>

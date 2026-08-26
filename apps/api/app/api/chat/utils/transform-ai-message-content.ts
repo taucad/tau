@@ -1,4 +1,5 @@
 import { AIMessage } from '@langchain/core/messages';
+import { cloneAiMessage } from '#api/chat/utils/ai-message-clone.js';
 
 type TextTransformer = (text: string) => string;
 
@@ -21,18 +22,7 @@ export function transformAiMessageContent(message: AIMessage, transform: TextTra
       return message;
     }
 
-    return new AIMessage({
-      content: transformed,
-      id: message.id,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      tool_calls: message.tool_calls,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      additional_kwargs: message.additional_kwargs,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      response_metadata: message.response_metadata,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-      usage_metadata: message.usage_metadata,
-    });
+    return cloneAiMessage(message, { content: transformed });
   }
 
   if (!Array.isArray(content)) {
@@ -64,16 +54,5 @@ export function transformAiMessageContent(message: AIMessage, transform: TextTra
     return message;
   }
 
-  return new AIMessage({
-    content: transformedBlocks as AIMessage['content'],
-    id: message.id,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    tool_calls: message.tool_calls,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    additional_kwargs: message.additional_kwargs,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    response_metadata: message.response_metadata,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-    usage_metadata: message.usage_metadata,
-  });
+  return cloneAiMessage(message, { content: transformedBlocks as AIMessage['content'] });
 }

@@ -195,7 +195,6 @@ async function initializeLsp(monaco: typeof Monaco): Promise<void> {
     fs: {
       fileManager: context.fileManager,
       treeService: context.treeService,
-      proxy,
       paths,
       filePoolBuffer: snap.context.filePoolBuffer,
     },
@@ -309,7 +308,7 @@ async function initializeSymbolServiceWasm(): Promise<void> {
     const [wasmModule, wasmPathModule, engineModule] = await Promise.all([
       import('@taucad/kcl-wasm-lib'),
       import('@taucad/kcl-wasm-lib/kcl.wasm?url'),
-      import('@taucad/runtime/kernels/zoo/engine-connection'),
+      import('@taucad/zoo/engine-connection'),
     ]);
 
     // Initialize WASM

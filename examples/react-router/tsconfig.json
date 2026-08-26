@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "rootDir": ".",
+    "tsBuildInfoFile": "../../node_modules/.cache/tsbuildinfo/examples/react-router/tsconfig.tsbuildinfo",
+    "types": ["vite/client", "node"]
+  },
+  "include": ["app/**/*.ts", "app/**/*.tsx", "tau/**/*.ts", "e2e/**/*.ts", "*.ts"]
+}

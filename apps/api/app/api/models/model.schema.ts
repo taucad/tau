@@ -4,12 +4,26 @@ import { modelFamilySchema, providerIdSchema } from '#api/providers/provider.sch
 export const modelSupportSchema = z.object({
   tools: z.boolean().describe('Whether the model supports tools').optional(),
   toolChoice: z.boolean().describe('Whether the model supports tool choice').optional(),
+  modalities: z
+    .object({
+      input: z
+        .array(z.enum(['text', 'image']))
+        .min(1)
+        .describe('Input modalities the model can receive'),
+      output: z
+        .array(z.enum(['text']))
+        .min(1)
+        .describe('Output modalities the model can produce'),
+    })
+    .describe('Model input and output modality support')
+    .optional(),
 });
 
 export const modelConfigurationSchema = z.object({
   streaming: z.boolean().describe('Whether the model is streaming'),
   temperature: z.number().describe('The temperature of the model').optional(),
   maxTokens: z.number().describe('The maximum number of tokens to generate').optional(),
+  maxOutputTokens: z.number().describe('The maximum number of output tokens to generate').optional(),
   topP: z.number().describe('The top P of the model').optional(),
   thinking: z
     .union([
@@ -93,3 +107,5 @@ export const modelSchema = z.object({
 export type Model = z.infer<typeof modelSchema>;
 export type ModelDetails = z.infer<typeof modelDetailsSchema>;
 export type ModelSupport = z.infer<typeof modelSupportSchema>;
+export type ModelModalities = NonNullable<ModelSupport['modalities']>;
+export type ModelInputModality = NonNullable<ModelSupport['modalities']>['input'][number];

@@ -32,11 +32,11 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   /**
    * Start the WebSocket server when the module initializes.
    */
-  public onModuleInit(): void {
+  public async onModuleInit(): Promise<void> {
     // Use import.meta.env.DEV to detect Vite dev mode
     // vite-plugin-node doesn't support WebSockets, so we use a standalone server in dev
     if (import.meta.env.DEV) {
-      this.initDevWebSocket();
+      await this.initDevWebSocket();
     } else {
       this.initFastifyWebSocket();
     }
@@ -68,11 +68,13 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
    * Initialize WebSocket handler for development mode.
    * Uses the shared DevWebSocketService.
    */
-  private initDevWebSocket(): void {
+  private async initDevWebSocket(): Promise<void> {
     this.devWebSocketService.registerPathHandler(zooWebSocketPath, (socket, request) => {
       const url = new URL(request.url ?? '/', `http://localhost:${this.devWebSocketService.getPort()}`);
       this.handleZooProxy(socket, url.searchParams);
     });
+
+    await this.devWebSocketService.ensureStarted();
 
     const wsPort = this.devWebSocketService.getPort();
     this.logger.log(`Zoo proxy available at ws://localhost:${wsPort}${zooWebSocketPath} (dev mode)`);

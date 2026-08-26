@@ -35,6 +35,10 @@ export type StaticTypeDefinition = {
   packageName: string;
   /** Raw .d.ts content string */
   content: string;
+  /** Absolute virtual file path for this declaration, when not package root index.d.ts. */
+  filePath?: string;
+  /** Optional package.json content for package-root declarations. */
+  packageJsonContent?: string;
   /** If true, content already contains `declare module` blocks and should not be wrapped */
   prewrapped?: boolean;
 };
@@ -114,21 +118,30 @@ export class TypeAcquisitionService {
       const content = staticType.prewrapped
         ? staticType.content
         : `declare module '${staticType.packageName}' {\n${staticType.content}\n}`;
-      const filePath = `file:///node_modules/${staticType.packageName}/index.d.ts`;
+      const filePath = staticType.filePath ?? `file:///node_modules/${staticType.packageName}/index.d.ts`;
 
       // Register on both TS and JS defaults so .js files also get type info
       const tsDisposable = monaco.typescript.typescriptDefaults.addExtraLib(content, filePath);
       const jsDisposable = monaco.typescript.javascriptDefaults.addExtraLib(content, filePath);
 
       this.staticDisposables.push(tsDisposable, jsDisposable);
-      this.builtinTypePackages.add(staticType.packageName);
       this.acquiredTypes.add(staticType.packageName);
 
-      const packageJsonPath = `file:///node_modules/${staticType.packageName}/package.json`;
-      const packageJsonContent = JSON.stringify({ name: staticType.packageName, types: 'index.d.ts' });
-      const tsPackageDisposable = monaco.typescript.typescriptDefaults.addExtraLib(packageJsonContent, packageJsonPath);
-      const jsPackageDisposable = monaco.typescript.javascriptDefaults.addExtraLib(packageJsonContent, packageJsonPath);
-      this.staticDisposables.push(tsPackageDisposable, jsPackageDisposable);
+      if (!this.builtinTypePackages.has(staticType.packageName)) {
+        this.builtinTypePackages.add(staticType.packageName);
+        const packageJsonPath = `file:///node_modules/${staticType.packageName}/package.json`;
+        const packageJsonContent =
+          staticType.packageJsonContent ?? JSON.stringify({ name: staticType.packageName, types: 'index.d.ts' });
+        const tsPackageDisposable = monaco.typescript.typescriptDefaults.addExtraLib(
+          packageJsonContent,
+          packageJsonPath,
+        );
+        const jsPackageDisposable = monaco.typescript.javascriptDefaults.addExtraLib(
+          packageJsonContent,
+          packageJsonPath,
+        );
+        this.staticDisposables.push(tsPackageDisposable, jsPackageDisposable);
+      }
     }
   }
 
@@ -424,8 +437,8 @@ export class TypeAcquisitionService {
   ): Promise<void> {
     try {
       // Fetch the module to discover the X-TypeScript-Types header
-      const moduleUrl = `${esmShBase}/${packageName}`;
-      const moduleResponse = await fetch(moduleUrl, { signal });
+      const moduleHref = `${esmShBase}/${packageName}`;
+      const moduleResponse = await fetch(moduleHref, { signal });
 
       if (this.sessionEpoch !== epoch) {
         return;

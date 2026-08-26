@@ -15,6 +15,11 @@ Tools follow a client-server RPC pattern via Socket.IO:
 2. **Frontend (UI)**: RPC handlers execute the actual logic (filesystem, kernel, graphics) and return results via Socket.IO
 3. **Schemas (libs/chat)**: Shared type definitions between frontend and backend
 
+`libs/chat` is a **shared Apache-2.0 capability**, not application code. Its tool schemas and
+`src/rpc/**` handlers are the CAD-loop contract a published MCP tool layer will consume, so keep them
+host-agnostic and dependency-injected: no `apps/**` import, no browser-only assumption baked into a
+schema. See `docs/research/workspace-license-boundary-migration.md` (Finding 3).
+
 ## Step-by-Step Process
 
 ### Step 1: Define Tool Schema (libs/chat)
@@ -178,9 +183,9 @@ If your tool needs a new RPC (e.g., for a new client-side operation), add the RP
 5. If the RPC depends on `RpcGraphicsClient` / CAD snapshot types, extend **`libs/chat/src/rpc/rpc-dependencies.ts`** accordingly
 6. Add browser implementation in **`apps/ui/app/hooks/rpc-handlers.ts`**
 
-Most tools reuse existing RPCs (e.g., `readFile`, `createFile`, `getKernelResult`, `captureObservations`).
+Most tools reuse existing RPCs (e.g., `readFile`, `createFile`, `getKernelResult`, `captureImages`).
 
-**Browser adapter split:** operations that need the live CAD unit, kernel export/render, or viewer-adjacent work belong on **`RpcGraphicsClient`** (see `createBrowserGraphicsClient` in `rpc-handlers.ts`). Pure kernel compile/status without graphics should stay on **`RpcRuntimeClient`**. **`ensureGeometryUnit`** in `rpc-handlers.ts` is the canonical lazy-bootstrap when the LLM names a `targetFile` that may not have an open geometry unit yet.
+**Browser adapter split:** headless image capture belongs on **`RpcImageClient`** and must not depend on a mounted viewer. Geometry fetch/export belongs on **`RpcGraphicsClient`** (see `createBrowserGraphicsClient` in `rpc-handlers.ts`), while pure kernel compile/status belongs on **`RpcRuntimeClient`**. **`ensureGeometryUnit`** in `rpc-handlers.ts` is the canonical lazy-bootstrap when the LLM names a `targetFile` that may not have an open geometry unit yet.
 
 ### Step 10: Create UI Component
 
@@ -289,11 +294,11 @@ await fileManager.writeFile(path, content, { source: 'external' });
 
 `useFileManager().readFile` returns **`Uint8Array`** (binary-safe); pair with **`downloadBlob`** from `@taucad/utils/file` for user downloads.
 
-### Chat artifacts — `.tau/artifacts` + `writeArtifact`
+### Chat artifacts — `.tau/artifacts` + `writeArtifactSet`
 
-When an RPC persists bytes for later UI download (e.g. fetched GLB snapshots, interchange exports):
+When an RPC persists an interchange export for later UI download:
 
-1. Prefer **`libs/chat/src/rpc/handlers/write-artifact.ts`** **`writeArtifact({ toolCallId, targetFile, extension, bytes }, fileSystem)`** — canonical path **``.tau/artifacts/${toolCallId}__${slugifyTargetFile(targetFile)}.${ext}`**.
-2. Return **`artifactPath`**, **`mimeType`**, and **`byteLength`** (or analogous) in the RPC success payload so the chat card can render size + type without re-reading disk.
+1. Prefer **`libs/chat/src/rpc/handlers/write-artifact.ts`** **`writeArtifactSet({ toolCallId, targetFile, format, files }, fileSystem)`** — it validates the file set and writes it under one canonical export directory.
+2. Return its **`artifactPath`**, **`mimeType`**, and **`byteLength`** metadata in the RPC success payload so the chat card can render size + type without re-reading disk.
 3. On **Download**, the UI reads **`artifactPath`** via **`fileManager.readFile`**, wraps a **`Blob`**, and calls **`downloadBlob(blob, basename)`**.
-4. Passing **`toolCallId`** into RPC args alongside LLM-visible fields keeps filenames deterministic across retries (mirror **`fetch_geometry`**’s `artifactId` pattern where applicable).
+4. Pass **`toolCallId`** into RPC args alongside LLM-visible fields to keep export directories deterministic across retries.

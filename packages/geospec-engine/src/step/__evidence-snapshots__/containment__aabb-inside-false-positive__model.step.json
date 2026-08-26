@@ -1,0 +1,507 @@
+{
+  "brep": {
+    "boundingBox": {
+      "center": [
+        0.0024731865033995604,
+        0,
+        30
+      ],
+      "max": [
+        30.00495383234156,
+        30.003717213602762,
+        60.004953832341556
+      ],
+      "min": [
+        -30.00000745933476,
+        -30.003717213602762,
+        -0.004953832341558412
+      ],
+      "size": [
+        60.004961291676324,
+        60.007434427205524,
+        60.00990766468311
+      ]
+    },
+    "chamferFeatures": [],
+    "circularHolePatterns": [],
+    "circularHoles": [
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 60.004953832341556,
+          "min": 2.9950461676584417
+        },
+        "center": [
+          1.779909553079051e-12,
+          6.177487246163608e-16,
+          31.5
+        ],
+        "diameter": 54,
+        "through": false
+      }
+    ],
+    "cylindricalFaces": [
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 60.004946473006804,
+          "min": -0.004946473006807198
+        },
+        "center": [
+          1.964650664376677e-12,
+          7.210975302746548e-17,
+          30
+        ],
+        "radius": 30
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 60.004953832341556,
+          "min": 2.9950461676584417
+        },
+        "center": [
+          1.779909553079051e-12,
+          6.177487246163608e-16,
+          31.5
+        ],
+        "radius": 27
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 30.0042822535228,
+          "min": 19.9957177464772
+        },
+        "center": [
+          27.00000000000013,
+          27,
+          25
+        ],
+        "radius": 2
+      }
+    ],
+    "filletFeatures": [
+      {
+        "radius": 30
+      },
+      {
+        "radius": 2
+      }
+    ],
+    "massProperties": {
+      "centerOfMass": [
+        0.0864899495480605,
+        0.08648994954756586,
+        24.99243212941469
+      ],
+      "surfaceArea": 26785.21896450797,
+      "volume": 39229.06746537646
+    },
+    "minimumWallThickness": {
+      "algorithm": "occt-brep-extrema-material-interval",
+      "location": [
+        28.5,
+        -6.98048675514e-15,
+        60
+      ],
+      "pointA": [
+        30,
+        -7.347880794884e-15,
+        60
+      ],
+      "pointB": [
+        27,
+        -6.613092715396e-15,
+        60
+      ],
+      "solidIndex": 0,
+      "supportA": {
+        "faceIndex": 0,
+        "supportType": "vertex",
+        "surfaceType": "cylinder"
+      },
+      "supportB": {
+        "faceIndex": 3,
+        "supportType": "vertex",
+        "surfaceType": "cylinder"
+      },
+      "tieCount": 7,
+      "tolerance": 0.000001,
+      "value": 2.999999999999997
+    },
+    "planarFaces": [
+      {
+        "area": 537.2123437638552,
+        "center": [
+          -1.4210854715202004e-14,
+          -5.609263931743317e-15,
+          60
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 60
+      },
+      {
+        "area": 2827.433388230814,
+        "center": [
+          0,
+          -1.1977386709160228e-15,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": 0
+      },
+      {
+        "area": 2290.2210444669586,
+        "center": [
+          -1.0658141036401503e-14,
+          -1.900508178496021e-15,
+          3
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 3
+      },
+      {
+        "area": 12.566370614359167,
+        "center": [
+          27,
+          27,
+          30
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 30
+      },
+      {
+        "area": 12.566370614359167,
+        "center": [
+          27,
+          27,
+          20
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": -20
+      }
+    ],
+    "topologyCounts": {
+      "compounds": 1,
+      "edges": 18,
+      "faces": 8,
+      "shells": 2,
+      "solids": 2,
+      "vertices": 36,
+      "wires": 9
+    },
+    "validity": {
+      "closedSolids": true,
+      "invalidSolidCount": 0,
+      "openEdgeCount": 0,
+      "solidCount": 2,
+      "valid": true
+    }
+  },
+  "capabilities": [
+    {
+      "feature": "bounding-box",
+      "kind": "brep"
+    },
+    {
+      "feature": "bounding-box",
+      "kind": "mesh"
+    },
+    {
+      "feature": "center-of-mass",
+      "kind": "mesh"
+    },
+    {
+      "feature": "chamfer-features",
+      "kind": "brep"
+    },
+    {
+      "feature": "circular-hole-patterns",
+      "kind": "brep"
+    },
+    {
+      "feature": "circular-holes",
+      "kind": "brep"
+    },
+    {
+      "feature": "component-overlap",
+      "kind": "mesh"
+    },
+    {
+      "feature": "connected-components",
+      "kind": "mesh"
+    },
+    {
+      "feature": "cylindrical-faces",
+      "kind": "brep"
+    },
+    {
+      "feature": "distance",
+      "kind": "mesh"
+    },
+    {
+      "feature": "fillet-features",
+      "kind": "brep"
+    },
+    {
+      "feature": "mass-properties",
+      "kind": "brep"
+    },
+    {
+      "feature": "planar-faces",
+      "kind": "brep"
+    },
+    {
+      "feature": "product-structure",
+      "kind": "step"
+    },
+    {
+      "feature": "reader-provenance",
+      "kind": "step"
+    },
+    {
+      "feature": "schema",
+      "kind": "step"
+    },
+    {
+      "feature": "surface-area",
+      "kind": "mesh"
+    },
+    {
+      "feature": "topology-counts",
+      "kind": "brep"
+    },
+    {
+      "feature": "triangles",
+      "kind": "mesh"
+    },
+    {
+      "feature": "units",
+      "kind": "step"
+    },
+    {
+      "feature": "validity",
+      "kind": "brep"
+    },
+    {
+      "feature": "volume",
+      "kind": "mesh"
+    },
+    {
+      "feature": "wall-thickness",
+      "kind": "brep"
+    },
+    {
+      "feature": "watertightness",
+      "kind": "mesh"
+    }
+  ],
+  "diagnostics": [],
+  "mesh": {
+    "format": "mesh-buffer",
+    "meshCount": 1,
+    "signedVolume": 39223.34971230452,
+    "surfaceArea": 26782.601419170573,
+    "triangleCount": 1532,
+    "triangleDigest": "sha256:fb4a41327531e96349ec1179b57b58e4786f8ebb7f7452208337649ba215e311",
+    "vertexCount": 4596,
+    "watertight": true
+  },
+  "provenance": {
+    "contentHash": "sha256:b83ab817fb509eb49a354a7bd8c5b2d0d65c9a50ab98d82720f54fa5658fb28e",
+    "loader": "opencascade-step",
+    "unit": "mm"
+  },
+  "step": {
+    "capabilities": [
+      {
+        "feature": "product-structure",
+        "supported": true
+      },
+      {
+        "feature": "color",
+        "supported": false
+      },
+      {
+        "feature": "material",
+        "supported": false
+      },
+      {
+        "feature": "geometric-tolerance",
+        "reason": "GeoSpec P0 reports unsupported AP242 PMI/GD&T evidence explicitly.",
+        "supported": false
+      }
+    ],
+    "productStructure": [
+      {
+        "name": "housing",
+        "path": "housing",
+        "transform": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      {
+        "name": "cartridge",
+        "path": "cartridge",
+        "transform": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    ],
+    "readStrategy": {
+      "bytesRead": 18601,
+      "copiedToEmscriptenFs": false,
+      "inputKind": "path",
+      "nativeReadStream": true,
+      "strategy": "native-stream"
+    },
+    "schema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF {1 0 10303 442 1 1 4 }",
+    "unit": "mm",
+    "xde": {
+      "datumPlacements": [],
+      "datumSystems": [],
+      "freeShapeCount": 0,
+      "occurrences": [
+        {
+          "bounds": {
+            "max": [
+              30,
+              30,
+              60
+            ],
+            "min": [
+              -30,
+              -30,
+              0
+            ]
+          },
+          "instanceName": "housing",
+          "path": "housing",
+          "productName": "housing",
+          "shapeIndex": 0,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "bounds": {
+            "max": [
+              29,
+              29,
+              30
+            ],
+            "min": [
+              25,
+              25,
+              20
+            ]
+          },
+          "instanceName": "cartridge",
+          "path": "cartridge",
+          "productName": "cartridge",
+          "shapeIndex": 1,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      ],
+      "semanticDatums": [],
+      "subshapeNames": [
+        {
+          "faceIndex": 3,
+          "name": "cavity",
+          "occurrencePath": "housing",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 0,
+          "name": "body",
+          "occurrencePath": "cartridge",
+          "shapeType": "face"
+        }
+      ],
+      "supplementalPlanes": []
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 
 /** @public */
 export const deleteFileInputSchema = z.object({
@@ -8,6 +9,11 @@ export const deleteFileInputSchema = z.object({
 /** @public */
 export const deleteFileOutputSchema = z.object({
   message: z.string().describe('Information about the operation.'),
+  diffStats: diffStatsWithContentSchema
+    .optional()
+    .describe(
+      'Pre-deletion file content, captured so the delete is invertible for restore. Absent for missing/binary/legacy deletes.',
+    ),
 });
 
 /** @public */

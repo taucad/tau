@@ -7,46 +7,48 @@
  * concern — channel construction, SAB allocation, abort signalling,
  * geometry pool resolution, and FS bridging — so this class only:
  *
- * 1. Forwards typed RPC calls (`initialize`, `export`) and notifies
- *    (`openFile`, `updateParameters`, `setOptions`, `fileChanged`,
- *    `configureMiddleware`, `cleanup`, `abort`,
- *    `stage-and-render`) onto the transport's channel.
+ * 1. Forwards typed RPC calls (`initialize`, `export`) and preview commands
+ *    (`openFile`, `updateParameters`, `setOptions`, `stage-and-render`) onto
+ *    the transport's channel.
  * 2. Wires `on*` notify subscriptions onto the channel.
- * 3. Enforces the wall-clock render timeout (cooperative abort
- *    triggered via `transport.abort('timeout')`).
+ * 3. Enforces the wall-clock render timeout and coordinates bounded,
+ *    exact-host recovery through the transport.
  * 4. Caches the latest {@link CapabilitiesManifest} from
  *    `initialize` and `capabilitiesUpdated`.
  *
  * Subsumed responsibilities (no longer here):
- * - SAB allocation (signal/geometry pool/file pool) → transport.client.
+ * - SAB allocation (signal/geometry pool) → transport.client.
  * - `MessagePort` plumbing & `fileSystemPort` forwarding → transport.client.
- * - Wire-format `'abort'` notify → `transport.abort(reason)`.
+ * - SAB reservation and targeted timeout signalling → transport.
  * - Geometry materialisation → `transport.resolveGeometry(payload)`.
  */
 
-import type { FileExtension, Geometry, GeometryFile, LogEntry } from '@taucad/types';
+import type { FileExtension, LogEntry } from '@taucad/types';
+import { randomUuid } from '@taucad/utils/id';
 import type { Channel } from '@taucad/rpc';
+import { Topic } from '@taucad/events';
 import type {
   ExportGeometryResult,
   GetParametersResult,
   HashedGeometryResult,
   KernelIssue,
-  MiddlewareRegistrations,
-  BundlerRegistrations,
   CapabilitiesManifest,
 } from '#types/runtime.types.js';
+import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
-  AbortReason,
-  GeometryTransport,
   HashedGeometryResultTransport,
+  RuntimeExportModelArgs,
+  RuntimeExportResultTransport,
+  RuntimePreviewIdentity,
   RenderPhase,
   RuntimeProtocol,
+  RuntimeStateChangedArgs,
   TelemetryEntry,
-  TranscoderModuleEntry,
-  WorkerState,
 } from '#types/runtime-protocol.types.js';
-import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
-import { subscribeMaterialisedGeometry } from '#transport/_internal/geometry-materialiser.js';
+import type { RuntimeContentInput } from '#types/runtime-content.types.js';
+import type { RuntimeTransportClient, RuntimeTransportTimeoutRecovery } from '#transport/runtime-transport.types.js';
+import { renderTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
+import { validateProtocolHeader } from '#types/protocol-header.types.js';
 
 /** Unsubscribe handle for {@link RuntimeWorkerClient} subscription helpers. */
 export type Unsubscribe = () => void;
@@ -57,18 +59,18 @@ export type Unsubscribe = () => void;
  *
  * The kernel's OC Proxy polls the SAB (or wire-format `'abort'` notify
  * for SAB-less ports) before every WASM call and throws this when a
- * newer `openFile` / `updateParameters` / `setOptions` (or a
- * render-timeout) has bumped the generation.
+ * newer selected preview — including an autonomous watched-filesystem
+ * rerender — or a render timeout has bumped the generation.
  *
  * Internal cooperative-abort plumbing; never surfaces on the public
  * `RuntimeClient` surface. Supersession is observed via
  * `RenderOutcome.superseded`.
  *
- * @internal
+ * @public
  */
 export class RenderAbortedError extends Error {
   public constructor() {
-    super('Render aborted by a newer openFile/updateParameters call');
+    super('Render aborted by a newer selected preview');
     this.name = 'RenderAbortedError';
   }
 
@@ -84,7 +86,7 @@ export class RenderAbortedError extends Error {
 /**
  * Realm-safe type guard -- checks `error.name` instead of prototype chain.
  *
- * @internal
+ * @public
  * @param error - the value to test
  * @returns `true` when the error is a {@link RenderAbortedError}
  */
@@ -103,7 +105,7 @@ export class RenderTimeoutError extends Error {
   public constructor(renderTimeout: number) {
     super(
       `Render timed out after ${renderTimeout / 1000} seconds. ` +
-        'Increase the timeout in viewer settings or simplify the model geometry.',
+        'Inspect recent model changes, kernel diagnostics, and parameter values; fix the render blocker or increase the render timeout for legitimately long operations.',
     );
     this.name = 'RenderTimeoutError';
   }
@@ -144,23 +146,73 @@ export type RuntimeWorkerClientOptions = {
 };
 
 /**
+ */
+export type RuntimeWorkerClientInitializeOptions = {
+  readonly config?: unknown;
+};
+
+/** Identity and captured deadline for one preview admission. @internal */
+type SelectedPreview = RuntimePreviewIdentity & {
+  readonly renderTimeout: number;
+};
+
+type ActivePreviewAdmission = SelectedPreview & {
+  timer?: ReturnType<typeof setTimeout>;
+  timedOut: boolean;
+  settled: boolean;
+  /**
+   * Set at synchronous `geometryComputed` receipt, before geometry
+   * materialisation is awaited. Geometry strictly precedes the terminal
+   * `idle` frame on the ordered channel in every worker completion path, so a
+   * selected preview that reaches `idle` without this flag produced nothing —
+   * the client settles its public promise as superseded rather than hanging.
+   */
+  geometryObserved: boolean;
+};
+
+type QueuedPreview = {
+  readonly admission: RuntimePreviewIdentity;
+  readonly send: () => void;
+};
+
+/**
+ * Create the fact-only issue emitted when a preview deadline expires.
+ *
+ * @param renderTimeout - Milliseconds.
+ * @returns The timeout issue for the worker or client deadline.
+ */
+export const renderTimeoutIssue = (renderTimeout?: number): KernelIssue => ({
+  message: renderTimeout === undefined ? 'Render timed out.' : `Render timed out after ${renderTimeout} ms.`,
+  code: 'RENDER_TIMEOUT',
+  type: 'runtime',
+  severity: 'error',
+});
+
+export const assertValidRenderTimeout = (renderTimeout: number): void => {
+  if (!Number.isFinite(renderTimeout) || renderTimeout < 0) {
+    throw new TypeError('renderTimeout must be a finite, non-negative number of milliseconds.');
+  }
+};
+
+/**
  * Main-thread orchestrator over a {@link RuntimeTransportClient}.
  *
  * Owns:
  *
  * 1. **RPC settlement** — `initialize()` and `exportGeometry()` resolve
  *    via the transport's channel.
- * 2. **Cooperative abort dispatch** — every public `notify` (openFile /
- *    updateParameters / setOptions) calls `transport.abort('superseded')`
- *    so the SAB / wire-notify plane stays coherent without the worker
- *    client knowing which is in use.
- * 3. **Render timeout** — start a wall-clock timer when the worker
- *    transitions to `'rendering'` and clear it on `'idle'`/`'error'`;
- *    on expiry call `transport.abort('timeout')`.
- * 4. **Geometry materialisation** — defers to
+ * 2. **Atomic preview admission** — reserves transport cancellation state and
+ *    an opaque render identity before connection or command awaits.
+ * 3. **Selected-preview publication** — adopts autonomous successors only
+ *    after a terminal handoff and filters every render-scoped frame at this
+ *    single boundary.
+ * 4. **Render timeout** — starts a render-scoped wall-clock timer when the
+ *    preview command is dispatched, settles locally at the deadline, and
+ *    terminates an unresponsive isolated host after bounded recovery.
+ * 5. **Geometry materialisation** — defers to
  *    `transport.resolveGeometry()` so pool/transfer/copy decoding stays
  *    wire-agnostic.
- * 5. **Capabilities cache** — captures the manifest from the
+ * 6. **Capabilities cache** — captures the manifest from the
  *    `initialize` call result and the `capabilitiesUpdated` notify.
  *
  * @public
@@ -168,13 +220,21 @@ export type RuntimeWorkerClientOptions = {
 export class RuntimeWorkerClient {
   private readonly transport: RuntimeTransportClient;
   private channel: Channel<RuntimeProtocol> | undefined;
-  private readonly pendingSubscriptions: Array<(channel: Channel<RuntimeProtocol>) => void> = [];
+  private readonly pendingSubscriptions = new Topic<Channel<RuntimeProtocol>>({
+    name: 'runtime-worker-client.pending-subscriptions',
+  });
 
-  private localAbortGeneration = 0;
-  private lastReportedState: WorkerState | undefined;
   /** Wall-clock render timeout enforced via `setTimeout`. Milliseconds. */
   private renderTimeout = 0;
-  private renderTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
+  private selectedPreview: ActivePreviewAdmission | undefined;
+  private recoveringRenderId: string | undefined;
+  private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private queuedPreview: QueuedPreview | undefined;
+  private readonly localTimeouts = new Topic<{
+    readonly renderId: string;
+    readonly renderTimeout: number;
+    readonly issues: readonly KernelIssue[];
+  }>({ name: 'runtime-worker-client.local-timeouts' });
   private readonly disposers: Unsubscribe[] = [];
   private _capabilities: CapabilitiesManifest | undefined;
   private terminated = false;
@@ -189,21 +249,20 @@ export class RuntimeWorkerClient {
 
   /**
    * Open the transport and send the `initialize` RPC. The transport's
-   * own `client(opts)` factory pre-allocated every SAB; we forward the
-   * caller's plugin / module config verbatim.
+   * own `client(opts)` factory pre-allocated every SAB; runtime composition
+   * lives entirely inside the worker/host runtime definition.
    */
-  public async initialize(input: {
-    options: Record<string, unknown>;
-    middlewareEntries: MiddlewareRegistrations;
-    bundlerEntries?: BundlerRegistrations;
-    transcoderModules?: TranscoderModuleEntry[];
-  }): Promise<void> {
+  public async initialize(options: RuntimeWorkerClientInitializeOptions = {}): Promise<void> {
     this.ensureNotTerminated();
     const { channel } = await this.transport.open();
+    await channel.ready;
+    const hello = channel.hello.payload;
+    validateProtocolHeader({ v: hello.protocolVersion });
+    this.ensureNotTerminated();
     this.channel = channel;
     this.disposers.push(
-      this.channel.onNotify('stateChanged', ({ state, detail }) => {
-        this.handleStateChange(state, detail);
+      this.channel.onNotify('stateChanged', ({ renderId, abortGeneration, state, detail }) => {
+        this.handleStateChange({ renderId, abortGeneration, state, detail });
       }),
       this.channel.onNotify('capabilitiesUpdated', ({ capabilities }) => {
         this._capabilities = capabilities;
@@ -213,38 +272,50 @@ export class RuntimeWorkerClient {
      * consumers can attach handlers eagerly without missing the first
      * frame. */
     this.flushPendingSubscriptions();
-    const result = await this.transport.initialize({
-      options: input.options,
-      middlewareEntries: input.middlewareEntries,
-      bundlerEntries: input.bundlerEntries,
-      transcoderModules: input.transcoderModules,
-    });
+    const result = await this.transport.initialize(options.config === undefined ? {} : { config: options.config });
+    this.ensureNotTerminated();
     this._capabilities = result.capabilities;
   }
 
-  /**
-   * Cooperative-abort hook. Delegates to the transport's abort plane
-   * which writes the SAB (when present) and unconditionally fires the
-   * wire-format `'abort'` notify. Returns the post-increment local
-   * generation counter.
-   */
-  public incrementAbortGeneration(reason: AbortReason = 'superseded'): number {
-    if (this.channel) {
-      this.transport.abort(reason);
-    }
-    this.localAbortGeneration += 1;
-    return this.localAbortGeneration;
+  /** Select a preview synchronously before connection or command awaits. */
+  public admitPreview(): RuntimePreviewIdentity {
+    this.ensureNotTerminated();
+    const renderId = randomUuid();
+    const reservation = this.transport.reservePreview();
+    const identity: RuntimePreviewIdentity = { renderId, ...reservation };
+    this.clearPreviewTimer(this.selectedPreview);
+    const selected: ActivePreviewAdmission = {
+      ...identity,
+      renderTimeout: this.renderTimeout,
+      timedOut: false,
+      settled: false,
+      geometryObserved: false,
+    };
+    this.selectedPreview = selected;
+    return identity;
   }
 
-  /** Send `openFile` to the autonomous render loop and bump the abort generation. */
-  public openFile(file: GeometryFile, parameters?: Record<string, unknown>, options?: Record<string, unknown>): void {
+  /** Send `openFile` with its already-reserved preview admission. */
+  public openFile(
+    file: RuntimeFileLocator,
+    input: {
+      readonly parameters?: Record<string, unknown>;
+      readonly options?: Record<string, unknown>;
+      readonly content?: RuntimeContentInput;
+    },
+    admission: RuntimePreviewIdentity,
+  ): void {
     this.ensureNotTerminated();
     this.ensureChannel();
-    this.incrementAbortGeneration('superseded');
-    this.channel!.notify('openFile', {
-      file,
-      parameters: parameters ?? {},
-      ...(options === undefined ? {} : { options }),
+    this.dispatchPreview(admission, () => {
+      this.channel!.notify('openFile', {
+        renderId: admission.renderId,
+        ...(admission.abortGeneration === undefined ? {} : { abortGeneration: admission.abortGeneration }),
+        file,
+        parameters: input.parameters ?? {},
+        ...(input.options === undefined ? {} : { options: input.options }),
+        ...(input.content === undefined ? {} : { content: input.content }),
+      });
     });
   }
 
@@ -252,64 +323,65 @@ export class RuntimeWorkerClient {
    * Stage byte payloads onto the worker's filesystem and open the
    * supplied entry in a single envelope.
    */
-  public stageAndOpenFile(request: {
-    stage: Record<string, Uint8Array<ArrayBuffer>>;
-    file: GeometryFile;
-    parameters?: Record<string, unknown>;
-    options?: Record<string, unknown>;
-  }): void {
+  public stageAndOpenFile(
+    request: {
+      stage: Record<string, Uint8Array<ArrayBuffer>>;
+      file: RuntimeFileLocator;
+      parameters?: Record<string, unknown>;
+      options?: Record<string, unknown>;
+      content?: RuntimeContentInput;
+    },
+    admission: RuntimePreviewIdentity,
+  ): void {
     this.ensureNotTerminated();
     this.ensureChannel();
-    this.incrementAbortGeneration('superseded');
-    this.channel!.notify('stage-and-render', {
-      stage: request.stage,
-      file: request.file,
-      parameters: request.parameters ?? {},
-      ...(request.options === undefined ? {} : { options: request.options }),
+    this.dispatchPreview(admission, () => {
+      this.channel!.notify('stage-and-render', {
+        renderId: admission.renderId,
+        ...(admission.abortGeneration === undefined ? {} : { abortGeneration: admission.abortGeneration }),
+        stage: request.stage,
+        file: request.file,
+        parameters: request.parameters ?? {},
+        ...(request.options === undefined ? {} : { options: request.options }),
+        ...(request.content === undefined ? {} : { content: request.content }),
+      });
     });
   }
 
   /** Update parameters for the autonomous render loop. */
-  public updateParameters(parameters: Record<string, unknown>): void {
+  public updateParameters(parameters: Record<string, unknown>, admission: RuntimePreviewIdentity): void {
     this.ensureNotTerminated();
     this.ensureChannel();
-    this.incrementAbortGeneration('superseded');
-    this.channel!.notify('updateParameters', { parameters });
+    this.dispatchPreview(admission, () => {
+      this.channel!.notify('updateParameters', {
+        renderId: admission.renderId,
+        ...(admission.abortGeneration === undefined ? {} : { abortGeneration: admission.abortGeneration }),
+        parameters,
+      });
+    });
   }
 
   /**
    * Replace the active per-render kernel options and trigger a re-render.
    * `setOptions` is a full replace, not a patch-merge.
-   *
-   * The wall-clock `renderTimeout` is unpacked main-thread-side; only
-   * the remaining keys are forwarded to the worker as kernel-specific
-   * options. A timeout-only update never preempts an in-flight render.
    */
-  public setOptions(options: Record<string, unknown> & { renderTimeout?: number }): void {
+  public setOptions(options: Record<string, unknown>, admission: RuntimePreviewIdentity): void {
     this.ensureNotTerminated();
     this.ensureChannel();
-    const { renderTimeout, ...kernelOptions } = options;
-    if (typeof renderTimeout === 'number') {
-      this.renderTimeout = renderTimeout;
-    }
-    if (Object.keys(kernelOptions).length > 0) {
-      this.incrementAbortGeneration('superseded');
-    }
-    this.channel!.notify('setOptions', { options: kernelOptions });
+    this.dispatchPreview(admission, () => {
+      this.channel!.notify('setOptions', {
+        renderId: admission.renderId,
+        ...(admission.abortGeneration === undefined ? {} : { abortGeneration: admission.abortGeneration }),
+        options,
+      });
+    });
   }
 
-  /** Notify the worker that files have changed for cache invalidation. */
-  public notifyFileChanged(paths: readonly string[]): void {
+  /** Set local wall-clock timeout state for subsequent renders without notifying the worker. */
+  public setRenderTimeout(renderTimeout: number): void {
     this.ensureNotTerminated();
-    this.ensureChannel();
-    this.channel!.notify('fileChanged', { paths });
-  }
-
-  /** Reconfigure middleware on the worker. */
-  public configureMiddleware(entries: MiddlewareRegistrations): void {
-    this.ensureNotTerminated();
-    this.ensureChannel();
-    this.channel!.notify('configureMiddleware', { entries });
+    assertValidRenderTimeout(renderTimeout);
+    this.renderTimeout = renderTimeout;
   }
 
   /**
@@ -317,56 +389,89 @@ export class RuntimeWorkerClient {
    *
    * @param format - export file format identifier (e.g. `'stl'`, `'glb'`).
    * @param options - format-specific export options (may include `tessellation`).
+   * @param content - request-scoped content input.
+   * @param signal - per-call cancellation; the channel carries it as an `rc` frame.
    */
-  public async exportGeometry(format: FileExtension, options?: Record<string, unknown>): Promise<ExportGeometryResult> {
+  // oxlint-disable-next-line max-params -- mirrors the fixed `export` protocol call shape (format, options, content, signal).
+  public async exportGeometry(
+    format: FileExtension,
+    options?: Record<string, unknown>,
+    content?: RuntimeContentInput,
+    signal?: AbortSignal,
+  ): Promise<ExportGeometryResult> {
     this.ensureNotTerminated();
     this.ensureChannel();
-    return this.channel!.call('export', {
-      format,
-      ...(options === undefined ? {} : { options }),
-    });
-  }
-
-  /** Cleanup any worker-side state without tearing down the channel. */
-  public cleanup(): void {
-    if (this.terminated || !this.channel) {
-      return;
-    }
-    this.channel.notify('cleanup');
-  }
-
-  /** Resolve a wire-level {@link GeometryTransport} into a fully-materialised {@link Geometry}. */
-  public async resolveGeometry(payload: GeometryTransport): Promise<Geometry> {
-    return this.transport.resolveGeometry(payload);
+    const result = await this.channel!.call(
+      'export',
+      {
+        format,
+        ...(options === undefined ? {} : { options }),
+        ...(content === undefined ? {} : { content }),
+      },
+      signal,
+    );
+    return this.transport.resolveExport
+      ? this.transport.resolveExport(result as unknown as RuntimeExportResultTransport)
+      : result;
   }
 
   /**
-   * Resolve a worker-side {@link HashedGeometryResultTransport} into the
-   * fully-materialised consumer-facing {@link HashedGeometryResult}.
+   * Export geometry for an exact request without mutating the autonomous preview render state.
+   *
+   * @param request - source file, parameters, render options, export format, and optional staged source bytes
+   * @param signal - per-call cancellation; the channel carries it as an `rc` frame.
    */
-  public async resolveResult(result: HashedGeometryResultTransport): Promise<HashedGeometryResult> {
-    if (!result.success) {
-      return result;
-    }
-    const data = await Promise.all(result.data.map(async (g) => this.transport.resolveGeometry(g)));
-    return { ...result, data };
+  public async exportModel(request: RuntimeExportModelArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    const result = await this.channel!.call('exportModel', request, signal);
+    return this.transport.resolveExport
+      ? this.transport.resolveExport(result as unknown as RuntimeExportResultTransport)
+      : result;
   }
 
-  /** Subscribe to autonomous worker state transitions. */
-  public onState(handler: (args: { state: WorkerState; detail?: string }) => void): Unsubscribe {
-    return this.deferNotify('stateChanged', handler);
+  /** Cleanup any worker-side state without tearing down the channel. */
+  public async cleanup(): Promise<void> {
+    if (this.terminated || !this.channel) {
+      return;
+    }
+    await this.channel.call('cleanup', undefined);
+  }
+
+  /**
+   * Subscribe to autonomous worker state transitions. `geometryObserved`
+   * reports whether the selected preview has already received a geometry
+   * frame, so the owner of the public promise can settle a terminal `idle`
+   * that produced nothing.
+   */
+  public onState(
+    handler: (args: RuntimeStateChangedArgs & { readonly geometryObserved: boolean }) => void,
+  ): Unsubscribe {
+    return this.deferNotify('stateChanged', (args) => {
+      if (this.isSelectedPreviewPublishable(args.renderId)) {
+        handler({ ...args, geometryObserved: this.selectedPreview?.geometryObserved === true });
+      }
+    });
   }
 
   /** Subscribe to autonomous render-progress events. */
   public onProgress(
-    handler: (args: { phase: RenderPhase; rgen: number; detail?: Record<string, unknown> }) => void,
+    handler: (args: { phase: RenderPhase; renderId: string; detail?: Record<string, unknown> }) => void,
   ): Unsubscribe {
-    return this.deferNotify('progress', handler);
+    return this.deferNotify('progress', (args) => {
+      if (this.isSelectedPreviewPublishable(args.renderId)) {
+        handler(args);
+      }
+    });
   }
 
   /** Subscribe to autonomous parameter resolution events. */
-  public onParametersResolved(handler: (args: { result: GetParametersResult; rgen: number }) => void): Unsubscribe {
-    return this.deferNotify('parametersResolved', handler);
+  public onParametersResolved(handler: (args: { result: GetParametersResult; renderId: string }) => void): Unsubscribe {
+    return this.deferNotify('parametersResolved', (args) => {
+      if (this.isSelectedPreviewPublishable(args.renderId)) {
+        handler(args);
+      }
+    });
   }
 
   /**
@@ -385,28 +490,36 @@ export class RuntimeWorkerClient {
    * subscribers is applied downstream at the `geometry` Topic emission
    * boundary in `runtime-client`.
    */
-  public onGeometry(handler: (result: HashedGeometryResult, rgen: number) => void): Unsubscribe {
-    /* Routes pooled-resolution through the transport via a custom
-     * resolver so the pool view never leaks out of the transport
-     * plugin. */
-    /* `deferNotify`'s default-handler arg expects a typed callback; the
-     * subscription path replaces it with `subscribeMaterialisedGeometry`,
-     * so the noop fallback never executes. Cast as unknown via the
-     * handler signature rather than `as never`. */
-    type GeometrySink = Parameters<typeof this.deferNotify<'geometryComputed'>>[1];
-    return this.deferNotify('geometryComputed', ((): void => undefined) as unknown as GeometrySink, (channel) =>
-      subscribeMaterialisedGeometry(channel, handler, {
-        resolveGeometry: async (g) => this.transport.resolveGeometry(g),
-        dedupeByHash: false,
-      }),
-    );
+  public onGeometry(handler: (result: HashedGeometryResult, renderId: string) => void): Unsubscribe {
+    return this.deferNotify('geometryComputed', ({ result, renderId }) => {
+      if (!this.isSelectedPreviewPublishable(renderId)) {
+        return;
+      }
+      this.selectedPreview!.geometryObserved = true;
+      void this.resolveGeometryNotification(result, renderId, handler);
+    });
   }
 
-  /** Subscribe to autonomous error events (kernel issues). `rgen` is present for render-scoped failures. */
-  public onError(handler: (issues: readonly KernelIssue[], rgen?: number) => void): Unsubscribe {
-    return this.deferNotify('errorEvent', ({ issues, rgen }) => {
-      handler(issues, rgen);
+  /** Subscribe to autonomous error events. `renderId` is absent only for connection-scoped failures. */
+  public onError(handler: (issues: readonly KernelIssue[], renderId?: string) => void): Unsubscribe {
+    return this.deferNotify('errorEvent', ({ issues, renderId }) => {
+      if (renderId === undefined) {
+        handler(issues);
+        return;
+      }
+      if (!this.isSelectedPreviewPublishable(renderId)) {
+        return;
+      }
+      this.settleSelectedPreview(renderId);
+      handler(issues, renderId);
     });
+  }
+
+  /** Subscribe to authoritative local render deadline settlement. @internal */
+  public onLocalTimeout(
+    handler: (event: { renderId: string; renderTimeout: number; issues: readonly KernelIssue[] }) => void,
+  ): Unsubscribe {
+    return this.localTimeouts.subscribe(handler);
   }
 
   /** Subscribe to single log entries. */
@@ -433,9 +546,11 @@ export class RuntimeWorkerClient {
   }
 
   /** Subscribe to active-kernel-changed events. */
-  public onKernelChange(handler: (kernelId: string | undefined) => void): Unsubscribe {
-    return this.deferNotify('activeKernelChanged', ({ kernelId }) => {
-      handler(kernelId);
+  public onKernelChange(handler: (kernelId: string | undefined, renderId?: string) => void): Unsubscribe {
+    return this.deferNotify('activeKernelChanged', ({ kernelId, renderId }) => {
+      if (renderId === undefined || this.isSelectedPreviewPublishable(renderId)) {
+        handler(kernelId, renderId);
+      }
     });
   }
 
@@ -451,23 +566,6 @@ export class RuntimeWorkerClient {
     return this._capabilities;
   }
 
-  /** Current cooperative-abort generation. */
-  public abortGeneration(): number {
-    return this.localAbortGeneration;
-  }
-
-  /**
-   * Channel-ready promise. Resolves once the underlying transport's
-   * channel hello frame has been observed; rejects if `initialize()`
-   * was not called yet.
-   */
-  public get ready(): Promise<void> {
-    if (!this.channel) {
-      return Promise.reject(new Error('RuntimeWorkerClient.ready: call initialize() first'));
-    }
-    return this.channel.ready;
-  }
-
   /**
    * Tear down client-side subscriptions and timers. Does **not** invoke
    * {@link RuntimeTransportClient.close}; {@link RuntimeClient} owns the
@@ -480,11 +578,36 @@ export class RuntimeWorkerClient {
       return;
     }
     this.terminated = true;
-    this.clearRenderTimeout();
+    this.clearPreviewTimer(this.selectedPreview);
+    this.selectedPreview = undefined;
+    this.queuedPreview = undefined;
+    this.recoveringRenderId = undefined;
+    if (this.recoveryTimer !== undefined) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = undefined;
+    }
+    this.localTimeouts.dispose();
     for (const off of this.disposers) {
       off();
     }
     this.disposers.length = 0;
+  }
+
+  /**
+   * Settle a selected preview without a terminal frame. Called by the owner of
+   * the public promise when a command fails after admission, so the failed
+   * admission can never fence autonomous adoption. Idempotent; a no-op for any
+   * identity that is not the current selection.
+   *
+   * @internal
+   */
+  public settleSelectedPreview(renderId: string): void {
+    const selected = this.selectedPreview;
+    if (selected?.renderId !== renderId || selected.settled) {
+      return;
+    }
+    this.clearPreviewTimer(selected);
+    selected.settled = true;
   }
 
   /**
@@ -494,33 +617,27 @@ export class RuntimeWorkerClient {
    *
    * @param name - The name of the notify to subscribe to.
    * @param handler - The handler function to call when the notify is received.
-   * @param customWire - An optional custom wire function to use instead of the default channel.onNotify.
    * @returns A function to unsubscribe from the notify.
    */
   private deferNotify<K extends keyof RuntimeProtocol['notifies']>(
     name: K,
     handler: (args: RuntimeProtocol['notifies'][K]['args']) => void,
-    customWire?: (channel: Channel<RuntimeProtocol>) => Unsubscribe,
   ): Unsubscribe {
     if (this.channel) {
-      const off = customWire ? customWire(this.channel) : this.channel.onNotify(name, handler);
+      const off = this.channel.onNotify(name, handler);
       this.disposers.push(off);
       return off;
     }
     /* Subscribed before initialize(): record a pending wiring.
      * `initialize()` flushes the queue once the channel is live. */
     let wired: Unsubscribe | undefined;
-    const pending = (channel: Channel<RuntimeProtocol>): void => {
-      wired = customWire ? customWire(channel) : channel.onNotify(name, handler);
+    const unsubscribePending = this.pendingSubscriptions.subscribe((channel) => {
+      wired = channel.onNotify(name, handler);
       this.disposers.push(wired);
-    };
-    this.pendingSubscriptions.push(pending);
+    });
     return () => {
       wired?.();
-      const index = this.pendingSubscriptions.indexOf(pending);
-      if (index !== -1) {
-        this.pendingSubscriptions.splice(index, 1);
-      }
+      unsubscribePending();
     };
   }
 
@@ -528,10 +645,8 @@ export class RuntimeWorkerClient {
     if (!this.channel) {
       return;
     }
-    for (const pending of this.pendingSubscriptions) {
-      pending(this.channel);
-    }
-    this.pendingSubscriptions.length = 0;
+    this.pendingSubscriptions.emit(this.channel);
+    this.pendingSubscriptions.dispose();
   }
 
   private ensureChannel(): void {
@@ -546,33 +661,158 @@ export class RuntimeWorkerClient {
     }
   }
 
-  private startRenderTimeout(): void {
-    this.clearRenderTimeout();
-    if (this.renderTimeout <= 0) {
-      return;
-    }
-    this.renderTimeoutTimer = setTimeout(() => {
-      this.transport.abort('timeout');
-      this.localAbortGeneration += 1;
-    }, this.renderTimeout);
+  private isSelectedPreviewPublishable(renderId: string): boolean {
+    return this.selectedPreview?.renderId === renderId && !this.selectedPreview.timedOut;
   }
 
-  private clearRenderTimeout(): void {
-    if (this.renderTimeoutTimer !== undefined) {
-      clearTimeout(this.renderTimeoutTimer);
-      this.renderTimeoutTimer = undefined;
+  private dispatchPreview(admission: RuntimePreviewIdentity, send: () => void): void {
+    if (this.selectedPreview?.renderId !== admission.renderId) {
+      return;
+    }
+    if (this.recoveringRenderId) {
+      this.queuedPreview = { admission, send };
+      return;
+    }
+    this.sendPreview(admission, send);
+  }
+
+  private sendPreview(admission: RuntimePreviewIdentity, send: () => void): void {
+    const selected = this.selectedPreview;
+    if (selected?.renderId !== admission.renderId) {
+      return;
+    }
+    send();
+    this.startRenderTimeout(selected);
+  }
+
+  private startRenderTimeout(admission: ActivePreviewAdmission): void {
+    this.clearPreviewTimer(admission);
+    if (admission.renderTimeout <= 0) {
+      return;
+    }
+    admission.timer = setTimeout(() => {
+      this.handleRenderTimeout(admission);
+    }, admission.renderTimeout);
+  }
+
+  private clearPreviewTimer(admission: ActivePreviewAdmission | undefined): void {
+    if (admission?.timer === undefined) {
+      return;
+    }
+    clearTimeout(admission.timer);
+    admission.timer = undefined;
+  }
+
+  private handleRenderTimeout(admission: ActivePreviewAdmission): void {
+    if (admission.settled || admission.timedOut || this.selectedPreview?.renderId !== admission.renderId) {
+      return;
+    }
+    admission.timedOut = true;
+    admission.timer = undefined;
+    this.localTimeouts.emit({
+      renderId: admission.renderId,
+      renderTimeout: admission.renderTimeout,
+      issues: [renderTimeoutIssue(admission.renderTimeout)],
+    });
+    const recovery = this.transport.renderTimeoutRecovery;
+    if (recovery.kind !== 'terminable') {
+      return;
+    }
+    this.recoveringRenderId = admission.renderId;
+    /* Arm the escalation before signalling: a transport whose abort plane is
+     * already broken is exactly the host that must still be terminated. */
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = undefined;
+      void this.terminateTimedOutHost(recovery);
+    }, renderTimeoutRecoveryGrace);
+    try {
+      recovery.abortRender({
+        renderId: admission.renderId,
+        ...(admission.abortGeneration === undefined ? {} : { abortGeneration: admission.abortGeneration }),
+      });
+    } catch {
+      // Cooperative cancellation is best-effort; the armed timer is authoritative.
     }
   }
 
-  private handleStateChange(state: WorkerState, detail?: string): void {
-    if (state === this.lastReportedState && !detail) {
-      return;
+  private async terminateTimedOutHost(
+    recovery: Extract<RuntimeTransportTimeoutRecovery, { readonly kind: 'terminable' }>,
+  ): Promise<void> {
+    try {
+      await recovery.terminate();
+    } catch {
+      // The transport's typed `closed` result remains the authoritative terminal signal.
     }
-    this.lastReportedState = state;
-    if (state === 'rendering') {
-      this.startRenderTimeout();
-    } else if (state === 'idle' || state === 'error') {
-      this.clearRenderTimeout();
+  }
+
+  private async resolveGeometryNotification(
+    result: HashedGeometryResultTransport,
+    renderId: string,
+    handler: (result: HashedGeometryResult, renderId: string) => void,
+  ): Promise<void> {
+    let resolved: HashedGeometryResult;
+    try {
+      resolved = result.success ? { ...result, data: await this.transport.resolveGeometry(result.data) } : result;
+    } catch (error) {
+      resolved = {
+        success: false,
+        issues: [
+          {
+            message: error instanceof Error ? error.message : String(error),
+            code: 'RUNTIME',
+            type: 'runtime',
+            severity: 'error',
+          },
+        ],
+      };
+    }
+    if (this.isSelectedPreviewPublishable(renderId)) {
+      handler(resolved, renderId);
+    }
+  }
+
+  private handleStateChange(args: RuntimeStateChangedArgs): void {
+    if (this.recoveringRenderId === args.renderId && (args.state === 'idle' || args.state === 'error')) {
+      this.recoveringRenderId = undefined;
+      if (this.recoveryTimer !== undefined) {
+        clearTimeout(this.recoveryTimer);
+      }
+      this.recoveryTimer = undefined;
+      const queued = this.queuedPreview;
+      this.queuedPreview = undefined;
+      if (queued) {
+        this.sendPreview(queued.admission, queued.send);
+      }
+    }
+
+    let selected = this.selectedPreview;
+    if (
+      (!selected || selected.renderId !== args.renderId) &&
+      (!selected || selected.settled) &&
+      (args.state === 'buffering' || args.state === 'rendering')
+    ) {
+      selected = {
+        renderId: args.renderId,
+        abortGeneration: args.abortGeneration,
+        renderTimeout: this.renderTimeout,
+        timedOut: false,
+        settled: false,
+        geometryObserved: false,
+      };
+      this.selectedPreview = selected;
+    }
+    if (selected?.renderId === args.renderId) {
+      if (
+        (args.state === 'buffering' || args.state === 'rendering') &&
+        selected.timer === undefined &&
+        !selected.timedOut &&
+        !selected.settled
+      ) {
+        this.startRenderTimeout(selected);
+      }
+      if (args.state === 'idle' || args.state === 'error') {
+        this.settleSelectedPreview(args.renderId);
+      }
     }
   }
 }

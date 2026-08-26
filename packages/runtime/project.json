@@ -3,41 +3,11 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/runtime",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"],
+  "tags": ["scope:shared", "type:package"],
+  "implicitDependencies": ["units"],
   "targets": {
-    "test": {
-      "dependsOn": ["copy-assets"]
-    },
-    "benchmark": {
-      "command": "tsx --require ./scripts/cjs-compat.cjs scripts/benchmark-kernels.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "wasm-inspect": {
-      "command": "tsx scripts/wasm-inspect.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "build-matrix": {
-      "command": "tsx scripts/build-matrix-report.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "compare-benchmarks": {
-      "command": "tsx scripts/compare-benchmarks.mts",
-      "options": {
-        "cwd": "{projectRoot}"
-      }
-    },
-    "size": {
-      "command": "size-limit",
-      "options": {
-        "cwd": "{projectRoot}"
-      },
-      "dependsOn": ["build"]
+    "build": {
+      "dependsOn": ["^build"]
     },
     "audit-public-surface": {
       "command": "node --import @oxc-node/core/register scripts/audit-public-surface.mts",
@@ -48,8 +18,17 @@
       "inputs": [
         "{projectRoot}/scripts/audit-public-surface.mts",
         "{projectRoot}/src/index.ts",
-        "{projectRoot}/src/client/runtime-client.ts"
+        "{projectRoot}/src/client/runtime-client.ts",
+        "{projectRoot}/src/vite/index.ts"
       ]
+    },
+    "npm-local-smoke": {
+      "command": "node scripts/src/check-pack-install.ts packages/runtime",
+      "options": {
+        "cwd": "{workspaceRoot}"
+      },
+      "dependsOn": ["build"],
+      "cache": false
     }
   }
 }

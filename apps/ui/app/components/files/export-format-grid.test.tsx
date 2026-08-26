@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { FormatEntry } from '#routes/projects_.$id/export-formats.utils.js';
+import type { FormatEntry } from '#utils/export-formats.utils.js';
 
 const { ExportFormatGrid } = await import('./export-format-grid.js');
 
@@ -15,7 +15,7 @@ const brepFormats: FormatEntry[] = [
 ];
 
 describe('ExportFormatGrid', () => {
-  it('should render mesh formats under the MESH heading and BREP formats under the BREP heading', () => {
+  it('should render BREP formats above mesh formats', () => {
     try {
       render(
         <ExportFormatGrid formats={[...meshFormats, ...brepFormats]} isExporting={false} onSelectFormat={vi.fn()} />,
@@ -23,6 +23,7 @@ describe('ExportFormatGrid', () => {
 
       expect(screen.getByText('Mesh')).toBeInTheDocument();
       expect(screen.getByText('BREP')).toBeInTheDocument();
+      expect(screen.getAllByText(/^(BREP|Mesh)$/).map((heading) => heading.textContent)).toEqual(['BREP', 'Mesh']);
 
       for (const { format } of meshFormats) {
         expect(screen.getByRole('button', { name: new RegExp(format, 'i') })).toBeInTheDocument();

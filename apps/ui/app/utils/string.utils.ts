@@ -1,5 +1,5 @@
 /**
- * Convert a string from camelCase or snake_case to Sentence Case. Acronyms are preserved.
+ * Convert a string from identifier casing to Title Case. Acronyms are preserved.
  *
  * @example
  * toTitleCase('firstName') // 'First Name'
@@ -19,7 +19,7 @@
  * @example
  * toTitleCase('api2Response') // 'Api 2 Response'
  *
- * @param string_ The camelCase or snake_case string to convert
+ * @param string_ The identifier or display string to convert
  * @returns The converted Title Case string
  */
 export const toTitleCase = (string_: string): string => {
@@ -42,6 +42,14 @@ export const toTitleCase = (string_: string): string => {
       .replaceAll(/\b\w/g, (char) => char.toUpperCase())
   );
 };
+
+/**
+ * Format a user-visible display label in Tau's Title Case style.
+ *
+ * @param label The identifier or display label to format
+ * @returns The formatted display label
+ */
+export const formatDisplayLabel = (label: string): string => toTitleCase(label);
 
 /**
  * Convert a string from camelCase, PascalCase, Title Case, or kebab-case to snake_case.

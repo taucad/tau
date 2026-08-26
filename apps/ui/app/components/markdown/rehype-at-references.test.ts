@@ -130,17 +130,14 @@ describe('rehypeAtReferences', () => {
     expect(markText.value).toBe('@.tau/transcripts/abc-123.jsonl');
   });
 
-  it('should transform known /command into mark with data-slash-command', () => {
+  it('should leave /command text untouched in markdown without catalog context', () => {
     const root = tree(element('p', text('/create-policy')));
 
     runPlugin(root);
 
     const p = root.children[0] as ElementNode;
     expect(p.children).toHaveLength(1);
-    const mark = p.children[0] as ElementNode;
-    expect(mark.tagName).toBe('mark');
-    expect(mark.properties['data-slash-command']).toBe('create-policy');
-    expect((mark.children[0] as TextNode).value).toBe('/create-policy');
+    expect((p.children[0] as TextNode).value).toBe('/create-policy');
   });
 
   it('should handle mixed @path and /command in same text node', () => {
@@ -151,10 +148,7 @@ describe('rehypeAtReferences', () => {
     const p = root.children[0] as ElementNode;
     expect(p.children).toHaveLength(3);
 
-    const slashMark = p.children[0] as ElementNode;
-    expect(slashMark.tagName).toBe('mark');
-    expect(slashMark.properties['data-slash-command']).toBe('create-policy');
-
+    expect((p.children[0] as TextNode).value).toBe('/create-policy');
     expect((p.children[1] as TextNode).value).toBe(' check ');
 
     const atMark = p.children[2] as ElementNode;

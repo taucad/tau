@@ -6,16 +6,22 @@
  */
 
 import type { PartialDeep } from 'type-fest';
-import type { CreateGeometryResult, ExportGeometryResult, GetParametersResult } from '#types/runtime.types.js';
+import type {
+  CreateGeometryResult,
+  ExportGeometryResult,
+  GetParametersResult,
+  MeshGeometryResult,
+} from '#types/runtime.types.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type {
   RuntimeLogger,
   KernelFileSystem,
-  CreateGeometryInput,
-  ExportGeometryInput,
+  ExportGeometryRequest,
   GetDependenciesInput,
   GetParametersInput,
 } from '#types/runtime-kernel.types.js';
+import type { ContentHookInputFor, RuntimeContentKey } from '#types/runtime-content.types.js';
+import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 
 // =============================================================================
 // Middleware State & Runtime
@@ -62,9 +68,16 @@ export type KernelMiddlewareRuntime<
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
   Options extends Record<string, unknown> = {},
 > = {
+  /**
+   * Operation-scoped cancellation signal shared with the active kernel call.
+   * Fresh for each operation; pass it to cancellable APIs and do not retain it.
+   */
+  readonly signal: AbortSignal;
+  /** Span tracer for middleware-authored performance instrumentation. */
+  readonly tracer: RuntimeSpanTracer;
   /** Logger with middleware name pre-configured as the component */
   logger: RuntimeLogger;
-  /** Filesystem for all file operations (uses absolute path methods for middleware) */
+  /** Filesystem capability for runtime-path operations. `/` is the supplied filesystem root. */
   filesystem: KernelFileSystem;
   /** Type-safe state for persisting data during the wrap hook execution */
   state: MiddlewareState<State>;
@@ -82,24 +95,6 @@ export type KernelMiddlewareRuntime<
    * This is a 64-character hex string.
    */
   dependencyHash: string;
-  /**
-   * Register a file path for the kernel's watch set with an optional debounce tier.
-   * Paths registered here are included in the kernel's filesystem watcher.
-   * The debounce tier controls how quickly changes to this path trigger a re-render
-   * (e.g., 50ms for parameter files vs 500ms default for source code).
-   *
-   * Idempotent — re-registering the same path updates the debounce value.
-   *
-   * @param absolutePath - Absolute filesystem path to watch
-   * @param options - Optional configuration with `watchDebounce` (milliseconds) override
-   */
-  registerWatchPath(
-    absolutePath: string,
-    options?: {
-      /** Milliseconds. */
-      watchDebounce?: number;
-    },
-  ): void;
 };
 
 // =============================================================================
@@ -113,7 +108,38 @@ export type KernelMiddlewareRuntime<
  * Uses internal geometry types (without hash) - hash is added by kernel-worker.ts.
  * @public
  */
-export type CreateGeometryHandler = (input: CreateGeometryInput) => Promise<CreateGeometryResult>;
+export type MiddlewareCreateGeometryRequest<Content extends RuntimeContentKey = RuntimeContentKey> = {
+  readonly entryPath: string;
+  readonly parameters: Record<string, unknown>;
+  readonly options?: Record<string, unknown>;
+} & ContentHookInputFor<Content>;
+
+/** Continue the create-geometry chain with the content visible to this middleware. @public */
+export type CreateGeometryHandler<Content extends RuntimeContentKey = RuntimeContentKey> = (
+  input: MiddlewareCreateGeometryRequest<Content>,
+) => Promise<CreateGeometryResult>;
+
+/**
+ * Request seen by mesh-phase middleware. Mirrors {@link ExportGeometryRequest}:
+ * middleware never sees the native handle — the framework appends it at the
+ * internal kernel execution boundary.
+ * @public
+ */
+export type MeshGeometryRequest<Content extends RuntimeContentKey = RuntimeContentKey> = {
+  /** Kernel-specific render options (preview tessellation etc.). */
+  options: Record<string, unknown>;
+  /** Framework content projected to the selected render route. */
+} & ContentHookInputFor<Content>;
+
+/**
+ * Handler function for the meshGeometry display phase.
+ * Called by wrap hooks to continue the middleware chain or execute the main operation.
+ * The success result always carries a display artifact in `data`.
+ * @public
+ */
+export type MeshGeometryHandler<Content extends RuntimeContentKey = RuntimeContentKey> = (
+  input: MeshGeometryRequest<Content>,
+) => Promise<MeshGeometryResult>;
 
 /**
  * Handler function for exportGeometry.
@@ -121,7 +147,16 @@ export type CreateGeometryHandler = (input: CreateGeometryInput) => Promise<Crea
  * Runtime is captured in the handler's closure, so middleware only passes input.
  * @public
  */
-export type ExportGeometryHandler = (input: ExportGeometryInput) => Promise<ExportGeometryResult>;
+export type MiddlewareExportGeometryRequest<Content extends RuntimeContentKey = RuntimeContentKey> = Omit<
+  ExportGeometryRequest,
+  'content'
+> &
+  ContentHookInputFor<Content>;
+
+/** Continue the export-geometry chain with the content visible to this middleware. @public */
+export type ExportGeometryHandler<Content extends RuntimeContentKey = RuntimeContentKey> = (
+  input: MiddlewareExportGeometryRequest<Content>,
+) => Promise<ExportGeometryResult>;
 
 /**
  * Handler function for getParameters.
@@ -156,6 +191,7 @@ export type GetParametersHandler = (input: GetParametersInput) => Promise<GetPar
  * import { defineMiddleware } from '@taucad/runtime/middleware';
  *
  * const loggingMiddleware = defineMiddleware({
+ *   id: 'logging',
  *   name: 'Logging',
  *   async wrapCreateGeometry(input, handler, { logger }) {
  *     logger.debug('Computing geometry...');
@@ -171,11 +207,34 @@ export type WrapCreateGeometryHook<
   State extends Record<string, unknown> = {},
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
   Options extends Record<string, unknown> = {},
+  Content extends RuntimeContentKey = RuntimeContentKey,
 > = (
-  input: CreateGeometryInput,
-  handler: CreateGeometryHandler,
+  input: MiddlewareCreateGeometryRequest<Content>,
+  handler: CreateGeometryHandler<Content>,
   runtime: KernelMiddlewareRuntime<State, Options>,
 ) => Promise<CreateGeometryResult>;
+
+/**
+ * Wrap-style hook for the meshGeometry display phase.
+ * Provides full control over execution with onion model semantics. The mesh
+ * phase runs only on the display path — export requests never trigger it —
+ * so hooks here (e.g. the display-mesh cache) never tax a BRep-only export.
+ *
+ * @template State - The state type from the middleware's stateSchema. Must be an object type.
+ * @template Options - The options type from the middleware's optionsSchema. Must be an object type.
+ * @public
+ */
+export type WrapMeshGeometryHook<
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
+  State extends Record<string, unknown> = {},
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
+  Options extends Record<string, unknown> = {},
+  Content extends RuntimeContentKey = RuntimeContentKey,
+> = (
+  input: MeshGeometryRequest<Content>,
+  handler: MeshGeometryHandler<Content>,
+  runtime: KernelMiddlewareRuntime<State, Options>,
+) => Promise<MeshGeometryResult>;
 
 /**
  * Wrap-style hook for exportGeometry.
@@ -190,9 +249,10 @@ export type WrapExportGeometryHook<
   State extends Record<string, unknown> = {},
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
   Options extends Record<string, unknown> = {},
+  Content extends RuntimeContentKey = RuntimeContentKey,
 > = (
-  input: ExportGeometryInput,
-  handler: ExportGeometryHandler,
+  input: MiddlewareExportGeometryRequest<Content>,
+  handler: ExportGeometryHandler<Content>,
   runtime: KernelMiddlewareRuntime<State, Options>,
 ) => Promise<ExportGeometryResult>;
 
@@ -235,15 +295,45 @@ export type WrapGetParametersHook<
  * import { defineMiddleware } from '@taucad/runtime/middleware';
  *
  * const parameterResolver = defineMiddleware({
+ *   id: 'parameter-resolver',
  *   name: 'ParameterResolver',
- *   getDependencies({ filePath, basePath }, options) {
- *     const relativePath = filePath.replace(`${basePath}/`, '');
- *     return [`${basePath}/${options.parametersDir}/${relativePath}.json`];
+ *   async getDependencies({ entryPath }, { signal }) {
+ *     const response = await fetch(`/parameter-path?entry=${encodeURIComponent(entryPath)}`, { signal });
+ *     return [{ path: await response.text() }];
  *   },
  * });
  * ```
  */
+export type MiddlewareDependencyDeclaration = Readonly<{
+  /** Path of the dependency within the runtime filesystem. */
+  path: string;
+  /** Milliseconds. */
+  watchDebounce?: number;
+}>;
+
+/** Runtime services available while middleware declares operation dependencies. @public */
+export type MiddlewareDependencyRuntime<
+  // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
+  Options extends Record<string, unknown> = {},
+> = {
+  /**
+   * Operation-scoped cancellation signal. Fresh for each dependency-resolution
+   * operation; pass it to cancellable APIs and do not retain it.
+   */
+  readonly signal: AbortSignal;
+  /** Logger with middleware name pre-configured as the component. */
+  readonly logger: RuntimeLogger;
+  /** Filesystem capability for runtime-path operations. */
+  readonly filesystem: KernelFileSystem;
+  /** Resolved middleware options. */
+  readonly options: Options;
+};
+
+/** @public */
 export type GetMiddlewareDependenciesHook<
   // oxlint-disable-next-line @typescript-eslint/no-empty-object-type -- Default represents z.infer<z.object({})>
   Options extends Record<string, unknown> = {},
-> = (input: GetDependenciesInput, options: Options) => string[] | Promise<string[]>;
+> = (
+  input: GetDependenciesInput,
+  runtime: MiddlewareDependencyRuntime<Options>,
+) => MiddlewareDependencyDeclaration[] | Promise<MiddlewareDependencyDeclaration[]>;

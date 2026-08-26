@@ -1,0 +1,66 @@
+{
+  "family": "clearance",
+  "fixture": "clearance.shaft-bore-tilted-negative",
+  "generator": {
+    "script": "scripts/clearance/shaft-bore/main.ts",
+    "parameters": {
+      "tiltDegrees": 1
+    }
+  },
+  "tolerances": {
+    "clearanceMin": 0.02,
+    "clearanceMax": 0.06,
+    "angular": 0.5,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "housing.bore",
+      "status": "resolved",
+      "entityCount": 1
+    },
+    {
+      "selector": "shaft.journal",
+      "status": "resolved",
+      "entityCount": 1
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "coaxial",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "tolerance": 0.02,
+        "angularToleranceDegrees": 0.5
+      },
+      "expected": {
+        "verdict": "fail",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "angle": 1
+          }
+        },
+        "mentions": ["shaft.journal"]
+      }
+    },
+    {
+      "kind": "clearance",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "min": 0.02,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": true
+        }
+      }
+    }
+  ],
+  "notes": "Clearance varies along the axial span; the shaft end displaces 15*sin(1 deg) = 0.26 and interferes with the bore wall."
+}

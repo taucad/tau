@@ -5,6 +5,7 @@ import path from 'node:path';
 import { requirePublicExportJsdocRule } from './require-public-export-jsdoc.js';
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, '..', '..');
+const NAMED_RE_EXPORT_FIXTURE = path.join(import.meta.dirname, 'fixtures', 'require-public-export-jsdoc');
 
 const ruleTester = new RuleTester({
   languageOptions: {
@@ -34,6 +35,103 @@ describe('require-public-export-jsdoc', () => {
   });
 
   describe('public files', () => {
+    it('should follow named re-exports without promoting sibling exports', () => {
+      const filename = path.join(NAMED_RE_EXPORT_FIXTURE, 'implementation.js');
+
+      ruleTester.run('require-public-export-jsdoc', requirePublicExportJsdocRule, {
+        valid: [
+          {
+            name: 'unreachable sibling export needs no public tag',
+            code: `
+/** @public */
+export const PublicThing = 1;
+export const InternalSibling = 2;
+`,
+            filename,
+          },
+        ],
+        invalid: [
+          {
+            name: 'named public re-export still requires a public tag',
+            code: `
+export const PublicThing = 1;
+export const InternalSibling = 2;
+`,
+            filename,
+            errors: [{ messageId: 'missingPublicTag', data: { name: 'PublicThing' } }],
+          },
+        ],
+      });
+    });
+
+    it('should follow local export lists to their declarations', () => {
+      const filename = path.join(NAMED_RE_EXPORT_FIXTURE, 'implementation.js');
+
+      ruleTester.run('require-public-export-jsdoc', requirePublicExportJsdocRule, {
+        valid: [
+          {
+            name: 'documented local declaration exported under a public alias',
+            code: `
+/** @public */
+const implementation = 1;
+const sibling = 2;
+export { implementation as PublicThing, sibling as InternalSibling };
+`,
+            filename,
+          },
+          {
+            name: 'unreachable local export needs no public tag',
+            code: `
+const InternalSibling = 1;
+export { InternalSibling };
+`,
+            filename,
+          },
+        ],
+        invalid: [
+          {
+            name: 'public alias requires JSDoc on its local declaration',
+            code: `
+const implementation = 1;
+const sibling = 2;
+export { implementation as PublicThing, sibling as InternalSibling };
+`,
+            filename,
+            errors: [{ messageId: 'missingPublicTag', data: { name: 'implementation' } }],
+          },
+        ],
+      });
+    });
+
+    it('should follow type-only star re-exports without promoting values', () => {
+      const filename = path.join(NAMED_RE_EXPORT_FIXTURE, 'type-implementation.ts');
+
+      ruleTester.run('require-public-export-jsdoc', requirePublicExportJsdocRule, {
+        valid: [
+          {
+            name: 'value beside a public type needs no public tag',
+            code: `
+/** @public */
+export interface PublicType { value: string; }
+export const internalValue = 1;
+`,
+            filename,
+          },
+        ],
+        invalid: [
+          {
+            name: 'type-only star still requires tags on public types',
+            code: `
+export interface PublicType { value: string; }
+export const internalValue = 1;
+`,
+            filename,
+            errors: [{ messageId: 'missingPublicTag', data: { name: 'PublicType' } }],
+          },
+        ],
+      });
+    });
+
     it('should not match @public embedded in another word', () => {
       const filename = path.join(PACKAGE_ROOT, 'src', 'tau-lint.js');
 
@@ -248,6 +346,42 @@ export enum Status { Active, Inactive }
             code: `export enum Status { Active, Inactive }`,
             filename,
             errors: [{ messageId: 'missingPublicTag', data: { name: 'Status' } }],
+          },
+        ],
+      });
+    });
+
+    it('should support every declaration kind in local export lists', () => {
+      const filename = path.join(PACKAGE_ROOT, 'src', 'tau-lint.js');
+
+      ruleTester.run('require-public-export-jsdoc', requirePublicExportJsdocRule, {
+        valid: [],
+        invalid: [
+          {
+            name: 'local value and type declarations require public tags',
+            code: `
+const value = 1;
+function fn() {}
+class Klass {}
+interface Shape { value: string }
+type Alias = string;
+enum Choice { One }
+export { value, fn, Klass, Shape, Alias, Choice };
+`,
+            filename,
+            errors: ['value', 'fn', 'Klass', 'Shape', 'Alias', 'Choice'].map((name) => ({
+              messageId: 'missingPublicTag',
+              data: { name },
+            })),
+          },
+          {
+            name: 'type-only local export is public',
+            code: `
+interface Shape { value: string }
+export type { Shape };
+`,
+            filename,
+            errors: [{ messageId: 'missingPublicTag', data: { name: 'Shape' } }],
           },
         ],
       });

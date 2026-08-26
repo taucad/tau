@@ -1,0 +1,58 @@
+{
+  "name": "@taucad/rpc",
+  "version": "0.1.0-beta.1",
+  "description": "Typed RPC channel primitives for postMessage-style transports",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/rpc"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./bridge": "./src/bridge/index.ts",
+    "./codec/msgpack": "./src/codec/msgpack.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./bridge": {
+        "types": "./dist/bridge/index.d.mts",
+        "import": "./dist/bridge/index.mjs",
+        "default": "./dist/bridge/index.mjs"
+      },
+      "./codec/msgpack": {
+        "types": "./dist/codec/msgpack.d.mts",
+        "import": "./dist/codec/msgpack.mjs",
+        "default": "./dist/codec/msgpack.mjs"
+      }
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "catalog:",
+    "@taucad/events": "workspace:*",
+    "@taucad/utils": "workspace:*"
+  }
+}

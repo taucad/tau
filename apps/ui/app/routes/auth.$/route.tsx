@@ -2,6 +2,7 @@ import { lazy } from 'react';
 import { Link, useParams } from 'react-router';
 import { Auth } from '#components/auth/auth.js';
 import { AuthEmailDraftProvider } from '#components/auth/auth-email-draft.js';
+import { MagicLinkVerify } from '#components/auth/magic-link-verify.js';
 import { VerifyEmail } from '#components/auth/verify-email.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
@@ -9,7 +10,7 @@ import type { Handle } from '#types/matches.types.js';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 
 const AuthSplashbackLazy = lazy(async () => {
-  const m = await import('#routes/auth.$/splashback/auth-splashback.js');
+  const m = await import('#components/geometry/splash/auth-splashback.js');
   return { default: m.AuthSplashback };
 });
 
@@ -36,6 +37,8 @@ export default function AuthPage(): React.JSX.Element {
           <div className='flex flex-1 items-center justify-center'>
             {segment === 'verify-email' ? (
               <VerifyEmail className='w-full max-w-md' />
+            ) : segment === 'magic-link/verify' ? (
+              <MagicLinkVerify className='w-full max-w-md' />
             ) : (
               <Auth path={segment} className='w-full max-w-md' />
             )}

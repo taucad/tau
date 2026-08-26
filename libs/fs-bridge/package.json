@@ -1,0 +1,53 @@
+{
+  "name": "@taucad/fs-bridge",
+  "version": "0.1.0-beta.1",
+  "description": "MessagePort filesystem bridge adapters for @taucad/filesystem",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/fs-bridge"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sync": "./src/sync/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./sync": {
+        "types": "./dist/sync/index.d.mts",
+        "import": "./dist/sync/index.mjs",
+        "default": "./dist/sync/index.mjs"
+      }
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/filesystem": "workspace:*",
+    "@taucad/rpc": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "@taucad/utils": "workspace:*"
+  }
+}

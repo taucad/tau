@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { crossOriginIsolation } from '#vite/index.js';
+import { crossOriginIsolation, tauRuntime } from '#vite/index.js';
+import * as viteIntegration from '#vite/index.js';
 import { documentHeaders } from '#cross-origin-isolation/index.js';
 
 type MiddlewareHandler = (
@@ -21,7 +22,10 @@ function createMockServer() {
 }
 
 describe('crossOriginIsolation (vite plugin)', () => {
-  const plugin = crossOriginIsolation();
+  const plugin = crossOriginIsolation() as ReturnType<typeof crossOriginIsolation> & {
+    configurePreviewServer: (server: unknown) => void;
+    configureServer: (server: unknown) => void;
+  };
 
   it('should have taucad-namespaced metadata and both server hooks', () => {
     expect(plugin.name).toBe('taucad-runtime:cross-origin-isolation');
@@ -31,19 +35,19 @@ describe('crossOriginIsolation (vite plugin)', () => {
 
   it('should register middleware on dev server', () => {
     const server = createMockServer();
-    (plugin.configureServer as (server: unknown) => void)(server);
+    plugin.configureServer(server);
     expect(server.middlewares.use).toHaveBeenCalledOnce();
   });
 
   it('should register middleware on preview server', () => {
     const server = createMockServer();
-    (plugin.configurePreviewServer as (server: unknown) => void)(server);
+    plugin.configurePreviewServer(server);
     expect(server.middlewares.use).toHaveBeenCalledOnce();
   });
 
   it('should set all three COI headers on a request', () => {
     const server = createMockServer();
-    (plugin.configureServer as (server: unknown) => void)(server);
+    plugin.configureServer(server);
 
     const response = { setHeader: vi.fn() };
     const next = vi.fn();
@@ -56,7 +60,7 @@ describe('crossOriginIsolation (vite plugin)', () => {
 
   it('should stay in sync with the canonical documentHeaders from @taucad/runtime/cross-origin-isolation', () => {
     const server = createMockServer();
-    (plugin.configureServer as (server: unknown) => void)(server);
+    plugin.configureServer(server);
 
     const response = { setHeader: vi.fn() };
     const next = vi.fn();
@@ -70,7 +74,7 @@ describe('crossOriginIsolation (vite plugin)', () => {
 
   it('should call next() to continue the middleware chain', () => {
     const server = createMockServer();
-    (plugin.configureServer as (server: unknown) => void)(server);
+    plugin.configureServer(server);
 
     const response = { setHeader: vi.fn() };
     const next = vi.fn();
@@ -81,7 +85,7 @@ describe('crossOriginIsolation (vite plugin)', () => {
 
   it('should set all headers on every request', () => {
     const server = createMockServer();
-    (plugin.configureServer as (server: unknown) => void)(server);
+    plugin.configureServer(server);
 
     const response = { setHeader: vi.fn() };
     const next = vi.fn();
@@ -90,5 +94,12 @@ describe('crossOriginIsolation (vite plugin)', () => {
     server.handlers[0]!({}, response, next);
 
     expect(response.setHeader).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe('@taucad/runtime/vite public surface', () => {
+  it('should export only the supported runtime Vite values', () => {
+    expect(tauRuntime).toBeTypeOf('function');
+    expect(Object.keys(viteIntegration).sort()).toEqual(['crossOriginIsolation', 'tauRuntime']);
   });
 });

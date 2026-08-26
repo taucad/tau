@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://tau.new/schemas/tau-schema-v1.json"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^proj_[\\dA-Za-z]{21}$"
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 10000
+    },
+    "tags": {
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 100
+      }
+    },
+    "assets": {
+      "type": "object",
+      "properties": {
+        "main": {
+          "type": "object",
+          "properties": {
+            "entryPath": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "thumbnail": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          },
+          "required": ["entryPath"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["main"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["$schema", "id", "name", "description", "tags", "assets"],
+  "additionalProperties": false,
+  "$id": "https://tau.new/schemas/tau-schema-v1.json",
+  "title": "Tau Project Manifest v1"
+}

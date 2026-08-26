@@ -35,6 +35,7 @@ import { z } from 'zod';
 import { AttributeKey, GenAiInterruptRecoveryOutcome } from '@taucad/telemetry';
 import type { ModelService } from '#api/models/model.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
+import { createTauInternalHumanMessage } from '#api/chat/utils/tau-internal-message.js';
 
 // =============================================================================
 // Public types
@@ -382,8 +383,14 @@ export const createInterruptRecoveryMiddleware = (metricsService: MetricsService
         dominantInterruptCause: detection.dominantInterruptCause,
       });
 
-      const nudge = new HumanMessage({
+      const nudge = createTauInternalHumanMessage({
+        id: `tau:interrupt-recovery:${detection.signature}`,
         content: `<system-reminder>\n${reminder}\n</system-reminder>`,
+        kind: 'interrupt-recovery',
+        metadata: {
+          anchorId: detection.signature,
+          pruning: 'preserve-until-compaction',
+        },
       });
 
       metricsService.genAiInterruptRecoveryReminders.add(

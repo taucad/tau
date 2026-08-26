@@ -1,42 +1,25 @@
-import {
-  BookOpen,
-  ChartColumn,
-  Files,
-  Frame,
-  Hammer,
-  Import,
-  Map,
-  PieChart,
-  Settings,
-  Shuffle,
-  UsersRound,
-} from 'lucide-react';
+import { BookOpen, ChartColumn, Files, Hammer, Import, Plug, Settings, Shuffle, UsersRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import type { FeatureFlagName } from '#flags/flag.constants.js';
 
 type NavRoute = {
   title: string;
   url: string;
   icon: LucideIcon;
+  featureFlag?: FeatureFlagName;
   /** When set, clicking the item calls this instead of navigating to `url`. */
   action?: () => void;
-};
-
-type NavProject = {
-  name: string;
-  url: string;
-  icon: LucideIcon;
 };
 
 export const navRoutes: {
   navMain: NavRoute[];
   navSecondary: NavRoute[];
-  projects: NavProject[];
 } = {
   navMain: [
     {
       title: 'Projects',
-      url: '/projects/library',
+      url: '/projects',
       icon: Hammer,
       // Items: [
       //   {
@@ -55,7 +38,7 @@ export const navRoutes: {
     },
     {
       title: 'Community',
-      url: '/projects/community',
+      url: '/community',
       icon: UsersRound,
     },
     {
@@ -73,6 +56,12 @@ export const navRoutes: {
     //   url: '/workflows',
     //   icon: Workflow,
     // },
+    {
+      title: 'Plugins',
+      url: '/plugins',
+      icon: Plug,
+      featureFlag: 'pluginsStore',
+    },
     {
       title: 'Usage',
       url: '/usage',
@@ -97,23 +86,6 @@ export const navRoutes: {
       action(): void {
         openSettingsDialog();
       },
-    },
-  ],
-  projects: [
-    {
-      name: 'Design Engineering',
-      url: '/projects/design-engineering',
-      icon: Frame,
-    },
-    {
-      name: 'Sales & Marketing',
-      url: '/projects/sales-marketing',
-      icon: PieChart,
-    },
-    {
-      name: 'Travel',
-      url: '/projects/travel',
-      icon: Map,
     },
   ],
 };

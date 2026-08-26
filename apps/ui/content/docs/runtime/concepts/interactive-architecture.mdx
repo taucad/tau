@@ -4,8 +4,6 @@ description: An interactive, explorable version of the runtime's three-thread ar
 icon: lucide:mouse-pointer-click
 ---
 
-import { InteractiveDiagram } from '#components/docs/interactive-diagram.js';
-
 # Interactive Architecture
 
 This page demonstrates an interactive version of the [architecture diagram](./architecture). Click any node to highlight its connections and see details.
@@ -27,7 +25,7 @@ export const architectureNodes = [
     data: {
       label: 'Editor / App',
       description:
-        'The user-facing editor (Monaco) and application shell. Sends file edits to the File Manager Worker and openFile/updateParameters commands to the RuntimeClient.',
+        'The user-facing editor (Monaco) and application shell. Sends file edits to the File Manager Worker and render/updateParameters commands to the RuntimeClient.',
     },
   },
   {
@@ -49,7 +47,7 @@ export const architectureNodes = [
     data: {
       label: 'RuntimeClient',
       description:
-        'Consumer-facing API. Lifecycle is construct -> connect -> command -> consume. The transport owns the SharedArrayBuffer abort channel and the postMessage event stream that the client multiplexes to subscribers. Sends openFile / updateParameters / setOptions / export commands to the Kernel Worker.',
+        'Consumer-facing API. Lifecycle is construct -> connect -> command -> consume. The transport owns the SharedArrayBuffer abort channel and the postMessage event stream that the client multiplexes to subscribers. Sends render / updateParameters / setOptions / export commands to the Kernel Worker.',
     },
   },
 
@@ -111,7 +109,7 @@ parentId: 'kernel-group',
 data: {
 label: 'Render Loop + Debounce',
 description:
-'The autonomous render scheduler. openFile renders immediately; file changes debounce at 500ms; parameter changes debounce at 50ms. Owns the generation counter for abort detection.',
+'The autonomous render scheduler. render renders immediately; file changes debounce at 500ms; parameter changes debounce at 50ms. Owns the generation counter for abort detection.',
 },
 },
 {
@@ -186,7 +184,7 @@ export const architectureEdges = [
     source: 'editor',
     target: 'client',
     type: 'labeled',
-    data: { label: 'openFile / updateParameters' },
+    data: { label: 'render / updateParameters' },
     sourceHandle: 'right-source',
     targetHandle: 'right-target',
     style: { strokeDasharray: '6 3' },

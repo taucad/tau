@@ -1,8 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
+import type { RpcDirectoryEntry, RpcFileStat, RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { handleGrep } from '#rpc/handlers/handle-grep.js';
+
+const textStat = (size: number, lineCount = 1): RpcFileStat => ({
+  size,
+  isDirectory: false,
+  contentKind: 'text',
+  lineCount,
+  createdAt: '2026-05-12T00:00:00.000Z',
+  modifiedAt: '2026-05-12T00:00:00.000Z',
+});
+
+const textEntry = (name: string, size: number, lineCount = 1): RpcDirectoryEntry => ({
+  name,
+  type: 'file',
+  size,
+  contentKind: 'text',
+  lineCount,
+});
 
 describe('handleGrep', () => {
   it('should return matches when pattern matches file contents in a directory walk', async () => {
@@ -13,7 +30,7 @@ describe('handleGrep', () => {
       createdAt: '2026-05-12T00:00:00.000Z',
       modifiedAt: '2026-05-12T00:00:00.000Z',
     });
-    fileSystem.readdir.mockResolvedValue([{ name: 'app.ts', type: 'file', size: 20 }]);
+    fileSystem.readdir.mockResolvedValue([textEntry('app.ts', 20, 1)]);
     fileSystem.readFile.mockResolvedValue("const x = 'hello world'\n");
 
     const result = await handleGrep({ pattern: 'hello', path: '' }, fileSystem);
@@ -26,6 +43,62 @@ describe('handleGrep', () => {
     });
     expect(result.success && result.matches).toEqual([expect.objectContaining({ file: 'app.ts', line: 1 })]);
     expect(result.success && result.matches[0]?.content).toContain('hello');
+  });
+
+  it.each(['', '.', './', '/'] as const)(
+    'should resolve root alias %j before recursively reading project-relative paths',
+    async (rootAlias) => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue({
+        size: 0,
+        isDirectory: true,
+        createdAt: '2026-05-12T00:00:00.000Z',
+        modifiedAt: '2026-05-12T00:00:00.000Z',
+      });
+      fileSystem.readdir.mockImplementation(async (path) => {
+        if (path === '') {
+          return [{ name: 'checks', type: 'dir', size: 0 }];
+        }
+        if (path === 'checks') {
+          return [textEntry('existing.geospec.ts', 24, 1)];
+        }
+        throw new Error(`Unexpected non-canonical project path: ${path}`);
+      });
+      fileSystem.readFile.mockImplementation(async (path) => {
+        if (path === 'checks/existing.geospec.ts') {
+          return "it('should retain this check')";
+        }
+        throw new Error(`Unexpected non-canonical project path: ${path}`);
+      });
+
+      const result = await handleGrep({ pattern: 'retain', path: rootAlias }, fileSystem);
+
+      expect(result).toEqual({
+        success: true,
+        matches: [
+          {
+            file: 'checks/existing.geospec.ts',
+            line: 1,
+            content: "it('should retain this check')",
+          },
+        ],
+        totalMatches: 1,
+        truncated: false,
+        appliedHeadLimit: 50,
+        appliedOffset: 0,
+      });
+    },
+  );
+
+  it('should reject paths outside the project before filesystem access', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleGrep({ pattern: 'x', path: '../secret' }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.stat).not.toHaveBeenCalled();
+    expect(fileSystem.readdir).not.toHaveBeenCalled();
+    expect(fileSystem.readFile).not.toHaveBeenCalled();
   });
 
   it('should return FILE_NOT_FOUND when the path stat fails with ENOENT', async () => {
@@ -44,7 +117,7 @@ describe('handleGrep', () => {
   //
   // The transcript at Downloads/involute_gear_profiles_2026-05-12T07-18.md (lines
   // 1015, 1030, 1405) shows three back-to-back `grep` calls with `path` set to a
-  // FILE (`node_modules/opencascade.js/index.d.ts`). Each crashed with
+  // FILE (`node_modules/libcascade/index.d.ts`). Each crashed with
   // `[Error: Grep search failed]` because `collectFilePaths` calls `readdir` on
   // what is actually a regular file. The model recovered with three large
   // `read_file` calls instead, leaking ~34 KB of OCCT type bindings into the
@@ -57,12 +130,7 @@ describe('handleGrep', () => {
   describe('Phase 0 — file-as-path handling', () => {
     it('should search a single file directly when `path` points to a regular file (no readdir)', async () => {
       const fileSystem = mock<RpcFileSystem>();
-      fileSystem.stat.mockResolvedValue({
-        size: 30,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(30, 3));
       fileSystem.readFile.mockResolvedValue('alpha\nfoo bar\ngamma');
 
       const result = await handleGrep({ pattern: 'foo', path: 'src/app.ts' }, fileSystem);
@@ -96,12 +164,7 @@ describe('handleGrep', () => {
   describe('Phase 0 — server-side caps', () => {
     it('should default headLimit to 50 matches when omitted on the wire', async () => {
       const fileSystem = mock<RpcFileSystem>();
-      fileSystem.stat.mockResolvedValue({
-        size: 200_000,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(200_000, 1000));
       const lines = Array.from({ length: 1000 }, (_, lineIndex) => `match line ${lineIndex}`);
       fileSystem.readFile.mockResolvedValue(lines.join('\n'));
 
@@ -119,12 +182,7 @@ describe('handleGrep', () => {
 
     it('should honour an explicit headLimit override up to 1000', async () => {
       const fileSystem = mock<RpcFileSystem>();
-      fileSystem.stat.mockResolvedValue({
-        size: 200_000,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(200_000, 800));
       const lines = Array.from({ length: 800 }, (_, lineIndex) => `match line ${lineIndex}`);
       fileSystem.readFile.mockResolvedValue(lines.join('\n'));
 
@@ -141,12 +199,7 @@ describe('handleGrep', () => {
 
     it('should paginate via offset (skip the first N matches before applying headLimit)', async () => {
       const fileSystem = mock<RpcFileSystem>();
-      fileSystem.stat.mockResolvedValue({
-        size: 200_000,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(200_000, 100));
       const lines = Array.from({ length: 100 }, (_, lineIndex) => `match line ${lineIndex}`);
       fileSystem.readFile.mockResolvedValue(lines.join('\n'));
 
@@ -164,12 +217,7 @@ describe('handleGrep', () => {
 
     it('should truncate match lines longer than 500 chars with `[line truncated: N chars]` while preserving file/line', async () => {
       const fileSystem = mock<RpcFileSystem>();
-      fileSystem.stat.mockResolvedValue({
-        size: 5000,
-        isDirectory: false,
-        createdAt: '2026-05-12T00:00:00.000Z',
-        modifiedAt: '2026-05-12T00:00:00.000Z',
-      });
+      fileSystem.stat.mockResolvedValue(textStat(5000, 3));
       const longLine = `${'a'.repeat(2000)}foo${'b'.repeat(3000)}`;
       fileSystem.readFile.mockResolvedValue(`short line\n${longLine}\nanother`);
 

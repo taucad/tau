@@ -1,20 +1,23 @@
 /**
- * Script to scan node_modules and generate license-deps file.
+ * Script to generate the license-deps file.
  *
- * This script extracts license information from all installed packages
- * and outputs a formatted markdown file grouped by license type.
+ * It walks the dependency closure that actually ships in the published
+ * `@taucad/runtime` artifact (the file is copied into its dist as
+ * THIRD_PARTY_LICENSES.md), extracts license information from each package and
+ * outputs a formatted markdown file grouped by license type.
  *
  * Usage: node --import tsx scripts/src/update-license-deps.mts
  */
 
-import { readdir, readFile, writeFile, stat, access } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFile, writeFile, stat, access, realpath } from 'node:fs/promises';
+import { join, dirname, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import process from 'node:process';
+import { bundledLibraries, workspace } from '@taucad/nx';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDirectory = join(__dirname, '../..');
-const nodeModulesDirectory = join(rootDirectory, 'node_modules');
+const runtimeDirectory = join(rootDirectory, 'packages/runtime');
 const outputFile = join(rootDirectory, 'license-deps');
 
 type PackageInfo = {
@@ -25,6 +28,9 @@ type PackageInfo = {
   author?: string;
 };
 
+/** A resolved package plus the real directory it was resolved from. */
+type ScannedPackage = PackageInfo & { directory: string };
+
 type PackageJsonRaw = {
   name?: string;
   version?: string;
@@ -32,6 +38,9 @@ type PackageJsonRaw = {
   licenses?: Array<{ type?: string }>;
   repository?: string | { url?: string };
   author?: string | { name?: string };
+  dependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
 };
 
 type LicenseGroup = {
@@ -75,62 +84,65 @@ function normalizeGithubUrl(url: string): string {
 /**
  * Read and parse package.json from a directory.
  */
-async function readPackageJson(packagePath: string): Promise<PackageInfo | undefined> {
+async function readManifest(packagePath: string): Promise<PackageJsonRaw | undefined> {
   try {
-    const packageJsonPath = join(packagePath, 'package.json');
-    const content = await readFile(packageJsonPath, 'utf8');
-    const packageJson = JSON.parse(content) as PackageJsonRaw;
-
-    const {
-      name,
-      version,
-      license: licenseField,
-      licenses: licensesField,
-      repository: repositoryField,
-      author: authorField,
-    } = packageJson;
-
-    if (!name || !version) {
-      return undefined;
-    }
-
-    let license: string | undefined;
-    if (typeof licenseField === 'string') {
-      license = licenseField;
-    } else if (typeof licenseField === 'object') {
-      license = licenseField.type;
-    }
-
-    if (Array.isArray(licensesField) && licensesField.length > 0) {
-      license = licensesField.map((l) => l.type ?? JSON.stringify(l)).join(' OR ');
-    }
-
-    let repository: string | undefined;
-    if (typeof repositoryField === 'string') {
-      repository = repositoryField;
-    } else if (typeof repositoryField === 'object') {
-      repository = repositoryField.url;
-    }
-
-    repository &&= normalizeGithubUrl(repository);
-
-    let author: string | undefined;
-    if (typeof authorField === 'string') {
-      author = authorField;
-    } else if (typeof authorField === 'object') {
-      author = authorField.name;
-    }
-
-    return {
-      name,
-      version,
-      license: license ?? 'UNKNOWN',
-      repository,
-      author,
-    };
+    return JSON.parse(await readFile(join(packagePath, 'package.json'), 'utf8')) as PackageJsonRaw;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Extract the attribution fields Tau publishes for one package.
+ */
+function toPackageInfo(packageJson: PackageJsonRaw): PackageInfo | undefined {
+  const {
+    name,
+    version,
+    license: licenseField,
+    licenses: licensesField,
+    repository: repositoryField,
+    author: authorField,
+  } = packageJson;
+
+  if (!name || !version) {
+    return undefined;
+  }
+
+  let license: string | undefined;
+  if (typeof licenseField === 'string') {
+    license = licenseField;
+  } else if (typeof licenseField === 'object') {
+    license = licenseField.type;
+  }
+
+  if (Array.isArray(licensesField) && licensesField.length > 0) {
+    license = licensesField.map((l) => l.type ?? JSON.stringify(l)).join(' OR ');
+  }
+
+  let repository: string | undefined;
+  if (typeof repositoryField === 'string') {
+    repository = repositoryField;
+  } else if (typeof repositoryField === 'object') {
+    repository = repositoryField.url;
+  }
+
+  repository &&= normalizeGithubUrl(repository);
+
+  let author: string | undefined;
+  if (typeof authorField === 'string') {
+    author = authorField;
+  } else if (typeof authorField === 'object') {
+    author = authorField.name;
+  }
+
+  return {
+    name,
+    version,
+    license: license ?? 'UNKNOWN',
+    repository,
+    author,
+  };
 }
 
 /**
@@ -146,48 +158,99 @@ async function isDirectory(path: string): Promise<boolean> {
 }
 
 /**
- * Scan a directory for packages.
- * Handles pnpm's symlinked structure by following symlinks.
+ * Resolve a dependency to its real directory with Node's node_modules lookup,
+ * starting at the dependent's own directory. pnpm puts a package's dependencies
+ * in the node_modules beside its real path, so resolving from the real path of
+ * each dependent walks the true closure rather than the hoisted root.
  */
-async function scanDirectory(directory: string): Promise<PackageInfo[]> {
-  const packages: PackageInfo[] = [];
+async function resolvePackageDirectory(name: string, fromDirectory: string): Promise<string | undefined> {
+  let directory = fromDirectory;
 
-  try {
-    const entries = await readdir(directory);
-
-    for (const entryName of entries) {
-      // Skip hidden files and special pnpm directories
-      if (entryName.startsWith('.')) {
-        continue;
-      }
-
-      const packagePath = join(directory, entryName);
-
-      // Check if it's a directory (follows symlinks)
-      // oxlint-disable-next-line no-await-in-loop -- Sequential scanning is intentional for memory efficiency
-      const isDirectoryResult = await isDirectory(packagePath);
-      if (!isDirectoryResult) {
-        continue;
-      }
-
-      // Handle scoped packages (@org/package)
-      if (entryName.startsWith('@')) {
-        // oxlint-disable-next-line no-await-in-loop -- Sequential scanning is intentional for memory efficiency
-        const scopedPackages = await scanDirectory(packagePath);
-        packages.push(...scopedPackages);
-      } else {
-        // oxlint-disable-next-line no-await-in-loop -- Sequential scanning is intentional for memory efficiency
-        const packageInfo = await readPackageJson(packagePath);
-        if (packageInfo) {
-          packages.push(packageInfo);
-        }
-      }
+  for (;;) {
+    const candidate = join(directory, 'node_modules', name);
+    // oxlint-disable-next-line no-await-in-loop -- Ancestors must be probed in order.
+    if (await isDirectory(candidate)) {
+      return realpath(candidate);
     }
-  } catch {
-    // Directory doesn't exist or can't be read
+
+    const parent = dirname(directory);
+    if (parent === directory) {
+      return undefined;
+    }
+
+    directory = parent;
+  }
+}
+
+/**
+ * Collect the dependency closure that ships in the published runtime artifact:
+ * the runtime's own production and optional dependencies, plus those of the
+ * workspace libraries bundled into its dist (their code ships inside it).
+ *
+ * The bundled libraries come from `@taucad/nx`'s `bundledLibraries('runtime')`,
+ * the one rule the runtime's own bundler is configured from — so the attribution
+ * file cannot cover a different set than the artifact ships. Dev-time
+ * `workspace:` devDependencies (`type:tool`) are not bundled and are excluded by
+ * that rule.
+ *
+ * peerDependencies are deliberately excluded: the host application supplies
+ * them, so Tau does not distribute them and owes no attribution for them.
+ */
+async function collectRuntimeClosure(): Promise<ScannedPackage[]> {
+  const runtimeManifest = await readManifest(runtimeDirectory);
+
+  const queue = [
+    ...Object.keys({ ...runtimeManifest?.dependencies, ...runtimeManifest?.optionalDependencies }),
+    ...bundledLibraries(await workspace({ fresh: true }), 'runtime'),
+  ].map((name) => ({ name, from: runtimeDirectory }));
+
+  const packages: ScannedPackage[] = [];
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const { name, from } = queue.shift()!;
+    // oxlint-disable-next-line no-await-in-loop -- Breadth-first walk; each step depends on the previous resolution.
+    const directory = await resolvePackageDirectory(name, from);
+    if (!directory || visited.has(directory)) {
+      continue;
+    }
+
+    visited.add(directory);
+    // oxlint-disable-next-line no-await-in-loop -- Same walk.
+    const manifest = await readManifest(directory);
+    const packageInfo = manifest && toPackageInfo(manifest);
+    if (!manifest || !packageInfo) {
+      continue;
+    }
+
+    packages.push({ ...packageInfo, directory });
+    for (const dependencyName of Object.keys({ ...manifest.dependencies, ...manifest.optionalDependencies })) {
+      queue.push({ name: dependencyName, from: directory });
+    }
   }
 
   return packages;
+}
+
+/**
+ * Drop first-party packages from the manifest.
+ *
+ * A package is first-party when it is a **workspace project** — its real path is
+ * inside the repository and outside any node_modules directory. The test is the
+ * resolved path, never the name: `@taucad/kcl-wasm-lib` is published to the
+ * registry, resolves inside node_modules and stays; `geospec` and the
+ * `@taucad/*` workspace libraries resolve to source directories and go.
+ *
+ * Workspace versions are what made this file self-invalidating: `nx release`
+ * rewrites them in the very commit the release tag points at.
+ */
+export function selectThirdPartyPackages(packages: ScannedPackage[], repositoryRoot: string): PackageInfo[] {
+  return packages
+    .filter(
+      ({ directory }) =>
+        !(directory.startsWith(repositoryRoot + sep) && !directory.includes(`${sep}node_modules${sep}`)),
+    )
+    .map(({ directory, ...packageInfo }) => packageInfo);
 }
 
 /**
@@ -209,7 +272,8 @@ function groupByLicense(packages: PackageInfo[]): LicenseGroup[] {
   for (const [license, pkgs] of groups) {
     result.push({
       license,
-      packages: pkgs.sort((a, b) => a.name.localeCompare(b.name)),
+      // Version breaks ties so two copies of one package cannot reorder with the walk.
+      packages: pkgs.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version)),
     });
   }
 
@@ -255,6 +319,20 @@ function getLicenseNotice(license: string): string[] {
     return ['> This package is dual-licensed. Tau uses it under the **MIT License** terms.', ''];
   }
 
+  // AGPL is distinct from GPL and must be checked before the GPL-3.0 substring match.
+  if (upper.includes('AGPL')) {
+    return [
+      '> **AGPL-3.0 License Notice**',
+      '>',
+      '> This component is licensed under AGPL-3.0-only. Source is available at',
+      '> https://github.com/taucad/tau, and the component ships with the AGPL text',
+      "> plus Tau's applicable Section 7 additional permission.",
+      '>',
+      '> Full license text: https://www.gnu.org/licenses/agpl-3.0.html',
+      '',
+    ];
+  }
+
   // LGPL notice (library copyleft — checked before plain GPL so LGPL-3.0 doesn't
   // fall through to the GPL-3.0 branch)
   if (upper.includes('LGPL')) {
@@ -269,8 +347,7 @@ function getLicenseNotice(license: string): string[] {
     ];
   }
 
-  // GPL-2.0 specific notice (applies to openscad-wasm-prebuilt — the only
-  // plain-GPL dependency in Tau)
+  // GPL-2.0 specific notice
   if (upper.includes('GPL-2.0')) {
     return [
       '> **GPL-2.0-or-later License Notice**',
@@ -318,6 +395,14 @@ function getLicenseNotice(license: string): string[] {
     return ['> Apache-2.0 licensed packages require preservation of copyright notices and disclaimers.', ''];
   }
 
+  if (upper.includes('BSL-1.0') || upper.includes('BOOST')) {
+    return [
+      '> Boost Software License 1.0 packages are permissive and compatible with Tau distribution.',
+      '> Preserve copyright notices and license disclaimers in third-party notices.',
+      '',
+    ];
+  }
+
   return [];
 }
 
@@ -328,26 +413,23 @@ function generateMarkdown(groups: LicenseGroup[]): string {
   const lines: string[] = [
     '# Third-Party Licenses',
     '',
-    'This file lists all third-party dependencies used by Tau and their respective licenses.',
+    'This file lists the third-party dependencies distributed with the published `@taucad/runtime`',
+    'artifact — its production and optional dependency closure, plus that of the workspace libraries',
+    'bundled into it — and their respective licenses. It ships inside the artifact as',
+    '`THIRD_PARTY_LICENSES.md`.',
     '',
     '## Licensing Overview',
     '',
-    'Tau source is **[MIT-licensed](./license)**. The MIT license applies to all',
-    'files authored by the Tau project.',
+    'Tau-authored source is **[Apache-2.0](./license)** by default, including the applications,',
+    'libraries, tools, examples, and published packages. The only exception is the GeoSpec engine,',
+    'which is fair source under FSL-1.1-Apache-2.0 and converts to Apache-2.0 two years after each release.',
+    'Routing map: **[LICENSING.md](./LICENSING.md)**.',
     '',
     'Some third-party dependencies impose additional obligations on **combined',
     'distributions** that include them:',
     '',
-    '- **`openscad-wasm-prebuilt` (GPL-2.0-or-later)** — Bundled exclusively by',
-    '  the standalone `@taucad/openscad` package, which is itself published under',
-    '  GPL-2.0-or-later for license clarity. A distribution that includes',
-    '  `@taucad/openscad` is a GPL-2.0-or-later combined work; source must be',
-    '  available (it is, at https://github.com/taucad/tau) and the GPL license',
-    '  text must accompany the OpenSCAD WASM.',
     '- **LGPL-2.1 / LGPL-3.0 libraries** (see sections below) — Library-style',
     '  copyleft; satisfied by attribution and source availability.',
-    '',
-    'Distributions that exclude `@taucad/openscad` carry no GPL obligation.',
     '',
     'By using Tau, you agree to comply with the license terms of all included dependencies.',
     '',
@@ -415,10 +497,16 @@ const stripGeneratedDate = (content: string): string =>
 async function main(): Promise<void> {
   const isCheck = process.argv.includes('--check');
 
-  console.log('Scanning node_modules for package licenses...');
+  console.log('Scanning the published runtime dependency closure for package licenses...');
 
-  const packages = await scanDirectory(nodeModulesDirectory);
-  console.log(`Found ${packages.length} packages`);
+  const closure = await collectRuntimeClosure();
+  const thirdParty = selectThirdPartyPackages(closure, rootDirectory);
+  const packages = [
+    ...new Map(thirdParty.map((packageInfo) => [`${packageInfo.name}@${packageInfo.version}`, packageInfo])).values(),
+  ];
+  console.log(
+    `Runtime closure: ${closure.length} packages, ${closure.length - thirdParty.length} first-party excluded, ${packages.length} listed`,
+  );
 
   const groups = groupByLicense(packages);
   console.log(`Grouped into ${groups.length} license types`);
@@ -455,7 +543,9 @@ async function main(): Promise<void> {
   }
 }
 
-await main().catch((error: unknown) => {
-  console.error('Error:', error);
-  throw error;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main().catch((error: unknown) => {
+    console.error('Error:', error);
+    throw error;
+  });
+}

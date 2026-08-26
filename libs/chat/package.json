@@ -4,6 +4,7 @@
   "description": "Tau AI-SDK chat tools",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -29,15 +30,24 @@
       "types": "./src/schemas/index.ts",
       "import": "./src/schemas/index.ts",
       "default": "./src/schemas/index.ts"
+    },
+    "./schemas/tools/test-model": {
+      "types": "./src/schemas/tools/test-model.tool.schema.ts",
+      "import": "./src/schemas/tools/test-model.tool.schema.ts",
+      "default": "./src/schemas/tools/test-model.tool.schema.ts"
+    },
+    "./schemas/tools/test-model-input-normalizer": {
+      "types": "./src/schemas/tools/test-model-input-normalizer.ts",
+      "import": "./src/schemas/tools/test-model-input-normalizer.ts",
+      "default": "./src/schemas/tools/test-model-input-normalizer.ts"
     }
   },
   "dependencies": {
-    "@taucad/runtime": "workspace:*",
-    "@taucad/testing": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*"
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   }
 }

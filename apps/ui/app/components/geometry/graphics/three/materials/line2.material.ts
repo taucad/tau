@@ -1,13 +1,14 @@
 /* oxlint-disable typescript-eslint/ban-ts-comment -- verbatim port of three.js Line2NodeMaterial.setup; TS cannot type the TSL graph body */
 // @ts-nocheck -- verbatim port of three r184 Line2NodeMaterial.setup; @types/three collapses TSL generics to never
 
-/* oxlint-disable eslint(new-cap) -- three/tsl `Fn`/`If`/`ElseIf`/`Else` are shader graph factories */
+/* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`ElseIf`/`Else` are shader graph factories */
 /* oxlint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- verbatim three.js Line2NodeMaterial.setup port; three/tsl node graph is loosely typed vs strict Oxlint inference */
 /* oxlint-disable unicorn-js/no-zero-fractions -- numeric literals match upstream Line2NodeMaterial.js */
 /* oxlint-disable unicorn-js/prevent-abbreviations -- identifiers match upstream Line2NodeMaterial.js */
 
 import type { Line2NodeMaterialParameters as ThreeLine2NodeMaterialParameters } from 'three/webgpu';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
+import { gltfEdgeDepthBiasReferenceTanHalfFov } from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 import {
   attribute,
   cameraFar,
@@ -68,7 +69,6 @@ import {
  * its own. Calling `.sample(uv, level)` on the singleton produces a derived sample node
  * for each call site without duplicating the underlying framebuffer texture.
  */
-// oxlint-disable-next-line @typescript-eslint/no-unsafe-call -- nodeProxy factory returns a loosely-typed Node singleton
 const tauOpaqueViewportTextureSingleton = viewportTexture();
 
 /**
@@ -79,7 +79,6 @@ const tauOpaqueViewportTextureSingleton = viewportTexture();
  * (the only level the CB-4 blend ever samples).
  */
 export const tauOpaqueViewportTexture = (uv: typeof screenUV = screenUV, level: unknown = null): unknown =>
-  // oxlint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- TSL `.sample(uv, level)` returns a loosely-typed Node
   (tauOpaqueViewportTextureSingleton as { sample: (uv: unknown, level: unknown) => unknown }).sample(uv, level);
 
 /**
@@ -126,7 +125,10 @@ export const tauOpaqueViewportTexture = (uv: typeof screenUV = screenUV, level: 
  * `builder.renderer.logarithmicDepthBuffer`, mirroring the exact pattern three.js itself
  * uses in `PointShadowNode` and `NodeMaterial.setupDepth`. The coplanar bias is exposed via
  * the {@link depthBias} field (default `1.0` = no bias) so the gltf-edges factory can pull
- * the line forward in view-space without re-implementing the dispatch.
+ * the line forward in view-space without re-implementing the dispatch. The pull is
+ * perspective-FOV-adaptive: the shader derives `tan(fov/2)` from `cameraProjectionMatrix`
+ * at render time so Tau's near-orthographic perspective mode preserves the same effective
+ * bias distance instead of letting a fixed multiplier leak far-side edges through occluders.
  *
  * **Divergence 4 — gamma-space alpha blend for backend parity.** The transparent-branch
  * `outputNode` below performs an explicit manual composition against the Tau-owned
@@ -164,14 +166,39 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
   }
 
   /**
-   * Multiplicative bias applied to `positionView.z` inside {@link setupDepth}. `1.0` is the
-   * identity (no bias). Values in `(0, 1)` pull the line forward in view-space (smaller
-   * `|z|` because view-space Z is negative for objects in front of the camera) so the line
-   * wins coplanar Z-fights against the surface it overlays; values `> 1` push the line
-   * backwards. The factory layer in `gltf-edges.ts` owns the chosen value so the bias stays
-   * tunable without re-implementing the renderer-aware dispatch.
+   * Base multiplicative bias applied to `positionView.z` inside {@link setupDepth}. `1.0`
+   * is the identity (no bias). Values in `(0, 1)` pull the line forward in view-space
+   * (smaller `|z|` because view-space Z is negative for objects in front of the camera) so
+   * the line wins coplanar Z-fights against the surface it overlays; values `> 1` push the
+   * line backwards. Perspective cameras raise this base value by the live FOV scale before
+   * encoding depth, matching the WebGL shader path and preventing low-FOV overpull.
    */
   public depthBias = 1;
+
+  /**
+   * Enables deterministic screen-space coverage for CAD presentation edges. The stock
+   * non-alpha-to-coverage path relies on opaque quad MSAA coverage, which makes near-1px
+   * WebGPU GLTF edges vary in apparent thickness by subpixel phase and segment angle.
+   * This path is intentionally opaque/discard-based so coincident or adjacent line
+   * segments cannot compound fractional transparent alpha into grain.
+   */
+  public edgePresentationCoverage = false;
+
+  /** Target visible width, in CSS pixels, used when {@link edgePresentationCoverage} is enabled. */
+  public edgePresentationLineWidth = 1;
+
+  /**
+   * Converts display-referred coverage into a linear-render-target alpha so black CAD
+   * edges keep WebGL-like apparent salience after WebGPU's Linear-sRGB resolve/output pass.
+   */
+  public edgePresentationCoverageGamma = 2.2;
+
+  /**
+   * Transparent overlay lines normally use Tau's explicit sRGB viewport blend. GLTF edge
+   * presentation coverage intentionally keeps normal GPU blending to avoid a framebuffer
+   * copy on the main model path.
+   */
+  public useViewportSrgbBlend = true;
 
   public constructor(parameters?: ThreeLine2NodeMaterialParameters) {
     super(parameters);
@@ -204,8 +231,9 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
    * assigned `material.depthNode` delegate to `super.setupDepth(builder)` so the upstream
    * decision tree (including the ortho-log branch) stays authoritative.
    *
-   * The {@link depthBias} multiplier is applied to `positionView.z` before encoding so
-   * coplanar edges win the depth comparison consistently across all three encodings.
+   * The {@link depthBias} multiplier is FOV-adjusted and applied to `positionView.z` before
+   * encoding so coplanar edges win the depth comparison consistently across all three
+   * encodings without overpulling at near-zero perspective FOV.
    */
   public override setupDepth(builder: unknown): void {
     const { renderer, camera } = builder as {
@@ -229,7 +257,10 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       return;
     }
 
-    const biasedZ = positionView.z.mul(this.depthBias);
+    const tanHalfFov = cameraProjectionMatrix.element(1).element(1).reciprocal();
+    const fovScale = tanHalfFov.div(gltfEdgeDepthBiasReferenceTanHalfFov);
+    const adjustedDepthBias = float(this.depthBias).pow(fovScale);
+    const biasedZ = positionView.z.mul(adjustedDepthBias);
 
     const depthNode = renderer.reversedDepthBuffer
       ? viewZToReversedPerspectiveDepth(biasedZ, cameraNear, cameraFar)
@@ -249,6 +280,7 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
     const vertexColors = self.vertexColors as boolean | undefined;
     const useDash = self._useDash as boolean;
     const useWorldUnits = self._useWorldUnits as boolean;
+    const useEdgePresentationCoverage = self.edgePresentationCoverage === true;
 
     const trimSegment = Fn(({ start, end }: { readonly start: any; readonly end: any }) => {
       const nearEstimate = cameraNear.negate();
@@ -438,6 +470,14 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
             norm.greaterThan(0.5).discard();
           }
         }
+      } else if (useEdgePresentationCoverage) {
+        vUv.y.abs().greaterThan(1.0).discard();
+
+        const halfPresentationWidth = float(self.edgePresentationLineWidth).mul(0.5);
+        const distance = vUv.x.abs().mul(materialLineWidth.mul(0.5)).toVar('edgeCoverageDistance');
+
+        distance.greaterThan(halfPresentationWidth).discard();
+        alpha.assign(1.0);
       } else if (useAlphaToCoverage && renderer.currentSamples > 0) {
         const aUv = vUv.x;
         const bUv = vUv.y.greaterThan(0.0).select(vUv.y.sub(1.0), vUv.y.add(1.0));
@@ -477,7 +517,7 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       return vec4(lineColorNode, alpha);
     })();
 
-    if (self.transparent) {
+    if (self.transparent && self.useViewportSrgbBlend !== false) {
       const opacityNode = self.opacityNode ? float(self.opacityNode) : materialOpacity;
 
       // Divergence 4: perform the line-vs-background alpha mix in sRGB (gamma) space

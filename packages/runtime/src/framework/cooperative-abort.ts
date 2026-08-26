@@ -21,33 +21,49 @@
  * @internal
  */
 
+/* oxlint-disable unicorn/prefer-math-trunc, no-bitwise -- cancellation generations use ECMAScript ToUint32 wrap semantics. */
+
 import { RenderAbortedError } from '#framework/runtime-worker-client.js';
 import { signalSlot } from '#types/runtime-protocol.types.js';
 
 let abortSignalView: Int32Array | undefined;
 let abortGeneration = 0;
+let localAbortSignal: AbortSignal | undefined;
+let onSharedAbort: ((reason: number) => void) | undefined;
+
+/** Render-owned cooperative abort context. @internal @public */
+export type AbortContext = {
+  readonly signal: AbortSignal;
+  readonly signalView?: Int32Array;
+  readonly generation: number;
+  readonly onSharedAbort?: (reason: number) => void;
+};
 
 /**
  * Configure the abort context before starting a render cycle.
  * The proxy checks this before every OC call (~1ns overhead per call).
  *
  * @internal
- *
- * @param view - Int32Array view over the shared signal buffer
- * @param generation - current render generation (must match to continue)
+ * @public
+ * @param context - Render-owned signal, generation, and optional shared-memory polling context.
  */
-export function setAbortContext(view: Int32Array, generation: number): void {
-  abortSignalView = view;
-  abortGeneration = generation;
+export function setAbortContext(context: AbortContext): void {
+  localAbortSignal = context.signal;
+  abortSignalView = context.signalView;
+  abortGeneration = context.generation >>> 0;
+  onSharedAbort = context.onSharedAbort;
 }
 
 /**
  * Clear the abort context after a render cycle completes or is aborted.
  * @internal
+ * @public
  */
 export function clearAbortContext(): void {
   abortSignalView = undefined;
   abortGeneration = 0;
+  localAbortSignal = undefined;
+  onSharedAbort = undefined;
 }
 
 /**
@@ -55,9 +71,12 @@ export function clearAbortContext(): void {
  * Throws {@link RenderAbortedError} when the SAB abort generation no longer
  * matches the generation stored by `setAbortContext`.
  * @internal
+ * @public
  */
 export function checkAbort(): void {
-  if (abortSignalView && Atomics.load(abortSignalView, signalSlot.abortGeneration) !== abortGeneration) {
+  localAbortSignal?.throwIfAborted();
+  if (abortSignalView && Atomics.load(abortSignalView, signalSlot.abortGeneration) >>> 0 !== abortGeneration) {
+    onSharedAbort?.(Atomics.load(abortSignalView, signalSlot.abortReason));
     throw new RenderAbortedError();
   }
 }

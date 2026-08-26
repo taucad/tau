@@ -3,13 +3,13 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/cli",
   "projectType": "library",
-  "tags": ["scope:shared", "type:lib"],
+  "tags": ["scope:shared", "type:package"],
   "targets": {
     "tau": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],
       "options": {
-        "command": "node --import @oxc-node/core/register packages/cli/dist/bin/taucad.js",
+        "command": "node --import @oxc-node/core/register packages/cli/dist/bin/taucad.mjs",
         "forwardAllArgs": true
       }
     }

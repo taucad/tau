@@ -1,4 +1,4 @@
-/* oxlint-disable no-barrel-files/no-barrel-files -- composition file: re-exports paired client/host types from sibling files */
+/* oxlint-disable no-barrel-files/no-barrel-files -- composition file: re-exports topology types from sibling files */
 
 /**
  * Bundled web-worker transport — composition file.
@@ -6,43 +6,44 @@
  * Hosts the kernel inside a dedicated browser `Worker`. The transport
  * advertises the highest-tier wire (SAB-backed memory, signal-slot
  * abort, transferable / pooled geometry) on its descriptor and exposes
- * the canonical fat handles through paired `client` / `host` factories.
+ * the client plugin consumed by `createRuntimeClient`.
  *
- * Per `docs/research/runtime-transport-authoring-simplification.md` (R1),
- * the client factory (and its `new URL('../worker/web.js', ...)`
- * chunk-emit literal) live in `web-worker-client.ts`, and the host
- * factory lives in `web-worker-host.ts`. This file is the *only*
- * place that imports both — the worker entry chunk
- * (`@taucad/runtime/worker/web`) static-imports `webWorkerHost`
- * directly to keep the chunk-emitter file structurally outside its
- * own transitive graph.
+ * Application code owns the worker module URL through `createWorker`
+ * or `url`; the runtime transport owns the client channel mechanics.
+ * The standalone worker entry owns `webWorkerHost`. This keeps framework worker chunks in the app graph
+ * instead of hiding a bundler-specific URL in the library import graph.
  *
  * @public
  *
- * @example <caption>Defaulted bundled worker (recommended)</caption>
+ * @example <caption>App-owned worker (recommended)</caption>
  * ```typescript
- * import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+ * import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+ * import { createRuntimeClient } from '@taucad/runtime/client';
+ * import { fromMemoryFs } from '@taucad/runtime/filesystem';
  * import { webWorkerTransport } from '@taucad/runtime/transport/web';
- * import { replicad } from '@taucad/runtime/kernels';
  *
- * const client = createRuntimeClient({
- *   kernels: [replicad()],
+ * declare const runtime: AnyRuntimeDefinition;
+ *
+ * const client = createRuntimeClient<typeof runtime>({
  *   transport: webWorkerTransport({
+ *     createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
  *     fileSystem: fromMemoryFs(),
  *   }),
  * });
  * ```
  *
- * @example <caption>Custom worker module — pass an explicit URL</caption>
+ * @example <caption>Explicit worker URL</caption>
  * ```typescript
- * import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+ * import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+ * import { createRuntimeClient } from '@taucad/runtime/client';
+ * import { fromMemoryFs } from '@taucad/runtime/filesystem';
  * import { webWorkerTransport } from '@taucad/runtime/transport/web';
- * import { replicad } from '@taucad/runtime/kernels';
  *
- * const client = createRuntimeClient({
- *   kernels: [replicad()],
+ * declare const runtime: AnyRuntimeDefinition;
+ *
+ * const client = createRuntimeClient<typeof runtime>({
  *   transport: webWorkerTransport({
- *     url: new URL('./custom-worker.ts', import.meta.url),
+ *     url: new URL('./runtime.worker.ts', import.meta.url),
  *     fileSystem: fromMemoryFs(),
  *   }),
  * });
@@ -50,26 +51,20 @@
  */
 
 import { defineRuntimeTransport } from '#transport/define-runtime-transport.js';
-import { webWorkerClientOptionsSchema, webWorkerHostOptionsSchema } from '#transport/web-worker-transport.schemas.js';
+import { webWorkerClientOptionsSchema } from '#transport/web-worker-transport.schemas.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import { webWorkerClient } from '#transport/web-worker-client.js';
-import { webWorkerHost } from '#transport/web-worker-host.js';
 
-export type { WebWorkerLike, WebWorkerClientOptions } from '#transport/web-worker-client.js';
+export type { WebWorkerLike, WebWorkerTransportOptions } from '#transport/web-worker-client.js';
 export type { WebWorkerHostOptions } from '#transport/web-worker-host.js';
 
 /**
- * Bundled web-worker transport plugin (`webWorkerTransport`). Pairs
- * {@link webWorkerClient} and {@link webWorkerHost} via
- * {@link defineRuntimeTransport} so consumers can pass the result to
- * `createRuntimeClient` / `createRuntimeHost` directly.
+ * Bundled web-worker client transport plugin (`webWorkerTransport`).
  *
  * @public
  */
 export const webWorkerTransport = defineRuntimeTransport({
   id: webWorkerId,
   clientOptionsSchema: webWorkerClientOptionsSchema,
-  hostOptionsSchema: webWorkerHostOptionsSchema,
   client: webWorkerClient,
-  host: webWorkerHost,
 });

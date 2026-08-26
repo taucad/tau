@@ -1,0 +1,15 @@
+{
+  "copyFiles": [
+    {
+      "from": "../../../node_modules/geist/dist/fonts/geist-sans/Geist-Regular.ttf",
+      "to": "src/fonts/Geist-Regular.ttf"
+    },
+    {
+      "from": "../../../node_modules/replicad/dist/replicad.js.map",
+      "to": "src/sourcemaps/replicad.js.map"
+    }
+  ],
+  "copyFilesSettings": {
+    "whenFileExists": "overwrite"
+  }
+}

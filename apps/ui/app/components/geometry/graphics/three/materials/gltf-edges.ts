@@ -3,6 +3,10 @@ import type { Group, LineSegments, Material, Object3D, Scene, Vector2 } from 'th
 import { InterleavedBufferAttribute } from 'three';
 import { LineSegments2, LineSegmentsGeometry, LineMaterial } from 'three/addons';
 import { LineSegments2 as WebGpuFatLineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
+import {
+  gltfEdgeDepthBiasFactor,
+  gltfEdgeDepthBiasReferenceTanHalfFov,
+} from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { gltfEdgeColorLightMode } from '#components/geometry/graphics/three/overlay-colors.constants.js';
@@ -12,6 +16,13 @@ import { gltfEdgeColorLightMode } from '#components/geometry/graphics/three/over
  * This is screen-space width, not world units.
  */
 const defaultLineWidth = 1;
+
+/**
+ * Expanded WebGPU edge quad width in CSS pixels. The material shades only the central
+ * {@link defaultLineWidth} stroke as fully covered and uses the extra width as an analytic
+ * AA fringe, avoiding the inconsistent opaque-MSAA thickness of near-1px lines.
+ */
+const webGpuEdgePresentationGeometryLineWidth = 2;
 
 /**
  * Depth bias multiplier shared by WebGL (`LineMaterial`) and WebGPU (`Line2NodeMaterial.depthBias`).
@@ -25,14 +36,18 @@ const defaultLineWidth = 1;
  * **WebGPU** — forwarded to {@link Line2NodeMaterial.depthBias}. The subclass'
  * `setupDepth(builder)` override picks the matching `viewZTo*Depth` encoder per renderer
  * (reversed-Z viewport, log-depth screenshot/offscreen, or standard perspective) so the
- * emitted depth always shares the surrounding surface rasterizer's encoding. Hardcoding a
- * single encoder at construction time was the "lines never occluded in screenshots"
- * smoking gun (see `docs/research/webgpu-fat-line-renderer-aware-depth.md`).
+ * emitted depth always shares the surrounding surface rasterizer's encoding. It also derives
+ * the same perspective FOV scale from `cameraProjectionMatrix[1][1]` at shader runtime, so
+ * near-orthographic perspective cameras do not turn the subtle coplanar pull into a
+ * cross-object occlusion leak. Hardcoding a single encoder at construction time was the
+ * "lines never occluded in screenshots" smoking gun (see
+ * `docs/research/webgpu-fat-line-renderer-aware-depth.md`); hardcoding a fixed depth
+ * multiplier was the follow-up WebGPU low-FOV smoking gun.
  *
- * **FOV adaptation (WebGL perspective only)**:
+ * **FOV adaptation (perspective cameras)**:
  * `fovScale = tan(fov/2)/tan(30°)`; `adjustedBias = pow(depthBiasFactor, fovScale)`.
- * Orthographic projection is intentionally not biased here (`gl_FragCoord.z` path in three's chunk);
- * defer ortho parity to a dedicated follow-up.
+ * Orthographic projection is intentionally not biased here (`gl_FragCoord.z` path in three's
+ * chunk on WebGL, upstream depth setup on WebGPU); defer ortho parity to a dedicated follow-up.
  *
  * Tuning trade-off (WebGL subtle bias vs ghosting): weaker bias preserves occlusion from real
  * occluders; stronger bias restores full opaque line coverage against coplanar faces.
@@ -40,23 +55,22 @@ const defaultLineWidth = 1;
  * @see `docs/policy/webgpu-rendering-pipeline.md`
  * @see `docs/research/webgpu-fat-line-renderer-aware-depth.md`
  */
-const depthBiasFactor = 0.999;
-
 /**
  * Module-level singleton uniform shared by every WebGL `LineMaterial` instance produced by
  * {@link createWebGlGltfFatLineMaterial}. Lifting the uniform out of per-call allocation
  * (combined with {@link webGlEdgeProgramCacheKey} below) lets three's `WebGLPrograms`
  * deduplicate the compiled GLSL across viewport + screenshot renderers and across every
- * `LineSegments2` mesh in a loaded scene — the structural perf win from
+ * owner-local `LineSegments2` mesh in a loaded scene — the structural perf win from
  * `docs/research/gltf-edges-fat-line-performance.md` R7.
  *
  * Mutating `sharedDepthBiasUniform.value` at runtime updates every material that references it.
- * The middleware-side merge already guarantees one `LineSegments2` per backend per scene, so
- * this fan-out is normally a one-element fan-out — but the shared uniform also covers the
- * screenshot-clone path (`applyEdgeMaterialsToClonedScene`) which allocates fresh materials
- * per capture.
+ * Owner-local runtime edges can produce multiple fat-line meshes, and sharing this uniform
+ * keeps them on one shader program. The screenshot-clone path
+ * (`applyEdgeMaterialsToClonedScene`) still allocates fresh materials per capture.
  */
-const sharedDepthBiasUniform = { value: depthBiasFactor };
+const sharedDepthBiasUniform = { value: gltfEdgeDepthBiasFactor };
+
+const gltfEdgeDepthBiasReferenceTanHalfFovGlsl = gltfEdgeDepthBiasReferenceTanHalfFov.toPrecision(8);
 
 /**
  * Stable cache key returned from `LineMaterial.customProgramCacheKey()`. The shader source
@@ -75,6 +89,21 @@ const webGlEdgeProgramCacheKey = 'tau-gltf-edge-logdepth-bias-v1';
  * `docs/research/gltf-edges-fat-line-performance.md`.
  */
 const disableRaycast = (): void => undefined;
+
+export type GltfFatLineMaterial = Line2NodeMaterial | LineMaterial;
+
+export type CreateGltfFatLineMaterialOptions = Readonly<{
+  backend: ResolvedGraphicsBackend;
+  /** Required for the WebGL `LineMaterial` `resolution` uniform; ignored on WebGPU. */
+  resolution: Vector2;
+  edgeColor?: number;
+}>;
+
+export type CreateGltfFatLineSegmentsFromPositionsOptions = Readonly<{
+  backend: ResolvedGraphicsBackend;
+  positions: Float32Array;
+  material: GltfFatLineMaterial;
+}>;
 
 /**
  * Extract positions from indexed geometry with InterleavedBufferAttribute, baking each
@@ -243,7 +272,7 @@ export function createWebGlGltfFatLineMaterial(
       #ifdef USE_LOGARITHMIC_DEPTH_BUFFER
         if (projectionMatrix[3][3] == 0.0) {
           float tanHalfFov = 1.0 / projectionMatrix[1][1];
-          float fovScale = tanHalfFov / 0.57735;
+          float fovScale = tanHalfFov / ${gltfEdgeDepthBiasReferenceTanHalfFovGlsl};
           vFragDepth *= pow(depthBias, fovScale);
         }
       #endif`,
@@ -286,24 +315,70 @@ export function createWebGlGltfFatLineMaterial(
 export function createWebGpuGltfFatLineMaterial(edgeColor: number = gltfEdgeColorLightMode): Line2NodeMaterial {
   const material = new Line2NodeMaterial({
     color: edgeColor,
-    linewidth: defaultLineWidth,
+    linewidth: webGpuEdgePresentationGeometryLineWidth,
     worldUnits: false,
   });
 
   material.alphaToCoverage = false;
-  material.depthBias = depthBiasFactor;
+  material.depthBias = gltfEdgeDepthBiasFactor;
+  material.depthWrite = false;
+  material.transparent = false;
+  material.edgePresentationCoverage = true;
+  material.edgePresentationLineWidth = defaultLineWidth;
+  material.useViewportSrgbBlend = false;
 
   return material;
 }
 
+export function createGltfFatLineMaterial(options: CreateGltfFatLineMaterialOptions): GltfFatLineMaterial {
+  const { backend, resolution, edgeColor = gltfEdgeColorLightMode } = options;
+  return backend === 'webgpu'
+    ? createWebGpuGltfFatLineMaterial(edgeColor)
+    : createWebGlGltfFatLineMaterial(resolution, edgeColor);
+}
+
+export function createGltfFatLineSegmentsFromPositions(
+  options: CreateGltfFatLineSegmentsFromPositionsOptions,
+): LineSegments2 | WebGpuFatLineSegments2 | undefined {
+  const { backend, positions, material } = options;
+  if (positions.length === 0) {
+    return undefined;
+  }
+
+  if (positions.length % 6 !== 0) {
+    console.warn('[FatLines] Position buffer length must contain complete line segment endpoint pairs');
+    return undefined;
+  }
+
+  const geometry = new LineSegmentsGeometry();
+  geometry.setPositions(positions);
+
+  const fatLine =
+    backend === 'webgpu'
+      ? new WebGpuFatLineSegments2(geometry, material as Line2NodeMaterial)
+      : new LineSegments2(geometry, material as LineMaterial);
+
+  // R5: edge meshes are render-only overlays; skip the expensive per-segment screen-space
+  // raycast that R3F's pointermove handler would otherwise invoke on every mouse move.
+  fatLine.raycast = disableRaycast;
+
+  return fatLine;
+}
+
+export function setGltfFatLineMaterialColor(material: GltfFatLineMaterial, edgeColor: number): void {
+  if ('color' in material) {
+    material.color.setHex(edgeColor);
+  }
+}
+
 /**
- * Wrap a single source `LineSegments` (the kernel-side merged edges primitive) into one
- * `LineSegments2` for the active backend, sharing a pre-built material so multiple sources
- * — when the middleware skips merging — still produce a single pipeline.
+ * Wrap a single owner-local source `LineSegments` into one `LineSegments2` for the active
+ * backend, sharing a pre-built material so multiple edge sources still produce a single
+ * shader pipeline.
  */
 function wrapAsFatLineSegments(
   lineSegments: LineSegments,
-  material: Line2NodeMaterial | LineMaterial,
+  material: GltfFatLineMaterial,
   backend: ResolvedGraphicsBackend,
 ): Object3D | undefined {
   const positions = extractPositions(lineSegments);
@@ -313,16 +388,10 @@ function wrapAsFatLineSegments(
     return undefined;
   }
 
-  const geometry = new LineSegmentsGeometry();
-  geometry.setPositions(positions);
-
-  // The backend-specific mesh classes accept different material types at the type level
-  // (`Line2NodeMaterial` vs `LineMaterial`) but both satisfy each other's runtime contract.
-  // Cast at the constructor call site so the assignment is local rather than function-wide.
-  const fatLine =
-    backend === 'webgpu'
-      ? new WebGpuFatLineSegments2(geometry, material as Line2NodeMaterial)
-      : new LineSegments2(geometry, material as LineMaterial);
+  const fatLine = createGltfFatLineSegmentsFromPositions({ backend, positions, material });
+  if (!fatLine) {
+    return undefined;
+  }
 
   fatLine.position.copy(lineSegments.position);
   fatLine.rotation.copy(lineSegments.rotation);
@@ -332,10 +401,6 @@ function wrapAsFatLineSegments(
   fatLine.name = lineSegments.name;
   fatLine.userData = { ...lineSegments.userData };
 
-  // R5: edge meshes are render-only overlays; skip the expensive per-segment screen-space
-  // raycast that R3F's pointermove handler would otherwise invoke on every mouse move.
-  fatLine.raycast = disableRaycast;
-
   // R8: do not pin `renderOrder = 1`. The explicit `depthBias` on both backends already
   // wins the coplanar comparison; sorting edges into a separate bucket only loses cache
   // locality against the surfaces they overlay.
@@ -344,29 +409,25 @@ function wrapAsFatLineSegments(
 }
 
 /**
- * Apply fat line segments to a GLTF scene by converting each `LineSegments` to a single
- * shared-material `LineSegments2`.
+ * Apply fat line segments to a GLTF scene by converting each owner-local `LineSegments` to
+ * a shared-material `LineSegments2`.
  *
- * The kernel-side `gltfEdgeDetectionMiddleware` (via `mergeGltfLineSegments`) consolidates
- * every LINES primitive into a single `tau-merged-edges` mesh before the bytes leave the
- * runtime, so under normal operation this function finds exactly one source `LineSegments`
- * and produces exactly one `LineSegments2` + one shared material + one render pipeline.
- *
- * The implementation remains tolerant of multiple source `LineSegments` (test fixtures or
- * future kernels that bypass the merge): all sources share a single allocated material so
- * the R1 perf win (one pipeline) holds even when R2 (one draw call) does not.
+ * Runtime GLBs preserve kernel/component ownership by keeping LINES primitives on their
+ * source meshes. This function may therefore find one or more source `LineSegments`; all
+ * sources share a single allocated material so the pipeline count stays flat even when
+ * draw calls remain owner-local.
  *
  * @param gltf - The GLTF scene to process
- * @param resolution - The viewport resolution for line width calculation
- * @param backend - Active rendering backend for the host viewer
- * @param edgeColor - sRGB hex edge tint (defaults to {@link gltfEdgeColorLightMode}).
+ * @param options - Backend, resolution, and optional edge tint for the host viewer.
  */
-export function applyFatLineSegments(
-  gltf: GLTF,
-  resolution: Vector2,
-  backend: ResolvedGraphicsBackend,
-  edgeColor: number = gltfEdgeColorLightMode,
-): void {
+type ApplyFatLineSegmentsOptions = Readonly<{
+  resolution: Vector2;
+  backend: ResolvedGraphicsBackend;
+  edgeColor?: number;
+}>;
+
+export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOptions): void {
+  const { resolution, backend, edgeColor = gltfEdgeColorLightMode } = options;
   const sources: Array<{ parent: Group; lineSegments: LineSegments }> = [];
 
   gltf.scene.traverse((object) => {
@@ -384,10 +445,7 @@ export function applyFatLineSegments(
   }
 
   // Single material instance shared across every wrapped fat line — the R1 perf win.
-  const sharedMaterial: Line2NodeMaterial | LineMaterial =
-    backend === 'webgpu'
-      ? createWebGpuGltfFatLineMaterial(edgeColor)
-      : createWebGlGltfFatLineMaterial(resolution, edgeColor);
+  const sharedMaterial = createGltfFatLineMaterial({ backend, resolution, edgeColor });
 
   for (const { parent, lineSegments } of sources) {
     const fatLine = wrapAsFatLineSegments(lineSegments, sharedMaterial, backend);
@@ -434,9 +492,9 @@ type ApplyEdgeMaterialsToClonedSceneOptions = Readonly<{
  * graininess gap (Symptom B in
  * `docs/research/screenshot-viewport-shared-material-state-bleed.md`).
  *
- * Since the kernel-side merge collapses every LINES primitive into a single `LineSegments2`
- * per scene, this function now typically allocates exactly one material per capture (rather
- * than one-per-source-primitive as it did before the merge landed).
+ * The live scene shares one edge material across owner-local `LineSegments2` meshes. The
+ * screenshot clone path allocates fresh materials for renderer-specific pipeline state, but
+ * still avoids reconstructing edge geometry.
  *
  * @returns The set of newly-allocated edge materials owned by this clone pass.
  */
@@ -505,18 +563,23 @@ export function updateLineMaterialResolution(scene: Group, resolution: Vector2):
  * Shared materials mean one `setHex` updates all edge meshes (including screenshot
  * clones that copied the viewport color via {@link applyEdgeMaterialsToClonedScene}).
  *
- * @param scene - Scene group containing fat-line edge meshes
- * @param edgeColor - sRGB hex edge tint
+ * @param scene - Scene group containing fat-line edge meshes.
+ * @param edgeColor - sRGB hex edge tint.
+ * @returns The deduped edge materials whose color was updated.
  */
-export function updateGltfEdgeColor(scene: Group, edgeColor: number): void {
+export function updateGltfEdgeColor(scene: Group, edgeColor: number): Set<GltfFatLineMaterial> {
+  const updatedMaterials = new Set<GltfFatLineMaterial>();
+
   scene.traverse((object) => {
     if (object.type !== 'LineSegments2') {
       return;
     }
 
     const { material } = object as LineSegments2;
-    if ('color' in material && material.color) {
-      (material as { color: { setHex(hex: number): void } }).color.setHex(edgeColor);
-    }
+    const edgeMaterial = material as GltfFatLineMaterial;
+    setGltfFatLineMaterialColor(edgeMaterial, edgeColor);
+    updatedMaterials.add(edgeMaterial);
   });
+
+  return updatedMaterials;
 }

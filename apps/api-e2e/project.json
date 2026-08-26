@@ -4,5 +4,14 @@
   "projectType": "application",
   "tags": ["scope:api", "type:e2e"],
   "implicitDependencies": ["api"],
-  "targets": {}
+  "targets": {
+    "test:server-modes": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/api-e2e/vitest.server-modes.config.ts"
+      }
+    }
+  }
 }

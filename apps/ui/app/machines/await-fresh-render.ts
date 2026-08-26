@@ -1,6 +1,7 @@
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 
+import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 /**
@@ -34,14 +35,12 @@ export type AwaitFreshRenderOptions = {
   signal?: AbortSignal;
   /**
    * Maximum wall-clock time to await a fresh render. Milliseconds.
-   * Defaults to 30 000 — the same default as {@link cadMachine}'s
+   * Defaults to {@link defaultRenderTimeout} — the same default as {@link cadMachine}'s
    * `renderTimeout`.
    */
   awaitTimeout?: number;
 };
 
-/** Milliseconds. */
-const defaultAwaitTimeout = 30_000;
 /**
  * XState's `waitFor` requires a finite `timeout`. We pass a generous
  * super-timeout (`awaitTimeout + slop`) so our owned `Promise.race` timer
@@ -55,10 +54,10 @@ const innerTimeoutSlop = 1000;
  * Awaits the next settled state on `cadActor` whose `lastSettledRenderId`
  * is greater-than-or-equal to the baseline captured at call-time.
  *
- * This is the freshness oracle for RPC flows like `fetch_geometry` and
- * `get_kernel_result` — guarantees the geometry returned reflects the most
- * recent UI intent, eliminating staleness windows where the machine settled
- * on an older render after the agent issued a new request.
+ * This is the freshness oracle for RPC flows like `get_kernel_result`,
+ * `export_geometry`, and `capture_images` — guarantees the geometry returned
+ * reflects the most recent UI intent, eliminating staleness windows where the
+ * machine settled on an older render after the agent issued a new request.
  *
  * Resolves when:
  * 1. `lastSettledRenderId >= baselineRenderId`, AND
@@ -77,7 +76,7 @@ export async function awaitFreshRender(
   options: AwaitFreshRenderOptions = {},
 ): Promise<SnapshotFrom<typeof cadMachine>> {
   const baselineRenderId = cadActor.getSnapshot().context.lastRequestedRenderId;
-  const awaitTimeout = options.awaitTimeout ?? defaultAwaitTimeout;
+  const awaitTimeout = options.awaitTimeout ?? defaultRenderTimeout;
 
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {

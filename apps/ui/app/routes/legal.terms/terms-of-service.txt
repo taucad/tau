@@ -102,8 +102,6 @@ TauCAD is built on open-source software. The source code is publicly available a
 
 TauCAD source is **MIT-licensed**. The MIT license governs all source code authored by TauCAD Limited and contributors.
 
-The optional `@taucad/openscad` package bundles `openscad-wasm-prebuilt`, which is licensed under GPL-2.0-or-later, and is itself published under GPL-2.0-or-later. A distribution that includes `@taucad/openscad` is a GPL-2.0-or-later combined work. This does not change the MIT license on TauCAD's own source code.
-
 Nothing in these Terms restricts your rights under the applicable open-source licenses. The following elements remain proprietary: the hosted SaaS infrastructure, API rate limits and subscription tiers, your User Data, the TauCAD name and trademarks, and any content we create that is not part of the open-source codebase.
 
 ### 6.3 Your Designs

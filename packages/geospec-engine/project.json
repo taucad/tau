@@ -1,0 +1,48 @@
+{
+  "name": "geospec-engine",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/geospec-engine",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "performance-gate": {
+      "command": "vitest run src/runner/node/compiled-module-fanout.bench.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
+    "generate-provenance": {
+      "command": "node scripts/generate-provenance.mjs",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "pkgcheck": {
+      "dependsOn": ["generate-provenance", "^build"]
+    },
+    "e2e": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config packages/geospec-engine/e2e/vitest.config.ts"
+      }
+    },
+    "build-wasm": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "commands": [
+          "libcascade build --config native/opencascade/libcascade.config.ts",
+          "libcascade assemble --config native/opencascade/libcascade.config.ts"
+        ],
+        "parallel": false
+      }
+    }
+  }
+}

@@ -1,29 +1,18 @@
-import { describe, it, expect } from 'vitest';
-import { completionLanguages } from '#lib/monaco.lib.client.js';
-import { monacoLanguages } from '#lib/monaco.constants.js';
+import { describe, it, expect, vi } from 'vitest';
+import { registerCompletion } from 'monacopilot';
+import { registerCompletions } from '#lib/monaco.lib.client.js';
+import type * as Monaco from 'monaco-editor';
 
-describe('completionLanguages', () => {
-  it('should contain exactly the JS/TS and JSON languages', () => {
-    expect(completionLanguages).toEqual([
-      monacoLanguages.typescript,
-      monacoLanguages.typescriptreact,
-      monacoLanguages.javascript,
-      monacoLanguages.javascriptreact,
-      monacoLanguages.json,
-    ]);
-  });
+vi.mock('monacopilot', () => ({ registerCompletion: vi.fn() }));
 
-  it('should not include KCL (registers its own completion provider)', () => {
-    expect(completionLanguages).not.toContain(monacoLanguages.kcl);
-  });
+describe('registerCompletions', () => {
+  it('should be a no-op while AI autocomplete is disabled', () => {
+    const registration = registerCompletions({} as Monaco.editor.IStandaloneCodeEditor, {} as typeof Monaco);
 
-  it('should not include OpenSCAD (registers its own completion provider)', () => {
-    expect(completionLanguages).not.toContain(monacoLanguages.openscad);
-  });
+    registration.trigger();
+    registration.deregister();
+    registration.updateOptions(() => ({}));
 
-  it('should not include binary/non-code formats', () => {
-    expect(completionLanguages).not.toContain(monacoLanguages.stepfile);
-    expect(completionLanguages).not.toContain(monacoLanguages.stl);
-    expect(completionLanguages).not.toContain(monacoLanguages.usd);
+    expect(registerCompletion).not.toHaveBeenCalled();
   });
 });

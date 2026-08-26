@@ -116,6 +116,37 @@ describe('draftMachine', () => {
       actor.stop();
     });
 
+    it('should load a draft from a message transiently without invoking persistence', async () => {
+      const persistInputs: PersistDraftInput[] = [];
+      const actor = createTestActorWithPersistCapture({
+        chatId: 'chat_abc',
+        onPersist(input) {
+          persistInputs.push(input);
+        },
+      });
+      actor.start();
+
+      actor.send({
+        type: 'loadDraftFromMessageTransient',
+        draft: {
+          id: 'draft',
+          role: 'user',
+          parts: [
+            { type: 'text', text: 'restored prompt' },
+            { type: 'file', url: 'data:image/png;base64,AAA', mediaType: 'image/png' },
+          ],
+          metadata: { createdAt: 1, status: 'pending' },
+        },
+      });
+
+      await Promise.resolve();
+
+      expect(actor.getSnapshot().context.draftText).toBe('restored prompt');
+      expect(actor.getSnapshot().context.draftImages).toEqual(['data:image/png;base64,AAA']);
+      expect(persistInputs).toEqual([]);
+      actor.stop();
+    });
+
     it('should add draft image (after resize chokepoint settles)', async () => {
       const actor = createTestActor();
       actor.start();

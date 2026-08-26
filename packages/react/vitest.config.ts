@@ -7,6 +7,7 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     setupFiles: ['./vitest.setup.ts'],
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],
@@ -16,7 +17,7 @@ export default defineConfig({
     reporters: ['verbose'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/packages/react',
+      reportsDirectory: '../../out/reports/coverage/packages/react',
       include: ['src/**/*'],
       exclude: ['src/**/*.{test,spec,test-d}.ts'],
       thresholds: {

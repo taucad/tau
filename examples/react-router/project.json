@@ -1,0 +1,61 @@
+{
+  "name": "example-react-router",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "examples/react-router/app",
+  "projectType": "application",
+  "tags": ["scope:example", "type:example"],
+  "targets": {
+    "dev": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "react-router dev"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/build"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "react-router build"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vite preview"
+      }
+    },
+    "typegen": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": ["{projectRoot}/app/**/*.tsx", "{projectRoot}/app/**/*.ts", "{projectRoot}/react-router.config.ts"],
+      "outputs": ["{projectRoot}/.react-router/types/**"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "react-router typegen"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "dependsOn": ["typegen"],
+      "outputs": ["{workspaceRoot}/node_modules/.cache/tsbuildinfo/examples/react-router/tsconfig.tsbuildinfo"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "tsc -p tsconfig.json --noEmit"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "oxlint -c .oxlintrc.json examples/react-router/app examples/react-router/tau examples/react-router/react-router.config.ts examples/react-router/vite.config.ts && eslint examples/react-router/app examples/react-router/tau examples/react-router/react-router.config.ts examples/react-router/vite.config.ts"
+      }
+    }
+  }
+}

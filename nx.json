@@ -9,9 +9,6 @@
       "plugin": "./tools/copy-files-from-to.plugin.ts"
     },
     {
-      "plugin": "./tools/generate-cjs-dts.plugin.ts"
-    },
-    {
       "plugin": "./tools/pkgcheck.plugin.ts"
     },
     {
@@ -26,12 +23,6 @@
       }
     },
     {
-      "plugin": "@nx/playwright/plugin",
-      "options": {
-        "targetName": "e2e"
-      }
-    },
-    {
       "plugin": "@nx/vite/plugin",
       "options": {
         "buildTargetName": "build",
@@ -40,27 +31,14 @@
         "serveTargetName": "serve",
         "serveStaticTargetName": "serve-static",
         "outputPath": "dist"
-      }
+      },
+      "exclude": ["examples/**", "apps/react-e2e/apps/**"]
     },
     {
       "plugin": "@nx/eslint/plugin",
       "options": {
         "targetName": "lint",
         "eslintConfig": "eslint.config.mjs"
-      }
-    },
-    {
-      "plugin": "@nx/js/typescript",
-      "options": {
-        "typecheck": {
-          "targetName": "typecheck-tsc"
-        },
-        "build": {
-          "targetName": "typebuild",
-          "configName": "tsconfig.lib.json",
-          "buildDepsName": "build-deps",
-          "watchDepsName": "watch-deps"
-        }
       }
     },
     {
@@ -73,13 +51,20 @@
       "plugin": "@nx/vitest",
       "options": {
         "testTargetName": "test"
-      }
+      },
+      "exclude": ["examples/**", "apps/react-e2e/apps/**"]
     }
   ],
   "targetDefaults": {
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "forwardAllArgs": false
+      }
+    },
     "lint": {
       "options": {
-        "command": "oxlint -c $NX_WORKSPACE_ROOT/.oxlintrc.json {args.files} && eslint {args.files}",
+        "command": "oxlint --no-error-on-unmatched-pattern -c $NX_WORKSPACE_ROOT/.oxlintrc.json {args.files} && eslint {args.files}",
         "forwardAllArgs": false
       },
       "inputs": [
@@ -128,13 +113,30 @@
     "default": ["{projectRoot}/**/*", "sharedGlobals"]
   },
   "release": {
-    "projects": ["packages/*"],
+    "projects": [
+      "packages/*",
+      "packages/kernels/*",
+      "converter",
+      "events",
+      "filesystem",
+      "fs-bridge",
+      "gltf-extensions",
+      "json-schema",
+      "memory",
+      "rpc",
+      "types",
+      "units",
+      "utils",
+      "vm"
+    ],
+    "projectsRelationship": "fixed",
     "versionPlans": {
       "ignorePatternsForPlanCheck": ["**/*.spec.ts", "**/*.test.ts", "**/*.md"]
     },
     "version": {
-      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*",
-      "conventionalCommits": true
+      "preVersionCommand": "pnpm nx run-many -t build --projects=packages/*,packages/kernels/*,converter,events,filesystem,fs-bridge,gltf-extensions,json-schema,memory,rpc,types,units,utils,vm",
+      "currentVersionResolver": "git-tag",
+      "fallbackCurrentVersionResolver": "disk"
     },
     "changelog": {
       "workspaceChangelog": {

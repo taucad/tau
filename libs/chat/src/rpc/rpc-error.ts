@@ -1,6 +1,7 @@
 import { getErrno } from '@taucad/utils/error';
+import { VirtualPathError } from '@taucad/utils/path';
 import type { RpcClientErrorCode } from '#schemas/rpc.schema.js';
-import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
+import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '#schemas/rpc.schema.js';
 import type { RpcHandlerError } from '#rpc/rpc-dependencies.js';
 
 /**
@@ -29,8 +30,16 @@ export function getErrorMessage(error: unknown): string {
 
 /** @public */
 export function getErrorCode(error: unknown): RpcClientErrorCode {
+  if (error instanceof VirtualPathError) {
+    return rpcClientErrorCode.validationError;
+  }
+
   if (error instanceof Error) {
     const errno = getErrno(error);
+    const typedCode = rpcClientErrorCodeSchema.safeParse(errno);
+    if (typedCode.success) {
+      return typedCode.data;
+    }
     if (errno && errno in errnoToRpcCode) {
       return errnoToRpcCode[errno]!;
     }

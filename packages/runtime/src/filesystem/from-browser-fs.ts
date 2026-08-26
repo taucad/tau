@@ -16,6 +16,7 @@
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import { resolveVirtualPath } from '@taucad/utils/path';
 
 const enoent = (path: string): Error => {
   const error = new Error(`ENOENT: no such file or directory: ${path}`);
@@ -23,7 +24,24 @@ const enoent = (path: string): Error => {
   return error;
 };
 
-const splitPath = (path: string): string[] => path.split('/').filter((segment) => segment.length > 0);
+const eisdir = (path: string): Error => {
+  const error = new Error(`EISDIR: illegal operation on a directory: ${path}`);
+  (error as NodeJS.ErrnoException).code = 'EISDIR';
+  return error;
+};
+
+const isMissingEntryError = (error: unknown): boolean => {
+  if (error instanceof DOMException) {
+    return error.name === 'NotFoundError' || error.name === 'TypeMismatchError';
+  }
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+};
+
+const splitPath = (path: string): string[] =>
+  resolveVirtualPath(path)
+    .split('/')
+    .filter((segment) => segment.length > 0);
 
 const getDirectory = async (
   root: FileSystemDirectoryHandle,
@@ -34,8 +52,11 @@ const getDirectory = async (
   for (const segment of segments) {
     try {
       current = await current.getDirectoryHandle(segment, { create });
-    } catch {
-      throw enoent(segments.join('/'));
+    } catch (error) {
+      if (isMissingEntryError(error)) {
+        throw enoent(segments.join('/'));
+      }
+      throw error;
     }
   }
   return current;
@@ -46,9 +67,10 @@ const getDirectory = async (
  * opaque {@link RuntimeFileSystem} value passed to
  * `createRuntimeClient({ fileSystem })`.
  *
- * @param root - The root directory handle returned by
+ * @param root - Browser directory capability exposed as runtime `/`, returned by
  *   `window.showDirectoryPicker()` or
- *   `navigator.storage.getDirectory()`.
+ *   `navigator.storage.getDirectory()`. Runtime paths are resolved through
+ *   this handle and do not imply that a portable host OS path exists.
  *
  * @returns The wrapped `RuntimeFileSystem` handle.
  *
@@ -58,14 +80,13 @@ const getDirectory = async (
  * ```typescript
  * import { createRuntimeClient } from '@taucad/runtime';
  * import { webWorkerTransport } from '@taucad/runtime/transport/web';
- * import { fromBrowserFs } from '@taucad/runtime/filesystem';
- * import { replicad } from '@taucad/runtime/kernels';
+ * import { fromBrowserFs } from '@taucad/runtime/filesystem/browser';
  *
  * declare const window: { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> };
  * const root = await window.showDirectoryPicker();
  * const client = createRuntimeClient({
- *   kernels: [replicad()],
  *   transport: webWorkerTransport({
+ *     createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
  *     fileSystem: fromBrowserFs(root),
  *   }),
  * });
@@ -95,7 +116,7 @@ function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemB
 
   const fs: RuntimeFileSystemBase = {
     id: 'runtime:browser-fs',
-    capabilities: { persistent: true, writable: true, quotaBased: true, caseSensitive: true },
+    capabilities: { persistent: true, writable: true, quotaBased: true },
     dispose() {
       /* The host owns the FileSystemDirectoryHandle lifecycle. */
     },
@@ -110,8 +131,11 @@ function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemB
       let fileHandle: FileSystemFileHandle;
       try {
         fileHandle = await directory.getFileHandle(filename, { create: false });
-      } catch {
-        throw enoent(filePath);
+      } catch (error) {
+        if (isMissingEntryError(error)) {
+          throw enoent(filePath);
+        }
+        throw error;
       }
       const file = await fileHandle.getFile();
       const buffer = new Uint8Array(await file.arrayBuffer());
@@ -155,7 +179,7 @@ function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemB
     async stat(filePath) {
       const segments = splitPath(filePath);
       if (segments.length === 0) {
-        return { type: 'dir', size: 0, mtimeMs: Date.now() };
+        return { type: 'dir', size: 0, mtimeMs: 0 };
       }
       const last = segments.at(-1)!;
       const parentSegments = segments.slice(0, -1);
@@ -163,12 +187,18 @@ function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemB
       try {
         const fileHandle = await directory.getFileHandle(last, { create: false });
         const file = await fileHandle.getFile();
-        return { type: 'file', size: file.size, mtimeMs: file.lastModified };
-      } catch {
+        return { type: 'file', size: file.size, mtimeMs: file.lastModified, contentKind: 'binary' };
+      } catch (fileError) {
+        if (!isMissingEntryError(fileError)) {
+          throw fileError;
+        }
         try {
           await directory.getDirectoryHandle(last, { create: false });
-          return { type: 'dir', size: 0, mtimeMs: Date.now() };
-        } catch {
+          return { type: 'dir', size: 0, mtimeMs: 0 };
+        } catch (directoryError) {
+          if (!isMissingEntryError(directoryError)) {
+            throw directoryError;
+          }
           throw enoent(filePath);
         }
       }
@@ -183,19 +213,29 @@ function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemB
       await directory.removeEntry(last, { recursive: true });
     },
     async rename(oldPath, newPath) {
-      const data = await (this.readFile as (p: string) => Promise<Uint8Array<ArrayBuffer>>)(oldPath);
-      await this.writeFile(newPath, data);
-      await this.unlink(oldPath);
+      const canonicalOldPath = resolveVirtualPath(oldPath);
+      const canonicalNewPath = resolveVirtualPath(newPath);
+      const sourceStat = await this.stat(canonicalOldPath);
+      if (sourceStat.type === 'dir') {
+        throw eisdir(canonicalOldPath);
+      }
+      const data = await (this.readFile as (p: string) => Promise<Uint8Array<ArrayBuffer>>)(canonicalOldPath);
+      await this.writeFile(canonicalNewPath, data);
+      await this.unlink(canonicalOldPath);
     },
     async lstat(filePath) {
       return this.stat(filePath);
     },
     async exists(filePath) {
+      const canonicalPath = resolveVirtualPath(filePath);
       try {
-        await this.stat(filePath);
+        await this.stat(canonicalPath);
         return true;
-      } catch {
-        return false;
+      } catch (error) {
+        if (isMissingEntryError(error)) {
+          return false;
+        }
+        throw error;
       }
     },
   };

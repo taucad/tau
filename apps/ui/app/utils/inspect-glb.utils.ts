@@ -1,9 +1,9 @@
 /**
  * Browser-side glTF 2.0 binary (`.glb`) inspector. Mirrors the Electron
  * example's `gltf-inspector.ts` byte-for-byte (so the e2e debug panel
- * surfaces the same shape in both apps), but lives in `apps/ui` because
- * `@taucad/testing/analyzeGlb` depends on `@gltf-transform/core`'s
- * `NodeIO` and is therefore unusable in the browser.
+ * surfaces the same shape in both apps). It reads the container directly
+ * rather than going through a glTF library, so the debug panel costs the
+ * browser bundle nothing.
  *
  * Pure parsing — no DOM, no Three.js, no GPU. Runs identically in a
  * worker, in jsdom, or in the renderer.

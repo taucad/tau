@@ -3,7 +3,7 @@ title: 'Documentation Policy'
 description: 'Standards for writing and maintaining Tau documentation: content types, templates, AI discoverability, API reference, sidebar navigation, and cross-linking. Applies to apps/ui/content/docs/ and docs/.'
 status: active
 created: '2026-02-23'
-updated: '2026-05-21'
+updated: '2026-08-22'
 ---
 
 # Documentation Policy
@@ -302,7 +302,7 @@ Individual pages are available as raw markdown at `*.mdx` endpoints via the `llm
 
 - Use clear H2/H3 headings to structure content.
 - Use fenced code blocks with language tags (`typescript`, `bash`, `json`).
-- Include explicit package import paths in code examples (`@taucad/runtime`, `@taucad/runtime/kernels`, etc.).
+- Include explicit package import paths in code examples (`@taucad/runtime`, `@taucad/runtime/plugin`, `@taucad/replicad`, etc.).
 
 ### Structured Metadata
 
@@ -355,6 +355,8 @@ Reference documentation is auto-generated from JSDoc using `fumadocs-typescript`
 ### Public API Boundary
 
 A type is "public" if it is exported from one of the package's entry points defined in `package.json` `exports`. Internal implementation types (framework internals, worker protocol messages, internal kernel state) must NOT appear in props files even if they are technically exported for cross-module use.
+
+Capability-driven operation APIs must document the consumer request, the capability/route discovery surface, defaults, and unsupported-route behavior together. Generated type references must include public runtime-owned parents such as `content` and each independently inferred property; examples must demonstrate capability-safe route selection rather than broad option bags or internal phase names. Plugin authoring references separately document how kernels, middleware, and transcoders declare and fulfill those properties.
 
 ## 7. Cross-Linking Rules
 

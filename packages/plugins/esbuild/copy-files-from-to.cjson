@@ -1,0 +1,11 @@
+{
+  "copyFiles": [
+    {
+      "from": "node_modules/esbuild-wasm/esbuild.wasm",
+      "to": "src/vm/wasm/esbuild.wasm"
+    }
+  ],
+  "copyFilesSettings": {
+    "whenFileExists": "overwrite"
+  }
+}

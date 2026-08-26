@@ -1,6 +1,6 @@
 ---
 name: create-script
-description: Author a workspace script in the Tau monorepo following established conventions for bash and TypeScript scripts (shebang, set -euo pipefail, header comment template, env-var validation, REPO_ROOT pattern, location decision tree, chmod, Nx wiring). Use when creating a new script under scripts/, apps/*/scripts/, packages/*/scripts/, or a skill-bundled script, or when the user asks to add a script, helper, CLI tool, smoke test, release helper, or operator runbook.
+description: Author a workspace script in the Tau monorepo following established conventions for bash and TypeScript scripts (shebang, set -euo pipefail, header comment template, env-var validation, REPO_ROOT pattern, location decision tree, chmod, Nx wiring). Use when creating a new script under scripts/, apps/*/scripts/, packages/**/scripts/, or a skill-bundled script, or when the user asks to add a script, helper, CLI tool, smoke test, release helper, or operator runbook.
 disable-model-invocation: true
 ---
 
@@ -16,7 +16,7 @@ Conventions for bash and TypeScript scripts in the Tau monorepo. Pick the right 
 | Workspace-wide CLI exposed as an Nx target (TS) | `scripts/src/<name>.ts` + entry in `scripts/project.json`                                           | [scripts/src/validate-frontmatter.ts](../../scripts/src/validate-frontmatter.ts)                                                                                                                   |
 | Workspace-wide installable bin (TS)             | `scripts/src/<name>/` directory + `bin` field in [scripts/package.json](../../scripts/package.json) | `scripts/src/repos/`                                                                                                                                                                               |
 | Per-project ops (bash or TS)                    | `apps/<app>/scripts/` or `packages/<pkg>/scripts/`                                                  | [apps/api/scripts/sync-grafana-dashboards.sh](../../apps/api/scripts/sync-grafana-dashboards.sh), [apps/ui/scripts/check-ssr-bundle-budget.mts](../../apps/ui/scripts/check-ssr-bundle-budget.mts) |
-| Skill-internal (only invoked by one skill)      | `.agent/skills/<skill>/scripts/`                                                                    | `.agent/skills/pr-review-coordinator/scripts/fetch-pr-comments.sh`                                                                                                                                 |
+| Skill-internal (only invoked by one skill)      | `.agents/skills/<skill>/scripts/`                                                                   | `.agents/skills/pr-review-coordinator/scripts/fetch-pr-comments.sh`                                                                                                                                |
 
 **Rule of thumb:** workspace-wide one-shot ops → `scripts/`; gated CI checks → `scripts/src/` + Nx target; build-output assertions → next to the thing they assert about (`apps/<app>/scripts/`).
 

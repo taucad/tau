@@ -1,0 +1,80 @@
+{
+  "family": "mate",
+  "fixture": "mate.aabb-pass-real-fail",
+  "generator": {
+    "script": "scripts/mate/flanged-pipe-port/main.ts",
+    "parameters": {
+      "portOffset": 8
+    }
+  },
+  "tolerances": {
+    "contact": 0.02,
+    "coaxial": 0.05
+  },
+  "adversarialAabb": {
+    "subject": "runnerFlange",
+    "target": "manifold"
+  },
+  "selectors": [
+    {
+      "selector": "runnerFlange.port",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "axisOrigin": [8, 0, 10]
+      },
+      "factsTolerance": 0.001
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "contact",
+      "subject": "runnerFlange.face",
+      "target": "manifold.face",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "runnerFlange.port",
+      "target": "manifold.port",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "fail",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 8
+          }
+        },
+        "mentions": ["runnerFlange.port", "manifold.port"]
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "runnerFlange.boltHole[1]",
+      "target": "manifold.boltHole[1]",
+      "options": {
+        "tolerance": 0.05
+      },
+      "expected": {
+        "verdict": "pass"
+      }
+    }
+  ],
+  "notes": "Master acceptance case 6 (mate form): part AABBs overlap and face contact passes, but the port opening is laterally offset 8.00 — the port subconstraint must fail and be named."
+}

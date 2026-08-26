@@ -5,23 +5,23 @@
  * speaking the typed {@link RuntimeProtocol}. Calls (`initialize`,
  * `export`) are settled via `impl.call`; production drives renders
  * autonomously via the `openFile` notify and consumes `geometryComputed`
- * notifies correlated by `rgen` (mirrors LSP `didOpen` + diagnostics).
+ * notifies correlated by opaque `renderId` (mirrors LSP `didOpen` + diagnostics).
  *
  * Client → worker commands (`openFile`, `updateParameters`,
- * `setOptions`, `fileChanged`, `configureMiddleware`, `cleanup`,
- * `abort`, `stage-and-render`) ride the bidirectional `nt` notify
- * channel; autonomous worker events (`progress`, `geometryComputed`,
+ * `setOptions`, `abort`, `stage-and-render`) ride the bidirectional `nt`
+ * notify channel (`cleanup` is an acknowledged `call`, not a notify);
+ * autonomous worker events (`progress`, `geometryComputed`,
  * `parametersResolved`, `errorEvent`, `stateChanged`,
  * `activeKernelChanged`, `capabilitiesUpdated`, `log`, `logBatch`,
- * `telemetry`) fan out via `serverHandle.notify(...)`. `progress`,
- * `geometryComputed`, and `errorEvent` carry the originating render
- * generation (`rgen`) so consumers can ignore frames from superseded
- * renders.
+ * `telemetry`) fan out via `serverHandle.notify(...)`. Six events carry
+ * render identity: `parametersResolved`, `geometryComputed`, `errorEvent`,
+ * `progress`, `activeKernelChanged`, and `stateChanged`; the two optional
+ * sites also cover connection-scoped work.
  *
  * Binary delivery for `export` results and `geometryComputed` notify
  * args hoists via {@link WithTransferables}; the transport encodes each
  * payload through its `pool → transfer → copy` ladder
- * (`encodeGeometry` / `encodeFile`) — the dispatcher itself never reads
+ * (`encodeGeometry`) — the dispatcher itself never reads
  * a `Port` capability set, so wire facts stay private to the transport.
  *
  * An unhandled-rejection trap wraps every awaited operation so errors
@@ -42,6 +42,8 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { createChannelServer } from '@taucad/rpc';
 import type { ChannelServer, ChannelServerHandle, Port, WithTransferables } from '@taucad/rpc';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
+import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
+import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import type { HashedGeometryResult, ExportGeometryResult } from '#types/runtime.types.js';
 import type {
   GeometryTransport,
@@ -56,12 +58,14 @@ import type { KernelWorker } from '#framework/kernel-worker.js';
 import { logFlushDebounce } from '#framework/runtime-framework.constants.js';
 import { createErrorTrap } from '#framework/worker-error-trap.js';
 import { packageVersion } from '#utils/package-info.js';
+import { protocolVersion } from '#types/protocol-header.types.js';
 import type {
+  EncodedBinary,
   EncodedGeometry,
-  EncodedFileBytes,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
 } from '#transport/runtime-transport.types.js';
+import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 
 /** Stable session key for the runtime worker channel. */
 export const runtimeChannelSessionKey = 'tau.runtime/v1';
@@ -77,14 +81,8 @@ export const runtimeChannelSessionKey = 'tau.runtime/v1';
  * @public
  */
 export type GeometryEncoder = (geometry: Geometry) => EncodedGeometry;
-
-/**
- * File-bytes encoder injected by the transport host. Symmetric with
- * {@link GeometryEncoder}.
- *
- * @public
- */
-export type FileBytesEncoder = (file: Uint8Array<ArrayBuffer>) => EncodedFileBytes;
+/** Encode one owned binary payload for its selected delivery tier. @public */
+export type BinaryEncoder = (key: string, bytes: Uint8Array<ArrayBuffer>) => EncodedBinary;
 
 function applyGeometryEncoder(
   geometry: Geometry,
@@ -113,37 +111,29 @@ function toTransportResult(
   return {
     ...result,
     issues: result.issues.map(normaliseIssueForWire),
-    data: result.data.map((geo) => applyGeometryEncoder(geo, encode, transferables)),
+    data: applyGeometryEncoder(result.data, encode, transferables),
   };
 }
 
-/* Some kernels (notably `@taucad/openscad`) emit `KernelIssue` objects
- * without the required `code` discriminator. The wire-protocol Zod
- * schema treats `code` as a closed enum, so those frames would be
- * silently dropped server-side. Default missing codes to `'RUNTIME'`
- * here so the contract validates without forcing every kernel author
- * to set it explicitly today. */
-function normaliseIssueForWire<T extends { code?: string }>(issue: T): T & { code: string } {
-  return issue.code ? (issue as T & { code: string }) : { ...issue, code: 'RUNTIME' };
+function normaliseIssueForWire<T extends { code?: unknown }>(issue: T): T & { code: KernelIssueCode } {
+  return isKernelIssueCode(issue.code) ? (issue as T & { code: KernelIssueCode }) : { ...issue, code: 'UNKNOWN' };
 }
 
-function extractExportTransferables(
+function prepareExportTransfer(
   result: ExportGeometryResult,
-  encodeFile: FileBytesEncoder | undefined,
-  outTransferables: Transferable[],
-): void {
-  if (!result.success || !encodeFile) {
-    return;
+  options: { encode: BinaryEncoder; publicationId: number; transferables: Transferable[] },
+): unknown {
+  const issues = result.issues.map(normaliseIssueForWire);
+  if (!result.success) {
+    return { ...result, issues };
   }
 
-  const seen = new Set<Transferable>();
-  for (const file of result.data) {
-    const encoded = encodeFile(file.bytes);
-    for (const t of encoded.transferables) {
-      seen.add(t);
-    }
-  }
-  outTransferables.push(...seen);
+  const data = result.data.map((file, index) => {
+    const encoded = options.encode(`export:${options.publicationId}:${index}`, file.bytes);
+    options.transferables.push(...encoded.transferables);
+    return { ...file, bytes: encoded.value };
+  });
+  return { ...result, data, issues };
 }
 
 /**
@@ -155,7 +145,7 @@ function extractExportTransferables(
  * (worker, node-worker, host) leave this unset and continue to wire
  * the FS via `memoryHandle.fileSystemPort`.
  *
- * The `encodeGeometry` / `encodeFile` encoders are produced by the
+ * The geometry encoder is produced by the
  * transport host's `adoptInitialize(...)` bindings. The dispatcher
  * uses them verbatim so the wire-tier decision (pool/transfer/copy)
  * stays inside the transport plugin and the dispatcher never reads
@@ -171,12 +161,10 @@ export type WorkerDispatcherOptions = {
    * falls back to inline / copy delivery (no transferables, no pool).
    */
   readonly encodeGeometry?: GeometryEncoder;
-  /**
-   * Transport-supplied file-bytes encoder (typically
-   * `bindings.fileDelivery.publish`). When omitted the dispatcher
-   * falls back to inline / copy delivery for export results.
-   */
-  readonly encodeFile?: FileBytesEncoder;
+  /** Transport-supplied pooled/transfer encoder for export file bytes. */
+  readonly encodeBinary?: BinaryEncoder;
+  /** Transport-owned pooled-delivery acknowledgement handler. */
+  readonly acknowledgeBinary?: (key: string) => void;
   /**
    * Late-bound host bindings factory invoked when the dispatcher
    * receives the `initialize` RPC. The factory inspects the inbound
@@ -206,6 +194,11 @@ const inlineGeometryEncoder: GeometryEncoder = (geometry) => {
   };
 };
 
+const inlineBinaryEncoder: BinaryEncoder = (_key, source) => {
+  const bytes = new Uint8Array(source);
+  return { value: { delivery: 'inline', bytes }, transferables: [bytes.buffer], tier: 'transfer' };
+};
+
 /**
  * Spawn a `ChannelServer<RuntimeProtocol>` that routes typed RPC calls
  * and notifies into a {@link KernelWorker}.
@@ -232,14 +225,16 @@ export function createWorkerDispatcher(
     serverHandle?.notify(name, args);
   };
 
-  /* Transport host injects geometry / file encoders via
+  /* Transport host injects its geometry encoder via
    * `dispatcherOptions`. When omitted (smoke tests, in-isolate hosts)
    * the dispatcher falls back to an inline-only encoder. When the
    * caller supplies `bindingsFactory`, the encoders are swapped to
    * the bindings' SAB-aware variants the moment `initialize` lands.
    * The dispatcher never reads `port.capabilities` directly. */
   let encodeGeometry: GeometryEncoder = dispatcherOptions?.encodeGeometry ?? inlineGeometryEncoder;
-  let encodeFile: FileBytesEncoder | undefined = dispatcherOptions?.encodeFile;
+  let encodeBinary: BinaryEncoder = dispatcherOptions?.encodeBinary ?? inlineBinaryEncoder;
+  let acknowledgeBinary = dispatcherOptions?.acknowledgeBinary ?? (() => undefined);
+  let exportPublicationId = 0;
 
   const pendingLogs: LogEntry[] = [];
   let logFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -276,66 +271,71 @@ export function createWorkerDispatcher(
     }
     callbacksWired = true;
 
-    worker.onStateChanged = (state, detail) => {
-      notify('stateChanged', { state, ...(detail === undefined ? {} : { detail }) });
+    worker.onStateChanged = (event) => {
+      notify('stateChanged', event);
     };
 
-    worker.onGeometryComputed = (result, rgen) => {
+    worker.onGeometryComputed = ({ result, renderId }) => {
       flushLogs();
       worker.flushTelemetry();
       const transferables: Transferable[] = [];
       const transport = toTransportResult(result, encodeGeometry, transferables);
       const args: WithTransferables<RuntimeGeometryComputedArgs> = {
-        value: { result: transport, rgen },
+        value: { result: transport, renderId },
         transferables,
       };
       notify('geometryComputed', args);
     };
 
-    worker.onParametersResolved = (result, rgen) => {
-      notify('parametersResolved', { result, rgen });
+    worker.onParametersResolved = (event) => {
+      notify('parametersResolved', event);
     };
 
-    worker.onProgressUpdate = (phase, rgen, detail) => {
-      notify('progress', { phase, rgen, ...(detail === undefined ? {} : { detail }) });
+    worker.onProgressUpdate = (event) => {
+      notify('progress', event);
     };
 
-    worker.onError = (issues, rgen) => {
+    worker.onError = ({ issues, renderId }) => {
       notify('errorEvent', {
         issues: issues.map((issue) => normaliseIssueForWire(issue)),
-        ...(rgen === undefined ? {} : { rgen }),
+        ...(renderId === undefined ? {} : { renderId }),
       });
     };
 
-    worker.onActiveKernelChanged = (kernelId) => {
-      notify('activeKernelChanged', { kernelId });
+    worker.onActiveKernelChanged = ({ kernelId, renderId }) => {
+      notify('activeKernelChanged', { kernelId, ...(renderId === undefined ? {} : { renderId }) });
     };
 
     worker.onCapabilitiesUpdated = (capabilities) => {
       notify('capabilitiesUpdated', { capabilities });
     };
+
+    worker.onKernelEvent = (event) => {
+      notify('kernelEvent', event);
+    };
   };
 
+  let initializing = false;
+  let initialized = false;
   const handleInitialize: (
     args: RuntimeProtocol['calls']['initialize']['args'],
   ) => Promise<RuntimeProtocol['calls']['initialize']['result']> = async (args) => {
+    if (initializing || initialized) {
+      throw new RuntimeAlreadyInitializedError();
+    }
+    initializing = true;
     const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
     try {
       wireWorkerCallbacks();
 
       const { memoryHandle } = args;
+      worker.setDevtoolsTelemetryEnabled(memoryHandle?.devtoolsTelemetry === true);
+      worker.setCompiledWasmModules(memoryHandle?.compiledWasmModules ?? []);
       if (memoryHandle?.signalBuffer) {
         worker.setSignalBuffer(memoryHandle.signalBuffer);
       }
-      if (memoryHandle?.geometryPoolBuffer) {
-        worker.setGeometryPoolBuffer(memoryHandle.geometryPoolBuffer);
-      }
-      if (memoryHandle?.filePoolBuffer) {
-        worker.setFilePoolBuffer(memoryHandle.filePoolBuffer);
-      }
-
       /* Late-bind the host bindings now that we have the inbound
-       * `memoryHandle`. The bindings' geometry / file encoders win
+       * `memoryHandle`. The bindings' geometry encoder wins
        * over the early-bound encoders supplied at dispatcher
        * construction time, so the same dispatcher transparently
        * upgrades from `transfer` to `pool` tier when the client
@@ -343,7 +343,8 @@ export function createWorkerDispatcher(
       if (dispatcherOptions?.bindingsFactory && memoryHandle) {
         const bindings = dispatcherOptions.bindingsFactory(memoryHandle);
         encodeGeometry = bindings.geometryDelivery.publish;
-        encodeFile = bindings.fileDelivery.publish;
+        encodeBinary = bindings.geometryDelivery.publishBytes;
+        acknowledgeBinary = bindings.geometryDelivery.acknowledge;
       }
 
       await Promise.race([
@@ -353,33 +354,41 @@ export function createWorkerDispatcher(
             fileSystemPort: memoryHandle?.fileSystemPort,
             inlineFileSystem: dispatcherOptions?.inlineFileSystem,
           },
-          options: args.options,
-          middlewareEntries: args.middlewareEntries,
-          transcoderModules: args.transcoderModules,
+          config: args.config,
         }),
         trapPromise,
       ]);
 
-      if (args.bundlerEntries) {
-        for (const entry of args.bundlerEntries) {
-          // oxlint-disable-next-line no-await-in-loop -- bundler entries must load sequentially to avoid race conditions
-          await Promise.race([worker.ensureLoadedBundler(entry), trapPromise]);
-        }
-      }
-
+      initialized = true;
       return { capabilities: worker.capabilitiesManifest };
     } finally {
+      initializing = false;
       cleanupTrap();
     }
   };
 
-  const handleExport: (args: RuntimeProtocol['calls']['export']['args']) => Promise<ExportGeometryResult> = async (
-    args,
-  ) => {
+  const handleExport: (
+    args: RuntimeProtocol['calls']['export']['args'],
+    signal?: AbortSignal,
+  ) => Promise<ExportGeometryResult> = async (args, signal) => {
     const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
     try {
-      return await Promise.race([worker.exportGeometry(args.format, args.options), trapPromise]);
+      return await Promise.race([worker.exportGeometry(args.format, args.options, args.content, signal), trapPromise]);
     } finally {
+      worker.flushTelemetry();
+      cleanupTrap();
+    }
+  };
+
+  const handleExportModel: (
+    args: RuntimeProtocol['calls']['exportModel']['args'],
+    signal?: AbortSignal,
+  ) => Promise<ExportGeometryResult> = async (args, signal) => {
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+    try {
+      return await Promise.race([worker.exportModel(args, signal), trapPromise]);
+    } finally {
+      worker.flushTelemetry();
       cleanupTrap();
     }
   };
@@ -388,74 +397,39 @@ export function createWorkerDispatcher(
 
   const impl: ChannelServer<RuntimeProtocol> = {
     // oxlint-disable-next-line max-params -- ChannelServer.call signature is fixed (ctx, name, args, signal); parameter count is enforced by the protocol contract.
-    async call(_context, name, args, _signal) {
+    async call(_context, name, args, signal) {
       switch (name) {
         case 'initialize': {
           const result = await handleInitialize(args as RuntimeProtocol['calls']['initialize']['args']);
           return result as unknown as CallResult;
         }
         case 'export': {
-          const result = await handleExport(args as RuntimeProtocol['calls']['export']['args']);
+          const result = await handleExport(args as RuntimeProtocol['calls']['export']['args'], signal);
           const transferables: Transferable[] = [];
-          extractExportTransferables(result, encodeFile, transferables);
+          const value = prepareExportTransfer(result, {
+            encode: encodeBinary,
+            publicationId: ++exportPublicationId,
+            transferables,
+          });
           const envelope: WithTransferables<unknown> = {
-            value: result,
+            value,
             transferables,
           };
           return envelope as unknown as CallResult;
         }
-      }
-    },
-
-    notify(_context, name, args) {
-      switch (name) {
-        case 'openFile': {
-          const a = args as RuntimeProtocol['notifies']['openFile']['args'];
-          worker.handleOpenFile(a.file, a.parameters, a.options);
-          break;
-        }
-        case 'stage-and-render': {
-          const a = args as RuntimeProtocol['notifies']['stage-and-render']['args'];
-          /* Fire-and-forget: notify is synchronous, so rejection routing
-           * happens via .catch — making the handler async would block the
-           * dispatcher loop on every staged render. */
-          const stagePromise = worker.handleStageAndOpenFile({
-            stage: a.stage,
-            file: a.file,
-            parameters: a.parameters,
-            options: a.options,
+        case 'exportModel': {
+          const result = await handleExportModel(args as RuntimeProtocol['calls']['exportModel']['args'], signal);
+          const transferables: Transferable[] = [];
+          const value = prepareExportTransfer(result, {
+            encode: encodeBinary,
+            publicationId: ++exportPublicationId,
+            transferables,
           });
-          // oxlint-disable-next-line eslint-plugin-promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
-          stagePromise.catch((error: unknown) => {
-            notify('errorEvent', { issues: errorToIssues(error) });
-          });
-          break;
-        }
-        case 'updateParameters': {
-          const a = args as RuntimeProtocol['notifies']['updateParameters']['args'];
-          worker.handleUpdateParameters(a.parameters);
-          break;
-        }
-        case 'setOptions': {
-          const a = args as RuntimeProtocol['notifies']['setOptions']['args'];
-          worker.handleSetOptions(a.options);
-          break;
-        }
-        case 'fileChanged': {
-          const a = args as RuntimeProtocol['notifies']['fileChanged']['args'];
-          // oxlint-disable-next-line promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
-          worker.notifyFileChanged(a.paths).catch((error: unknown) => {
-            notify('errorEvent', { issues: errorToIssues(error) });
-          });
-          break;
-        }
-        case 'configureMiddleware': {
-          const a = args as RuntimeProtocol['notifies']['configureMiddleware']['args'];
-          // oxlint-disable-next-line promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
-          worker.configureMiddleware(a.entries).catch((error: unknown) => {
-            notify('errorEvent', { issues: errorToIssues(error) });
-          });
-          break;
+          const envelope: WithTransferables<unknown> = {
+            value,
+            transferables,
+          };
+          return envelope as unknown as CallResult;
         }
         case 'cleanup': {
           if (logFlushTimer) {
@@ -463,15 +437,68 @@ export function createWorkerDispatcher(
             logFlushTimer = undefined;
           }
           flushLogs();
-          // oxlint-disable-next-line promise/prefer-await-to-then -- intentional fire-and-forget routing inside synchronous notify handler
-          worker.cleanup().catch((error: unknown) => {
-            notify('errorEvent', { issues: errorToIssues(error) });
+          await worker.cleanup();
+          return null as unknown as CallResult;
+        }
+      }
+    },
+
+    notify(_context, name, args) {
+      const runPreviewCommand = (renderId: string, command: () => unknown): void => {
+        const report = (error: unknown): void => {
+          notify('errorEvent', { issues: errorToIssues(error), renderId });
+        };
+        try {
+          const result = command();
+          if (result instanceof Promise) {
+            // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- RPC notifies are fire-and-forget; this boundary reports returned rejections.
+            void result.catch(report);
+          }
+        } catch (error) {
+          report(error);
+        }
+      };
+      switch (name) {
+        case 'openFile': {
+          const a = args as RuntimeProtocol['notifies']['openFile']['args'];
+          runPreviewCommand(a.renderId, () => {
+            worker.handleOpenFile(a);
+          });
+          break;
+        }
+        case 'stage-and-render': {
+          const a = args as RuntimeProtocol['notifies']['stage-and-render']['args'];
+          runPreviewCommand(a.renderId, async () => {
+            await worker.handleStageAndOpenFile(a);
+          });
+          break;
+        }
+        case 'updateParameters': {
+          const a = args as RuntimeProtocol['notifies']['updateParameters']['args'];
+          runPreviewCommand(a.renderId, () => {
+            worker.handleUpdateParameters(a);
+          });
+          break;
+        }
+        case 'setOptions': {
+          const a = args as RuntimeProtocol['notifies']['setOptions']['args'];
+          runPreviewCommand(a.renderId, () => {
+            worker.handleSetOptions(a);
           });
           break;
         }
         case 'abort': {
           const a = args as RuntimeProtocol['notifies']['abort']['args'];
-          worker.handleWireAbort(a.reason);
+          worker.handleWireAbort(a);
+          break;
+        }
+        case 'binaryMaterialised': {
+          const a = args as RuntimeProtocol['notifies']['binaryMaterialised']['args'];
+          acknowledgeBinary(a.key);
+          break;
+        }
+        case 'kernelCommand': {
+          // Reserved for kernel-owned command routing in a later protocol revision.
           break;
         }
         // Worker → client autonomous notifies are emitted via `serverHandle.notify`,
@@ -485,7 +512,8 @@ export function createWorkerDispatcher(
         case 'log':
         case 'logBatch':
         case 'telemetry':
-        case 'capabilitiesUpdated': {
+        case 'capabilitiesUpdated':
+        case 'kernelEvent': {
           // No-op: server never receives these.
           break;
         }
@@ -501,6 +529,7 @@ export function createWorkerDispatcher(
   const helloPayload: RuntimeHelloPayload = {
     server: 'kernel-runtime-worker',
     runtimeVersion: packageVersion,
+    protocolVersion,
   };
 
   serverHandle = createChannelServer<RuntimeProtocol>({

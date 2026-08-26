@@ -1,17 +1,13 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public API re-export */
 // Client
 export { createRuntimeClient } from '#client/runtime-client.js';
-export { createRuntimeClientOptions } from '#client/runtime-client-options.js';
 export {
   RenderTimeoutError,
   isRenderTimeoutError,
   RenderAbortedError,
   isRenderAbortedError,
 } from '#framework/runtime-worker-client.js';
-export {
-  SharedPoolEntryNotFoundError,
-  isSharedPoolEntryNotFoundError,
-} from '#transport/_internal/shared-pool-errors.js';
+export { SharedPoolEntryNotFoundError, isSharedPoolEntryNotFoundError } from '#transport/shared-pool-errors.js';
 export {
   NoRenderOutcomeError,
   isNoRenderOutcomeError,
@@ -25,10 +21,16 @@ export {
 export type {
   RuntimeClient,
   RuntimeClientOptions,
-  CodeInput,
-  FileInput,
+  FilesystemRuntimeSource,
+  InlineRuntimeSource,
+  RuntimeExportOptions,
+  RuntimeRenderInput,
+  RuntimeSource,
+  RuntimeSourceContent,
+  RuntimeSourceFiles,
   ExportResult,
   RenderOutcome,
+  RenderStatus,
   RuntimeLifecycleState,
   RuntimeConnectionCause,
   RuntimeTerminatedCause,
@@ -46,28 +48,43 @@ export type {
   CollectRenderOptions,
   CollectTranscodeMap,
   CollectTranscoderTargets,
+  ExportFormatsFor,
+  ExportContentFor,
+  ExportOptionsFor,
   KnownSourceFormats,
   KnownTargetFormats,
   KnownTranscoderIds,
   MergeExportMap,
   RenderOptionsFor,
+  RenderContentFor,
+  RuntimePluginDeclaration,
+  RuntimePluginPermissions,
 } from '#plugins/plugin-types.js';
 
-// Plugin factory helpers
-export {
-  createKernelPlugin,
-  createMiddlewarePlugin,
-  createBundlerPlugin,
-  createTranscoderPlugin,
-} from '#plugins/plugin-helpers.js';
-
-// Presets
-export { presets } from '#plugins/presets.js';
+// Plugin authoring helpers
+export { definePlugin } from '#plugins/plugin.js';
+export type {
+  AnyPluginInstance,
+  ExpandPluginBundlers,
+  ExpandPluginKernels,
+  ExpandPluginMiddleware,
+  ExpandPluginTranscoders,
+  PluginCapabilities,
+  PluginFactory,
+  PluginInstance,
+  PluginMeta,
+} from '#plugins/plugin.js';
+export { defineKernel } from '#types/runtime-kernel.types.js';
+export { defineMiddleware } from '#middleware/runtime-middleware.js';
+export { defineBundler } from '#types/runtime-bundler.types.js';
+export { defineTranscoder } from '#types/runtime-transcoder.types.js';
+export { defineRuntime } from '#worker/runtime-definition.js';
+export type { AnyRuntimeDefinition, RuntimeDefinition, RuntimeDefinitionOptions } from '#worker/runtime-definition.js';
 
 // Filesystem factories (browser-safe; `fromNodeFs` is at `@taucad/runtime/filesystem/node`).
 // Consumers always work with the opaque `RuntimeFileSystem`; transports
 // bridge it internally.
-export { fromMemoryFs, fromFsLike, fromChannelFs, isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
+export { fromMemoryFs, fromFsLike, fromFileSystemBridge, isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 export type { FsLike, RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 export { fromBrowserFs } from '#filesystem/from-browser-fs.js';
 
@@ -91,25 +108,17 @@ export { fromBrowserFs } from '#filesystem/from-browser-fs.js';
 // their graph.
 export type {
   TransportPlugin,
+  RuntimeFromTransport,
   RuntimeTransportClient,
+  RuntimeTransportCloseResult,
+  RuntimeTransportPreviewReservation,
+  RuntimeTransportRenderTarget,
+  RuntimeTransportTimeoutRecovery,
   RuntimeTransportHost,
   TransportClientReady,
   TransportHostReady,
 } from '#transport/index.js';
 export { defineRuntimeTransport } from '#transport/index.js';
 
-// Worker-author primitives (custom transports) live at the
-// `@taucad/runtime/worker-internals` subpath — they would eagerly
-// pull `esbuild-wasm` into this default browser-safe entry via
-// `KernelRuntimeWorker` → `KernelWorker` → `#bundler/esbuild-core.js`,
-// which the `browser-compat` jsdom gate forbids.
-
 // Core types (runtime, kernel, bundler, middleware, protocol)
 export * from '#types/index.js';
-
-// File content cache (TR11)
-export { lruCache, sharedPoolCache } from '#cache/file-content-cache.js';
-export type { FileContentCache, LruCacheOptions } from '#cache/file-content-cache.js';
-
-// Helpers
-export { createKernelSuccess, createKernelError } from '#kernels/kernel-helpers.js';

@@ -1,0 +1,7 @@
+# `libcascade build` writes the committed WASM artifacts to `dist/`, which the
+# root .gitignore excludes. Re-include the directory (a nested negation only
+# works when the directory itself is un-ignored first).
+!dist/
+
+# Rendered ymls and raw container output, kept for post-failure inspection.
+.libcascade/

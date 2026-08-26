@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { languageFromExtension } from '@taucad/types/constants';
-import { extensionToMonacoLanguage, monacoLanguages } from '#lib/monaco.constants.js';
+import { codeLanguageToMonacoLanguage, extensionToMonacoLanguage, monacoLanguages } from '#lib/monaco.constants.js';
 
 describe('JSON-family language mappings', () => {
   describe('jsonl', () => {
@@ -36,5 +36,34 @@ describe('JSON-family language mappings', () => {
       expect(languageFromExtension.json).toBe('json');
       expect(extensionToMonacoLanguage['json']).toBe('json');
     });
+  });
+});
+
+describe('Markdown language mappings', () => {
+  it('should map markdown extensions through the shared language contract', () => {
+    expect(languageFromExtension.md).toBe('markdown');
+    expect(languageFromExtension.markdown).toBe('markdown');
+    expect(extensionToMonacoLanguage['md']).toBe(monacoLanguages.markdown);
+    expect(extensionToMonacoLanguage['markdown']).toBe(monacoLanguages.markdown);
+  });
+});
+
+describe('derived Monaco language mapping', () => {
+  it('should adapt shared JSX/TSX code language ids to Monaco family ids', () => {
+    expect(codeLanguageToMonacoLanguage.jsx).toBe(monacoLanguages.javascriptreact);
+    expect(codeLanguageToMonacoLanguage.tsx).toBe(monacoLanguages.typescriptreact);
+    expect(extensionToMonacoLanguage['jsx']).toBe(monacoLanguages.javascriptreact);
+    expect(extensionToMonacoLanguage['tsx']).toBe(monacoLanguages.typescriptreact);
+  });
+
+  it('should preserve UI-only module extension aliases without changing shared import mappings', () => {
+    expect(extensionToMonacoLanguage['mjs']).toBe(monacoLanguages.javascript);
+    expect(extensionToMonacoLanguage['mts']).toBe(monacoLanguages.typescript);
+  });
+
+  it('should register shell files with the Tau bash language id', () => {
+    expect(languageFromExtension.sh).toBe('bash');
+    expect(extensionToMonacoLanguage['sh']).toBe(monacoLanguages.bash);
+    expect(extensionToMonacoLanguage['bash']).toBe(monacoLanguages.bash);
   });
 });

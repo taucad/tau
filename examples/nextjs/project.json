@@ -1,0 +1,44 @@
+{
+  "name": "example-nextjs",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "examples/nextjs",
+  "projectType": "application",
+  "tags": ["scope:example", "type:example"],
+  "targets": {
+    "dev": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "next dev"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/.next"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "next build"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["build"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "next start",
+        "env": {
+          "NODE_ENV": "production"
+        }
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "oxlint -c $NX_WORKSPACE_ROOT/.oxlintrc.json app tau next.config.ts && eslint app tau next.config.ts"
+      }
+    }
+  }
+}

@@ -36,7 +36,7 @@ import { documentHeaders } from '#cross-origin-isolation/index.js';
  * adapter usable on raw Node servers (Polka, Tinyhttp, etc.).
  */
 type CoiServerResponse = ServerResponse & {
-  append?: (name: string, value: unknown) => unknown;
+  append?: (name: string, value?: string | string[]) => unknown;
 };
 
 type CoiNextFunction = (error?: unknown) => void;
@@ -97,7 +97,12 @@ function suppressDownstreamCoiAppends(response: CoiServerResponse): void {
   if (typeof original !== 'function') {
     return;
   }
-  response.append = (name: string, value: unknown) => {
+  /**
+   * @param name - Header name.
+   * @param value - Header value.
+   * @returns The underlying response.
+   */
+  response.append = (name: string, value?: string | string[]) => {
     if (typeof name === 'string' && coiHeaderNamesLc.has(name.toLowerCase())) {
       return response;
     }

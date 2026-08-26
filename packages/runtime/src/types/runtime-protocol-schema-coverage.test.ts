@@ -13,8 +13,14 @@
 import { describe, it, expect } from 'vitest';
 import { runtimeProtocolCallNames, runtimeProtocolNotifyNames } from '#types/runtime-protocol.types.js';
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
+import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
 
 describe('runtime-protocol schema coverage (C15)', () => {
+  it('binds the hello validator and empty listen inventory explicitly', () => {
+    expect(runtimeProtocolSchemas.hello).toBeDefined();
+    expect(Object.keys(runtimeProtocolSchemas.listens)).toEqual([]);
+  });
+
   it('every protocol call has a matching schema entry', () => {
     const callSchemaNames = new Set(Object.keys(runtimeProtocolSchemas.calls));
     for (const name of runtimeProtocolCallNames) {
@@ -50,8 +56,73 @@ describe('runtime-protocol schema coverage (C15)', () => {
     }
   });
 
-  it('exposes exactly the protocol inventory: 2 calls + 18 notifies', () => {
-    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(2);
+  it('should expose exactly the protocol inventory: 4 calls and 18 notifies (T18)', () => {
+    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(4);
     expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(18);
+  });
+
+  it('validates kernel issue codes from the canonical registry', () => {
+    const legacyGeometryCode = `JSCAD_${'GEOMETRY'}_INVALID`;
+
+    for (const code of kernelIssueCodeValues) {
+      expect(
+        runtimeProtocolSchemas.calls.export.result.safeParse({
+          success: false,
+          issues: [{ code, severity: 'error', message: `${code} message` }],
+        }).success,
+        `expected protocol schema to accept ${code}`,
+      ).toBe(true);
+    }
+
+    expect(
+      runtimeProtocolSchemas.calls.export.result.safeParse({
+        success: false,
+        issues: [{ code: legacyGeometryCode, severity: 'error', message: 'legacy code' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('should require a non-empty export artifact set with MIME types while tolerating additive fields', () => {
+    const schema = runtimeProtocolSchemas.calls.export.result;
+    const valid = {
+      success: true,
+      data: [
+        {
+          name: 'model.gltf',
+          mimeType: 'model/gltf+json',
+          bytes: { delivery: 'inline', bytes: new Uint8Array([1]) },
+        },
+        {
+          name: 'buffer.bin',
+          mimeType: 'application/octet-stream',
+          bytes: { delivery: 'pooled', key: 'buffer-key' },
+        },
+      ],
+      issues: [],
+    };
+
+    expect(schema.safeParse(valid).success).toBe(true);
+    expect(schema.safeParse({ ...valid, data: [] }).success).toBe(false);
+    expect(schema.safeParse({ ...valid, data: [{ name: 'model.glb', bytes: valid.data[0]!.bytes }] }).success).toBe(
+      false,
+    );
+    expect(
+      schema.safeParse({
+        ...valid,
+        data: [{ name: 'model.glb', mimeType: '', bytes: valid.data[0]!.bytes }],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        ...valid,
+        data: [{ name: 'model.glb', mimeType: '   ', bytes: valid.data[0]!.bytes }],
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({
+        ...valid,
+        data: [{ ...valid.data[0], unrelated: true }],
+      }).success,
+    ).toBe(true);
   });
 });

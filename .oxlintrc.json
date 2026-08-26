@@ -5,9 +5,15 @@
   },
   "ignorePatterns": [
     "repos/**",
+    "**/.claude/skills/**",
+    "**/.next/**",
+    "**/.next-*/**",
     "**/assets/**",
     "**/dist/**",
+    "**/dist-*/**",
     "**/generated/**",
+    "**/native/opencascade/geospec_opencascade_single.*",
+    "**/wasm/**",
     "**/out-tsc/**",
     "**/coverage/**",
     "**/.nx/**",
@@ -19,9 +25,12 @@
     "**/*.prompt.example-multifile/**",
     "**/public/**",
     "**/content/docs/**",
-    "tarballs/**",
     "experiments/**",
-    "**/*.jscad.js"
+    // Opt-in benchmark/parity CLIs run by hand against a locally built native
+    // addon; unpublished (`files` excludes them) and outside every tsconfig.
+    "bench/**",
+    "**/*.jscad.js",
+    "**/fixtures/scripts/**"
   ],
   "plugins": [
     "unicorn",
@@ -96,7 +105,13 @@
     "tau-lint/no-bare-time-identifier": "error",
     "tau-lint/no-async-iife": "error",
     "tau-lint/no-monaco-create-model": "error",
+    // Storage-policy Rule 0: direct indexedDB access only in allowlisted storage providers.
+    "tau-lint/no-bare-random-uuid": "error",
+    "tau-lint/no-direct-indexeddb": "error",
+    "tau-lint/no-bare-rpc-error-code": "error",
     "tau-lint/no-scene-override-material": "error",
+    "tau-lint/no-impl-in-index": "error",
+    "tau-lint/plugin-capability-filename": "error",
     "unicorn/no-accessor-recursion": "error",
     "unicorn/no-anonymous-default-export": "error",
     "unicorn/no-array-callback-reference": "error",
@@ -458,7 +473,7 @@
       "error",
       "always",
       {
-        "ignorePattern": "pragma|ignore|prettier-ignore|webpack\\w+:|c8|type-coverage:|async-iife:",
+        "ignorePattern": "pragma|ignore|prettier-ignore|webpack\\w+:|c8|v8 ignore|type-coverage:|async-iife:",
         "ignoreInlineComments": true,
         "ignoreConsecutiveComments": true
       }
@@ -1006,6 +1021,7 @@
               "Res",
               "Req",
               "HttpCode",
+              "Ip",
               "Inject",
               "Global",
               "UseGuards",
@@ -1195,7 +1211,7 @@
       // is the UI app's internal package-equivalent layer (each subdirectory
       // behaves like a libs/-style local package without being extracted),
       // so its `index.ts` aggregators inherit the same exemption.
-      "files": ["{packages,libs}/**/index.ts", "apps/ui/app/lib/**/index.ts"],
+      "files": ["{packages,libs,apps/libs}/**/index.ts", "apps/ui/app/lib/**/index.ts"],
       "rules": {
         "no-barrel-files/no-barrel-files": "off"
       }
@@ -1209,12 +1225,11 @@
        * every downstream import site.
        */
       "files": [
-        "packages/runtime/src/worker-internals.ts",
+        "packages/runtime/src/node.ts",
+        "packages/runtime/src/vm.ts",
         "packages/runtime/src/filesystem/runtime-filesystem.ts",
-        "packages/runtime/src/transport/define-runtime-transport.ts",
         "packages/runtime/src/transport/in-process-transport.ts",
-        "packages/runtime/src/transport/transport-projections.ts",
-        "packages/runtime/src/transport/_internal/runtime-worker-dispatcher.ts"
+        "packages/runtime/src/transport/transport-projections.ts"
       ],
       "rules": {
         "no-barrel-files/no-barrel-files": "off"
@@ -1251,11 +1266,25 @@
     {
       // CAD examples may not always follow typical conventions. For example, it's
       // easier to read d_x rather than dX, so we relax the rules here.
+      // Multi-file Tau examples are also editor-loadable fixture trees, so they
+      // use local relative imports rather than Tau-only package aliases.
       "files": ["libs/tau-examples/src/kernels/**/*.ts"],
       "rules": {
-        "unicorn-js/prevent-abbreviations": "warn",
+        "no-restricted-imports": "off",
+        "import/extensions": "off",
+        "import/consistent-type-specifier-style": "off",
+        "no-barrel-files/no-barrel-files": "off",
+        "unicorn-js/prefer-export-from": "off",
+        "unicorn-js/prevent-abbreviations": [
+          "warn",
+          {
+            "replacements": {
+              "params": false
+            }
+          }
+        ],
         "unicorn/no-array-callback-reference": "warn",
-        "@typescript-eslint/explicit-module-boundary-types": "warn",
+        "@typescript-eslint/explicit-module-boundary-types": "off",
         "@typescript-eslint/no-unsafe-assignment": "warn",
         "@typescript-eslint/no-unsafe-call": "warn",
         "@typescript-eslint/no-restricted-types": "warn",
@@ -1263,6 +1292,31 @@
         "max-params": "warn"
       },
       "plugins": ["typescript"]
+    },
+    {
+      // libcascade exposes generated OCCT/Emscripten names whose constructor
+      // and factory conventions intentionally do not match JavaScript new-cap
+      // heuristics.
+      "files": ["libs/tau-examples/src/kernels/opencascade/**/*.ts"],
+      "rules": {
+        "new-cap": "off"
+      }
+    },
+    {
+      // Agent skill folders are self-contained units (SKILL.md + scripts +
+      // references travel together into agent harnesses), so sibling relative
+      // imports are their contract — same reasoning as examples/**. The
+      // `.claude/skills` symlink twin is ignored outright (ignorePatterns)
+      // to avoid double-linting the same files.
+      "files": ["**/.agents/skills/**/*.{ts,mts}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"]
+          }
+        ]
+      }
     },
     {
       /*
@@ -1280,8 +1334,33 @@
       "rules": {
         "no-restricted-imports": "off",
         "import/extensions": "off",
-        "unicorn-js/prevent-abbreviations": "warn",
+        "unicorn-js/prevent-abbreviations": [
+          "warn",
+          {
+            "replacements": {
+              "params": false
+            }
+          }
+        ],
         "@typescript-eslint/explicit-module-boundary-types": "warn"
+      }
+    },
+    {
+      /*
+       * Cross-framework E2E fixtures are standalone consumer applications
+       * compiled independently by Next.js, Vite, and Electron Vite. Their
+       * portable local imports follow each host bundler rather than Tau's
+       * production-app `#alias` and emitted `.js` conventions.
+       */
+      "files": ["apps/react-e2e/**/*.{ts,tsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": ["error", "domain", "freelist", "smalloc", "punycode", "sys", "querystring", "colors"]
+          }
+        ],
+        "import/extensions": "off"
       }
     },
     {
@@ -1321,10 +1400,51 @@
         "@typescript-eslint/no-unsafe-assignment": "off",
         "@typescript-eslint/no-unsafe-argument": "off",
         "@typescript-eslint/no-unsafe-call": "off",
+        "@typescript-eslint/no-unsafe-return": "off",
         "@typescript-eslint/no-unnecessary-condition": "off",
         "@typescript-eslint/no-unnecessary-type-assertion": "off",
         "@typescript-eslint/prefer-optional-chain": "off",
         "@typescript-eslint/no-duplicate-type-constituents": "off"
+      }
+    },
+    {
+      // Public package exports are pre-1.0 contracts; missing @public is an error before release.
+      "files": ["packages/**/*.{ts,tsx,mts,cts}"],
+      "rules": {
+        "tau-lint/require-public-export-jsdoc": "error"
+      }
+    },
+    {
+      // Runtime framework production modules must split before they exceed the workspace ceiling.
+      "files": ["packages/runtime/src/framework/**/*.{ts,tsx,mts,cts}"],
+      "rules": {
+        "max-lines": [
+          "error",
+          {
+            "max": 1500,
+            "skipComments": true
+          }
+        ]
+      }
+    },
+    {
+      // Test modules follow testing-policy structure instead of the production-module ceiling.
+      "files": ["packages/runtime/src/framework/**/*.test.{ts,tsx,mts,cts}"],
+      "rules": {
+        "max-lines": "off"
+      }
+    },
+    {
+      // Ratified exception: the stateful kernel orchestrator is split only by a dedicated refactor.
+      "files": ["packages/runtime/src/framework/kernel-worker.ts"],
+      "rules": {
+        "max-lines": [
+          "warn",
+          {
+            "max": 1500,
+            "skipComments": true
+          }
+        ]
       }
     },
     {
@@ -1346,11 +1466,11 @@
       }
     },
     {
-      // Static `new URL(literal, import.meta.url)` invariant for the runtime
-      // and standalone kernels. Computed first arguments silently opt out of
+      // Static `new URL(literal, import.meta.url)` invariant for the runtime.
+      // Computed first arguments silently opt out of
       // bundler asset emission and break downstream consumers.
       // See docs/research/runtime-zero-config-bundling.md (Finding 1, R5).
-      "files": ["packages/runtime/src/**/*.{ts,tsx}", "kernels/openscad/src/**/*.{ts,tsx}"],
+      "files": ["packages/runtime/src/**/*.{ts,tsx}"],
       "rules": {
         "tau-lint/static-import-meta-url": "error"
       }

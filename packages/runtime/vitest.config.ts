@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [nxViteTsPaths() as any],
   test: {
     environment: 'node',
+    maxWorkers: 4,
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],
@@ -16,7 +17,7 @@ export default defineConfig({
     setupFiles: ['vitest.setup.ts'],
     coverage: {
       provider: 'v8',
-      reportsDirectory: '../../coverage/packages/runtime',
+      reportsDirectory: '../../out/reports/coverage/packages/runtime',
       include: ['src/**/*'],
       exclude: [
         'src/**/*.{test,spec,test-d}.ts',

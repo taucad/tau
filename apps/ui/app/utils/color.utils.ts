@@ -1,4 +1,4 @@
-import { hashCode } from '#utils/crypto.utils.js';
+import { hashString } from '@taucad/utils/hash';
 import { clamp } from '#utils/number.utils.js';
 
 /**
@@ -27,7 +27,7 @@ function hashToColor(hash: string, opacity = 1): string {
  * @returns OKLCH color string with CSS variables
  */
 export function stringToColor(input: string, opacity = 1): string {
-  const hash = hashCode(input);
+  const hash = hashString(input);
   return hashToColor(hash, opacity);
 }
 

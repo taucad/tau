@@ -24,6 +24,7 @@ cleanup; they may exceed the 200-char cap.
 
 ## Learned Workspace Facts
 
+- Netlify function runtime overrides belong in Terraform-managed Netlify env (`AWS_LAMBDA_JS_RUNTIME=nodejs24.x`), never `netlify.toml`.
 - Colima only shares `$HOME` into its VM — `-v /tmp/...:/output` writes to VM `/tmp`, NOT host; Docker runs needing host-visible output must bind-mount under `/Users/...` (e.g. `repos/opencascade.js/dist`).
 - Cloudflare R2 publications: single bucket (`TAU_S3_BUCKET` env-driven) + namespace prefixes hard-coded as constants in `libs/types` (not env vars — prefixes are architecture, not config); CDN via `cloudflare_r2_custom_domain` + zone cache rules (no Worker hot path); MinIO local parity.
 - Cloudflare `cloudflare_ruleset` rules using the `Matches` operator require a Business / WAF Advanced zone plan — free/Pro zones return `400 not entitled: the use of operator Matches is not allowed`.

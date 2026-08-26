@@ -92,6 +92,9 @@ jobs:
         with:
           ref: ${{ steps.checkout-ref.outputs.ref }}
           fetch-depth: 20
+          # Untrusted PR head is checked out and PR-authored tooling runs here;
+          # don't persist the workflow token into .git/config for later steps.
+          persist-credentials: false
 
       - name: Run Claude Code
         id: claude
@@ -157,6 +160,9 @@ jobs:
         with:
           ref: ${{ steps.checkout-ref.outputs.ref }}
           fetch-depth: 20
+          # Untrusted PR head is checked out and PR-authored tooling runs here;
+          # don't persist the workflow token into .git/config for later steps.
+          persist-credentials: false
 
       - name: Run Claude Code
         id: claude

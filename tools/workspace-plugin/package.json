@@ -2,5 +2,10 @@
   "name": "@taucad/workspace-plugin",
   "type": "module",
   "private": true,
-  "generators": "./generators.json"
+  "license": "Apache-2.0",
+  "generators": "./generators.json",
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  }
 }

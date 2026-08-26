@@ -6,6 +6,7 @@ import {
   finalizeInterruptedToolParts,
   serializeMessage,
   serializeTranscript,
+  stampMessageCreatedAt,
 } from '#utils/chat.utils.js';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
 import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
@@ -300,11 +301,11 @@ describe('serializeMessage', () => {
           toolCallId: 'c1',
           state: 'output-available',
           input: { targetFile: 'readme.md' },
-          output: { content: 'Hello', totalLines: 1, startLine: 1 },
+          output: { content: 'Hello', totalLines: 1, startLine: 1, size: 5, contentKind: 'text' },
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="read_file">\ntargetFile: readme.md\n</tool_call>\n<tool_result>\nLine 1:\n```\nHello\n```\n</tool_result>',
+        '<tool_call name="read_file">\ntargetFile: readme.md\n</tool_call>\n<tool_result>\nL1-L1\n```\nHello\n```\n</tool_result>',
       );
     });
 
@@ -323,6 +324,34 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes tool-use_skill without dumping the raw SKILL.md body', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-use_skill',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { skillName: 'woodworking', reason: 'Need joinery guidance' },
+          output: {
+            skillName: 'woodworking',
+            resourceUri: 'file:.agents/skills/woodworking/SKILL.md',
+            skillPath: '.agents/skills/woodworking/SKILL.md',
+            baseDirectory: '.agents/skills/woodworking',
+            source: 'user',
+            fingerprint: 'woodhash',
+            frontmatter: {},
+            content: '# Full Woodworking Skill Body',
+            supportingFiles: [],
+          },
+        },
+      ]);
+
+      const serialized = serializeMessage(message);
+      expect(serialized).toBe(
+        '<tool_call name="use_skill">\nskillName: woodworking\nreason: Need joinery guidance\n</tool_call>\n<tool_result>\nActivated skill: woodworking\npath: .agents/skills/woodworking/SKILL.md\nresource: file:.agents/skills/woodworking/SKILL.md\nsource: user\nfingerprint: woodhash\n</tool_result>',
+      );
+      expect(serialized).not.toContain('Full Woodworking Skill Body');
+    });
+
     it('serializes tool-list_directory output-available', () => {
       const message = baseMessage([
         {
@@ -334,13 +363,36 @@ describe('serializeMessage', () => {
             path: '/',
             entries: [
               { name: 'src', type: 'dir', size: 0 },
-              { name: 'file.txt', type: 'file', size: 10 },
+              { name: 'file.txt', type: 'file', size: 10, contentKind: 'text', lineCount: 1 },
             ],
           },
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="list_directory">\npath: /\n</tool_call>\n<tool_result>\nPath: /\n  [dir] src\n   file.txt\n</tool_result>',
+        '<tool_call name="list_directory">\npath: /\n</tool_call>\n<tool_result>\nPath: /\n  [dir] src\n   file.txt (1 line, 10B)\n</tool_result>',
+      );
+    });
+
+    it('serializes tool-glob_search output-available with enriched entries', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-glob_search',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { pattern: '**/*' },
+          output: {
+            files: ['src/main.ts', 'preview.glb'],
+            entries: [
+              { path: 'src/main.ts', size: 4096, contentKind: 'text', lineCount: 142 },
+              { path: 'preview.glb', size: 1_363_149, contentKind: 'binary' },
+            ],
+            totalFiles: 2,
+          },
+        },
+      ]);
+
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="glob_search">\npattern: **/*\n</tool_call>\n<tool_result>\nTotal: 2\nsrc/main.ts (142 lines, 4KB)\npreview.glb (binary, 1.3MB)\n</tool_result>',
       );
     });
 
@@ -391,12 +443,6 @@ describe('serializeMessage', () => {
                 targetFile: 'lib/bracket.scad',
               },
             ],
-            geometryArtifactPaths: {
-              /* eslint-disable @typescript-eslint/naming-convention -- file-path keys can't be camelCase */
-              'main.scad': '.tau/artifacts/c1__main.scad.glb',
-              'lib/bracket.scad': '.tau/artifacts/c1__lib_bracket.scad.glb',
-              /* eslint-enable @typescript-eslint/naming-convention -- end file-path key allowance */
-            },
           },
         },
       ]);
@@ -547,7 +593,7 @@ describe('finalizeInterruptedToolParts', () => {
 
   it.each<{
     cause: RequestTerminationCause;
-    expectedCode: 'USER_INTERRUPTED' | 'CLIENT_DISCONNECTED' | 'STREAM_ERROR';
+    expectedCode: 'USER_INTERRUPTED' | 'CLIENT_DISCONNECTED' | 'STREAM_ERROR' | 'ORPHANED_TOOL_CALL';
     expectedMessage: string;
   }>([
     {
@@ -569,6 +615,11 @@ describe('finalizeInterruptedToolParts', () => {
       cause: 'error',
       expectedCode: 'STREAM_ERROR',
       expectedMessage: 'The chat stream ended before this tool could finish.',
+    },
+    {
+      cause: 'success',
+      expectedCode: 'ORPHANED_TOOL_CALL',
+      expectedMessage: 'The chat stream ended before this tool produced a result.',
     },
   ])(
     'demotes in-flight tools to the fallback error for cause $cause when ledger is unavailable',
@@ -697,6 +748,38 @@ describe('finalizeInterruptedToolParts', () => {
       toolName: 'create_file',
     });
   });
+
+  it('finalizes dynamic-tool input-available parts with their dynamic toolName', () => {
+    const messages: MyUIMessage[] = [
+      {
+        id: 'a',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'dynamic-tool',
+            toolName: 'experimental_tool',
+            toolCallId: 'tc_dynamic',
+            state: 'input-available',
+            input: { draft: true },
+          },
+        ],
+        metadata: { createdAt: 2 },
+      },
+    ];
+
+    const next = finalizeInterruptedToolParts(messages, undefined, 'user_stop');
+
+    expect(next).not.toBe(messages);
+    const part = next.at(-1)!.parts[0] as { state: string; errorText: string; input: unknown };
+    expect(part.state).toBe('output-error');
+    expect(part.input).toEqual({ draft: true });
+    expect(JSON.parse(part.errorText)).toEqual({
+      errorCode: 'USER_INTERRUPTED',
+      message: 'Interrupted by user.',
+      toolCallId: 'tc_dynamic',
+      toolName: 'experimental_tool',
+    });
+  });
 });
 
 describe('createMessage', () => {
@@ -718,5 +801,69 @@ describe('createMessage', () => {
       metadata: {},
     });
     expect((message.parts[0] as { type: 'text'; text: string }).text).toBe('trimmed');
+  });
+});
+
+describe('stampMessageCreatedAt', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should stamp createdAt on an assistant message that lacks it', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const messages: MyUIMessage[] = [{ id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'reply' }] }];
+
+    const stamped = stampMessageCreatedAt(messages);
+
+    expect(stamped[0]?.metadata?.createdAt).toBe(1000);
+    expect(stamped).not.toBe(messages); // A mutation returns a fresh array.
+  });
+
+  it('should stamp createdAt on a user message that lacks it (defense in depth, R5)', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1500);
+    const messages: MyUIMessage[] = [{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'prompt' }] }];
+
+    const stamped = stampMessageCreatedAt(messages);
+
+    expect(stamped[0]?.metadata?.createdAt).toBe(1500);
+    expect(stamped).not.toBe(messages);
+  });
+
+  it('should return the same reference when every message is already stamped', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(2000);
+    const messages: MyUIMessage[] = [
+      { id: 'u', role: 'user', parts: [{ type: 'text', text: 'prompt' }], metadata: { createdAt: 5 } },
+      { id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'reply' }], metadata: { createdAt: 7 } },
+    ];
+
+    const result = stampMessageCreatedAt(messages);
+
+    expect(result).toBe(messages); // No-op → original reference.
+    expect(result[0]?.metadata?.createdAt).toBe(5); // User untouched.
+    expect(result[1]?.metadata?.createdAt).toBe(7); // Existing assistant stamp not overwritten.
+  });
+
+  it('should be idempotent and stable across re-persists even as the clock advances', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(3000);
+    const messages: MyUIMessage[] = [{ id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'reply' }] }];
+
+    const first = stampMessageCreatedAt(messages);
+    now.mockReturnValue(9999); // Clock advances before the next persist.
+    const second = stampMessageCreatedAt(first);
+
+    expect(first[0]?.metadata?.createdAt).toBe(3000);
+    expect(second).toBe(first); // Second persist is a no-op.
+    expect(second[0]?.metadata?.createdAt).toBe(3000); // Value never changes.
+  });
+
+  it('should preserve existing metadata (status) when stamping createdAt', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(4000);
+    const messages: MyUIMessage[] = [
+      { id: 'a', role: 'assistant', parts: [{ type: 'text', text: 'reply' }], metadata: { status: 'success' } },
+    ];
+
+    const stamped = stampMessageCreatedAt(messages);
+
+    expect(stamped[0]?.metadata).toEqual({ status: 'success', createdAt: 4000 });
   });
 });

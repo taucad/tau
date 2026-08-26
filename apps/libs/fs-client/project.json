@@ -1,0 +1,7 @@
+{
+  "name": "fs-client",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/libs/fs-client",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:app-lib"]
+}

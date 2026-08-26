@@ -1,0 +1,31 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "noEmit": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "incremental": true
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "../../support/browser-cancellation-harness.tsx",
+    "../../support/browser-cancellation-kernels.ts",
+    "../../support/glb-bounds.ts",
+    "../../support/replicad-cylinder.ts",
+    "../../support/runtime-fixture.tsx",
+    "../../../src/**/*.ts",
+    ".next-isolated/types/**/*.ts",
+    ".next-isolated/dev/types/**/*.ts",
+    ".next-non-isolated/types/**/*.ts",
+    ".next-non-isolated/dev/types/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}

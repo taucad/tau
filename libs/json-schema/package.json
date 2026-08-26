@@ -1,0 +1,24 @@
+{
+  "name": "@taucad/json-schema",
+  "version": "0.1.0-beta.1",
+  "description": "Convert JSON to JSON Schema",
+  "type": "module",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/json-schema"
+  },
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@types/json-schema": "catalog:"
+  }
+}

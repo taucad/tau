@@ -4,6 +4,21 @@
       "factory": "./src/generators/package/generator",
       "schema": "./src/generators/package/schema.json",
       "description": "Create a @taucad/* publishable package with Tau conventions"
+    },
+    "plugin": {
+      "factory": "./src/generators/plugin/generator",
+      "schema": "./src/generators/plugin/schema.json",
+      "description": "Create a @taucad/* toolkit package under packages/plugins/"
+    },
+    "core": {
+      "factory": "./src/generators/core/generator",
+      "schema": "./src/generators/core/schema.json",
+      "description": "Create a @taucad/*-core support package under packages/core/"
+    },
+    "lint-rule": {
+      "factory": "./src/generators/lint-rule/generator",
+      "schema": "./src/generators/lint-rule/schema.json",
+      "description": "Create a tau-lint oxlint rule + RuleTester test under libs/oxlint/src/rules"
     }
   }
 }

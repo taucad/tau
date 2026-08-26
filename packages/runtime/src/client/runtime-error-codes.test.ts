@@ -17,6 +17,7 @@ import {
   RuntimeTerminatedError,
   SharedPoolEntryNotFoundError,
 } from '#index.js';
+import { RuntimeConfigError } from '#worker/runtime-definition.js';
 
 describe('runtime error codes', () => {
   it('NoRenderOutcomeError exposes code RUNTIME_NO_RENDER_OUTCOME', () => {
@@ -44,8 +45,16 @@ describe('runtime error codes', () => {
     expectTypeOf(error.code).toEqualTypeOf<'RUNTIME_CONNECTION_FAILED'>();
   });
 
+  it('RuntimeConfigError exposes code RUNTIME_CONFIG_INVALID', () => {
+    const cause = new Error('invalid endpoint');
+    const error = new RuntimeConfigError('Invalid runtime config: endpoint: Invalid URL', cause);
+    expect(error.code).toBe('RUNTIME_CONFIG_INVALID');
+    expect(error.cause).toBe(cause);
+    expectTypeOf(error.code).toEqualTypeOf<'RUNTIME_CONFIG_INVALID'>();
+  });
+
   it('RuntimeNotConnectedError exposes code RUNTIME_NOT_CONNECTED', () => {
-    const error = new RuntimeNotConnectedError('openFile');
+    const error = new RuntimeNotConnectedError('render');
     expect(error.code).toBe('RUNTIME_NOT_CONNECTED');
     expectTypeOf(error.code).toEqualTypeOf<'RUNTIME_NOT_CONNECTED'>();
   });

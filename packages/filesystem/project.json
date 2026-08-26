@@ -1,7 +1,0 @@
-{
-  "name": "filesystem",
-  "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/filesystem",
-  "projectType": "library",
-  "tags": ["scope:shared", "type:lib"]
-}

@@ -1,16 +1,18 @@
 import type * as Monaco from 'monaco-editor';
 import type { FileStatEntry } from '@taucad/types';
-import type { FileContentService, ContentChangeEvent } from '@taucad/fs-client/file-content-service';
+import type {
+  FileContentService,
+  ContentChangeEvent,
+  OutcomeChangeEvent,
+} from '@taucad/fs-client/file-content-service';
+import { isNodeModulesPath } from '@taucad/utils/import';
+import { resolveVirtualPath, VirtualPathError } from '@taucad/utils/path';
 import { getMonacoLanguage } from '#lib/monaco.constants.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { debugCmdClick } from '#lib/monaco-workspace-fs/cmd-click-diagnostic.js';
 import { MonacoWorkspaceFileNotFoundError } from '#lib/monaco-workspace-fs/file-not-found-error.js';
 import type { MonacoFileSystemProvider } from '#lib/monaco-workspace-fs/monaco-workspace-fs.types.js';
 import { workspaceRelativePathFromFileUri } from '#lib/monaco-workspace-fs/workspace-path-from-uri.js';
-
-export function isNodeModulesPath(path: string): boolean {
-  return path.includes('/node_modules/') || path.startsWith('node_modules/');
-}
 
 export type WorkspaceFileSystemProviderOptions = Readonly<{
   monaco: typeof Monaco;
@@ -24,6 +26,17 @@ export type WorkspaceFileSystemProviderOptions = Readonly<{
   ) => Promise<readonly FileStatEntry[]> | readonly FileStatEntry[];
 }>;
 
+export const canonicalWorkspacePath = (uriPath: string): string => {
+  try {
+    return workspaceRelativePathFromFileUri(resolveVirtualPath(uriPath));
+  } catch (error) {
+    if (!(error instanceof VirtualPathError)) {
+      throw error;
+    }
+    return workspaceRelativePathFromFileUri(uriPath);
+  }
+};
+
 /**
  * `file://` workspace provider: Tau workspace-relative paths under a root `file:///` URI.
  */
@@ -36,12 +49,12 @@ export function createWorkspaceFileSystemProvider(
     scheme: 'file',
 
     async readText(uri: Monaco.Uri): Promise<string> {
-      const path = workspaceRelativePathFromFileUri(uri.path);
+      const path = canonicalWorkspacePath(uri.path);
       return readPathAsText(contentService, uri, path);
     },
 
     peekText(uri: Monaco.Uri): string | undefined {
-      const path = workspaceRelativePathFromFileUri(uri.path);
+      const path = canonicalWorkspacePath(uri.path);
       const outcome = contentService.peekOutcome(path);
       if (outcome.kind === 'text') {
         debugCmdClick('WorkspaceFileSystemProvider.peekText:text', { uri: uri.toString(), path });
@@ -66,13 +79,13 @@ export function createWorkspaceFileSystemProvider(
     },
 
     languageId(uri: Monaco.Uri): string | undefined {
-      const path = workspaceRelativePathFromFileUri(uri.path);
+      const path = canonicalWorkspacePath(uri.path);
       return getMonacoLanguage(path);
     },
 
     isReadOnly(uri: Monaco.Uri): boolean {
-      const path = workspaceRelativePathFromFileUri(uri.path);
-      return isNodeModulesPath(path);
+      const path = canonicalWorkspacePath(uri.path);
+      return isNodeModulesPath(`/${path}`);
     },
 
     /** Per-URI sync for `file://` is handled globally via {@link subscribeWorkspaceContentDispatch}. */
@@ -127,9 +140,16 @@ export function createWorkspaceFileSystemProvider(
 export function subscribeWorkspaceContentDispatch(
   contentService: FileContentService,
   dispatch: (event: ContentChangeEvent) => void,
+  dispatchOutcome?: (event: OutcomeChangeEvent) => void,
 ): Monaco.IDisposable {
-  const unsubscribe = contentService.onDidContentChange(dispatch);
-  return { dispose: unsubscribe };
+  const unsubscribeContent = contentService.onDidContentChange(dispatch);
+  const unsubscribeOutcome = dispatchOutcome ? contentService.onDidChangeOutcome(dispatchOutcome) : undefined;
+  return {
+    dispose() {
+      unsubscribeContent();
+      unsubscribeOutcome?.();
+    },
+  };
 }
 
 async function readPathAsText(contentService: FileContentService, uri: Monaco.Uri, path: string): Promise<string> {

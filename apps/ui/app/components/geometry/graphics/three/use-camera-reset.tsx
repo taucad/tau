@@ -22,8 +22,10 @@ type ResetPerspective = {
 type ResetCameraParameters = {
   geometryRadius: number;
   geometryCenter: THREE.Vector3;
+  geometryBounds: THREE.Box3;
   rotation: ResetRotation;
   perspective: ResetPerspective;
+  fitMargin: number;
   setSceneRadius: (radius: number) => void;
   originalDistanceReference?: RefObject<number | undefined>;
   cameraFovAngle: number;
@@ -42,10 +44,10 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
    */
   enableConfiguredAngles?: boolean;
 }) => void {
-  const { camera, controls, invalidate, size } = useThree();
+  const { camera, get, invalidate, size } = useThree();
   const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
   const cameraCapabilityActor = useCameraCapability();
-  const isRegistered = useRef(false);
+  const resetCameraRef = useRef<(options?: { enableConfiguredAngles?: boolean }) => void>(() => undefined);
 
   // Store viewportAspect in a ref so the resetCamera callback remains stable
   // during resize. The aspect is read lazily when reset is actually called,
@@ -56,8 +58,10 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
   const {
     geometryRadius,
     geometryCenter,
+    geometryBounds,
     rotation,
     perspective,
+    fitMargin,
     setSceneRadius,
     originalDistanceReference,
     cameraFovAngle,
@@ -74,37 +78,46 @@ export function useCameraReset(parameters: ResetCameraParameters): (options?: {
         camera,
         geometryRadius,
         geometryCenter,
+        geometryBounds,
         rotation,
         perspective,
+        fitMargin,
         setSceneRadius,
         invalidate,
         enableConfiguredAngles: options?.enableConfiguredAngles,
         cameraFovAngle,
-        controls: (controls ?? undefined) as { target: THREE.Vector3; update: () => void } | undefined,
+        controls: get().controls ?? undefined,
         viewportAspect: viewportAspectRef.current,
       });
     },
     [
       originalDistanceReference,
       camera,
-      controls,
+      get,
       geometryRadius,
       geometryCenter,
+      geometryBounds,
       rotation,
       perspective,
+      fitMargin,
       setSceneRadius,
       invalidate,
       cameraFovAngle,
     ],
   );
 
-  // Register the reset function with the camera capability actor only once
+  resetCameraRef.current = resetCamera;
+
+  // Register a stable wrapper so the camera capability always reaches the latest
+  // camera/controls captures without retaining stale R3F instances after remounts.
   useEffect(() => {
-    if (!isRegistered.current) {
-      cameraCapabilityActor.send({ type: 'registerReset', reset: resetCamera });
-      isRegistered.current = true;
-    }
-  }, [resetCamera, cameraCapabilityActor]);
+    cameraCapabilityActor.send({
+      type: 'registerReset',
+      reset: (options?: { enableConfiguredAngles?: boolean }) => {
+        resetCameraRef.current(options);
+      },
+    });
+  }, [cameraCapabilityActor]);
 
   // Return the reset function for direct use if needed
   return resetCamera;

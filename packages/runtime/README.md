@@ -1,185 +1,135 @@
 # @taucad/runtime
 
-Multi-kernel CAD runtime that powers [tau.new](https://tau.new). Build a
-client, send a command, consume the result.
+Composable CAD runtime for browser workers, Node.js, and custom hosts.
+
+The runtime package owns the framework and authoring contracts. Concrete kernels, middleware, bundlers, and transcoders live in separate plugin packages and are composed by each application.
 
 ## Quick start
 
-`client.export(format, { code, file })` self-provisions an in-memory
-filesystem, connects on first call, runs the render, and resolves a single
-`ExportResult`.
+`zod` is a required peer — the runtime parses the schemas you author, so one install must hold one
+zod: `npm i @taucad/runtime zod`.
+
+The runtime ships no kernels. Compose plugins into `defineRuntime` and hand the definition to
+`createNodeClient`, which supplies the in-process transport and filesystem; the caller always
+supplies the runtime definition. The runtime publishes one wave ahead of the plugins it cites, so a
+freshly released runtime names plugin versions that reach the registry minutes later.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createNodeClient } from '@taucad/runtime/node';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
 
-const client = createRuntimeClient(presets.all());
+const runtime = defineRuntime({ plugins: [esbuild(), replicad()] });
+const client = await createNodeClient(undefined, { runtime });
 const result = await client.export('glb', {
-  code: {
-    'main.ts': `
-    import { drawRoundedRectangle } from 'replicad';
-    export default () => drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
-  `,
+  source: {
+    files: {
+      'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);',
+    },
   },
-  file: 'main.ts',
 });
 
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
-console.log(`Exported ${result.data.bytes.byteLength} bytes (${result.data.mimeType})`);
+console.log(`Exported ${result.data[0].name}: ${result.data[0].bytes.byteLength} bytes`);
 client.terminate();
 ```
 
-## The lifecycle
+## Browser worker
 
-Every consumer — UI panes, the CLI, RPC handlers, benchmarks, AI agents —
-follows the same shape:
-
-1. **Construct** — `createRuntimeClient(options)` produces an inert client.
-   No network, no WASM, and the client itself never allocates a
-   `SharedArrayBuffer` — SAB lifecycle is owned by the active
-   {@link RuntimeTransportClient} (in-process, dedicated worker, or remote).
-   The client is in `lifecycleState: 'unconnected'`.
-2. **Command** — `client.openFile`, `client.updateParameters`,
-   `client.setOptions`, and `client.export` drive the worker. Each
-   command-shaped method (apart from `export`) returns a `RenderOutcome`
-   so consumers can branch on supersession without try/catch flow control.
-   The first command call lazy-connects the transport and (for inline
-   `code:` input) auto-provisions an in-memory filesystem.
-3. **Consume** — `client.on('geometry' | 'error' | 'progress' | …, handler)`
-   subscribes to the single ordered event stream the worker produces.
-   Subscriptions auto-dispose on `client.terminate()`.
-
-```mermaid
-flowchart LR
-  c["createRuntimeClient"] --> command["openFile / updateParameters / setOptions / export"]
-  command --> consume["client.on('geometry')"]
-  consume --> command
-  consume --> term["client.terminate"]
-```
-
-`client.connect()` advances the lifecycle without arguments; every
-host-wiring concern (SAB pools, FS bridges, worker URLs, deferred filesystem
-attachment) is owned by the wired {@link TransportPlugin} callable passed at
-construction (`{ transport: webWorkerTransport({ ... }) }`). Opaque
-filesystems are produced by the public factories
-(`fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLikeOpaque`,
-`fromWorkerOpaque`); raw `MessagePort`s are not part of the public surface.
-See [Embedding in a Host](../../apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx).
-
-## Autonomous render loop (editors and live UIs)
-
-`openFile` hands the worker a `(file, parameters)` pair and lets it own
-re-rendering. New calls supersede in-flight ones; the prior `RenderOutcome`
-resolves with `{ superseded: true }` and the latest one carries the geometry.
-For inline `code:` input the runtime auto-provisions the filesystem on the
-first call.
+Worker entry:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeWorker, defineRuntime } from '@taucad/runtime/worker';
+import { webWorkerHost } from '@taucad/runtime/transport/web';
+import { replicad } from '@taucad/replicad';
 
-const client = createRuntimeClient(presets.all());
-
-const unsubscribe = client.on('geometry', (result) => {
-  if (!result.success) {
-    console.error('render failed', result.issues);
-    return;
-  }
-  const gltf = result.data.find((g) => g.format === 'gltf');
-  console.log('fresh geometry', gltf?.content.byteLength, 'bytes');
-});
-
-await client.openFile({
-  code: { 'main.ts': 'export default () => drawCircle(10).sketchOnPlane().extrude(20);' },
-  file: 'main.ts',
-  parameters: {},
-});
-
-await client.updateParameters({ height: 40 });
-
-unsubscribe();
-client.terminate();
+export const runtime = defineRuntime({ plugins: [replicad()] });
+await webWorkerHost({ worker: createRuntimeWorker({ runtime }) }).open();
 ```
 
-For viewers that watch a real filesystem (Node fs, OPFS, the browser FM
-worker), pass it once at construction so every `openFile({ file })` call
-runs against it: `createRuntimeClient({ ...presets.all(), fileSystem })`.
+Client:
 
-## Lifecycle states
+```typescript
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { webWorkerTransport } from '@taucad/runtime/transport/web';
+import type { runtime } from './runtime.worker.js';
 
-`client.lifecycleState` is the single source of truth for what the client can
-do right now:
+const client = createRuntimeClient<typeof runtime>({
+  transport: webWorkerTransport({
+    createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+  }),
+});
+```
 
-| State         | Reachable methods                             | Notes                                                                                                                             |
-| ------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `unconnected` | every public method                           | The default after construction. Command methods (`openFile`/`updateParameters`/`setOptions`/`export`) lazy-connect on first call. |
-| `connecting`  | `lifecycleState`                              | Concurrent command calls await the in-flight handshake.                                                                           |
-| `connected`   | every public method                           | Steady state.                                                                                                                     |
-| `terminated`  | `lifecycleState`, `terminate()`, `shutdown()` | All other methods throw `RuntimeTerminatedError`. `shutdown()` is idempotent.                                                     |
+## Plugin toolkits
 
-Connect failures leave the client in `unconnected` so retry is safe.
-`connect()` is one-shot per client lifetime: once `connected`, subsequent
-`connect()` calls return the existing connection. To bind a single client to
-a different filesystem, `terminate()` (or `await shutdown()`) it and create a
-fresh one. `FileInput` commands (i.e. `openFile({ file })` with no inline
-`code:`) on a client whose transport has no filesystem bridge throw
-`RuntimeNotConnectedError`.
+Every toolkit declares its package-named factory as the canonical authoring symbol and re-exports that same binding as `plugin` for mechanical loaders. There is no default export. Import the package name:
 
-### Termination
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { assimp } from '@taucad/assimp';
+import { image } from '@taucad/image';
 
-Two complementary termination methods are exposed:
+const runtime = defineRuntime({
+  plugins: [assimp({ preset: 'all' }), image()],
+});
+```
 
-- `terminate()` — synchronous, abrupt. Stops the worker immediately,
-  rejects every in-flight intent with `RuntimeTerminatedError`, and
-  releases the kernel-host port. Use this for hard-stop / unmount paths.
-- `shutdown({ drain? })` — asynchronous, cooperative. Awaits in-flight
-  intents to settle when `drain: true`, then performs the same teardown
-  as `terminate()`. Use this for orderly shutdown (e.g. `beforeunload`
-  guards, server graceful-exit handlers). Both methods are idempotent.
+Presets select capabilities; role-nested options configure the selected factories. Use direct capability buckets only for app-local capabilities, isolated capability tests, or whole-role ordering that must interleave outside plugin expansion:
 
-## Transports
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { middleware } from '@taucad/middleware';
 
-`@taucad/runtime/transport` ships pluggable {@link RuntimeTransportPlugin}
-implementations. Each plugin exposes paired `client(options)` / `host(options)`
-factories that own the wire (channel construction, SAB allocation, abort
-signalling, geometry pool resolution, FS bridging):
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'auto' } } }), middleware({ preset: 'cache' })],
+});
+```
 
-- `inProcessTransport` — same realm; lowest latency. The runtime worker
-  runs on the calling thread over an internal `MessageChannel`.
-- `webWorkerTransport` — dedicated browser `Worker`. The plugin spawns
-  the worker, posts the host port across `postMessage`, and forwards
-  lifecycle errors as channel-level `lb` (lifecycle-bye) frames so the
-  client surfaces typed termination errors.
-- `nodeWorkerTransport` — Node.js `worker_threads`. Uses
-  `MessageChannelMain`-style port handoff so the host and worker share
-  the same `Port<unknown>` shape as the browser.
+Plugin capabilities retain their flat author-declared IDs. `meta.name` identifies the toolkit; diagnostics qualify a selected capability as `<name>/<preset-path>`.
 
-Custom transports (e.g. `electronUtilityTransport`) are authored with
-`defineRuntimeTransport({ id, clientOptionsSchema?, hostOptionsSchema?, client, host })`.
+The live `capabilities.registrations` manifest is discriminated by role. Kernel entries include their source `extensions`; unknown fields and future capability kinds survive validation, so clients should consume the manifest rather than maintain a parallel extension map.
 
-All transports produce the same `Port<unknown>` so the channel — and
-therefore everything above it — is transport-agnostic. Cross-origin
-isolated pages also receive zero-copy geometry transfers via a
-`SharedArrayBuffer` pool that the transport allocates internally.
+## Authoring a toolkit
 
-## Plugin entry points
+```typescript
+import { definePlugin } from '@taucad/runtime/plugin';
+import { myKernel } from './my-kernel.js';
 
-| Subpath                                | Purpose                                                                                   |
-| -------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `@taucad/runtime`                      | Public client surface, connectors, types, error classes.                                  |
-| `@taucad/runtime/kernels`              | Built-in kernel plugin factories (`replicad`, `openscad`, …).                             |
-| `@taucad/runtime/transcoders`          | Format converters (`converter`, …) injected as plugins.                                   |
-| `@taucad/runtime/transport`            | Author API only: `defineRuntimeTransport`, `runtimeProtocolSchemas`, shared types.        |
-| `@taucad/runtime/transport/in-process` | `inProcessTransport` — same-isolate transport (cross-env).                                |
-| `@taucad/runtime/transport/web`        | `webWorkerTransport` — browser `Worker` host.                                             |
-| `@taucad/runtime/transport/node`       | `nodeWorkerTransport` — `node:worker_threads` host (gated to keep browser bundles clean). |
-| `@taucad/runtime/middleware`           | Built-in middlewares (parameter cache, geometry cache, file resolver).                    |
-| `@taucad/runtime/filesystem`           | `fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, opaque file primitives.                    |
-| `@taucad/runtime/testing`              | `createMockRuntimeClient`, kernel testing utilities.                                      |
-| `@taucad/runtime/node`                 | `createNodeClient` for headless/CLI usage.                                                |
+export const myPlugin = definePlugin({
+  meta: { name: '@scope/my-plugin' },
+  kernels: { default: myKernel },
+  presets: { default: ['kernels.default'] },
+});
 
-## Further reading
+// Package root: the generic name is only the dynamic-loader contract.
+export { myPlugin, myPlugin as plugin } from './my-plugin.js';
+```
 
-- Quick start — `apps/ui/content/docs/runtime/getting-started/quick-start.mdx`
-- Live rendering (autonomous loop, `RenderOutcome`, supersession) — `apps/ui/content/docs/runtime/guides/live-rendering.mdx`
-- Embedding in a host (port bridges, `filePoolBuffer` SAB, deferred FS) — `apps/ui/content/docs/runtime/guides/embedding-in-a-host.mdx`
-- Architecture invariants — `docs/architecture/runtime-topology.md`
-- Per-kernel guides — `apps/ui/content/docs/runtime/`
+Capability backends load in `defineKernel` or `defineTranscoder` `initialize()` and remain in the returned context. Do not cache backend handles at module scope.
+
+Capability `permissions` are declarative metadata for store and host review. The runtime reports them but does not enforce them; confinement remains the host's responsibility.
+
+Published toolkits declare `@taucad/runtime` in `peerDependencies`. Dynamic loaders check that range and warn on mismatches; runtime composition never checks package manifests, and path-loaded modules without one skip the check. Plugin factories and instances also carry the exact `runtimePluginAbiVersion` through frozen `Symbol.for` slots for same-realm duplicate-runtime interop. Those brands do not cross workers; the validated capabilities manifest is the wire contract.
+
+## Public subpaths
+
+| Subpath                                | Purpose                                              |
+| -------------------------------------- | ---------------------------------------------------- |
+| `@taucad/runtime`                      | Runtime client and shared public types               |
+| `@taucad/runtime/client`               | Client API and source/export types                   |
+| `@taucad/runtime/plugin`               | `definePlugin`, derivation helpers, and plugin types |
+| `@taucad/runtime/kernel`               | Kernel authoring API                                 |
+| `@taucad/runtime/middleware`           | Middleware authoring API                             |
+| `@taucad/runtime/bundler`              | Bundler authoring API                                |
+| `@taucad/runtime/transcoder`           | Transcoder authoring API                             |
+| `@taucad/runtime/worker`               | Runtime definitions and worker construction          |
+| `@taucad/runtime/transport/web`        | Browser worker transport and host                    |
+| `@taucad/runtime/transport/node`       | Node worker transport and host                       |
+| `@taucad/runtime/transport/in-process` | Same-isolate transport                               |
+| `@taucad/runtime/filesystem`           | Runtime filesystem adapters                          |
+| `@taucad/runtime/types`                | Runtime-owned public type utilities                  |
+
+Concrete capability barrels and runtime presets are intentionally absent.

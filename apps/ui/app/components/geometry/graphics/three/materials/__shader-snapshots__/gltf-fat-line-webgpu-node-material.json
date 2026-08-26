@@ -3,8 +3,10 @@
   "blending": 0,
   "color": 0,
   "dashSize": 3,
+  "depthWrite": false,
   "gapSize": 1,
   "inputNodes": {},
+  "linewidth": 2,
   "metadata": {
     "generator": "Material.toJSON",
     "type": "Material",

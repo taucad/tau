@@ -15,7 +15,10 @@ import { createRenderer } from '#components/geometry/graphics/three/renderer.js'
 import type { ViewportCadGl } from '#components/geometry/graphics/three/viewport-cad-renderer.js';
 import { isViewportWebGpu } from '#components/geometry/graphics/three/viewport-cad-renderer.js';
 import { calculateFovDistanceCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
-import { computeViewFittingZoom } from '#components/geometry/graphics/three/utils/camera.utils.js';
+import {
+  calculatePositionFromSphericalCoordinates,
+  computeViewFittingZoom,
+} from '#components/geometry/graphics/three/utils/camera.utils.js';
 import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
 import { sceneTag, hasSceneTag, findBySceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
@@ -733,8 +736,8 @@ async function captureScreenshots({
     screenshotScene.environment = null;
     screenshotScene.environmentIntensity = 0;
 
-    // Temporarily hide section-view helpers (cap planes, stencil groups) so they
-    // don't inflate the bounding box — their large plane geometry would push the
+    // Temporarily hide section-view helper geometry so contour fills and diagnostic outlines
+    // don't inflate the bounding box — their generated geometry would push the
     // camera too far away, producing blank screenshots.
     const sectionViewHelpers = findBySceneTag(screenshotScene, sceneTag.sectionViewHelper);
     for (const helper of sectionViewHelpers) {
@@ -767,41 +770,25 @@ async function captureScreenshots({
           defaultStageOptions.offsetRatio * calculateFovDistanceCompensation(standardFov, screenshotFov, 1);
         const distance = geometryRadius * adjustedOffsetRatio;
 
-        const phiRad = (cameraAngle.phi * Math.PI) / 180;
-        const thetaRad = (cameraAngle.theta * Math.PI) / 180;
-
-        const upVector = THREE.Object3D.DEFAULT_UP.clone();
-
-        let ox: number;
-        let oy: number;
-        let oz: number;
-
-        if (upVector.z === 1) {
-          ox = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-          oy = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-          oz = distance * Math.cos(phiRad);
-        } else if (upVector.y === 1) {
-          ox = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-          oz = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-          oy = distance * Math.cos(phiRad);
-        } else {
-          oy = distance * Math.sin(phiRad) * Math.cos(thetaRad);
-          oz = distance * Math.sin(phiRad) * Math.sin(thetaRad);
-          ox = distance * Math.cos(phiRad);
-        }
-
-        screenshotCamera.position.set(geometryCenter.x + ox, geometryCenter.y + oy, geometryCenter.z + oz);
-        screenshotCamera.lookAt(geometryCenter);
-
-        screenshotCamera.zoom = computeViewFittingZoom({
-          cameraPosition: screenshotCamera.position,
-          target: geometryCenter,
-          boundingBox,
-          fovDeg: screenshotFov,
-          aspectRatio: config.aspectRatio,
+        const offset = calculatePositionFromSphericalCoordinates({
+          distance,
+          horizontalAngle: THREE.MathUtils.degToRad(cameraAngle.theta),
+          verticalAngle: Math.PI / 2 - THREE.MathUtils.degToRad(cameraAngle.phi),
+          up: screenshotCamera.up,
         });
+        screenshotCamera.position.copy(geometryCenter).add(offset);
       }
 
+      screenshotCamera.lookAt(geometryCenter);
+      screenshotCamera.zoom = computeViewFittingZoom({
+        cameraPosition: screenshotCamera.position,
+        target: geometryCenter,
+        boundingBox,
+        fovDeg: screenshotCamera.fov,
+        aspectRatio: config.aspectRatio,
+        up: screenshotCamera.up,
+        paddingFactor: 0.9,
+      });
       screenshotCamera.updateProjectionMatrix();
       screenshotCamera.updateMatrixWorld(true);
 

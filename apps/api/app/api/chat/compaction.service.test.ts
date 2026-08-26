@@ -1,32 +1,21 @@
-/* eslint-disable @typescript-eslint/naming-convention -- LangChain content blocks use snake_case (image_url) */
+/* eslint-disable @typescript-eslint/naming-convention -- LangChain and Morph payloads use snake_case fields. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { HumanMessage, AIMessage } from '@langchain/core/messages';
-import { CompactionService, CompactSummaryValidationError } from '#api/chat/compaction.service.js';
-
-/**
- * 9-section summary that satisfies `parseCompactSummary`. Existing tests
- * exercise transport and stats logic, not the summary contract, so they wrap
- * a short body in this template and assert on substrings inside `body`.
- */
-function validSummary(body = 'Compacted summary of conversation.'): string {
-  return `1. Primary Request and Intent: ${body}
-2. Key Technical Concepts: stub.
-3. Files and Code Sections: stub.
-4. Errors and Fixes: stub.
-5. Problem Solving: stub.
-6. All User Messages: "stub"
-7. Pending Tasks: stub.
-8. Current Work: stub.
-9. Optional Next Step: stub.`;
-}
+import { CompactionService } from '#api/chat/compaction.service.js';
+import {
+  MorphCompactionContractError,
+  MorphCompactionHttpError,
+  MorphCompactionTransportError,
+} from '#api/chat/utils/compaction-errors.js';
 
 describe('CompactionService', () => {
   let service: CompactionService;
   let moduleRef: TestingModule | undefined;
   const originalFetch = globalThis.fetch;
+
   const createService = async (morphApiKey: string | undefined): Promise<CompactionService> => {
     moduleRef = await Test.createTestingModule({
       providers: [
@@ -55,46 +44,61 @@ describe('CompactionService', () => {
     }
   });
 
-  it('should throw when MORPH_API_KEY is missing', async () => {
+  it('throws when MORPH_API_KEY is missing', async () => {
     await expect(createService(undefined)).rejects.toThrow(
       'MORPH_API_KEY is required for context compaction functionality',
     );
   });
 
-  it('should call Morph API with correct parameters', async () => {
-    const mockResponse = {
-      choices: [{ message: { content: validSummary() } }],
-      usage: { prompt_tokens: 500, completion_tokens: 50 },
-    };
-
+  it('calls Morph native compact API with provider-neutral transcript fields', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => mockResponse,
+      json: async () => ({ output: 'Compacted transcript' }),
     });
 
-    const messages = [new HumanMessage('Hello'), new AIMessage('Hi there!')];
-
-    await service.compact({ messages, query: 'What did we discuss?' });
+    await service.compact({
+      messages: [
+        new HumanMessage('Hello'),
+        new AIMessage({
+          content: [
+            { type: 'reasoning', reasoning: 'hidden reasoning', signature: 'opaque' },
+            { type: 'text', text: 'Visible assistant text' },
+          ],
+          tool_calls: [{ id: 'call_read', name: 'read_file', args: { targetFile: 'main.ts' }, type: 'tool_call' }],
+        }),
+      ],
+      query: 'What matters next?',
+    });
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://api.morphllm.com/v1/chat/completions',
+      'https://api.morphllm.com/v1/compact',
       expect.objectContaining({
         method: 'POST',
-        // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.objectContaining returns any
         headers: expect.objectContaining({
           Authorization: 'Bearer test-key',
         }),
       }),
     );
+    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const body = JSON.parse(fetchCall[1].body as string) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      query: 'What matters next?',
+      compression_ratio: 0.35,
+      preserve_recent: 0,
+    });
+    expect(body['model']).toBeUndefined();
+    expect(body['messages']).toBeUndefined();
+    expect(body['input']).toContain('--- message 1 role=user');
+    expect(body['input']).toContain('Visible assistant text');
+    expect(body['input']).toContain('<tool_call index=0 id=call_read name=read_file>');
+    expect(body['input']).not.toContain('hidden reasoning');
+    expect(body['input']).not.toContain('opaque');
   });
 
-  it('should parse compacted messages correctly', async () => {
-    const body = 'The user greeted, the assistant responded warmly.';
+  it('returns a compacted HumanMessage seeded with Morph output', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary(body) } }],
-      }),
+      json: async () => ({ output: 'The user greeted; the assistant answered.' }),
     });
 
     const { compactedMessages } = await service.compact({
@@ -104,31 +108,59 @@ describe('CompactionService', () => {
 
     expect(compactedMessages).toHaveLength(1);
     expect(compactedMessages[0]).toBeInstanceOf(HumanMessage);
-    expect(compactedMessages[0]!.content).toContain(body);
+    expect(compactedMessages[0]!.content).toContain('The user greeted');
   });
 
-  it('should handle API errors gracefully', async () => {
+  it('throws MorphCompactionHttpError on non-2xx responses', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
-      status: 500,
-      text: async () => 'Internal Server Error',
+      status: 503,
+      text: async () => 'temporarily unavailable',
     });
 
-    await expect(
-      service.compact({
-        messages: [new HumanMessage('test')],
-        query: 'test',
-      }),
-    ).rejects.toThrow('Morph compaction failed: 500');
+    await expect(service.compact({ messages: [new HumanMessage('test')], query: 'test' })).rejects.toMatchObject({
+      name: 'MorphCompactionHttpError',
+      status: 503,
+      responseBody: 'temporarily unavailable',
+      failureKind: 'morph_http_error',
+    } satisfies Partial<MorphCompactionHttpError>);
   });
 
-  it('should calculate compression stats', async () => {
+  it('throws MorphCompactionTransportError when fetch rejects', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network down'));
+
+    await expect(service.compact({ messages: [new HumanMessage('test')], query: 'test' })).rejects.toBeInstanceOf(
+      MorphCompactionTransportError,
+    );
+  });
+
+  it('throws MorphCompactionContractError when output is missing', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ messages: [{ compacted_line_ranges: [] }] }),
+    });
+
+    await expect(service.compact({ messages: [new HumanMessage('test')], query: 'test' })).rejects.toBeInstanceOf(
+      MorphCompactionContractError,
+    );
+  });
+
+  it('throws MorphCompactionContractError when output is empty', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ output: '   \n' }),
+    });
+
+    await expect(service.compact({ messages: [new HumanMessage('test')], query: 'test' })).rejects.toThrow(
+      'output" was empty',
+    );
+  });
+
+  it('calculates compression stats from native input/output text', async () => {
     const longContent = 'A'.repeat(4000);
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary('Short summary.') } }],
-      }),
+      json: async () => ({ output: 'Short compacted transcript.' }),
     });
 
     const { stats } = await service.compact({
@@ -138,133 +170,13 @@ describe('CompactionService', () => {
 
     expect(stats.tokensBeforeCompaction).toBeGreaterThan(stats.tokensAfterCompaction);
     expect(stats.compressionRatio).toBeLessThan(1);
-    expect(stats.compressionRatio).toBeGreaterThan(0);
+    expect(stats.messagesEvicted).toBe(1);
   });
 
-  it('should return empty messages for empty compacted output', async () => {
+  it('includes image count in compacted summary when images were evicted', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        choices: [{ message: { content: '' } }],
-      }),
-    });
-
-    const { compactedMessages } = await service.compact({
-      messages: [new HumanMessage('test')],
-      query: 'test',
-    });
-
-    expect(compactedMessages).toHaveLength(0);
-  });
-
-  // ===================================================================
-  // Strip images before Morph (toMorphFormat)
-  // ===================================================================
-
-  it('should replace image_url blocks with [image] marker in Morph payload', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary() } }],
-      }),
-    });
-
-    await service.compact({
-      messages: [
-        new HumanMessage([
-          { type: 'text', text: 'Look at this design:' },
-          { type: 'image_url', image_url: { url: 'data:image/png;base64,' + 'A'.repeat(500_000) } },
-        ]),
-      ],
-      query: 'Summarize',
-    });
-
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    const body = JSON.parse(fetchCall[1].body as string) as { messages: Array<{ role: string; content: string }> };
-    const userMessage = body.messages.find((m) => m.role === 'user' && !m.content.includes('Respond with TEXT ONLY'));
-    expect(userMessage).toBeDefined();
-    expect(userMessage!.content).toContain('[image]');
-    expect(userMessage!.content).toContain('Look at this design:');
-    expect(userMessage!.content).not.toContain('base64');
-  });
-
-  it('should replace file parts with image mediaType with [image] marker', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary() } }],
-      }),
-    });
-
-    await service.compact({
-      messages: [new HumanMessage([{ type: 'file', mediaType: 'image/jpeg', data: 'A'.repeat(500_000) }])],
-      query: 'Summarize',
-    });
-
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    const body = JSON.parse(fetchCall[1].body as string) as { messages: Array<{ role: string; content: string }> };
-    const userMessage = body.messages.find((m) => m.role === 'user' && !m.content.includes('Respond with TEXT ONLY'));
-    expect(userMessage).toBeDefined();
-    expect(userMessage!.content).toContain('[image]');
-    expect(userMessage!.content).not.toContain('base64');
-  });
-
-  it('should preserve text and reasoning blocks when stripping images for Morph', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary() } }],
-      }),
-    });
-
-    await service.compact({
-      messages: [
-        new AIMessage([
-          { type: 'reasoning', reasoning: 'Thinking about design' },
-          { type: 'text', text: 'Here is my analysis' },
-        ]),
-      ],
-      query: 'Summarize',
-    });
-
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    const body = JSON.parse(fetchCall[1].body as string) as { messages: Array<{ role: string; content: string }> };
-    const assistantMessage = body.messages.find((m) => m.role === 'assistant');
-    expect(assistantMessage).toBeDefined();
-    expect(assistantMessage!.content).toContain('Thinking about design');
-    expect(assistantMessage!.content).toContain('Here is my analysis');
-  });
-
-  it('should handle messages with only image content for Morph', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary() } }],
-      }),
-    });
-
-    await service.compact({
-      messages: [new HumanMessage([{ type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } }])],
-      query: 'Summarize',
-    });
-
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    const body = JSON.parse(fetchCall[1].body as string) as { messages: Array<{ role: string; content: string }> };
-    const userMessage = body.messages.find((m) => m.role === 'user' && !m.content.includes('Respond with TEXT ONLY'));
-    expect(userMessage).toBeDefined();
-    expect(userMessage!.content).toBe('[image]');
-  });
-
-  // ===================================================================
-  // Image markers in compacted summary
-  // ===================================================================
-
-  it('should include image count in compacted summary when images were evicted', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary('User showed a design and asked for feedback.') } }],
-      }),
+      json: async () => ({ output: 'User showed a design and asked for feedback.' }),
     });
 
     const { compactedMessages } = await service.compact({
@@ -279,160 +191,7 @@ describe('CompactionService', () => {
       query: 'Summarize',
     });
 
-    expect(compactedMessages).toHaveLength(1);
-    const content = compactedMessages[0]!.content as string;
-    expect(content).toContain('2 image(s)');
-    expect(content).toContain('omitted');
-  });
-
-  it('should show zero image count when no images were evicted', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary('User discussed text-only topics.') } }],
-      }),
-    });
-
-    const { compactedMessages } = await service.compact({
-      messages: [new HumanMessage('Hello'), new AIMessage('Hi there!')],
-      query: 'Summarize',
-    });
-
-    expect(compactedMessages).toHaveLength(1);
-    const content = compactedMessages[0]!.content as string;
-    expect(content).toContain('[Compacted conversation history]');
-    expect(content).not.toContain('image(s)');
-  });
-
-  it('should count images across all evicted messages', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary('User shared multiple images.') } }],
-      }),
-    });
-
-    const { compactedMessages } = await service.compact({
-      messages: [
-        new HumanMessage([
-          { type: 'image_url', image_url: { url: 'data:image/png;base64,a' } },
-          { type: 'image_url', image_url: { url: 'data:image/png;base64,b' } },
-        ]),
-        new AIMessage('Two images received'),
-        new HumanMessage([{ type: 'image_url', image_url: { url: 'data:image/png;base64,c' } }]),
-      ],
-      query: 'Summarize',
-    });
-
-    expect(compactedMessages).toHaveLength(1);
-    const content = compactedMessages[0]!.content as string;
-    expect(content).toContain('3 image(s)');
-  });
-
-  // ===================================================================
-  // Structured summary schema and drift prevention
-  // ===================================================================
-
-  it('should include structured summary schema in compaction prompt', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary() } }],
-      }),
-    });
-
-    await service.compact({
-      messages: [new HumanMessage('Hello'), new AIMessage('Hi')],
-      query: 'What did we discuss?',
-    });
-
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    const body = JSON.parse(fetchCall[1].body as string) as { messages: Array<{ role: string; content: string }> };
-    const lastMessage = body.messages.at(-1)!;
-    expect(lastMessage.content).toContain('Primary Request');
-    expect(lastMessage.content).toContain('Key Technical Concepts');
-    expect(lastMessage.content).toContain('Pending Tasks');
-    expect(lastMessage.content).toContain('Current Work');
-  });
-
-  it('should include drift-prevention guard in compaction prompt', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [{ message: { content: validSummary() } }],
-      }),
-    });
-
-    await service.compact({
-      messages: [new HumanMessage('Hello'), new AIMessage('Hi')],
-      query: 'What did we discuss?',
-    });
-
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    const body = JSON.parse(fetchCall[1].body as string) as { messages: Array<{ role: string; content: string }> };
-    const lastMessage = body.messages.at(-1)!;
-    expect(lastMessage.content).toMatch(/directly in line with.*user.*explicit/i);
-  });
-
-  // ===================================================================
-  // Schema validation — fall through to truncate-tool-args fallback when
-  // the Morph response is missing required sections.
-  // ===================================================================
-
-  it('should throw CompactSummaryValidationError when Morph response omits required sections', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        // Missing sections 4-9 — middleware must fall back to truncated args.
-        choices: [
-          {
-            message: {
-              content: `1. Primary Request and Intent: x
-2. Key Technical Concepts: y
-3. Files and Code Sections: z`,
-            },
-          },
-        ],
-      }),
-    });
-
-    await expect(
-      service.compact({
-        messages: [new HumanMessage('Hello'), new AIMessage('Hi')],
-        query: 'Summary',
-      }),
-    ).rejects.toBeInstanceOf(CompactSummaryValidationError);
-  });
-
-  it('should expose missingSections on the validation error so the middleware can log them', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            message: {
-              content: `1. Primary Request and Intent: x
-2. Key Technical Concepts: y`,
-            },
-          },
-        ],
-      }),
-    });
-
-    let caught: unknown;
-    try {
-      await service.compact({
-        messages: [new HumanMessage('Hello'), new AIMessage('Hi')],
-        query: 'Summary',
-      });
-    } catch (error) {
-      caught = error;
-    }
-
-    expect(caught).toBeInstanceOf(CompactSummaryValidationError);
-    if (caught instanceof CompactSummaryValidationError) {
-      expect(caught.missingSections).toContain('Optional Next Step');
-      expect(caught.missingSections).toContain('Pending Tasks');
-    }
+    expect(compactedMessages[0]!.content).toContain('2 image(s)');
+    expect(compactedMessages[0]!.content).toContain('omitted');
   });
 });

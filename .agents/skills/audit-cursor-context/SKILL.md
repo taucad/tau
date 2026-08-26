@@ -56,10 +56,10 @@ If `AGENTS.md` exceeds **8K tokens (≈32KB)**, it is too large. The ceiling mat
 ### Step 4: Inventory skills
 
 ```bash
-ls .agent/skills/
+ls .agents/skills/
 # personal skills
-ls ~/.agent/skills/ 2>/dev/null
-ls ~/.agent/skills-cursor/ 2>/dev/null
+ls ~/.agents/skills/ 2>/dev/null
+ls ~/.agents/skills-cursor/ 2>/dev/null
 ```
 
 Skills are progressive-disclosure — only their frontmatter (`name` + `description`) is loaded until invoked. Each costs ≈50–250 tokens. **Do not** recommend deleting skills to save context; recommend `disable-model-invocation: true` on skills that should only run when explicitly typed (`/skill-name`).
@@ -127,7 +127,7 @@ The agent loads the file only when the user is touching matching paths. Token co
 
 ### Pattern B: Convert a verbose MCP tool description to a skill
 
-If an MCP server ships paragraph-length `serverUseInstructions`, move the detailed playbook into a `.agent/skills/<name>/SKILL.md` and shrink the server-level instructions to ≤50 words pointing at the skill name. Skill bodies load only when the skill is invoked.
+If an MCP server ships paragraph-length `serverUseInstructions`, move the detailed playbook into a `.agents/skills/<name>/SKILL.md` and shrink the server-level instructions to ≤50 words pointing at the skill name. Skill bodies load only when the skill is invoked.
 
 ### Pattern C: Convert an `alwaysApply: true` rule to glob-scoped
 

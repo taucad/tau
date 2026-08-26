@@ -1,0 +1,74 @@
+{
+  "family": "clearance",
+  "fixture": "clearance.bolt-clearance-hole-positive",
+  "generator": {
+    "script": "scripts/clearance/bolt-clearance-hole/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "clearanceMin": 0.1,
+    "clearanceMax": 0.3,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "plate.hole",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 4.2
+      }
+    },
+    {
+      "selector": "bolt.shank",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 4
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "clearance",
+      "subject": "bolt.shank",
+      "target": "plate.hole",
+      "options": {
+        "min": 0.1,
+        "max": 0.3,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0.2
+          }
+        }
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "bolt.shank",
+      "target": "plate.hole",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0
+          }
+        }
+      }
+    }
+  ],
+  "notes": "The bolt shank traverses the full 8 mm plate thickness (z spans [-2, 12] against the plate [0, 8])."
+}

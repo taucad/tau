@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
-import { createRuntimeHost, createRuntimeHostConfig } from '#host/create-runtime-host.js';
+import { createRuntimeHost } from '#host/create-runtime-host.js';
 import type { RuntimeTransportHost, TransportHostReady } from '#transport/runtime-transport.types.js';
 
 type RecordingHost = RuntimeTransportHost & {
@@ -43,9 +43,6 @@ function createRecordingHost(id = 'recording'): RecordingHost {
     }),
     encodeGeometry: vi.fn(() => {
       throw new Error('encodeGeometry not used by createRuntimeHost contract');
-    }),
-    encodeFile: vi.fn(() => {
-      throw new Error('encodeFile not used by createRuntimeHost contract');
     }),
     close: vi.fn(async () => {
       counters.closed += 1;
@@ -93,26 +90,12 @@ describe('createRuntimeHost', () => {
     expect(transport.close).toHaveBeenCalledTimes(1);
   });
 
-  it('accepts optional kernels / bundlers / transcoders / middleware / cache without throwing', () => {
+  it('rejects executable capability arrays on the host config type', () => {
     const transport = createRecordingHost();
-    expect(() => {
-      const host = createRuntimeHost({
-        transport,
-        kernels: [],
-        bundlers: [],
-        transcoders: [],
-        middleware: [],
-        cache: undefined,
-      });
-      host.dispose();
-    }).not.toThrow();
-  });
-});
-
-describe('createRuntimeHostConfig', () => {
-  it('returns the configuration object as-is (identity helper for type-inference)', () => {
-    const transport = createRecordingHost();
-    const config = createRuntimeHostConfig({ transport });
-    expect(config.transport).toBe(transport);
+    createRuntimeHost({
+      transport,
+      // @ts-expect-error -- executable capabilities are declared in `defineRuntime`, not on host config.
+      kernels: [],
+    }).dispose();
   });
 });

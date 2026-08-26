@@ -196,6 +196,24 @@ describe('EagerToolDispatchHandler', () => {
     expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 
+  it('rejects duplicate terminal tool_call ids instead of silently collapsing them', async () => {
+    const runnableBaseline: RunnableConfig = {};
+    const handler = new EagerToolDispatchHandler({ runnableConfigBaseline: runnableBaseline });
+    const invokeMock = vi.fn(async ({ value }: { value: string }): Promise<string> => `ok:${value}`);
+    handler.bindTools([createNoopTool(invokeMock)]);
+    handler.setWriter(vi.fn());
+
+    emitEnd(handler, [
+      { id: 'duplicate_call_id', name: 'noop', args: { value: 'first' }, type: 'tool_call' },
+      { id: 'duplicate_call_id', name: 'noop', args: { value: 'second' }, type: 'tool_call' },
+    ]);
+
+    await settleEntries(handler);
+
+    expect(handler.entries.size).toBe(0);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
   it('records a sealed parse failure then repairs from terminal tool_calls', async () => {
     const runnableBaseline: RunnableConfig = {};
     const handler = new EagerToolDispatchHandler({ runnableConfigBaseline: runnableBaseline });

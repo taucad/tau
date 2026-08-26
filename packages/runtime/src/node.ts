@@ -1,23 +1,38 @@
 import { createRuntimeClient } from '#client/runtime-client.js';
 import type { RuntimeClientOptions, RuntimeClient } from '#client/runtime-client.js';
-import { presets } from '#plugins/presets.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { fromNodeFs } from '#filesystem/from-node-fs.js';
+import type {
+  AnyRuntimeDefinition,
+  RuntimeKernels,
+  RuntimeMiddleware,
+  RuntimeTranscoders,
+} from '#worker/runtime-definition.js';
+
+export { isSafeRelativePath } from '@taucad/utils/path';
+
+type InProcessTransportFor<Runtime extends AnyRuntimeDefinition> = ReturnType<typeof inProcessTransport<Runtime>>;
+
+/** Options for a Node client backed by a custom runtime definition. @public */
+export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyRuntimeDefinition> = Omit<
+  RuntimeClientOptions<Runtime, InProcessTransportFor<Runtime>>,
+  'transport'
+> & {
+  readonly runtime: Runtime;
+};
 
 /**
  * Create a `RuntimeClient` pre-configured for headless Node.js usage.
  *
- * Composes `presets.all()` with the bundled `inProcessTransport` (FS-backed
- * by `fromNodeFs(projectPath)` when supplied, `fromMemoryFs()`
- * otherwise) into a single factory call. The returned client connects
- * on first command.
+ * Composes a caller-owned runtime with `inProcessTransport`, backed by
+ * `fromNodeFs(projectPath)` when supplied or `fromMemoryFs()` otherwise.
  *
- * @param projectPath - Root directory for filesystem-backed rendering. Omit
- *   for inline-`code:` mode; the client provisions an in-memory filesystem
- *   on the first `openFile` / `export({ code })` call.
- * @param options - Override individual client options (kernels, middleware)
+ * @param projectPath - Host filesystem directory exposed to the runtime as `/`. Omit
+ *   for inline-source mode; the client provisions an in-memory filesystem
+ *   on the first `render({ source })` / `export({ source })` call.
+ * @param options - Runtime definition and client options.
  * @returns Configured `RuntimeClient` ready for render and export operations
  *
  * @public
@@ -25,11 +40,15 @@ import { fromNodeFs } from '#filesystem/from-node-fs.js';
  * @example <caption>Inline-code export (no projectPath, auto-connect)</caption>
  * ```typescript
  * import { createNodeClient } from '@taucad/runtime/node';
+ * import { defineRuntime } from '@taucad/runtime/worker';
+ * import type { AnyPluginInstance } from '@taucad/runtime/plugin';
  *
- * const client = await createNodeClient();
+ * declare const kernelPlugin: AnyPluginInstance;
+ * declare const bundlerPlugin: AnyPluginInstance;
+ * const runtime = defineRuntime({ plugins: [kernelPlugin, bundlerPlugin] });
+ * const client = await createNodeClient(undefined, { runtime });
  * const result = await client.export('glb', {
- *   code: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);' },
- *   file: 'main.ts',
+ *   source: { files: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);' } },
  * });
  * client.terminate();
  * ```
@@ -37,22 +56,36 @@ import { fromNodeFs } from '#filesystem/from-node-fs.js';
  * @example <caption>Export a file from disk (filesystem-backed)</caption>
  * ```typescript
  * import { createNodeClient } from '@taucad/runtime/node';
+ * import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
  *
- * const client = await createNodeClient('/path/to/project');
- * const result = await client.export('glb', { file: 'main.ts' });
+ * declare const runtime: AnyRuntimeDefinition;
+ * const client = await createNodeClient('/path/to/project', { runtime });
+ * const result = await client.export('glb', { source: { path: 'main.ts' } });
  * client.terminate();
  * ```
  */
-export async function createNodeClient(
-  projectPath?: string,
-  options?: Partial<Omit<RuntimeClientOptions, 'transport'>>,
-): Promise<RuntimeClient> {
+export async function createNodeClient<const Runtime extends AnyRuntimeDefinition>(
+  projectPath: string | undefined,
+  options: NodeRuntimeClientOptions<Runtime>,
+): Promise<
+  RuntimeClient<
+    RuntimeKernels<Runtime>,
+    RuntimeMiddleware<Runtime>,
+    RuntimeTranscoders<Runtime>,
+    InProcessTransportFor<Runtime>
+  >
+> {
   const fileSystem: RuntimeFileSystem = projectPath ? fromNodeFs(projectPath) : fromMemoryFs();
-  const transport = inProcessTransport({ fileSystem });
+  const { runtime, ...clientOptions } = options;
+  const transport = inProcessTransport({ runtime, fileSystem });
 
   return createRuntimeClient({
-    ...presets.all(),
-    ...options,
+    ...clientOptions,
     transport,
-  });
+  } as RuntimeClientOptions<Runtime, typeof transport>) as RuntimeClient<
+    RuntimeKernels<Runtime>,
+    RuntimeMiddleware<Runtime>,
+    RuntimeTranscoders<Runtime>,
+    InProcessTransportFor<Runtime>
+  >;
 }

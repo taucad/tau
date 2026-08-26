@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { deflateSync } from 'node:zlib';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { RpcGraphicsClient } from '@taucad/chat/rpc';
+import type { RpcImageClient } from '@taucad/chat/rpc';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
 import { expectNoErrors, expectHasTextContent, expectToolCallSucceeded } from '#testing/stream-assertions.js';
 import { createTestApp } from '#testing/create-test-app.js';
@@ -135,36 +135,15 @@ describe.skipIf(requiresEnv('OPENAI_API_KEY'))('OpenAI screenshot vision (live)'
   let testApp: TestApp;
 
   beforeAll(async () => {
-    const graphicsStub: RpcGraphicsClient = {
-      async captureScreenshot() {
+    const imagesStub: RpcImageClient = {
+      async captureImages() {
         return {
           success: true,
-          images: [{ view: 'current', dataUrl: fixtureDataUrl }],
-        };
-      },
-      async captureObservations() {
-        return {
-          success: false,
-          errorCode: 'IO_ERROR',
-          message: 'captureObservations is unused in this scenario',
-        };
-      },
-      async fetchGeometry() {
-        return {
-          success: false,
-          errorCode: 'IO_ERROR',
-          message: 'fetchGeometry is unused in this scenario',
-        };
-      },
-      async exportGeometry() {
-        return {
-          success: false,
-          errorCode: 'IO_ERROR',
-          message: 'exportGeometry is unused in this scenario',
+          images: [{ view: 'isometric', dataUrl: fixtureDataUrl }],
         };
       },
     };
-    testApp = await createTestApp({ graphicsStub });
+    testApp = await createTestApp({ imagesStub });
   }, 30_000);
 
   afterAll(async () => {

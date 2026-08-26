@@ -26,7 +26,7 @@ import { invokeWrapToolCall } from '#testing/middleware-testing.utils.js';
 /** Returns a synthetic grep result mirroring the shape of `handle-grep.ts`. */
 const buildGrepResult = (matchCount: number, lineLength: number): string => {
   const matches = Array.from({ length: matchCount }, (_, index) => ({
-    file: 'node_modules/opencascade.js/index.d.ts',
+    file: 'node_modules/libcascade/index.d.ts',
     line: 50_000 + index,
     content: 'X'.repeat(lineLength),
   }));
@@ -73,7 +73,7 @@ describe('tool-offloading inverted regression locks (involute-gear transcript re
     };
   });
 
-  it('FIXED: a 100-match grep on a dense .d.ts (≈30 KB) is now persisted to .tau/tool-results/', async () => {
+  it('FIXED: a 100-match grep on a dense .d.ts (≈30 KB) is now persisted to /.tau/tool-results/', async () => {
     const middleware = createToolOffloadingMiddleware(rpcBackendFactory, metricsService);
     const rawGrepResult = buildGrepResult(100, 300);
     const grepResult = toolResult('grep-call-1', toolName.grep, rawGrepResult);
@@ -90,11 +90,11 @@ describe('tool-offloading inverted regression locks (involute-gear transcript re
 
     expect(result).not.toBe(grepResult);
     expect((result as ToolMessage).content).toContain('<persisted-output>');
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-involute/grep-call-1.json', rawGrepResult);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-involute/grep-call-1.json', rawGrepResult);
     expect(chatToolResultOffloadedAdd).toHaveBeenCalledTimes(1);
   });
 
-  it('FIXED: a 230-line dense .d.ts read_file (≈80 KB+) is persisted to .tau/tool-results/', async () => {
+  it('FIXED: a 230-line dense .d.ts read_file (≈80 KB+) is persisted to /.tau/tool-results/', async () => {
     const middleware = createToolOffloadingMiddleware(rpcBackendFactory, metricsService);
     const rawReadResult = buildReadFileResult(2000, 80, 109_330);
     const readResult = toolResult('read-call-1', toolName.readFile, rawReadResult);
@@ -106,7 +106,7 @@ describe('tool-offloading inverted regression locks (involute-gear transcript re
         toolCall: {
           name: toolName.readFile,
           id: 'read-call-1',
-          args: { targetFile: 'node_modules/opencascade.js/index.d.ts', offset: 109_330, limit: 2000 },
+          args: { targetFile: 'node_modules/libcascade/index.d.ts', offset: 109_330, limit: 2000 },
         },
         runtime: { context: { chatId: 'chat-involute' } },
       },
@@ -115,7 +115,7 @@ describe('tool-offloading inverted regression locks (involute-gear transcript re
 
     expect(result).not.toBe(readResult);
     expect((result as ToolMessage).content).toContain('<persisted-output>');
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-involute/read-call-1.txt', rawReadResult);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-involute/read-call-1.txt', rawReadResult);
     expect(chatToolResultOffloadedAdd).toHaveBeenCalledTimes(1);
   });
 
@@ -242,7 +242,7 @@ describe('Phase 1 — filesystem offload with one generic envelope', () => {
     expect(content).toContain('persisted');
   });
 
-  it('persisted file path uses .tau/tool-results/<chatId>/<toolCallId>.{json,txt} (claude-code session-scoped layout)', async () => {
+  it('persisted file path uses /.tau/tool-results/<chatId>/<toolCallId>.{json,txt} (claude-code session-scoped layout)', async () => {
     const middleware = createToolOffloadingMiddleware(rpcBackendFactory, metricsService, {
       perToolMaxCharsOverride: { [toolName.readFile]: 50, [toolName.grep]: 50 },
     });
@@ -256,7 +256,7 @@ describe('Phase 1 — filesystem offload with one generic envelope', () => {
       },
       vi.fn().mockResolvedValue(toolResult('tc-json', toolName.grep, jsonContent)),
     );
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-a/tc-json.json', jsonContent);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-a/tc-json.json', jsonContent);
 
     mockBackend.write.mockClear();
 
@@ -269,7 +269,7 @@ describe('Phase 1 — filesystem offload with one generic envelope', () => {
       },
       vi.fn().mockResolvedValue(toolResult('tc-txt', toolName.readFile, textContent)),
     );
-    expect(mockBackend.write).toHaveBeenCalledWith('.tau/tool-results/chat-a/tc-txt.txt', textContent);
+    expect(mockBackend.write).toHaveBeenCalledWith('/.tau/tool-results/chat-a/tc-txt.txt', textContent);
   });
 
   it('emits chat.tool_result.offloads telemetry counter with tool/byte/token attributes', async () => {

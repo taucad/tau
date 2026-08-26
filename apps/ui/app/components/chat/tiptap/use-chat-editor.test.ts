@@ -2,10 +2,17 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useChatEditor, extractContent, buildEditorContentJson } from '#components/chat/tiptap/use-chat-editor.js';
 import type { UseChatEditorOptions } from '#components/chat/tiptap/use-chat-editor.js';
+import { defaultCommands } from '#components/chat/tiptap/slash-command-suggestion.js';
 import type { PastedContentSegment } from '#utils/at-reference.utils.js';
 import { buildPastedContent } from '#utils/at-reference.utils.js';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
+
+Object.defineProperty(document, 'elementFromPoint', {
+  configurable: true,
+  value: () => document.body,
+});
 
 function createMockTreeService(fileTree: Map<string, FileEntry>): FileTreeService {
   return {
@@ -25,6 +32,57 @@ function createDefaultOptions(overrides?: Partial<UseChatEditorOptions>): UseCha
 }
 
 describe('useChatEditor', () => {
+  it('should register /compress as a disabled default slash command', () => {
+    expect(defaultCommands).toEqual([
+      expect.objectContaining({
+        id: 'compress',
+        label: '/compress',
+        enabled: false,
+      }),
+    ]);
+  });
+
+  it('should hide disabled slash commands while showing enabled skill suggestions', async () => {
+    const { result } = renderHook(() =>
+      useChatEditor(
+        createDefaultOptions({
+          slashCommandItems: [
+            {
+              id: 'create-skill',
+              label: '/create-skill',
+              title: 'Create Skill',
+              description: 'Create or update a skill',
+              group: 'Skills',
+              source: 'system',
+            },
+            {
+              id: 'hidden-skill',
+              label: '/hidden-skill',
+              title: 'Hidden Skill',
+              description: 'Do not show this skill',
+              group: 'Skills',
+              source: 'system',
+              enabled: false,
+            },
+          ],
+        }),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+
+    act(() => {
+      result.current.editor!.commands.focus();
+      result.current.editor!.commands.insertContent('design this /');
+    });
+
+    await waitFor(() => {
+      expect(result.current.slashCommandState?.items.map((item) => item.id)).toEqual(['create-skill']);
+    });
+  });
+
   describe('editor initialization', () => {
     it('should create a non-null editor', async () => {
       const { result } = renderHook(() => useChatEditor(createDefaultOptions()));
@@ -277,90 +335,100 @@ describe('useChatEditor', () => {
 
 const createFileTree = (entries: Array<[string, Partial<FileEntry>]>): Map<string, FileEntry> =>
   new Map(
-    entries.map(([path, partial]) => [
-      path,
-      {
-        path,
-        name: partial.name ?? path.split('/').pop()!,
-        type: partial.type ?? 'file',
-        size: 0,
-        isLoaded: true,
-        mtimeMs: 0,
-      },
-    ]),
+    entries.map(([path, partial]) => {
+      const name = partial.name ?? path.split('/').pop()!;
+      const size = partial.size ?? 0;
+      const isLoaded = partial.isLoaded ?? true;
+      const mtimeMs = partial.mtimeMs ?? 0;
+      const entry: FileEntry =
+        partial.type === 'dir'
+          ? { path, name, type: 'dir', size, isLoaded, mtimeMs }
+          : {
+              path,
+              name,
+              type: 'file',
+              size,
+              isLoaded,
+              mtimeMs,
+              contentKind: 'text',
+              lineCount: (partial as Partial<Extract<FileEntry, { type: 'file' }>>).lineCount ?? 1,
+            };
+      return [path, entry] as const;
+    }),
   );
 
-describe('useChatEditor — image paste dispatches raw data URL', () => {
+const createTextPasteEvent = (text: string): ClipboardEvent => {
+  const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  const clipboardData: Pick<DataTransfer, 'getData'> = {
+    getData: (type: string) => (type === 'text/plain' ? text : ''),
+  };
+  Object.defineProperty(event, 'clipboardData', {
+    value: clipboardData,
+  });
+  return event;
+};
+
+describe('useChatEditor — image paste delegation', () => {
   /**
-   * Tiptap paste used to call `resizeImageForChat` and silently swallow
-   * rejection paths. The chokepoint now lives in the draft machine, so the
-   * editor's `handlePaste` MUST forward the raw data URL into `onImagePaste`
-   * without any pre-processing. If we re-introduce inline resizing here we
-   * both lose the chokepoint contract and re-open the silent failure mode.
+   * Tiptap paste used to read image files itself, which caused desktop and
+   * mobile paste to drift and limited multi-image clipboards to the first
+   * image. The editor now delegates image paste events to the shared chat
+   * paste handler and keeps only the structured-text fallback locally.
    */
-  it('should forward the raw FileReader data URL to onImagePaste (no inline resize)', async () => {
-    const onImagePaste = vi.fn();
-    const { result } = renderHook(() => useChatEditor(createDefaultOptions({ onImagePaste })));
+  it('should delegate image paste events before running the structured text fallback', async () => {
+    const handleImagePaste = vi.fn<(event: ClipboardPasteEvent) => boolean>(() => true);
+    const { result } = renderHook(() => useChatEditor(createDefaultOptions({ handleImagePaste })));
 
     await waitFor(() => {
       expect(result.current.editor).not.toBeNull();
     });
 
     const editor = result.current.editor!;
-    const rawDataUrl = `data:image/png;base64,${'A'.repeat(2_000_000)}`;
 
     act(() => {
       editor.commands.focus();
     });
 
     const file = new File([new Blob(['stub'])], 'pasted.png', { type: 'image/png' });
-    const items = [
-      {
-        type: 'image/png',
-        getAsFile: () => file,
-      },
-    ];
-    const clipboardData = {
+    const item: DataTransferItem = {
+      kind: 'file',
+      type: 'image/png',
+      getAsFile: () => file,
+      getAsString: () => undefined,
+      webkitGetAsEntry: () => null,
+    };
+    const itemArray = [item];
+    const items = Object.assign(itemArray, {
+      add: () => null,
+      clear: () => undefined,
+      item: (index: number) => itemArray[index] ?? null,
+      remove: () => undefined,
+    }) as DataTransferItemList;
+    const fileArray = [file];
+    const files = Object.assign(fileArray, {
+      item: (index: number) => fileArray[index] ?? null,
+    }) as FileList;
+    const clipboardData: DataTransfer = {
+      dropEffect: 'none',
+      effectAllowed: 'none',
       items,
       types: ['Files'],
-      files: [file],
-      getData: () => '',
-    } as unknown as DataTransfer;
+      files,
+      clearData: () => undefined,
+      getData: (type: string) => (type === 'text/plain' ? '@main.ts' : ''),
+      setData: () => undefined,
+      setDragImage: () => undefined,
+    };
     const event = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(event, 'clipboardData', { value: clipboardData });
 
-    const originalFileReader = globalThis.FileReader;
-    class StubReader {
-      public result: string | undefined = undefined;
-      private readonly listeners = new Map<string, Array<(event: unknown) => void>>();
-      public addEventListener(name: string, listener: (event: unknown) => void) {
-        const list = this.listeners.get(name) ?? [];
-        list.push(listener);
-        this.listeners.set(name, list);
-      }
-      // oxlint-disable-next-line no-empty-function -- jsdom FileReader stub satisfies interface but has no teardown semantics
-      public removeEventListener(): void {}
-      public readAsDataURL() {
-        queueMicrotask(() => {
-          this.result = rawDataUrl;
-          for (const listener of this.listeners.get('load') ?? []) {
-            listener({ target: { result: rawDataUrl } });
-          }
-        });
-      }
-    }
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- jsdom FileReader stub
-    globalThis.FileReader = StubReader as unknown as typeof FileReader;
+    editor.view.dom.dispatchEvent(event);
 
-    try {
-      editor.view.dom.dispatchEvent(event);
-      await waitFor(() => {
-        expect(onImagePaste).toHaveBeenCalledOnce();
-      });
-      expect(onImagePaste).toHaveBeenCalledWith(rawDataUrl);
-    } finally {
-      globalThis.FileReader = originalFileReader;
-    }
+    expect(handleImagePaste).toHaveBeenCalledOnce();
+    const delegatedEvent = handleImagePaste.mock.calls[0]?.[0];
+    expect(delegatedEvent?.clipboardData).toBe(clipboardData);
+    expect(typeof delegatedEvent?.preventDefault).toBe('function');
+    expect(extractContent(editor)).toEqual({ text: '', contextChips: [] });
   });
 });
 
@@ -391,6 +459,72 @@ describe('buildEditorContentJson', () => {
           ],
         },
       ],
+    });
+  });
+
+  it('should preserve geometry chip structured attrs and @cad serialization', async () => {
+    const geometryReference = JSON.stringify({
+      scheme: 'tau-cad',
+      filePath: 'main.ts',
+      componentId: 'component:sun_gear',
+      selector: '/nodes/0',
+      label: 'Sun Gear',
+      kind: 'part',
+    });
+    const segments: PastedContentSegment[] = [
+      { type: 'text', value: 'Inspect ' },
+      {
+        type: 'chip',
+        id: 'main.ts#component:sun_gear',
+        label: 'Sun Gear',
+        chipType: 'geometry',
+        path: 'main.ts',
+        referenceToken: '@cad[main.ts#component:sun_gear]',
+        geometryReference,
+      },
+    ];
+    const result = buildEditorContentJson(segments);
+    expect(result).toEqual({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Inspect ' },
+            {
+              type: 'contextChip',
+              attrs: {
+                id: 'main.ts#component:sun_gear',
+                label: 'Sun Gear',
+                chipType: 'geometry',
+                path: 'main.ts',
+                referenceToken: '@cad[main.ts#component:sun_gear]',
+                geometryReference,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const { result: hookResult } = renderHook(() => useChatEditor(createDefaultOptions()));
+    await waitFor(() => {
+      expect(hookResult.current.editor).not.toBeNull();
+    });
+
+    act(() => {
+      hookResult.current.editor!.commands.setContent(result!);
+    });
+
+    const content = extractContent(hookResult.current.editor!);
+    expect(content.text).toBe('Inspect @cad[main.ts#component:sun_gear]');
+    expect(content.contextChips[0]).toEqual({
+      id: 'main.ts#component:sun_gear',
+      label: 'Sun Gear',
+      chipType: 'geometry',
+      path: 'main.ts',
+      referenceToken: '@cad[main.ts#component:sun_gear]',
+      geometryReference,
     });
   });
 
@@ -549,6 +683,101 @@ describe('draft content restoration with chip rehydration', () => {
     expect(content.contextChips[0]?.label).toBe('/create-policy');
     expect(content.contextChips[0]?.path).toBeUndefined();
     expect(content.text).toBe('/create-policy');
+  });
+
+  it('should rehydrate catalog-backed slash skills without relying on static defaults', async () => {
+    const knownSkills = new Set(['woodworking']);
+    const draftText = '/woodworking make this joinery manufacturable';
+    const segments = buildPastedContent(draftText, { fileTree: new Map(), chats: [], knownSkills });
+    const json = buildEditorContentJson(segments);
+
+    expect(json).toBeDefined();
+
+    const { result } = renderHook(() =>
+      useChatEditor(
+        createDefaultOptions({
+          slashCommandItems: [
+            {
+              id: 'woodworking',
+              label: '/woodworking',
+              title: 'Woodworking',
+              description: 'Design for woodworking',
+              group: 'Skills',
+              source: 'tau-store',
+            },
+          ],
+        }),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+
+    const editor = result.current.editor!;
+
+    act(() => {
+      editor.commands.setContent(json!);
+    });
+
+    const content = extractContent(editor);
+    expect(content.contextChips).toHaveLength(1);
+    expect(content.contextChips[0]).toEqual(
+      expect.objectContaining({
+        id: 'woodworking',
+        label: '/woodworking',
+        chipType: 'skill',
+      }),
+    );
+    expect(content.text).toBe('/woodworking make this joinery manufacturable');
+  });
+
+  it('should not rehydrate disabled slash items from pasted text', async () => {
+    const { result } = renderHook(() =>
+      useChatEditor(
+        createDefaultOptions({
+          slashCommandItems: [
+            {
+              id: 'visible-skill',
+              label: '/visible-skill',
+              title: 'Visible Skill',
+              description: 'Visible skill',
+              group: 'Skills',
+            },
+            {
+              id: 'hidden-skill',
+              label: '/hidden-skill',
+              title: 'Hidden Skill',
+              description: 'Hidden skill',
+              group: 'Skills',
+              enabled: false,
+            },
+          ],
+        }),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(result.current.editor).not.toBeNull();
+    });
+
+    const editor = result.current.editor!;
+
+    await act(async () => {
+      editor.commands.focus();
+      editor.view.dom.dispatchEvent(createTextPasteEvent('/visible-skill /hidden-skill'));
+    });
+
+    const content = extractContent(editor);
+    expect(content.contextChips).toHaveLength(1);
+    expect(content.contextChips[0]).toEqual(
+      expect.objectContaining({
+        id: 'visible-skill',
+        label: '/visible-skill',
+        chipType: 'skill',
+      }),
+    );
+    expect(content.text).toBe('/visible-skill /hidden-skill');
   });
 
   it('should produce skill chip without path in buildEditorContentJson', () => {

@@ -10,36 +10,6 @@
 import type { RuntimeHostConfig, RuntimeHostHandle } from '#host/runtime-host.types.js';
 
 /**
- * Identity helper that returns the supplied {@link RuntimeHostConfig}
- * untouched. Useful when authoring host configs in a separate module
- * so call sites get full intellisense without importing the
- * `RuntimeHostConfig` type explicitly.
- *
- * @param config - The host configuration.
- * @returns The same configuration object, typed.
- *
- * @public
- *
- * @example <caption>Author host config separately from the host bootstrap</caption>
- * ```typescript
- * import { createRuntimeHostConfig } from '@taucad/runtime/host';
- * import type { RuntimeTransportHost } from '@taucad/runtime/transport';
- * import type { RuntimeProtocol } from '@taucad/runtime/types';
- *
- * declare const transport: RuntimeTransportHost<
- *   RuntimeProtocol,
- *   Readonly<Record<string, never>>,
- *   string
- * >;
- *
- * export const hostConfig = createRuntimeHostConfig({ transport });
- * ```
- */
-export function createRuntimeHostConfig(config: RuntimeHostConfig): RuntimeHostConfig {
-  return config;
-}
-
-/**
  * Create a runtime host bound to the supplied transport.
  *
  * @param config - {@link RuntimeHostConfig}.
@@ -50,7 +20,7 @@ export function createRuntimeHostConfig(config: RuntimeHostConfig): RuntimeHostC
  *
  * @example <caption>Dispose a runtime host created from a prebuilt transport</caption>
  * ```typescript
- * import { createRuntimeHost } from '@taucad/runtime/host';
+ * import { createRuntimeHost } from './create-runtime-host.js';
  * import type { RuntimeTransportHost } from '@taucad/runtime/transport';
  * import type { RuntimeProtocol } from '@taucad/runtime/types';
  *

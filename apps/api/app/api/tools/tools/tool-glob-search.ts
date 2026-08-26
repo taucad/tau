@@ -47,8 +47,11 @@ export const globSearchTool: ChatTool<
   });
 
   // Return success output
+  const { entries, files, totalFiles } = result;
+
   return {
-    files: result.files,
-    totalFiles: result.totalFiles,
+    entries,
+    files,
+    totalFiles,
   };
 }, globSearchToolDefinition);

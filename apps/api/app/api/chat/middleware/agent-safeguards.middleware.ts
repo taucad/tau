@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createMiddleware } from 'langchain';
 import type { AgentMiddleware } from 'langchain';
-import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { toolName } from '@taucad/chat/constants';
@@ -10,6 +10,7 @@ import type { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import type { ModelService } from '#api/models/model.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 import { appendTranscriptLine } from '#api/chat/middleware/transcript.middleware.js';
+import { createTauInternalHumanMessage } from '#api/chat/utils/tau-internal-message.js';
 
 // =============================================================================
 // Public types
@@ -33,6 +34,22 @@ export const anomalyPattern = {
 
 export type AnomalyPattern = (typeof anomalyPattern)[keyof typeof anomalyPattern];
 
+export type UnknownArgsReason = 'missing-tool-call' | 'duplicate-tool-call-id' | 'orphan-tool-message';
+
+export type SafeguardEvidence = {
+  argsKnown: boolean;
+  unknownArgsReason?: UnknownArgsReason;
+  toolNames: string[];
+  eventCount: number;
+  eventIndexes: number[];
+};
+
+export type TestModelVerificationSummary = {
+  outcome: 'passed' | 'failed';
+  files: string[];
+  coversAll: boolean;
+};
+
 /**
  * Compact summary of one tool round-trip (`AIMessage(tool_call)` paired with
  * its `ToolMessage` result). Detectors operate exclusively on these summaries
@@ -42,10 +59,14 @@ export type ToolEventSummary = {
   /** Position of the `ToolMessage` in `state.messages`. */
   index: number;
   toolName: string;
+  /** True only when this result was paired to trusted model-emitted tool-call args. */
+  argsKnown: boolean;
   /** First 16 hex chars of `sha256(canonicalJson(args))`. */
-  argsHash: string;
+  argsHash?: string;
   /** Stable preview of args (≤80 chars, single line) for reminder text. */
-  argsPreview: string;
+  argsPreview?: string;
+  /** Why args were unavailable or untrusted. */
+  unknownArgsReason?: UnknownArgsReason;
   /** Set when the tool returned a structured `ToolExecutionError`. */
   errorCode?: string;
   /** First 16 hex chars of `sha256(errorCode + ':' + message)`. */
@@ -56,13 +77,15 @@ export type ToolEventSummary = {
   isError: boolean;
   /** True when this tool call returned a recognised "no results" success shape (AP5). */
   isEmptyResult: boolean;
-  /** True for tools that mutate the user's filesystem (`edit_file` / `create_file` / `delete_file` / `edit_tests`). */
+  /** True for tools that mutate the user's filesystem (`edit_file` / `create_file` / `delete_file`). */
   isMutation: boolean;
   /**
    * Optional `targetFile` extracted from args when the tool operates on a single
    * file (used by AP3 to track per-file thrash without an intervening kernel flip).
    */
   targetFile?: string;
+  /** Parsed structured verification signal for `test_model` results. */
+  verification?: TestModelVerificationSummary;
 };
 
 /**
@@ -81,12 +104,14 @@ export type Detection =
       pattern: AnomalyPattern;
       reminder: string;
       signature: string;
+      evidence: SafeguardEvidence;
     }
   | {
       kind: 'terminate';
       pattern: AnomalyPattern;
       reason: string;
       signature: string;
+      evidence: SafeguardEvidence;
     };
 
 /**
@@ -107,7 +132,6 @@ export type ThresholdConfig = {
   perTargetEdit: number;
   pingPongCycles: number;
   emptyResult: number;
-  noForwardProgress: number;
   sameErrorDifferentArgsCount: number;
   sameErrorDifferentArgsWindow: number;
   sameErrorDifferentArgsDistinctArgs: number;
@@ -125,7 +149,6 @@ export const defaultThresholds: ThresholdConfig = {
   perTargetEdit: 5,
   pingPongCycles: 2,
   emptyResult: 3,
-  noForwardProgress: 8,
   sameErrorDifferentArgsCount: 5,
   sameErrorDifferentArgsWindow: 8,
   sameErrorDifferentArgsDistinctArgs: 2,
@@ -181,12 +204,7 @@ export const errorHash = (message: string, errorCode?: string): string => sha256
 // Message → ToolEventSummary projection
 // =============================================================================
 
-const mutationToolNames = new Set<string>([
-  toolName.editFile,
-  toolName.createFile,
-  toolName.deleteFile,
-  toolName.editTests,
-]);
+const mutationToolNames = new Set<string>([toolName.editFile, toolName.createFile, toolName.deleteFile]);
 
 const targetFileTools = new Set<string>([
   toolName.editFile,
@@ -196,7 +214,6 @@ const targetFileTools = new Set<string>([
   toolName.getKernelResult,
   toolName.exportGeometry,
   toolName.screenshot,
-  toolName.editTests,
   toolName.testModel,
 ]);
 
@@ -210,17 +227,23 @@ const messageContent = (message: BaseMessage): string =>
 
 type ParsedToolError = { errorCode?: string; message?: string };
 
-const parseToolError = (content: string): ParsedToolError | undefined => {
+const parseJsonRecord = (content: string): Record<string, unknown> | undefined => {
   try {
     const parsed: unknown = JSON.parse(content);
-    if (parsed !== null && typeof parsed === 'object' && 'errorCode' in parsed) {
-      const record = parsed as Record<string, unknown>;
-      const errorCode = typeof record['errorCode'] === 'string' ? record['errorCode'] : undefined;
-      const message = typeof record['message'] === 'string' ? record['message'] : undefined;
-      return { errorCode, message };
-    }
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
   } catch {
-    // Not JSON; treated as opaque error text below.
+    return undefined;
+  }
+};
+
+const parseToolError = (content: string): ParsedToolError | undefined => {
+  const record = parseJsonRecord(content);
+  if (record && 'errorCode' in record) {
+    const errorCode = typeof record['errorCode'] === 'string' ? record['errorCode'] : undefined;
+    const message = typeof record['message'] === 'string' ? record['message'] : undefined;
+    return { errorCode, message };
   }
   return undefined;
 };
@@ -256,30 +279,118 @@ const isEmptyResultPayload = (toolNameValue: string, content: string): boolean =
   return false;
 };
 
-const extractTargetFile = (args: Record<string, unknown> | undefined): string | undefined => {
+const toStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+
+const uniqueStrings = (values: string[]): string[] => [...new Set(values)];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const extractTestModelVerification = (input: {
+  toolNameValue: string;
+  args: unknown;
+  content: string;
+  isStatusError: boolean;
+}): TestModelVerificationSummary | undefined => {
+  const { toolNameValue, args, content, isStatusError } = input;
+  if (toolNameValue !== toolName.testModel || isStatusError || !isRecord(args)) {
+    return undefined;
+  }
+
+  const record = parseJsonRecord(content);
+  if (!record) {
+    return undefined;
+  }
+
+  const failures = Array.isArray(record['failures']) ? record['failures'] : undefined;
+  const passed = typeof record['passed'] === 'number' ? record['passed'] : undefined;
+  const total = typeof record['total'] === 'number' ? record['total'] : undefined;
+  const explicitSuccess = typeof record['success'] === 'boolean' ? record['success'] : undefined;
+  const failed =
+    explicitSuccess === false ||
+    (failures !== undefined && failures.length > 0) ||
+    (passed !== undefined && total !== undefined && passed < total);
+  const succeeded =
+    explicitSuccess === true ||
+    (passed !== undefined && total !== undefined && total > 0 && passed === total && failures?.length === 0);
+
+  if (!succeeded && !failed) {
+    return undefined;
+  }
+
+  const files = uniqueStrings([
+    ...toStringArray(args['files']),
+    ...toStringArray(record['files']),
+    ...(typeof args['targetFile'] === 'string' ? [args['targetFile']] : []),
+  ]);
+
+  return {
+    outcome: failed ? 'failed' : 'passed',
+    files,
+    coversAll: files.length === 0,
+  };
+};
+
+export const extractTargetFile = (args: Record<string, unknown> | undefined): string | undefined => {
   if (!args) {
     return undefined;
   }
   const candidate =
     args['targetFile'] ?? args['path'] ?? args['filePath'] ?? args['filepath'] ?? args['file'] ?? args['target'];
-  return typeof candidate === 'string' ? candidate : undefined;
+  if (typeof candidate === 'string') {
+    return candidate;
+  }
+  // `test_model` (testModelInputSchema) targets files via a `files: string[]` arg — track the first entry.
+  const { files } = args;
+  if (Array.isArray(files) && typeof files[0] === 'string') {
+    return files[0];
+  }
+  return undefined;
 };
 
-type ToolCallInfo = { name: string; args: Record<string, unknown> | undefined };
+type ToolCallInfo = { name: string; args: unknown };
 
-const indexToolCalls = (messages: BaseMessage[]): Map<string, ToolCallInfo> => {
-  const toolCallById = new Map<string, ToolCallInfo>();
-  for (const message of messages) {
-    if (!(message instanceof AIMessage) || !message.tool_calls) {
+type ToolCallLike = {
+  id?: string;
+  name: string;
+  args: unknown;
+};
+
+type ToolRound = {
+  calls: Map<string, ToolCallInfo>;
+  unknownArgsReason?: UnknownArgsReason;
+};
+
+const toolRoundForAiMessage = (message: { tool_calls?: readonly ToolCallLike[] }): ToolRound => {
+  const calls = message.tool_calls ?? [];
+  const seen = new Set<string>();
+  let unknownArgsReason: UnknownArgsReason | undefined;
+
+  for (const call of calls) {
+    const id = call.id?.trim();
+    if (!id) {
+      unknownArgsReason ??= 'missing-tool-call';
       continue;
     }
-    for (const call of message.tool_calls) {
-      if (call.id) {
-        toolCallById.set(call.id, { name: call.name, args: call.args });
-      }
+    if (seen.has(id)) {
+      unknownArgsReason ??= 'duplicate-tool-call-id';
+      continue;
+    }
+    seen.add(id);
+  }
+
+  if (unknownArgsReason) {
+    return { calls: new Map(), unknownArgsReason };
+  }
+
+  const roundCalls = new Map<string, ToolCallInfo>();
+  for (const call of calls) {
+    if (call.id) {
+      roundCalls.set(call.id, { name: call.name, args: call.args });
     }
   }
-  return toolCallById;
+  return { calls: roundCalls };
 };
 
 type ErrorFields = {
@@ -306,8 +417,9 @@ const summarizeOne = (input: {
   index: number;
   message: BaseMessage;
   callInfo: ToolCallInfo | undefined;
+  unknownArgsReason?: UnknownArgsReason;
 }): ToolEventSummary | undefined => {
-  const { index, message, callInfo } = input;
+  const { index, message, callInfo, unknownArgsReason } = input;
   if (!(message instanceof ToolMessage)) {
     return undefined;
   }
@@ -317,21 +429,29 @@ const summarizeOne = (input: {
   }
 
   const args = callInfo?.args;
+  const argsKnown = callInfo !== undefined && unknownArgsReason === undefined;
   const content = messageContent(message);
   const isStatusError = message.status === 'error';
   const errorFields = deriveErrorFields(isStatusError, content);
-  const targetFile = targetFileTools.has(toolNameValue) ? extractTargetFile(args) : undefined;
+  const argsRecord = isRecord(args) ? args : undefined;
+  const targetFile = argsKnown && targetFileTools.has(toolNameValue) ? extractTargetFile(argsRecord) : undefined;
+  const verification = argsKnown
+    ? extractTestModelVerification({ toolNameValue, args, content, isStatusError })
+    : undefined;
 
   return {
     index,
     toolName: toolNameValue,
-    argsHash: canonicalArgsHash(args),
-    argsPreview: oneLine(canonicalJson(args ?? null), 80),
+    argsKnown,
+    ...(argsKnown
+      ? { argsHash: canonicalArgsHash(args), argsPreview: oneLine(canonicalJson(args ?? null), 80) }
+      : { unknownArgsReason: unknownArgsReason ?? 'orphan-tool-message' }),
     ...errorFields,
     isError: isStatusError,
     isEmptyResult: !isStatusError && isEmptyResultPayload(toolNameValue, content),
     isMutation: mutationToolNames.has(toolNameValue),
     ...(targetFile ? { targetFile } : {}),
+    ...(verification ? { verification } : {}),
   };
 };
 
@@ -343,17 +463,32 @@ const summarizeOne = (input: {
  * are skipped.
  */
 export function summarizeMessages(messages: BaseMessage[]): ToolEventSummary[] {
-  const toolCallById = indexToolCalls(messages);
   const events: ToolEventSummary[] = [];
+  let pendingRound: ToolRound = { calls: new Map() };
+
   for (const [index, message] of messages.entries()) {
-    if (!(message instanceof ToolMessage)) {
+    if (message instanceof AIMessage) {
+      pendingRound =
+        message.tool_calls && message.tool_calls.length > 0 ? toolRoundForAiMessage(message) : { calls: new Map() };
       continue;
     }
-    const callInfo = toolCallById.get(message.tool_call_id);
-    const event = summarizeOne({ index, message, callInfo });
+
+    if (!(message instanceof ToolMessage)) {
+      pendingRound = { calls: new Map() };
+      continue;
+    }
+
+    const callInfo = pendingRound.unknownArgsReason ? undefined : pendingRound.calls.get(message.tool_call_id);
+    const event = summarizeOne({
+      index,
+      message,
+      callInfo,
+      unknownArgsReason: callInfo ? undefined : pendingRound.unknownArgsReason,
+    });
     if (event) {
       events.push(event);
     }
+    pendingRound.calls.delete(message.tool_call_id);
   }
   return events;
 }
@@ -448,13 +583,6 @@ export function emptyResultReminder(input: { toolName: string; argsPreview: stri
 The query is unlikely to find anything no matter how many times you retry it. Broaden the pattern, search a different path, or use a different tool (e.g. \`list_directory\` to discover what actually exists).`;
 }
 
-export function noForwardProgressReminder(input: { count: number }): string {
-  const { count } = input;
-  return `You have made ${count} consecutive read-only tool calls without editing any file.
-
-If you are gathering context, summarise what you have learned and either propose a concrete code change (\`edit_file\` / \`create_file\`) or report your findings to the user. Continuing to read without acting is not making progress on the task.`;
-}
-
 export function sameErrorDifferentArgsReminder(input: {
   toolName: string;
   errorCode: string;
@@ -480,10 +608,38 @@ Please review what was attempted, and either rephrase the request or correct the
 // Detector implementations
 // =============================================================================
 
-const lastSignature = (event: ToolEventSummary): string =>
-  `${event.toolName}:${event.argsHash}:${event.errorHash ?? '-'}`;
+const evidenceFromEvents = (events: ToolEventSummary[]): SafeguardEvidence => {
+  const unknownEvent = events.find((event) => !event.argsKnown);
+  return {
+    argsKnown: unknownEvent === undefined,
+    ...(unknownEvent?.unknownArgsReason ? { unknownArgsReason: unknownEvent.unknownArgsReason } : {}),
+    toolNames: [...new Set(events.map((event) => event.toolName))],
+    eventCount: events.length,
+    eventIndexes: events.map((event) => event.index),
+  };
+};
 
-const callSignature = (event: ToolEventSummary): string => `${event.toolName}:${event.argsHash}`;
+const lastSignature = (event: ToolEventSummary): string | undefined =>
+  event.argsKnown && event.argsHash ? `${event.toolName}:${event.argsHash}:${event.errorHash ?? '-'}` : undefined;
+
+const callSignature = (event: ToolEventSummary): string | undefined =>
+  event.argsKnown && event.argsHash ? `${event.toolName}:${event.argsHash}` : undefined;
+
+const isSuccessfulVerificationEvent = (event: ToolEventSummary, targetFile: string): boolean => {
+  if (event.toolName === toolName.getKernelResult) {
+    return event.targetFile === targetFile && !event.isError;
+  }
+
+  if (event.toolName === toolName.testModel) {
+    return (
+      !event.isError &&
+      event.verification?.outcome === 'passed' &&
+      (event.verification.coversAll || event.verification.files.includes(targetFile))
+    );
+  }
+
+  return false;
+};
 
 const identicalErrorDetector = (thresholds: ThresholdConfig): Detector => ({
   pattern: anomalyPattern.identicalError,
@@ -499,6 +655,10 @@ const identicalErrorDetector = (thresholds: ThresholdConfig): Detector => ({
     }
 
     const signature = lastSignature(tail);
+    if (!signature) {
+      return { kind: 'clear' };
+    }
+
     let consecutive = 0;
     for (let index = events.length - 1; index >= 0; index--) {
       const event = events[index];
@@ -518,6 +678,7 @@ const identicalErrorDetector = (thresholds: ThresholdConfig): Detector => ({
         pattern: anomalyPattern.identicalError,
         reason: `\`${tail.toolName}\` failed identically ${consecutive} times in a row.`,
         signature,
+        evidence: evidenceFromEvents(events.slice(-consecutive)),
       };
     }
 
@@ -527,11 +688,12 @@ const identicalErrorDetector = (thresholds: ThresholdConfig): Detector => ({
         pattern: anomalyPattern.identicalError,
         reminder: identicalErrorReminder({
           toolName: tail.toolName,
-          argsPreview: tail.argsPreview,
+          argsPreview: tail.argsPreview ?? '<unknown>',
           errorPreview: tail.errorPreview,
           count: consecutive,
         }),
         signature,
+        evidence: evidenceFromEvents(events.slice(-consecutive)),
       };
     }
 
@@ -553,6 +715,10 @@ const identicalCallDetector = (thresholds: ThresholdConfig): Detector => ({
     }
 
     const signature = callSignature(tail);
+    if (!signature) {
+      return { kind: 'clear' };
+    }
+
     let consecutive = 0;
     for (let index = events.length - 1; index >= 0; index--) {
       const event = events[index];
@@ -572,10 +738,11 @@ const identicalCallDetector = (thresholds: ThresholdConfig): Detector => ({
       pattern: anomalyPattern.identicalCall,
       reminder: identicalCallReminder({
         toolName: tail.toolName,
-        argsPreview: tail.argsPreview,
+        argsPreview: tail.argsPreview ?? '<unknown>',
         count: consecutive,
       }),
       signature: `${signature}:any-result`,
+      evidence: evidenceFromEvents(events.slice(-consecutive)),
     };
   },
 });
@@ -597,12 +764,7 @@ const perTargetEditDetector = (thresholds: ThresholdConfig): Detector => ({
         break;
       }
 
-      if (
-        event.toolName === toolName.getKernelResult &&
-        event.targetFile === targetFile &&
-        !event.isError &&
-        edits > 0
-      ) {
+      if (isSuccessfulVerificationEvent(event, targetFile) && edits > 0) {
         return { kind: 'clear' };
       }
 
@@ -620,6 +782,7 @@ const perTargetEditDetector = (thresholds: ThresholdConfig): Detector => ({
       pattern: anomalyPattern.perTargetEdit,
       reminder: perTargetEditReminder({ targetFile, count: edits }),
       signature: `per_target_edit:${targetFile}:${edits}`,
+      evidence: evidenceFromEvents(events.slice(-edits)),
     };
   },
 });
@@ -642,6 +805,9 @@ const pingPongDetector = (thresholds: ThresholdConfig): Detector => ({
 
     const sigA = callSignature(first);
     const sigB = callSignature(second);
+    if (!sigA || !sigB) {
+      return { kind: 'clear' };
+    }
     if (sigA === sigB) {
       return { kind: 'clear' };
     }
@@ -658,6 +824,7 @@ const pingPongDetector = (thresholds: ThresholdConfig): Detector => ({
       pattern: anomalyPattern.pingPong,
       reminder: pingPongReminder({ toolA: first.toolName, toolB: second.toolName }),
       signature: `ping_pong:${sigA}:${sigB}`,
+      evidence: evidenceFromEvents(tail),
     };
   },
 });
@@ -676,6 +843,10 @@ const emptyResultDetector = (thresholds: ThresholdConfig): Detector => ({
     }
 
     const signature = callSignature(tail);
+    if (!signature) {
+      return { kind: 'clear' };
+    }
+
     let consecutive = 0;
     for (let index = events.length - 1; index >= 0; index--) {
       const event = events[index];
@@ -695,37 +866,11 @@ const emptyResultDetector = (thresholds: ThresholdConfig): Detector => ({
       pattern: anomalyPattern.emptyResult,
       reminder: emptyResultReminder({
         toolName: tail.toolName,
-        argsPreview: tail.argsPreview,
+        argsPreview: tail.argsPreview ?? '<unknown>',
         count: consecutive,
       }),
       signature: `empty_result:${signature}`,
-    };
-  },
-});
-
-const noForwardProgressDetector = (thresholds: ThresholdConfig): Detector => ({
-  pattern: anomalyPattern.noForwardProgress,
-
-  evaluate(events) {
-    if (events.length < thresholds.noForwardProgress) {
-      return { kind: 'clear' };
-    }
-
-    const tail = events.slice(-thresholds.noForwardProgress);
-    if (tail.some((event) => event.isMutation)) {
-      return { kind: 'clear' };
-    }
-
-    const tailLast = tail.at(-1);
-    if (!tailLast) {
-      return { kind: 'clear' };
-    }
-
-    return {
-      kind: 'nudge',
-      pattern: anomalyPattern.noForwardProgress,
-      reminder: noForwardProgressReminder({ count: tail.length }),
-      signature: `no_forward_progress:${tailLast.index}`,
+      evidence: evidenceFromEvents(events.slice(-consecutive)),
     };
   },
 });
@@ -739,13 +884,14 @@ const sameErrorDifferentArgsDetector = (thresholds: ThresholdConfig): Detector =
     }
 
     const tail = events.at(-1);
-    if (!tail || !tail.isError || !tail.errorCode) {
+    if (!tail || !tail.isError || !tail.errorCode || !tail.argsKnown) {
       return { kind: 'clear' };
     }
 
     const window = events.slice(-thresholds.sameErrorDifferentArgsWindow);
     const matching = window.filter(
-      (event) => event.isError && event.toolName === tail.toolName && event.errorCode === tail.errorCode,
+      (event) =>
+        event.argsKnown && event.isError && event.toolName === tail.toolName && event.errorCode === tail.errorCode,
     );
     if (matching.length < thresholds.sameErrorDifferentArgsCount) {
       return { kind: 'clear' };
@@ -766,6 +912,7 @@ const sameErrorDifferentArgsDetector = (thresholds: ThresholdConfig): Detector =
         errorPreview: tail.errorPreview,
       }),
       signature: `same_error_different_args:${tail.toolName}:${tail.errorCode}`,
+      evidence: evidenceFromEvents(matching),
     };
   },
 });
@@ -774,7 +921,7 @@ const sameErrorDifferentArgsDetector = (thresholds: ThresholdConfig): Detector =
  * Default detector chain. Order matters: the first detector to return
  * `nudge` / `terminate` short-circuits the chain (single intervention per
  * turn). Most-specific detectors (`identicalError` / `identicalCall`) run
- * before broader pattern detectors (`noForwardProgress`).
+ * before broader pattern detectors.
  */
 export const buildDefaultDetectors = (thresholds: ThresholdConfig = defaultThresholds): Detector[] => [
   identicalErrorDetector(thresholds),
@@ -783,7 +930,6 @@ export const buildDefaultDetectors = (thresholds: ThresholdConfig = defaultThres
   pingPongDetector(thresholds),
   emptyResultDetector(thresholds),
   sameErrorDifferentArgsDetector(thresholds),
-  noForwardProgressDetector(thresholds),
 ];
 
 // =============================================================================
@@ -915,6 +1061,10 @@ export const createAgentSafeguardsMiddleware = (
           pattern: detection.pattern,
           action,
           signature: detection.signature,
+          ...detection.evidence,
+          ...(detection.kind === 'nudge'
+            ? { reminderPreview: oneLine(detection.reminder, 200) }
+            : { reasonPreview: oneLine(detection.reason, 200) }),
           timestamp: new Date().toISOString(),
         });
 
@@ -929,8 +1079,14 @@ export const createAgentSafeguardsMiddleware = (
           };
         }
 
-        const nudge = new HumanMessage({
+        const nudge = createTauInternalHumanMessage({
+          id: `tau:safeguard:${detection.signature}`,
           content: `<system-reminder>\n${detection.reminder}\n</system-reminder>`,
+          kind: 'safeguard',
+          metadata: {
+            anchorId: detection.signature,
+            pruning: 'preserve-until-compaction',
+          },
         });
 
         return {

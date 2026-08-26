@@ -3,8 +3,10 @@ import type { AgentMiddleware } from 'langchain';
 import { ToolMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { toolName, fileUnchangedMarker } from '@taucad/chat/constants';
+import { countTextLines } from '@taucad/filesystem';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import { shouldPreserveToolResultForMedia } from '#api/chat/middleware/tool-result-retention.js';
 
 /** Characters per token approximation. */
 const charactersPerToken = 4;
@@ -36,16 +38,11 @@ const offloadConfig: Record<string, { maxChars: number }> = {
   [toolName.listDirectory]: { maxChars: 20_000 },
 };
 
-/**
- * Tools that should never have their output persisted/replaced. Their results
- * are either tiny ack messages (mutators) or binary fixtures consumed by the
- * UI verbatim (screenshot).
- */
+/** Tools with tiny ack messages that should never be persisted/replaced. */
 const skipOffloadTools: ReadonlySet<string> = new Set<string>([
   toolName.editFile,
   toolName.createFile,
   toolName.deleteFile,
-  toolName.screenshot,
 ]);
 
 const offloadingContextSchema = z.object({
@@ -109,8 +106,9 @@ function headTruncateAtNewline(content: string, budget: number): { preview: stri
  */
 function buildPersistedEnvelope(options: { toolName: string; persistedPath: string; rawContent: string }): string {
   const { preview, truncatedChars } = headTruncateAtNewline(options.rawContent, envelopePreviewBudget);
+  const lineCount = countTextLines(options.rawContent);
   const header =
-    `Tool ${options.toolName} output persisted (${options.rawContent.length} chars) to ${options.persistedPath}. ` +
+    `Tool ${options.toolName} output persisted (${options.rawContent.length} chars, ${lineCount} lines) to ${options.persistedPath}. ` +
     (truncatedChars > 0
       ? `Re-read narrower ranges via read_file ${options.persistedPath} offset=<line> limit=<lines> ` +
         `(showing head ${preview.length} chars; ${truncatedChars} chars omitted).`
@@ -153,12 +151,12 @@ function looksLikeJson(content: string): boolean {
 
 /**
  * Computes the persisted path for an offloaded tool result. Session-scoped
- * under `.tau/tool-results/<chatId>/` so concurrent chats never collide and
+ * under `/.tau/tool-results/<chatId>/` so concurrent chats never collide and
  * eviction can be done by directory.
  */
 function buildPersistedPath(options: { chatId: string; toolCallId: string; isJson: boolean }): string {
   const extension = options.isJson ? 'json' : 'txt';
-  return `.tau/tool-results/${options.chatId}/${options.toolCallId}.${extension}`;
+  return `/.tau/tool-results/${options.chatId}/${options.toolCallId}.${extension}`;
 }
 
 function estimateTokens(chars: number): number {
@@ -183,7 +181,7 @@ function extractReadFileContent(serialised: string): string {
  * Creates middleware that offloads large tool results to the chat virtual
  * filesystem. When a configured tool's payload exceeds its per-tool
  * `maxChars`, the full result is written to
- * `.tau/tool-results/<chatId>/<toolCallId>.{json,txt}` and the `ToolMessage`
+ * `/.tau/tool-results/<chatId>/<toolCallId>.{json,txt}` and the `ToolMessage`
  * content is replaced with a `<persisted-output>` envelope carrying a
  * head-truncated preview plus directive copy for narrower re-reads. Unknown
  * tools fall back to structure-preserving JSON compaction so downstream
@@ -226,7 +224,7 @@ export const createToolOffloadingMiddleware = (
       }
 
       const tool = result.name ?? '';
-      if (skipOffloadTools.has(tool)) {
+      if (skipOffloadTools.has(tool) || shouldPreserveToolResultForMedia(result)) {
         return result;
       }
 

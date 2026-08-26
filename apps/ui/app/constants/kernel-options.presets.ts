@@ -1,4 +1,6 @@
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import { ENV } from '#environment.config.js';
+import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 
 /**
  * Lazy-resolve default editor kernel options after the file manager is ready.
@@ -6,7 +8,8 @@ import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
  */
 export const defaultKernelOptions: LazyKernelOptionsFactory = async () => {
   const { createDefaultKernelOptions } = await import('#constants/kernel-worker.constants.js');
-  return createDefaultKernelOptions;
+  const runtimeConfig = createUiRuntimeConfig(ENV);
+  return (deps) => createDefaultKernelOptions({ ...deps, runtimeConfig });
 };
 
 /**
@@ -14,5 +17,6 @@ export const defaultKernelOptions: LazyKernelOptionsFactory = async () => {
  */
 export const debugKernelOptions: LazyKernelOptionsFactory = async () => {
   const { createDebugKernelOptions } = await import('#constants/kernel-worker.constants.js');
-  return createDebugKernelOptions;
+  const runtimeConfig = createUiRuntimeConfig(ENV);
+  return (deps) => createDebugKernelOptions({ ...deps, runtimeConfig });
 };

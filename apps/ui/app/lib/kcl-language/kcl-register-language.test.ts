@@ -53,7 +53,7 @@ vi.mock('@taucad/kcl-wasm-lib', () => ({
   Context: vi.fn().mockImplementation(() => ({ executeMock: vi.fn(async () => ({ variables: {}, errors: [] })) })),
 }));
 vi.mock('@taucad/kcl-wasm-lib/kcl.wasm?url', () => ({ default: 'mock://wasm' }));
-vi.mock('@taucad/runtime/kernels/zoo/engine-connection', () => ({
+vi.mock('@taucad/zoo/engine-connection', () => ({
   MockEngineConnection: vi.fn().mockImplementation(() => ({})),
 }));
 

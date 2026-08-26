@@ -4,6 +4,7 @@
   "description": "Tau API Extractor",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -15,6 +16,11 @@
       "import": "./src/kernel-types.ts",
       "default": "./src/kernel-types.ts"
     },
+    "./authoring-types": {
+      "types": "./src/authoring-types.ts",
+      "import": "./src/authoring-types.ts",
+      "default": "./src/authoring-types.ts"
+    },
     "./kcl-reference": {
       "types": "./src/kcl-reference.ts",
       "import": "./src/kcl-reference.ts",
@@ -22,6 +28,7 @@
     }
   },
   "imports": {
+    "#*.js": "./src/*.ts",
     "#*": "./src/*"
   }
 }

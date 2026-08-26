@@ -122,7 +122,7 @@ type DraftMachineEvents =
   | { type: 'setDraftToolChoice'; toolChoice: string | string[] }
   | { type: 'setDraftMode'; mode: ChatMode }
   | { type: 'clearDraft' }
-  | { type: 'loadDraftFromMessage'; draft: MyUIMessage }
+  | { type: 'loadDraftFromMessageTransient'; draft: MyUIMessage }
   | { type: 'setEditDraftText'; text: string }
   | { type: 'addEditDraftImage'; image: string }
   | { type: 'removeEditDraftImage'; index: number }
@@ -305,7 +305,7 @@ export const draftMachine = setup({
             imageQueue: ({ context }) => context.imageQueue.filter((entry) => entry.target !== 'main'),
           }),
         },
-        loadDraftFromMessage: {
+        loadDraftFromMessageTransient: {
           actions: assign({
             draftText({ event }) {
               const textPart = event.draft.parts.find((p) => p.type === 'text');

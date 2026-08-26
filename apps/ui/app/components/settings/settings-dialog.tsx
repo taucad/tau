@@ -79,8 +79,6 @@ const pathToSection = Object.fromEntries(
 /** Map section id to label */
 const sectionToLabel = Object.fromEntries(sections.map((s) => [s.id, s.label])) as Record<SettingsSection, string>;
 
-const settingsScrollClass = 'h-full overflow-y-auto p-6 pb-8';
-
 /**
  * Global settings dialog with responsive layout using ResponsiveTabs.
  *
@@ -127,45 +125,69 @@ export function SettingsDialog(): React.JSX.Element {
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className={cn('gap-0 overflow-hidden', 'h-[min(90vh,900px)] grid-rows-[1fr]', 'sm:max-w-4xl')}>
+      <DialogContent className={cn('gap-0 overflow-hidden p-0', 'h-[min(90vh,900px)] grid-rows-[1fr]', 'sm:max-w-4xl')}>
         <DialogTitle className='sr-only'>Settings</DialogTitle>
         <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
 
-        <div className='size-full min-h-0 overflow-hidden' onClickCapture={handleClickCapture}>
-          <ResponsiveTabs tabs={settingsTabs} activeTab={activeTab} enableContentAnimation={false}>
-            <TabsContent enableAnimation={false} value='Account'>
+        <div className='size-full min-h-0 overflow-clip' onClickCapture={handleClickCapture}>
+          <ResponsiveTabs
+            tabs={settingsTabs}
+            activeTab={activeTab}
+            enableContentAnimation={false}
+            tabsListClassName={cn(
+              // TabsList has its own `bg-sidebar` background, so we use *margins*
+              // (not padding) to offset the whole sidebar pane from the dialog
+              // edges — padding would only push the items inside the pane.
+              // Mobile: horizontal scroll strip nudged in from the dialog edges.
+              'max-md:mx-6 max-md:mt-6',
+              // Desktop: vertical sidebar offset from the dialog left edge.
+              'md:ml-6 md:mb-6',
+            )}
+            contentClassName={cn(
+              // Top padding takes over from the removed DialogContent p-6.
+              'pt-6 pb-8',
+              // Mobile: keep horizontal padding so content clears the dialog edges.
+              'max-md:px-6',
+              // Desktop: the scroll container extends flush to the dialog's right border
+              // so the scrollbar tucks against it; `pr-6` keeps content visually clear
+              // of the scrollbar. Left padding is supplied via the `md:gap-6` between
+              // TabsList and this column.
+              'md:pr-6',
+            )}
+          >
+            <TabsContent forceMount enableAnimation={false} value='Account'>
               <SettingsAuthGate>
-                <AccountSettings className={settingsScrollClass} />
+                <AccountSettings />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent enableAnimation={false} value='Security'>
+            <TabsContent forceMount enableAnimation={false} value='Security'>
               <SettingsAuthGate>
-                <SecuritySettings className={settingsScrollClass} />
+                <SecuritySettings />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent enableAnimation={false} value='API Keys'>
+            <TabsContent forceMount enableAnimation={false} value='API Keys'>
               <SettingsAuthGate>
-                <ApiKeys className={settingsScrollClass} />
+                <ApiKeys />
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent enableAnimation={false} value='General'>
+            <TabsContent forceMount enableAnimation={false} value='General'>
               <GeneralSettings />
             </TabsContent>
-            <TabsContent enableAnimation={false} value='Filesystem'>
+            <TabsContent forceMount enableAnimation={false} value='Filesystem'>
               <FileSystemSettings />
             </TabsContent>
-            <TabsContent enableAnimation={false} value='Billing'>
+            <TabsContent forceMount enableAnimation={false} value='Billing'>
               <SettingsAuthGate>
                 <div className='py-4 text-sm text-muted-foreground'>Billing - coming soon.</div>
               </SettingsAuthGate>
             </TabsContent>
-            <TabsContent enableAnimation={false} value='Models'>
+            <TabsContent forceMount enableAnimation={false} value='Models'>
               <ModelSettings />
             </TabsContent>
-            <TabsContent enableAnimation={false} value='Agents'>
+            <TabsContent forceMount enableAnimation={false} value='Agents'>
               <AgentSettings />
             </TabsContent>
-            <TabsContent enableAnimation={false} value='Experimental'>
+            <TabsContent forceMount enableAnimation={false} value='Experimental'>
               <ExperimentalSettings />
             </TabsContent>
           </ResponsiveTabs>

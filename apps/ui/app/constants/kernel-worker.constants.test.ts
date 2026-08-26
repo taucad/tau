@@ -1,10 +1,10 @@
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import {
-  createDefaultKernelOptions,
-  createDebugKernelOptions,
-  defaultKernels,
-} from '#constants/kernel-worker.constants.js';
+import { createDefaultKernelOptions, createDebugKernelOptions } from '#constants/kernel-worker.constants.js';
+import { runtime, uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 
 /* `webWorkerTransport(...)` validates a `Worker` ctor is in scope at
  * construction time (the actual worker is only spawned on `open()`). jsdom
@@ -28,46 +28,84 @@ afterAll(() => {
 });
 
 describe('kernel-worker constants', () => {
-  it('defaultKernels exposes the editor kernel list independent of the transport', () => {
-    expect(defaultKernels.length).toBeGreaterThan(0);
-    for (const kernel of defaultKernels) {
+  const expectedConfig = {
+    tauApiUrl: 'http://localhost:4000',
+    tauWebSocketUrl: 'ws://localhost:4001',
+  };
+
+  it('the UI runtime definition materializes the editor plugins from boot config', async () => {
+    const parsedConfig = uiRuntimeConfigSchema.parse(expectedConfig);
+    const resolvedRuntime = await resolveRuntimeDefinition(runtime, parsedConfig);
+
+    expect(resolvedRuntime.kernels.map((kernel) => kernel.id)).toEqual([
+      'opencascade',
+      'openrscad',
+      'jscad',
+      'manifold',
+      'gltf',
+      'brep',
+      'rhino',
+      'assimp',
+      'replicad',
+      'zoo',
+    ]);
+    for (const kernel of resolvedRuntime.kernels) {
       expect(typeof kernel.id).toBe('string');
       expect(Array.isArray(kernel.extensions)).toBe(true);
     }
+    expect(resolvedRuntime.middleware.map((middleware) => middleware.id)).toEqual([
+      'observability',
+      'parameterFileResolver',
+      'parameterCache',
+      'geometryCache',
+      'gltfCoordinateTransform',
+      'gltfEdgeDetection',
+    ]);
   });
 
-  it('createDefaultKernelOptions builds RuntimeClientOptions with a wired TransportPlugin', () => {
+  it('createDefaultKernelOptions builds client options with boot config and a wired TransportPlugin', () => {
     const fileSystem = fromMemoryFs();
-    const filePoolBuffer = new SharedArrayBuffer(1024);
-    const options = createDefaultKernelOptions({ fileSystem, filePoolBuffer });
+    const options = createDefaultKernelOptions({ fileSystem, runtimeConfig: expectedConfig });
 
+    expect(options.config).toEqual(expectedConfig);
     expect(options.transport).toBeDefined();
-    expect(typeof options.transport!.materialize).toBe('function');
-    expect(typeof options.transport!.describe).toBe('function');
-    const transport = options.transport!.materialize();
+    const transportPlugin = options.transport;
+    expect(typeof transportPlugin.materialize).toBe('function');
+    expect(typeof transportPlugin.describe).toBe('function');
+    const transport = transportPlugin.materialize();
     expect(typeof transport.open).toBe('function');
     expect(typeof transport.close).toBe('function');
-    expect(options.kernels.length).toBe(defaultKernels.length);
+    expect(options).not.toHaveProperty('kernels');
+    expect(options).not.toHaveProperty('middleware');
+    expect(options).not.toHaveProperty('bundlers');
+    expect(options).not.toHaveProperty('transcoders');
   });
 
   it('createDebugKernelOptions inherits transport composition from default', () => {
     const fileSystem = fromMemoryFs();
-    const filePoolBuffer = new SharedArrayBuffer(1024);
-    const debugOptions = createDebugKernelOptions({ fileSystem, filePoolBuffer });
+    const debugOptions = createDebugKernelOptions({ fileSystem, runtimeConfig: expectedConfig });
 
     expect(debugOptions.transport).toBeDefined();
-    expect(typeof debugOptions.transport!.materialize).toBe('function');
-    expect(debugOptions.transport!.materialize()).toMatchObject({
-      id: debugOptions.transport!.id,
-    });
-    expect(debugOptions.kernels.length).toBeGreaterThan(0);
+    expect(debugOptions.config).toEqual(expectedConfig);
+    const transportPlugin = debugOptions.transport;
+    expect(typeof transportPlugin.materialize).toBe('function');
+    expect(transportPlugin.materialize()).toHaveProperty('id', transportPlugin.id);
+    expect(debugOptions).not.toHaveProperty('kernels');
   });
 
   it('createDefaultKernelOptions does not expose a top-level tessellation field', () => {
     const options = createDefaultKernelOptions({
       fileSystem: fromMemoryFs(),
-      filePoolBuffer: new SharedArrayBuffer(1024),
+      runtimeConfig: expectedConfig,
     });
     expect(options).not.toHaveProperty('tessellation');
+  });
+
+  it('should keep worker-reachable kernel option builders free of environment value imports', async () => {
+    const source = await readFile(resolve(process.cwd(), 'app/constants/kernel-worker.constants.ts'), 'utf8');
+
+    expect(source).not.toContain('#environment.config.js');
+    expect(source).not.toContain(' ENV ');
+    expect(source).not.toContain('ENV.');
   });
 });

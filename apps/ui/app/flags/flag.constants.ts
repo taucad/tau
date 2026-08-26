@@ -35,10 +35,21 @@ export const flagRegistry = {
     label: 'Planning Mode',
     description: 'Show mode selector and plan viewer in chat.',
   },
+  pluginsStore: {
+    schema: z.boolean().default(false),
+    label: 'Plugins Store',
+    description: 'Expose the plugin and skill store while it is under development.',
+  },
   tauDebug: {
     schema: z.boolean().default(tauDebugDefault),
     label: 'Tau Debug',
     description: 'Enable in-app debug surfaces (e2e diagnostic panels, geometry inspectors).',
+  },
+  marketingLanding: {
+    schema: z.boolean().default(false),
+    label: 'Marketing Landing',
+    description:
+      'Render the marketing landing page for signed-out visitors and the project library for signed-in users on the home route.',
   },
 } as const satisfies Record<string, FlagDefinition>;
 

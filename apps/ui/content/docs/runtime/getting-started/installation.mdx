@@ -6,7 +6,7 @@ icon: lucide:download
 
 # Installation
 
-Install `@taucad/runtime` and its peer dependencies to start using the multi-kernel CAD runtime in your project.
+Install the runtime framework and only the capability packages your application composes.
 
 ## Prerequisites
 
@@ -16,28 +16,60 @@ Install `@taucad/runtime` and its peer dependencies to start using the multi-ker
 ## Install the Package
 
 ```bash tab="pnpm"
-pnpm add @taucad/runtime
+pnpm add @taucad/runtime @taucad/react @taucad/replicad @taucad/esbuild @taucad/middleware
 ```
 
 ```bash tab="npm"
-npm install @taucad/runtime
+npm install @taucad/runtime @taucad/react @taucad/replicad @taucad/esbuild @taucad/middleware
 ```
 
 ```bash tab="yarn"
-yarn add @taucad/runtime
+yarn add @taucad/runtime @taucad/react @taucad/replicad @taucad/esbuild @taucad/middleware
 ```
+
+Kernel authors also install `@taucad/geometry-core`; application consumers do not need a core package.
 
 ## Framework Configuration
 
-### Vite
+### Vite and React Router
 
-`@taucad/runtime` uses Web Workers for kernel isolation. Vite handles worker URLs natively via `new URL(..., import.meta.url)`:
+Add the runtime's Vite invariants beside the framework plugins. Vite flattens the plugin array returned by `tauRuntime()`, so do not spread it:
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { reactRouter } from '@react-router/dev/vite';
+import { tauRuntime } from '@taucad/runtime/vite';
+import { defineConfig } from 'vite';
 
-const client = createRuntimeClient(presets.all());
+export default defineConfig({
+  plugins: [tauRuntime(), reactRouter()],
+});
 ```
+
+For plain Vite, omit `reactRouter()`. The same `tauRuntime()` call supports Vite 7 and 8.
+
+### Next.js
+
+```typescript
+import { withTauRuntime } from '@taucad/runtime/nextjs/config';
+
+export default withTauRuntime();
+```
+
+The composer supports Next.js 15/Webpack and Next.js 16/Turbopack without a version branch.
+
+### Electron
+
+```typescript
+import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
+
+export default electronRuntimeConfig({
+  main: {},
+  preload: {},
+  renderer: {},
+});
+```
+
+The same config supports electron-vite 5/Vite 7 and electron-vite 6 beta/Vite 8. Continue with [Bundling](../guides/bundling) for the utility-process `?modulePath` entry and [Framework Integrations API](../api/frameworks) for every process helper.
 
 ### Node.js
 
@@ -47,13 +79,16 @@ For server-side usage, workers run as Node.js worker threads. Use `fromNodeFs` f
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
 
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromNodeFs('/path/to/project') }),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
 });
 ```
 
@@ -61,28 +96,39 @@ const client = createRuntimeClient({
 
 The package exposes multiple subpath imports for tree-shaking:
 
-| Import Path                            | Contents                                                                                                       |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `@taucad/runtime`                      | Client, presets, `fromMemoryFs`, `fromFsLike`, plugin factories, error types, core types                       |
-| `@taucad/runtime/kernels`              | Kernel factories (`replicad`, `opencascade`, `manifold`, `jscad`, `zoo`, `tau`)                                |
-| `@taucad/openscad`                     | OpenSCAD kernel (separate package, GPL-2.0-or-later — install with `pnpm add @taucad/openscad` to opt in)      |
-| `@taucad/runtime/kernel`               | Kernel-author entry (`defineKernel`, helpers, schemas) for building out-of-tree kernels                        |
-| `@taucad/runtime/middleware`           | `defineMiddleware` and built-in middleware factories                                                           |
-| `@taucad/runtime/bundler`              | `defineBundler` and esbuild bundler factory                                                                    |
-| `@taucad/runtime/transport`            | Author API only (`defineRuntimeTransport`, `runtimeProtocolSchemas`, types)                                    |
-| `@taucad/runtime/transport/in-process` | Same-isolate transport (`inProcessTransport`) — cross-environment                                              |
-| `@taucad/runtime/transport/web`        | Browser-only transport (`webWorkerTransport`) — DOM `Worker` host                                              |
-| `@taucad/runtime/transport/node`       | Node-only transport (`nodeWorkerTransport`) — gated so browser bundles don't externalize `node:worker_threads` |
-| `@taucad/runtime/filesystem`           | `fromMemoryFs`, `fromFsLike`, `fromChannelFs`, `fromBrowserFs`                                                 |
-| `@taucad/runtime/filesystem/node`      | `fromNodeFs` (Node-only)                                                                                       |
-| `@taucad/runtime/filesystem/browser`   | Browser File System Access helpers where split from the main `filesystem` entry                                |
-| `@taucad/runtime/types`                | All TypeScript type exports                                                                                    |
-| `@taucad/runtime/testing`              | Testing utilities for kernel and middleware development                                                        |
-| `@taucad/runtime/worker/web`           | Browser worker entry / bootstrap                                                                               |
-| `@taucad/runtime/worker/node`          | Node worker entry / bootstrap                                                                                  |
-| `@taucad/runtime/worker-internals`     | `KernelRuntimeWorker` ([worker model](../concepts/worker-model))                                               |
+| Import Path                                | Contents                                                                                                       |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `@taucad/runtime`                          | Runtime client, shared definitions, errors, and core types                                                     |
+| `@taucad/runtime/plugin`                   | Toolkit authoring and capability-derivation helpers                                                            |
+| `@taucad/openrscad`                        | OpenRSCAD toolkit and `openrscadKernel`                                                                        |
+| `@taucad/replicad`                         | Replicad toolkit and `replicadKernel`                                                                          |
+| `@taucad/esbuild`                          | esbuild toolkit and `esbuildBundler`                                                                           |
+| `@taucad/runtime/kernel`                   | Kernel-author entry (`defineKernel`, helpers, schemas) for building out-of-tree kernels                        |
+| `@taucad/runtime/middleware`               | Middleware authoring (`defineMiddleware` and author types)                                                     |
+| `@taucad/runtime/bundler`                  | Bundler authoring (`defineBundler` and author types)                                                           |
+| `@taucad/middleware`                       | First-party cache, coordinate-transform, and edge-detection middleware                                         |
+| `@taucad/runtime/transport`                | Author API only (`defineRuntimeTransport`, `runtimeProtocolSchemas`, types)                                    |
+| `@taucad/runtime/transport/in-process`     | Same-isolate transport (`inProcessTransport`) — cross-environment                                              |
+| `@taucad/runtime/transport/web`            | Browser worker helper (`createWebWorkerClientOptions`) and low-level transport/host                            |
+| `@taucad/runtime/transport/node`           | Node-only transport (`nodeWorkerTransport`) — gated so browser bundles don't externalize `node:worker_threads` |
+| `@taucad/runtime/transport/websocket`      | Remote-host client (`webSocketTransport`) — browser-safe                                                       |
+| `@taucad/runtime/transport/websocket-host` | Node `ws` server (`webSocketHost`) serving one kernel per connection                                           |
+| `@taucad/runtime/vite`                     | Vite 7/8 integration (`tauRuntime`, `crossOriginIsolation`)                                                    |
+| `@taucad/runtime/nextjs/config`            | Next.js 15/16 config composer (`withTauRuntime`, `nextRuntimeHeaders`)                                         |
+| `@taucad/runtime/react-router`             | React Router SSR response-header adapter                                                                       |
+| `@taucad/runtime/electron/vite`            | electron-vite 5/6 config composer (`electronRuntimeConfig`)                                                    |
+| `@taucad/runtime/electron/main`            | Electron isolation headers and utility-process broker                                                          |
+| `@taucad/runtime/electron/preload`         | Electron context-isolated preload bridge                                                                       |
+| `@taucad/runtime/electron/utility`         | Electron utility-process runtime host                                                                          |
+| `@taucad/runtime/electron/renderer`        | Electron renderer client-options provider                                                                      |
+| `@taucad/runtime/filesystem`               | `fromMemoryFs`, `fromFsLike`, `fromFileSystemBridge`, `fromBrowserFs`                                          |
+| `@taucad/runtime/filesystem/node`          | `fromNodeFs` (Node-only)                                                                                       |
+| `@taucad/runtime/filesystem/browser`       | Browser File System Access helpers where split from the main `filesystem` entry                                |
+| `@taucad/runtime/types`                    | All TypeScript type exports                                                                                    |
+| `@taucad/runtime-testing`                  | Development-only runtime harness, mocks, geometry inspection, and assertions                                   |
+| `@taucad/runtime/worker/web`               | Browser worker entry helper (`serveWebWorkerRuntime`)                                                          |
 
-`fromMemoryFs` and `fromFsLike` are available from both the main `@taucad/runtime` entry and `@taucad/runtime/filesystem`. `fromNodeFs` is only available from `@taucad/runtime/filesystem/node` because it depends on Node.js APIs; `fromBrowserFs` is only available from `@taucad/runtime/filesystem/browser` because it depends on the browser-only File System Access API.
+`fromMemoryFs` and `fromFsLike` are available from `@taucad/runtime/filesystem`. `fromNodeFs` is only available from `@taucad/runtime/filesystem/node` because it depends on Node.js APIs; `fromBrowserFs` is only available from `@taucad/runtime/filesystem/browser` because it depends on the browser-only File System Access API.
 
 ## What's Next
 

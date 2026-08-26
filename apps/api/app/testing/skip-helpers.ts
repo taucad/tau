@@ -3,6 +3,16 @@ import type { AgentConfigInput } from '@taucad/chat/schemas';
 import type { KernelId } from '@taucad/types/constants';
 
 /**
+ * Options for {@link buildCadAgent}.
+ *
+ * @public
+ */
+export type BuildCadAgentOptions = {
+  /** Enable GeoSpec testing tools for integration scenarios that exercise `test_model`. */
+  testingEnabled?: boolean;
+};
+
+/**
  * Build the `agent` block for an integration-test `POST /v1/chat` request.
  * Mirrors the production wire contract enforced by `chatTurnRequestSchema` so
  * tests parse cleanly through the same schema. See
@@ -10,15 +20,20 @@ import type { KernelId } from '@taucad/types/constants';
  *
  * @param modelId - Provider-prefixed model identifier.
  * @param kernel - Kernel target for the CAD agent (default `replicad`).
+ * @param options - Test-only agent toggles.
  * @returns A `cad`-profile agent config suitable for inlining into the wire body.
  */
-export const buildCadAgent = (modelId: string, kernel: KernelId = 'replicad'): AgentConfigInput => ({
+export const buildCadAgent = (
+  modelId: string,
+  kernel: KernelId = 'replicad',
+  options: BuildCadAgentOptions = {},
+): Extract<AgentConfigInput, { profile: 'cad' }> => ({
   profile: 'cad',
   model: modelId,
   kernel,
   mode: 'agent',
   toolChoice: 'auto',
-  testingEnabled: false,
+  testingEnabled: options.testingEnabled ?? false,
 });
 
 /**
@@ -91,6 +106,15 @@ export const providerEnvForModelId = (modelId: string): string | undefined => {
     }
     case 'together': {
       return 'TOGETHER_API_KEY';
+    }
+    case 'morph': {
+      return 'MORPH_API_KEY';
+    }
+    case 'xai': {
+      return 'XAI_API_KEY';
+    }
+    case 'moonshot': {
+      return 'MOONSHOT_API_KEY';
     }
     default: {
       return undefined;

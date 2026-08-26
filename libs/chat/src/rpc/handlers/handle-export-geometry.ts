@@ -1,7 +1,7 @@
 import type { ExportGeometryRpcInput, ExportGeometryRpcResult } from '#schemas/rpc.schema.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem, RpcGraphicsClient } from '#rpc/rpc-dependencies.js';
-import { writeArtifact } from '#rpc/handlers/write-artifact.js';
+import { writeArtifactSet } from '#rpc/handlers/write-artifact.js';
 
 export async function handleExportGeometry(
   input: ExportGeometryRpcInput,
@@ -22,17 +22,17 @@ export async function handleExportGeometry(
     return result;
   }
 
-  const artifactPath = await writeArtifact(
+  const files = await writeArtifactSet(
     {
       toolCallId: input.toolCallId,
       targetFile: input.targetFile,
-      extension: input.format,
-      bytes: result.bytes,
+      format: input.format,
+      files: result.files,
     },
     fileSystem,
   );
 
-  if (!artifactPath) {
+  if (!files) {
     return {
       success: false,
       errorCode: rpcClientErrorCode.ioError,
@@ -42,9 +42,7 @@ export async function handleExportGeometry(
 
   return {
     success: true,
-    artifactPath,
     format: input.format,
-    mimeType: result.mimeType,
-    byteLength: result.bytes.byteLength,
+    files,
   };
 }

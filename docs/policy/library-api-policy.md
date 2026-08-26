@@ -3,10 +3,11 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-05-17'
+updated: '2026-08-24'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
+  - docs/policy/runtime-api-policy.md
   - docs/research/typescript-overloads.md
   - docs/research/subpath-export-naming.md
   - docs/research/runtime-async-event-contract.md
@@ -28,7 +29,7 @@ Use `createX()` factory functions for consumer-facing instances. Keep class inte
 
 ```typescript
 // CORRECT: factory returns an opaque interface
-const client = createRuntimeClient({ kernels: [replicad()] });
+const client = createRuntimeClient({ transport });
 
 // INCORRECT: exposing class constructors
 const client = new RuntimeWorkerClient(worker, onLog); // leaks implementation
@@ -38,29 +39,35 @@ const client = new RuntimeWorkerClient(worker, onLog); // leaks implementation
 
 ## 2. Define Functions for Plugin Authors
 
-Use `defineX()` functions for plugin implementation contracts. The function validates shape and provides type inference without runtime overhead.
+Use `defineX()` functions for plugin implementation contracts. For runtime capabilities, `defineKernel`, `defineMiddleware`, `defineBundler`, and `defineTranscoder` are the only public authoring primitives: each returns the callable plugin factory directly, and each factory call returns plain serializable metadata while carrying executable implementation through an internal non-enumerable slot owned by the worker or host runtime.
 
 ```typescript
-export default defineKernel({
+export const myKernel = defineKernel({
+  id: 'my-kernel',
+  extensions: ['mycad'],
   name: 'MyKernel',
   version: '1.0.0',
-  async onInitialize(options, runtime) { ... },
-  async onCreateGeometry(input, runtime, ctx) { ... },
+  async initialize(options, runtime) { ... },
+  async createGeometry(input, runtime, context) { ... },
 });
 ```
 
-**Why**: `defineX` is a well-known pattern (Vite's `defineConfig`, Nuxt's `defineNuxtConfig`) that signals "this is a configuration/plugin definition" and enables full type inference on the generic context parameter.
+Do not create a second public wrapper helper for the same concern. A split between a lifecycle definition helper and a separate plugin wrapper helper forces authors to repeat IDs, schemas, extension metadata, and implementation wiring across files. If the public artifact is a plugin factory, the `defineX()` helper should create that factory in one step.
+
+**Why**: `defineX` is a well-known pattern (Vite's `defineConfig`, Nuxt's `defineNuxtConfig`) that signals "this is a configuration/plugin definition" and enables full type inference on the generic context parameter. Returning the runtime plugin factory directly keeps authoring single-source-of-truth while preserving plain metadata for runtime composition.
 
 ## 3. Flat Options with Sensible Defaults
 
 Prefer flat option objects over deeply nested configuration. Use optional fields with defaults, not required nested objects.
 
 ```typescript
+import { replicadKernel } from '@taucad/replicad';
+
 // CORRECT: flat, obvious defaults
-replicad({ wasm: 'single-exceptions', linearTolerance: 0.1 });
+replicadKernel({ wasm: 'single', withSourceMapping: true });
 
 // INCORRECT: deeply nested, hard to read
-replicad({
+replicadKernel({
   options: {
     exceptions: { enabled: true },
     mesh: { tolerances: { linear: 0.1 } },
@@ -78,11 +85,11 @@ Maximum **3 positional parameters**. Prefer fewer. Each positional parameter mus
 
 ```typescript
 // CORRECT: single object -- self-documenting, easy to extend
-createRuntimeClient({ kernels: [replicad()], transport: workerTransport });
-render({ file, parameters, tessellation });
+createRuntimeClient({ transport: workerTransport });
+render({ source, parameters, renderOptions });
 
 // INCORRECT: positional args for same-concern data
-render(file, parameters, tessellation);
+render(source, parameters, renderOptions);
 ```
 
 **2 params (primary + config)** -- When there is one clear "subject" and a bag of optional configuration. The first param answers "what", the second answers "how".
@@ -91,7 +98,6 @@ render(file, parameters, tessellation);
 // CORRECT: clear subject + optional config
 exposeFileSystem(fileSystem, options?)
 on(event, handler)
-fromFsLikeOpaque(fsLike, rootPath?)
 ```
 
 **3 params (distinct architectural concerns)** -- Only when each parameter represents a genuinely different concern in a consistent interface contract. All methods on the same interface must use the same positional convention.
@@ -126,11 +132,11 @@ Three signals that indicate a parameter design violation:
 
 ```typescript
 // INCORRECT: developer must write _runtime, _ctx just to reach nativeHandle
-async exportGeometry({ fileType, tessellation }, _runtime, _ctx, nativeHandle) {
-  // Only uses fileType, tessellation, and nativeHandle
+async exportGeometry({ format, tessellation }, _runtime, _ctx, nativeHandle) {
+  // Only uses format, tessellation, and nativeHandle
 
 // CORRECT: nativeHandle is in the input object, no placeholders needed
-async exportGeometry({ fileType, tessellation, nativeHandle }, _runtime, _ctx) {
+async exportGeometry({ format, tessellation, nativeHandle }, _runtime, _ctx) {
   // Everything the developer needs is in the first param
 ```
 
@@ -171,7 +177,7 @@ Names should describe **what** the code does, not **how** the framework routes i
 
 ```typescript
 // CORRECT: describes the action
-client.render({ file, parameters });
+client.render({ source: { path: 'main.ts' }, parameters });
 worker.initialize(input);
 
 // INCORRECT: leaks internal dispatch architecture
@@ -186,14 +192,13 @@ worker.initializeEntry(input);
 type KernelRegistration = {
   id: string;
   extensions: string[];
-  moduleUrl: string;
 };
 
 // INCORRECT: says where it lives (an "entry" in a list)
 type KernelWorkerEntry = {
   id: string;
   extensions: string[];
-  kernelModuleUrl: string;
+  workerKernelModule: string;
 };
 ```
 
@@ -209,6 +214,23 @@ type KernelWorkerEntry = {
 
 **Avoid overloading terms.** If a word is already used for one concept, don't reuse it for another. For example, "entry" was previously overloaded as both "item in a registration list" (`MiddlewareEntry`) and "method entry point" (`renderEntry`), which motivated the rename to `MiddlewareRegistration` and `render()`.
 
+**Keep logical identity, physical location, and content roles distinct.** An ID answers “which object?”, a locator answers “where was it observed?”, and a content field answers “what should a consumer open?”. Do not overload one string or options bag to mean all three, and do not reconstruct a physical path from a logical ID.
+
+```typescript
+// CORRECT: explicit roles and no ambient/defaulted location
+type ProjectLocator = {
+  storageRootKey: string;
+  providerBasePath: string;
+};
+
+const entryPath = manifest.assets.main.entryPath;
+
+// INCORRECT: one ambiguous string inferred differently by each caller
+openProject(project.id);
+```
+
+Use a specific compound name where the shorter word is already overloaded. `entryPath` is clearer than `entry`, `file`, `source`, or `path` for the file that starts project evaluation. Exact-location operations require an explicit locator object; optional locator fields, inferred storage roots, and logical-ID path reconstruction are forbidden.
+
 ### Consistent prefixes by role
 
 Each naming prefix signals a specific role:
@@ -218,7 +240,7 @@ Each naming prefix signals a specific role:
 | `create`\* | Factory function                | `createRuntimeClient`, `createBridgePort`           |
 | `define*`  | Plugin definition               | `defineKernel`, `defineMiddleware`, `defineBundler` |
 | `is*`      | Type guard                      | `isGeometryFile`, `isKernelPlugin`                  |
-| `from*`    | Conversion constructor          | `fromNodeFs`, `fromMemoryFs`, `fromFsLikeOpaque`    |
+| `from*`    | Conversion constructor          | `fromNodeFs`, `fromMemoryFs`, `fromFsLike`          |
 | `on*`      | Framework hook / event callback | `onInitialize`, `onLog`, `onProgress`               |
 
 ### Callback and hook naming
@@ -241,46 +263,95 @@ protected abstract onCreateGeometry(input, runtime): Promise<Result>;
 
 **Why**: Consistent naming prefixes let developers predict API shape without reading docs. When every factory starts with `create`_, every type guard starts with `is_`, and every hook starts with `on\*`, the API becomes self-documenting.
 
+### Filenames name the role
+
+A module that defines a capability names its role in the filename, separated by a dot: `{name}.{role}.ts`, with `{name}.{role}.test.ts` and `{name}.{role}.test-d.ts` siblings. The plugin factory of package `@taucad/<p>` lives in `<p>.plugin.ts`.
+
+```text
+CORRECT                        INCORRECT
+zoo.kernel.ts                  zoo-kernel.ts
+image.transcoder.ts            image-transcoder.ts
+esbuild.bundler.ts             esbuild-bundler.ts
+geometry-cache.middleware.ts   geometry-cache-middleware.ts
+replicad.plugin.ts             plugin.ts
+replicad.plugin.test.ts        plugin.test.ts
+```
+
+Hyphens stay legal inside the name segment (`opencascade-native.kernel.ts`); only the role separator is a dot. Roles are `plugin`, `kernel`, `transcoder`, `middleware`, and `bundler`. Helper, schema, and scenario modules carry no role marker (`assimp-backend.ts`, `replicad.schemas.ts`, `image-import-failure.test.ts`) and are not governed. `tau-lint/plugin-capability-filename` enforces this for flat modules under `packages/plugins/*/src`.
+
+**Why**: A capability is locatable by filename, and a test always sits next to the subject it covers instead of drifting one convention away from it.
+
 ## 6. Subpath Exports
 
 Organize `package.json` exports by what each audience needs, not by internal file structure.
 
 ```text
-@taucad/runtime                -- createRuntimeClient, presets, types (consumer)
-@taucad/runtime/kernel         -- replicad(), openscad() factories (consumer)
-@taucad/runtime/middleware     -- defineMiddleware(), cache factories (author + consumer)
-@taucad/runtime/bundler        -- defineBundler(), esbuild() factory (author + consumer)
-@taucad/runtime/transport      -- RuntimeTransport, createWorkerTransport (advanced)
-@taucad/runtime/testing        -- test utilities (testing)
+@taucad/runtime                         -- createRuntimeClient, types (consumer)
+@taucad/runtime/plugin                  -- definePlugin and derivation helpers (author)
+@taucad/replicad                        -- Replicad toolkit and kernel factory (consumer)
+@taucad/esbuild                         -- esbuild toolkit and bundler factory (consumer)
+@taucad/middleware                      -- middleware toolkit and role factories (consumer)
+@taucad/runtime/transport/web           -- selected browser worker transport (consumer)
+@taucad/runtime-testing                 -- runtime test utilities (testing)
 ```
 
-### Singular subpath naming
+### Capability subpaths are dependency-graph boundaries
 
-Use **singular nouns** for all subpath export segments. Subpaths are module namespaces that a developer imports from, not REST-style collection endpoints. The package name itself may be plural (it scopes a collection of modules), but every subpath within it is singular.
-
-**Why**: Singular subpaths eliminate the doubled-name stutter (`@taucad/runtime/kernels`), align sibling categories so developers can predict paths by analogy, and match the convention used by tRPC, Effect-TS, Drizzle ORM, and TanStack Router.
+Runtime capability packages, transports, and framework adapters must expose selected dependency-graph boundaries. A consumer choosing Replicad imports its package, not a runtime-owned concrete barrel. Capability package roots stay descriptor-light and load heavy backends from capability `initialize()`.
 
 CORRECT:
 
 ```typescript
-import { replicad } from '@taucad/runtime/kernel';
-import { esbuild } from '@taucad/runtime/bundler';
+import { replicadKernel } from '@taucad/replicad';
+import { esbuildBundler } from '@taucad/esbuild';
+import { geometryCache } from '@taucad/middleware';
+import { webWorkerTransport } from '@taucad/runtime/transport/web';
+```
+
+INCORRECT for first-class examples:
+
+```typescript
+import { replicadKernel } from '@taucad/runtime/<concrete-kernel-barrel>'; // runtime does not own concrete capabilities
+import { webWorkerTransport } from '@taucad/runtime/transport'; // broad barrel; may load unrelated transports
+```
+
+**Why**: Subpaths are not only naming structure; for capability-heavy packages they are bundler and runtime isolation boundaries. Convenience barrels may exist for advanced users, tests, or migration ergonomics, but they must not be the happy-path teaching surface when selected implementations have different dependencies or asset bootstraps.
+
+### Examples are quickstarts, not test harnesses
+
+First-class framework examples should stay copyable and test-agnostic. Do not put runner-specific configs, repository-only GLB inspection helpers, `data-testid` assertions, query-string test branches, or `window.__tau*` geometry probes in public example apps. Keep those artifacts in a dedicated e2e project such as `apps/react-e2e`, where maintainers can preserve framework transport coverage without making the example code look like CI scaffolding.
+
+**Why**: A consumer opening an example should see the runtime integration topology, not Tau's regression-test strategy. Keeping test machinery out of examples makes the happy path easier to copy while preserving mature coverage in a purpose-built test surface.
+
+### Singular subpath naming
+
+For new packages, use **singular nouns** for subpath export segments. Subpaths are module namespaces that a developer imports from, not REST-style collection endpoints. The package name itself may be plural (it scopes a collection of modules), but every new subpath within it should be singular unless preserving an existing public contract.
+
+**Why**: Singular authoring subpaths eliminate doubled-name stutter, while concrete capabilities use their own package identities.
+
+CORRECT for new packages:
+
+```typescript
+import { defineKernel } from '@taucad/runtime/kernel';
+import { defineBundler } from '@taucad/runtime/bundler';
 import { defineMiddleware } from '@taucad/runtime/middleware';
 ```
 
 INCORRECT:
 
 ```typescript
-import { replicad } from '@taucad/runtime/kernels'; // stutters package name
-import { esbuild } from '@taucad/runtime/bundlers'; // inconsistent with ./middleware
+import { replicadKernel } from '@taucad/runtime/<concrete-kernel-barrel>'; // concrete runtime barrel is forbidden
+import { esbuildBundler } from '@taucad/runtime/bundlers'; // concrete runtime barrel is forbidden
 ```
 
 | Segment type              | Convention    | Examples                                   |
 | ------------------------- | ------------- | ------------------------------------------ |
 | Category barrel           | Singular      | `./kernel`, `./bundler`, `./middleware`    |
-| Individual implementation | Singular      | `./kernel/replicad`, `./bundler/esbuild`   |
+| Individual implementation | Own package   | `@taucad/replicad`, `@taucad/esbuild`      |
 | Standalone module         | Singular      | `./transport`, `./filesystem`, `./testing` |
 | Package name              | May be plural | `@taucad/runtime` (scopes a collection)    |
+
+When an existing package already exposes a stable plural grouping segment, do not introduce a broad barrel to satisfy this naming preference. Prefer the concrete selected implementation subpath and treat any eventual singular rename as a separate package-surface migration.
 
 For the full library survey, analysis, and trade-offs behind this convention, see [Subpath Export Naming Research](../research/subpath-export-naming.md).
 
@@ -315,31 +386,29 @@ off();
 
 **Why**: Works naturally with React's `useEffect` cleanup, avoids config-time binding, and follows the EventEmitter pattern without inheriting `EventEmitter`.
 
-## 8. Plugin Factories Return Plain Objects
+## 8. Plugin Factories Return Plain Metadata
 
-Plugin selection functions return plain registration objects, not class instances. The object carries the module URL and configuration.
+Plugin selection functions return plain metadata objects, not class instances. Executable implementations belong to worker-owned runtime definitions; client-facing plugin objects must not expose loader URLs or implementation handles. In `@taucad/runtime`, the same `define*` call that authors an executable capability returns the public plugin factory, so there is no separate `create*Plugin` public layer.
 
 ```typescript
-export function replicad(options?: ReplicadOptions): KernelPlugin {
-  return {
-    id: 'replicad',
-    moduleUrl: new URL('../kernels/replicad.kernel.js', import.meta.url).href,
-    extensions: ['ts', 'js'],
-    options,
-  };
-}
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+
+export const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
 ```
 
-**Why**: Plain objects are serializable, inspectable, and composable. No prototype chain, no hidden state.
+**Why**: Public plugin metadata remains inspectable and composable, while executable code stays in the process or worker that actually loads it.
 
 ## 9. Lazy Initialization for Expensive Resources
 
 Defer Worker creation, WASM loading, and network connections until first use. The factory call itself should be instant.
 
 ```typescript
-const client = createRuntimeClient({ ... }); // instant, no Worker created
-await client.connect({ fileSystem });        // Worker created here
-await client.render({ file, params });        // auto-connects if needed
+const client = createRuntimeClient({ transport }); // instant, no Worker created
+await client.connect(); // Worker created here
+await client.render({ source: { path: 'main.ts' }, parameters }); // auto-connects if needed
 ```
 
 ## 10. High-Level Wrappers with Low-Level Escape Hatches
@@ -403,56 +472,57 @@ Use `package.json` export conditions for environment-specific code:
 {
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/index.d.cts",
-        "default": "./dist/cjs/index.cjs"
-      }
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
     }
   }
 }
 ```
 
-## 15. Presets for Zero-Config
+## 15. Toolkit Presets and Capability Options
 
-Provide preset configurations that cover common use cases. Let advanced users compose their own.
+Let each plugin toolkit provide a default preset and additional presets only for distinct capability sets. Configure a selected capability through role-nested plugin options derived from that capability factory; do not create a preset solely to bind an option value. Applications still compose their runtime explicitly; runtime exposes no global preset.
 
 ```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const client = createRuntimeClient(presets.all());
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'auto' } } }), esbuild()],
+});
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime }),
+});
 ```
 
-## 16. Type-Safe Options Helpers
+Every published plugin package declares `@taucad/runtime` in `peerDependencies`. Dynamic loaders resolve that manifest range, compare it with their bundled runtime through standard semver prerelease semantics, and warn on mismatch. Runtime composition never performs a package-version check; a path-loaded plugin without a resolvable manifest skips the check. Any future CLI, store, daemon, or project-package loader owns the same check.
 
-Every options type that consumers declare as a standalone constant should have a companion `createXOptions()` helper. The helper provides full intellisense via generic inference -- consumers get autocomplete and type checking without importing the type explicitly.
+Treat the five `Symbol.for('@taucad/runtime/...')` slot names and the shapes reachable through them as a frozen same-realm contract. Bump `runtimePluginAbiVersion` when either changes, and require the exact ABI integer on factory and instance brands. Do not send those brands over structured clone; validate the discriminated `CapabilitiesManifest.registrations` schema at worker and process boundaries.
+
+## 16. Type-Safe Options Constants
+
+Use TypeScript's native `satisfies` operator for standalone options constants. Do not add identity functions whose only behavior is returning an options object unchanged.
 
 ```typescript
-// Without helper: requires explicit type import
 import type { RuntimeClientOptions } from '@taucad/runtime';
-const options: RuntimeClientOptions = { kernels: [replicad()] };
+import { defineRuntime } from '@taucad/runtime/worker';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { replicad } from '@taucad/replicad';
 
-// With helper: intellisense via inference, no type import needed
-import { createRuntimeClientOptions } from '@taucad/runtime';
-const options = createRuntimeClientOptions({ kernels: [replicad()] });
+const runtime = defineRuntime({ plugins: [replicad()] });
+const transport = inProcessTransport({ runtime });
+const options = { transport } satisfies RuntimeClientOptions<typeof runtime, typeof transport>;
 ```
 
-The identity overload returns the input as-is (zero runtime cost). A second merge overload enables declarative overrides when consumers need variations of a base configuration.
-
-Add `createXOptions` to the naming conventions table in section 5:
-
-| Prefix           | Role                                  | Examples                     |
-| ---------------- | ------------------------------------- | ---------------------------- |
-| `createXOptions` | Options helper (intellisense + merge) | `createRuntimeClientOptions` |
-
-**Canonical implementation**: `createRuntimeClientOptions` in `@taucad/runtime`.
+This keeps inference and excess-property checking without adding a runtime API or a second name for the options type.
 
 ## 17. Options Override Patterns
 
-When an options object contains **plugin arrays** (items with an `id` field), **config objects** (nested plain objects), and **opaque fields** (functional objects like transports), use a three-tier merge strategy in the `createXOptions` merge overload:
+When explicitly composing a runtime definition from an existing definition, apply these field-specific override patterns at the declaration site:
 
 | Tier           | Field type                          | Strategy                                                                               | Rationale                                                                                               |
 | -------------- | ----------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -460,24 +530,20 @@ When an options object contains **plugin arrays** (items with an `id` field), **
 | Config objects | `tessellation`, nested settings     | **Deep merge**: recursively merge keys; absent keys preserve base                      | Config objects have structure (keys); consumers want to override one nested key without losing siblings |
 | Opaque fields  | `transport`, `fileSystem`           | **Full replacement**: override replaces entirely                                       | Functional objects have unity (methods work as a set); deep merge would create broken hybrids           |
 
-### Before (manual array manipulation)
+### Explicit plugin replacement
 
 ```typescript
-const debugOptions: RuntimeClientOptions = {
-  ...defaultOptions,
-  kernels: defaultOptions.kernels.map((k) => (k.id === 'replicad' ? replicad({ withSourceMapping: true }) : k)),
-};
-```
+import { replicadKernel } from '@taucad/replicad';
 
-### After (declarative ID-based merge)
-
-```typescript
-const debugOptions = createRuntimeClientOptions(defaultOptions, {
-  kernels: [replicad({ withSourceMapping: true })],
+const debugRuntime = defineRuntime({
+  ...defaultRuntime,
+  kernels: defaultRuntime.kernels.map((kernel) =>
+    kernel.id === 'replicad' ? replicadKernel({ withSourceMapping: true }) : kernel,
+  ),
 });
 ```
 
-The merge automatically finds the `replicad` kernel by `id`, replaces it in-place, and preserves all other kernels in their original position.
+Runtime definitions are explicit enough that executable plugin variations should remain visible at the declaration site.
 
 ## 18. ES Module Asset Injection
 
@@ -517,7 +583,7 @@ Error messages should tell the developer what to do, not just what went wrong:
 // CORRECT: actionable
 throw new Error(
   `Kernel "${id}" not found. Available kernels: ${available.join(', ')}. ` +
-    'Make sure you included it in the `kernels` array when calling createRuntimeClient().',
+    'Make sure the worker or in-process transport runtime includes that kernel.',
 );
 
 // INCORRECT: describes the problem without guidance
@@ -551,7 +617,7 @@ they do not care about — for context, the runtime previously exported
 outcome shown below). Instead, return a **discriminated-union outcome** so
 callers can deterministically branch on supersession without ever throwing.
 
-The pattern, distilled from `RuntimeClient.openFile` / `updateParameters` /
+The pattern, distilled from `RuntimeClient.render` / `updateParameters` /
 `setOptions` (`packages/runtime/src/client/runtime-client.ts`):
 
 ```typescript
@@ -559,12 +625,12 @@ export type RenderOutcome =
   | { readonly superseded: false; readonly geometry: HashedGeometryResult }
   | { readonly superseded: true };
 
-const outcome = await client.openFile({ file: '/main.ts', parameters });
+const outcome = await client.render({ source: { path: '/main.ts' }, parameters });
 
 if (outcome.superseded) {
-  // A newer openFile / updateParameters / setOptions call took ownership of
-  // the worker before this one settled. The newer call's RenderOutcome
-  // carries the authoritative geometry — this caller can safely no-op.
+  // A newer public command or an autonomous watched-filesystem preview took
+  // ownership before this call settled. The selected preview's authoritative
+  // geometry arrives over the event channel; this caller can safely no-op.
   return;
 }
 
@@ -585,11 +651,81 @@ true | false` lets TypeScript narrow without any runtime helper.
 - **Carry the result on the success branch only.** Putting `geometry?:
 HashedGeometryResult` on both branches forces every caller into a
   needless null check; the discriminant exists to avoid that.
-- **Document the supersession trigger** in the JSDoc. Consumers need to
-  know which sibling calls invalidate the in-flight outcome so they
-  can reason about ordering without reading the runtime source.
+- **Document every supersession trigger** in the JSDoc. Consumers need to
+  know when autonomous work, not only a sibling public call, can invalidate an
+  in-flight outcome. Do not promise a successor `RenderOutcome` when the
+  successor can be event-only.
 
-## 21. Temporal Values
+## 21. Keep Plugin-Owned Operation Options Nested
+
+When a public operation combines runtime-owned structural fields with plugin-owned option schemas, keep those ownership domains separate. Runtime-owned fields live at the operation top level; plugin-owned keys live inside a named field such as `renderOptions` or `exportOptions`.
+
+**Why**: Plugin keyspaces are open-ended and third-party owned. Flattening plugin options beside runtime fields (`source`, `parameters`, `signal`, `priority`) creates future collision risks and misleading errors.
+
+CORRECT:
+
+```typescript
+await client.render({
+  source: { files: { 'main.ts': code } },
+  parameters,
+  content: { includeEdges: true },
+  renderOptions: { tessellation: { linearTolerance: 0.05 } },
+});
+
+await client.export('glb', {
+  source: { files: { 'main.ts': code } },
+  parameters,
+  content: { includeEdges: true, includeTopology: false },
+  exportOptions: { coordinateSystem: 'y-up' },
+});
+```
+
+INCORRECT:
+
+```typescript
+await client.render({
+  source: { files: { 'main.ts': code } },
+  parameters,
+  tessellation: { linearTolerance: 0.05 }, // plugin-owned key flattened beside runtime keys
+});
+
+await client.export('glb', {
+  source: { files: { 'main.ts': code } },
+  parameters,
+  coordinateSystem: 'y-up', // belongs under exportOptions
+});
+```
+
+This rule refines the flat-options preference in §3. Capability factory configuration stays flat (`replicadKernel({ wasm, withSourceMapping })`) because the capability owns that options object. A toolkit exposes the same flat bag under its role and selected capability path (`replicad({ kernels: { default: { wasm, withSourceMapping } } })`); it must derive that shape from the capability factory rather than duplicate it. Operation inputs are different: the runtime owns the operation envelope, while kernels/transcoders own nested option bags.
+
+Framework-wide semantic requirements belong in a stable runtime-owned parent such as `content`, not in plugin option bags and not as phase selectors. Each property is independently capability-declared and route-inferred: supporting `includeEdges` does not imply support for `includeTopology`. Unsupported keys must disappear from exact inferred operation types and be rejected by runtime validation. Authors declare what a route can fulfill; consumers never choose an internal source phase.
+
+Provider capability declarations are positive-only. Omit an unsupported declaration instead of spelling a negative value; use a non-empty literal tuple only when the route fulfills content. The `defineX` boundary validates declarations once, rejecting empty tuples, duplicates, and unknown keys.
+
+CORRECT:
+
+```typescript
+render: { content: ['includeEdges'] as const },
+exportFormats: {
+  glb: { optionsSchema: glbSchema, content: ['includeEdges'] as const },
+  step: { optionsSchema: stepSchema }, // format supported; no framework content
+},
+```
+
+INCORRECT:
+
+```typescript
+render: { content: [] },
+exportFormats: {
+  glb: { optionsSchema: glbSchema, content: ['includeEdges', 'includeEdges'] },
+},
+```
+
+Provider hook inputs follow the same contract: when a provider declares no content, its method input omits `content`; this is distinct from the consumer envelope, where requesting an unsupported property is a type and runtime error. Do not add empty capability objects or arrays to advertise absence.
+
+Hook return objects follow the same ownership rule and must avoid reserved-word member names when consumers are expected to destructure the result. Prefer `exportGeometry` over a hook member named `export`, because `const { export } = useRuntime()` is a syntax error.
+
+## 22. Temporal Values
 
 All numeric temporal values — durations, timeouts, intervals, delays, debounces, ages, windows, polling cadences — are in **milliseconds**. Never encode the unit in the identifier (no `Ms`, `Sec`, `S`, `Min`, `Seconds`, `Hours` suffixes; no `ms`/`s`/`min` prefixes).
 
@@ -608,7 +744,7 @@ type CacheOptions = {
 };
 
 await sleep(250);
-client.setOptions({ renderTimeout: 30_000 });
+client.setRenderTimeout(60_000);
 ```
 
 INCORRECT:
@@ -621,7 +757,7 @@ type CacheOptions = {
 };
 
 await sleep(0.25); // ambiguous: seconds or milliseconds?
-client.setOptions({ renderTimeoutMs: 30_000 }); // suffix is forbidden
+client.setRenderTimeout(30_000); // `setRenderTimeoutMs` would be forbidden
 ```
 
 ### Documenting the unit
@@ -635,7 +771,7 @@ type RuntimeClientOptions = {
   /**
    * Reject the render with `RenderTimeoutError` after this duration. Milliseconds.
    *
-   * @defaultValue 30000
+   * @defaultValue 60000
    */
   renderTimeout?: number;
 };
@@ -659,7 +795,7 @@ If a future API genuinely needs to accept multiple temporal units (e.g., a CLI s
 
 **Enforced by**: `tau-lint/no-time-unit-suffix` (forbids `Ms`/`Sec`/`Min`/etc. suffixes on identifiers) and `tau-lint/no-bare-time-identifier` (requires the `Milliseconds.` JSDoc tag on temporal fields).
 
-## 22. Async Surface Hygiene (Antipatterns)
+## 23. Async Surface Hygiene (Antipatterns)
 
 Five patterns that signal an async/sync mismatch in your API contract. If you find yourself reaching for any of them, **the contract is wrong** — fix the contract, not the syntax.
 
@@ -775,9 +911,7 @@ For older Node targets, ship an inline shim — eight lines, well-understood Def
 INCORRECT:
 
 ```typescript
-export type ConnectOptions =
-  | { fileSystem: RuntimeFileSystemBase; filePoolBuffer?: SharedArrayBuffer }
-  | { port: MessagePort; filePoolBuffer?: SharedArrayBuffer };
+export type ConnectOptions = { fileSystem: RuntimeFileSystemBase } | { port: MessagePort };
 ```
 
 `MessagePort` is a `MessageChannel`-shaped primitive. A WebSocket transport cannot synthesise one. An Electron IPC transport cannot synthesise one. An FFI transport cannot synthesise one. Yet the public surface accepts it — the runtime client therefore advertises a coupling to one specific wire choice.
@@ -794,22 +928,24 @@ export type RuntimeFileSystem = { readonly [opaqueBrand]: unique symbol };
 export const fromMemoryFs: () => RuntimeFileSystem;
 export const fromNodeFs: (basePath: string) => RuntimeFileSystem;
 export const fromBrowserFs: (...) => RuntimeFileSystem;
-export const fromFsLikeOpaque: (fsLike: FsLike, rootPath?: string) => RuntimeFileSystem;
-export const fromWorkerOpaque: (worker: Worker) => RuntimeFileSystem;
+// fsLike is already confined to virtual `/`; raw Node roots use fromNodeFs.
+export const fromFsLike: (fsLike: FsLike) => RuntimeFileSystem;
+export const fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => RuntimeFileSystem;
 
 // The wired transport callable is the only surface that binds wire primitives from options.
-const client = createRuntimeClient({
-  ...presets.all(),
+const runtime = defineRuntime({ plugins: [replicad()] });
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
-    url: kernelWorkerUrl,
-    fileSystem,            // opaque RuntimeFileSystem
-    filePoolBuffer,        // optional SAB allocated upstream
+    createWorker,
+    fileSystem, // opaque RuntimeFileSystem
   }),
 });
 await client.connect();    // no arguments
 ```
 
-A Worker / in-process transport binds the FS bridge via `MessagePort` internally; a WebSocket transport multiplexes it over the same socket; an Electron IPC transport binds it via `MessagePortMain`. The runtime client never types against any wire primitive — that responsibility lives entirely inside the wired {@link TransportPlugin} callable and its `.materialize()` handle.
+A Worker / in-process transport binds the FS bridge via `MessagePort` internally; a WebSocket transport carries it on a second socket (`/fs`) — no multiplexer exists; an Electron IPC transport binds it via `MessagePortMain`. The runtime client never types against any wire primitive — that responsibility lives entirely inside the wired {@link TransportPlugin} callable and its `.materialize()` handle.
+
+The opaque filesystem is also the complete runtime reachability contract. Plugin callbacks accept normalized runtime paths within the supplied filesystem; never add project roots, ids, grants, authorization callbacks, or wire-derived capability objects to kernel, bundler, middleware, or headless-service inputs. A leading `/` names the supplied filesystem's root, not the host OS root. Exact source requests keep their operation ownership local instead of mutating the active preview's public state.
 
 ### Smell tests
 
@@ -823,9 +959,11 @@ Three signals that one of these antipatterns has crept in:
 
 Internal callers can usually work around these patterns. **Downstream consumers cannot.** A consumer who imports `RuntimeClient` and writes their own tests inherits every microtask drain, every IIFE schedule, every wire-primitive coupling. The blast radius of a sync-void-callback-with-async-body is the entire ecosystem of consumers who try to test against your API. Fixing the contract once eliminates the class.
 
-## 23. Plugin-Layer Values Are Plain-Data Specs
+## 24. Plugin-Layer Values Are Plain-Data Specs
 
-Plugin-layer values produced by factories like `fromMemoryFs(...)`, `fromNodeFs(...)`, `fromBrowserFs(...)`, `fromFsLike(...)`, `inProcessTransport({...})`, `webWorkerTransport({...})`, `replicad()`, `manifold()`, `esbuild()`, and `parameterCache()` are **plain-data specs**, not live instances. They describe **how to materialise** a live binding when a `RuntimeClient` is constructed. Each call to `createRuntimeClient(spec)` runs the spec's `materialize()` factory **once per client lifetime**, producing a fresh, isolated live binding (filesystem adapter, transport bridge, kernel handle).
+Filesystem and transport values produced by factories like `fromMemoryFs(...)`, `fromNodeFs(...)`, `fromBrowserFs(...)`, `fromFsLike(...)`, `inProcessTransport({...})`, and `webWorkerTransport({...})` are **plain-data specs**, not live instances. They describe **how to materialise** a live binding when a `RuntimeClient` is constructed. Each call to `createRuntimeClient({ transport })` runs the transport spec's `materialize()` factory **once per client lifetime**, producing a fresh, isolated live binding (filesystem adapter, transport bridge, channel handle). Executable plugins (`replicad()`, `esbuild()`, `parameterCache()`, …) are declared in `defineRuntime(...)` on the worker or host side, not as client options.
+
+Executable runtime values also belong at that same host boundary. Same-isolate execution uses `inProcessTransport({ runtime, ... })`; worker-backed execution uses a worker or utility host entry that calls `createRuntimeWorker({ runtime })`. The client facade always connects to a transport with `createRuntimeClient({ transport })`; it may import `typeof runtime` only as a compile-time witness for typed config, routes, and exports.
 
 This shape is what allows the same option object — including the same `fromMemoryFs(seed)` value — to feed an arbitrary number of clients without leaking state across them. The contract is: **specs are immutable plain data; instances are per-client and ephemeral**.
 
@@ -833,15 +971,20 @@ This shape is what allows the same option object — including the same `fromMem
 
 If the spec value does not depend on per-render input, declare it at module scope and pass it directly to `createRuntimeClient` (or to the helper that builds your options). This dogfoods the multi-client-from-one-spec contract on every cold module load.
 
+This applies equally to React-facing client options and async provider specs used by hooks such as `useRuntime`. A `clientOptions` object or provider function is a lifecycle key: changing its identity means "tear down the old client and materialise a new one." Inline objects, inline helper calls, and inline async providers in a React render path can therefore create a new client without replaying the current render command. Static client options must be module-scope constants. Static async providers must also be module-scope constants; the provider body may materialise live resources per client, but the provider identity is stable.
+
 ```typescript
 // CORRECT: module-scope spec, multi-client safe
-import { createRuntimeClient, createRuntimeClientOptions, fromMemoryFs, presets } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
-const replicadReferenceClientOptions = createRuntimeClientOptions({
-  ...presets.all(),
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-});
+const runtime = defineRuntime({ plugins: [replicad()] });
+const replicadReferenceClientOptions = {
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+};
 
 export const ReplicadReference = ({ code }: { code: Record<string, string> }) => {
   // Each <KernelModelView /> instance produces its own materialised filesystem,
@@ -850,18 +993,30 @@ export const ReplicadReference = ({ code }: { code: Record<string, string> }) =>
 };
 ```
 
+For async transport bootstraps, declare the provider itself at module scope and read browser/preload globals lazily inside the provider. Do not eagerly create a module-scope `Promise` for one-shot resources such as `MessagePort`.
+
+```typescript
+// CORRECT: stable provider identity, live bridge resolved per client lifecycle
+const electronClientOptions = createElectronClientOptions({
+  bridge: () => globalThis.window.taucad,
+});
+
+export const ElectronPreview = ({ code }: { code: Record<string, string> }) => {
+  return <KernelModelView clientOptions={electronClientOptions} code={code} />;
+};
+```
+
 ### Antipattern: wrapping static specs in `useMemo`
 
-`useMemo(() => createRuntimeClientOptions({...}), [])` is the React-flavoured way of pretending a plain-data spec has component-scope ownership. It does not. The spec is referentially identical across every render of the component **and** across every component instance — `useMemo` adds runtime overhead and reader confusion without changing the behaviour. The same critique applies to `useState(() => createRuntimeClientOptions({...}))`.
+`useMemo(() => ({ transport: webWorkerTransport({...}) }), [])` is the React-flavoured way of pretending a plain-data spec has component-scope ownership. It does not. The spec is referentially identical across every render of the component **and** across every component instance — `useMemo` adds runtime overhead and reader confusion without changing the behaviour. The same critique applies to `useState(() => ({ transport: webWorkerTransport({...}) }))`.
 
 ```typescript
 // INCORRECT: useMemo over a static spec
 const ReplicadReference = ({ code }: Props) => {
   const clientOptions = useMemo(
     () =>
-      createRuntimeClientOptions({
-        ...presets.all(),
-        transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
+      ({
+        transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
       }),
     [],
   );
@@ -871,8 +1026,27 @@ const ReplicadReference = ({ code }: Props) => {
 
 `useMemo` is only legitimate when a spec **depends on per-render inputs** (props, route parameters, user-selected paths). In that case the dependency array reflects the genuine inputs and `useMemo` is doing real work.
 
+Likewise, `useCallback` is only legitimate for a provider that genuinely depends on props or route state. A provider that does not depend on render-time state belongs at module scope.
+
 ### Why this matters
 
 When specs are declared at module scope, every multi-instance render path automatically exercises the multi-client-from-one-spec invariant. If a `from*` factory ever regresses to capturing shared mutable state (e.g. an inline filesystem instance instead of a `create()` factory), the failure surfaces immediately — a single hot-reload of the docs page will produce two `RuntimeClient`s that read each other's writes. By contrast, ad-hoc inline `createRuntimeClient({...})` calls inside components mask the regression because most components only ever produce one client per page.
 
 **Fail loudly, dogfood the contract, keep static specs at module scope.**
+
+## 25. Examples Are Quickstarts, Test Harnesses Live With Packages
+
+Public examples must teach the shortest truthful consumer path. They should show the meaningful integration boundary — selected plugin subpaths, runtime definition, transport/client options, `useRuntime`, a viewer, and schema-backed parameters — without carrying repository-specific regression scaffolding.
+
+Example apps must not contain runner-specific configs, test-only globals, GLB bounds inspectors, `data-testid`-only DOM, `?e2e` behavior branches, or debug controls whose purpose is assertion targeting. Those details make examples look like private CI harnesses instead of copyable quickstarts, and they couple consumers to Tau's test stack.
+
+Package-owned maintainer e2e fixtures are the correct place for integrated framework coverage. For React consumer flows, this means fixture apps under `@taucad/react` can publish raw GLB bytes, parse bounds, expose compact test state, and assert framework transport behavior because they are explicitly not consumer examples. Runtime-owned tests keep lower-level protocol, transport, host, and adapter conformance coverage.
+
+This split preserves maturity without polluting DX:
+
+- examples stay self-contained and scannable;
+- e2e fixtures can share one strict test contract across frameworks;
+- test dependencies sit at the workspace/tooling boundary, not inside quickstart package manifests;
+- examples remain free to choose readable UI over assertion-friendly DOM.
+
+When a quickstart starts needing a test probe to prove correctness, move the probe to a package-owned fixture instead of teaching it to consumers.

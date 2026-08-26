@@ -35,7 +35,7 @@ import { Topic } from '@taucad/events';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
-import { isToolPart } from '@taucad/chat';
+import { isAnyToolPart } from '@taucad/chat';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type { ChatRequest } from '#hooks/chat-persistence.machine.js';
@@ -44,8 +44,9 @@ import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { inspect } from '#machines/inspector.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
-import { extractMimeTypeFromDataUrl, finalizeInterruptedToolParts } from '#utils/chat.utils.js';
+import { extractMimeTypeFromDataUrl, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
 import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
+import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -62,6 +63,11 @@ export type ChatSessionDeps = {
     chatId: string,
     key: K,
     value: ChatEntity[K],
+  ) => Promise<ChatEntity | undefined>;
+  consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<ChatEntity | undefined>;
+  commitCancelledDraftRestore: (
+    chatId: string,
+    input: CommitCancelledDraftRestoreInput,
   ) => Promise<ChatEntity | undefined>;
   setMessageEdit: (chatId: string, messageId: string, draft: MyUIMessage) => Promise<ChatEntity | undefined>;
   clearMessageEdit: (chatId: string, messageId: string) => Promise<ChatEntity | undefined>;
@@ -144,10 +150,51 @@ function aggregateUsageCost(messages: readonly MyUIMessage[]): number {
   return total;
 }
 
+function buildDraftFromUserMessage(message: MyUIMessage): MyUIMessage {
+  return {
+    id: 'draft',
+    role: 'user',
+    parts: message.parts.filter((part) => part.type === 'text' || part.type === 'file'),
+    metadata: {
+      createdAt: Date.now(),
+      status: 'pending',
+    },
+  };
+}
+
+function buildPendingTailDraftRestore(messages: readonly MyUIMessage[]):
+  | {
+      userMessage: MyUIMessage;
+      truncatedMessages: MyUIMessage[];
+    }
+  | undefined {
+  const last = messages.at(-1);
+  if (last?.role === 'user' && last.metadata?.status === 'pending') {
+    return {
+      userMessage: last,
+      truncatedMessages: messages.slice(0, -1),
+    };
+  }
+
+  if (last?.role !== 'assistant' || last.parts.length > 0) {
+    return undefined;
+  }
+
+  const userMessage = messages.at(-2);
+  if (userMessage?.role !== 'user' || userMessage.metadata?.status !== 'pending') {
+    return undefined;
+  }
+
+  return {
+    userMessage,
+    truncatedMessages: messages.slice(0, -2),
+  };
+}
+
 function countPersistMilestones(message: MyUIMessage): number {
   let count = 0;
   for (const part of message.parts) {
-    if (isToolPart(part) && (part.state === 'output-available' || part.state === 'output-error')) {
+    if (isAnyToolPart(part) && (part.state === 'output-available' || part.state === 'output-error')) {
       count += 1;
       continue;
     }
@@ -178,8 +225,8 @@ type InternalSession = ChatSession & {
    * computed for this chat. Populated via {@link ChatSessionStore.setLatestAgentBody}
    * from `useCadChatClient` on every render. The `dispatchRequest` listener
    * falls back to this body when a request enters the persistence machine
-   * without an explicit `body` (currently the only such path is the
-   * hydration auto-regenerate on pending-tail in `loadChatActor`).
+   * without an explicit `body` (currently the startup-request hydration
+   * regenerate in `loadChatActor` and manual continue paths).
    */
   latestAgentBody: Readonly<Record<string, unknown>> | undefined;
   /** Cleanups for the per-chat subscriptions wired up at session creation. */
@@ -212,6 +259,12 @@ export class ChatSessionStore {
     },
     async patchChat() {
       throw new Error('ChatSessionStore: patchChat not provided');
+    },
+    async consumeChatStartupRequest() {
+      throw new Error('ChatSessionStore: consumeChatStartupRequest not provided');
+    },
+    async commitCancelledDraftRestore() {
+      throw new Error('ChatSessionStore: commitCancelledDraftRestore not provided');
     },
     async setMessageEdit() {
       throw new Error('ChatSessionStore: setMessageEdit not provided');
@@ -277,7 +330,7 @@ export class ChatSessionStore {
   }
 
   public subscribeChat(chatId: string, listener: () => void): () => void {
-    return this.#addPerChatListener(this.#chatTopics, 'chat', chatId, listener);
+    return this.#addPerChatListener({ bucket: this.#chatTopics, namePrefix: 'chat', chatId, listener });
   }
 
   public getStatus(chatId: string): ChatStatus | undefined {
@@ -285,7 +338,7 @@ export class ChatSessionStore {
   }
 
   public subscribeStatus(chatId: string, listener: () => void): () => void {
-    return this.#addPerChatListener(this.#statusTopics, 'status', chatId, listener);
+    return this.#addPerChatListener({ bucket: this.#statusTopics, namePrefix: 'status', chatId, listener });
   }
 
   public getUsage(chatId: string): UsageSnapshot | undefined {
@@ -293,7 +346,7 @@ export class ChatSessionStore {
   }
 
   public subscribeUsage(chatId: string, listener: () => void): () => void {
-    return this.#addPerChatListener(this.#usageTopics, 'usage', chatId, listener);
+    return this.#addPerChatListener({ bucket: this.#usageTopics, namePrefix: 'usage', chatId, listener });
   }
 
   /**
@@ -301,9 +354,8 @@ export class ChatSessionStore {
    * client (`useCadChatClient` today, future name/commit clients tomorrow)
    * has composed for this chat. The `dispatchRequest` listener inside
    * `#createSession` falls back to this when a request hits the persistence
-   * machine without an explicit `body` (the only such path today is the
-   * hydration-driven auto-regenerate on a pending-tail user message — see
-   * `loadChatActor` in `#createSession`).
+   * machine without an explicit `body` (notably the startup-request
+   * hydration regenerate — see `loadChatActor` in `#createSession`).
    *
    * Stored as a snapshot, not subscribed to, because the listener only
    * needs a single read at dispatch time.
@@ -331,34 +383,73 @@ export class ChatSessionStore {
           loadChatActor: fromSafeAsync(async ({ input }) => {
             const loadedChat = await depsRef().getChat(input.chatId);
 
-            if (loadedChat) {
-              // Defensive guard: only seed messages from the loaded chat when
-              // the live `Chat` instance has not started accumulating its own
-              // (a brand-new chat that's already in-flight). Prevents the
-              // classic "load wipes in-flight messages" race.
+            if (!loadedChat) {
               if (session.chat.messages.length === 0) {
-                session.chat.messages = loadedChat.messages;
+                session.chat.messages = [];
               }
 
-              session.draftActorRef.send({ type: 'initializeFromChat', chat: loadedChat });
+              return { type: 'chatRetrieved', chat: undefined };
+            }
 
-              const lastMessage = session.chat.messages.at(-1);
-              if (lastMessage?.role === 'user' && lastMessage.metadata?.status === 'pending') {
+            // Defensive guard: only seed messages from the loaded chat when
+            // the live `Chat` instance has not started accumulating its own
+            // (a brand-new chat that's already in-flight). Prevents the
+            // classic "load wipes in-flight messages" race.
+            if (session.chat.messages.length === 0) {
+              session.chat.messages = loadedChat.messages;
+            }
+
+            let hydratedChat = loadedChat;
+            const lastMessage = session.chat.messages.at(-1);
+            const { startupRequest } = loadedChat;
+            if (startupRequest) {
+              const isEligibleStartupRequest =
+                lastMessage?.role === 'user' &&
+                lastMessage.id === startupRequest.messageId &&
+                lastMessage.metadata?.status === 'pending';
+              const consumedChat = await depsRef().consumeChatStartupRequest(input.chatId, startupRequest.id);
+              if (consumedChat) {
+                hydratedChat = consumedChat;
+              }
+
+              if (isEligibleStartupRequest && consumedChat) {
+                session.draftActorRef.send({ type: 'initializeFromChat', chat: consumedChat });
+                session.chat.messages = consumedChat.messages;
+
                 persistenceActorRef.send({
                   type: 'startRequest',
                   request: { kind: 'regenerate' },
                 });
 
-                return { type: 'chatRetrieved', chat: { ...loadedChat, error: undefined } };
+                return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
               }
-            } else if (session.chat.messages.length === 0) {
-              session.chat.messages = [];
             }
 
-            return { type: 'chatRetrieved', chat: loadedChat };
+            const pendingTailRestore = buildPendingTailDraftRestore(session.chat.messages);
+            if (pendingTailRestore) {
+              const draft = buildDraftFromUserMessage(pendingTailRestore.userMessage);
+              const restoredChat = await depsRef().commitCancelledDraftRestore(input.chatId, {
+                messages: pendingTailRestore.truncatedMessages,
+                draft,
+                clearStartupRequestId: startupRequest?.id,
+              });
+              const healedChat = restoredChat ?? {
+                ...hydratedChat,
+                messages: pendingTailRestore.truncatedMessages,
+                draft,
+                startupRequest: undefined,
+              };
+              session.chat.messages = pendingTailRestore.truncatedMessages;
+              session.draftActorRef.send({ type: 'initializeFromChat', chat: healedChat });
+
+              return { type: 'chatRetrieved', chat: healedChat };
+            }
+
+            session.draftActorRef.send({ type: 'initializeFromChat', chat: hydratedChat });
+            return { type: 'chatRetrieved', chat: hydratedChat };
           }),
           persistMessagesActor: fromSafeAsync(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'messages', input.messages);
+            await depsRef().patchChat(input.chatId, 'messages', stampMessageCreatedAt(input.messages));
           }),
           persistErrorActor: fromSafeAsync(async ({ input }) => {
             await depsRef().patchChat(input.chatId, 'error', input.error);
@@ -458,9 +549,9 @@ export class ChatSessionStore {
         // a verb it originated (submit / retry / regenerateTail / stop). Two
         // request kinds are *bodyless* by construction:
         //
-        //   - Hydration auto-regen on a pending-tail (see `loadChatActor`),
-        //     which fires before any client has attached a body.
-        //   - `continue` (manual Retry on a transient-network banner via
+        //   - Startup-request hydration regenerate (see `loadChatActor`),
+        //     which may fire before any client has attached a body.
+        //   - `continue` (manual Try again on a transient-network banner via
         //     `continueChat`, and the persistence machine's transparent
         //     auto-retry in `retrying`), which resumes the in-flight stream
         //     and has no producer that owns the per-turn agent payload.
@@ -533,7 +624,7 @@ export class ChatSessionStore {
           // top-level `agent` block required by `chatTurnRequestSchema`. Without
           // it the API rejects the retry with `agent: expected object, received
           // undefined` and the user sees a fresh "Processing Error" banner the
-          // moment they click Retry on a network drop.
+          // moment they click Try again on a network drop.
           case 'continue': {
             type ChatMakeRequestShim = {
               makeRequest: (args: {
@@ -587,31 +678,33 @@ export class ChatSessionStore {
       persistenceActorRef.send({ type: 'queuePersist', messages: sanitized });
     });
 
-    // Empty-cancel companion to `applyStoppedRequest`: the persistence
-    // machine has already computed both the truncated transcript and the
-    // user message to lift back into the composer (see
-    // `buildRestoreCancelledDraftEmit` in chat-persistence.machine.ts), so
-    // this listener does zero message-shape work. The flow is:
-    //
-    //  1. Replace `chat.messages` with the truncated tail (drops the
-    //     cancelled user message AND any zero-part assistant placeholder
-    //     AI SDK appended on stream-open).
-    //  2. Hand the original user message to the draft machine via the
-    //     existing `loadDraftFromMessage` event — `inputSaving` debounces
-    //     the IndexedDB write through `persistDraftActor`. Overwrites any
-    //     stale draft (in practice empty because `sendMessage` clears it).
-    //  3. Queue a persist of the truncated transcript so the next reload
-    //     does not auto-regenerate a now-missing turn.
+    // Empty-cancel companion to `applyStoppedRequest`: commit the truncated
+    // transcript and restored composer draft as one durable chat-row
+    // transition. The draft-machine event is intentionally transient; storage
+    // durability is owned by `commitCancelledDraftRestore`.
     //
     // `chat-history.tsx` subscribes to the same emit independently to
     // refocus the composer in the next animation frame.
     const restoreSubscription = persistenceActorRef.on(
       'restoreCancelledDraft',
-      ({ userMessage, truncatedMessages }) => {
+      async ({ userMessage, truncatedMessages }) => {
         resetMilestonePersistTracking();
+        const draft = buildDraftFromUserMessage(userMessage);
         chat.messages = truncatedMessages;
-        draftActorRef.send({ type: 'loadDraftFromMessage', draft: userMessage });
-        persistenceActorRef.send({ type: 'queuePersist', messages: truncatedMessages });
+        draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft });
+        try {
+          await depsRef().commitCancelledDraftRestore(chatId, {
+            messages: truncatedMessages,
+            draft,
+          });
+        } catch (error) {
+          const persistenceError =
+            error instanceof Error ? error : new Error('Failed to restore cancelled draft', { cause: error });
+          persistenceActorRef.send({
+            type: 'setPersistedError',
+            error: parseErrorForPersistence(persistenceError),
+          });
+        }
       },
     );
 
@@ -696,12 +789,17 @@ export class ChatSessionStore {
     return session;
   }
 
-  #addPerChatListener(
-    bucket: Map<string, Topic<void>>,
-    namePrefix: string,
-    chatId: string,
-    listener: () => void,
-  ): () => void {
+  #addPerChatListener({
+    bucket,
+    namePrefix,
+    chatId,
+    listener,
+  }: {
+    bucket: Map<string, Topic<void>>;
+    namePrefix: string;
+    chatId: string;
+    listener: () => void;
+  }): () => void {
     let topic = bucket.get(chatId);
     if (!topic) {
       topic = new Topic<void>({ name: `ChatSessionStore.${namePrefix}[${chatId}]` });

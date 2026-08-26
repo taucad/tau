@@ -1,0 +1,7 @@
+{
+  "name": "units",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/units",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"]
+}

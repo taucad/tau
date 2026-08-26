@@ -1,0 +1,18 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "types": ["node", "electron-vite/node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "../../support/**/*.ts",
+    "../../support/**/*.tsx",
+    "../../../src/**/*.ts",
+    "electron.vite.config.ts"
+  ]
+}

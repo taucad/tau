@@ -12,6 +12,8 @@ export const openscadConfig: KernelConfig = {
   commonErrorPatterns:
     'missing semicolons, undefined variables, invalid dimensions (must be positive), unclosed modules, $fn baked globally instead of $fa/$fs adaptive tessellation, hull()/minkowski() used as stand-ins for loft or rotate_extrude',
 
+  testingProfile: { includeBrepFeatureExamples: false },
+
   topologyHints: `- No analytical curves — mesh kernel. Choose \`$fn\` / \`$fa\` / \`$fs\`, not curve form.
 - Prefer adaptive tessellation globally: \`$fa = 2; $fs = 0.4;\` at the top of \`main.scad\`. Set \`$fn\` locally only when a specific feature needs an exact count (e.g. hex sockets).
 - Avoid \`$fn > 64\` on small features; the kernel will tessellate to the export deliverable independently.

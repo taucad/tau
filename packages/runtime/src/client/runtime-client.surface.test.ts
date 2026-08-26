@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 const clientDirectory = dirname(fileURLToPath(import.meta.url));
-const surfaceFiles = ['runtime-client.ts', 'runtime-client-options.ts'] as const;
+const surfaceFiles = ['runtime-client.ts', 'runtime-client-core.ts'] as const;
 const safetyLookbackLines = 5;
 const castPattern = /\bas\s+unknown\s+as\b/;
 const safetyPattern = /\/\/\s*SAFETY\b/;

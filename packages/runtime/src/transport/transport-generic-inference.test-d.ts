@@ -7,18 +7,19 @@ import { describe, it, assertType } from 'vitest';
 import { z } from 'zod';
 
 import { defineRuntimeTransport } from '#transport/define-runtime-transport.js';
-import type {
-  RuntimeTransportClient,
-  RuntimeTransportHost,
-  TransportDescriptor,
-} from '#transport/runtime-transport.types.js';
+import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type {
   TransportId,
   TransportProtocol,
   TransportBindingsExtra,
+  RuntimeFromTransport,
   TransportClientOptions,
 } from '#transport/transport-projections.js';
+import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+import { inProcessTransport } from '#transport/in-process-transport.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 
 const stubClient = (): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<string, unknown>>, 'web-worker'> =>
   ({ id: 'web-worker' }) as unknown as RuntimeTransportClient<
@@ -34,27 +35,17 @@ const bundledTransport = defineRuntimeTransport({
     workerScript: z.string(),
     name: z.string().optional(),
   }),
-  hostOptionsSchema: z.object({
-    pool: z
-      .object({
-        bytes: z.number().int().nonnegative().default(0),
-      })
-      .optional(),
-  }),
   client: Object.assign(stubClient, {
     describe: (): TransportDescriptor<'web-worker'> => ({
       id: 'web-worker',
       wire: 'web-worker',
       memory: {
         geometryDelivery: 'transfer',
-        fileDelivery: 'transfer',
         abortSignal: 'sab-atomics',
       },
       fileSystem: 'unbound',
     }),
   }),
-  host: (): RuntimeTransportHost<RuntimeProtocol, Readonly<Record<string, unknown>>, 'web-worker'> =>
-    ({}) as RuntimeTransportHost<RuntimeProtocol, Readonly<Record<string, unknown>>, 'web-worker'>,
 });
 
 describe('transport callable generic inference end-to-end (C12)', () => {
@@ -79,5 +70,20 @@ describe('transport callable generic inference end-to-end (C12)', () => {
     assertType<C>({ workerScript: '/w.js', name: 'foo' });
     /* @ts-expect-error -- workerScript missing */
     assertType<C>({ name: 'oops' });
+  });
+
+  it('RuntimeFromTransport is undefined for worker-backed transports', () => {
+    type R = RuntimeFromTransport<ReturnType<typeof bundledTransport>>;
+    assertType<undefined>(undefined as unknown as R);
+  });
+
+  it('RuntimeFromTransport projects in-process runtime definitions', () => {
+    const runtime = defineRuntime({});
+    const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
+    type R = RuntimeFromTransport<typeof transport>;
+    assertType<typeof runtime>(undefined as unknown as R);
+
+    // @ts-expect-error -- same-isolate transports own host creation and must receive a runtime.
+    inProcessTransport({ fileSystem: fromMemoryFs() });
   });
 });

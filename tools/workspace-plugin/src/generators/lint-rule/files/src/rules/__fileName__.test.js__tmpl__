@@ -1,0 +1,25 @@
+import { describe, it } from 'vitest';
+import { RuleTester } from 'eslint';
+import tseslint from 'typescript-eslint';
+import { <%= propertyName %>Rule } from './<%= fileName %>.js';
+
+const ruleTester = new RuleTester({
+  languageOptions: {
+    parser: tseslint.parser,
+  },
+});
+
+describe('<%= ruleName %>', () => {
+  it('reports violations and accepts valid code', () => {
+    ruleTester.run('<%= ruleName %>', <%= propertyName %>Rule, {
+      valid: [
+        // TODO: replace with real valid cases.
+        { name: 'placeholder valid case', code: 'const ok = 1;' },
+      ],
+      invalid: [
+        // TODO: add invalid cases, e.g.
+        // { name: '...', code: '...', errors: [{ messageId: 'violation' }] },
+      ],
+    });
+  });
+});

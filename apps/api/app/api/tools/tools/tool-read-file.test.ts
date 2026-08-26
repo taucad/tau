@@ -44,20 +44,39 @@ const buildRuntime = (
     },
   }) as unknown as ToolRuntime;
 
-type ReadFileResult = { content: string; totalLines: number; modifiedAt?: string };
+type ReadFileResult = { content: string; size: number; contentKind: 'text'; totalLines: number; modifiedAt?: string };
+type ReadFileRpcSuccess = {
+  success: true;
+  content: string;
+  size: number;
+  contentKind: 'text';
+  totalLines: number;
+  startLine: number;
+  modifiedAt?: string;
+};
+
+const readFileRpcSuccess = (
+  content: string,
+  totalLines: number,
+  options?: { startLine?: number; modifiedAt?: string },
+): ReadFileRpcSuccess => ({
+  success: true,
+  content,
+  size: new TextEncoder().encode(content).byteLength,
+  contentKind: 'text',
+  totalLines,
+  startLine: options?.startLine ?? 1,
+  ...(options?.modifiedAt ? { modifiedAt: options.modifiedAt } : {}),
+});
 
 const namespace = [...recentReadsRootNamespace, chatId];
 
 describe('readFileTool — gutter wrap and dedup', () => {
   it('returns the cat -n gutter and persists the dedup pointer to the store on a fresh read', async () => {
     const chatRpcService = mock<ChatRpcConfigurable['chatRpcService']>();
-    chatRpcService.sendRpcRequest.mockResolvedValue({
-      success: true,
-      content: 'line1\nline2',
-      totalLines: 3,
-      startLine: 1,
-      modifiedAt: '2026-05-13T12:00:00.000Z',
-    });
+    chatRpcService.sendRpcRequest.mockResolvedValue(
+      readFileRpcSuccess('line1\nline2', 3, { modifiedAt: '2026-05-13T12:00:00.000Z' }),
+    );
 
     const store = new InMemoryStore();
     const runtime = buildRuntime('tc-wrap', chatRpcService, store);
@@ -66,6 +85,8 @@ describe('readFileTool — gutter wrap and dedup', () => {
     const result = (await tool.invoke({ targetFile: 'f.ts' }, runtime)) as ReadFileResult;
 
     expect(result.content).toBe('   1\tline1\n   2\tline2');
+    expect(result.contentKind).toBe('text');
+    expect(result.size).toBe(new TextEncoder().encode('line1\nline2').byteLength);
     expect(result.totalLines).toBe(3);
     expect(result.modifiedAt).toBe('2026-05-13T12:00:00.000Z');
 
@@ -77,13 +98,9 @@ describe('readFileTool — gutter wrap and dedup', () => {
 
   it('aligns the gutter with startLine when an offset slice is returned', async () => {
     const chatRpcService = mock<ChatRpcConfigurable['chatRpcService']>();
-    chatRpcService.sendRpcRequest.mockResolvedValue({
-      success: true,
-      content: 'gamma\ndelta',
-      totalLines: 10,
-      startLine: 3,
-      modifiedAt: '2026-05-13T12:00:00.000Z',
-    });
+    chatRpcService.sendRpcRequest.mockResolvedValue(
+      readFileRpcSuccess('gamma\ndelta', 10, { startLine: 3, modifiedAt: '2026-05-13T12:00:00.000Z' }),
+    );
 
     const runtime = buildRuntime('tc-offset', chatRpcService);
     const tool = readFileTool as unknown as ToolInvoke;
@@ -95,13 +112,7 @@ describe('readFileTool — gutter wrap and dedup', () => {
   it('returns the fileUnchangedMarker when the store reports an unchanged read', async () => {
     const chatRpcService = mock<ChatRpcConfigurable['chatRpcService']>();
     const modifiedAt = '2026-05-13T12:00:00.000Z';
-    chatRpcService.sendRpcRequest.mockResolvedValue({
-      success: true,
-      content: 'only',
-      totalLines: 1,
-      startLine: 1,
-      modifiedAt,
-    });
+    chatRpcService.sendRpcRequest.mockResolvedValue(readFileRpcSuccess('only', 1, { modifiedAt }));
 
     const store = new InMemoryStore();
     const fingerprint = buildReadFingerprint({ targetFile: 'same.ts' });
@@ -124,12 +135,7 @@ describe('readFileTool — gutter wrap and dedup', () => {
 
   it('does not persist a dedup pointer when the RPC response has no modifiedAt', async () => {
     const chatRpcService = mock<ChatRpcConfigurable['chatRpcService']>();
-    chatRpcService.sendRpcRequest.mockResolvedValue({
-      success: true,
-      content: 'no-mtime',
-      totalLines: 1,
-      startLine: 1,
-    });
+    chatRpcService.sendRpcRequest.mockResolvedValue(readFileRpcSuccess('no-mtime', 1));
 
     const store = new InMemoryStore();
     const runtime = buildRuntime('tc-no-mtime', chatRpcService, store);
@@ -146,13 +152,9 @@ describe('readFileTool — gutter wrap and dedup', () => {
 
   it('treats a stale dedup pointer (mtime drift) as a miss and rewrites the pointer', async () => {
     const chatRpcService = mock<ChatRpcConfigurable['chatRpcService']>();
-    chatRpcService.sendRpcRequest.mockResolvedValue({
-      success: true,
-      content: 'drifted',
-      totalLines: 1,
-      startLine: 1,
-      modifiedAt: '2026-05-13T13:00:00.000Z',
-    });
+    chatRpcService.sendRpcRequest.mockResolvedValue(
+      readFileRpcSuccess('drifted', 1, { modifiedAt: '2026-05-13T13:00:00.000Z' }),
+    );
 
     const store = new InMemoryStore();
     const fingerprint = buildReadFingerprint({ targetFile: 'drift.ts' });
@@ -173,13 +175,9 @@ describe('readFileTool — gutter wrap and dedup', () => {
 
   it('falls back to plain output when no store is wired (defensive)', async () => {
     const chatRpcService = mock<ChatRpcConfigurable['chatRpcService']>();
-    chatRpcService.sendRpcRequest.mockResolvedValue({
-      success: true,
-      content: 'no-store',
-      totalLines: 1,
-      startLine: 1,
-      modifiedAt: '2026-05-13T12:00:00.000Z',
-    });
+    chatRpcService.sendRpcRequest.mockResolvedValue(
+      readFileRpcSuccess('no-store', 1, { modifiedAt: '2026-05-13T12:00:00.000Z' }),
+    );
 
     const runtime = buildRuntime('tc-no-store', chatRpcService, undefined);
     const tool = readFileTool as unknown as ToolInvoke;

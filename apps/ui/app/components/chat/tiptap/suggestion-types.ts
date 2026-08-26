@@ -4,7 +4,7 @@ import type { ChipType } from '#components/chat/context-chip.js';
  * Structured metadata for screenshot action items.
  * Carried directly on the item to avoid encoding/decoding action type from string IDs.
  */
-export type ScreenshotActionData = { type: 'single' } | { type: 'composite' } | { type: 'view'; entryFile: string };
+export type ScreenshotActionData = { type: 'single' } | { type: 'composite' } | { type: 'view'; entryPath: string };
 
 export type ContextSuggestionItem = {
   id: string;
@@ -23,9 +23,12 @@ export type ContextSuggestionItem = {
 export type SlashCommandItem = {
   id: string;
   label: string;
+  title?: string;
   description: string;
   fullDescription?: string;
   group: string;
+  source?: string;
+  enabled?: boolean;
 };
 
 export type SuggestionPopupState<I> = {

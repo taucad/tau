@@ -21,4 +21,8 @@ describe('module side effects', () => {
     expect(typeof buildBundledTypes).toBe('function');
     expect(typeof buildApiData).toBe('function');
   });
+
+  it('normalizes bundled declarations to LF line endings', () => {
+    expect(buildBundledTypes()['replicad']).not.toContain('\r');
+  });
 });

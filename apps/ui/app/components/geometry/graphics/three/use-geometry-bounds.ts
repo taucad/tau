@@ -22,6 +22,8 @@ type GeometryBoundsResult = {
   geometryRadius: number;
   /** The bounding box center of the geometry. */
   geometryCenter: THREE.Vector3;
+  /** Immutable snapshot of the geometry's world-space bounding box. */
+  geometryBounds: THREE.Box3;
 };
 
 /**
@@ -48,12 +50,14 @@ export function useGeometryBounds(
 
   const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
 
-  const [{ geometryRadius, geometryCenter }, set] = useState<{
+  const [{ geometryRadius, geometryCenter, geometryBounds }, set] = useState<{
     geometryRadius: number;
     geometryCenter: THREE.Vector3;
+    geometryBounds: THREE.Box3;
   }>({
     geometryRadius: 0,
     geometryCenter: new THREE.Vector3(),
+    geometryBounds: new THREE.Box3(),
   });
 
   // Track geometry key changes to avoid expensive per-frame scene traversal.
@@ -81,6 +85,9 @@ export function useGeometryBounds(
       return;
     }
 
+    if (enableCentering && outerRef.current) {
+      outerRef.current.position.set(0, 0, 0);
+    }
     if (outerRef.current) {
       outerRef.current.updateWorldMatrix(true, true);
     }
@@ -99,23 +106,27 @@ export function useGeometryBounds(
     _box3.getCenter(_centerPoint);
     _box3.getBoundingSphere(_sphere);
 
+    let snapshotCenter = _centerPoint.clone();
+    const snapshotBounds = _box3.clone();
     if (enableCentering && outerRef.current) {
       // Snap to the negated center directly rather than accumulating deltas,
       // so repeated frames are idempotent and don't drift from floating-point error.
       outerRef.current.position.set(-_centerPoint.x, -_centerPoint.y, -_centerPoint.z);
+      snapshotBounds.translate(_centerPoint.clone().negate());
+      snapshotCenter = new THREE.Vector3();
     }
 
     // Snapshot values from shared temporaries BEFORE the state updater runs,
     // to guard against cross-contamination if React batches updates across
     // multiple Canvas instances sharing the same module-level _sphere / _centerPoint.
     const snapshotRadius = _sphere.radius;
-    const snapshotCenter = _centerPoint.clone();
 
-    // Only update state when the radius or center has actually changed to avoid unnecessary re-renders
+    // Only update state when the measured bounds have actually changed.
     set((previous) => {
       const centerChanged = !previous.geometryCenter.equals(snapshotCenter);
+      const boundsChanged = !previous.geometryBounds.equals(snapshotBounds);
 
-      if (previous.geometryRadius === snapshotRadius && !centerChanged) {
+      if (previous.geometryRadius === snapshotRadius && !centerChanged && !boundsChanged) {
         // Radius and center converged -- bounds are stable, stop polling
         boundsStableRef.current = true;
         return previous;
@@ -124,6 +135,7 @@ export function useGeometryBounds(
       return {
         geometryRadius: snapshotRadius,
         geometryCenter: centerChanged ? snapshotCenter : previous.geometryCenter,
+        geometryBounds: boundsChanged ? snapshotBounds : previous.geometryBounds,
       };
     });
   });
@@ -138,5 +150,5 @@ export function useGeometryBounds(
     }
   }, [graphicsActor, geometryRadius]);
 
-  return { geometryRadius, geometryCenter };
+  return { geometryRadius, geometryCenter, geometryBounds };
 }

@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { Globe, Image, Eye, Check, Wand2, Ban, Zap } from 'lucide-react';
+import { Globe, Image, Eye, Check, Wand2, Ban, Zap, Blocks } from 'lucide-react';
 import type { ToolSelection, ToolName } from '@taucad/chat';
 import { toolName, toolMode } from '@taucad/chat/constants';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
@@ -39,13 +39,13 @@ const toolMetadata: Partial<Record<ToolName, ToolMetadata>> = {
   },
   [toolName.testModel]: {
     label: 'Test Model',
-    description: 'Run measurement tests across every file in test.json',
+    description: 'Run GeoSpec tests for the current project',
     icon: Image,
   },
-  [toolName.editTests]: {
-    label: 'Edit Tests',
-    description: 'Edit per-file test requirements in test.json',
-    icon: Image,
+  [toolName.useSkill]: {
+    label: 'Use Skill',
+    description: 'Activate a workspace skill',
+    icon: Blocks,
   },
 };
 

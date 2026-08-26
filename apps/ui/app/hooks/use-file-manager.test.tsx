@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { renderHook, act } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
+import type { ProjectRootConfiguration } from '@taucad/filesystem';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
 import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
@@ -47,11 +48,15 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
 
 const mockMount = vi.fn<(prefix: string, config: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
+const mockConfigureProjectRoots = vi.fn<(configuration: ProjectRootConfiguration) => Promise<void>>();
 const mockInvalidateStandaloneProvider = vi.fn<(backend: string, workspaceId?: string) => void>();
-const mockProxyMkdir = vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => {});
-const mockProxyRmdir = vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => {});
-const mockProxyWriteFile = vi.fn<(path: string, data: unknown, options?: unknown) => Promise<void>>(async () => {});
+const mockProxyMkdir = vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => undefined);
+const mockProxyRmdir = vi.fn<(path: string, options?: { recursive?: boolean }) => Promise<void>>(async () => undefined);
+const mockProxyWriteFile = vi.fn<(path: string, data: unknown, options?: unknown) => Promise<void>>(
+  async () => undefined,
+);
 const mockWaitForWorkerReady = vi.fn<() => Promise<void>>();
+const mockListProjectManifests = vi.fn<() => Promise<{ roots: readonly unknown[]; entries: readonly unknown[] }>>();
 const mockCreateFileSystemBridge = vi.fn(() => ({
   port: {
     postMessage: vi.fn(),
@@ -60,17 +65,24 @@ const mockCreateFileSystemBridge = vi.fn(() => ({
   },
   dispose: vi.fn(),
 }));
+const mockOpenFileSystemBridge = vi.fn(() => ({
+  port: new MessageChannel().port1,
+  dispose: vi.fn(),
+}));
 
-vi.mock('@taucad/runtime/transport-internals', () => ({
+vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
+  openFileSystemBridge: () => mockOpenFileSystemBridge(),
   waitForWorkerReady: async () => mockWaitForWorkerReady(),
-  createBridgeProxy: vi.fn(() => ({
+  createFileSystemBridgeProxy: vi.fn(() => ({
+    configureProjectRoots: mockConfigureProjectRoots,
     mount: mockMount,
     unmount: mockUnmount,
-    invalidateStandaloneProvider: mockInvalidateStandaloneProvider,
+    disposeStorageRoot: mockInvalidateStandaloneProvider,
     getDirectoryStat: vi.fn(async () => []),
     readShallowDirectory: vi.fn(async () => []),
     readDirectory: vi.fn(async () => []),
+    listProjectManifests: mockListProjectManifests,
     mkdir: mockProxyMkdir,
     rmdir: mockProxyRmdir,
     writeFile: mockProxyWriteFile,
@@ -90,9 +102,16 @@ const mockGetProjectFileSystemConfig =
 
 const mockSetProjectFileSystemConfig =
   vi.fn<(config: { projectId: string; backend: 'webaccess'; workspaceId: string }) => Promise<void>>();
+const mockGetProjectRootConfigs = vi.fn<() => Promise<ProjectRootConfiguration>>();
+const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs'>>();
+const handleStoreTestState = vi.hoisted(() => ({
+  updateWorkspaceHandle: vi.fn(async () => undefined),
+  forgetWorkspace: vi.fn(async () => undefined),
+}));
 
 vi.mock('#filesystem/handle-store.js', () => ({
-  getDefaultWorkspace: vi.fn(async () => undefined),
+  getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
+  getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
   getWorkspace: vi.fn(async () => undefined),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
   checkHandlePermission: vi.fn(async () => 'granted'),
@@ -100,6 +119,8 @@ vi.mock('#filesystem/handle-store.js', () => ({
   setProjectFileSystemConfig: async (config: { projectId: string; backend: 'webaccess'; workspaceId: string }) =>
     mockSetProjectFileSystemConfig(config),
   requestHandlePermission: vi.fn(async () => true),
+  updateWorkspaceHandle: handleStoreTestState.updateWorkspaceHandle,
+  forgetWorkspace: handleStoreTestState.forgetWorkspace,
 }));
 
 // Stub the workspace-telemetry hook so the provider doesn't pull in
@@ -115,7 +136,13 @@ vi.mock('#utils/workspace-telemetry.utils.js', async (importOriginal) => {
   };
 });
 
-const { waitForFileManagerServices, FileManagerProvider, useFileManager } = await import('#hooks/use-file-manager.js');
+const {
+  waitForFileManagerServices,
+  FileManagerProvider,
+  HomeFileManagerProvider,
+  useFileManager,
+  useHomeStorageBackend,
+} = await import('#hooks/use-file-manager.js');
 
 describe('waitForFileManagerServices', () => {
   beforeEach(() => {
@@ -124,6 +151,9 @@ describe('waitForFileManagerServices', () => {
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
     mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    mockConfigureProjectRoots.mockResolvedValue(undefined);
   });
 
   it('should resolve immediately when both services are already bound', async () => {
@@ -218,6 +248,29 @@ describe('waitForFileManagerServices', () => {
   });
 });
 
+describe('HomeFileManagerProvider', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+  });
+
+  it('resolves Home once and shares the selected engine with nested mounts', async () => {
+    const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <HomeFileManagerProvider rootDirectory='/' shouldInitializeOnStart={false}>
+        <HomeFileManagerProvider rootDirectory='/nested' shouldInitializeOnStart={false}>
+          {children}
+        </HomeFileManagerProvider>
+      </HomeFileManagerProvider>
+    );
+    const { result } = renderHook(() => useHomeStorageBackend(), { wrapper });
+
+    await vi.waitFor(() => {
+      expect(result.current).toBe('opfs');
+    });
+    expect(mockGetHomeStorageBackend).toHaveBeenCalledOnce();
+  });
+});
+
 describe('FileManagerProvider — bindProjectToWorkspace', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -225,7 +278,26 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
     mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
   });
+
+  const setDiscoveredProject = (projectId: string, workspaceId: string): void => {
+    mockListProjectManifests.mockResolvedValue({
+      roots: [],
+      entries: [
+        {
+          status: 'valid',
+          manifest: { id: projectId },
+          locator: {
+            backend: 'webaccess',
+            workspaceId,
+            storageRootKey: `webaccess:${workspaceId}`,
+            relativeDirectory: `/${projectId}`,
+          },
+        },
+      ],
+    });
+  };
 
   const renderProvider = (projectId: string | undefined) => {
     // Audit R4 / R15: `FileManagerProvider` requires an explicit
@@ -247,6 +319,11 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
 
   it('should persist ProjectFileSystemConfig before dispatching reloadWorkspace', async () => {
     const { result } = renderProvider('proj-bind');
+    setDiscoveredProject('proj-bind', 'wsp_target');
+
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
 
     await act(async () => {
       await result.current.bindProjectToWorkspace('wsp_target');
@@ -256,6 +333,7 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
       projectId: 'proj-bind',
       backend: 'webaccess',
       workspaceId: 'wsp_target',
+      providerBasePath: '/proj-bind',
     });
     // The IDB write completes before the event reaches the actor — call
     // order is the binding-transaction contract.
@@ -271,6 +349,7 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
     }));
 
     const { result } = renderProvider('proj-reload');
+    setDiscoveredProject('proj-reload', 'wsp_next');
 
     await vi.waitFor(() => {
       expect(mockGetProjectFileSystemConfig).toHaveBeenCalled();
@@ -303,6 +382,7 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
     });
 
     const { result } = renderProvider('proj-tele');
+    setDiscoveredProject('proj-tele', 'wsp_new');
 
     // Wait for the initial init so `activeWorkspaceId` is populated.
     await vi.waitFor(() => {
@@ -357,13 +437,16 @@ describe('FileManagerProvider — client + workspace facades', () => {
     });
   });
 
-  it('exposes a workspace facade that wires mount/unmount/invalidateStandaloneProvider to the proxy', async () => {
+  it('exposes a workspace facade that wires mount/unmount/root teardown to the proxy', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
-      await result.current.workspace.mount('/scratch', { backend: 'memory' });
+      await result.current.workspace.mount('/scratch', { backend: 'memory', storageRootKey: 'memory:0' });
     });
-    expect(mockMount).toHaveBeenCalledExactlyOnceWith('/scratch', { backend: 'memory' });
+    expect(mockMount).toHaveBeenCalledExactlyOnceWith('/scratch', {
+      backend: 'memory',
+      storageRootKey: 'memory:0',
+    });
 
     await act(async () => {
       result.current.workspace.unmount('/scratch');
@@ -373,30 +456,71 @@ describe('FileManagerProvider — client + workspace facades', () => {
     });
 
     await act(async () => {
-      await result.current.workspace.invalidateStandaloneProvider('webaccess', 'wsp_x');
+      await result.current.workspace.disposeStorageRoot('webaccess:wsp_x');
     });
-    expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess', 'wsp_x');
+    expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess:wsp_x');
   });
 
-  it('routes mkdir through the worker proxy without writing any .gitkeep placeholder', async () => {
+  it('synchronizes the initiating tab after replacing or forgetting a workspace handle', async () => {
+    const { result } = renderProvider();
+    const handle = mock<FileSystemDirectoryHandle>();
+
+    await act(async () => {
+      await result.current.workspace.replaceWorkspaceHandle('wsp_x', handle);
+    });
+    expect(handleStoreTestState.updateWorkspaceHandle).toHaveBeenCalledExactlyOnceWith('wsp_x', handle);
+    expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess:wsp_x');
+    expect(mockConfigureProjectRoots).toHaveBeenCalledWith(await mockGetProjectRootConfigs());
+
+    vi.clearAllMocks();
+    await act(async () => {
+      await result.current.workspace.forgetWorkspace('wsp_x');
+    });
+    expect(handleStoreTestState.forgetWorkspace).toHaveBeenCalledExactlyOnceWith('wsp_x');
+    expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess:wsp_x');
+    expect(mockConfigureProjectRoots).toHaveBeenCalledWith(await mockGetProjectRootConfigs());
+  });
+
+  it('routes createDirectory through the project content facade with an absolute project path', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
-      await result.current.mkdir('newfolder', { recursive: true });
+      await result.current.createDirectory('newfolder', { recursive: true });
     });
 
-    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('newfolder', { recursive: true });
+    expect(mockProxyMkdir).toHaveBeenCalledExactlyOnceWith('/projects/root/newfolder', { recursive: true });
     expect(mockProxyWriteFile).not.toHaveBeenCalled();
   });
 
-  it('routes rmdir through the worker proxy with recursive: true and does not call unlink per file', async () => {
+  it('routes deleteDirectory through the project content facade with an absolute project path', async () => {
     const { result } = renderProvider();
 
     await act(async () => {
-      await result.current.rmdir('subtree', { recursive: true });
+      await result.current.deleteDirectory('subtree', { recursive: true });
     });
 
-    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('subtree', { recursive: true });
+    expect(mockProxyRmdir).toHaveBeenCalledExactlyOnceWith('/projects/root/subtree', { recursive: true });
+  });
+
+  it('rotates the opaque runtime filesystem when replacement services become authoritative', async () => {
+    const { result } = renderProvider();
+
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+
+    const firstContentService = result.current.contentService;
+    const firstRuntimeFileSystem = result.current.runtimeFileSystem;
+
+    act(() => {
+      result.current.fileManagerRef.send({ type: 'reloadWorkspace' });
+    });
+
+    await vi.waitFor(() => {
+      expect(result.current.contentService).not.toBe(firstContentService);
+    });
+
+    expect(result.current.runtimeFileSystem).not.toBe(firstRuntimeFileSystem);
   });
 
   it('does not expose the deleted scoped suffix or top-level admin callbacks on the context value', () => {
@@ -407,6 +531,8 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(value).not.toHaveProperty('deleteFileScoped');
     expect(value).not.toHaveProperty('deleteDirectoryScoped');
     expect(value).not.toHaveProperty('getZippedDirectoryScoped');
+    expect(value).not.toHaveProperty('mkdir');
+    expect(value).not.toHaveProperty('rmdir');
     expect(value).not.toHaveProperty('mount');
     expect(value).not.toHaveProperty('unmount');
     expect(value).not.toHaveProperty('invalidateStandaloneProvider');

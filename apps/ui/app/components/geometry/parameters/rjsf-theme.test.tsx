@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import Form from '@rjsf/core';
+import validator from '@rjsf/validator-ajv8';
 import type { WidgetProps, RJSFSchema, Registry } from '@rjsf/utils';
 import { mock } from 'vitest-mock-extended';
-import { widgets } from '#components/geometry/parameters/rjsf-theme.js';
+import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
+import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 
 const SelectWidget = widgets['SelectWidget']!;
 
@@ -151,5 +154,40 @@ describe('SelectWidget', () => {
       const trigger = screen.getByRole('combobox');
       expect(trigger).toHaveTextContent('Choose an option');
     });
+  });
+});
+
+describe('fixed-length arrays', () => {
+  it('should route tuple schemas to the unsupported-field presentation', () => {
+    const formContext: RJSFContext = {
+      searchTerm: '',
+      allExpanded: true,
+      resetSingleParameter: vi.fn(),
+      shouldShowField: () => true,
+      units: { length: { symbol: 'mm', factor: 1 } },
+    };
+
+    render(
+      <Form
+        schema={{
+          type: 'object',
+          properties: {
+            background: {
+              type: 'array',
+              items: [{ type: 'number' }, { type: 'number' }, { type: 'number' }, { type: 'number' }],
+            },
+          },
+        }}
+        validator={validator}
+        widgets={widgets}
+        templates={templates}
+        uiSchema={uiSchema}
+        formContext={formContext}
+      />,
+    );
+
+    expect(screen.getByLabelText('Invalid Field: background')).toHaveTextContent(
+      'Fixed-length tuple fields are not supported.',
+    );
   });
 });

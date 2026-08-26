@@ -1,4 +1,4 @@
-import { assign, assertEvent, setup, enqueueActions, emit, raise } from 'xstate';
+import { assign, assertEvent, setup, enqueueActions, raise } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -13,8 +13,13 @@ import type {
   PanelState,
   ViewState,
 } from '#types/editor.types.js';
-import type { GraphicsViewSettings } from '#constants/editor.constants.js';
-import { defaultPanelState } from '#constants/editor.constants.js';
+import type {
+  GraphicsViewSettings,
+  PersistedModelComponentDisplayState,
+  PersistedModelComponentDisplayUnitState,
+} from '#constants/editor.constants.js';
+import { defaultPanelState, omitEmptyComponentDisplayState } from '#constants/editor.constants.js';
+import { createSourceModelInteractionUnitId } from '#machines/model-interaction.machine.js';
 
 const maxOpenFiles = 200;
 
@@ -64,6 +69,146 @@ function deepMergePanelState(current: PanelState, update: PartialDeep<PanelState
       ...(update.parametersPaneview as PanelState['parametersPaneview'] | undefined),
     },
   };
+}
+
+function pathMatchesPathOrDescendant(path: string, targetPath: string): boolean {
+  return path === targetPath || path.startsWith(`${targetPath}/`);
+}
+
+function rewritePathIfMatched(path: string | undefined, oldPath: string, newPath: string): string | undefined {
+  if (!path) {
+    return path;
+  }
+  if (path === oldPath) {
+    return newPath;
+  }
+  if (!pathMatchesPathOrDescendant(path, oldPath)) {
+    return path;
+  }
+  return `${newPath}${path.slice(oldPath.length)}`;
+}
+
+function mergeComponentDisplayUnits(
+  left: PersistedModelComponentDisplayUnitState,
+  right: PersistedModelComponentDisplayUnitState,
+): PersistedModelComponentDisplayUnitState {
+  return {
+    hiddenComponentIds: [...new Set([...(left.hiddenComponentIds ?? []), ...(right.hiddenComponentIds ?? [])])],
+    isolatedComponentIds: [...new Set([...(left.isolatedComponentIds ?? []), ...(right.isolatedComponentIds ?? [])])],
+    opacityByComponentId: {
+      ...left.opacityByComponentId,
+      ...right.opacityByComponentId,
+    },
+  };
+}
+
+function normalizeComponentDisplayUnits(
+  unitsById: Record<string, PersistedModelComponentDisplayUnitState>,
+): PersistedModelComponentDisplayState | undefined {
+  const normalizedEntries = Object.entries(unitsById)
+    .map(([unitId, unit]): [string, PersistedModelComponentDisplayUnitState] | undefined => {
+      const normalizedUnit: PersistedModelComponentDisplayUnitState = {
+        ...((unit.hiddenComponentIds?.length ?? 0) > 0 ? { hiddenComponentIds: unit.hiddenComponentIds } : {}),
+        ...((unit.isolatedComponentIds?.length ?? 0) > 0 ? { isolatedComponentIds: unit.isolatedComponentIds } : {}),
+        ...(Object.keys(unit.opacityByComponentId ?? {}).length > 0
+          ? { opacityByComponentId: unit.opacityByComponentId }
+          : {}),
+      };
+      return Object.keys(normalizedUnit).length > 0 ? [unitId, normalizedUnit] : undefined;
+    })
+    .filter((entry): entry is [string, PersistedModelComponentDisplayUnitState] => entry !== undefined);
+
+  return omitEmptyComponentDisplayState({
+    schemaVersion: 1,
+    unitsById: Object.fromEntries(normalizedEntries),
+  });
+}
+
+function rekeyComponentDisplayForRename(
+  componentDisplay: PersistedModelComponentDisplayState | undefined,
+  oldPath: string,
+  newPath: string,
+): PersistedModelComponentDisplayState | undefined {
+  if (!componentDisplay) {
+    return undefined;
+  }
+
+  const updatedUnits: Record<string, PersistedModelComponentDisplayUnitState> = {};
+  for (const [unitId, unit] of Object.entries(componentDisplay.unitsById)) {
+    const oldUnitPrefix = createSourceModelInteractionUnitId(oldPath);
+    const nextUnitId =
+      unitId === oldUnitPrefix || unitId.startsWith(`${oldUnitPrefix}/`)
+        ? createSourceModelInteractionUnitId(`${newPath}${unitId.slice(oldUnitPrefix.length)}`)
+        : unitId;
+    updatedUnits[nextUnitId] = updatedUnits[nextUnitId]
+      ? mergeComponentDisplayUnits(updatedUnits[nextUnitId], unit)
+      : unit;
+  }
+
+  return normalizeComponentDisplayUnits(updatedUnits);
+}
+
+function pruneComponentDisplayForDeletedPath(
+  componentDisplay: PersistedModelComponentDisplayState | undefined,
+  deletedPath: string,
+): PersistedModelComponentDisplayState | undefined {
+  if (!componentDisplay) {
+    return undefined;
+  }
+
+  const deletedUnitPrefix = createSourceModelInteractionUnitId(deletedPath);
+  return normalizeComponentDisplayUnits(
+    Object.fromEntries(
+      Object.entries(componentDisplay.unitsById).filter(
+        ([unitId]) => unitId !== deletedUnitPrefix && !unitId.startsWith(`${deletedUnitPrefix}/`),
+      ),
+    ),
+  );
+}
+
+function rekeyViewSettingsForRename(
+  viewSettings: Record<string, ViewState>,
+  oldPath: string,
+  newPath: string,
+): Record<string, ViewState> {
+  return Object.fromEntries(
+    Object.entries(viewSettings).map(([viewId, viewState]) => [
+      viewId,
+      {
+        ...viewState,
+        entryPath: rewritePathIfMatched(viewState.entryPath, oldPath, newPath),
+        graphicsSettings: {
+          ...viewState.graphicsSettings,
+          componentDisplay: rekeyComponentDisplayForRename(
+            viewState.graphicsSettings.componentDisplay,
+            oldPath,
+            newPath,
+          ),
+        },
+      },
+    ]),
+  );
+}
+
+function pruneViewSettingsForDeletedPath(
+  viewSettings: Record<string, ViewState>,
+  deletedPath: string,
+): Record<string, ViewState> {
+  return Object.fromEntries(
+    Object.entries(viewSettings).map(([viewId, viewState]) => [
+      viewId,
+      {
+        ...viewState,
+        graphicsSettings: {
+          ...viewState.graphicsSettings,
+          componentDisplay: pruneComponentDisplayForDeletedPath(
+            viewState.graphicsSettings.componentDisplay,
+            deletedPath,
+          ),
+        },
+      },
+    ]),
+  );
 }
 
 /**
@@ -124,13 +269,13 @@ type EditorStateMachineInput = {
  */
 type EditorStateEvent =
   | { type: 'load' }
-  | { type: 'reload'; projectId: string }
   // File operations (consolidated from fileExplorerMachine)
   | { type: 'openFile'; path: string; source: FileOpenSource; lineNumber?: number; column?: number; readOnly?: boolean }
   | { type: 'registerMaterialiseModel'; materialiseModel: ((path: string) => Promise<void>) | undefined }
   | { type: 'closeFile'; path: string }
   | { type: 'setActiveFile'; path: string }
   | { type: 'revealFileInTree'; path: string; expandTarget?: boolean }
+  | { type: 'revealModelComponentInExplorer'; entryPath: string; unitId: string; componentId: string }
   | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'closeAll' }
   // Chat operations
@@ -144,6 +289,7 @@ type EditorStateEvent =
   | { type: 'setViewSettings'; viewId: string; viewState: ViewState }
   | { type: 'updateViewSettings'; viewId: string; settings: Partial<GraphicsViewSettings> }
   | { type: 'removeViewSettings'; viewId: string }
+  | { type: 'pruneComponentDisplayForDeletedPath'; path: string }
   // Flush pending state immediately (bypasses debounce, used on tab close)
   | { type: 'flushNow' }
   | { type: 'editorStateRetrieved'; state: EditorState | undefined }
@@ -158,7 +304,6 @@ type EditorStateEvent =
  * Editor state Machine Emitted Events
  */
 type EditorStateEmitted =
-  | { type: 'editorStateLoaded'; editorState: EditorState | undefined }
   | {
       type: 'fileOpened';
       path: string;
@@ -169,7 +314,8 @@ type EditorStateEmitted =
     }
   | { type: 'fileOpening'; path: string }
   | { type: 'fileOpenFailed'; path: string; error: Error }
-  | { type: 'fileRevealRequested'; path: string; expandTarget?: boolean };
+  | { type: 'fileRevealRequested'; path: string; expandTarget?: boolean }
+  | { type: 'modelComponentRevealRequested'; entryPath: string; unitId: string; componentId: string };
 
 // Actors to be provided by the consumer
 const loadEditorStateActor = fromSafeAsync<
@@ -320,34 +466,7 @@ export const editorMachine = setup({
           readOnly: activeMeta.readOnly,
         });
       }
-
-      // Always emit editorStateLoaded so consumers know loading is complete
-      enqueue.emit({
-        type: 'editorStateLoaded',
-        editorState: loadedState,
-      });
     }),
-
-    updateProjectId: assign(({ event }) => {
-      assertEvent(event, 'reload');
-      return {
-        projectId: event.projectId,
-        openFiles: [],
-        activePaneId: undefined,
-        focusedChatId: undefined,
-        panelState: defaultPanelState,
-        editorLayout: undefined,
-        viewerLayout: undefined,
-        viewSettings: {},
-        materialiseModel: undefined,
-        pendingOpenFile: undefined,
-      };
-    }),
-
-    emitEditorStateLoadedEmpty: emit(() => ({
-      type: 'editorStateLoaded',
-      editorState: undefined,
-    })),
 
     setMaterialiseModel: assign(({ event }) => {
       assertEvent(event, 'registerMaterialiseModel');
@@ -537,6 +656,16 @@ export const editorMachine = setup({
         expandTarget: event.expandTarget,
       });
     }),
+    revealModelComponentInExplorer: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'revealModelComponentInExplorer');
+
+      enqueue.emit({
+        type: 'modelComponentRevealRequested',
+        entryPath: event.entryPath,
+        unitId: event.unitId,
+        componentId: event.componentId,
+      });
+    }),
 
     closeAll: enqueueActions(({ enqueue }) => {
       enqueue.assign({
@@ -576,6 +705,7 @@ export const editorMachine = setup({
 
       enqueue.assign({
         openFiles: updatedOpenFiles,
+        viewSettings: rekeyViewSettingsForRename(context.viewSettings, oldPath, newPath),
       });
 
       const activePath = selectActiveFilePath(context.openFiles, context.activePaneId);
@@ -691,6 +821,13 @@ export const editorMachine = setup({
       return { viewSettings: rest };
     }),
 
+    pruneComponentDisplayForDeletedPathInContext: assign(({ event, context }) => {
+      assertEvent(event, 'pruneComponentDisplayForDeletedPath');
+      return {
+        viewSettings: pruneViewSettingsForDeletedPath(context.viewSettings, event.path),
+      };
+    }),
+
     // ============================================================================
     // Persistence tracking
     // ============================================================================
@@ -698,10 +835,6 @@ export const editorMachine = setup({
     clearPendingChanges: assign({ hasPendingChanges: false }),
   },
   guards: {
-    isProjectIdChanging({ context, event }) {
-      assertEvent(event, 'reload');
-      return context.projectId !== event.projectId;
-    },
     hasPendingChanges({ context }) {
       return context.hasPendingChanges;
     },
@@ -752,22 +885,11 @@ export const editorMachine = setup({
           target: 'loading',
           actions: 'setLoading',
         },
-        reload: {
-          target: 'loading',
-          actions: ['updateProjectId', 'setLoading'],
-        },
       },
     },
     loading: {
       entry: 'clearError',
       initial: 'hydrating',
-      on: {
-        reload: {
-          target: '.hydrating',
-          actions: ['updateProjectId', 'setLoading'],
-          reenter: true,
-        },
-      },
       states: {
         hydrating: {
           invoke: {
@@ -781,7 +903,7 @@ export const editorMachine = setup({
               // gate sees either a healed focusedChatId or a typed error
               // panel rather than a stuck spinner.
               target: 'ensuringFocusedChat',
-              actions: ['clearLoading', 'emitEditorStateLoadedEmpty'],
+              actions: 'clearLoading',
             },
           },
           on: {
@@ -896,6 +1018,9 @@ export const editorMachine = setup({
             revealFileInTree: {
               actions: 'revealFileInTree',
             },
+            revealModelComponentInExplorer: {
+              actions: 'revealModelComponentInExplorer',
+            },
             renameFile: {
               actions: 'renameFile',
             },
@@ -923,9 +1048,8 @@ export const editorMachine = setup({
             removeViewSettings: {
               actions: 'removeViewSettingsInContext',
             },
-            reload: {
-              target: '#editor.loading',
-              actions: ['updateProjectId', 'setLoading'],
+            pruneComponentDisplayForDeletedPath: {
+              actions: 'pruneComponentDisplayForDeletedPathInContext',
             },
           },
         },
@@ -946,6 +1070,7 @@ export const editorMachine = setup({
                 setViewSettings: { target: 'pending' },
                 updateViewSettings: { target: 'pending' },
                 removeViewSettings: { target: 'pending' },
+                pruneComponentDisplayForDeletedPath: { target: 'pending' },
                 registerMaterialiseModel: { target: 'pending' },
               },
             },
@@ -966,6 +1091,7 @@ export const editorMachine = setup({
                 setViewSettings: { target: 'pending', reenter: true },
                 updateViewSettings: { target: 'pending', reenter: true },
                 removeViewSettings: { target: 'pending', reenter: true },
+                pruneComponentDisplayForDeletedPath: { target: 'pending', reenter: true },
                 registerMaterialiseModel: { target: 'pending', reenter: true },
                 // Immediately bypass debounce and write
                 flushNow: { target: 'writing' },
@@ -1012,6 +1138,7 @@ export const editorMachine = setup({
                 setViewSettings: { actions: 'setPendingChanges' },
                 updateViewSettings: { actions: 'setPendingChanges' },
                 removeViewSettings: { actions: 'setPendingChanges' },
+                pruneComponentDisplayForDeletedPath: { actions: 'setPendingChanges' },
                 registerMaterialiseModel: { actions: 'setPendingChanges' },
               },
             },

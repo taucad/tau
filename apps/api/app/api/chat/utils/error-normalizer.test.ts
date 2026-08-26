@@ -2,10 +2,30 @@
 import type { ChatError } from '@taucad/types';
 import { describe, it, expect } from 'vitest';
 import { normalizeError } from '#api/chat/utils/error-normalizer.js';
+import { CompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 
 function parseNormalizedError(result: string): ChatError {
   return JSON.parse(result) as ChatError;
 }
+
+const anthropicCreditMessage =
+  'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.';
+
+const statusPrefixedAnthropicCreditErrorText = `400 {"type":"error","error":{"type":"invalid_request_error","message":"${anthropicCreditMessage}"}}`;
+const googleInvalidArgumentByteList = [
+  ...new TextEncoder().encode(
+    JSON.stringify([
+      {
+        error: {
+          code: 400,
+          message: 'Request contains an invalid argument.',
+          errors: [{ message: 'Request contains an invalid argument.', domain: 'global', reason: 'badRequest' }],
+          status: 'INVALID_ARGUMENT',
+        },
+      },
+    ]),
+  ),
+].join(',');
 
 describe('normalizeError', () => {
   describe('generic errors', () => {
@@ -32,6 +52,37 @@ describe('normalizeError', () => {
 
       expect(result.category).toBe('generic');
       expect(result.message).toBe('[object Object]');
+    });
+  });
+
+  describe('implementation bug errors', () => {
+    it('should preserve compaction failure metadata from the error object', () => {
+      const error = new CompactionPipelineError('Required compaction failed', 'morph_contract_error', {
+        debugId: 'dat_debug',
+      });
+
+      const result = parseNormalizedError(normalizeError(error));
+
+      expect(result.category).toBe('tool_error');
+      expect(result.code).toBe('CONTEXT_COMPACTION_FAILED');
+      expect(result.message).toContain('Failure kind: morph_contract_error');
+      expect(result.message).toContain('Debug ID: dat_debug');
+      expect(result.raw).toContain('CONTEXT_COMPACTION_FAILED');
+    });
+
+    it('should preserve compaction failure metadata from stream error text', () => {
+      const result = parseNormalizedError(
+        normalizeError(
+          new Error(
+            'CONTEXT_COMPACTION_FAILED: Required compaction failed failureKind=transcript_commit_failed failureDisposition=blocked_before_provider debugId=dat_debug',
+          ),
+        ),
+      );
+
+      expect(result.category).toBe('tool_error');
+      expect(result.code).toBe('CONTEXT_COMPACTION_FAILED');
+      expect(result.message).toContain('Failure kind: transcript_commit_failed');
+      expect(result.message).toContain('Debug ID: dat_debug');
     });
   });
 
@@ -141,6 +192,17 @@ describe('normalizeError', () => {
 
       expect(result.category).toBe('tool_error');
       expect(result.httpStatus).toBe(400);
+    });
+
+    it('should decode Google byte-list invalid argument errors', () => {
+      const result = parseNormalizedError(
+        normalizeError(new Error(`Google request failed with status code 400: ${googleInvalidArgumentByteList}`)),
+      );
+
+      expect(result.category).toBe('tool_error');
+      expect(result.httpStatus).toBe(400);
+      expect(result.code).toBe('INVALID_ARGUMENT');
+      expect(result.message).toBe('Request contains an invalid argument.');
     });
 
     it('should detect 401 status as auth', () => {
@@ -282,6 +344,31 @@ describe('normalizeError', () => {
       expect(result.message).toContain('Rate limit exceeded');
     });
 
+    it('should classify nested billing message as credits even when LangChain wrapper is a tool error', () => {
+      const error = Object.assign(new Error(statusPrefixedAnthropicCreditErrorText), {
+        status: 400,
+        lc_error_code: 'INVALID_TOOL_RESULTS',
+        requestID: 'req_credit_lc',
+        error: {
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: anthropicCreditMessage,
+          },
+          request_id: 'req_credit_lc',
+        },
+      });
+
+      const result = parseNormalizedError(normalizeError(error));
+
+      expect(result.category).toBe('credits');
+      expect(result.title).toBe('Credit Limit Reached');
+      expect(result.message).toBe(anthropicCreditMessage);
+      expect(result.code).toBe('INVALID_TOOL_RESULTS');
+      expect(result.httpStatus).toBe(400);
+      expect(result.requestId).toBe('req_credit_lc');
+    });
+
     it('should fall back to raw message if nested error structure is missing', () => {
       const error = Object.assign(new Error('400 some error'), {
         status: 400,
@@ -305,6 +392,35 @@ describe('normalizeError', () => {
       expect(result.httpStatus).toBe(400);
       expect(result.message).toBe('Bad request');
       expect(result.code).toBe('invalid_request_error');
+    });
+
+    it('should classify status-prefixed Anthropic billing error as credits', () => {
+      const error = new Error(statusPrefixedAnthropicCreditErrorText);
+
+      const result = parseNormalizedError(normalizeError(error));
+
+      expect(result.category).toBe('credits');
+      expect(result.title).toBe('Credit Limit Reached');
+      expect(result.message).toBe(anthropicCreditMessage);
+      expect(result.code).toBe('invalid_request_error');
+      expect(result.httpStatus).toBe(400);
+      expect(result.raw).toBe(statusPrefixedAnthropicCreditErrorText);
+    });
+
+    it('should classify status-wrapped Anthropic billing SDK error as credits', () => {
+      const error = Object.assign(new Error(statusPrefixedAnthropicCreditErrorText), {
+        status: 400,
+        requestID: 'req_credit_status',
+      });
+
+      const result = parseNormalizedError(normalizeError(error));
+
+      expect(result.category).toBe('credits');
+      expect(result.title).toBe('Credit Limit Reached');
+      expect(result.message).toBe(anthropicCreditMessage);
+      expect(result.code).toBe('invalid_request_error');
+      expect(result.httpStatus).toBe(400);
+      expect(result.requestId).toBe('req_credit_status');
     });
 
     it('should parse pure JSON Anthropic error format', () => {
@@ -485,5 +601,45 @@ describe('normalizeError', () => {
       expect(result.httpStatus).toBe(400);
       expect(result.requestId).toBe('req-full');
     });
+  });
+});
+
+describe('first-party billing errors (B2)', () => {
+  it('should extract µ$ amounts from the INSUFFICIENT_CREDITS marker into friendly copy', () => {
+    const marker =
+      'INSUFFICIENT_CREDITS: Your credit balance is $0.12 and this request needs about $1.11. Add credits to continue. balanceMicro=123000 requiredMicro=1111500';
+
+    const result = parseNormalizedError(normalizeError(new Error(marker)));
+
+    expect(result.category).toBe('credits');
+    expect(result.code).toBe('INSUFFICIENT_CREDITS');
+    expect(result.message).toBe(
+      'Your credit balance is $0.12 and this request needs about $1.11. Add credits to continue.',
+    );
+  });
+
+  it('should survive the stream error channel where only the message string remains', () => {
+    const marker = 'INSUFFICIENT_CREDITS: out of credits balanceMicro=-5000000 requiredMicro=200000';
+
+    const result = parseNormalizedError(normalizeError(marker));
+
+    expect(result.category).toBe('credits');
+    expect(result.message).toContain('$-5.00');
+  });
+
+  it('should fall back to generic credits copy when the marker carries no amounts', () => {
+    const result = parseNormalizedError(normalizeError(new Error('INSUFFICIENT_CREDITS: exhausted')));
+
+    expect(result.category).toBe('credits');
+    expect(result.message).toBe('Your credit balance is too low for this request. Add credits to continue.');
+  });
+
+  it('should map first-party 402 statuses to the credits category (S35)', () => {
+    const paymentRequired = Object.assign(new Error('Payment Required'), { status: 402 });
+
+    const result = parseNormalizedError(normalizeError(paymentRequired));
+
+    expect(result.category).toBe('credits');
+    expect(result.httpStatus).toBe(402);
   });
 });

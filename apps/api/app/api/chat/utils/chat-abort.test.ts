@@ -3,17 +3,19 @@ import {
   ChatAbortError,
   isChatAbortError,
   registerChatAbort,
-  isTrackedAbortError,
+  isExpectedChatCancellationRejection,
   clearAbortTracking,
 } from '#api/chat/utils/chat-abort.js';
 
 describe('ChatAbortError', () => {
-  it('should have the correct name and message', () => {
+  it('should be abort-shaped while preserving chat cancellation metadata', () => {
     const error = new ChatAbortError('chat_123');
 
-    expect(error.name).toBe('ChatAbortError');
+    expect(error.name).toBe('AbortError');
     expect(error.message).toBe('Chat chat_123 was cancelled by client');
     expect(error.chatId).toBe('chat_123');
+    expect(error.kind).toBe('chat-client-abort');
+    expect(error.code).toBe('CHAT_CLIENT_ABORT');
   });
 
   it('should be an instance of Error', () => {
@@ -36,15 +38,26 @@ describe('isChatAbortError', () => {
     expect(isChatAbortError(error)).toBe(false);
   });
 
-  it('should return false for errors with matching name but no brand', () => {
+  it('should return false for errors with matching abort shape but no brand', () => {
     const error = new Error('fake');
-    error.name = 'ChatAbortError';
+    error.name = 'AbortError';
+    Object.assign(error, {
+      chatId: 'chat_123',
+      code: 'CHAT_CLIENT_ABORT',
+      kind: 'chat-client-abort',
+    });
 
     expect(isChatAbortError(error)).toBe(false);
   });
 
   it('should return false for plain objects mimicking the shape', () => {
-    const fake = { name: 'ChatAbortError', chatId: 'chat_123', message: 'fake' };
+    const fake = {
+      name: 'AbortError',
+      chatId: 'chat_123',
+      code: 'CHAT_CLIENT_ABORT',
+      kind: 'chat-client-abort',
+      message: 'fake',
+    };
 
     expect(isChatAbortError(fake)).toBe(false);
   });
@@ -86,12 +99,12 @@ describe('abort tracking', () => {
     vi.useRealTimers();
   });
 
-  describe('isTrackedAbortError', () => {
+  describe('isExpectedChatCancellationRejection', () => {
     it('should return false when no aborts are tracked', () => {
       const error = new Error('The operation was aborted');
       error.name = 'AbortError';
 
-      expect(isTrackedAbortError(error)).toBe(false);
+      expect(isExpectedChatCancellationRejection(error)).toBe(false);
     });
 
     it('should return true for AbortError when a chat abort is tracked', () => {
@@ -100,7 +113,7 @@ describe('abort tracking', () => {
       const error = new Error('The operation was aborted');
       error.name = 'AbortError';
 
-      expect(isTrackedAbortError(error)).toBe(true);
+      expect(isExpectedChatCancellationRejection(error)).toBe(true);
     });
 
     it('should return true for node-fetch style errors with type=aborted', () => {
@@ -109,7 +122,13 @@ describe('abort tracking', () => {
       const error = new Error('The operation was aborted') as Error & { type: string };
       error.type = 'aborted';
 
-      expect(isTrackedAbortError(error)).toBe(true);
+      expect(isExpectedChatCancellationRejection(error)).toBe(true);
+    });
+
+    it('should return true for branded chat cancellation without requiring tracker state', () => {
+      const error = new ChatAbortError('chat_123');
+
+      expect(isExpectedChatCancellationRejection(error)).toBe(true);
     });
 
     it('should return false for non-AbortError even when a chat abort is tracked', () => {
@@ -117,15 +136,15 @@ describe('abort tracking', () => {
 
       const error = new Error('Something else went wrong');
 
-      expect(isTrackedAbortError(error)).toBe(false);
+      expect(isExpectedChatCancellationRejection(error)).toBe(false);
     });
 
     it('should return false for non-Error values', () => {
       registerChatAbort('chat_123');
 
-      expect(isTrackedAbortError('AbortError')).toBe(false);
-      expect(isTrackedAbortError(null)).toBe(false);
-      expect(isTrackedAbortError(undefined)).toBe(false);
+      expect(isExpectedChatCancellationRejection('AbortError')).toBe(false);
+      expect(isExpectedChatCancellationRejection(null)).toBe(false);
+      expect(isExpectedChatCancellationRejection(undefined)).toBe(false);
     });
   });
 
@@ -136,11 +155,11 @@ describe('abort tracking', () => {
       const error = new Error('The operation was aborted');
       error.name = 'AbortError';
 
-      expect(isTrackedAbortError(error)).toBe(true);
+      expect(isExpectedChatCancellationRejection(error)).toBe(true);
 
       vi.advanceTimersByTime(10_000);
 
-      expect(isTrackedAbortError(error)).toBe(false);
+      expect(isExpectedChatCancellationRejection(error)).toBe(false);
     });
 
     it('should extend the window when re-registering the same chat', () => {
@@ -154,10 +173,10 @@ describe('abort tracking', () => {
 
       const error = new Error('The operation was aborted');
       error.name = 'AbortError';
-      expect(isTrackedAbortError(error)).toBe(true);
+      expect(isExpectedChatCancellationRejection(error)).toBe(true);
 
       vi.advanceTimersByTime(3001);
-      expect(isTrackedAbortError(error)).toBe(false);
+      expect(isExpectedChatCancellationRejection(error)).toBe(false);
     });
 
     it('should track multiple chats independently', () => {
@@ -169,7 +188,7 @@ describe('abort tracking', () => {
 
       vi.advanceTimersByTime(10_000);
 
-      expect(isTrackedAbortError(error)).toBe(false);
+      expect(isExpectedChatCancellationRejection(error)).toBe(false);
     });
 
     it('should clear all state via clearAbortTracking', () => {
@@ -180,7 +199,7 @@ describe('abort tracking', () => {
 
       const error = new Error('The operation was aborted');
       error.name = 'AbortError';
-      expect(isTrackedAbortError(error)).toBe(false);
+      expect(isExpectedChatCancellationRejection(error)).toBe(false);
     });
   });
 });

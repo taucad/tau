@@ -1,13 +1,13 @@
 {
   "metadata": {
-    "extractionDate": "2026-05-31T23:40:27.919Z",
+    "extractionDate": "2026-08-18T03:57:41.648Z",
     "source": "TypeScript Compiler API (replicad)",
-    "totalEntries": 223,
+    "totalEntries": 224,
     "breakdown": {
       "class": 46,
       "constant": 68,
       "type": 36,
-      "interface": 16,
+      "interface": 17,
       "function": 57
     }
   },
@@ -16,13 +16,13 @@
       "name": "_1DShape",
       "kind": "class",
       "category": "Geometry Types",
-      "signature": "export declare abstract class _1DShape<Type extends TopoDS_Shape> extends Shape<Type> {\n    get repr(): string;\n    get curve(): Curve;\n    get startPoint(): Vector;\n    get endPoint(): Vector;\n    tangentAt(position?: number): Vector;\n    pointAt(position?: number): Vector;\n    get isClosed(): boolean;\n    get isPeriodic(): boolean;\n    get period(): number;\n    get geomType(): CurveType;\n    get length(): number;\n    get orientation(): 'forward' | 'backward';\n    flipOrientation(): Type;\n}"
+      "signature": "export declare abstract class _1DShape<Type extends TopoDS_Shape> extends Shape<Type> {\n    get repr(): string;\n    get curve(): Curve;\n    get startPoint(): Vector;\n    get endPoint(): Vector;\n    tangentAt(position?: number): Vector;\n    pointAt(position?: number): Vector;\n    get isClosed(): boolean;\n    get isPeriodic(): boolean;\n    get period(): number;\n    get geomType(): CurveType;\n    get length(): number;\n    get orientation(): \"forward\" | \"backward\";\n    flipOrientation(): Type;\n}"
     },
     {
       "name": "_3DShape",
       "kind": "class",
       "category": "Geometry Types",
-      "signature": "export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> implements Shape3DLike<Shape3D, ShapeMesh, AnyShape, {\n    tolerance?: number;\n    angularTolerance?: number;\n}> {\n    fuse(other: Shape3D, { optimisation }?: {\n        optimisation?: 'none' | 'commonFace' | 'sameFace';\n    }): Shape3D;\n    cut(tool: Shape3D, { optimisation }?: {\n        optimisation?: 'none' | 'commonFace' | 'sameFace';\n    }): Shape3D;\n    intersect(tool: AnyShape): Shape3D;\n    meshShape(options?: {\n        tolerance?: number;\n        angularTolerance?: number;\n    }): MeshShape;\n    shell(config: {\n        filter: FaceFinder;\n        thickness: number;\n    }, tolerance?: number): Shape3D;\n    shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;\n    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    draft(angle: number, faceFinder: (e: FaceFinder) => FaceFinder, neutralPlane?: Plane | PlaneName): AnyShape;\n}"
+      "signature": "export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> implements Shape3DLike<Shape3D, ShapeMesh, AnyShape, {\n    tolerance?: number;\n    angularTolerance?: number;\n}> {\n    fuse(other: Shape3D, options?: BooleanOperationOptions): Shape3D;\n    fuseAll(others: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;\n    cut(tool: Shape3D, options?: BooleanOperationOptions): Shape3D;\n    cutAll(tools: readonly Shape3D[], options?: BooleanOperationOptions): Shape3D;\n    intersect(tool: AnyShape, options?: BooleanOperationOptions): Shape3D;\n    intersectAll(tools: readonly AnyShape[], options?: BooleanOperationOptions): Shape3D;\n    meshShape(options?: {\n        tolerance?: number;\n        angularTolerance?: number;\n    }): MeshShape;\n    shell(config: {\n        filter: FaceFinder;\n        thickness: number;\n    }, tolerance?: number): Shape3D;\n    shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;\n    fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;\n    draft(angle: number, faceFinder: (e: FaceFinder) => FaceFinder, neutralPlane?: Plane | PlaneName): AnyShape;\n}"
     },
     {
       "name": "addHolesInFace",
@@ -117,6 +117,18 @@
       "kind": "class",
       "category": "Drawing & Sketching",
       "signature": "export declare class BlueprintSketcher extends BaseSketcher2d implements GenericSketcher<Blueprint> {\n    constructor(origin?: Point2D);\n    done(): Blueprint;\n    close(): Blueprint;\n    closeWithMirror(): Blueprint;\n    closeWithCustomCorner(radius: number, mode?: \"fillet\" | \"chamfer\" | \"dogbone\"): Blueprint;\n}"
+    },
+    {
+      "name": "BooleanOperationOptions",
+      "kind": "interface",
+      "category": "Utilities",
+      "signature": "export declare interface BooleanOperationOptions {\n    optimisation?: BooleanOptimisation;\n}"
+    },
+    {
+      "name": "BooleanOptimisation",
+      "kind": "type",
+      "category": "Utilities",
+      "signature": "declare type BooleanOptimisation = \"none\" | \"commonFace\" | \"sameFace\";"
     },
     {
       "name": "BoundingBox",
@@ -675,7 +687,7 @@
       "name": "Face",
       "kind": "class",
       "category": "Finders & Filters",
-      "signature": "export declare class Face extends Shape<TopoDS_Face> {\n    get surface(): Surface;\n    get orientation(): 'forward' | 'backward';\n    flipOrientation(): Face;\n    get geomType(): SurfaceType;\n    get UVBounds(): {\n        uMin: number;\n        uMax: number;\n        vMin: number;\n        vMax: number;\n    };\n    pointOnSurface(u: number, v: number): Vector;\n    uvCoordinates(point: Point): [\n        number,\n        number\n    ];\n    normalAt(locationVector?: Point): Vector;\n    get center(): Vector;\n    outerWire(): Wire;\n    innerWires(): Wire[];\n    triangulation(index0?: number): FaceTriangulation | null;\n}"
+      "signature": "export declare class Face extends Shape<TopoDS_Face> {\n    get surface(): Surface;\n    get orientation(): \"forward\" | \"backward\";\n    flipOrientation(): Face;\n    get geomType(): SurfaceType;\n    get UVBounds(): {\n        uMin: number;\n        uMax: number;\n        vMin: number;\n        vMax: number;\n    };\n    pointOnSurface(u: number, v: number): Vector;\n    uvCoordinates(point: Point): [\n        number,\n        number\n    ];\n    normalAt(locationVector?: Point): Vector;\n    get center(): Vector;\n    outerWire(): Wire;\n    innerWires(): Wire[];\n    triangulation(index0?: number): FaceTriangulation | null;\n}"
     },
     {
       "name": "FaceFinder",
@@ -817,7 +829,7 @@
       "name": "GenericSweepConfig",
       "kind": "interface",
       "category": "Utilities",
-      "signature": "export declare interface GenericSweepConfig {\n    frenet?: boolean;\n    auxiliarySpine?: Wire | Edge;\n    law?: null | Handle_Law_Function;\n    transitionMode?: \"right\" | \"transformed\" | \"round\";\n    withContact?: boolean;\n    support?: TopoDS_Shape;\n    forceProfileSpineOthogonality?: boolean;\n}"
+      "signature": "export declare interface GenericSweepConfig {\n    frenet?: boolean;\n    auxiliarySpine?: Wire | Edge;\n    law?: null | Law_Function;\n    transitionMode?: \"right\" | \"transformed\" | \"round\";\n    withContact?: boolean;\n    support?: TopoDS_Shape;\n    forceProfileSpineOthogonality?: boolean;\n}"
     },
     {
       "name": "GenericTopo",
@@ -861,12 +873,6 @@
         }
       ],
       "returnType": "Face"
-    },
-    {
-      "name": "Handle_Law_Function",
-      "kind": "type",
-      "category": "Utilities",
-      "signature": "declare type Handle_Law_Function = ReturnType<Law_Function[\"Trim\"]>;"
     },
     {
       "name": "HASH_CODE_MAX",
@@ -1681,7 +1687,7 @@
       "name": "Shape",
       "kind": "class",
       "category": "Geometry Types",
-      "signature": "export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {\n    constructor(ocShape: Type);\n    clone(): this;\n    serialize(): string;\n    get hashCode(): number;\n    get isNull(): boolean;\n    isSame(other: AnyShape): boolean;\n    isEqual(other: AnyShape): boolean;\n    asShape3D(): Shape3D;\n    simplify(): this;\n    translate(xDist: number, yDist: number, zDist: number): this;\n    translate(vector: Point): this;\n    translateX(distance: number): this;\n    translateY(distance: number): this;\n    translateZ(distance: number): this;\n    rotate(angle: number, position?: Point, direction?: Point): this;\n    mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;\n    scale(scale: number, center?: Point): this;\n    get edges(): Edge[];\n    get faces(): Face[];\n    get wires(): Wire[];\n    get boundingBox(): BoundingBox;\n    mesh({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): ShapeMesh;\n    meshEdges({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): {\n        lines: number[];\n        edgeGroups: {\n            start: number;\n            count: number;\n            edgeId: number;\n        }[];\n    };\n    blobSTEP(): Blob;\n    blobSTL({ tolerance, angularTolerance, binary }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n        binary?: boolean | undefined;\n    }): Blob;\n}"
+      "signature": "export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type> {\n    constructor(ocShape: Type);\n    clone(): this;\n    serialize(): string;\n    get hashCode(): number;\n    get isNull(): boolean;\n    isSame(other: AnyShape): boolean;\n    isEqual(other: AnyShape): boolean;\n    asShape3D(): Shape3D;\n    simplify(): this;\n    translate(xDist: number, yDist: number, zDist: number): this;\n    translate(vector: Point): this;\n    translateX(distance: number): this;\n    translateY(distance: number): this;\n    translateZ(distance: number): this;\n    rotate(angle: number, position?: Point, direction?: Point): this;\n    mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;\n    scale(scale: number, center?: Point): this;\n    get edges(): Edge[];\n    get faces(): Face[];\n    get wires(): Wire[];\n    get boundingBox(): BoundingBox;\n    mesh({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): ShapeMesh;\n    meshEdges({ tolerance, angularTolerance }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n    }): {\n        lines: number[];\n        edgeGroups: {\n            start: number;\n            count: number;\n            edgeId: number;\n        }[];\n    };\n    blobSTEP(): Blob;\n    blobSTL({ tolerance, angularTolerance, binary, }?: {\n        tolerance?: number | undefined;\n        angularTolerance?: number | undefined;\n        binary?: boolean | undefined;\n    }): Blob;\n}"
     },
     {
       "name": "Shape2D",
@@ -1765,7 +1771,7 @@
       "name": "Sketches",
       "kind": "class",
       "category": "Utilities",
-      "signature": "export declare class Sketches {\n    sketches: Array<Sketch | CompoundSketch>;\n    constructor(sketches: Array<Sketch | CompoundSketch>);\n    wires(): AnyShape;\n    faces(): AnyShape;\n    extrude(extrusionDistance: number, extrusionConfig?: {\n        extrusionDirection?: Point;\n        extrusionProfile?: ExtrusionProfile;\n        twistAngle?: number;\n        origin?: Point;\n    }): AnyShape;\n    revolve(revolutionAxis?: Point, config?: {\n        origin?: Point;\n        angle?: number;\n    }): AnyShape;\n}"
+      "signature": "export declare class Sketches {\n    sketches: Array<Sketch | CompoundSketch>;\n    constructor(sketches: Array<Sketch | CompoundSketch>);\n    wires(): AnyShape;\n    faces(): AnyShape;\n    extrude(extrusionDistance: number, extrusionConfig?: {\n        extrusionDirection?: Point;\n        extrusionProfile?: ExtrusionProfile;\n        twistAngle?: number;\n        origin?: Point;\n    }): Shape3D;\n    revolve(revolutionAxis?: Point, config?: {\n        origin?: Point;\n        angle?: number;\n    }): Shape3D;\n}"
     },
     {
       "name": "sketchFaceOffset",
@@ -1867,7 +1873,7 @@
       "name": "SupportedUnit",
       "kind": "type",
       "category": "Utilities",
-      "signature": "export declare type SupportedUnit = 'M' | 'CM' | 'MM' | 'INCH' | 'FT' | 'm' | 'mm' | 'cm' | 'inch' | 'ft';"
+      "signature": "export declare type SupportedUnit = \"M\" | \"CM\" | \"MM\" | \"INCH\" | \"FT\" | \"m\" | \"mm\" | \"cm\" | \"inch\" | \"ft\";"
     },
     {
       "name": "supportExtrude",
@@ -1891,7 +1897,7 @@
       "name": "SurfaceType",
       "kind": "type",
       "category": "Utilities",
-      "signature": "export declare type SurfaceType = 'PLANE' | 'CYLINDRE' | 'CONE' | 'SPHERE' | 'TORUS' | 'BEZIER_SURFACE' | 'BSPLINE_SURFACE' | 'REVOLUTION_SURFACE' | 'EXTRUSION_SURFACE' | 'OFFSET_SURFACE' | 'OTHER_SURFACE';"
+      "signature": "export declare type SurfaceType = \"PLANE\" | \"CYLINDRE\" | \"CONE\" | \"SPHERE\" | \"TORUS\" | \"BEZIER_SURFACE\" | \"BSPLINE_SURFACE\" | \"REVOLUTION_SURFACE\" | \"EXTRUSION_SURFACE\" | \"OFFSET_SURFACE\" | \"OTHER_SURFACE\";"
     },
     {
       "name": "textBlueprints",
@@ -1916,7 +1922,7 @@
       "name": "TopoEntity",
       "kind": "type",
       "category": "Utilities",
-      "signature": "declare type TopoEntity = 'vertex' | 'edge' | 'wire' | 'face' | 'shell' | 'solid' | 'solidCompound' | 'compound' | 'shape';"
+      "signature": "declare type TopoEntity = \"vertex\" | \"edge\" | \"wire\" | \"face\" | \"shell\" | \"solid\" | \"solidCompound\" | \"compound\" | \"shape\";"
     },
     {
       "name": "Transformation",
@@ -2068,7 +2074,7 @@
       "name": "Wire",
       "kind": "class",
       "category": "Finders & Filters",
-      "signature": "export declare class Wire extends _1DShape<TopoDS_Wire> {\n    offset2D(offset: number, kind?: 'arc' | 'intersection' | 'tangent'): Wire;\n}"
+      "signature": "export declare class Wire extends _1DShape<TopoDS_Wire> {\n    offset2D(offset: number, kind?: \"arc\" | \"intersection\" | \"tangent\"): Wire;\n}"
     },
     {
       "name": "WrappingObj",

@@ -37,6 +37,7 @@ Use `wrapCreateGeometry` (or `wrapGetParameters`, `wrapExportGeometry`) to log b
 import { defineMiddleware } from '@taucad/runtime/middleware';
 
 const loggingMiddleware = defineMiddleware({
+  id: 'logging',
   name: 'Logging',
   async wrapCreateGeometry(input, handler, { logger }) {
     logger.debug('Computing geometry...');
@@ -60,6 +61,7 @@ import type { CreateGeometryResult } from '@taucad/runtime';
 const cache = new Map<string, CreateGeometryResult>();
 
 const cacheMiddleware = defineMiddleware({
+  id: 'simple-cache',
   name: 'SimpleCache',
   async wrapCreateGeometry(input, handler, { logger, dependencyHash }) {
     const cached = cache.get(dependencyHash);
@@ -89,6 +91,7 @@ import { z } from 'zod';
 const cache = new Map<string, CreateGeometryResult>();
 
 const statefulCacheMiddleware = defineMiddleware({
+  id: 'stateful-cache',
   name: 'StatefulCache',
   stateSchema: z.object({
     cacheKey: z.string().optional(),
@@ -125,6 +128,7 @@ import { z } from 'zod';
 const cache = new Map<string, { value: CreateGeometryResult; expiresAt: number }>();
 
 const configurableCacheMiddleware = defineMiddleware({
+  id: 'configurable-cache',
   name: 'ConfigurableCache',
   optionsSchema: z.object({
     maxAge: z.number().default(60_000),
@@ -155,7 +159,7 @@ Options are resolved from schema defaults and caller overrides when the middlewa
 
 ### 6. Export and Register Your Middleware
 
-Middleware runs in the worker and must be loaded as a separate module. Create a module file that exports the middleware (default or named with a `name` property), then a factory that returns a [`MiddlewarePlugin`](../api/middleware):
+Middleware runs in the worker-owned runtime. `defineMiddleware` returns a callable [`MiddlewarePlugin`](../api/middleware) factory directly, so the same file owns the metadata and wrap hooks:
 
 ```typescript
 // my-cache.middleware.ts
@@ -165,7 +169,8 @@ import { z } from 'zod';
 
 const cache = new Map<string, CreateGeometryResult>();
 
-const myCacheMiddleware = defineMiddleware({
+export const myCache = defineMiddleware({
+  id: 'my-cache',
   name: 'MyCache',
   stateSchema: z.object({ cacheKey: z.string().optional() }),
   async wrapCreateGeometry(input, handler, { state, dependencyHash }) {
@@ -179,40 +184,25 @@ const myCacheMiddleware = defineMiddleware({
     return result;
   },
 });
-
-export default myCacheMiddleware;
 ```
 
-```typescript
-// my-cache-plugin.ts
-import type { MiddlewarePlugin } from '@taucad/runtime';
-
-export function myCache(): MiddlewarePlugin {
-  return {
-    id: 'my-cache',
-    moduleUrl: new URL('./my-cache.middleware.js', import.meta.url).href,
-    options: {},
-  };
-}
-```
-
-Pass the factory to [`createRuntimeClient`](../api/client):
+Pass the factory to [`defineRuntime`](../api/client):
 
 ```typescript
-import { createRuntimeClient, createMiddlewarePlugin } from '@taucad/runtime';
-import { fromNodeFs } from '@taucad/runtime/filesystem/node';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { myCache } from './examples/my-cache.middleware';
 
-const myCache = createMiddlewarePlugin({
-  id: 'my-cache',
-  moduleUrl: new URL('./my-cache.middleware.js', import.meta.url).href,
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+  middleware: [myCache()],
 });
 
 const client = createRuntimeClient({
-  kernels: [replicad()],
-  bundlers: [esbuild()],
-  middleware: [myCache()],
+  transport: inProcessTransport({ runtime }),
 });
 ```
 
@@ -224,6 +214,7 @@ Implement `wrapGetParameters` and `wrapExportGeometry` when needed:
 import { defineMiddleware } from '@taucad/runtime/middleware';
 
 const fullMiddleware = defineMiddleware({
+  id: 'full-middleware',
   name: 'FullMiddleware',
   async wrapGetParameters(input, handler, { logger }) {
     logger.debug('Getting parameters');
@@ -244,10 +235,12 @@ const fullMiddleware = defineMiddleware({
 
 - **Version**: Set `version` for cache-key computation. Changing the version invalidates caches that include middleware signatures.
 - **Runtime services**: Destructure `logger`, `filesystem`, `dependencies`, `dependencyHash`, `state`, and `options` from the `KernelMiddlewareRuntime` as needed.
-- **Inline middleware**: For testing or single-app use, you can pass middleware objects directly if your setup supports it. Production use typically requires a module URL for worker loading.
+- **Cancellation**: Destructure the fresh operation `signal`, pass it to cancellable APIs, and never retain it after the hook settles.
+- **Worker-owned middleware**: Put middleware factories in the worker/host module that calls `defineRuntime`. Browser clients can type-import the runtime definition, but should not value-import executable middleware modules.
 
 ## Related
 
 - [Middleware Model](../concepts/middleware-model) -- Onion model and execution order
 - [Use Middleware](./using-middleware) -- Add built-in middleware
 - [API Reference: Middleware](../api/middleware) -- defineMiddleware and types
+- [Cooperate with Cancellation](./cooperate-with-cancellation) -- AbortSignal patterns for wrap and dependency hooks

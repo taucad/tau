@@ -8,10 +8,14 @@
  */
 
 import type { KernelIssue } from '#types/runtime.types.js';
+import type { KernelRuntime } from '#types/runtime-kernel.types.js';
+import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
+import { resolveVirtualPath } from '@taucad/utils/path';
 
-// eslint-disable-next-line @typescript-eslint/naming-convention -- module-level constant
+/** @public */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- protocol global key mirrors its host name
 export const KERNEL_MODULES_KEY = '__KERNEL_MODULES__';
 
 /**
@@ -54,6 +58,122 @@ export function getModuleRegistry(): Map<string, Record<string, unknown>> {
 }
 
 /**
+ */
+export type KernelModuleShimOptions = {
+  moduleExpression: string;
+  exports: Record<string, unknown>;
+  exportPrefix?: string;
+};
+
+/**
+ */
+export type RegisterKernelModuleOptions = {
+  name: string;
+  exports: Record<string, unknown>;
+  version: string;
+  globalName?: string;
+  exportPrefix?: string;
+};
+
+/** Builds an ESM shim that exposes a registry-backed built-in kernel module. @public */
+export function createKernelModuleShim({
+  moduleExpression,
+  exports,
+  exportPrefix = '__kernel_export',
+}: KernelModuleShimOptions): string {
+  const exportNames = Object.keys(exports).filter((key) => key !== 'default' && isValidJavaScriptIdentifier(key));
+  const namedExports = exportNames
+    .map((key, index) => {
+      const localName = isSafeBindingIdentifier(key) ? key : `${exportPrefix}_${index}`;
+      const exportClause = localName === key ? localName : `${localName} as ${key}`;
+      return `const ${localName} = __mod[${JSON.stringify(key)}];\nexport { ${exportClause} };`;
+    })
+    .join('\n');
+
+  return `const __mod = ${moduleExpression};\n${namedExports}\nexport default __mod;\n`;
+}
+
+/** Builds the JavaScript expression used by shims to read a module from the global registry. @public */
+export function createKernelModuleRegistryExpression(name: string): string {
+  return `globalThis.${KERNEL_MODULES_KEY}.get(${JSON.stringify(name)})`;
+}
+
+/** Registers a registry-backed built-in module with the runtime bundler. @public */
+export function registerKernelModule(runtime: KernelRuntime, options: RegisterKernelModuleOptions): void {
+  const registry = getModuleRegistry();
+  registry.set(options.name, options.exports);
+
+  runtime.bundler.registerModule(options.name, {
+    code: createKernelModuleShim({
+      moduleExpression: createKernelModuleRegistryExpression(options.name),
+      exports: options.exports,
+      exportPrefix: options.exportPrefix,
+    }),
+    version: options.version,
+    globalName: options.globalName,
+  });
+}
+
+function isValidJavaScriptIdentifier(value: string): boolean {
+  return /^[$_a-z][\w$]*$/i.test(value);
+}
+
+const reservedBindingIdentifiers = new Set([
+  'arguments',
+  'await',
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'debugger',
+  'default',
+  'delete',
+  'do',
+  'else',
+  'enum',
+  'eval',
+  'export',
+  'extends',
+  'false',
+  'finally',
+  'for',
+  'function',
+  'if',
+  'implements',
+  'import',
+  'in',
+  'instanceof',
+  'interface',
+  'let',
+  'new',
+  'null',
+  'package',
+  'private',
+  'protected',
+  'public',
+  'return',
+  'static',
+  'super',
+  'switch',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'typeof',
+  'var',
+  'void',
+  'while',
+  'with',
+  'yield',
+]);
+
+function isSafeBindingIdentifier(value: string): boolean {
+  return value !== '__mod' && isValidJavaScriptIdentifier(value) && !reservedBindingIdentifiers.has(value);
+}
+
+/**
  * Extract `defaultParams` or `defaultParameters` from an executed module.
  * @public
  */
@@ -67,17 +187,11 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
 }
 
 /**
- * Convert an absolute path to a relative path by stripping the base prefix.
+ * Convert a canonical project-local file path to the leading-slash-free entry
+ * spelling required by the JavaScript VM adapter.
  * @public
  */
-export function resolveToRelative(absolutePath: string, basePath: string): string {
-  const normalizedBase = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
-  if (absolutePath.startsWith(`${normalizedBase}/`)) {
-    return absolutePath.slice(normalizedBase.length + 1);
-  }
-
-  return absolutePath;
-}
+export const toVmEntryPath = (absolutePath: string): string => resolveVirtualPath(absolutePath).slice(1);
 
 /**
  * Convert raw build issues (from bundler/execute) to `KernelIssue` objects
@@ -87,13 +201,13 @@ export function resolveToRelative(absolutePath: string, basePath: string): strin
  * @public
  */
 export function convertRawIssuesToKernelIssues(
-  issues: Array<{ message: string; severity: string; location?: unknown; code?: KernelIssue['code'] }>,
+  issues: Array<{ message: string; severity: string; location?: unknown; code?: unknown }>,
   fallbackFileName: string,
 ): KernelIssue[] {
   return issues.map((issue) => ({
     ...issue,
     message: issue.message,
-    code: issue.code ?? 'RUNTIME',
+    code: isKernelIssueCode(issue.code) ? issue.code : 'UNKNOWN',
     type: 'runtime',
     severity: issue.severity === 'warning' ? 'warning' : 'error',
     location: (issue.location as KernelIssue['location']) ?? {

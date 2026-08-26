@@ -10,9 +10,9 @@ export { MonacoWorkspaceFileNotFoundError } from '#lib/monaco-workspace-fs/file-
 export { workspaceRelativePathFromFileUri } from '#lib/monaco-workspace-fs/workspace-path-from-uri.js';
 export {
   createWorkspaceFileSystemProvider,
-  isNodeModulesPath,
   subscribeWorkspaceContentDispatch,
 } from '#lib/monaco-workspace-fs/workspace-file-system-provider.js';
+export { isNodeModulesPath } from '@taucad/utils/import';
 export { createExtraLibsFileSystemProvider } from '#lib/monaco-workspace-fs/extra-libs-file-system-provider.js';
 export { createInMemoryFileSystemProvider } from '#lib/monaco-workspace-fs/in-memory-file-system-provider.js';
 export type { InMemoryFileSystemProvider } from '#lib/monaco-workspace-fs/in-memory-file-system-provider.js';

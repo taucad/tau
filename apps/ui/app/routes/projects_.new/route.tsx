@@ -1,9 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useSession } from '@better-auth-ui/react';
-import { authClient } from '#lib/auth-client.js';
 import type { KernelProvider } from '@taucad/runtime';
-import type { FileSystemBackend } from '@taucad/types';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
@@ -12,6 +9,7 @@ import { Label } from '#components/ui/label.js';
 import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { RadioGroup, RadioGroupItem } from '#components/ui/radio-group.js';
+import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '#components/ui/accordion.js';
 import { getKernelRequiredTier } from '@taucad/billing';
@@ -24,14 +22,13 @@ import { cn } from '#utils/ui.utils.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useKernel } from '#hooks/use-kernel.js';
-import { BackendSelector, coerceFilesystemBackendCookie } from '#components/filesystem/backend-selector.js';
-import type { SelectableFilesystemBackend } from '#components/filesystem/backend-selector.js';
-import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
-import { isWorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
-import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { useNewProjectWorkspacePicker } from '#routes/projects_.new/use-new-project-workspace-picker.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
+import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
+import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
+import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
+import { projectUrl } from '#utils/project-url.utils.js';
+
+const homeLocationLabel = projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }));
 
 export const handle: Handle = {
   breadcrumb() {
@@ -89,8 +86,6 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
 function useProjectCreation() {
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
-  const { data: sessionData } = useSession(authClient);
-  const user = sessionData?.user;
   const projectManager = useProjectManager();
 
   const createProject = useCallback(
@@ -98,8 +93,7 @@ function useProjectCreation() {
       name: string;
       description: string;
       kernel: KernelProvider;
-      backend: FileSystemBackend;
-      workspaceId?: string;
+      location: ProjectCreationLocation;
     }) => {
       setIsCreating(true);
       try {
@@ -109,16 +103,10 @@ function useProjectCreation() {
           project: {
             name: projectData.name.trim(),
             description: projectData.description.trim(),
-            author: {
-              name: user?.name ?? 'You',
-              avatar: user?.image ?? '/avatar-sample.png',
-            },
             tags: [],
-            thumbnail: '',
             assets: {
-              mechanical: {
-                main: selectedOption.mainFile,
-                parameters: {},
+              main: {
+                entryPath: selectedOption.mainFile,
               },
             },
           },
@@ -128,22 +116,21 @@ function useProjectCreation() {
             },
           },
           chatName: 'Initial design',
-          backend: projectData.backend,
-          workspaceId: projectData.workspaceId,
+          location: projectData.location,
           // Set initial panel state: editor open
           editorState: {
             panelState: { openPanels: { editor: true, files: true } },
           },
         });
 
-        void navigate(`/projects/${createProject.id}`);
+        await navigate(projectUrl(createProject.slugs));
       } catch (error) {
         setIsCreating(false);
         console.error('Failed to create project:', error);
         throw error;
       }
     },
-    [user?.name, user?.image, projectManager, navigate],
+    [projectManager, navigate],
   );
 
   return { createProject, isCreating };
@@ -152,81 +139,40 @@ function useProjectCreation() {
 export default function ProjectsNew(): React.JSX.Element {
   const navigate = useNavigate();
   const { createProject, isCreating } = useProjectCreation();
-  const telemetry = useWorkspaceTelemetry();
+  const location = useProjectCreationLocation();
+  const presentLocationError = useProjectCreationLocationError();
 
   const { kernel, setKernel: setSelectedKernel } = useKernel();
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
-  const [backendCookie] = useCookie(cookieName.filesystemBackend, 'indexeddb');
-  const [selectedBackend, setSelectedBackend] = useState<SelectableFilesystemBackend>(
-    coerceFilesystemBackendCookie(backendCookie),
-  );
-
-  const { workspaces, selectedWorkspaceId, setSelectedWorkspaceId, workspaceStatus } = useNewProjectWorkspacePicker();
-
-  const activeWorkspace = workspaces.find((workspace) => workspace.workspaceId === selectedWorkspaceId);
-  const backendBadge = selectedBackend === 'webaccess' && activeWorkspace ? activeWorkspace.name : undefined;
 
   const handleCreateProject = useCallback(async () => {
+    if (location.phase !== 'ready') {
+      return;
+    }
     try {
       await createProject({
         name: projectName,
         description: projectDescription,
         kernel,
-        backend: selectedBackend,
-        workspaceId: selectedBackend === 'webaccess' ? selectedWorkspaceId : undefined,
+        location: location.value,
       });
     } catch (error) {
-      // Structured workspace errors route to an actionable toast that
-      // explains what the user must do next (Audit R2/R3). Anything else
-      // is treated as a generic creation failure. Workspace management
-      // (connect / grant access / change folder) is owned by Settings +
-      // `/files` — this route only surfaces the picker, so the toast
-      // routes the user there for any recoverable workspace failure.
-      if (isWorkspaceDirectoryRequiredError(error)) {
-        telemetry.projectCreateWebaccessBlocked({ reason: error.code });
-        const toastLabelByCode = {
-          missing: 'Connect a workspace folder to use the File System backend.',
-          permission: 'Workspace access was revoked. Re-grant permission to continue.',
-          unsupported: 'This browser does not support the File System Access API. Pick a different storage backend.',
-        } as const;
-        toast.error(toastLabelByCode[error.code], {
-          action:
-            error.code === 'unsupported'
-              ? undefined
-              : {
-                  label: 'Manage Workspaces',
-                  onClick: () => {
-                    void navigate('/files');
-                  },
-                },
-        });
+      if (presentLocationError(error)) {
+        if (location.hasWebAccessCapability) {
+          await location.refresh();
+        }
         return;
       }
       toast.error('Failed to create project. Please try again.');
     }
-  }, [
-    projectName,
-    projectDescription,
-    kernel,
-    selectedBackend,
-    selectedWorkspaceId,
-    createProject,
-    navigate,
-    telemetry,
-  ]);
+  }, [createProject, kernel, location, presentLocationError, projectDescription, projectName]);
 
   const handleCancel = useCallback(() => {
     void navigate('/');
   }, [navigate]);
 
-  // Block submit when webaccess is chosen but the workspace can't currently
-  // accept writes. Mirrors the `WorkspaceDirectoryRequiredError` surface so
-  // the user is never able to click Create and get a toast — the inline
-  // picker below has already prompted them to recover (R7).
-  const isWebAccessBlocked =
-    selectedBackend === 'webaccess' && (workspaceStatus !== 'connected' || !selectedWorkspaceId);
-  const isCreateButtonDisabled = !projectName.trim() || isCreating || isWebAccessBlocked;
+  const isCreateButtonDisabled = !projectName.trim() || isCreating || !location.canCreate;
 
   // Add keyboard shortcut for Enter to submit
   const { formattedKeyCombination } = useKeybinding(
@@ -279,41 +225,15 @@ export default function ProjectsNew(): React.JSX.Element {
               </div>
             </div>
             <div className='space-y-2'>
-              <Label>Storage Backend</Label>
-              <BackendSelector
-                value={selectedBackend}
-                badge={backendBadge}
-                onSelect={(value) => {
-                  setSelectedBackend(value as SelectableFilesystemBackend);
-                }}
-              />
+              <Label>Location</Label>
+              {location.shouldShowPicker ? (
+                <WorkspaceSelector state={location} variant='field' />
+              ) : (
+                <p className='text-sm'>{homeLocationLabel}</p>
+              )}
               <p className='text-xs text-muted-foreground'>
-                Where project files are stored. Can be changed later in project settings.
+                Browser storage can be cleared or evicted. Export important work.
               </p>
-
-              {selectedBackend === 'webaccess' && workspaces.length > 1 ? (
-                <div className='flex flex-col gap-1.5 pt-2'>
-                  <Label className='text-xs text-muted-foreground'>Workspace</Label>
-                  <Select
-                    value={selectedWorkspaceId ?? undefined}
-                    onValueChange={(value) => {
-                      setSelectedWorkspaceId(value);
-                    }}
-                  >
-                    <SelectTrigger className='w-full bg-background'>
-                      <SelectValue placeholder='Pick a workspace' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {workspaces.map((workspace) => (
-                        <SelectItem key={workspace.workspaceId} value={workspace.workspaceId}>
-                          {workspace.name}
-                          {workspace.isDefault ? ' (default)' : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : undefined}
             </div>
           </CardContent>
 
@@ -348,7 +268,12 @@ export default function ProjectsNew(): React.JSX.Element {
                         kernel === option.id && 'bg-primary/5',
                       )}
                     >
-                      <div className='flex items-start gap-3 p-4'>
+                      <div
+                        className='flex cursor-pointer items-start gap-3 p-4'
+                        onClick={() => {
+                          setSelectedKernel(option.id);
+                        }}
+                      >
                         <RadioGroupItem value={option.id} id={`mobile-${option.id}`} className='mt-1' />
                         <div className='min-w-0 flex-1'>
                           <AccordionTrigger
@@ -405,6 +330,9 @@ export default function ProjectsNew(): React.JSX.Element {
                           'flex h-auto cursor-pointer items-start justify-start gap-3 border-b border-border p-4 text-left transition-all last:border-b-0 hover:bg-primary/5',
                           kernel === option.id && 'bg-primary/5 hover:bg-primary/10',
                         )}
+                        onClick={() => {
+                          setSelectedKernel(option.id);
+                        }}
                       >
                         <RadioGroupItem value={option.id} id={option.id} className='mt-1' />
                         <SvgIcon id={option.id} className='mt-0.5 size-6 shrink-0' />

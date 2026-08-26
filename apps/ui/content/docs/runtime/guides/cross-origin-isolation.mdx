@@ -1,6 +1,6 @@
 ---
 title: Cross-Origin Isolation
-description: Configure COOP, COEP, and CORP headers so SharedArrayBuffer-backed kernels (multi-threaded WASM, file pool, geometry pool) load on every browser, including Safari.
+description: Configure COOP, COEP, and CORP headers so SharedArrayBuffer-backed kernels (multi-threaded WASM and geometry pool) load on every browser, including Safari.
 icon: lucide:shield-check
 ---
 
@@ -9,7 +9,7 @@ icon: lucide:shield-check
 `@taucad/runtime` requires `crossOriginIsolated === true` for `SharedArrayBuffer`-backed features. SAB ownership is split across two layers and you should treat them as one isolation requirement:
 
 - **Transport-owned SABs** — the active [transport](../api/client) allocates the geometry pool and the cooperative-abort channel internally via `RuntimeTransport.configureMemory`. The runtime client, worker client, and your application code never see these.
-- **Host-owned SABs** — the multi-threaded OpenCASCADE WASM heap and the optional `filePool` you pass to `client.connect(...)` are allocated by the WASM kernel and the host respectively.
+- **Host-owned SABs** — the multi-threaded OpenCASCADE WASM heap is allocated by the WASM kernel.
 
 Either way, browsers only enter `crossOriginIsolated` state when the top-level document is served with the right combination of COOP, COEP, and CORP headers.
 
@@ -33,9 +33,11 @@ The runtime provides one adapter per response-producing layer. Pick the rows you
 
 | Layer                                | Adapter                                              | When to use                                       |
 | ------------------------------------ | ---------------------------------------------------- | ------------------------------------------------- |
-| Vite dev/preview server              | `@taucad/runtime/vite`                               | `pnpm vite` / `vite preview`.                     |
+| Vite dev/preview server              | `@taucad/runtime/vite#tauRuntime`                    | Vite and React Router development/preview.        |
+| Next.js                              | `@taucad/runtime/nextjs/config#withTauRuntime`       | Next.js Webpack or Turbopack production builds.   |
 | React Router SSR (the HTML document) | `@taucad/runtime/react-router`                       | Any SSR host (Express, Netlify, Fly).             |
 | Express/Connect production server    | `@taucad/runtime/cross-origin-isolation/express`     | `node server.ts` or any custom Express bootstrap. |
+| Electron renderer session            | `@taucad/runtime/electron/main`                      | Electron main-process bootstrap.                  |
 | Static host with declarative headers | Your host's config (e.g. `netlify.toml`, `_headers`) | CDN-fronted static deploys.                       |
 
 Set the headers at every layer that produces a response. Missing any one of HTML, worker scripts, or WASM responses breaks Safari.
@@ -43,13 +45,25 @@ Set the headers at every layer that produces a response. Missing any one of HTML
 ## Vite dev/preview
 
 ```typescript
-import { crossOriginIsolation } from '@taucad/runtime/vite';
+import { tauRuntime } from '@taucad/runtime/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  plugins: [crossOriginIsolation()],
+  plugins: [tauRuntime()],
 });
 ```
+
+`tauRuntime()` includes the isolation adapter plus the runtime's required asset and worker invariants. Use the lower-level `crossOriginIsolation()` export only when another integration already supplies those build invariants.
+
+## Next.js
+
+```typescript
+import { withTauRuntime } from '@taucad/runtime/nextjs/config';
+
+export default withTauRuntime();
+```
+
+`withTauRuntime()` composes existing application headers with the canonical runtime rules. Use `nextRuntimeHeaders()` only when another config composer owns the bundler configuration.
 
 ## React Router SSR
 
@@ -72,7 +86,7 @@ export default function handleRequest(
 Mount `coiMiddleware()` **before** `express.static` so worker scripts and WASM responses carry CORP. The middleware also suppresses downstream `res.append()` of COI headers, so the same triple cannot be duplicated by a downstream `Response` writer (e.g. `@react-router/express`).
 
 ```typescript
-import express, { type Express, type RequestHandler } from 'express';
+import express, { type Express } from 'express';
 import { createRequestHandler } from '@react-router/express';
 import { coiMiddleware } from '@taucad/runtime/cross-origin-isolation/express';
 
@@ -81,12 +95,24 @@ type ServerBuild = Parameters<typeof createRequestHandler>[0]['build'];
 export function createApp(build: ServerBuild): Express {
   const app = express();
   app.disable('x-powered-by');
-  app.use(coiMiddleware() as RequestHandler);
+  app.use(coiMiddleware());
   app.use('/assets', express.static('build/client/assets', { immutable: true, maxAge: '1y' }));
   app.use(express.static('build/client', { maxAge: '1h' }));
   app.all('*splat', createRequestHandler({ build }));
   return app;
 }
+```
+
+## Electron
+
+Install the renderer-session headers after `app.whenReady()` and before creating runtime windows:
+
+```typescript
+import { app } from 'electron';
+import { installElectronRuntimeHeaders } from '@taucad/runtime/electron/main';
+
+await app.whenReady();
+installElectronRuntimeHeaders();
 ```
 
 ## Static hosts

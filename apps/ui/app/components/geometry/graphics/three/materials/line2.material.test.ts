@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import {
   cameraFar,
   cameraNear,
+  cameraProjectionMatrix,
   depth,
+  float,
   materialOpacity,
   positionView,
   sRGBTransferEOTF,
@@ -20,6 +22,7 @@ import {
   Line2NodeMaterial,
   tauOpaqueViewportTexture,
 } from '#components/geometry/graphics/three/materials/line2.material.js';
+import { gltfEdgeDepthBiasReferenceTanHalfFov } from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 import { serialiseStrippedTslGraph } from '#components/geometry/graphics/three/utils/tsl-node-graph-snapshot.js';
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url));
@@ -30,6 +33,19 @@ type SetupPrototypeShim = {
 
 const nodeMaterialPrototype = ThreeNodeMaterial.prototype as unknown as SetupPrototypeShim;
 const line2Prototype = ThreeLine2NodeMaterial.prototype as unknown as SetupPrototypeShim;
+
+type TslNode = Parameters<typeof viewZToPerspectiveDepth>[0];
+type TslScalarNode = TslNode & {
+  div(operand: unknown): TslScalarNode;
+  element(index: number): TslScalarNode;
+  mul(operand: unknown): TslScalarNode;
+  pow(operand: unknown): TslScalarNode;
+  reciprocal(): TslScalarNode;
+};
+
+function asTslScalarNode(node: unknown): TslScalarNode {
+  return node as TslScalarNode;
+}
 
 describe('Line2NodeMaterial TSL snapshots', () => {
   it('materialises a node graph distinct from stock ThreeLine2NodeMaterial (trimSegmentCameraNear layout)', () => {
@@ -329,6 +345,17 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
     return serialiseStrippedTslGraph((node as { toJSON: () => unknown }).toJSON());
   }
 
+  function buildFovAdaptiveBiasedZ(depthBias: number): TslNode {
+    const tanHalfFov = asTslScalarNode(cameraProjectionMatrix).element(1).element(1).reciprocal();
+    const fovScale = tanHalfFov.div(gltfEdgeDepthBiasReferenceTanHalfFov);
+
+    return asTslScalarNode(positionView.z).mul(asTslScalarNode(float(depthBias)).pow(fovScale));
+  }
+
+  function buildFixedBiasedZ(depthBias: number): TslNode {
+    return asTslScalarNode(positionView.z).mul(depthBias);
+  }
+
   const buildMaterial = (): Line2NodeMaterial =>
     new Line2NodeMaterial({
       color: 0xff_00_ff,
@@ -338,7 +365,7 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
       worldUnits: false,
     });
 
-  it('emits viewZToReversedPerspectiveDepth when renderer.reversedDepthBuffer is true (viewport)', () => {
+  it('emits FOV-adaptive viewZToReversedPerspectiveDepth when renderer.reversedDepthBuffer is true (viewport)', () => {
     const material = buildMaterial();
     material.depthBias = 0.999;
 
@@ -355,11 +382,21 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
     }
 
     expect(captured.node).toBeDefined();
-    const expected = viewZToReversedPerspectiveDepth(positionView.z.mul(material.depthBias), cameraNear, cameraFar);
+    const expected = viewZToReversedPerspectiveDepth(
+      buildFovAdaptiveBiasedZ(material.depthBias),
+      cameraNear,
+      cameraFar,
+    );
+    const priorFixedBias = viewZToReversedPerspectiveDepth(
+      buildFixedBiasedZ(material.depthBias),
+      cameraNear,
+      cameraFar,
+    );
     expect(fingerprint(captured.node)).toBe(fingerprint(expected));
+    expect(fingerprint(captured.node)).not.toBe(fingerprint(priorFixedBias));
   });
 
-  it('emits viewZToLogarithmicDepth when renderer.logarithmicDepthBuffer is true (screenshot occlusion fix)', () => {
+  it('emits FOV-adaptive viewZToLogarithmicDepth when renderer.logarithmicDepthBuffer is true (screenshot occlusion fix)', () => {
     const material = buildMaterial();
     material.depthBias = 0.999;
 
@@ -376,11 +413,13 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
     }
 
     expect(captured.node).toBeDefined();
-    const expected = viewZToLogarithmicDepth(positionView.z.mul(material.depthBias), cameraNear, cameraFar);
+    const expected = viewZToLogarithmicDepth(buildFovAdaptiveBiasedZ(material.depthBias), cameraNear, cameraFar);
+    const priorFixedBias = viewZToLogarithmicDepth(buildFixedBiasedZ(material.depthBias), cameraNear, cameraFar);
     expect(fingerprint(captured.node)).toBe(fingerprint(expected));
+    expect(fingerprint(captured.node)).not.toBe(fingerprint(priorFixedBias));
   });
 
-  it('emits viewZToPerspectiveDepth when neither renderer flag is set', () => {
+  it('emits FOV-adaptive viewZToPerspectiveDepth when neither renderer flag is set', () => {
     const material = buildMaterial();
     material.depthBias = 0.999;
 
@@ -397,8 +436,10 @@ describe('Line2NodeMaterial.setupDepth (renderer-aware encoding regression guard
     }
 
     expect(captured.node).toBeDefined();
-    const expected = viewZToPerspectiveDepth(positionView.z.mul(material.depthBias), cameraNear, cameraFar);
+    const expected = viewZToPerspectiveDepth(buildFovAdaptiveBiasedZ(material.depthBias), cameraNear, cameraFar);
+    const priorFixedBias = viewZToPerspectiveDepth(buildFixedBiasedZ(material.depthBias), cameraNear, cameraFar);
     expect(fingerprint(captured.node)).toBe(fingerprint(expected));
+    expect(fingerprint(captured.node)).not.toBe(fingerprint(priorFixedBias));
   });
 
   it('honours material.depthNode when a caller has manually overridden it', () => {

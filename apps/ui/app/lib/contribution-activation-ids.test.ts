@@ -15,6 +15,8 @@ import { stepfileContribution } from '#lib/stepfile-language/stepfile-register-l
 import { stlContribution } from '#lib/stl-language/stl-register-language.js';
 import { usdContribution } from '#lib/usd-language/usd-register-language.js';
 import { sysmlContribution } from '#lib/sysml-language/sysml-register-language.js';
+import { markdownContribution } from '#lib/markdown-language/markdown-register-language.js';
+import { bashContribution } from '#lib/bash-language/bash-register-language.js';
 
 const contributions: ReadonlyArray<{
   readonly name: string;
@@ -60,6 +62,16 @@ const contributions: ReadonlyArray<{
     name: 'sysmlContribution',
     contribution: sysmlContribution,
     expectedIds: [codeLanguages.sysml],
+  },
+  {
+    name: 'markdownContribution',
+    contribution: markdownContribution,
+    expectedIds: [codeLanguages.markdown],
+  },
+  {
+    name: 'bashContribution',
+    contribution: bashContribution,
+    expectedIds: [codeLanguages.bash],
   },
 ];
 

@@ -26,13 +26,13 @@ Three runtime contexts collaborate to turn user code into 3D geometry:
 │ File Manager │  │ Kernel Worker    │
 │ Worker       │  │ (per comp. unit) │
 │              │  │                  │
-│ FileService  │◀─│ watch() ──────── │
-│ ZenFS        │  │ render loop      │
+│ Workspace FS │◀─│ watch() ──────── │
+│ Providers    │  │ render loop      │
 │ EventBus     │──│ ──▶ push geometry│
 └──────────────┘  └──────────────────┘
 ```
 
-**File Manager Worker**: single instance hosting `FileService`, `ProviderRegistry`, `WriteCoordinator`, `DirectoryTreeCache`, and `ChangeEventBus`. Owns all ZenFS access. Serves both the main thread and kernel workers via the bridge protocol.
+**File Manager Worker**: single instance hosting `WorkspaceFileService`, `ProviderRegistry`, `ResourceQueue`, `InMemoryFileTree`, and `ChangeEventBus`. Owns mounted browser filesystem access. Serves both the main thread and kernel workers via the bridge protocol.
 
 **Kernel Worker**: one per geometry unit. Runs bundler (esbuild), executes user code, computes geometry, tessellates, and pushes results. Watches its dependency graph via the filesystem bridge.
 
@@ -120,7 +120,7 @@ Worker-side, before delivery to subscribers:
    → load WASM, configure bundler, set up bridge proxy
 
 2. setFile(file, params)
-   → store entry file + parameters
+   → store entry path + parameters
    → render() immediately
    → discover dependencies from bundler metafile
    → watch(dependencies) via filesystem bridge
@@ -178,13 +178,13 @@ No mutation-triggered full recursive tree scans.
 
 ## Compilation Unit Lifecycle
 
-A geometry unit is a single `cadMachine` actor managing one runtime worker for one entry file:
+A geometry unit is a single `cadMachine` actor managing one runtime worker for one entry path:
 
 ```
-projectMachine spawns cadMachine(entryFile, kernelType)
+projectMachine spawns cadMachine(entryPath, kernelType)
   → cadMachine enters 'connecting' state
   → creates RuntimeClient, connects to runtime worker
-  → sends setFile(entryFile, initialParams)
+  → sends setFile(entryPath, initialParams)
   → transitions to 'idle'
 
   [worker pushes stateChanged('rendering')]
@@ -196,7 +196,7 @@ projectMachine spawns cadMachine(entryFile, kernelType)
   [worker pushes error]
   → cadMachine transitions to 'error', shows diagnostics
 
-  [user changes entry file]
+  [user changes entry path]
   → cadMachine sends setFile(newFile)
 
   [build closes]

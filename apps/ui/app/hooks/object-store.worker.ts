@@ -5,6 +5,7 @@ import { idPrefix } from '@taucad/types/constants';
 import type { Chat } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
+import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type { EditorState, EditorStateInput, OpenFile, PanelState } from '#types/editor.types.js';
 import { defaultPanelState } from '#constants/editor.constants.js';
 
@@ -219,14 +220,8 @@ const objectStoreWorker = {
     return newProject;
   },
 
-  async updateProject(
-    projectId: string,
-    update: PartialDeep<Project>,
-    options?: {
-      noUpdatedAt?: boolean;
-    },
-  ): Promise<Project | undefined> {
-    return storage.updateProject(projectId, update, options);
+  async updateProject(projectId: string, update: PartialDeep<Project>): Promise<Project | undefined> {
+    return storage.updateProject(projectId, update);
   },
 
   async touchProject(projectId: string): Promise<Project | undefined> {
@@ -264,16 +259,31 @@ const objectStoreWorker = {
     return storage.createChat(resourceId, chat);
   },
 
-  async updateChat(
-    chatId: string,
-    update: PartialDeep<Chat>,
-    options?: { noUpdatedAt?: boolean },
-  ): Promise<Chat | undefined> {
-    return storage.updateChat(chatId, update, options);
+  async createNavigationRepairChat(resourceId: string): Promise<Chat> {
+    return storage.createNavigationRepairChat(resourceId);
+  },
+
+  async updateChat(chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> {
+    return storage.updateChat(chatId, update);
+  },
+
+  async applyGeneratedChatName(chatId: string, name: string): Promise<Chat | undefined> {
+    return storage.applyGeneratedChatName(chatId, name);
   },
 
   async patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined> {
     return storage.patchChat(chatId, key, value);
+  },
+
+  async consumeChatStartupRequest(chatId: string, requestId: string): Promise<Chat | undefined> {
+    return storage.consumeChatStartupRequest(chatId, requestId);
+  },
+
+  async commitCancelledDraftRestore(
+    chatId: string,
+    input: CommitCancelledDraftRestoreInput,
+  ): Promise<Chat | undefined> {
+    return storage.commitCancelledDraftRestore(chatId, input);
   },
 
   async setMessageEdit(

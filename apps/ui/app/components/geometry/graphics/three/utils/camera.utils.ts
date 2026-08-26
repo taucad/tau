@@ -4,27 +4,33 @@ import {
   calculateFovDistanceCompensation,
   tanEpsilon,
 } from '#components/geometry/graphics/three/utils/math.utils.js';
+import {
+  resolveControlsTarget,
+  syncCameraControlsUp,
+  syncControlsLookAt,
+} from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 
 /**
- * Calculates a 3D position from spherical coordinates.
- * Converts distance (radius), horizontal angle (phi), and vertical angle (theta) into x, y, z coordinates.
- * Supports X-up, Y-up, and Z-up coordinate systems by checking THREE.Object3D.DEFAULT_UP.
+ * Calculates a 3D position from spherical coordinates for an explicit up axis.
+ * `horizontalAngle` is the right-handed azimuth around `up`; `verticalAngle`
+ * is elevation from the plane perpendicular to `up`.
  */
-function calculatePositionFromSphericalCoordinates({
+export function calculatePositionFromSphericalCoordinates({
   distance,
   horizontalAngle,
   verticalAngle,
+  up,
 }: {
   distance: number;
   horizontalAngle: number;
   verticalAngle: number;
+  up: THREE.Vector3;
 }): THREE.Vector3 {
   const cosTheta = Math.cos(verticalAngle);
   const sinTheta = Math.sin(verticalAngle);
 
-  // Determine which axis is up by checking THREE.Object3D.DEFAULT_UP
-  const isXaxisUp = THREE.Object3D.DEFAULT_UP.x === 1;
-  const isYaxisUp = THREE.Object3D.DEFAULT_UP.y === 1;
+  const isXaxisUp = up.x === 1;
+  const isYaxisUp = up.y === 1;
 
   if (isXaxisUp) {
     // X-up: X is the vertical axis, Y and Z are horizontal
@@ -73,6 +79,7 @@ export function computeViewFittingZoom({
   boundingBox,
   fovDeg,
   aspectRatio,
+  up: worldUp,
   paddingFactor = 0.9,
 }: {
   cameraPosition: THREE.Vector3;
@@ -80,10 +87,19 @@ export function computeViewFittingZoom({
   boundingBox: THREE.Box3;
   fovDeg: number;
   aspectRatio: number;
+  up: THREE.Vector3;
   paddingFactor?: number;
 }): number {
   const distance = cameraPosition.distanceTo(target);
-  if (distance < tanEpsilon) {
+  if (
+    !Number.isFinite(distance) ||
+    distance < tanEpsilon ||
+    !Number.isFinite(fovDeg) ||
+    !Number.isFinite(aspectRatio) ||
+    aspectRatio <= tanEpsilon ||
+    !Number.isFinite(paddingFactor) ||
+    paddingFactor <= 0
+  ) {
     return 1;
   }
 
@@ -91,7 +107,6 @@ export function computeViewFittingZoom({
   const forward = new THREE.Vector3().subVectors(target, cameraPosition).normalize();
 
   // Camera right = forward x worldUp (same pattern as computeHeadlampTransform)
-  const worldUp = THREE.Object3D.DEFAULT_UP.clone();
   const right = new THREE.Vector3().crossVectors(forward, worldUp);
 
   // Handle degenerate case: camera looking along up axis (e.g. TOP/BOTTOM view)
@@ -116,7 +131,7 @@ export function computeViewFittingZoom({
   const up = new THREE.Vector3().crossVectors(right, forward).normalize();
 
   const tanHalfFov = Math.tan((fovDeg / 2) * (Math.PI / 180));
-  if (tanHalfFov < tanEpsilon) {
+  if (!Number.isFinite(tanHalfFov) || tanHalfFov < tanEpsilon) {
     return 1;
   }
 
@@ -154,16 +169,19 @@ export function computeViewFittingZoom({
     validCorners++;
   }
 
-  // Guard against no visible corners or zero-extent projected geometry
-  if (validCorners === 0 || maxRightTan < tanEpsilon || maxUpTan < tanEpsilon) {
+  // A degenerate projected axis is unconstrained. Only fall back when neither
+  // axis can meaningfully constrain the frame.
+  const hasHorizontalExtent = maxRightTan >= tanEpsilon;
+  const hasVerticalExtent = maxUpTan >= tanEpsilon;
+  if (validCorners === 0 || (!hasHorizontalExtent && !hasVerticalExtent)) {
     return 1;
   }
 
   // Max zoom that keeps every corner inside the frustum:
   //   zoom_v = tan(fov/2) / maxUpTan
   //   zoom_h = aspect * tan(fov/2) / maxRightTan
-  const zoomVertical = tanHalfFov / maxUpTan;
-  const zoomHorizontal = (aspectRatio * tanHalfFov) / maxRightTan;
+  const zoomVertical = hasVerticalExtent ? tanHalfFov / maxUpTan : Infinity;
+  const zoomHorizontal = hasHorizontalExtent ? (aspectRatio * tanHalfFov) / maxRightTan : Infinity;
 
   // Tighter constraint wins (smaller zoom = less visible area)
   const tightZoom = Math.min(zoomVertical, zoomHorizontal) * paddingFactor;
@@ -180,10 +198,12 @@ export function updateCameraFov({
   camera,
   cameraFovAngle,
   invalidate,
+  controls,
 }: {
   camera: THREE.Camera;
   cameraFovAngle: number;
   invalidate: () => void;
+  controls?: unknown;
 }): void {
   if (!(camera instanceof THREE.PerspectiveCamera)) {
     console.error('updateCameraFov requires PerspectiveCamera');
@@ -199,17 +219,22 @@ export function updateCameraFov({
 
   // Adjust camera distance to maintain perceived size.
   // This keeps objects the same apparent size when FOV changes.
-  if (camera.position.lengthSq() >= tanEpsilon) {
-    const currentDistance = camera.position.length();
+  const target = resolveControlsTarget({ camera, controls });
+  const offset = camera.position.clone().sub(target);
+
+  if (offset.lengthSq() >= tanEpsilon) {
+    const currentDistance = offset.length();
     const newDistance = calculateFovDistanceCompensation(oldFov, newFov, currentDistance);
 
     if (newDistance !== currentDistance) {
-      const direction = camera.position.clone().normalize();
-      camera.position.copy(direction.multiplyScalar(newDistance));
+      const direction = offset.normalize();
+      camera.position.copy(target).add(direction.multiplyScalar(newDistance));
+      camera.lookAt(target);
     }
   }
 
   camera.updateProjectionMatrix();
+  syncControlsLookAt({ camera, controls, target, transition: false });
   invalidate();
 }
 
@@ -221,8 +246,10 @@ export function resetCamera({
   camera,
   geometryRadius,
   geometryCenter,
+  geometryBounds,
   rotation,
   perspective,
+  fitMargin,
   setSceneRadius,
   invalidate,
   enableConfiguredAngles,
@@ -238,6 +265,7 @@ export function resetCamera({
    * to remain at its absolute coordinates.
    */
   geometryCenter: THREE.Vector3;
+  geometryBounds: THREE.Box3;
   rotation: { side: number; vertical: number };
   perspective: {
     offsetRatio: number;
@@ -246,16 +274,13 @@ export function resetCamera({
     minimumFarPlane: number;
     farPlaneRadiusMultiplier: number;
   };
+  fitMargin: number;
   setSceneRadius: (radius: number) => void;
   invalidate: () => void;
   enableConfiguredAngles?: boolean;
   cameraFovAngle: number;
-  controls?: { target: THREE.Vector3; update: () => void } | undefined;
-  /**
-   * The viewport width / height ratio. When the viewport is in portrait
-   * orientation (aspect < 1), the camera distance is increased so the model
-   * is not clipped horizontally.
-   */
+  controls?: unknown;
+  /** The viewport width / height ratio used by projected-corner fitting. */
   viewportAspect?: number;
 }): void {
   if (!(camera instanceof THREE.PerspectiveCamera)) {
@@ -274,30 +299,16 @@ export function resetCamera({
   camera.fov = calculatedFov;
 
   // Calculate the effective FOV that will be active after this reset, due to perspective.zoomLevel
-  let effectiveFovForAdjustment = calculatedFov;
-  if (useConfiguredAngles) {
-    effectiveFovForAdjustment =
-      THREE.MathUtils.RAD2DEG *
-      2 *
-      Math.atan(Math.tan((THREE.MathUtils.DEG2RAD * calculatedFov) / 2) / perspective.zoomLevel);
-  }
+  const effectiveFovForAdjustment =
+    THREE.MathUtils.RAD2DEG *
+    2 *
+    Math.atan(Math.tan((THREE.MathUtils.DEG2RAD * calculatedFov) / 2) / perspective.zoomLevel);
 
   const standardFov = 60;
   // Distance compensation ratio: pass distance=1 to get the pure tan(std/2)/tan(eff/2) ratio
   const adjustedOffsetRatio =
     perspective.offsetRatio * calculateFovDistanceCompensation(standardFov, effectiveFovForAdjustment, 1);
-  let newDistance = adjustedGeometryRadius * adjustedOffsetRatio;
-
-  // Compensate for narrow (portrait) viewports so the model isn't clipped horizontally.
-  // The base distance ensures the model fits vertically. When the viewport is narrower
-  // than it is tall, the horizontal FOV shrinks and the model may exceed the horizontal
-  // frustum. Scale the distance by the ratio of vertical-to-horizontal half-FOV tangents
-  // so both dimensions are covered.
-  if (viewportAspect !== undefined && viewportAspect > 0 && viewportAspect < 1) {
-    const vFovRad = (effectiveFovForAdjustment / 2) * (Math.PI / 180);
-    const hFovHalf = Math.atan(viewportAspect * Math.tan(vFovRad));
-    newDistance *= Math.tan(vFovRad) / Math.tan(hFovHalf);
-  }
+  const newDistance = adjustedGeometryRadius * adjustedOffsetRatio;
 
   if (useConfiguredAngles) {
     // Use configured rotation angles (side and vertical) for positioning
@@ -306,6 +317,7 @@ export function resetCamera({
       distance: newDistance,
       horizontalAngle: rotation.side,
       verticalAngle: rotation.vertical,
+      up: camera.up,
     });
     camera.position.copy(geometryCenter).add(offset);
   } else if (camera.position.distanceToSquared(geometryCenter) >= 1e-9) {
@@ -318,22 +330,32 @@ export function resetCamera({
       distance: newDistance,
       horizontalAngle: rotation.side,
       verticalAngle: rotation.vertical,
+      up: camera.up,
     });
     camera.position.copy(geometryCenter).add(offset);
   }
 
-  camera.zoom = perspective.zoomLevel;
+  camera.zoom = geometryBounds.isEmpty()
+    ? perspective.zoomLevel
+    : computeViewFittingZoom({
+        cameraPosition: camera.position,
+        target: geometryCenter,
+        boundingBox: geometryBounds,
+        fovDeg: camera.fov,
+        aspectRatio: viewportAspect ?? camera.aspect,
+        up: camera.up,
+        paddingFactor: 1 - THREE.MathUtils.clamp(fitMargin, 0, 0.5),
+      });
   camera.near = perspective.nearPlane;
   camera.far = Math.max(perspective.minimumFarPlane, adjustedGeometryRadius * perspective.farPlaneRadiusMultiplier);
 
   // Aim the camera at the geometry center
   camera.lookAt(geometryCenter);
 
-  // Update orbit controls target so the user orbits around the geometry center
-  if (controls) {
-    controls.target.copy(geometryCenter);
-    controls.update();
-  }
+  // Sync controls after the camera up vector and look-at target are settled so
+  // CameraControls stores the same target-relative spherical state the camera shows.
+  syncCameraControlsUp({ camera, controls, up: camera.up });
+  syncControlsLookAt({ camera, controls, target: geometryCenter, transition: false });
 
   // Update the scene radius
   setSceneRadius(geometryRadius);

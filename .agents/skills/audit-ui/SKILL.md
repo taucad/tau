@@ -33,23 +33,23 @@ Install at workspace root (NEVER per-app) since these are dev-only utilities run
 ```bash
 pnpm add -w -D \
   lighthouse \
-  @axe-core/playwright \
-  @playwright/test \
+  axe-core \
+  playwright \
   web-vitals \
   source-map-explorer \
   unlighthouse
 ```
 
-| Tool                   | Purpose                                                                                      |
-| ---------------------- | -------------------------------------------------------------------------------------------- |
-| `lighthouse`           | Core Web Vitals + a11y + best-practices + SEO scores per route                               |
-| `@axe-core/playwright` | WCAG 2.2 AA rule engine (axe-core 4.10+) with full per-rule node lists                       |
-| `@playwright/test`     | Headless Chromium driver for axe runs, screenshot capture, viewport switching                |
-| `web-vitals`           | In-page CrUX-compatible field metrics (INP, LCP, CLS) captured via `Browser` MCP             |
-| `source-map-explorer`  | Treemap of asset bundles when source maps are reachable                                      |
-| `unlighthouse`         | Site-wide Lighthouse sweep with `--site` (use for follow-up batch runs, not per-route depth) |
+| Tool                  | Purpose                                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------- |
+| `lighthouse`          | Core Web Vitals + a11y + best-practices + SEO scores per route                               |
+| `axe-core`            | WCAG 2.2 AA rule engine (axe-core 4.10+) with full per-rule node lists                       |
+| `playwright`          | Headless Chromium driver for axe runs, screenshot capture, and viewport switching            |
+| `web-vitals`          | In-page CrUX-compatible field metrics (INP, LCP, CLS) captured via `Browser` MCP             |
+| `source-map-explorer` | Treemap of asset bundles when source maps are reachable                                      |
+| `unlighthouse`        | Site-wide Lighthouse sweep with `--site` (use for follow-up batch runs, not per-route depth) |
 
-Avoid: `pa11y-ci` (stale axe-core 3.x, no WCAG 2.2), `webhint` (CLI archived), bare `puppeteer` (use `@playwright/test`).
+Avoid: `pa11y-ci` (stale axe-core 3.x, no WCAG 2.2), `webhint` (CLI archived), bare `puppeteer` (use the workspace `playwright` driver).
 
 ## Workflow
 
@@ -130,7 +130,7 @@ Lighthouse will emit `lh-<route>-<viewport>.report.json` and `.report.html`. Ext
 Run after Lighthouse completes:
 
 ```bash
-node ../../.agent/skills/audit-ui/scripts/lh-summary.mjs lh-*.report.json
+node ../../.agents/skills/audit-ui/scripts/lh-summary.mjs lh-*.report.json
 ```
 
 Outputs a markdown-ready table of `perf | a11y | bp | seo | FCP | LCP | TBT | CLS | TTI` per report.
@@ -140,7 +140,7 @@ Outputs a markdown-ready table of `perf | a11y | bp | seo | FCP | LCP | TBT | CL
 Drive axe through Playwright across routes × viewports with WCAG 2.2 AA + best-practice tags. Use `scripts/axe-audit.mjs` (template provided in this skill).
 
 ```bash
-node ../../.agent/skills/audit-ui/scripts/axe-audit.mjs
+node ../../.agents/skills/audit-ui/scripts/axe-audit.mjs
 ```
 
 The script emits `axe-violations.json` (full node list per rule, per URL, per viewport) and `axe-summary.json` (counts). Cite **all critical** + **serious** rule IDs in the research doc; mention moderate but do not list every node.
@@ -281,7 +281,7 @@ The companion research doc lives at `docs/research/<environment>-ui-audit-<YYYY-
 The skill ships two ready-to-run helpers in `scripts/`:
 
 - `lh-summary.mjs` — parses one or more Lighthouse JSON files and emits a markdown table.
-- `axe-audit.mjs` — drives Playwright + `@axe-core/playwright` across the four target routes × two viewports with WCAG 2.2 AA + best-practice tags.
+- `axe-audit.mjs` — drives Chromium + `axe-core` across the four target routes × two viewports with WCAG 2.2 AA + best-practice tags.
 
 Execute both from inside `tmp/audit-<date>/` so artifacts colocate.
 

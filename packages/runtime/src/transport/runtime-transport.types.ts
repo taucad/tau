@@ -5,12 +5,13 @@
  *
  * - {@link TransportPlugin} — consumer-facing registration returned by calling
  *   bundled transports (`webWorkerTransport(opts)`, `inProcessTransport(opts)`).
- * - {@link RuntimeTransportClient} — fat consumer-facing handle. Owns SAB,
- *   abort, geometry pool, FS bridge. Exposes `open` / `initialize` /
- *   `abort` / `resolveGeometry` / `close` / `closed`.
+ * - {@link RuntimeTransportClient} — fat consumer-facing handle. Owns SAB
+ *   cancellation reservations, geometry pool, FS bridge, and timeout recovery.
+ *   Exposes `open` / `initialize` / `reservePreview` / `resolveGeometry` /
+ *   `close` / `closed`.
  * - {@link RuntimeTransportHost} — fat kernel-host-facing handle. Owns wire
  *   encoding tiers. Exposes `open` / `adoptInitialize` / `encodeGeometry`
- *   / `encodeFile` / `close` / `closed`.
+ *   / `close` / `closed`.
  *
  * The runtime core (`createRuntimeClient` + `RuntimeWorkerClient` +
  * `createRuntimeHost` + dispatcher) calls these methods only. It never
@@ -22,15 +23,102 @@
 
 import type { Channel, ChannelServerHandle, RpcProtocol } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
+import type { ExportGeometryResult } from '#types/runtime.types.js';
+import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type {
-  AbortReason,
   GeometryGltfTransport,
   GeometryTransport,
+  BinaryContentDelivery,
+  RuntimeExportResultTransport,
   InitializeMemoryHandle,
   RuntimeInitializeArgs,
   RuntimeInitializeResult,
   RuntimeProtocol,
 } from '#types/runtime-protocol.types.js';
+
+/**
+ * Opaque transport reservation captured synchronously for one preview.
+ * Transport authors return it from {@link RuntimeTransportClient.reservePreview};
+ * runtime code combines it with the render identity owned by
+ * `RuntimeWorkerClient` and forwards it unchanged with that admission.
+ *
+ * @public
+ */
+export type RuntimeTransportPreviewReservation = {
+  /** Opaque cooperative-abort generation. Transport authors must forward it unchanged. */
+  readonly abortGeneration?: number;
+};
+
+/**
+ * Exact render target supplied to timeout recovery. Both fields are opaque to
+ * transport authors: forward them unchanged and never infer ordering from them.
+ *
+ * @public
+ */
+export type RuntimeTransportRenderTarget = RuntimeTransportPreviewReservation & {
+  /** Opaque render identity. Transport authors must not derive semantics from this value. */
+  readonly renderId: string;
+};
+
+/**
+ * Behavioral wall-clock timeout capability supplied by a transport.
+ *
+ * Isolated transports abort exactly the supplied target and can terminate the
+ * host if it does not acknowledge cancellation. Same-isolate transports report
+ * `unsupported` because their deadline timer cannot run while synchronous work
+ * blocks the same event loop.
+ *
+ * @public
+ */
+export type RuntimeTransportTimeoutRecovery =
+  | {
+      readonly kind: 'terminable';
+      /**
+       * Signal timeout cancellation for exactly the supplied render. This is
+       * cooperative and must not affect a successor with another `renderId`.
+       *
+       * @param target - Opaque render target captured at preview admission.
+       * @returns Nothing.
+       */
+      abortRender(target: RuntimeTransportRenderTarget): void;
+      /**
+       * Terminate this client's isolated host and settle `closed` as
+       * `{ cause: 'render-timeout' }`.
+       *
+       * @returns A promise that resolves after host termination is requested.
+       */
+      terminate(): Promise<void>;
+    }
+  | {
+      readonly kind: 'unsupported';
+    };
+
+/**
+ * First terminal cause observed by a runtime transport client. The
+ * {@link RuntimeTransportClient.closed} promise resolves once with this value
+ * and never rejects.
+ *
+ * @public
+ */
+export type RuntimeTransportCloseResult =
+  | { readonly cause: 'requested' }
+  | { readonly cause: 'render-timeout' }
+  | { readonly cause: 'host-exit'; readonly exitCode?: number }
+  | { readonly cause: 'wire-failure'; readonly error: Error };
+
+/** Typed rejection for a second in-flight or completed runtime initialization. @internal */
+export class RuntimeAlreadyInitializedError extends Error {
+  public constructor() {
+    super('Runtime transport is already initialized; create a new transport to initialize another runtime.');
+    this.name = 'RuntimeAlreadyInitializedError';
+  }
+
+  /** Stable machine-readable error code. */
+  public get code(): 'RUNTIME_ALREADY_INITIALIZED' {
+    return 'RUNTIME_ALREADY_INITIALIZED';
+  }
+}
 
 /* ============================================================ *
  * Phantom carriers — `unique symbol` brands that flow type      *
@@ -44,30 +132,8 @@ declare const __transportId: unique symbol;
 declare const __transportProtocol: unique symbol;
 /** Phantom: bindings extra carried by the transport host bindings. */
 declare const __transportBindingsExtra: unique symbol;
-
-/* ============================================================ *
- * Transport descriptor                                          *
- * ============================================================ */
-
-/**
- * Diagnostic snapshot of the transport's chosen strategy. Surfaced
- * only in logs / dev panels / conformance tests. Never branched on by
- * runtime code. Generic over the literal transport id so descriptors
- * can be discriminated by id.
- *
- * @template Id - The transport's literal id.
- * @public
- */
-export type TransportDescriptor<Id extends string = string> = {
-  readonly id: Id;
-  readonly wire: 'in-process' | 'web-worker' | 'node-worker' | 'electron-utility' | 'cross-process' | 'remote';
-  readonly memory: {
-    readonly geometryDelivery: 'pool' | 'transfer' | 'copy';
-    readonly fileDelivery: 'pool' | 'transfer' | 'copy';
-    readonly abortSignal: 'sab-atomics' | 'wire-notify';
-  };
-  readonly fileSystem: 'inline' | 'bridged' | 'host-local' | 'unbound';
-};
+/** Phantom: worker/host-owned runtime definition carried by same-isolate transports. */
+declare const __transportRuntime: unique symbol;
 
 /**
  * Hello payload exchanged on `open()`. Carries the runtime version
@@ -126,14 +192,9 @@ export type EncodedGeometry = {
   readonly tier: 'pool' | 'transfer' | 'copy';
 };
 
-/**
- * Result of {@link RuntimeTransportHost.encodeFile}. Mirrors
- * {@link EncodedGeometry} for the file-delivery binding.
- *
- * @public
- */
-export type EncodedFileBytes = {
-  readonly value: unknown;
+/** Transport-owned binary-delivery descriptor and wire transfer list. @public */
+export type EncodedBinary = {
+  readonly value: BinaryContentDelivery;
   readonly transferables: readonly Transferable[];
   readonly tier: 'pool' | 'transfer' | 'copy';
 };
@@ -141,19 +202,6 @@ export type EncodedFileBytes = {
 /* ============================================================ *
  * Host-initialize bindings                                      *
  * ============================================================ */
-
-/**
- * Cooperative-abort binding produced by the host transport. Each
- * transport implements its preferred strategy under one uniform
- * interface so the dispatcher does not branch on strategy.
- *
- * @public
- */
-export type HostAbortBinding = {
-  /** AbortSignal observed by every kernel call (driven by SAB Atomics or wire notify). */
-  readonly signal: AbortSignal;
-  readonly strategy: 'sab-atomics' | 'wire-notify';
-};
 
 /**
  * Geometry-delivery binding produced by the host transport. The
@@ -165,17 +213,8 @@ export type HostAbortBinding = {
 export type HostGeometryDeliveryBinding = {
   readonly tier: 'pool' | 'transfer' | 'copy';
   publish(geometry: Geometry): EncodedGeometry;
-};
-
-/**
- * File-delivery binding produced by the host transport. Symmetric
- * with {@link HostGeometryDeliveryBinding}.
- *
- * @public
- */
-export type HostFileDeliveryBinding = {
-  readonly tier: 'pool' | 'transfer' | 'copy';
-  publish(file: Uint8Array<ArrayBuffer>): EncodedFileBytes;
+  publishBytes(key: string, bytes: Uint8Array<ArrayBuffer>): EncodedBinary;
+  acknowledge(key: string): void;
 };
 
 /**
@@ -191,9 +230,7 @@ export type HostFileDeliveryBinding = {
  * @public
  */
 export type HostInitializeBindingsCore = {
-  readonly abort: HostAbortBinding;
   readonly geometryDelivery: HostGeometryDeliveryBinding;
-  readonly fileDelivery: HostFileDeliveryBinding;
 };
 
 /**
@@ -220,7 +257,6 @@ export type HostInitializeBindings<
  */
 export type TransportClientReady<Protocol extends RpcProtocol = RuntimeProtocol> = {
   readonly channel: Channel<Protocol>;
-  readonly hello: TransportHelloPayload;
 };
 
 /**
@@ -258,8 +294,14 @@ export type RuntimeTransportClient<
   /** Literal id (matches the plugin's `id`). */
   readonly id: Id;
 
-  /** Resolves once the transport is closed (for any reason). */
-  readonly closed: Promise<void>;
+  /** Resolves once with the first terminal transport cause. Never rejects. */
+  readonly closed: Promise<RuntimeTransportCloseResult>;
+
+  /**
+   * Behavioral timeout recovery. Runtime code uses this union directly and
+   * never infers enforceability from the diagnostic descriptor.
+   */
+  readonly renderTimeoutRecovery: RuntimeTransportTimeoutRecovery;
 
   /**
    * Phantom carrier so RuntimeClient can project BindingsExtra.
@@ -270,6 +312,15 @@ export type RuntimeTransportClient<
    * @internal
    */
   readonly [__transportBindingsExtra]?: BindingsExtra;
+
+  /**
+   * Reserve any transport-owned cooperative-abort state for one preview before
+   * asynchronous staging or wire work begins. Each call returns a distinct
+   * reservation; transports without a numeric generation return `{}`.
+   *
+   * @returns Opaque reservation to forward with exactly one preview admission.
+   */
+  reservePreview(): RuntimeTransportPreviewReservation;
 
   /** Human/diagnostic descriptor; never used to branch runtime behaviour. */
   describe(): TransportDescriptor<Id>;
@@ -287,18 +338,11 @@ export type RuntimeTransportClient<
    * chooses transferable vs copy semantics based on what its wire
    * supports. The runtime never sees the wire-level transferables
    * list.
+   * A second call while initialization is in flight or after it succeeds
+   * rejects with {@link RuntimeAlreadyInitializedError}; a failed first
+   * attempt may be retried.
    */
   initialize(input: RuntimeInitializePayload): Promise<RuntimeInitializeResult>;
-
-  /**
-   * Cooperative abort. The transport picks the fastest signalling
-   * path its wire supports — typically SAB Atomics for in-process /
-   * web-worker / node-worker / utilityProcess wires, falling back to
-   * wire notify for cross-process wires that cannot share memory.
-   * Always also sends a wire notify so the host has receipt
-   * regardless of medium.
-   */
-  abort(reason: AbortReason): void;
 
   /**
    * Materialise an {@link GeometryTransport} payload received
@@ -307,11 +351,14 @@ export type RuntimeTransportClient<
    */
   resolveGeometry(transport: GeometryTransport): Promise<Geometry>;
 
+  /** Materialise pooled/inline export files into owned consumer bytes. */
+  resolveExport?(transport: RuntimeExportResultTransport): Promise<ExportGeometryResult>;
+
   /**
    * Close the wire, terminate the host. After `close()` resolves the
    * transport is unusable; callers must construct a new instance.
    */
-  close(reason?: string): Promise<void>;
+  close(): Promise<void>;
 };
 
 /**
@@ -353,12 +400,6 @@ export type RuntimeTransportHost<
    */
   encodeGeometry(geometry: Geometry): EncodedGeometry;
 
-  /**
-   * Encode a file payload for transmission. Mirrors
-   * {@link encodeGeometry} for the file delivery binding.
-   */
-  encodeFile(file: Uint8Array<ArrayBuffer>): EncodedFileBytes;
-
   close(reason?: string): Promise<void>;
 };
 
@@ -379,12 +420,14 @@ export type RuntimeTransportHost<
  * @template Protocol      - RPC protocol carried over the wire.
  * @template BindingsExtra - Transport-specific host-binding extensions.
  * @template Id            - Literal transport id.
+ * @template Runtime       - Runtime definition owned by this transport topology, when applicable.
  * @public
  */
 export type TransportPlugin<
   Protocol extends RpcProtocol = RuntimeProtocol,
   BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
   Id extends string = string,
+  Runtime extends AnyRuntimeDefinition | undefined = undefined,
 > = {
   readonly id: Id;
 
@@ -394,6 +437,8 @@ export type TransportPlugin<
   readonly [__transportProtocol]?: Protocol;
   /** @internal */
   readonly [__transportBindingsExtra]?: BindingsExtra;
+  /** @internal */
+  readonly [__transportRuntime]?: Runtime;
 
   /** Pure diagnostic snapshot — never allocates SAB, spawns workers, or opens wires. */
   describe(): TransportDescriptor<Id>;
@@ -414,7 +459,9 @@ export type TransportPlugin<
  * @internal
  */
 export type TransportIdPhantomSlot = typeof __transportId;
-/** */
+/** @internal */
 export type TransportProtocolPhantomSlot = typeof __transportProtocol;
-/** */
+/** @internal */
 export type TransportBindingsExtraPhantomSlot = typeof __transportBindingsExtra;
+/** @internal */
+export type TransportRuntimePhantomSlot = typeof __transportRuntime;

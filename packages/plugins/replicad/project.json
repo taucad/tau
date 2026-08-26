@@ -1,0 +1,17 @@
+{
+  "name": "replicad",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/replicad",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "benchmark-tessellation": {
+      "command": "tsx --require ../../../tools/cjs-wasm-compat.cjs scripts/benchmark-tessellation.mts",
+      "options": { "cwd": "{projectRoot}" }
+    },
+    "wasm-inspect": {
+      "command": "tsx scripts/wasm-inspect.mts",
+      "options": { "cwd": "{projectRoot}" }
+    }
+  }
+}

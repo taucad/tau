@@ -1,0 +1,58 @@
+{
+  "family": "clearance",
+  "fixture": "clearance.shaft-bore-too-loose-negative",
+  "generator": {
+    "script": "scripts/clearance/shaft-bore/main.ts",
+    "parameters": {
+      "boreRadius": 25.25
+    }
+  },
+  "tolerances": {
+    "clearanceMin": 0.02,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "housing.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 25.25
+      }
+    },
+    {
+      "selector": "shaft.journal",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 25
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "clearance",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "min": 0.02,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0.25
+          }
+        },
+        "mentions": ["shaft.journal", "housing.bore", "too loose"]
+      }
+    }
+  ],
+  "notes": "Too loose: clearance 0.250 above max 0.060."
+}

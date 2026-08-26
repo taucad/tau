@@ -142,18 +142,26 @@ describe('extractChatIdFromTranscriptPath', () => {
 describe('resolveAtReference', () => {
   const createFileTree = (entries: Array<[string, Partial<FileEntry>]>): Map<string, FileEntry> =>
     new Map(
-      entries.map(([path, partial]) => [
-        path,
-        {
-          path,
-          name: partial.name ?? path.split('/').pop()!,
-          type: partial.type ?? 'file',
-          size: 0,
-          isLoaded: true,
-          mtimeMs: 0,
-          ...partial,
-        },
-      ]),
+      entries.map(([path, partial]) => {
+        const name = partial.name ?? path.split('/').pop()!;
+        const size = partial.size ?? 0;
+        const isLoaded = partial.isLoaded ?? true;
+        const mtimeMs = partial.mtimeMs ?? 0;
+        const entry: FileEntry =
+          partial.type === 'dir'
+            ? { path, name, type: 'dir', size, isLoaded, mtimeMs }
+            : {
+                path,
+                name,
+                type: 'file',
+                size,
+                isLoaded,
+                mtimeMs,
+                contentKind: 'text',
+                lineCount: (partial as Partial<Extract<FileEntry, { type: 'file' }>>).lineCount ?? 1,
+              };
+        return [path, entry] as const;
+      }),
     );
 
   const createChatsById = (chats: Array<{ id: string; name: string }>): Map<string, Chat> =>
@@ -232,18 +240,26 @@ describe('resolveAtReference', () => {
 describe('buildPastedContent', () => {
   const createFileTree = (entries: Array<[string, Partial<FileEntry>]>): Map<string, FileEntry> =>
     new Map(
-      entries.map(([path, partial]) => [
-        path,
-        {
-          path,
-          name: partial.name ?? path.split('/').pop()!,
-          type: partial.type ?? 'file',
-          size: 0,
-          isLoaded: true,
-          mtimeMs: 0,
-          ...partial,
-        },
-      ]),
+      entries.map(([path, partial]) => {
+        const name = partial.name ?? path.split('/').pop()!;
+        const size = partial.size ?? 0;
+        const isLoaded = partial.isLoaded ?? true;
+        const mtimeMs = partial.mtimeMs ?? 0;
+        const entry: FileEntry =
+          partial.type === 'dir'
+            ? { path, name, type: 'dir', size, isLoaded, mtimeMs }
+            : {
+                path,
+                name,
+                type: 'file',
+                size,
+                isLoaded,
+                mtimeMs,
+                contentKind: 'text',
+                lineCount: (partial as Partial<Extract<FileEntry, { type: 'file' }>>).lineCount ?? 1,
+              };
+        return [path, entry] as const;
+      }),
     );
 
   const createChats = (chats: Array<{ id: string; name: string }>): Chat[] =>

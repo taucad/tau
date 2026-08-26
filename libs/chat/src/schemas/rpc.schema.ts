@@ -13,12 +13,34 @@ import { z as zod } from 'zod';
 import { rpcName } from '#constants/rpc.constants.js';
 import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
-import { observationSchema } from '#schemas/tools/test-model.tool.schema.js';
+import { geoSpecRunFilterInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { exportGeometryFormatSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { screenshotImageSchema } from '#schemas/tools/screenshot.tool.schema.js';
+import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 
 // =============================================================================
 // RPC Error Types
 // =============================================================================
+
+const byteSizeSchema = zod.number().int().nonnegative();
+
+const textFileMetadataObjectSchema = zod
+  .object({
+    type: zod.literal('file'),
+    size: byteSizeSchema,
+    ...textFileContentMetadataSchema.shape,
+  })
+  .strict();
+
+const binaryFileMetadataObjectSchema = zod
+  .object({
+    type: zod.literal('file'),
+    size: byteSizeSchema,
+    ...binaryFileContentMetadataSchema.shape,
+  })
+  .strict();
+
+const fileMetadataObjectSchema = zod.union([textFileMetadataObjectSchema, binaryFileMetadataObjectSchema]);
 
 /**
  * Error codes for business-level RPC failures.
@@ -28,12 +50,12 @@ import { exportGeometryFormatSchema } from '#schemas/tools/export-geometry.tool.
  */
 export const rpcClientErrorCodeSchema = zod.enum([
   'FILE_NOT_FOUND',
-  'NO_TOP_LEVEL_GEOMETRY',
   'PERMISSION_DENIED',
   'IO_ERROR',
   'PARSE_ERROR',
   'RENDER_TIMEOUT',
   'RESULT_TOO_LARGE',
+  'SKILL_NOT_FOUND',
   'UNKNOWN',
   'UNKNOWN_GEOMETRY_UNIT',
   'VALIDATION_ERROR',
@@ -48,6 +70,7 @@ export const rpcClientErrorSchema = zod.object({
   success: zod.literal(false),
   errorCode: rpcClientErrorCodeSchema,
   message: zod.string(),
+  fileMetadata: fileMetadataObjectSchema.optional(),
 });
 
 // =============================================================================
@@ -104,6 +127,8 @@ const readFileRpc = defineRpc({
   }),
   success: zod.object({
     content: zod.string(),
+    size: byteSizeSchema,
+    contentKind: zod.literal('text'),
     totalLines: zod.number(),
     startLine: zod.number().optional(),
     truncated: zod.boolean().optional(),
@@ -129,19 +154,25 @@ const deleteFileRpc = defineRpc({
   }),
   success: zod.object({
     message: zod.string(),
+    diffStats: diffStatsWithContentSchema.optional(),
   }),
 });
 
-const directoryEntrySchema = zod.object({
+const directoryEntryBaseSchema = zod.object({
   name: zod.string(),
-  type: zod.enum(['file', 'dir']),
-  size: zod.number(),
+  size: byteSizeSchema,
   modifiedAt: zod.string().optional(),
 });
 
+const directoryEntrySchema = zod.union([
+  directoryEntryBaseSchema.extend({ type: zod.literal('dir') }).strict(),
+  directoryEntryBaseSchema.extend({ type: zod.literal('file'), ...textFileContentMetadataSchema.shape }).strict(),
+  directoryEntryBaseSchema.extend({ type: zod.literal('file'), ...binaryFileContentMetadataSchema.shape }).strict(),
+]);
+
 const listDirectoryRpc = defineRpc({
   input: zod.object({
-    path: zod.string(),
+    path: zod.string().optional(),
   }),
   success: zod.object({
     entries: zod.array(directoryEntrySchema),
@@ -173,12 +204,27 @@ const grepRpc = defineRpc({
   }),
 });
 
-const globFileEntrySchema = zod.object({
+const globEntryBaseSchema = zod.object({
   path: zod.string(),
-  isDirectory: zod.boolean().optional(),
-  size: zod.number().optional(),
+  size: byteSizeSchema,
   modifiedAt: zod.string().optional(),
 });
+
+const globFileEntrySchema = zod.union([
+  globEntryBaseSchema.extend({ isDirectory: zod.literal(true) }).strict(),
+  globEntryBaseSchema
+    .extend({
+      isDirectory: zod.literal(false).optional(),
+      ...textFileContentMetadataSchema.shape,
+    })
+    .strict(),
+  globEntryBaseSchema
+    .extend({
+      isDirectory: zod.literal(false).optional(),
+      ...binaryFileContentMetadataSchema.shape,
+    })
+    .strict(),
+]);
 
 const globSearchRpc = defineRpc({
   input: zod.object({
@@ -187,7 +233,7 @@ const globSearchRpc = defineRpc({
   }),
   success: zod.object({
     files: zod.array(zod.string()),
-    entries: zod.array(globFileEntrySchema).optional(),
+    entries: zod.array(globFileEntrySchema),
     totalFiles: zod.number(),
   }),
 });
@@ -202,13 +248,9 @@ const getKernelResultRpc = defineRpc({
   }),
 });
 
-const captureObservationsRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-  }),
-  success: zod.object({
-    observations: zod.array(observationSchema),
-  }),
+const runGeoSpecTestsRpc = defineRpc({
+  input: geoSpecRunFilterInputSchema,
+  success: testModelOutputSchema,
 });
 
 const exportGeometryRpc = defineRpc({
@@ -218,36 +260,33 @@ const exportGeometryRpc = defineRpc({
     format: exportGeometryFormatSchema,
   }),
   success: zod.object({
-    artifactPath: zod.string(),
     format: exportGeometryFormatSchema,
-    mimeType: zod.string(),
-    byteLength: zod.number().int().nonnegative(),
+    files: zod
+      .array(
+        zod.object({
+          name: zod.string(),
+          artifactPath: zod.string(),
+          mimeType: zod.string(),
+          byteLength: zod.number().int().nonnegative(),
+        }),
+      )
+      .min(1),
   }),
 });
 
-const fetchGeometryRpc = defineRpc({
-  input: zod.object({
-    artifactId: zod.string().optional(),
-    targetFile: zod.string(),
-  }),
-  success: zod.object({
-    glb: zod.instanceof(Uint8Array),
-    artifactPath: zod.string().optional(),
-  }),
-});
-
-const captureScreenshotRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-  }),
-  success: zod.object({
-    images: zod.array(
-      zod.object({
-        view: zod.string(),
-        dataUrl: zod.string(),
-      }),
-    ),
-  }),
+const captureImagesRpc = defineRpc({
+  input: zod
+    .object({
+      mode: zod.enum(['single', 'multi_angle']),
+      targetFile: zod.string(),
+      includeEdges: zod.boolean().optional(),
+    })
+    .strict(),
+  success: zod
+    .object({
+      images: zod.array(screenshotImageSchema).min(1),
+    })
+    .strict(),
 });
 
 const appendFileRpc = defineRpc({
@@ -274,6 +313,37 @@ const editFileRpc = defineRpc({
   }),
 });
 
+const skillShadowedSourceSchema = zod.object({
+  source: zod.string(),
+  resourceUri: zod.string().optional(),
+  path: zod.string().optional(),
+  skillPath: zod.string().optional(),
+  fingerprint: zod.string().optional(),
+});
+
+const resolveSkillRpc = defineRpc({
+  input: zod.object({
+    skillName: zod.string(),
+  }),
+  success: zod.object({
+    skillName: zod.string(),
+    title: zod.string().optional(),
+    description: zod.string(),
+    source: zod.string(),
+    enabled: zod.boolean(),
+    resourceUri: zod.string(),
+    skillPath: zod.string().optional(),
+    baseDirectory: zod.string().optional(),
+    version: zod.string().optional(),
+    whenToUse: zod.string().optional(),
+    fingerprint: zod.string().optional(),
+    frontmatter: zod.record(zod.string(), zod.unknown()),
+    content: zod.string(),
+    supportingFiles: zod.array(zod.string()),
+    shadowedSources: zod.array(skillShadowedSourceSchema).optional(),
+  }),
+});
+
 // =============================================================================
 // RPC Schemas Registry
 // =============================================================================
@@ -296,12 +366,12 @@ export type RpcSchemasRegistry = {
   [rpcName.grep]: RpcSchemaEntry<GrepRpcInput, GrepRpcResult>;
   [rpcName.globSearch]: RpcSchemaEntry<GlobSearchRpcInput, GlobSearchRpcResult>;
   [rpcName.getKernelResult]: RpcSchemaEntry<GetKernelResultRpcInput, GetKernelResultRpcResult>;
-  [rpcName.captureObservations]: RpcSchemaEntry<CaptureObservationsRpcInput, CaptureObservationsRpcResult>;
-  [rpcName.fetchGeometry]: RpcSchemaEntry<FetchGeometryRpcInput, FetchGeometryRpcResult>;
+  [rpcName.captureImages]: RpcSchemaEntry<CaptureImagesRpcInput, CaptureImagesRpcResult>;
+  [rpcName.runGeoSpecTests]: RpcSchemaEntry<RunGeoSpecTestsRpcInput, RunGeoSpecTestsRpcResult>;
   [rpcName.exportGeometry]: RpcSchemaEntry<ExportGeometryRpcInput, ExportGeometryRpcResult>;
-  [rpcName.captureScreenshot]: RpcSchemaEntry<CaptureScreenshotRpcInput, CaptureScreenshotRpcResult>;
   [rpcName.appendFile]: RpcSchemaEntry<AppendFileRpcInput, AppendFileRpcResult>;
   [rpcName.editFile]: RpcSchemaEntry<EditFileRpcInput, EditFileRpcResult>;
+  [rpcName.resolveSkill]: RpcSchemaEntry<ResolveSkillRpcInput, ResolveSkillRpcResult>;
 };
 
 /**
@@ -338,21 +408,17 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
     inputSchema: getKernelResultRpc.inputSchema,
     resultSchema: getKernelResultRpc.resultSchema,
   },
-  [rpcName.captureObservations]: {
-    inputSchema: captureObservationsRpc.inputSchema,
-    resultSchema: captureObservationsRpc.resultSchema,
+  [rpcName.captureImages]: {
+    inputSchema: captureImagesRpc.inputSchema,
+    resultSchema: captureImagesRpc.resultSchema,
   },
-  [rpcName.fetchGeometry]: {
-    inputSchema: fetchGeometryRpc.inputSchema,
-    resultSchema: fetchGeometryRpc.resultSchema,
+  [rpcName.runGeoSpecTests]: {
+    inputSchema: runGeoSpecTestsRpc.inputSchema,
+    resultSchema: runGeoSpecTestsRpc.resultSchema,
   },
   [rpcName.exportGeometry]: {
     inputSchema: exportGeometryRpc.inputSchema,
     resultSchema: exportGeometryRpc.resultSchema,
-  },
-  [rpcName.captureScreenshot]: {
-    inputSchema: captureScreenshotRpc.inputSchema,
-    resultSchema: captureScreenshotRpc.resultSchema,
   },
   [rpcName.appendFile]: {
     inputSchema: appendFileRpc.inputSchema,
@@ -361,6 +427,10 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   [rpcName.editFile]: {
     inputSchema: editFileRpc.inputSchema,
     resultSchema: editFileRpc.resultSchema,
+  },
+  [rpcName.resolveSkill]: {
+    inputSchema: resolveSkillRpc.inputSchema,
+    resultSchema: resolveSkillRpc.resultSchema,
   },
 };
 
@@ -423,12 +493,12 @@ export type RpcClientError = z.infer<typeof rpcClientErrorSchema>;
  */
 export const rpcClientErrorCode = {
   fileNotFound: 'FILE_NOT_FOUND',
-  noTopLevelGeometry: 'NO_TOP_LEVEL_GEOMETRY',
   permissionDenied: 'PERMISSION_DENIED',
   ioError: 'IO_ERROR',
   parseError: 'PARSE_ERROR',
   renderTimeout: 'RENDER_TIMEOUT',
   resultTooLarge: 'RESULT_TOO_LARGE',
+  skillNotFound: 'SKILL_NOT_FOUND',
   unknown: 'UNKNOWN',
   unknownGeometryUnit: 'UNKNOWN_GEOMETRY_UNIT',
   validationError: 'VALIDATION_ERROR',
@@ -484,11 +554,18 @@ export type GetKernelResultRpcSuccess = z.infer<typeof getKernelResultRpc.succes
 export type GetKernelResultRpcResult = z.infer<typeof getKernelResultRpc.resultSchema>;
 
 /** @public */
-export type CaptureObservationsRpcInput = z.infer<typeof captureObservationsRpc.inputSchema>;
+export type CaptureImagesRpcInput = z.infer<typeof captureImagesRpc.inputSchema>;
 /** @public */
-export type CaptureObservationsRpcSuccess = z.infer<typeof captureObservationsRpc.successSchema>;
+export type CaptureImagesRpcSuccess = z.infer<typeof captureImagesRpc.successSchema>;
 /** @public */
-export type CaptureObservationsRpcResult = z.infer<typeof captureObservationsRpc.resultSchema>;
+export type CaptureImagesRpcResult = z.infer<typeof captureImagesRpc.resultSchema>;
+
+/** @public */
+export type RunGeoSpecTestsRpcInput = z.infer<typeof runGeoSpecTestsRpc.inputSchema>;
+/** @public */
+export type RunGeoSpecTestsRpcSuccess = z.infer<typeof runGeoSpecTestsRpc.successSchema>;
+/** @public */
+export type RunGeoSpecTestsRpcResult = z.infer<typeof runGeoSpecTestsRpc.resultSchema>;
 
 /** @public */
 export type ExportGeometryRpcInput = z.infer<typeof exportGeometryRpc.inputSchema>;
@@ -496,20 +573,6 @@ export type ExportGeometryRpcInput = z.infer<typeof exportGeometryRpc.inputSchem
 export type ExportGeometryRpcSuccess = z.infer<typeof exportGeometryRpc.successSchema>;
 /** @public */
 export type ExportGeometryRpcResult = z.infer<typeof exportGeometryRpc.resultSchema>;
-
-/** @public */
-export type FetchGeometryRpcInput = z.infer<typeof fetchGeometryRpc.inputSchema>;
-/** @public */
-export type FetchGeometryRpcSuccess = z.infer<typeof fetchGeometryRpc.successSchema>;
-/** @public */
-export type FetchGeometryRpcResult = z.infer<typeof fetchGeometryRpc.resultSchema>;
-
-/** @public */
-export type CaptureScreenshotRpcInput = z.infer<typeof captureScreenshotRpc.inputSchema>;
-/** @public */
-export type CaptureScreenshotRpcSuccess = z.infer<typeof captureScreenshotRpc.successSchema>;
-/** @public */
-export type CaptureScreenshotRpcResult = z.infer<typeof captureScreenshotRpc.resultSchema>;
 
 /** @public */
 export type AppendFileRpcInput = z.infer<typeof appendFileRpc.inputSchema>;
@@ -524,3 +587,10 @@ export type EditFileRpcInput = z.infer<typeof editFileRpc.inputSchema>;
 export type EditFileRpcSuccess = z.infer<typeof editFileRpc.successSchema>;
 /** @public */
 export type EditFileRpcResult = z.infer<typeof editFileRpc.resultSchema>;
+
+/** @public */
+export type ResolveSkillRpcInput = z.infer<typeof resolveSkillRpc.inputSchema>;
+/** @public */
+export type ResolveSkillRpcSuccess = z.infer<typeof resolveSkillRpc.successSchema>;
+/** @public */
+export type ResolveSkillRpcResult = z.infer<typeof resolveSkillRpc.resultSchema>;

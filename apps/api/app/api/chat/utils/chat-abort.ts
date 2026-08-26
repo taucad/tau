@@ -1,18 +1,19 @@
 /**
  * Branded abort error and tracking utilities for chat request cancellation.
  *
- * When users cancel chat requests (stop button), LangGraph's internal abort
- * propagation creates fire-and-forget promises in node-fetch that reject with
- * generic AbortError. These utilities provide two layers of identification:
+ * When users cancel chat requests (stop button), LangGraph and provider SDK
+ * internals can surface cancellation from request-local catch blocks or from
+ * detached promises that reach the process-level unhandledRejection handler.
+ * These utilities provide two layers of identification:
  *
  * 1. **Branded ChatAbortError** — used as the abort reason via
  *    `AbortController.abort(new ChatAbortError(chatId))`, making it accessible
  *    on `signal.reason`. The controller's catch block checks this directly.
  *
- * 2. **Abort tracker** — correlates unhandled AbortError rejections (from
- *    node-fetch's fire-and-forget promises) with known chat cancellations.
- *    Used by the process-level `unhandledRejection` handler where we don't
- *    have access to the original AbortSignal.
+ * 2. **Abort tracker** — correlates generic transport-level AbortError
+ *    rejections with known chat cancellations. Used by the process-level
+ *    `unhandledRejection` handler when detached promises do not carry the
+ *    original AbortSignal reason.
  */
 
 /**
@@ -29,13 +30,22 @@ const chatAbortBrand: unique symbol = Symbol('ChatAbortBrand');
  * is accessible on `signal.reason` for precise identification in catch blocks.
  */
 export class ChatAbortError extends Error {
+  public override readonly name = 'AbortError';
+
+  public get kind(): 'chat-client-abort' {
+    return 'chat-client-abort';
+  }
+
+  public get code(): 'CHAT_CLIENT_ABORT' {
+    return 'CHAT_CLIENT_ABORT';
+  }
+
   public get [chatAbortBrand](): true {
     return true;
   }
 
   public constructor(public readonly chatId: string) {
     super(`Chat ${chatId} was cancelled by client`);
-    this.name = 'ChatAbortError';
   }
 }
 
@@ -62,6 +72,9 @@ const trackingWindow = 10_000;
 
 const activeChatAborts = new Set<string>();
 const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const isAbortLikeError = (error: Error): boolean =>
+  error.name === 'AbortError' || (error as { type?: unknown }).type === 'aborted';
 
 /**
  * Register that a chat request is about to be aborted.
@@ -90,14 +103,15 @@ export function registerChatAbort(chatId: string): void {
 }
 
 /**
- * Check whether an unhandled rejection is a tracked chat abort error.
+ * Check whether an unhandled rejection is an expected chat cancellation.
  *
- * Returns true only when **both** conditions are met:
- * 1. The error matches the AbortError pattern (`name` or `type` property)
- * 2. At least one chat abort was recently registered via {@link registerChatAbort}
+ * Tau-branded chat cancellations are expected regardless of tracking state
+ * because the private brand proves they came from this cancellation layer.
+ * Generic transport aborts are expected only when at least one chat abort was
+ * recently registered via {@link registerChatAbort}.
  *
- * This two-condition check prevents accidentally swallowing unrelated
- * AbortErrors from other subsystems.
+ * This preserves crash-on-unhandled-rejection behavior for unrelated errors
+ * while allowing benign cancellation rejections to settle cleanly.
  *
  * **Known limitation:** This checks for ANY active chat abort, not the
  * specific chat that produced the error. If two chats run concurrently and
@@ -111,7 +125,11 @@ export function registerChatAbort(chatId: string): void {
  * would require threading `chatId` through the unhandledRejection handler,
  * which is non-trivial since node-fetch rejections don't carry chat context.
  */
-export function isTrackedAbortError(error: unknown): boolean {
+export function isExpectedChatCancellationRejection(error: unknown): boolean {
+  if (isChatAbortError(error)) {
+    return true;
+  }
+
   if (activeChatAborts.size === 0) {
     return false;
   }
@@ -120,7 +138,7 @@ export function isTrackedAbortError(error: unknown): boolean {
     return false;
   }
 
-  return error.name === 'AbortError' || (error as { type?: string }).type === 'aborted';
+  return isAbortLikeError(error);
 }
 
 /**

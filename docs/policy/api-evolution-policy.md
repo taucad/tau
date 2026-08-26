@@ -3,9 +3,10 @@ title: 'API Evolution Policy'
 description: 'Rules for evolving library APIs over time: future flags, stability tiers, API surface management, advanced error patterns, and provider abstractions.'
 status: active
 created: '2026-03-10'
-updated: '2026-03-10'
+updated: '2026-08-23'
 related:
   - docs/policy/library-api-policy.md
+  - docs/policy/runtime-api-policy.md
   - docs/policy/version-policy.md
 ---
 
@@ -56,12 +57,16 @@ function resolveConfig(user: Partial<FutureConfig>): FutureConfig {
 **Why**: The `future` config pattern (used by React Router, Remix, and Prisma) lets consumers adopt breaking changes incrementally — one flag at a time — rather than facing a wall of changes on the next major upgrade. The `satisfies` pattern gives full type inference:
 
 ```typescript
-export default {
-  kernels: [replicad()],
+import { replicad } from '@taucad/replicad';
+
+const runtimeOptions = {
+  plugins: [replicad()],
   future: {
     v2_middlewareApi: true,
   },
-} satisfies RuntimeClientConfig;
+} satisfies RuntimeDefinitionConfig;
+
+export const runtime = defineRuntime(runtimeOptions);
 ```
 
 ## 2. Stability Annotations in Code
@@ -178,13 +183,13 @@ type RuntimeTransport = {
 };
 
 // Adapter: browser Web Worker
-function createWorkerTransport(worker: Worker): RuntimeTransport { ... }
+function webWorkerTransport(options: WebWorkerTransportOptions): TransportPlugin { ... }
 
 // Adapter: Node.js worker_threads
-function createNodeTransport(worker: NodeWorker): RuntimeTransport { ... }
+function nodeWorkerTransport(options: NodeWorkerClientOptions): TransportPlugin { ... }
 
 // Adapter: in-process (testing)
-function createInlineTransport(runtime: KernelRuntimeWorker): RuntimeTransport { ... }
+function inProcessTransport(options: InProcessClientOptions): TransportPlugin { ... }
 ```
 
 ### Adapter Export Convention
@@ -193,14 +198,15 @@ Adapters are exported from dedicated subpaths, not from the main entry point. Th
 
 ```text
 @taucad/runtime                     -- core (platform-agnostic)
-@taucad/runtime/transport           -- transport adapters
-@taucad/runtime/transport/worker    -- Web Worker adapter (browser)
+@taucad/runtime/transport           -- shared transport contracts
+@taucad/runtime/transport/in-process -- same-isolate adapter
+@taucad/runtime/transport/web       -- Web Worker adapter (browser)
 @taucad/runtime/transport/node      -- worker_threads adapter (Node.js)
 ```
 
 ### Shared API Across Adapters
 
-All adapters for the same interface must expose the same factory signature pattern. A developer who learns `createWorkerTransport(worker, options?)` can predict the shape of `createNodeTransport(worker, options?)`.
+All adapters for the same interface must return the same transport plugin contract. Keep factory names predictable (`webWorkerTransport`, `nodeWorkerTransport`, `inProcessTransport`) while their topology-specific option objects remain explicit.
 
 ## 5. Error Hierarchy with Symbol Markers
 
@@ -271,7 +277,7 @@ export class WasmInitError extends KernelSDKError {
 
 ```typescript
 try {
-  await client.render({ file, parameters });
+  await client.render({ source: { path: 'main.ts' }, parameters });
 } catch (error) {
   if (WasmInitError.isInstance(error)) {
     console.error(`WASM failed to load from ${error.wasmUrl}:`, error.cause);
@@ -291,7 +297,7 @@ Adapted from Stripe's "safe changes" definition. These changes are always backwa
 - Adding new properties to response/result objects
 - Adding new event types to `on()` subscriptions
 - Adding new enum values when the consumer handles an `else`/`default` case
-- Adding new export subpaths to `package.json`
+- Adding new export subpaths to `package.json` after satisfying [Public Surface Policy](public-surface-policy.md)
 - Adding new kernels, middleware, or bundler plugins
 - Adding new methods to existing objects (when the object is not user-constructible)
 - Widening input types (accepting more inputs)
@@ -391,11 +397,16 @@ Every public type export must have corresponding type-level tests. Adapted from 
 // src/types.test-d.ts
 import { expectTypeOf, describe, it } from 'vitest';
 import { createRuntimeClient } from './index';
-import { replicad } from './kernels/replicad';
+import { inProcessTransport } from './transport/in-process';
+import { replicad } from '@taucad/replicad';
+import { defineRuntime } from './worker';
 
 describe('createRuntimeClient', () => {
   it('should infer kernel context types', () => {
-    const client = createRuntimeClient({ kernels: [replicad()] });
+    const runtime = defineRuntime({ plugins: [replicad()] });
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime }),
+    });
     expectTypeOf(client.render).toBeFunction();
     expectTypeOf(client.on).toBeCallableWith('progress', (_phase: string) => {});
   });
@@ -410,6 +421,12 @@ describe('createRuntimeClient', () => {
 - Type tests catch regressions that runtime tests miss: return type narrowing, generic inference, conditional types, and discriminated union exhaustiveness.
 
 **Why**: The semver-ts specification requires that minor releases don't introduce new type errors. Type-level tests are the only reliable way to enforce this. The AI SDK uses this pattern extensively — every `tool()`, `generateText()`, and schema utility has corresponding type tests that would catch breaking type changes before they ship.
+
+Capability-driven APIs require positive and negative route tests. For every independently declared capability property, type tests must prove that capable routes accept the property, incapable routes reject it, composed routes preserve only the supported intersection, and route selectors/capability manifests infer the same surface exposed at runtime. A generic catch-all options bag is not a substitute for route inference.
+
+### Pre-release contract replacement
+
+Before a public package's first release, an internally consumed authoring or RPC contract may be replaced atomically without aliases, overload bridges, codemods, deprecation warnings, or migration guides. The repository must migrate every first-party producer and consumer in the same change, remove the old names, and retain type/runtime coverage for the resulting contract. This exception does not apply once any affected version has been published.
 
 ## 10. Flexible Schema Acceptance
 

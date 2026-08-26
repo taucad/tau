@@ -12,7 +12,7 @@ const CadContext = createContext<CadActorRef | undefined>(undefined);
  * Placed in ChatViewer alongside GraphicsProvider.
  *
  * Unlike GraphicsProvider, the value may be `undefined` when the geometry unit
- * has not yet been created for the current entry file.
+ * has not yet been created for the current entry path.
  */
 export function CadProvider({
   cadRef,
@@ -39,7 +39,7 @@ export function useCad(): CadActorRef | undefined {
  * Delegates to XState's useSelector for subscription management and re-render optimization.
  *
  * @example
- * const geometries = useCadSelector(state => state.context.geometries, []);
+ * const geometry = useCadSelector(state => state.context.geometry, undefined);
  * const status = useCadSelector(state => state.value, undefined);
  */
 export function useCadSelector<T>(selector: (state: SnapshotFrom<typeof cadMachine>) => T, defaultValue: T): T {

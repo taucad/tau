@@ -1,60 +1,95 @@
 import type { RuntimeFileSystemBase } from '@taucad/runtime';
-import type { RpcFileSystem, RpcFileStat } from '@taucad/chat/rpc';
+import { ResourceQueue } from '@taucad/filesystem';
+import type { RpcDirectoryEntry, RpcFileSystem, RpcFileStat } from '@taucad/chat/rpc';
+import { getErrno } from '@taucad/utils/error';
+import { joinRelativePath, resolveVirtualPath } from '@taucad/utils/path';
+
+const toRuntimePath = (path: string): string => resolveVirtualPath(path === '' ? '/' : `/${path}`);
 
 /**
- * Adapts a `RuntimeFileSystemBase` (e.g. the value returned by
- * `createRuntimeFileSystem(...)`) to the `RpcFileSystem` interface.
+ * Adapts a primitive `RuntimeFileSystemBase` to the `RpcFileSystem`
+ * interface used by headless API tests.
  */
 export function createHeadlessRpcFileSystem(fs: RuntimeFileSystemBase): RpcFileSystem {
+  const mutationQueue = new ResourceQueue();
+
   return {
     async readFile(path: string): Promise<string> {
-      return fs.readFile(path, 'utf8');
+      return fs.readFile(toRuntimePath(path), 'utf8');
     },
     async writeFile(path: string, content: string): Promise<void> {
-      await fs.writeFile(path, content);
+      const runtimePath = toRuntimePath(path);
+      await mutationQueue.queueFor(runtimePath, async () => fs.writeFile(runtimePath, content));
     },
     async writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
-      await fs.writeFile(path, new Uint8Array(data.buffer));
+      const runtimePath = toRuntimePath(path);
+      const ownedData = new Uint8Array(data);
+      await mutationQueue.queueFor(runtimePath, async () => fs.writeFile(runtimePath, ownedData));
     },
     async deleteFile(path: string): Promise<void> {
-      await fs.unlink(path);
+      const runtimePath = toRuntimePath(path);
+      await mutationQueue.queueFor(runtimePath, async () => fs.unlink(runtimePath));
     },
-    async readdir(
-      path: string,
-    ): Promise<Array<{ name: string; type: 'file' | 'dir'; size: number; modifiedAt?: string }>> {
-      const names = await fs.readdir(path);
-      const entries: Array<{ name: string; type: 'file' | 'dir'; size: number; modifiedAt?: string }> = [];
+    async readdir(path: string): Promise<RpcDirectoryEntry[]> {
+      const names = await fs.readdir(toRuntimePath(path));
+      const entries = await Promise.all(
+        names.map(async (name): Promise<RpcDirectoryEntry | undefined> => {
+          const childPath = toRuntimePath(joinRelativePath(path, name));
+          try {
+            const info = await fs.stat(childPath);
+            if (info.type === 'dir') {
+              return {
+                name,
+                type: 'dir',
+                size: info.size,
+                modifiedAt: new Date(info.mtimeMs).toISOString(),
+              };
+            }
+            if (info.contentKind === 'text') {
+              return {
+                name,
+                type: 'file',
+                size: info.size,
+                contentKind: 'text',
+                lineCount: info.lineCount,
+                modifiedAt: new Date(info.mtimeMs).toISOString(),
+              };
+            }
+            return {
+              name,
+              type: 'file',
+              size: info.size,
+              contentKind: 'binary',
+              modifiedAt: new Date(info.mtimeMs).toISOString(),
+            };
+          } catch (error) {
+            if (getErrno(error) === 'ENOENT') {
+              return undefined;
+            }
+            throw error;
+          }
+        }),
+      );
 
-      for (const name of names) {
-        const fullPath = path ? `${path}/${name}` : name;
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- sequential stat calls
-          const info = await fs.stat(fullPath);
-          entries.push({
-            name,
-            type: info.type,
-            size: info.size,
-            modifiedAt: new Date(info.mtimeMs).toISOString(),
-          });
-        } catch {
-          entries.push({ name, type: 'file', size: 0 });
-        }
-      }
-
-      return entries;
+      return entries.filter((entry): entry is RpcDirectoryEntry => entry !== undefined);
     },
     async exists(path: string): Promise<boolean> {
-      return fs.exists(path);
+      return fs.exists(toRuntimePath(path));
     },
     async appendFile(path: string, content: string): Promise<void> {
-      let existing = '';
-      try {
-        existing = await fs.readFile(path, 'utf8');
-      } catch {
-        // File doesn't exist yet — will be created
-      }
+      const runtimePath = toRuntimePath(path);
+      await mutationQueue.queueFor(runtimePath, async () => {
+        let existing = '';
+        try {
+          existing = await fs.readFile(runtimePath, 'utf8');
+        } catch (error) {
+          if (getErrno(error) !== 'ENOENT') {
+            throw error;
+          }
+        }
 
-      await fs.writeFile(path, existing + content);
+        await fs.writeFile(runtimePath, existing + content);
+      });
     },
     async editFile(
       path: string,
@@ -62,35 +97,48 @@ export function createHeadlessRpcFileSystem(fs: RuntimeFileSystemBase): RpcFileS
       newString: string,
       replaceAll?: boolean,
     ): Promise<{ occurrences: number }> {
-      const content = await fs.readFile(path, 'utf8');
-
-      let updated: string;
-      let occurrences: number;
-
-      if (replaceAll) {
-        occurrences = content.split(oldString).length - 1;
-        updated = occurrences > 0 ? content.replaceAll(oldString, newString) : content;
-      } else {
-        occurrences = content.includes(oldString) ? 1 : 0;
-        updated = occurrences > 0 ? content.replace(oldString, newString) : content;
-      }
-
-      if (occurrences === 0) {
-        throw new Error(`String not found in ${path}`);
-      }
-
-      await fs.writeFile(path, updated);
-      return { occurrences };
+      const runtimePath = toRuntimePath(path);
+      return mutationQueue.queueFor(runtimePath, async () => {
+        const content = await fs.readFile(runtimePath, 'utf8');
+        const occurrences = replaceAll ? content.split(oldString).length - 1 : content.includes(oldString) ? 1 : 0;
+        if (occurrences === 0) {
+          throw new Error(`String not found in ${path}`);
+        }
+        await fs.writeFile(
+          runtimePath,
+          replaceAll ? content.replaceAll(oldString, newString) : content.replace(oldString, newString),
+        );
+        return { occurrences };
+      });
     },
     async stat(path: string): Promise<RpcFileStat> {
-      const info = await fs.stat(path);
+      const runtimePath = toRuntimePath(path);
+      const info = await fs.stat(runtimePath);
       const isoDate = new Date(info.mtimeMs).toISOString();
-      return {
-        size: info.size,
-        isDirectory: info.type === 'dir',
-        createdAt: isoDate,
-        modifiedAt: isoDate,
-      };
+      if (info.type === 'dir') {
+        return {
+          size: info.size,
+          isDirectory: true,
+          createdAt: isoDate,
+          modifiedAt: isoDate,
+        };
+      }
+      return info.contentKind === 'text'
+        ? {
+            size: info.size,
+            isDirectory: false,
+            createdAt: isoDate,
+            modifiedAt: isoDate,
+            contentKind: 'text',
+            lineCount: info.lineCount,
+          }
+        : {
+            size: info.size,
+            isDirectory: false,
+            createdAt: isoDate,
+            modifiedAt: isoDate,
+            contentKind: 'binary',
+          };
     },
   };
 }

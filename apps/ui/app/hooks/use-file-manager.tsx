@@ -1,20 +1,30 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
-import type { FileTreeEntry, FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
+import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type { FileWriteSource } from '@taucad/fs-client/file-write-source';
 import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '@taucad/fs-client/file-system-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError } from '@taucad/filesystem';
-import { setProjectFileSystemConfig } from '#filesystem/handle-store.js';
+import {
+  forgetWorkspace as forgetStoredWorkspace,
+  getHomeStorageBackend,
+  getProjectRootConfigs,
+  setProjectFileSystemConfig,
+  updateWorkspaceHandle,
+} from '#filesystem/handle-store.js';
+import type { HomeStorageBackend } from '#filesystem/handle-store.js';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
+import type { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { FileManagerNotReadyError } from '#filesystem/workspace-errors.js';
+import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
+import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 
 type FileManagerSnapshot = SnapshotFrom<typeof fileManagerMachine>;
 
@@ -142,14 +152,12 @@ type DeleteFileOptions = {
 export type FileSystemClientFacade = Pick<
   FileSystemClient,
   | 'readFile'
-  | 'readFiles'
   | 'writeFile'
   | 'writeFiles'
   | 'mkdir'
   | 'readdir'
   | 'stat'
   | 'lstat'
-  | 'rename'
   | 'move'
   | 'bulkMove'
   | 'canMove'
@@ -159,8 +167,6 @@ export type FileSystemClientFacade = Pick<
   | 'unlink'
   | 'rmdir'
   | 'exists'
-  | 'batchExists'
-  | 'ensureDirectoryExists'
   | 'getDirectoryStat'
   | 'getDirectoryContents'
   | 'duplicateFile'
@@ -168,6 +174,10 @@ export type FileSystemClientFacade = Pick<
   | 'getZippedDirectory'
   | 'readShallowDirectory'
   | 'readDirectory'
+  | 'listProjectManifests'
+  | 'commitPendingProjectDirectory'
+  | 'permanentlyDeleteProjectDirectory'
+  | 'adoptProjectDirectory'
 >;
 
 /**
@@ -180,15 +190,14 @@ export type FileSystemClientFacade = Pick<
 export type WorkspaceFacade = {
   mount: (prefix: string, config: MountConfig) => Promise<void>;
   unmount: (prefix: string) => void;
-  /**
-   * Drop the cached standalone provider for the supplied backend /
-   * workspace pair. Used by `/files` "Change Folder" and recovery
-   * binding so the next standalone call picks up the new handle.
-   */
-  invalidateStandaloneProvider: (
-    backend: 'webaccess' | 'indexeddb' | 'opfs' | 'memory',
-    workspaceId?: string,
-  ) => Promise<void>;
+  /** Dispose a physical storage root after an explicit handle rebind. */
+  disposeStorageRoot: (storageRootKey: string) => Promise<void>;
+  /** Push the persisted locator set to the worker after a config change. */
+  syncProjectRoots: () => Promise<void>;
+  /** Replace a workspace handle and synchronize this tab before resolving. */
+  replaceWorkspaceHandle: (workspaceId: string, handle: FileSystemDirectoryHandle) => Promise<void>;
+  /** Forget an unreferenced workspace and synchronize this tab before resolving. */
+  forgetWorkspace: (workspaceId: string) => Promise<void>;
 };
 
 type FileManagerContextType = {
@@ -196,6 +205,7 @@ type FileManagerContextType = {
   backendType: FileSystemBackend;
   contentService: FileContentService | undefined;
   treeService: FileTreeService | undefined;
+  workerChangeChannel: WorkerChangeChannel | undefined;
   /** Resolves once both content and tree facades are bound (or rejects if the machine enters `error`). */
   whenServicesReady: () => Promise<{ contentService: FileContentService; treeService: FileTreeService }>;
   /**
@@ -227,47 +237,38 @@ type FileManagerContextType = {
    * `rootDirectory`; absolute keys that escape the workspace root throw
    * `WorkspaceScopeViolationError` synchronously.
    */
-  moveFile: (source: string, target: string, options?: { overwrite?: boolean }) => Promise<void>;
+  moveFile: (source: string, target: string) => Promise<void>;
   /**
-   * Move many paths in a single batch. On mid-flight failure every prior
-   * move within this batch is reversed by the worker so the workspace
-   * returns to the pre-batch state. See {@link BulkMoveResult}.
+   * Move many paths sequentially and report each completed or failed edit.
    */
-  bulkMove: (edits: readonly BulkMoveEdit[], options?: { overwrite?: boolean }) => Promise<BulkMoveResult>;
+  bulkMove: (edits: readonly BulkMoveEdit[]) => Promise<BulkMoveResult>;
   /**
    * Preflight {@link moveFile}. Returns `true` if safe to issue, or a
    * structured {@link WorkspaceMutationError} otherwise. Use to gate UI
    * actions (drag/drop, rename) on a typed error code rather than
    * letting the mutation fail with a less actionable message.
    */
-  canMove: (
-    source: string,
-    target: string,
-    options?: { overwrite?: boolean },
-  ) => Promise<true | WorkspaceMutationError>;
+  canMove: (source: string, target: string) => Promise<true | WorkspaceMutationError>;
   /**
    * Preflight rename within a single parent directory.
    */
   canRename: (source: string, newName: string) => Promise<true | WorkspaceMutationError>;
   /**
-   * Preflight create (`'file'` for `writeFile`, `'directory'` for `mkdir`).
+   * Preflight create (`'file'` for `writeFile`, `'directory'` for `createDirectory`).
    */
   canCreate: (path: string, kind: 'file' | 'directory') => Promise<true | WorkspaceMutationError>;
   /**
-   * Preflight delete (`unlink` for files, `rmdir` for directories).
+   * Preflight delete (`deleteFile` for files, `deleteDirectory` for directories).
    */
   canDelete: (path: string) => Promise<true | WorkspaceMutationError>;
   /**
-   * Create a directory through the worker mount. Pass `{ recursive: true }`
-   * to create intermediate directories.
+   * Create a directory through the project-scoped content facade.
    */
-  mkdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
+  createDirectory: (path: string, options?: { recursive?: boolean }) => Promise<void>;
   /**
-   * Remove a directory through the worker mount. Pass `{ recursive: true }`
-   * to drop a non-empty subtree (mount-routed; no scope required for the
-   * default workspace).
+   * Remove a directory through the project-scoped content facade.
    */
-  rmdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
+  deleteDirectory: (path: string, options?: { recursive?: boolean }) => Promise<void>;
   duplicateFile: (sourcePath: string, destinationPath: string) => Promise<void>;
   deleteFile: (path: string, options: DeleteFileOptions) => Promise<void>;
   stat: (path: string) => Promise<FileStat>;
@@ -316,6 +317,8 @@ type FileManagerContextType = {
    * (`projectId === undefined`).
    */
   bindProjectToWorkspace: (workspaceId: string) => Promise<void>;
+  /** Opaque, fully writable filesystem rooted at this provider's project. */
+  runtimeFileSystem: RuntimeFileSystem;
 };
 
 const FileManagerContext = createContext<FileManagerContextType | undefined>(undefined);
@@ -329,6 +332,17 @@ const SharedWorkerContext = createContext<Worker | undefined>(undefined);
  * traffic to the shared worker.
  */
 const SharedFilePoolBufferContext = createContext<SharedArrayBuffer | undefined>(undefined);
+
+const HomeStorageBackendContext = createContext<HomeStorageBackend | undefined>(undefined);
+
+/** Physical engine selected for the system-owned Home workspace. */
+export function useHomeStorageBackend(): HomeStorageBackend {
+  const backend = useContext(HomeStorageBackendContext);
+  if (!backend) {
+    throw new Error('useHomeStorageBackend must be used within HomeFileManagerProvider');
+  }
+  return backend;
+}
 
 /**
  * Gate component that defers rendering until the parent FileManagerProvider's
@@ -350,9 +364,8 @@ export function SharedWorkerGate({ children }: { readonly children: ReactNode })
  * Common props shared by every {@link FileManagerProvider} mount.
  * `initialBackend` is required (Audit R4 / Finding 7) — the call site
  * must commit to a backend explicitly so the FM machine can bootstrap
- * deterministically. The cookie used to be consulted inside the hook;
- * that read now lives in `apps/ui/app/root.tsx` where the policy
- * decision is centralized.
+ * deterministically. Product mount sites use {@link HomeFileManagerProvider}
+ * so the profile's pinned Home engine is resolved once at the app root.
  */
 type FileManagerProviderCommonProps = {
   readonly children: ReactNode;
@@ -376,6 +389,60 @@ export type FileManagerProviderProps = FileManagerProviderCommonProps &
       }
   );
 
+export type HomeFileManagerProviderProps = FileManagerProviderCommonProps & {
+  readonly projectId?: string;
+};
+
+/** Resolve Home once at the app root and reuse that engine at every nested mount. */
+export function HomeFileManagerProvider({
+  children,
+  rootDirectory,
+  projectId,
+  shouldInitializeOnStart,
+}: HomeFileManagerProviderProps): React.JSX.Element {
+  const inheritedBackend = useContext(HomeStorageBackendContext);
+  const [resolvedBackend, setResolvedBackend] = useState<HomeStorageBackend>();
+  const backend = inheritedBackend ?? resolvedBackend;
+
+  useEffect(() => {
+    if (inheritedBackend) {
+      return;
+    }
+    const controller = new AbortController();
+    // async-iife: bootstrap
+    void (async () => {
+      const backend = await getHomeStorageBackend();
+      if (!controller.signal.aborted) {
+        setResolvedBackend(backend);
+      }
+    })();
+    return () => {
+      controller.abort();
+    };
+  }, [inheritedBackend]);
+
+  if (!backend) {
+    return <div role='status' aria-label='Opening Home' />;
+  }
+
+  const fileManager = (
+    <FileManagerProvider
+      rootDirectory={rootDirectory}
+      initialBackend={backend}
+      {...(projectId === undefined ? {} : { projectId })}
+      {...(shouldInitializeOnStart === undefined ? {} : { shouldInitializeOnStart })}
+    >
+      {children}
+    </FileManagerProvider>
+  );
+
+  return inheritedBackend ? (
+    fileManager
+  ) : (
+    <HomeStorageBackendContext.Provider value={backend}>{fileManager}</HomeStorageBackendContext.Provider>
+  );
+}
+
 export function FileManagerProvider({
   children,
   rootDirectory,
@@ -396,6 +463,8 @@ export function FileManagerProvider({
       projectId,
       sharedWorker: parentWorker,
       sharedFilePoolBuffer: parentFilePoolBuffer,
+      onExternalPollTelemetry: workspaceTelemetry.workspaceExternalPoll,
+      onRootSkipped: workspaceTelemetry.workspaceRootSkipped,
     },
   });
 
@@ -408,6 +477,7 @@ export function FileManagerProvider({
 
   const contentService = useSelector(fileManagerRef, (state) => state.context.contentService);
   const treeService = useSelector(fileManagerRef, (state) => state.context.treeService);
+  const workerChangeChannel = useSelector(fileManagerRef, (state) => state.context.workerChangeChannel);
   const backendType = useSelector(fileManagerRef, (state) => state.context.backendType);
   const activeWorkspaceId = useSelector(fileManagerRef, (state) => state.context.activeWorkspaceId);
   const activeWorkspaceName = useSelector(fileManagerRef, (state) => state.context.activeWorkspaceName);
@@ -419,7 +489,6 @@ export function FileManagerProvider({
         throw new Error('bindProjectToWorkspace requires a project scope (provider mounted without projectId)');
       }
       const previousWorkspaceId = fileManagerRef.getSnapshot().context.activeWorkspaceId;
-      await setProjectFileSystemConfig({ projectId, backend: 'webaccess', workspaceId });
 
       // Drop the worker-side standalone cache before reload (Audit R6
       // / Finding 9). The previous workspace's cached provider must go
@@ -430,12 +499,34 @@ export function FileManagerProvider({
       // provider that was created while permission was missing.
       const snapshot = fileManagerRef.getSnapshot();
       const { proxy } = snapshot.context;
-      if (proxy) {
-        if (previousWorkspaceId && previousWorkspaceId !== workspaceId) {
-          proxy.invalidateStandaloneProvider('webaccess', previousWorkspaceId);
-        }
-        proxy.invalidateStandaloneProvider('webaccess', workspaceId);
+      if (!proxy) {
+        throw new Error('File manager is not ready');
       }
+
+      if (previousWorkspaceId && previousWorkspaceId !== workspaceId) {
+        proxy.disposeStorageRoot(`webaccess:${previousWorkspaceId}`);
+      }
+      proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
+      await proxy.configureProjectRoots(await getProjectRootConfigs());
+      const discovery = await proxy.listProjectManifests();
+      const matches = discovery.entries.filter(
+        (entry) =>
+          entry.status === 'valid' &&
+          entry.manifest.id === projectId &&
+          entry.locator.backend === 'webaccess' &&
+          entry.locator.workspaceId === workspaceId,
+      );
+      if (matches.length !== 1) {
+        throw new Error(`Workspace must contain exactly one valid manifest for project ${projectId}`);
+      }
+      const match = matches[0]!;
+      await setProjectFileSystemConfig({
+        projectId,
+        backend: 'webaccess',
+        workspaceId,
+        providerBasePath: match.locator.relativeDirectory,
+      });
+      await proxy.configureProjectRoots(await getProjectRootConfigs());
 
       workspaceTelemetry.workspaceSwap({ previousWorkspaceId, nextWorkspaceId: workspaceId });
       fileManagerRef.send({ type: 'reloadWorkspace' });
@@ -482,6 +573,28 @@ export function FileManagerProvider({
     return waitForFileManagerServices(fileManagerRef);
   }, [fileManagerRef]);
 
+  const openRootedFileSystemBridge = useCallback(
+    (root: string) => {
+      const opener = fileManagerRef.getSnapshot().context.openFileSystemBridge;
+      if (!opener) {
+        throw new FileManagerNotReadyError('proxy-timeout', {
+          cause: new Error('File Manager filesystem bridge is not ready.'),
+        });
+      }
+      return opener(root);
+    },
+    [fileManagerRef],
+  );
+
+  const runtimeFileSystem = useMemo(
+    () => fromFileSystemBridge(() => openRootedFileSystemBridge(rootDirectory)),
+    // A successful service initialization is the host's existing binding
+    // identity. Rotating the opaque filesystem here makes every owner keyed
+    // by RuntimeFileSystem identity capture the replacement mount instead of
+    // trying to retarget an already-materialized rooted capability.
+    [contentService, openRootedFileSystemBridge, rootDirectory],
+  );
+
   const writeFile = useCallback(
     async (path: string, data: Uint8Array<ArrayBuffer>, options: WriteFileOptions): Promise<void> => {
       const { contentService } = await whenServicesReady();
@@ -518,35 +631,31 @@ export function FileManagerProvider({
   );
 
   const moveFile = useCallback(
-    async (source: string, target: string, options?: { overwrite?: boolean }): Promise<void> => {
+    async (source: string, target: string): Promise<void> => {
       if (source === target) {
         return;
       }
       const { contentService } = await whenServicesReady();
-      await contentService.move(source, target, options);
+      await contentService.move(source, target);
     },
     [whenServicesReady],
   );
 
   const bulkMove = useCallback(
-    async (edits: readonly BulkMoveEdit[], options?: { overwrite?: boolean }): Promise<BulkMoveResult> => {
+    async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> => {
       if (edits.length === 0) {
         return { moved: [], failed: [] };
       }
       const { contentService } = await whenServicesReady();
-      return contentService.bulkMove(edits, options);
+      return contentService.bulkMove(edits);
     },
     [whenServicesReady],
   );
 
   const canMove = useCallback(
-    async (
-      source: string,
-      target: string,
-      options?: { overwrite?: boolean },
-    ): Promise<true | WorkspaceMutationError> => {
+    async (source: string, target: string): Promise<true | WorkspaceMutationError> => {
       const { contentService } = await whenServicesReady();
-      return contentService.canMove(source, target, options);
+      return contentService.canMove(source, target);
     },
     [whenServicesReady],
   );
@@ -575,20 +684,20 @@ export function FileManagerProvider({
     [whenServicesReady],
   );
 
-  const mkdir = useCallback(
+  const createDirectory = useCallback(
     async (path: string, options?: { recursive?: boolean }): Promise<void> => {
-      const proxy = await getReadiedProxy();
-      await proxy.mkdir(path, options);
+      const { contentService } = await whenServicesReady();
+      await contentService.createDirectory(path, options);
     },
-    [getReadiedProxy],
+    [whenServicesReady],
   );
 
-  const rmdir = useCallback(
+  const deleteDirectory = useCallback(
     async (path: string, options?: { recursive?: boolean }): Promise<void> => {
-      const proxy = await getReadiedProxy();
-      await proxy.rmdir(path, options);
+      const { contentService } = await whenServicesReady();
+      await contentService.deleteDirectory(path, options);
     },
-    [getReadiedProxy],
+    [whenServicesReady],
   );
 
   const duplicateFile = useCallback(
@@ -667,14 +776,12 @@ export function FileManagerProvider({
 
     return {
       readFile: gated('readFile'),
-      readFiles: gated('readFiles'),
       writeFile: gated('writeFile'),
       writeFiles: gated('writeFiles'),
       mkdir: gated('mkdir'),
       readdir: gated('readdir'),
       stat: gated('stat'),
       lstat: gated('lstat'),
-      rename: gated('rename'),
       move: gated('move'),
       bulkMove: gated('bulkMove'),
       canMove: gated('canMove'),
@@ -684,8 +791,6 @@ export function FileManagerProvider({
       unlink: gated('unlink'),
       rmdir: gated('rmdir'),
       exists: gated('exists'),
-      batchExists: gated('batchExists'),
-      ensureDirectoryExists: gated('ensureDirectoryExists'),
       getDirectoryStat: gated('getDirectoryStat'),
       getDirectoryContents: gated('getDirectoryContents'),
       duplicateFile: gated('duplicateFile'),
@@ -693,6 +798,10 @@ export function FileManagerProvider({
       getZippedDirectory: gated('getZippedDirectory'),
       readShallowDirectory: gated('readShallowDirectory'),
       readDirectory: gated('readDirectory'),
+      listProjectManifests: gated('listProjectManifests'),
+      commitPendingProjectDirectory: gated('commitPendingProjectDirectory'),
+      permanentlyDeleteProjectDirectory: gated('permanentlyDeleteProjectDirectory'),
+      adoptProjectDirectory: gated('adoptProjectDirectory'),
     };
   }, [getReadiedProxy]);
 
@@ -722,9 +831,25 @@ export function FileManagerProvider({
           }
         })();
       },
-      invalidateStandaloneProvider: async (backend, workspaceId) => {
+      disposeStorageRoot: async (storageRootKey) => {
         const proxy = await getReadiedProxy();
-        proxy.invalidateStandaloneProvider(backend, workspaceId);
+        proxy.disposeStorageRoot(storageRootKey);
+      },
+      syncProjectRoots: async () => {
+        const proxy = await getReadiedProxy();
+        await proxy.configureProjectRoots(await getProjectRootConfigs());
+      },
+      replaceWorkspaceHandle: async (workspaceId, handle) => {
+        await updateWorkspaceHandle(workspaceId, handle);
+        const proxy = await getReadiedProxy();
+        proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
+        await proxy.configureProjectRoots(await getProjectRootConfigs());
+      },
+      forgetWorkspace: async (workspaceId) => {
+        await forgetStoredWorkspace(workspaceId);
+        const proxy = await getReadiedProxy();
+        proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
+        await proxy.configureProjectRoots(await getProjectRootConfigs());
       },
     }),
     [getReadiedProxy, fileManagerRef, workspaceTelemetry],
@@ -736,6 +861,7 @@ export function FileManagerProvider({
       backendType,
       contentService,
       treeService,
+      workerChangeChannel,
       whenServicesReady,
       writeFile,
       writeFiles,
@@ -747,8 +873,8 @@ export function FileManagerProvider({
       canRename,
       canCreate,
       canDelete,
-      mkdir,
-      rmdir,
+      createDirectory,
+      deleteDirectory,
       duplicateFile,
       deleteFile,
       stat,
@@ -763,12 +889,14 @@ export function FileManagerProvider({
       activeWorkspaceId,
       unavailableReason,
       bindProjectToWorkspace,
+      runtimeFileSystem,
     }),
     [
       fileManagerRef,
       backendType,
       contentService,
       treeService,
+      workerChangeChannel,
       whenServicesReady,
       writeFile,
       writeFiles,
@@ -780,8 +908,8 @@ export function FileManagerProvider({
       canRename,
       canCreate,
       canDelete,
-      mkdir,
-      rmdir,
+      createDirectory,
+      deleteDirectory,
       duplicateFile,
       deleteFile,
       stat,
@@ -796,6 +924,7 @@ export function FileManagerProvider({
       activeWorkspaceId,
       unavailableReason,
       bindProjectToWorkspace,
+      runtimeFileSystem,
     ],
   );
 
@@ -842,22 +971,3 @@ export function useOptionalFileManager(): FileManagerContextType | undefined {
  *
  * @returns Array of file entries, or undefined if the file manager is not ready
  */
-export function useFileTree(): FileTreeEntry[] | undefined {
-  const { treeService } = useFileManager();
-
-  if (!treeService) {
-    return undefined;
-  }
-
-  const tree = treeService.getTreeSnapshot();
-  if (tree.size === 0) {
-    return undefined;
-  }
-
-  return [...tree.values()].map(({ path, name, type, size }) => ({
-    path,
-    name,
-    type,
-    size,
-  }));
-}

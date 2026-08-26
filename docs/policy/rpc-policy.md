@@ -3,10 +3,13 @@ title: 'RPC & Filesystem Bridge Policy'
 description: 'MessagePort bridge architecture for connecting filesystem implementations to kernel workers across thread boundaries. Covers RuntimeFileSystemBase, the opaque RuntimeFileSystem, from* constructors, and Bridge RPC primitives.'
 status: active
 created: '2026-03-03'
-updated: '2026-05-01'
+updated: '2026-08-22'
 related:
+  - docs/policy/runtime-api-policy.md
   - docs/research/comlink-rpc-practices.md
   - docs/research/fs-bridge-port-migration.md
+  - docs/research/runtime-model-load-project-root-regression-v3.md
+  - docs/research/runtime-rooted-filesystem-residual-migration.md
 ---
 
 # RPC & Filesystem Bridge Policy
@@ -42,14 +45,14 @@ The kernel package has two distinct communication systems, each purpose-built fo
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│ Layer 1: RuntimeFileSystemBase (11 primitives)                 │
-│         + RuntimeFileSystem (Base + enhanced helpers)           │
-│ createRuntimeFileSystem(base) adds default helpers             │
+│ Layer 1: RuntimeFileSystemBase (provider primitives)           │
+│         + KernelFileSystem (Base + enhanced helpers)           │
+│ An internal worker decorator adds canonical helper methods     │
 ├───────────────────────────────────────────────────────────────┤
 │ Layer 2: Constructors (from* factories)                       │
 │ Return the opaque RuntimeFileSystem (transport-ready):        │
-│ fromNodeFs, fromMemoryFs, fromFsLikeOpaque,                   │
-│ fromBrowserFs, fromWorkerOpaque                               │
+│ fromNodeFs, fromMemoryFs, fromFsLike,                         │
+│ fromBrowserFs, fromFileSystemBridge                           │
 ├───────────────────────────────────────────────────────────────┤
 │ Layer 3: Bridge RPC (MessagePort transport)                   │
 │ Serve/consume any object across thread boundaries:            │
@@ -83,10 +86,10 @@ type RuntimeFileSystemBase = {
 };
 ```
 
-**`RuntimeFileSystem`** -- extends Base with higher-level helpers that have default implementations built from the primitives:
+**`KernelFileSystem`** -- extends Base with higher-level helpers that have default implementations built from the primitives:
 
 ```typescript
-type RuntimeFileSystem = RuntimeFileSystemBase & {
+type KernelFileSystem = RuntimeFileSystemBase & {
   readFiles(paths: string[]): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   readdirContents(dirPath: string): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   readdirStat(dirPath: string): Promise<FileStatEntry[]>;
@@ -94,16 +97,11 @@ type RuntimeFileSystem = RuntimeFileSystemBase & {
 };
 ```
 
-**`createRuntimeFileSystem(base)`** wraps a `RuntimeFileSystemBase` with default implementations for the enhanced methods. Backends may supply optimized overrides:
-
-```typescript
-const fs = createRuntimeFileSystem(base); // defaults: readFiles = Promise.all(paths.map(readFile)), etc.
-const fs = createRuntimeFileSystem({ ...base, readFiles: optimizedBatchRead }); // override
-```
+The runtime worker applies one internal decorator that canonicalizes every primitive path and synthesizes the enhanced methods. It is not a public constructor, and backends cannot override the helpers to bypass that confinement boundary.
 
 **Design decisions:**
 
-- **Type split keeps the interface clean.** Filesystem backends implement only the 11 primitives (`RuntimeFileSystemBase`). The wrapper adds the helpers, so consumers always get the full `RuntimeFileSystem` with zero optional methods.
+- **Type split keeps the interface clean.** Filesystem backends implement the provider primitives (`RuntimeFileSystemBase`). The runtime worker adds helpers for kernel authors, while application consumers handle only the opaque `RuntimeFileSystem` brand.
 - **Simplified stat return.** Returns `FileStat = { type: 'file' | 'dir'; size; mtimeMs }` (from `@taucad/types`) instead of a full Node.js `Stats` object. This avoids serialization complexity across MessagePort while providing the metadata kernels actually need. `FileStatEntry` extends `FileStat` with `path` and `name` for directory listing results. `NativeStats` and `toFileStat()` (from `@taucad/types/constants`) handle the conversion from Node.js-style `isDirectory()` methods.
 - **`lstat` mirrors `stat`.** Required by `isomorphic-git`. Implementations without symlink support (ZenFS, in-memory) delegate `lstat` to `stat`.
 - **`exists` is explicit.** While `stat` + catch achieves the same result, `exists` is a common enough operation that an explicit method reduces boilerplate and improves readability.
@@ -113,27 +111,27 @@ const fs = createRuntimeFileSystem({ ...base, readFiles: optimizedBatchRead }); 
 
 Factory functions that create `RuntimeFileSystemBase` from various sources. Each normalizes a different source API into the 11-primitive contract.
 
-| Constructor                           | Source                         | Use Case                                                   |
-| ------------------------------------- | ------------------------------ | ---------------------------------------------------------- |
-| `fromNodeFs(basePath)`                | Node.js `fs.promises`          | CLI tools, benchmarks, SSR, tests                          |
-| `fromMemoryFs(files?)`                | In-memory Map                  | Inline code rendering, unit tests                          |
-| `fromFsLikeOpaque(fsLike, rootPath?)` | Any `{ promises: ... }` object | ZenFS, BrowserFS, memfs, or any fs.promises-compatible API |
-| `fromBrowserFs(...)`                  | Browser FileSystem APIs        | OPFS, FS Access, in-memory browser fs                      |
-| `fromWorkerOpaque(worker)`            | Cross-thread `MessagePort`     | Browser editor with a dedicated File Manager worker        |
+| Constructor                            | Source                                 | Use Case                                            |
+| -------------------------------------- | -------------------------------------- | --------------------------------------------------- |
+| `fromNodeFs(basePath)`                 | Node.js `fs.promises`                  | CLI tools, benchmarks, SSR, tests                   |
+| `fromMemoryFs(files?)`                 | In-memory Map                          | Inline code rendering, unit tests                   |
+| `fromFsLike(fsLike)`                   | Already-confined `{ promises: ... }`   | BrowserFS, memfs, or another virtual filesystem     |
+| `fromBrowserFs(...)`                   | Browser FileSystem APIs                | OPFS or File System Access directory roots          |
+| `fromFileSystemBridge(openConnection)` | Fresh rooted bridge connection factory | Browser editor with a dedicated File Manager worker |
 
 All constructors return the opaque {@link RuntimeFileSystem} type — consumers cannot inspect or branch on its internals. The transport plugin reads it through internal helpers in `transport/_internal/` to set up the appropriate channel.
 
-**Naming convention:** All constructors use the `from*` prefix per the library API policy. The name describes _what the source is_, not _what library it comes from_.
+**Naming convention:** All constructors use the `from*` prefix per the library API policy. The name describes _what the source is_, not _what library it comes from_. Each constructor exposes a runtime filesystem whose paths use `/` as that supplied filesystem's root, not the host OS or authority-global root.
 
-#### `fromNodeFs` vs `fromFsLikeOpaque`: why both exist
+#### `fromNodeFs` vs `fromFsLike`: why both exist
 
 These serve different environments with different constraints:
 
-- **`fromNodeFs(basePath)`** handles `require('node:fs/promises')` internally via dynamic require, preventing bundlers from including Node.js builtins in browser projects. It uses `path.resolve()` for OS-aware path resolution. This is genuinely Node.js-specific.
+- **`fromNodeFs(basePath)`** accepts a host filesystem directory and exposes it as runtime `/`. It handles `require('node:fs/promises')` internally via dynamic require, preventing bundlers from including Node.js builtins in browser projects, and uses `path.resolve()` for OS-aware resolution and containment. The host `basePath` is not exposed to runtime plugins.
 
-- **`fromFsLikeOpaque(fsLike, rootPath?)`** accepts any object with a `promises` namespace matching the `FsLike` shape. This covers ZenFS, BrowserFS, memfs, polyfills, and any future fs-compatible library. The caller provides the fs object; the constructor just normalizes return types (Buffer → Uint8Array, stat → simplified shape).
+- **`fromFsLike(fsLike)`** accepts an already-rooted/confined object with a `promises` namespace matching the `FsLike` shape. Calls use runtime paths within that supplied object. It normalizes return types and runtime paths but does not claim to sandbox an authority-global host filesystem. Use `fromNodeFs(hostRoot)` for raw Node.js access.
 
-They cannot be collapsed because `fromNodeFs` must do a dynamic `require()` internally to avoid bundler issues, while `fromFsLikeOpaque` must accept the fs object as a parameter because the caller controls which fs instance to use.
+They cannot be collapsed because `fromNodeFs` supplies Node-specific lexical and symlink containment, while `fromFsLike` accepts a caller-owned filesystem implementation.
 
 ### Layer 3: Bridge RPC
 
@@ -152,6 +150,8 @@ Client                          Server
 
 Every request carries a monotonically increasing `id`. The server dispatches by method name, calls the function, and responds with `{ id, result }` or `{ id, error }`. Errors are serialized as `BridgeError` objects preserving name, stack, errno code, and metadata.
 
+The channel hello carries immutable filesystem capabilities for a binding. Long-lived watch registration uses one internal ready frame emitted only after the host returns its unsubscribe handle; one multi-path request therefore has one acknowledgement. Public `watch()` and watch-event shapes remain transport-agnostic.
+
 #### Primitives
 
 | Function                                   | Level | Purpose                                                                                                                                        |
@@ -162,11 +162,10 @@ Every request carries a monotonically increasing `id`. The server dispatches by 
 | `createBridgeProxy<T>(port)`               | Low   | Generic **`Proxy`**-based RPC client (**`Port`**-backed wire)                                                                                  |
 | `catchMessages(port)`                      | Low   | Buffer incoming messages during initialization, replay on demand                                                                               |
 | `extractTransferables(value)`              | Low   | Walk nested values and collect **`ArrayBuffer`** transferables (de-duplicated)                                                                 |
-| `createRuntimeFileSystem(base)`            | Mid   | Wrap **`RuntimeFileSystemBase`** with default enhanced method implementations                                                                  |
 | `exposeFileSystem(handlers, options?)`     | High  | Worker-side: listen for incoming bridge ports                                                                                                  |
 | `createFileSystemBridge(worker, options?)` | High  | Client isolate: **`MessageChannel`** + transfer to FS worker — returns **`FileSystemBridge`** (wrapped **`Port`** for **`createBridgeProxy`**) |
 
-See **`docs/research/fs-bridge-port-migration.md`** for why **`createFileSystemBridge`** returns a **`Port`** while forwarding into a kernel worker uses an internal raw-**`MessagePort`** path (`fromChannelFs`), and how that avoids **`Port.onMessage`** mistakes at compile time.
+See **`docs/research/filesystem-bridge-runtime-inversion-blueprint.md`** for why generic object bridge primitives live under **`@taucad/rpc/bridge`**, filesystem-specific bridge helpers live under **`@taucad/fs-bridge`**, and runtime consumes a fresh scoped filesystem bridge connection via **`fromFileSystemBridge(() => connection)`**.
 
 **Naming split:** Generic bridge primitives use the `Bridge` prefix. Filesystem-typed functions use the `FileSystem` prefix. This distinction is intentional: `createBridgeServer` serves _any_ object (generic `<T extends Record<string, unknown>>`), while `createBridgeProxy<RuntimeFileSystemBase>` returns a typed filesystem proxy.
 
@@ -178,12 +177,20 @@ See **`docs/research/fs-bridge-port-migration.md`** for why **`createFileSystemB
 // Worker side (file-manager.worker.ts):
 exposeFileSystem(fileManager);
 
+// Kernel worker:
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+
+export const runtime = defineRuntime({ plugins: [replicad()] });
+createRuntimeWorker({ runtime });
+
 // Main thread (app shell):
-const client = createRuntimeClient({
-  ...presets.all(),
+import type { runtime } from './kernel-worker';
+
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
-    url: kernelWorkerUrl,
-    fileSystem: fromWorkerOpaque(fileManagerWorker),
+    createWorker,
+    fileSystem: fromFileSystemBridge(() => openFileSystemBridge(fileManagerWorker, { root: '/projects/widget' })),
   }),
 });
 await client.connect();
@@ -193,15 +200,15 @@ The transport creates the FS bridge `MessagePort` internally; the worker-hosted 
 
 ## Connection Modes
 
-`RuntimeClient.connect()` takes **no arguments**. Every wire concern (filesystem bridge, file pool SAB, abort signal channel) is closed over by the {@link TransportPlugin} the consumer hands to `createRuntimeClient({ transport })`.
+`RuntimeClient.connect()` takes **no arguments**. The opaque filesystem and transport-owned signalling/memory concerns are closed over by the {@link TransportPlugin} the consumer hands to `createRuntimeClient({ transport })`.
 
 ```typescript
-const client = createRuntimeClient({
-  ...presets.all(),
+import type { runtime } from './kernel-worker';
+
+const client = createRuntimeClient<typeof runtime>({
   transport: webWorkerTransport({
-    url: kernelWorkerUrl,
-    fileSystem: fromMemoryFs(files), // or fromNodeFs / fromBrowserFs / fromWorkerOpaque
-    filePoolBuffer, // optional, externally allocated SAB
+    createWorker,
+    fileSystem: fromMemoryFs(files), // or fromNodeFs / fromBrowserFs / fromFileSystemBridge
   }),
 });
 await client.connect();
@@ -209,19 +216,21 @@ await client.connect();
 
 ### Inline and worker-hosted `fileSystem`
 
-The transport's **`fileSystem`** option (on bundled callables such as `webWorkerTransport({ ... })` / `nodeWorkerTransport({ ... })`) accepts the opaque `RuntimeFileSystem` returned by any `from*` factory. For inline factories (`fromMemoryFs`, `fromNodeFs`, `fromFsLikeOpaque`, `fromBrowserFs`), the transport creates a `MessageChannel` internally and bridges the in-process or Node-backed `RuntimeFileSystemBase` into the kernel worker. For port-backed factories (`fromWorkerOpaque`), the transport binds the supplied port directly. Cross-process kernel hosts (Electron main, native subprocess) author a custom transport (e.g. **renderer:** `electronUtilityTransport({ port })`) and construct the **`RuntimeTransportHost`** on the host side with **`electronUtilityHost({ fileSystem })`** for `createRuntimeHost({ transport })`.
+The transport's **`fileSystem`** option accepts the opaque `RuntimeFileSystem` returned by any `from*` factory. Inline factories (`fromMemoryFs`, `fromNodeFs`, `fromFsLike`, `fromBrowserFs`) are bridged internally. `fromFileSystemBridge(openConnection)` opens a fresh scoped connection per binding or initialize retry. Cross-process kernel hosts construct their filesystem binding at the trusted host composition boundary.
 
-| Factory                                                                | When to use                                                                             |
-| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `fromMemoryFs` / `fromNodeFs` / `fromFsLikeOpaque` / `fromBrowserFs`   | same-thread or single-process FS source                                                 |
-| `fromWorkerOpaque`                                                     | browser editor with a `FileService` / FS worker that speaks the bridge protocol         |
-| _(named host factories such as `electronUtilityHost({ fileSystem })`)_ | cross-process kernel host (e.g. Electron utility process) that owns the real filesystem |
+| Factory                                                        | When to use                                                             |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `fromMemoryFs` / `fromNodeFs` / `fromFsLike` / `fromBrowserFs` | Same-thread or single-process filesystem source                         |
+| `fromFileSystemBridge(openConnection)`                         | Browser/editor host opening a fresh rooted filesystem bridge connection |
+| Named host factories                                           | Cross-process kernel host that owns the real filesystem                 |
 
 ## Subpath Export Structure
 
 ```
-@taucad/runtime              → fromNodeFs, fromMemoryFs, fromFsLikeOpaque, fromBrowserFs, fromWorkerOpaque
+@taucad/runtime              → fromMemoryFs, fromFsLike, fromFileSystemBridge
 @taucad/runtime/filesystem   → opaque RuntimeFileSystem type + same factories
+@taucad/runtime/filesystem/node    → fromNodeFs
+@taucad/runtime/filesystem/browser → fromBrowserFs
 @taucad/runtime/transport    → defineRuntimeTransport, inProcessTransport, webWorkerTransport, nodeWorkerTransport
                                (the only place that needs a transport author touchpoint)
 ```
@@ -232,21 +241,21 @@ The main entry exports constructors because they're the most common consumer nee
 
 The runtime package must be completely decoupled from ZenFS. The package provides a `node:fs`-compatible interface (`RuntimeFileSystem`) and constructors that normalize various fs implementations into that interface. No ZenFS types, imports, or naming should appear in the public API.
 
-**Current state:** Completed. `fromZenFS` and `ZenFSLike` have been renamed to `fromFsLikeOpaque` and `FsLike` respectively. The function accepts _any_ object with a `promises` namespace -- not just ZenFS. The dead `fromProxy` code from the Comlink era has been removed.
+**Current state:** Completed. `fromZenFS` and `ZenFSLike` were replaced by `fromFsLike` and `FsLike`. The function accepts _any_ object with a `promises` namespace. The dead `fromProxy` code from the Comlink era has been removed.
 
 **Exception:** Test utilities (`kernel-testing.utils.ts`) may import ZenFS directly as a concrete implementation for testing. This is acceptable because test utilities are not consumer-facing API.
 
-**Rationale:** A developer using a different browser filesystem (e.g., BrowserFS, memfs, lightning-fs) can pass it to `fromFsLikeOpaque()` without confusion about library-specific naming.
+**Rationale:** A developer using a browser filesystem such as BrowserFS, memfs, or lightning-fs can pass it to `fromFsLike()` without library-specific naming.
 
 ## Architectural Invariants
 
-1. **RuntimeFileSystem is the only filesystem dependency in the framework.** Kernels, bundlers, and middleware never see MessagePort, Bridge, or constructor details. They receive `RuntimeFileSystem` via `KernelRuntime.fileSystem`.
+1. **KernelFileSystem is the only filesystem dependency in runtime execution.** Kernels, bundlers, and middleware never see MessagePort, Bridge, project ids, or constructor details. Application consumers supply the opaque `RuntimeFileSystem`; runtime execution receives the enhanced local filesystem via `KernelRuntime.fileSystem`.
 
 2. **Bridge primitives are generic.** `createBridgeServer<T>`, `createBridgePort<T>`, `createBridgeCall`, and `createBridgeProxy<T>` work with any object, not just filesystems. This enables the app to serve a `FileManager` (which has methods beyond `RuntimeFileSystem`) through the same bridge infrastructure. `createBridgeProxy<T>(port)` eliminates the need for hand-written per-method stubs by using JavaScript's `Proxy` to auto-dispatch.
 
 3. **Constructors normalize, not extend.** Each `from*` function converts a source API to exactly the `RuntimeFileSystemBase` interface -- the 11 primitives, no extra methods, no source-specific behavior leaking through.
 
-4. **Zero-copy binary transfer.** `extractTransferables` scans values for `ArrayBuffer` instances and includes them in the `postMessage` transfer list. This avoids expensive structured-clone copies for large file content (CAD files can be tens of MB).
+4. **Owned binary transfer.** `extractTransferables` scans values for `ArrayBuffer` instances and includes them in the `postMessage` transfer list. A filesystem bridge clones borrowed provider/cache read results first, then transfers the boundary-owned copy; generic RPC handlers may transfer a buffer directly only when they own it and no retained state references it.
 
 5. **Initialization safety.** `catchMessages(port)` buffers incoming messages until the server is ready, then replays them. This prevents lost requests during worker initialization.
 
@@ -266,17 +275,17 @@ The function is generic (`<T extends Record<string, unknown>>`), not `RuntimeFil
 
 ## Open Questions
 
-### Should `@taucad/runtime/filesystem` split into two subpaths?
-
-Currently, `/filesystem` exports both filesystem-typed APIs (`createFileSystemBridge`) and generic bridge primitives (`createBridgeServer`, `createBridgeProxy`, `createBridgeCall`). A potential split:
+### Where do filesystem bridge helpers live?
 
 ```
-@taucad/runtime/filesystem   → filesystem-typed exports only
-@taucad/runtime/bridge       → generic bridge primitives
+@taucad/rpc/bridge  → generic object-over-MessagePort primitives
+@taucad/fs-bridge   → filesystem-specific bridge adapters
+@taucad/filesystem  → pure filesystem domain types/providers
+@taucad/runtime     → consumes RuntimeFileSystem handles
 ```
 
-**Current recommendation:** Keep them together. The bridge exists primarily for filesystem communication within Tau. A separate `/bridge` subpath adds complexity without clear consumer benefit. Revisit if the bridge primitives gain non-filesystem consumers.
+Generic bridge primitives must not import filesystem or runtime code. Core filesystem must not import RPC or runtime code. `@taucad/fs-bridge` is the adapter package allowed to depend on both `@taucad/filesystem` and `@taucad/rpc/bridge`.
 
-### Should `fromFsLikeOpaque` accept Node.js `fs` directly?
+### Should `fromFsLike` accept Node.js `fs` directly?
 
-Node.js `fs` has a `.promises` namespace matching `FsLike`. In theory, `fromFsLikeOpaque(require('fs'))` would work. However, `fromNodeFs` adds `path.resolve()` for OS-aware path resolution, which `fromFsLikeOpaque` does not (it uses simple string concatenation). Recommend keeping both: `fromNodeFs` for Node.js environments, `fromFsLikeOpaque` for browser/polyfill environments.
+Node.js `fs` has a `.promises` namespace matching `FsLike`, but raw `fs` is not already confined. Use `fromNodeFs(basePath)` for runtime execution because it adds OS-aware lexical containment and symlink-escape checks. Keep `fromFsLike` for browser/polyfill filesystems whose reachability is already defined by the supplied implementation.

@@ -1,0 +1,11 @@
+{
+  "copyFiles": [
+    {
+      "from": "node_modules/rhino3dm/rhino3dm.wasm",
+      "to": "src/wasm/rhino3dm.wasm"
+    }
+  ],
+  "copyFilesSettings": {
+    "whenFileExists": "overwrite"
+  }
+}

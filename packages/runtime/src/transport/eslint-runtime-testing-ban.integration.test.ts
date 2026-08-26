@@ -1,5 +1,5 @@
 /**
- * Validates workspace ESLInt `no-restricted-imports` for `@taucad/runtime/testing`
+ * Validates workspace ESLint `no-restricted-imports` for the dedicated testing package
  * blocks production TS while allowing dedicated test files.
  */
 // @vitest-environment node
@@ -13,8 +13,8 @@ const workspaceRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 
 const eslintCli = join(workspaceRoot, 'node_modules/eslint/bin/eslint.js');
 const fixturesDirectory = join(workspaceRoot, 'tools/eslint-fixtures/runtime-testing-ban');
 
-describe('eslint runtime/testing import ban', () => {
-  it('flags non-test typescript that imports `@taucad/runtime/testing`', () => {
+describe('eslint testing-package import ban', () => {
+  it('flags non-test TypeScript that imports `@taucad/runtime-testing`', () => {
     expect(() =>
       execFileSync(
         process.execPath,
@@ -27,7 +27,7 @@ describe('eslint runtime/testing import ban', () => {
     ).toThrow();
   }, 30_000);
 
-  it('allows *.test.ts files that import `@taucad/runtime/testing`', () => {
+  it('allows *.test.ts files that import `@taucad/runtime-testing`', () => {
     execFileSync(process.execPath, [eslintCli, join(fixturesDirectory, 'fine.test.ts'), '--max-warnings', '0'], {
       cwd: workspaceRoot,
       stdio: 'pipe',

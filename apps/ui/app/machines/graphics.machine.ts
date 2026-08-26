@@ -1,6 +1,6 @@
-import { assign, assertEvent, setup, emit, enqueueActions, fromPromise } from 'xstate';
+import { assign, assertEvent, setup, emit, enqueueActions, fromPromise, sendTo } from 'xstate';
 import type { AnyActorRef } from 'xstate';
-import type { GridSizes, ScreenshotOptions, Geometry } from '@taucad/types';
+import type { GeometryComponentManifest, GridSizes, ScreenshotOptions, Geometry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { LengthSymbol, UnitSystem } from '@taucad/units';
 import { standardInternationalBaseUnits } from '@taucad/units/constants';
@@ -9,12 +9,24 @@ import type {
   EnvironmentPreset,
   GraphicsBackendPreference,
   PinnedMeasurement,
+  PersistedModelComponentDisplayState,
   ResolvedGraphicsBackend,
 } from '#constants/editor.constants.js';
 import {
   probeWebGpuSupport,
   resolveGraphicsBackendPreference,
 } from '#components/geometry/graphics/graphics-backend.js';
+import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
+import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+
+export type ModelPointerClickSuppressionReason = 'measureTool';
+
+const addSuppressionReason = <T extends string>(reasons: readonly T[], reason: T): T[] =>
+  reasons.includes(reason) ? [...reasons] : [...reasons, reason];
+
+const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason: T): T[] =>
+  reasons.filter((existingReason) => existingReason !== reason);
 
 // Context type definition
 export type GraphicsContext = {
@@ -129,6 +141,12 @@ export type GraphicsContext = {
   // State flags
   isScreenshotReady: boolean;
   isCameraReady: boolean;
+  cameraInteracting: boolean;
+  cameraInteractionHadMovement: boolean;
+  suppressNextModelPointerClick: boolean;
+  modelPointerClickSuppressionReasons: ModelPointerClickSuppressionReason[];
+  /** Bumps when geometry or component display changes can invalidate renderer-side picking caches. */
+  pickableMeshesVersion: number;
 
   // Active operations
   activeScreenshotRequest?: {
@@ -137,9 +155,11 @@ export type GraphicsContext = {
   };
 
   // Geometry data from CAD
-  geometries: Geometry[];
-  /** Deterministic key derived from geometry content hashes. Used for skip-when-unchanged optimizations. */
+  geometry: Geometry | undefined;
+  /** Deterministic key derived from the geometry content hash. Used for skip-when-unchanged optimizations. */
   geometryKey: string;
+  /** Restored per-component display state passed through to the model-interaction child. */
+  componentDisplay?: PersistedModelComponentDisplayState;
 };
 
 // Event types
@@ -195,6 +215,7 @@ export type GraphicsEvent =
   | { type: 'toggleMeasurementPinned'; id: string }
   // Controls events
   | { type: 'controlsInteractionStart' }
+  | { type: 'controlsInteractionMoved' }
   | {
       type: 'controlsChanged';
       zoom: number;
@@ -205,6 +226,18 @@ export type GraphicsEvent =
       type: 'controlsInteractionEnd';
       zoom: number;
     }
+  | {
+      type: 'beginViewerModelHoverSuppression';
+      reason: ViewerHoverSuppressionReason;
+      source?: ModelInteractionSource;
+    }
+  | {
+      type: 'endViewerModelHoverSuppression';
+      reason: ViewerHoverSuppressionReason;
+      source?: ModelInteractionSource;
+    }
+  | { type: 'markModelPointerGestureMoved' }
+  | { type: 'clearModelPointerClickGuard' }
   // Screenshot events
   | { type: 'takeScreenshot'; options: ScreenshotOptions; requestId: string }
   | {
@@ -221,10 +254,42 @@ export type GraphicsEvent =
   | { type: 'unregisterCameraCapability' }
   // Geometry updates from CAD
   | {
-      type: 'updateGeometries';
-      geometries: Geometry[];
+      type: 'updateGeometry';
+      geometry: Geometry;
       units: { length: LengthSymbol };
+      sourceFile?: string;
     }
+  // Model/component interaction events
+  | {
+      type: 'loadModelComponentManifest';
+      unitId: string;
+      manifest: GeometryComponentManifest;
+      source?: ModelInteractionSource;
+    }
+  | { type: 'clearModelComponentManifest'; unitId: string; source?: ModelInteractionSource }
+  | {
+      type: 'setHoveredModelComponent';
+      unitId: string;
+      componentId: string | undefined;
+      source?: ModelInteractionSource;
+    }
+  | { type: 'toggleModelComponentSelection'; unitId: string; componentId: string; source?: ModelInteractionSource }
+  | { type: 'selectModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
+  | { type: 'clearModelComponentSelection'; unitId: string; source?: ModelInteractionSource }
+  | { type: 'hideModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
+  | { type: 'showModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
+  | { type: 'showHiddenModelComponents'; unitId: string; source?: ModelInteractionSource }
+  | { type: 'isolateModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
+  | { type: 'clearModelComponentIsolation'; unitId: string; source?: ModelInteractionSource }
+  | {
+      type: 'setModelComponentOpacity';
+      unitId: string;
+      componentId: string;
+      opacity: number;
+      source?: ModelInteractionSource;
+    }
+  | { type: 'focusModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
+  | { type: 'clearModelComponentFocus'; unitId: string; source?: ModelInteractionSource }
   // Scene radius update from Three.js bounding sphere (sent by Stage)
   | { type: 'sceneRadiusUpdated'; radius: number };
 
@@ -253,6 +318,7 @@ export type GraphicsInput = {
   /** Saved pinned measurements to restore */
   pinnedMeasurements?: PinnedMeasurement[];
   graphicsBackendPreference?: GraphicsBackendPreference;
+  componentDisplay?: PersistedModelComponentDisplayState;
 };
 
 type LengthUnitData = {
@@ -408,6 +474,36 @@ function normalize(v: [number, number, number]): [number, number, number] {
   return [v[0] / length_, v[1] / length_, v[2] / length_];
 }
 
+function extractComponentManifestUpdates({
+  geometry,
+  sourceFile,
+}: {
+  readonly geometry: Geometry;
+  readonly sourceFile?: string;
+}): { unitId: string; manifest: GeometryComponentManifest } | undefined {
+  if (geometry.format !== 'gltf') {
+    return undefined;
+  }
+
+  try {
+    const manifest = buildGltfComponentManifest(geometry.content, {
+      sourceFile,
+      geometryHash: geometry.hash,
+    });
+    return {
+      unitId: deriveModelInteractionUnitId({
+        sourceFile,
+        geometryHash: geometry.hash,
+        manifest,
+      }),
+      manifest,
+    };
+  } catch (error) {
+    console.error('Failed to extract GLTF component manifest in graphics machine', error);
+    return undefined;
+  }
+}
+
 // Apply XYZ-order Euler rotation to a vector
 function rotateVectorByEuler(v: [number, number, number], euler: [number, number, number]): [number, number, number] {
   const [x, y, z] = v;
@@ -476,6 +572,7 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
 export const graphicsMachine = setup({
   actors: {
     probeWebGpu: fromPromise(async () => probeWebGpuSupport()),
+    modelInteraction: modelInteractionMachine,
   },
   types: {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
@@ -598,28 +695,118 @@ export const graphicsMachine = setup({
       });
     }),
 
-    handleControlsInteractionStart() {
-      // Could add loading state or disable certain actions during interaction
-    },
-
-    handleControlsInteractionEnd: assign({
-      currentZoom({ event }) {
-        assertEvent(event, 'controlsInteractionEnd');
-        return event.zoom;
-      },
+    handleControlsInteractionStart: enqueueActions(({ enqueue }) => {
+      enqueue.assign({
+        cameraInteracting: true,
+        cameraInteractionHadMovement: false,
+        suppressNextModelPointerClick: false,
+      });
     }),
 
-    updateGeometries: enqueueActions(({ enqueue, event, context }) => {
-      assertEvent(event, 'updateGeometries');
+    handleControlsInteractionMoved: enqueueActions(({ enqueue, context }) => {
+      if (!context.cameraInteracting) {
+        return;
+      }
+
+      enqueue.assign({
+        cameraInteractionHadMovement: true,
+        suppressNextModelPointerClick: true,
+      });
+      enqueue.sendTo('modelInteraction', {
+        type: 'beginViewerHoverSuppression',
+        reason: 'cameraControls',
+        source: 'viewer',
+      });
+    }),
+
+    handleControlsInteractionEnd: enqueueActions(({ enqueue, event }) => {
+      assertEvent(event, 'controlsInteractionEnd');
+      enqueue.assign({
+        currentZoom: event.zoom,
+        cameraInteracting: false,
+        cameraInteractionHadMovement: false,
+      });
+      enqueue.sendTo('modelInteraction', {
+        type: 'endViewerHoverSuppression',
+        reason: 'cameraControls',
+        source: 'viewer',
+      });
+    }),
+
+    beginViewerModelHoverSuppression: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'beginViewerModelHoverSuppression');
+      return {
+        type: 'beginViewerHoverSuppression',
+        reason: event.reason,
+        source: event.source ?? 'viewer',
+      };
+    }),
+
+    endViewerModelHoverSuppression: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'endViewerModelHoverSuppression');
+      return {
+        type: 'endViewerHoverSuppression',
+        reason: event.reason,
+        source: event.source ?? 'viewer',
+      };
+    }),
+
+    markModelPointerGestureMoved: assign({
+      suppressNextModelPointerClick: true,
+    }),
+
+    clearModelPointerClickGuard: assign({
+      suppressNextModelPointerClick: false,
+    }),
+
+    beginMeasureHoverSuppression: enqueueActions(({ enqueue, context }) => {
+      enqueue.assign({
+        modelPointerClickSuppressionReasons: addSuppressionReason(
+          context.modelPointerClickSuppressionReasons,
+          'measureTool',
+        ),
+      });
+      enqueue.sendTo('modelInteraction', {
+        type: 'beginViewerHoverSuppression',
+        reason: 'measureTool',
+        source: 'viewer',
+      });
+    }),
+
+    endMeasureHoverSuppression: enqueueActions(({ enqueue, context }) => {
+      enqueue.assign({
+        modelPointerClickSuppressionReasons: removeSuppressionReason(
+          context.modelPointerClickSuppressionReasons,
+          'measureTool',
+        ),
+      });
+      enqueue.sendTo('modelInteraction', {
+        type: 'endViewerHoverSuppression',
+        reason: 'measureTool',
+        source: 'viewer',
+      });
+    }),
+
+    bumpPickableMeshesVersion: assign({
+      pickableMeshesVersion: ({ context }) => context.pickableMeshesVersion + 1,
+    }),
+
+    updateGeometry: enqueueActions(({ enqueue, event, context }) => {
+      assertEvent(event, 'updateGeometry');
 
       const cadUnitData = getLengthUnitData(event.units.length);
+      const componentManifestUpdate = extractComponentManifestUpdates({
+        geometry: event.geometry,
+        sourceFile: event.sourceFile,
+      });
 
       // Calculate relative factor for display (displayFactor / cadFactor)
       const relativeFactor = context.graphicsUnits.length.factor / cadUnitData.factor;
 
       enqueue.assign({
-        geometries: event.geometries,
-        geometryKey: event.geometries.map((g) => g.hash).join(','),
+        geometry: event.geometry,
+        geometryKey: event.geometry.hash,
+        pickableMeshesVersion: context.pickableMeshesVersion + 1,
         cadUnits: {
           length: {
             symbol: event.units.length,
@@ -634,6 +821,23 @@ export const graphicsMachine = setup({
           },
         },
       });
+
+      if (componentManifestUpdate) {
+        enqueue.sendTo('modelInteraction', {
+          type: 'loadManifest',
+          unitId: componentManifestUpdate.unitId,
+          manifest: componentManifestUpdate.manifest,
+          source: 'viewer',
+        });
+      }
+
+      if (event.sourceFile && !componentManifestUpdate) {
+        enqueue.sendTo('modelInteraction', {
+          type: 'clearManifest',
+          unitId: deriveModelInteractionUnitId({ sourceFile: event.sourceFile }),
+          source: 'viewer',
+        });
+      }
     }),
 
     updateSceneRadius: enqueueActions(({ enqueue, event }) => {
@@ -1096,6 +1300,84 @@ export const graphicsMachine = setup({
         return updated;
       },
     }),
+
+    loadModelComponentManifest: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'loadModelComponentManifest');
+      return { type: 'loadManifest', unitId: event.unitId, manifest: event.manifest, source: event.source };
+    }),
+    clearModelComponentManifest: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'clearModelComponentManifest');
+      return { type: 'clearManifest', unitId: event.unitId, source: event.source };
+    }),
+    setHoveredModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'setHoveredModelComponent');
+      return {
+        type: 'setHoveredComponent',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        source: event.source,
+      };
+    }),
+    toggleModelComponentSelection: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'toggleModelComponentSelection');
+      return {
+        type: 'toggleComponentSelection',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        source: event.source,
+      };
+    }),
+    selectModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'selectModelComponent');
+      return {
+        type: 'selectComponent',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        source: event.source,
+      };
+    }),
+    clearModelComponentSelection: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'clearModelComponentSelection');
+      return { type: 'clearSelection', unitId: event.unitId, source: event.source };
+    }),
+    hideModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'hideModelComponent');
+      return { type: 'hideComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+    }),
+    showModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'showModelComponent');
+      return { type: 'showComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+    }),
+    showHiddenModelComponents: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'showHiddenModelComponents');
+      return { type: 'showHiddenComponents', unitId: event.unitId, source: event.source };
+    }),
+    isolateModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'isolateModelComponent');
+      return { type: 'isolateComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+    }),
+    clearModelComponentIsolation: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'clearModelComponentIsolation');
+      return { type: 'clearIsolation', unitId: event.unitId, source: event.source };
+    }),
+    setModelComponentOpacity: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'setModelComponentOpacity');
+      return {
+        type: 'setComponentOpacity',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        opacity: event.opacity,
+        source: event.source,
+      };
+    }),
+    focusModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'focusModelComponent');
+      return { type: 'focusComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+    }),
+    clearModelComponentFocus: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'clearModelComponentFocus');
+      return { type: 'clearFocus', unitId: event.unitId, source: event.source };
+    }),
   },
   guards: {
     isActivatingClipping({ event }) {
@@ -1137,6 +1419,13 @@ export const graphicsMachine = setup({
   id: 'graphics',
 
   invoke: [
+    {
+      src: 'modelInteraction',
+      id: 'modelInteraction',
+      input: ({ context }) => ({
+        componentDisplay: context.componentDisplay,
+      }),
+    },
     {
       src: 'probeWebGpu',
       id: 'probeWebGpuInvocation',
@@ -1238,13 +1527,19 @@ export const graphicsMachine = setup({
       // State flags
       isScreenshotReady: false,
       isCameraReady: false,
+      cameraInteracting: false,
+      cameraInteractionHadMovement: false,
+      suppressNextModelPointerClick: false,
+      modelPointerClickSuppressionReasons: [],
+      pickableMeshesVersion: 0,
 
       // Active operations
       activeScreenshotRequest: undefined,
 
       // Shapes
-      geometries: [],
+      geometry: undefined,
       geometryKey: '',
+      componentDisplay: input.componentDisplay,
     };
   },
   initial: 'operational',
@@ -1276,7 +1571,7 @@ export const graphicsMachine = setup({
 
         // Visibility events
         setSurfaceVisibility: {
-          actions: 'setSurfaceVisibility',
+          actions: ['setSurfaceVisibility', 'bumpPickableMeshesVersion'],
         },
         setLinesVisibility: {
           actions: 'setLinesVisibility',
@@ -1318,11 +1613,26 @@ export const graphicsMachine = setup({
         controlsInteractionStart: {
           actions: 'handleControlsInteractionStart',
         },
+        controlsInteractionMoved: {
+          actions: 'handleControlsInteractionMoved',
+        },
         controlsChanged: {
           actions: 'handleControlsChange',
         },
         controlsInteractionEnd: {
           actions: 'handleControlsInteractionEnd',
+        },
+        beginViewerModelHoverSuppression: {
+          actions: 'beginViewerModelHoverSuppression',
+        },
+        endViewerModelHoverSuppression: {
+          actions: 'endViewerModelHoverSuppression',
+        },
+        markModelPointerGestureMoved: {
+          actions: 'markModelPointerGestureMoved',
+        },
+        clearModelPointerClickGuard: {
+          actions: 'clearModelPointerClickGuard',
         },
 
         // Screenshot events
@@ -1354,13 +1664,56 @@ export const graphicsMachine = setup({
         },
 
         // Geometry updates
-        updateGeometries: {
-          actions: 'updateGeometries',
+        updateGeometry: {
+          actions: 'updateGeometry',
         },
         sceneRadiusUpdated: {
           actions: 'updateSceneRadius',
         },
 
+        // Model/component interaction
+        loadModelComponentManifest: {
+          actions: 'loadModelComponentManifest',
+        },
+        clearModelComponentManifest: {
+          actions: 'clearModelComponentManifest',
+        },
+        setHoveredModelComponent: {
+          actions: 'setHoveredModelComponent',
+        },
+        toggleModelComponentSelection: {
+          actions: 'toggleModelComponentSelection',
+        },
+        selectModelComponent: {
+          actions: 'selectModelComponent',
+        },
+        clearModelComponentSelection: {
+          actions: 'clearModelComponentSelection',
+        },
+        hideModelComponent: {
+          actions: ['hideModelComponent', 'bumpPickableMeshesVersion'],
+        },
+        showModelComponent: {
+          actions: ['showModelComponent', 'bumpPickableMeshesVersion'],
+        },
+        showHiddenModelComponents: {
+          actions: ['showHiddenModelComponents', 'bumpPickableMeshesVersion'],
+        },
+        isolateModelComponent: {
+          actions: ['isolateModelComponent', 'bumpPickableMeshesVersion'],
+        },
+        clearModelComponentIsolation: {
+          actions: ['clearModelComponentIsolation', 'bumpPickableMeshesVersion'],
+        },
+        setModelComponentOpacity: {
+          actions: 'setModelComponentOpacity',
+        },
+        focusModelComponent: {
+          actions: 'focusModelComponent',
+        },
+        clearModelComponentFocus: {
+          actions: 'clearModelComponentFocus',
+        },
         // Section view pivot updates (world-space anchor)
         setSectionViewPivot: {
           actions: 'setSectionViewPivot',
@@ -1400,7 +1753,7 @@ export const graphicsMachine = setup({
             ],
             setMeasureActive: {
               guard: 'isActivatingMeasure',
-              actions: 'setMeasureActive',
+              actions: ['setMeasureActive', 'beginMeasureHoverSuppression'],
               target: 'measure.selecting',
             },
           },
@@ -1418,7 +1771,7 @@ export const graphicsMachine = setup({
                 },
                 setMeasureActive: {
                   guard: 'isActivatingMeasure',
-                  actions: ['deactivateSectionView', 'setMeasureActive'],
+                  actions: ['deactivateSectionView', 'setMeasureActive', 'beginMeasureHoverSuppression'],
                   target: '#graphics.operational.measure.selecting',
                 },
                 selectSectionView: {
@@ -1447,7 +1800,7 @@ export const graphicsMachine = setup({
                 },
                 setMeasureActive: {
                   guard: 'isActivatingMeasure',
-                  actions: ['deactivateSectionView', 'setMeasureActive'],
+                  actions: ['deactivateSectionView', 'setMeasureActive', 'beginMeasureHoverSuppression'],
                   target: '#graphics.operational.measure.selecting',
                 },
                 selectSectionView: [
@@ -1493,18 +1846,26 @@ export const graphicsMachine = setup({
               on: {
                 setMeasureActive: {
                   guard: 'isDeactivatingMeasure',
-                  actions: 'setMeasureActive',
+                  actions: ['setMeasureActive', 'endMeasureHoverSuppression'],
                   target: '#graphics.operational.ready',
                 },
                 setSectionViewActive: [
                   {
                     guard: 'isActivatingClippingWithSelection',
-                    actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
+                    actions: [
+                      'deactivateMeasurePreserveMeasurements',
+                      'endMeasureHoverSuppression',
+                      'setSectionViewActive',
+                    ],
                     target: '#graphics.operational.section-view.active',
                   },
                   {
                     guard: 'isActivatingClipping',
-                    actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
+                    actions: [
+                      'deactivateMeasurePreserveMeasurements',
+                      'endMeasureHoverSuppression',
+                      'setSectionViewActive',
+                    ],
                     target: '#graphics.operational.section-view.pending',
                   },
                 ],
@@ -1522,18 +1883,26 @@ export const graphicsMachine = setup({
               on: {
                 setMeasureActive: {
                   guard: 'isDeactivatingMeasure',
-                  actions: ['clearAllMeasurements', 'setMeasureActive'],
+                  actions: ['clearAllMeasurements', 'setMeasureActive', 'endMeasureHoverSuppression'],
                   target: '#graphics.operational.ready',
                 },
                 setSectionViewActive: [
                   {
                     guard: 'isActivatingClippingWithSelection',
-                    actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
+                    actions: [
+                      'deactivateMeasurePreserveMeasurements',
+                      'endMeasureHoverSuppression',
+                      'setSectionViewActive',
+                    ],
                     target: '#graphics.operational.section-view.active',
                   },
                   {
                     guard: 'isActivatingClipping',
-                    actions: ['deactivateMeasurePreserveMeasurements', 'setSectionViewActive'],
+                    actions: [
+                      'deactivateMeasurePreserveMeasurements',
+                      'endMeasureHoverSuppression',
+                      'setSectionViewActive',
+                    ],
                     target: '#graphics.operational.section-view.pending',
                   },
                 ],

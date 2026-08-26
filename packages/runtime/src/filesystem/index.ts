@@ -2,21 +2,28 @@
  * Public filesystem surface (`@taucad/runtime/filesystem` subpath).
  *
  * Consumers compose an opaque {@link RuntimeFileSystem} via one of the
- * bundled `fromX` factories and hand it to a transport plugin. Bridge
- * primitives (`createBridgeServer`, `exposeFileSystem`,
- * `createFileSystemBridge`, `waitForWorkerReady`, ...) are
- * transport-author tools; reach for them via
- * `@taucad/runtime/transport-internals` only when authoring a custom
- * FS bridge — ordinary consumers never need them.
+ * bundled `fromX` factories and hand it to a transport plugin. External
+ * hosts open the bundled filesystem-specific bridge here; generic RPC
+ * bridge primitives remain internal.
  */
 
 // Public opaque `RuntimeFileSystem` and `fromX` factories.
-export { fromMemoryFs, fromFsLike, fromChannelFs, isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
+export { fromMemoryFs, fromFsLike, fromFileSystemBridge, isRuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 export type { FsLike, RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 export { fromBrowserFs } from '#filesystem/from-browser-fs.js';
 
-// Enhanced filesystem wrapper — used by kernel authors composing their own
-// `RuntimeFileSystemBase` implementations.
-export { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
+export {
+  createFileSystemBridge,
+  createFileSystemBridgeProxy,
+  exposeFileSystem,
+  openFileSystemBridge,
+} from '@taucad/fs-bridge';
+export type {
+  ExposeFileSystemHandle,
+  FileSystemBridge,
+  FileSystemBridgeConnection,
+  FileSystemBridgeOptions,
+} from '@taucad/fs-bridge';
+export type { BridgePort, BridgeServerHandle } from '@taucad/rpc/bridge';
 
 export { runtimeFileSystemSchema } from '#filesystem/runtime-filesystem.schemas.js';

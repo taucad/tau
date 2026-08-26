@@ -1,0 +1,20 @@
+import { definePlugin } from '@taucad/runtime/plugin';
+<% for (const capability of capabilities) { %>
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
+import { <%= capability.factoryName %> } from '#<%= capability.fileName %>.js';
+<% } %>
+
+/** Canonical `<%= importPath %>` plugin factory. @public */
+export const <%= alias %> = definePlugin({
+  meta: {
+    name: '<%= importPath %>',
+  },
+<% for (const capability of capabilities) { %>
+  <%= capability.bucket %>: {
+    default: <%= capability.factoryName %>,
+  },
+<% } %>
+  presets: {
+    default: [<% capabilities.forEach((capability, index) => { %><%= index === 0 ? '' : ', ' %>'<%= capability.bucket %>.default'<% }); %>],
+  },
+});

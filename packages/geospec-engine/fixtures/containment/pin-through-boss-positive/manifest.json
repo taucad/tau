@@ -1,0 +1,117 @@
+{
+  "family": "containment",
+  "fixture": "containment.pin-through-boss-positive",
+  "generator": {
+    "script": "scripts/containment/pin-through-boss/main.ts",
+    "parameters": {}
+  },
+  "tolerances": {
+    "clearanceMin": 0.015,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "bossA.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "surfaceType": "cylinder",
+        "radius": 11.03,
+        "axisDirection": [1, 0, 0]
+      }
+    },
+    {
+      "selector": "bossB.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 11.03
+      }
+    },
+    {
+      "selector": "rodSmallEnd.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 11.025
+      }
+    },
+    {
+      "selector": "wristPin.body",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 11
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "containment",
+      "subject": "wristPin.body",
+      "target": "bossA.bore",
+      "options": {},
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "containment",
+      "subject": "wristPin.body",
+      "target": "bossB.bore",
+      "options": {},
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "containment",
+      "subject": "wristPin.body",
+      "target": "rodSmallEnd.bore",
+      "options": {},
+      "expected": {
+        "verdict": "pass"
+      }
+    },
+    {
+      "kind": "coaxial",
+      "subject": "wristPin.body",
+      "target": "rodSmallEnd.bore",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "pass",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0,
+            "angle": 0
+          }
+        }
+      }
+    },
+    {
+      "kind": "clearance",
+      "subject": "wristPin.body",
+      "target": "rodSmallEnd.bore",
+      "options": {
+        "min": 0.015,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "pass",
+        "broadPhase": {
+          "candidate": true
+        },
+        "final": {
+          "measured": {
+            "distance": 0.025
+          }
+        }
+      }
+    }
+  ]
+}

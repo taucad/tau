@@ -6,6 +6,7 @@ type DockviewPaneActionProperties = {
   readonly className?: string;
   readonly children: ReactNode;
   readonly onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  readonly onContextMenu?: React.MouseEventHandler<HTMLButtonElement>;
   readonly 'aria-label': string;
   readonly ref?: React.Ref<HTMLButtonElement>;
   readonly tooltip?: ReactNode;

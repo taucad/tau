@@ -1,10 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { importToGlb, supportedImportFormats, supportedExportFormats, formatConfigurations } from '@taucad/converter';
-import type { SupportedImportFormat, SupportedExportFormat } from '@taucad/converter';
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { webWorkerTransport } from '@taucad/runtime/transport/web';
+import { formatConfigurations } from '@taucad/types/constants';
 import { Download, Upload, RotateCcw, Package, Code2 } from 'lucide-react';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type { Geometry, Project } from '@taucad/types';
+import { projectToManifest } from '@taucad/types';
+import type { Geometry } from '@taucad/types';
+import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { Button } from '#components/ui/button.js';
 import { toast } from '#components/ui/sonner.js';
 import type { Handle } from '#types/matches.types.js';
@@ -43,7 +46,7 @@ import { SectionViewControl } from '#components/geometry/cad/section-view-contro
 import { MeasureControl } from '#components/geometry/cad/measure-control.js';
 import { ResetCameraControl } from '#components/geometry/cad/reset-camera-control.js';
 import { ViewerSettings } from '#components/geometry/cad/viewer-settings.js';
-import { ChatInterfaceGraphics } from '#routes/projects_.$id/chat-interface-graphics.js';
+import { ChatInterfaceGraphics } from '#routes/w.$workspace.$project/chat-interface-graphics.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { cn } from '#utils/ui.utils.js';
@@ -52,6 +55,18 @@ import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { SidebarOffset } from '#components/layout/sidebar-offset.js';
+import {
+  converterExportFormats,
+  converterImportFormats,
+  createConverterSource,
+} from '#routes/convert/converter-runtime.definition.js';
+import type {
+  converterRuntime,
+  ConverterExportFormat,
+  ConverterImportFormat,
+  ConverterRuntimeClient,
+  ConverterSource,
+} from '#routes/convert/converter-runtime.definition.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -66,7 +81,7 @@ export const handle: Handle = {
 
 type UploadedFileInfo = {
   name: string;
-  format: SupportedImportFormat;
+  format: ConverterImportFormat;
   size: number;
 };
 
@@ -109,7 +124,7 @@ const ConverterViewer = memo(function ({ glbData }: { readonly glbData: Uint8Arr
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
-  const geometries = useMemo<Geometry[]>(() => [{ format: 'gltf', content: glbData, hash: 'converter' }], [glbData]);
+  const geometry = useMemo<Geometry>(() => ({ format: 'gltf', content: glbData, hash: 'converter' }), [glbData]);
 
   return (
     <CadViewer
@@ -122,7 +137,7 @@ const ConverterViewer = memo(function ({ glbData }: { readonly glbData: Uint8Arr
       enableGrid={enableGrid}
       enableGizmo={enableGizmo}
       enableSurfaces={enableSurfaces}
-      geometries={geometries}
+      geometry={geometry}
     />
   );
 });
@@ -130,36 +145,74 @@ const ConverterViewer = memo(function ({ glbData }: { readonly glbData: Uint8Arr
 function ConverterContentInner(): React.JSX.Element {
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | undefined>(undefined);
   const [glbData, setGlbData] = useState<Uint8Array<ArrayBuffer> | undefined>(undefined);
-  const [selectedFormats, setSelectedFormats] = useCookie<SupportedExportFormat[]>(
+  const [source, setSource] = useState<ConverterSource | undefined>(undefined);
+  const [client, setClient] = useState<ConverterRuntimeClient | undefined>(undefined);
+  const [selectedFormats, setSelectedFormats] = useCookie<ConverterExportFormat[]>(
     cookieName.converterOutputFormats,
     [],
   );
   const [useZipForMultiple, setUseZipForMultiple] = useCookie<boolean>(cookieName.converterMultifileZip, true);
   const [isConverting, setIsConverting] = useState(false);
 
-  const handleFileSelect = useCallback(async (file: File) => {
-    setIsConverting(true);
+  useEffect(() => {
+    const runtimeClient = createRuntimeClient<typeof converterRuntime>({
+      transport: webWorkerTransport({
+        createWorker: () =>
+          new Worker(new URL('converter-runtime.worker.ts', import.meta.url), {
+            name: 'tau-converter-runtime-worker',
+            type: 'module',
+          }),
+      }),
+    });
+    setClient(runtimeClient);
+    return () => {
+      runtimeClient.terminate();
+    };
+  }, []);
 
-    try {
-      const format = getFormatFromFilename(file.name);
+  const handleFileSelect = useCallback(
+    async (files: File[]) => {
+      setIsConverting(true);
 
-      const arrayBuffer = await file.arrayBuffer();
-      const data = new Uint8Array(arrayBuffer);
-
-      toast.promise(
-        (async () => {
-          const glb = await importToGlb([{ name: file.name, bytes: data }], format);
-
-          setUploadedFile({
-            name: file.name,
-            format,
-            size: file.size,
-          });
-          setGlbData(glb);
-        })(),
-        {
-          loading: `Converting ${file.name}...`,
-          success: `Converted ${file.name} successfully`,
+      try {
+        if (!client) {
+          throw new Error('The converter runtime is still loading');
+        }
+        const entryFile = files.find((file) => {
+          try {
+            return converterImportFormats.includes(getFormatFromFilename(file.name));
+          } catch {
+            return false;
+          }
+        });
+        if (!entryFile) {
+          throw new Error('No supported model file was selected');
+        }
+        const format = getFormatFromFilename(entryFile.name);
+        const entries = await Promise.all(
+          files.map(
+            async (file) => [file.webkitRelativePath || file.name, new Uint8Array(await file.arrayBuffer())] as const,
+          ),
+        );
+        const nextSource = createConverterSource(entries, entryFile.webkitRelativePath || entryFile.name);
+        const operation = (async () => {
+          const outcome = await client.render({ source: nextSource });
+          if (outcome.superseded) {
+            throw new Error('Conversion was superseded by a newer upload');
+          }
+          if (!outcome.geometry.success) {
+            throw new Error(outcome.geometry.issues.map((issue) => issue.message).join('\n'));
+          }
+          if (outcome.geometry.data.format !== 'gltf') {
+            throw new Error(`Converter returned unsupported preview geometry: ${outcome.geometry.data.format}`);
+          }
+          setUploadedFile({ name: entryFile.name, format, size: entryFile.size });
+          setSource(nextSource);
+          setGlbData(outcome.geometry.data.content);
+        })();
+        toast.promise(operation, {
+          loading: `Converting ${entryFile.name}...`,
+          success: `Converted ${entryFile.name} successfully`,
           error(error: unknown) {
             let message = 'Failed to convert file';
             if (error instanceof Error) {
@@ -168,22 +221,24 @@ function ConverterContentInner(): React.JSX.Element {
 
             return message;
           },
-        },
-      );
-    } catch (error) {
-      let message = 'Failed to process file';
-      if (error instanceof Error) {
-        message = `${message}: ${error.message}`;
-      }
+        });
+        await operation;
+      } catch (error) {
+        let message = 'Failed to process file';
+        if (error instanceof Error) {
+          message = `${message}: ${error.message}`;
+        }
 
-      toast.error(message);
-    } finally {
-      setIsConverting(false);
-    }
-  }, []);
+        toast.error(message);
+      } finally {
+        setIsConverting(false);
+      }
+    },
+    [client],
+  );
 
   const handleFormatToggle = useCallback(
-    (format: SupportedExportFormat) => {
+    (format: ConverterExportFormat) => {
       setSelectedFormats((previous) => {
         if (previous.includes(format)) {
           return previous.filter((f) => f !== format);
@@ -197,6 +252,7 @@ function ConverterContentInner(): React.JSX.Element {
 
   const handleReset = useCallback(() => {
     setUploadedFile(undefined);
+    setSource(undefined);
     setGlbData(undefined);
   }, []);
 
@@ -213,12 +269,25 @@ function ConverterContentInner(): React.JSX.Element {
 
   const handleFileDrop = useCallback(
     (acceptedFiles: File[]) => {
-      const file = acceptedFiles[0];
-      if (file) {
-        void handleFileSelect(file);
+      if (acceptedFiles.length > 0) {
+        void handleFileSelect(acceptedFiles);
       }
     },
     [handleFileSelect],
+  );
+
+  const exportFormat = useCallback(
+    async (format: ConverterExportFormat) => {
+      if (!client || !source) {
+        throw new Error('No model is loaded');
+      }
+      const result = await client.export(format, { source });
+      if (!result.success) {
+        throw new Error(result.issues.map((issue) => issue.message).join('\n'));
+      }
+      return result.data;
+    },
+    [client, source],
   );
 
   const hasModel = glbData !== undefined;
@@ -270,7 +339,7 @@ function ConverterContentInner(): React.JSX.Element {
                   </FloatingPanelContentHeader>
                   <FloatingPanelContentBody className='flex h-full flex-col justify-between gap-4 p-3 pt-2'>
                     <Converter
-                      getGlbData={async () => glbData}
+                      exportFormat={exportFormat}
                       selectedFormats={selectedFormats}
                       shouldUseZipForMultiple={useZipForMultiple}
                       uploadedFile={uploadedFile}
@@ -281,7 +350,7 @@ function ConverterContentInner(): React.JSX.Element {
 
                     <div className='flex flex-col space-y-4'>
                       {/* Drop area for uploading new file */}
-                      <Dropzone className='w-full max-md:hidden' maxFiles={1} onDrop={handleFileDrop}>
+                      <Dropzone className='w-full max-md:hidden' maxFiles={100} onDrop={handleFileDrop}>
                         <DropzoneEmptyState>
                           <div className='flex flex-col items-center gap-2 py-4'>
                             <Upload className='size-6 text-muted-foreground' />
@@ -310,7 +379,7 @@ function ConverterContentInner(): React.JSX.Element {
               icon={Upload}
               title='Import Formats'
               description='Formats you can upload'
-              formats={supportedImportFormats}
+              formats={converterImportFormats}
               className='mt-30 max-xl:hidden'
             />
 
@@ -334,7 +403,7 @@ function ConverterContentInner(): React.JSX.Element {
               </div>
 
               {/* Upload Area */}
-              <Dropzone className='w-full max-w-2xl' maxFiles={1} onDrop={handleFileDrop}>
+              <Dropzone className='w-full max-w-2xl' maxFiles={100} onDrop={handleFileDrop}>
                 <DropzoneEmptyState>
                   <div className='flex flex-col items-center gap-6 py-4'>
                     <div className='flex size-20 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10'>
@@ -350,8 +419,8 @@ function ConverterContentInner(): React.JSX.Element {
 
               {/* Mobile Format Lists */}
               <div className='w-full max-w-2xl space-y-6 xl:hidden'>
-                <FormatsListMobile title='Import Formats' formats={supportedImportFormats} />
-                <FormatsListMobile title='Export Formats' formats={supportedExportFormats} />
+                <FormatsListMobile title='Import Formats' formats={converterImportFormats} />
+                <FormatsListMobile title='Export Formats' formats={converterExportFormats} />
               </div>
 
               {/* Alternative Usage Methods */}
@@ -389,13 +458,13 @@ function ConverterContentInner(): React.JSX.Element {
                             <CopyButton
                               size='xs'
                               getText={() => {
-                                return 'pnpm install @taucad/converter';
+                                return 'pnpm add @taucad/cli';
                               }}
                             />
                           </CodeBlockAction>
                         </CodeBlockHeader>
                         <CodeBlockContent>
-                          <Pre language='bash'>pnpm install @taucad/converter</Pre>
+                          <Pre language='bash'>pnpm add @taucad/cli</Pre>
                         </CodeBlockContent>
                       </CodeBlock>
                     </CardContent>
@@ -433,7 +502,7 @@ function ConverterContentInner(): React.JSX.Element {
               icon={Download}
               title='Export Formats'
               description='Formats you can convert to'
-              formats={supportedExportFormats}
+              formats={converterExportFormats}
               className='mt-30 max-xl:hidden'
             />
           </div>
@@ -455,21 +524,13 @@ function ConverterContentInner(): React.JSX.Element {
 
 export default function ConverterRoute(): React.JSX.Element {
   // Provide a minimal project context so downstream components can use graphics/cad state
-  const now = Date.now();
-  const converterProject: Project = {
+  const converterProject = projectToManifest({
     id: 'converter',
     name: 'Converter',
     description: 'Transient project context for the converter page',
-    author: {
-      name: 'Tau',
-      avatar: '',
-    },
     tags: [],
-    thumbnail: '',
-    createdAt: now,
-    updatedAt: now,
-    assets: {},
-  };
+    assets: { main: { entryPath: 'converter.glb' } },
+  });
 
   return (
     <ProjectProvider
@@ -477,8 +538,13 @@ export default function ConverterRoute(): React.JSX.Element {
       input={{ shouldLoadModelOnStart: false }}
       provide={{
         actors: {
-          loadProjectActor: fromSafeAsync(async () => {
-            return { type: 'projectRetrieved', project: converterProject, parameterEntries: new Map() };
+          loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async () => {
+            return {
+              type: 'projectRetrieved',
+              project: converterProject,
+              revisionState: undefined,
+              parameterEntries: new Map(),
+            };
           }),
         },
       }}

@@ -9,8 +9,7 @@
     "target": "ESNext",
     "paths": {
       "#*": ["./src/*"],
-      "opencascade.js": ["./src/generated/opencascade/modules/opencascade.js/index.d.ts"],
-      "opencascade": ["./src/generated/opencascade/modules/opencascade/index.d.ts"],
+      "libcascade": ["./src/generated/opencascade/modules/libcascade/index.d.ts"],
       "replicad": ["./src/generated/replicad/modules/replicad/index.d.ts"],
       "replicad-opencascadejs": ["./src/generated/replicad/replicad-opencascadejs-stub.d.ts"],
       "opentype.js": ["./src/generated/replicad/opentype-stub.d.ts"],

@@ -14,7 +14,7 @@ type AnyFunction = (...args: any[]) => any;
  * Set a function's `.name` property so it survives minification.
  * Returns the same function reference for inline use at assignment sites.
  *
- * @internal
+ * @public
  *
  * @param name - the desired `.name` for the function
  * @param callable - the function whose `.name` to override
@@ -22,6 +22,8 @@ type AnyFunction = (...args: any[]) => any;
  *
  * @example <caption>Naming an anonymous function</caption>
  * ```typescript
+ * import { named } from '@taucad/runtime/kernel';
+ *
  * const handler = named('kernelHandler', async (input: string) => input);
  * ```
  */

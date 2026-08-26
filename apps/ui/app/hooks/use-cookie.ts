@@ -1,6 +1,7 @@
 import { useSyncExternalStore, useMemo } from 'react';
 import * as Cookies from 'es-cookie';
 import { useRouteLoaderData } from 'react-router';
+import { Topic } from '@taucad/events';
 import type { loader } from '#root.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isFunction } from '#utils/function.utils.js';
@@ -10,24 +11,22 @@ type Listener = () => void;
 
 const cookieStore = () => {
   const cache = new Map<string, unknown>();
-  const listenerMap = new Map<string, Set<Listener>>();
+  const listenerTopics = new Map<string, Topic<void>>();
 
   const subscribe = (cookieName: string, listener: Listener) => {
-    if (!listenerMap.has(cookieName)) {
-      listenerMap.set(cookieName, new Set());
-    }
-
-    listenerMap.get(cookieName)?.add(listener);
-    return () => listenerMap.get(cookieName)?.delete(listener);
+    const topic = listenerTopics.get(cookieName) ?? new Topic<void>({ name: `cookie:${cookieName}` });
+    listenerTopics.set(cookieName, topic);
+    const unsubscribe = topic.subscribe(listener);
+    return () => {
+      unsubscribe();
+      if (topic.size === 0) {
+        listenerTopics.delete(cookieName);
+      }
+    };
   };
 
   const notify = (cookieName: string) => {
-    const listeners = listenerMap.get(cookieName);
-    if (listeners) {
-      for (const listener of listeners) {
-        listener();
-      }
-    }
+    listenerTopics.get(cookieName)?.emit();
   };
 
   const get = <T>(cookieName: string): T | undefined => {

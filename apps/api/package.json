@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "private": true,
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/lib-storage": "catalog:",
@@ -11,11 +12,8 @@
     "@pyroscope/nodejs": "catalog:",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/chat": "workspace:*",
-    "@taucad/openscad": "workspace:*",
-    "@taucad/runtime": "workspace:*",
-    "@taucad/tau-examples": "workspace:*",
+    "@taucad/filesystem": "workspace:*",
     "@taucad/telemetry": "workspace:*",
-    "@taucad/testing": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "react": "catalog:",
@@ -23,9 +21,13 @@
     "resend": "catalog:"
   },
   "devDependencies": {
-    "@taucad/vite": "workspace:*"
+    "@taucad/geospec-engine": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/vite": "workspace:*",
+    "geospec": "workspace:*"
   },
   "imports": {
+    "#*.js": "./app/*.ts",
     "#*": "./app/*"
   },
   "files": [

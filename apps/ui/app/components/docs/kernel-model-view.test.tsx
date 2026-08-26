@@ -2,7 +2,7 @@
  * `KernelModelView` — multi-client-from-one-spec dogfood test.
  *
  * Background: docs Replicad reference renders five `KernelModelView`
- * components, each driving its own `useRender` against the **same**
+ * components, each driving its own `useRuntime` against the **same**
  * module-level `kernelModelViewClientOptions` spec. Before PR1 the
  * inline `fromMemoryFs()` aliased one shared `Map<string, ...>` across
  * all five `RuntimeClient`s, so whichever component opened last
@@ -17,8 +17,8 @@
  *   - The component declares its `clientOptions` at **module scope**
  *     (one allocation per app process, shared across every render).
  *   - Mounting N sibling `KernelModelView`s passes the **same**
- *     `clientOptions` reference to every `useRender` call.
- *   - Each `useRender` call receives a **distinct** `code` payload
+ *     `clientOptions` reference to every `useRuntime` call.
+ *   - Each `useRuntime` call receives a **distinct** `source.files` payload
  *     wrapped under the canonical `'main.ts'` entry key.
  *
  * The runtime-level "fresh `RuntimeFileSystemBase` per client"
@@ -29,39 +29,39 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
 import { createContext } from 'react';
+import type { RenderStatus } from '@taucad/react';
 
 afterEach(() => {
   cleanup();
 });
 
-type CapturedUseRenderCall = {
+type CapturedUseRuntimeCall = {
   readonly clientOptions: unknown;
-  readonly code: unknown;
+  readonly source: unknown;
   readonly enabled: boolean;
 };
 
-const capturedUseRenderCalls: CapturedUseRenderCall[] = [];
+const capturedUseRuntimeCalls: CapturedUseRuntimeCall[] = [];
 
-type RenderStatus = 'idle' | 'loading' | 'success' | 'error';
 const idleStatus: RenderStatus = 'idle';
 
 vi.mock('@taucad/react', () => ({
-  useRender: ({
+  useRuntime: ({
     clientOptions,
-    code,
+    source,
     enabled,
   }: {
     clientOptions: unknown;
-    code: unknown;
+    source: unknown;
     enabled: boolean;
-  }): { geometries: unknown[]; status: RenderStatus; error: undefined } => {
-    capturedUseRenderCalls.push({ clientOptions, code, enabled });
-    return { geometries: [], status: idleStatus, error: undefined };
+  }): { geometry: undefined; status: RenderStatus; error: undefined } => {
+    capturedUseRuntimeCalls.push({ clientOptions, source, enabled });
+    return { geometry: undefined, status: idleStatus, error: undefined };
   },
 }));
 
 /* Stub the shared-renderer hook out — `KernelModelView` uses it inside
- * a `useCallback` that's never invoked because `useRender` is mocked
+ * a `useCallback` that's never invoked because `useRuntime` is mocked
  * and never returns geometry. The provider is replaced with a context
  * that supplies a no-op renderer object satisfying the `useContext`
  * non-undefined check. */
@@ -114,8 +114,8 @@ vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
 const { KernelModelView } = await import('./kernel-model-view.js');
 
 describe('KernelModelView — multi-client-from-one-spec dogfood', () => {
-  it('passes the same module-level clientOptions reference to every useRender invocation', () => {
-    capturedUseRenderCalls.length = 0;
+  it('passes the same module-level clientOptions reference to every useRuntime invocation', () => {
+    capturedUseRuntimeCalls.length = 0;
 
     const codeA = 'export default () => "A";';
     const codeB = 'export default () => "B";';
@@ -129,33 +129,33 @@ describe('KernelModelView — multi-client-from-one-spec dogfood', () => {
       </>,
     );
 
-    /* React 19's StrictMode is off in this test; one `useRender` call
+    /* React 19's StrictMode is off in this test; one `useRuntime` call
      * per mount. (We assert ≥ N to be resilient to future StrictMode
      * double-invocation; reference-identity check below is the
      * structural assertion.) */
-    expect(capturedUseRenderCalls.length).toBeGreaterThanOrEqual(3);
+    expect(capturedUseRuntimeCalls.length).toBeGreaterThanOrEqual(3);
 
-    const [first, second, third] = capturedUseRenderCalls;
+    const [first, second, third] = capturedUseRuntimeCalls;
     expect(first).toBeDefined();
     expect(second).toBeDefined();
     expect(third).toBeDefined();
 
     /* Module-level options dogfood: all instances share one
-     * `createRuntimeClientOptions(...)` reference. If anyone ever
+     * runtime client-options reference. If anyone ever
      * regresses by lifting the spec into a `useMemo` inside the
      * component, this assertion breaks loudly — the antipattern bullet
      * in `docs/policy/library-api-policy.md` §23 is enforced here. */
     expect(first!.clientOptions).toBe(second!.clientOptions);
     expect(second!.clientOptions).toBe(third!.clientOptions);
 
-    /* Each instance forwards its own `code` payload — no cross-prop
+    /* Each instance forwards its own `source.files` payload — no cross-prop
      * leakage between siblings. (The runtime FS isolation that
      * prevents cross-`Map` writes is pinned in
      * `multi-client-fs-isolation.test.ts`; here we only assert the
      * input plumbing.) */
     const mainEntryKey = 'main.ts';
-    expect(first!.code).toEqual({ [mainEntryKey]: codeA });
-    expect(second!.code).toEqual({ [mainEntryKey]: codeB });
-    expect(third!.code).toEqual({ [mainEntryKey]: codeC });
+    expect(first!.source).toEqual({ files: { [mainEntryKey]: codeA } });
+    expect(second!.source).toEqual({ files: { [mainEntryKey]: codeB } });
+    expect(third!.source).toEqual({ files: { [mainEntryKey]: codeC } });
   });
 });

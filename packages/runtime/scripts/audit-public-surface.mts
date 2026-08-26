@@ -5,7 +5,7 @@
  * package's public surface.
  *
  *  1. **`RuntimeClient` member allowlist** — introspect the canonical
- *     `RuntimeClient` type literal in `packages/runtime/src/client/runtime-client.ts`.
+ *     `RuntimeClient` type literal in `packages/runtime/src/client/runtime-client-core.ts`.
  *     CI fails on drift: an unknown member appearing (regression — a removed
  *     legacy verb came back) or a required member disappearing (accidental
  *     deletion).
@@ -29,8 +29,9 @@ import { dirname, resolve } from 'node:path';
 import * as ts from 'typescript';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const runtimeClientPath = resolve(here, '..', 'src', 'client', 'runtime-client.ts');
+const runtimeClientPath = resolve(here, '..', 'src', 'client', 'runtime-client-core.ts');
 const packageBarrelPath = resolve(here, '..', 'src', 'index.ts');
+const viteBarrelPath = resolve(here, '..', 'src', 'vite', 'index.ts');
 
 /**
  * Canonical `RuntimeClient` interface members. The set must match
@@ -39,12 +40,14 @@ const packageBarrelPath = resolve(here, '..', 'src', 'index.ts');
  */
 const allowedMembers: ReadonlySet<string> = new Set([
   'lifecycleState',
+  'renderStatus',
   'activeKernelId',
   'capabilities',
   'connect',
-  'openFile',
+  'render',
   'updateParameters',
   'setOptions',
+  'setRenderTimeout',
   'export',
   'on',
   'terminate',
@@ -57,14 +60,13 @@ const allowedMembers: ReadonlySet<string> = new Set([
 /**
  * Members that were part of the pre-cutover surface and must NEVER appear
  * again. The current redesign collapsed these verbs into the event-driven
- * `openFile` / `updateParameters` / `setOptions` trio plus typed errors;
+ * render-intent methods plus typed errors;
  * reintroducing any of them silently regresses the public contract.
  */
 const forbiddenMembers: ReadonlySet<string> = new Set([
-  'render',
+  'openFile',
   'setFile',
   'setParameters',
-  'setRenderTimeout',
   'notifyFileChanged',
   'cancelPendingRender',
   'geometryPool',
@@ -87,7 +89,7 @@ sourceFile.forEachChild((node) => {
 });
 
 if (!runtimeClientType) {
-  console.error('FAIL: could not locate exported `RuntimeClient` type alias in runtime-client.ts');
+  console.error('FAIL: could not locate exported `RuntimeClient` type alias in runtime-client-core.ts');
   process.exit(1);
 }
 
@@ -145,16 +147,22 @@ for (const required of allowedMembers) {
 const allowedBarrelExports: ReadonlySet<string> = new Set([
   // Client + factory
   'createRuntimeClient',
-  'createRuntimeClientOptions',
   'RuntimeClient',
   'RuntimeClientOptions',
-  'CodeInput',
-  'FileInput',
+  'FilesystemRuntimeSource',
+  'InlineRuntimeSource',
+  'RuntimeExportOptions',
+  'RuntimeRenderInput',
+  'RuntimeSource',
+  'RuntimeSourceContent',
+  'RuntimeSourceFiles',
   'ExportResult',
   'RenderOutcome',
+  'RenderStatus',
   'RuntimeLifecycleState',
   'RuntimeConnectionCause',
   'RuntimeTerminatedCause',
+  'RuntimeFromTransport',
 
   // Lifecycle errors + guards
   'NoRenderOutcomeError',
@@ -187,20 +195,37 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'CollectRenderOptions',
   'CollectTranscodeMap',
   'CollectTranscoderTargets',
+  'ExportFormatsFor',
+  'ExportContentFor',
+  'ExportOptionsFor',
   'KnownSourceFormats',
   'KnownTargetFormats',
   'KnownTranscoderIds',
   'MergeExportMap',
   'RenderOptionsFor',
+  'RenderContentFor',
+  'RuntimePluginDeclaration',
+  'RuntimePluginPermissions',
 
-  // Plugin factory helpers
-  'createKernelPlugin',
-  'createMiddlewarePlugin',
-  'createBundlerPlugin',
-  'createTranscoderPlugin',
-
-  // Presets
-  'presets',
+  // Plugin authoring helpers
+  'definePlugin',
+  'AnyPluginInstance',
+  'ExpandPluginBundlers',
+  'ExpandPluginKernels',
+  'ExpandPluginMiddleware',
+  'ExpandPluginTranscoders',
+  'PluginCapabilities',
+  'PluginFactory',
+  'PluginInstance',
+  'PluginMeta',
+  'defineKernel',
+  'defineMiddleware',
+  'defineBundler',
+  'defineTranscoder',
+  'defineRuntime',
+  'AnyRuntimeDefinition',
+  'RuntimeDefinition',
+  'RuntimeDefinitionOptions',
 
   // Filesystem (browser-safe opaque RuntimeFileSystem + factories)
   'RuntimeFileSystem',
@@ -208,7 +233,7 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'fromMemoryFs',
   'fromFsLike',
   'fromBrowserFs',
-  'fromChannelFs',
+  'fromFileSystemBridge',
   'isRuntimeFileSystem',
 
   // Transport author API only. Concrete transports are intentionally
@@ -218,25 +243,21 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   //   - `@taucad/runtime/transport/in-process`
   //   - `@taucad/runtime/transport/web`
   //   - `@taucad/runtime/transport/node`
+  //   - `@taucad/runtime/transport/websocket`
+  //   - `@taucad/runtime/transport/websocket-host`
   //
   // See `transport-browser-safe.test.ts` for the runtime-level
   // contract pin.
   'defineRuntimeTransport',
-  'RuntimeTransportPlugin',
+  'TransportPlugin',
   'RuntimeTransportClient',
+  'RuntimeTransportCloseResult',
+  'RuntimeTransportPreviewReservation',
+  'RuntimeTransportRenderTarget',
+  'RuntimeTransportTimeoutRecovery',
   'RuntimeTransportHost',
   'TransportClientReady',
   'TransportHostReady',
-
-  // Cache primitives consumed by middleware authors
-  'lruCache',
-  'sharedPoolCache',
-  'FileContentCache',
-  'LruCacheOptions',
-
-  // Helpers
-  'createKernelSuccess',
-  'createKernelError',
 ]);
 
 /**
@@ -248,6 +269,35 @@ const forbiddenBarrelExports: ReadonlySet<string> = new Set(['RuntimeWorkerClien
 
 const barrelSource = readFileSync(packageBarrelPath, 'utf8');
 const barrelSourceFile = ts.createSourceFile(packageBarrelPath, barrelSource, ts.ScriptTarget.Latest, true);
+
+const allowedViteBarrelExports: ReadonlySet<string> = new Set([
+  'crossOriginIsolation',
+  'tauRuntime',
+  'RuntimePluginOptions',
+  'RuntimeVitePlugin',
+]);
+const viteBarrelSource = readFileSync(viteBarrelPath, 'utf8');
+const viteBarrelSourceFile = ts.createSourceFile(viteBarrelPath, viteBarrelSource, ts.ScriptTarget.Latest, true);
+const observedViteBarrelExports = new Set<string>();
+viteBarrelSourceFile.forEachChild((node) => {
+  if (!ts.isExportDeclaration(node) || !node.exportClause || !ts.isNamedExports(node.exportClause)) {
+    return;
+  }
+  for (const element of node.exportClause.elements) {
+    observedViteBarrelExports.add(element.name.text);
+  }
+});
+
+for (const observed of observedViteBarrelExports) {
+  if (!allowedViteBarrelExports.has(observed)) {
+    failures.push(`unexpected export \`${observed}\` from @taucad/runtime/vite`);
+  }
+}
+for (const required of allowedViteBarrelExports) {
+  if (!observedViteBarrelExports.has(required)) {
+    failures.push(`missing export \`${required}\` from @taucad/runtime/vite`);
+  }
+}
 
 const observedBarrelExports = new Set<string>();
 
@@ -312,5 +362,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `audit-public-surface.mts OK — RuntimeClient surface matches the allowlist; ${observedBarrelExports.size} sibling exports on src/index.ts match the allowlist.`,
+  `audit-public-surface.mts OK — RuntimeClient, package barrel, and Vite subpath surfaces match their allowlists (${observedBarrelExports.size} package-barrel exports).`,
 );

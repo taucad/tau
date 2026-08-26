@@ -3,16 +3,78 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/ui",
   "projectType": "application",
-  "tags": ["scope:ui", "type:app"],
+  "tags": ["scope:ui", "type:app", "layer:feature"],
   "targets": {
     "build": {
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/build"],
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "env": "TAU_API_URL"
+        },
+        {
+          "env": "TAU_WEBSOCKET_URL"
+        },
+        {
+          "env": "TAU_FRONTEND_URL"
+        },
+        {
+          "env": "NETLIFY"
+        },
+        {
+          "env": "CONTEXT"
+        },
+        {
+          "env": "DEPLOY_PRIME_URL"
+        },
+        {
+          "env": "DEPLOY_URL"
+        },
+        {
+          "env": "NETLIFY_AI_GATEWAY_URL"
+        },
+        {
+          "env": "TAU_DEBUG"
+        },
+        {
+          "env": "POSTHOG_CLIENT_KEY"
+        },
+        {
+          "env": "POSTHOG_API_HOST"
+        },
+        {
+          "env": "POSTHOG_UI_HOST"
+        },
+        {
+          "env": "POSTHOG_ASSET_HOST"
+        },
+        {
+          "env": "STATS"
+        }
+      ],
       "command": "react-router build --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}",
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=8192"
+        }
+      }
+    },
+    "build:verify": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "outputs": ["{projectRoot}/build"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "react-router build",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192",
+          "TAU_API_URL": "http://localhost:4000",
+          "TAU_WEBSOCKET_URL": "ws://localhost:4001",
+          "TAU_FRONTEND_URL": "http://localhost:3000"
         }
       }
     },
@@ -27,18 +89,33 @@
         "command": "node --import @oxc-node/core/register scripts/check-ssr-bundle-budget.mts"
       }
     },
+    "bench-section-cap-boolean-backends": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --import @oxc-node/core/register scripts/bench-section-cap-boolean-backends.mts"
+      }
+    },
+    "generate-svg-sprite": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --import @oxc-node/core/register scripts/generate-svg-sprite.mts"
+      }
+    },
     "bootstrap-https-certs": {
       "executor": "nx:run-commands",
-      "cache": true,
+      "cache": false,
       "inputs": [
         "{projectRoot}/scripts/bootstrap-https-certs.ts",
         "{projectRoot}/app/lib/certificates/https-certs-path.ts",
-        "{projectRoot}/app/lib/certificates/mkcert-cache-writable.ts",
+        "{projectRoot}/app/lib/certificates/mkcert-storage.ts",
         {
           "runtime": "node {workspaceRoot}/tools/runtime-lan-ips.mjs"
         }
       ],
-      "outputs": ["{workspaceRoot}/node_modules/.cache/vite-plugin-mkcert"],
       "options": {
         "cwd": "{projectRoot}",
         "command": "node --import @oxc-node/core/register scripts/bootstrap-https-certs.ts",

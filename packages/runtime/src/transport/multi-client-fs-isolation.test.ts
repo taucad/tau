@@ -5,7 +5,7 @@
  * {@link RuntimeFileSystemHandle} (see
  * `docs/research/runtime-filesystem-spec-instance-harmonisation.md`):
  *
- * - A single `inProcessTransport({ fileSystem: fromMemoryFs(...) })`
+ * - A single `inProcessTransport({ runtime, fileSystem: fromMemoryFs(...) })`
  *   plugin is a plain-data spec safe to share at module scope.
  * - Each `plugin.materialize()` invocation produces a `RuntimeClient`
  *   whose underlying `RuntimeFileSystemBase` is freshly minted via
@@ -27,8 +27,11 @@ import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { resolveRuntimeFileSystem, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
 
 describe('multi-client filesystem isolation (spec/instance harmonisation)', () => {
+  const runtime = defineRuntime({});
+
   it('one inProcessTransport plugin produces N clients, each with an isolated RuntimeFileSystemBase', async () => {
     /* Build a plain-data filesystem spec (`fromMemoryFs(seed)`); feed
      * one plugin instance to two materialisations — the realistic
@@ -37,7 +40,7 @@ describe('multi-client filesystem isolation (spec/instance harmonisation)', () =
     const mainPath = '/main.ts';
     const seedSource = 'export default () => "seed";';
     const seedFs = fromMemoryFs({ [mainPath]: seedSource });
-    const plugin = inProcessTransport({ fileSystem: seedFs });
+    const plugin = inProcessTransport({ runtime, fileSystem: seedFs });
 
     const clientA = plugin.materialize();
     const clientB = plugin.materialize();
@@ -90,7 +93,7 @@ describe('multi-client filesystem isolation (spec/instance harmonisation)', () =
     const fakeBaseFactory = vi.fn((): RuntimeFileSystemBase => {
       const base: RuntimeFileSystemBase = {
         id: 'runtime:test-counted',
-        capabilities: { persistent: false, writable: true, quotaBased: false, caseSensitive: true },
+        capabilities: { persistent: false, writable: true, quotaBased: false },
         dispose() {
           /* Stub dispose — `create()`-count assertion does not exercise lifecycle. */
         },
@@ -99,10 +102,10 @@ describe('multi-client filesystem isolation (spec/instance harmonisation)', () =
         mkdir: noop,
         readdir: async () => [],
         unlink: noop,
-        stat: async () => ({ type: 'file', size: 0, mtimeMs: 0 }),
+        stat: async () => ({ type: 'file', size: 0, mtimeMs: 0, contentKind: 'binary' }),
         rmdir: noop,
         rename: noop,
-        lstat: async () => ({ type: 'file', size: 0, mtimeMs: 0 }),
+        lstat: async () => ({ type: 'file', size: 0, mtimeMs: 0, contentKind: 'binary' }),
         exists: async () => false,
       };
       minted.push(base);
@@ -118,7 +121,7 @@ describe('multi-client filesystem isolation (spec/instance harmonisation)', () =
      * `RuntimeFileSystem` by the public guard. */
     expect(isRuntimeFileSystem(opaque)).toBe(true);
 
-    const plugin = inProcessTransport({ fileSystem: opaque });
+    const plugin = inProcessTransport({ runtime, fileSystem: opaque });
 
     /* Plugin construction itself must not call `create()` — the spec
      * is plain data; only materialisation mints live state. */

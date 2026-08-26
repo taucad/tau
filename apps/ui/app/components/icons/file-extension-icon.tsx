@@ -1,6 +1,6 @@
 import { File as FileIcon } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
-import { fileExtensionSet, kernelConfigurations } from '@taucad/types/constants';
+import { fileExtensionSet } from '@taucad/types/constants';
 import { Format3D } from '#components/icons/format-3d.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
@@ -97,44 +97,41 @@ const iconConfigMap: Partial<Record<string, IconConfig>> = {
   },
 };
 
-// Export for backward compatibility
-export const iconFromExtension = iconConfigMap;
+// Whole-filename matches, checked before the extension table so `tau.json`
+// and `package.json` do not collapse into the generic `.json` icon — the same
+// rule editors use to badge `package.json` or `vite.config.ts`.
+const iconConfigByFilename: Partial<Record<string, IconConfig>> = {
+  'tau.json': {
+    type: 'lib',
+    id: 'tau',
+  },
+  'package.json': {
+    type: 'lib',
+    id: 'npm',
+  },
+  'readme.md': {
+    type: 'lib',
+    id: 'readme.md',
+  },
+};
 
-// Map kernel mainFile extensions to kernel configs
-const kernelExtensionMap = new Map<string, string>();
-for (const kernel of kernelConfigurations) {
-  const extension = getFileExtension(kernel.mainFile);
-  if (extension) {
-    kernelExtensionMap.set(extension, kernel.id);
-  }
+/** Last path segment, lowercased — call sites pass bare names and full paths alike. */
+function getBasename(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1).toLowerCase();
 }
 
-function getIconConfig(extension: string): IconConfig | undefined {
-  // Priority 1: Check config (kernel or explicit iconConfigMap)
+function getIconConfig(filename: string): IconConfig | undefined {
+  // Priority 1: whole-filename match
+  const filenameConfig = iconConfigByFilename[getBasename(filename)];
+  if (filenameConfig) {
+    return filenameConfig;
+  }
+
+  // Priority 2: extension match
+  const extension = getFileExtension(filename);
   const explicitConfig = iconConfigMap[extension];
   if (explicitConfig) {
     return explicitConfig;
-  }
-
-  // Check kernel config
-  const kernelId = kernelExtensionMap.get(extension);
-  if (kernelId) {
-    // Map kernel IDs to lib types
-    const kernelLibMap: Record<string, SvgIcons> = {
-      openscad: 'openscad',
-      zoo: 'zoo',
-      replicad: 'typescript',
-      manifold: 'typescript',
-      jscad: 'typescript',
-    };
-
-    const libId = kernelLibMap[kernelId];
-    if (libId) {
-      return {
-        type: 'lib',
-        id: libId,
-      };
-    }
   }
 
   if (fileExtensionSet.has(extension as FileExtension)) {
@@ -159,8 +156,7 @@ export function FileExtensionIcon({
   readonly filename: string;
   readonly className?: string;
 }): React.JSX.Element {
-  const extension = getFileExtension(filename);
-  const config = getIconConfig(extension);
+  const config = getIconConfig(filename);
 
   if (!config) {
     return <FileIcon className={className} />;
@@ -174,12 +170,12 @@ export function FileExtensionIcon({
 }
 
 /**
- * Get the icon ID for a file extension using the priority system:
- * 1. Config (explicit or kernel)
- * 2. Supported formats
- * 3. Returns undefined for fallback
+ * Get the icon ID for a filename or path using the priority system:
+ * 1. Whole-filename config
+ * 2. Extension config
+ * 3. Supported 3D formats
+ * 4. Returns undefined for fallback
  */
-export function getIconIdFromExtension(extension: string): string | undefined {
-  const config = getIconConfig(extension.toLowerCase());
-  return config?.id;
+export function getIconIdForFilename(filename: string): string | undefined {
+  return getIconConfig(filename)?.id;
 }

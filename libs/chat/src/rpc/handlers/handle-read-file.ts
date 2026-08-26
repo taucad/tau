@@ -1,6 +1,7 @@
 import type { ReadFileRpcInput, ReadFileRpcResult } from '#schemas/rpc.schema.js';
-import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
+import type { RpcFileMetadata, RpcFileStat, RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
+import { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 
 /**
@@ -17,6 +18,11 @@ const maxReadLines = 2000;
  */
 const maxUnboundedReadBytes = 256 * 1024;
 
+const toFileMetadata = (stat: Extract<RpcFileStat, { isDirectory: false }>): RpcFileMetadata =>
+  stat.contentKind === 'text'
+    ? { type: 'file', size: stat.size, contentKind: 'text', lineCount: stat.lineCount }
+    : { type: 'file', size: stat.size, contentKind: 'binary' };
+
 /** @public */
 export async function handleReadFile(input: ReadFileRpcInput, fileSystem: RpcFileSystem): Promise<ReadFileRpcResult> {
   const offset: number = input.offset ?? 1;
@@ -24,27 +30,44 @@ export async function handleReadFile(input: ReadFileRpcInput, fileSystem: RpcFil
   const limit = Math.min(requestedLimit, maxReadLines);
 
   try {
-    let fileStat: { size: number; createdAt?: string; modifiedAt?: string } | undefined;
+    const targetFile = resolveRpcProjectPath(input.targetFile);
+    let fileStat: RpcFileStat | undefined;
     try {
-      fileStat = await fileSystem.stat(input.targetFile);
+      fileStat = await fileSystem.stat(targetFile);
     } catch {
       // `stat` may not be available in all environments — fall through to
       // unbounded `readFile`. Without a stat we cannot enforce the 256 KB
       // precheck, but this is rare and the line-count clamp below still applies.
     }
 
-    if (fileStat && fileStat.size > maxUnboundedReadBytes && input.offset === undefined && input.limit === undefined) {
+    if (fileStat?.isDirectory === false && fileStat.contentKind === 'binary') {
+      return {
+        success: false,
+        errorCode: rpcClientErrorCode.ioError,
+        message: `File is binary (${fileStat.size} bytes) and cannot be read as text.`,
+        fileMetadata: toFileMetadata(fileStat),
+      };
+    }
+
+    if (
+      fileStat?.isDirectory === false &&
+      fileStat.size > maxUnboundedReadBytes &&
+      input.offset === undefined &&
+      input.limit === undefined
+    ) {
       const kilobytes = Math.round(fileStat.size / 1024);
       return {
         success: false,
         errorCode: rpcClientErrorCode.resultTooLarge,
         message:
-          `File is ${kilobytes} KB. Use offset and limit to read in ${maxReadLines}-line chunks, ` +
+          `File is ${kilobytes} KB with ${fileStat.lineCount} lines. ` +
+          `Use offset and limit to read in ${maxReadLines}-line chunks, ` +
           `or grep for specific content.`,
+        fileMetadata: toFileMetadata(fileStat),
       };
     }
 
-    const text = await fileSystem.readFile(input.targetFile);
+    const text = await fileSystem.readFile(targetFile);
     const lines = text.split('\n');
     const totalLines = lines.length;
 
@@ -57,6 +80,8 @@ export async function handleReadFile(input: ReadFileRpcInput, fileSystem: RpcFil
     return {
       success: true,
       content,
+      size: fileStat?.isDirectory === false ? fileStat.size : new TextEncoder().encode(text).byteLength,
+      contentKind: 'text',
       totalLines,
       startLine: startIndex + 1,
       ...(truncated && { truncated: true }),

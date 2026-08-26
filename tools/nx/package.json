@@ -1,0 +1,20 @@
+{
+  "name": "@taucad/nx",
+  "version": "0.0.1",
+  "description": "Nx-tag-driven workspace resolver: publishable set, bundled libraries, publish order",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "exports": {
+    ".": "./src/resolver.ts",
+    "./tags": "./src/tags.ts",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@nx/devkit": "catalog:"
+  }
+}

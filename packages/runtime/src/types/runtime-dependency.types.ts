@@ -12,7 +12,7 @@
  */
 export type FileDependency = {
   type: 'file';
-  /** Path to the file relative to the build directory */
+  /** Path of the dependency within the runtime filesystem. */
   path: string;
   /** SHA-256 hash of the file contents */
   contentHash: string;
@@ -25,8 +25,8 @@ export type FileDependency = {
  */
 export type MiddlewareDependency = {
   type: 'middleware';
-  /** Name of the middleware */
-  name: string;
+  /** Stable middleware plugin identifier. */
+  id: string;
   /** Version of the middleware */
   version: string;
   /** Position in the middleware chain (0-indexed) */
@@ -72,6 +72,71 @@ export type ParameterDependency = {
 };
 
 /**
+ * A render option dependency representing user-provided kernel render options.
+ * Used to invalidate geometry and export caches when render settings change.
+ * @public
+ */
+export type RenderOptionsDependency = {
+  type: 'render-options';
+  /** Zod-validated render options object -- serialized in the final dependency hash pass */
+  options: Record<string, unknown>;
+};
+
+/** Framework content normalized for the selected operation route. @public */
+export type ContentDependency = {
+  type: 'content';
+  /** Supported properties with operation defaults applied. */
+  content: Record<string, boolean>;
+};
+
+/**
+ * A kernel dependency representing the selected kernel for the active file.
+ * Used to invalidate caches when two kernels can handle the same source path.
+ * @public
+ */
+export type KernelDependency = {
+  type: 'kernel';
+  /** Selected kernel identifier */
+  id: string;
+  /** Selected kernel semantic version */
+  version: string;
+};
+
+/**
+ * An export dependency representing the target file format and export options.
+ * Used to invalidate export caches when format-specific settings change.
+ * @public
+ */
+export type ExportDependency = {
+  type: 'export';
+  /** Export file format identifier */
+  format: string;
+  /** Zod-validated export options object -- serialized in the final dependency hash pass */
+  options: Record<string, unknown>;
+  /** Framework content normalized for the selected export route. */
+  content?: Record<string, boolean>;
+  /** Selected export route identity and validated route options. */
+  route?: {
+    kind: 'direct' | 'transcoded';
+    kernelId?: string;
+    sourceFormat?: string;
+    targetFormat: string;
+    transcoderId?: string;
+    transcoderVersion?: string;
+    transcoderOptions?: Record<string, unknown>;
+    transcoderAssets?: ReadonlyArray<{ id: string; sha256: string }>;
+    contentContributors?: ReadonlyArray<{
+      id: string;
+      version: string;
+      index: number;
+      options: Record<string, unknown>;
+    }>;
+    sourceOptions?: Record<string, unknown>;
+    edgeOptions?: Record<string, unknown>;
+  };
+};
+
+/**
  * An asset dependency representing a bundled asset (font, WASM, etc.).
  * Used to invalidate cache when assets change between deployments.
  * @public
@@ -96,4 +161,21 @@ export type Dependency =
   | FrameworkDependency
   | OptionDependency
   | ParameterDependency
+  | RenderOptionsDependency
+  | ContentDependency
+  | KernelDependency
+  | ExportDependency
   | AssetDependency;
+
+/**
+ * Structured result from dependency resolution. Unresolved paths remain in
+ * the watch set so creating a missing file can trigger a later render.
+ *
+ * @public
+ */
+export type GetDependenciesResult = {
+  /** Paths within the runtime filesystem that were resolved and read. */
+  resolved: string[];
+  /** Paths that could not be resolved. */
+  unresolved: string[];
+};

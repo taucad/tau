@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import { extractInlineFileSystem, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 
 describe('extractInlineFileSystem (R2)', () => {
@@ -21,23 +22,20 @@ describe('extractInlineFileSystem (R2)', () => {
   });
 
   it('should throw a TypeError with expected message for channel bridged opaque fs', async () => {
-    const pair = new MessageChannel();
+    const connection = createFileSystemBridgePort(extractInlineFileSystem(fromMemoryFs())!);
     const channelFs = wrapAsRuntimeFileSystem({
       kind: 'channel',
-      port: pair.port2,
-      dispose(): void {
-        pair.port2.close();
-      },
+      create: () => connection,
     });
 
     expect(() => extractInlineFileSystem(channelFs)).toThrow(TypeError);
+    connection.dispose();
     try {
       extractInlineFileSystem(channelFs);
       expect.fail('should have thrown');
     } catch (error) {
       expect((error as Error).message).toBe(`extractInlineFileSystem: expected inline fs, received 'channel'`);
     }
-    pair.port1.close();
   });
 });
 
@@ -95,6 +93,17 @@ describe('extractInlineFileSystem — per-binding-fresh contract', () => {
     const fs = extractInlineFileSystem(opaque)!;
     await expect(fs.readFile(seedKey, 'utf8')).resolves.toBe('initial');
     await expect(fs.exists(extraKey)).resolves.toBe(false);
+  });
+
+  it('should defensively copy Uint8Array seed contents at fromMemoryFs() call time', async () => {
+    const seedKey = '/seed.bin';
+    const bytes = new Uint8Array([1, 2, 3]);
+    const opaque = fromMemoryFs({ [seedKey]: bytes });
+
+    bytes[0] = 9;
+
+    const fs = extractInlineFileSystem(opaque)!;
+    await expect(fs.readFile(seedKey)).resolves.toEqual(new Uint8Array([1, 2, 3]));
   });
 
   it('should produce an isolated base even when the spec has no seed files', async () => {

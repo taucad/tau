@@ -21,10 +21,7 @@ import { buildCadAgent, requiresEnv } from '#testing/skip-helpers.js';
  * `OPENAI_API_KEY` in `apps/api/.env` (auto-loaded by
  * `vitest.integration.config.ts`).
  *
- * Last verified: all three providers (anthropic-claude-haiku-4.5,
- * google-gemini-3.5-flash, openai-gpt-5.3-codex) accepted the partial-input
- * `output-error` history end-to-end, returning clean SSE streams with
- * `text-start` and no error chunks.
+ * Covers Anthropic Haiku, Vertex Gemini 3.5 Flash, and OpenAI GPT-5.6 Terra.
  */
 describe.skipIf(requiresEnv('ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_VERTEX_AI_CREDENTIALS'))(
   'Interrupted-tool-call provider contracts (real LLM)',
@@ -114,8 +111,8 @@ describe.skipIf(requiresEnv('ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_VERTE
       await assertProviderTolerated('google-gemini-3.5-flash');
     }, 120_000);
 
-    it('should accept partial-input output-error history when streaming via OpenAI GPT-5.3 Codex', async () => {
-      await assertProviderTolerated('openai-gpt-5.3-codex');
+    it('should accept partial-input output-error history when streaming via OpenAI GPT-5.6 Terra', async () => {
+      await assertProviderTolerated('openai-gpt-5.6-terra');
     }, 120_000);
   },
 );

@@ -3,13 +3,24 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
-import type { RuntimeClientOptions } from '@taucad/runtime';
-import { createMockRuntimeClient } from '@taucad/runtime/testing';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { stopRootWithRehydration } from '#lib/xstate-test.utils.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import type { PrepareFilesInput } from '#machines/cad-preview.machine.js';
+import type { runtime } from '#runtime/ui-runtime.definition.js';
+import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+
+const createMockAppRuntimeClient = () => createMockRuntimeClient<typeof runtime>();
+
+const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
+  mock<ReturnType<KernelOptionsFactory>>({
+    config: {
+      tauApiUrl: 'https://api.test',
+      tauWebSocketUrl: 'wss://api.test',
+    },
+  });
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -21,7 +32,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should send initializeModel to cadRef after prepareFiles completes', async () => {
-    const mockClient = createMockRuntimeClient();
+    const mockClient = createMockAppRuntimeClient();
 
     const providedCadMachine = cadMachine.provide({
       actors: {
@@ -38,7 +49,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
-        kernelOptionsFactory: async () => () => mock<RuntimeClientOptions>(),
+        kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
 
@@ -70,8 +81,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
       setTimeout(resolve, 0);
     });
 
-    expect(mockClient.openFile).toHaveBeenCalledWith({
-      file: { path: '/projects/proj_test', filename: 'main.ts' },
+    expect(mockClient.render).toHaveBeenCalledWith({
+      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
       parameters: { width: 42 },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -81,7 +92,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should send initializeModel after Strict Mode stopRootWithRehydration cycle', async () => {
-    const mockClient = createMockRuntimeClient();
+    const mockClient = createMockAppRuntimeClient();
     let connectDelay = 50;
 
     const providedCadMachine = cadMachine.provide({
@@ -102,7 +113,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
-        kernelOptionsFactory: async () => () => mock<RuntimeClientOptions>(),
+        kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
 
@@ -154,8 +165,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadSnapshot = cadRef.getSnapshot();
     expect(cadSnapshot.value).toBe('idle');
     expect(cadSnapshot.context.file).toEqual({ path: '/projects/proj_test', filename: 'main.ts' });
-    expect(mockClient.openFile).toHaveBeenCalledWith({
-      file: { path: '/projects/proj_test', filename: 'main.ts' },
+    expect(mockClient.render).toHaveBeenCalledWith({
+      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
       parameters: { width: 42 },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -165,7 +176,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should handle prepareFiles completing after cadRef connects', async () => {
-    const mockClient = createMockRuntimeClient();
+    const mockClient = createMockAppRuntimeClient();
 
     const providedCadMachine = cadMachine.provide({
       actors: {
@@ -182,7 +193,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
-        kernelOptionsFactory: async () => () => mock<RuntimeClientOptions>(),
+        kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
 
@@ -234,8 +245,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     await waitFor(previewRef, (s) => s.value === 'active', { timeout: 5000 });
 
     // InitializeModel should have been sent to cadRef (now in idle)
-    expect(mockClient.openFile).toHaveBeenCalledWith({
-      file: { path: '/projects/proj_test', filename: 'main.ts' },
+    expect(mockClient.render).toHaveBeenCalledWith({
+      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
       parameters: {},
     });
 
@@ -244,7 +255,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should handle slow prepareFiles with abort during Strict Mode', async () => {
-    const mockClient = createMockRuntimeClient();
+    const mockClient = createMockAppRuntimeClient();
     let connectDelay = 100;
 
     const providedCadMachine = cadMachine.provide({
@@ -265,7 +276,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
-        kernelOptionsFactory: async () => () => mock<RuntimeClientOptions>(),
+        kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
 
@@ -328,8 +339,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadSnapshot = cadRef.getSnapshot();
     expect(cadSnapshot.value).toBe('idle');
     expect(cadSnapshot.context.file).toEqual({ path: '/projects/proj_test', filename: 'main.ts' });
-    expect(mockClient.openFile).toHaveBeenCalledWith({
-      file: { path: '/projects/proj_test', filename: 'main.ts' },
+    expect(mockClient.render).toHaveBeenCalledWith({
+      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
       parameters: { width: 42 },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -339,7 +350,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should not fail with detached ArrayBuffer when zombie prepareFiles transfers file content', async () => {
-    const mockClient = createMockRuntimeClient();
+    const mockClient = createMockAppRuntimeClient();
     let connectDelay = 100;
 
     const providedCadMachine = cadMachine.provide({
@@ -360,7 +371,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
-        kernelOptionsFactory: async () => () => mock<RuntimeClientOptions>(),
+        kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
 
@@ -458,8 +469,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     // CadRef should have the file and parameters sent directly to kernel
     expect(cadRef.getSnapshot().context.file).toEqual({ path: '/projects/proj_test', filename: 'main.ts' });
-    expect(mockClient.openFile).toHaveBeenCalledWith({
-      file: { path: '/projects/proj_test', filename: 'main.ts' },
+    expect(mockClient.render).toHaveBeenCalledWith({
+      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
       parameters: { width: 42 },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -469,7 +480,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
   });
 
   it('should handle zombie prepareFiles natively with fromSafeAsync (no manual abort handling needed)', async () => {
-    const mockClient = createMockRuntimeClient();
+    const mockClient = createMockAppRuntimeClient();
 
     const providedCadMachine = cadMachine.provide({
       actors: {
@@ -486,7 +497,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
-        kernelOptionsFactory: async () => () => mock<RuntimeClientOptions>(),
+        kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
 

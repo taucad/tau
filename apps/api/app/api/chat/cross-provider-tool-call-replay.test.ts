@@ -6,18 +6,27 @@ import { createCrossProviderContentNormalizerMiddleware } from '#api/chat/middle
 import { messageContentSanitizerMiddleware } from '#api/chat/middleware/message-content-sanitizer.middleware.js';
 import { invokeWrapModelCall } from '#testing/middleware-testing.utils.js';
 
+type ResponsesInputRecord = Record<string, unknown> & {
+  id?: unknown;
+  call_id?: unknown;
+  type?: unknown;
+  role?: unknown;
+  content?: unknown;
+  arguments?: unknown;
+};
+
 /**
  * Runs the real upstream OpenAI Responses converter over normalized messages so
  * assertions target the actual wire payload shape (not regex over content). The
  * converter rejects `input_text` for the assistant role and only honors native
  * items via the `non_standard` passthrough gated on `model_provider === 'openai'`.
  */
-const toResponsesInput = (messages: BaseMessage[]): Array<Record<string, unknown>> =>
+const toResponsesInput = (messages: BaseMessage[]): ResponsesInputRecord[] =>
   convertMessagesToResponsesInput({
     messages,
     zdrEnabled: false,
     model: 'gpt-4.1',
-  }) as Array<Record<string, unknown>>;
+  }) as unknown as ResponsesInputRecord[];
 
 /**
  * The Responses API rejects an `id` (or `call_id`) of `''`: it must be omitted
@@ -29,20 +38,20 @@ const isValidOrAbsentId = (value: unknown): boolean =>
 const assertNoEmptyIds = (items: Array<Record<string, unknown>>): void => {
   for (const [index, item] of items.entries()) {
     expect(
-      isValidOrAbsentId(item.id),
-      `input[${index}].id must be valid or absent, got ${JSON.stringify(item.id)}`,
+      isValidOrAbsentId(item['id']),
+      `input[${index}].id must be valid or absent, got ${JSON.stringify(item['id'])}`,
     ).toBe(true);
     expect(
-      isValidOrAbsentId(item.call_id),
-      `input[${index}].call_id must be valid or absent, got ${JSON.stringify(item.call_id)}`,
+      isValidOrAbsentId(item['call_id']),
+      `input[${index}].call_id must be valid or absent, got ${JSON.stringify(item['call_id'])}`,
     ).toBe(true);
   }
 };
 
 /**
  * Block types accepted by @langchain/google-common's messageContentComplexToPart
- * (dist/utils/gemini.js). Any other type throws CrossProviderContentError before
- * the Vertex API is contacted.
+ * (dist/utils/gemini.js). Provider-native tool blocks are normalized away before
+ * replay reaches Vertex.
  */
 const googlePortableBlockTypes = new Set([
   'text',
@@ -163,22 +172,71 @@ describe('cross-provider tool-call replay (hermetic)', () => {
     assertGooglePortableMessages(normalized);
   });
 
+  it('drops Postgres-confirmed empty-name legacy tool metadata before vertexai replay', async () => {
+    const messages: BaseMessage[] = [
+      new HumanMessage('continue'),
+      new AIMessage({
+        content: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_calls: [],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        invalid_tool_calls: [
+          {
+            id: 'call_malformed_read',
+            name: 'read_file',
+            args: '{"limit":40}{"offset":140}{"targetFile":"main.ts"}{"targetFile":""}',
+            error: 'Malformed args.',
+            type: 'invalid_tool_call',
+          },
+        ],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        additional_kwargs: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible legacy metadata uses snake_case
+          tool_calls: [
+            {
+              id: '218421',
+              type: 'function',
+              function: { name: '', arguments: '{}' },
+            },
+          ],
+        },
+      }),
+      new HumanMessage('continue'),
+    ];
+
+    const normalized = await runModelCallPipeline('vertexai', messages);
+    const assistant = normalized.find(
+      (message): message is AIMessage => AIMessage.isInstance(message) && Array.isArray(message.content),
+    );
+    if (!assistant) {
+      throw new Error('expected sanitized assistant message');
+    }
+
+    expect(assistant.content).toEqual([{ type: 'text', text: '[interrupted]' }]);
+    expect(assistant.tool_calls ?? []).toEqual([]);
+    const legacyMetadata = assistant.additional_kwargs as Record<string, unknown>;
+    expect(legacyMetadata['tool_calls']).toBeUndefined();
+    expect(legacyMetadata['function_call']).toBeUndefined();
+    expect(assistant.invalid_tool_calls).toHaveLength(1);
+    assertGooglePortableMessages(normalized);
+  });
+
   it('heals streamed empty tool_call args for anthropic self-replay', async () => {
     const messages: BaseMessage[] = [
       new HumanMessage('a cube'),
       new AIMessage({
         content: [
-          { type: 'text', text: 'Creating tests.' },
-          { type: 'tool_call', id: toolCallId, name: 'edit_tests', args: '' },
+          { type: 'text', text: 'Inspecting files.' },
+          { type: 'tool_call', id: toolCallId, name: 'list_directory', args: '' },
         ],
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
-        tool_calls: [{ id: toolCallId, name: 'edit_tests', args: toolArgs, type: 'tool_call' }],
+        tool_calls: [{ id: toolCallId, name: 'list_directory', args: toolArgs, type: 'tool_call' }],
       }),
       new ToolMessage({
         content: '{}',
         // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
         tool_call_id: toolCallId,
-        name: 'edit_tests',
+        name: 'list_directory',
       }),
       new HumanMessage('continue'),
     ];
@@ -295,7 +353,7 @@ describe('cross-provider tool-call replay (hermetic)', () => {
       new HumanMessage('a cube with holecutout'),
       new AIMessage({
         content: [
-          { type: 'reasoning', reasoning: 'Plan: inspect the workspace, then read the entry files.' },
+          { type: 'reasoning', reasoning: 'Plan: inspect the workspace, then read the entry paths.' },
           { type: 'text', text: 'Let me inspect the workspace first.' },
           { type: 'tool_call', id: callIds[0], name: 'list_directory', args: { path: '/' } },
           { type: 'tool_call', id: callIds[1], name: 'read_file', args: { targetFile: 'main.ts' } },

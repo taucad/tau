@@ -1,12 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   apiHeaders,
   applyApiHeaders,
   applyDocumentHeaders,
   applySubresourceHeaders,
   documentHeaders,
+  getIsolationStatus,
   subresourceHeaders,
 } from '#cross-origin-isolation/index.js';
+import type { IsolationStatus } from '#cross-origin-isolation/index.js';
 
 describe('canonical header constants', () => {
   it('documentHeaders should contain COOP, COEP require-corp, CORP same-origin', () => {
@@ -78,5 +80,39 @@ describe('applySubresourceHeaders', () => {
     const target = new Headers();
     applySubresourceHeaders(target);
     expect(target.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
+  });
+});
+
+describe('getIsolationStatus', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    [
+      'reports the insecure context first, even when SAB is also missing',
+      { isSecureContext: false, crossOriginIsolated: false, sharedArrayBuffer: undefined },
+      { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-secure-context' },
+    ],
+    [
+      'reports missing COOP/COEP when the context is secure but not isolated',
+      { isSecureContext: true, crossOriginIsolated: false, sharedArrayBuffer: undefined },
+      { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-coep' },
+    ],
+    [
+      'reports the missing constructor when nothing else is gated',
+      { isSecureContext: true, crossOriginIsolated: true, sharedArrayBuffer: undefined },
+      { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-sab-constructor' },
+    ],
+  ] as const)('%s', (_label, globals, expected: IsolationStatus) => {
+    vi.stubGlobal('isSecureContext', globals.isSecureContext);
+    vi.stubGlobal('crossOriginIsolated', globals.crossOriginIsolated);
+    vi.stubGlobal('SharedArrayBuffer', globals.sharedArrayBuffer);
+
+    expect(getIsolationStatus()).toEqual(expected);
+  });
+
+  it('treats the unstubbed Node globals as isolated (absent flags are not a gate)', () => {
+    expect(getIsolationStatus()).toEqual({ crossOriginIsolated: true, sharedArrayBuffer: true });
   });
 });

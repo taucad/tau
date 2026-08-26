@@ -1,6 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { stringToColor } from '#utils/color.utils.js';
-import * as cryptoUtils from '#utils/crypto.utils.js';
 
 describe('stringToColor', () => {
   it('should return a valid OKLCH color string for any input', () => {
@@ -61,16 +60,6 @@ describe('stringToColor', () => {
 
     expect(color).toContain('var(--l-medium)');
     expect(color).toContain('0.2');
-  });
-
-  it('should call hashCode internally', () => {
-    const hashCodeSpy = vi.spyOn(cryptoUtils, 'hashCode');
-    const input = 'test-input';
-
-    stringToColor(input);
-
-    expect(hashCodeSpy).toHaveBeenCalledWith(input);
-    hashCodeSpy.mockRestore();
   });
 
   it('should generate well-distributed colors for similar inputs', () => {

@@ -1,16 +1,17 @@
 import { useCallback, useState } from 'react';
-import { MessageSquare, Camera, AlertCircle, Folder, BookOpen, X } from 'lucide-react';
+import { MessageSquare, Camera, AlertCircle, Folder, Blocks, X, Box } from 'lucide-react';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { cn } from '#utils/ui.utils.js';
 
-export type ChipType = 'file' | 'folder' | 'chat' | 'screenshot' | 'code' | 'skill';
+export type ChipType = 'file' | 'folder' | 'chat' | 'screenshot' | 'code' | 'skill' | 'geometry';
 
 const chipTypeIcons: Record<Exclude<ChipType, 'file'>, React.ComponentType<{ className?: string }>> = {
   folder: Folder,
   chat: MessageSquare,
   screenshot: Camera,
   code: AlertCircle,
-  skill: BookOpen,
+  skill: Blocks,
+  geometry: Box,
 };
 
 const chipColorClass: Record<ChipType, { base: string; hover: string }> = {
@@ -20,6 +21,7 @@ const chipColorClass: Record<ChipType, { base: string; hover: string }> = {
   chat: { base: 'bg-primary/10 text-primary', hover: 'hover:bg-primary/15' },
   screenshot: { base: 'bg-primary/10 text-primary', hover: 'hover:bg-primary/15' },
   code: { base: 'bg-primary/10 text-primary', hover: 'hover:bg-primary/15' },
+  geometry: { base: 'bg-primary/10 text-primary', hover: 'hover:bg-primary/15' },
 };
 
 type ContextChipProps = React.ComponentPropsWithRef<'span'> & {

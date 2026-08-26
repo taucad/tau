@@ -39,7 +39,7 @@ flowchart TB
         EventBus["EventBus + WatchRegistry"]
     end
 
-    Editor -->|"openFile / updateParameters"| Client
+    Editor -->|"render / updateParameters"| Client
     Client -->|"MessagePort (kernel protocol)\n+ Transport abort channel"| RenderLoop
     RenderLoop --> KRW
     KRW --> MW
@@ -54,7 +54,7 @@ flowchart TB
     WatchSub -->|"file changed → invalidate + debounce"| RenderLoop
 ```
 
-**Main Thread** -- display and user input. Houses the editor, Three.js renderer, parameter UI, and progress indicators. The editor writes files to the File Manager Worker through a bridge proxy (`createFileSystemBridge` + `createBridgeProxy<FileManagerProtocol>`). The `RuntimeClient` sends `openFile`/`updateParameters`/`setOptions`/`export` commands to the kernel worker and subscribes to geometry, state, and progress events.
+**Main Thread** -- display and user input. Houses the editor, Three.js renderer, parameter UI, and progress indicators. The editor writes files to the File Manager Worker through a validated bridge proxy (`createFileSystemBridge` + `createFileSystemBridgeProxy`). The `RuntimeClient` sends `render`/`updateParameters`/`setOptions`/`export` commands to the kernel worker and subscribes to geometry, state, and progress events.
 
 **Kernel Worker** -- the autonomous render service. Holds the current file, parameters, watch subscriptions, debounce timers, render generation counter, all caches (file hash, file content, bundle result, kernel selection), and the render loop. Runs middleware and kernel code. Pushes results to the main thread via events.
 
@@ -101,7 +101,7 @@ The protocol is asymmetric: few commands in, many event types out, plus a transp
 
 | Command            | Trigger                          | Worker Behavior                                            |
 | ------------------ | -------------------------------- | ---------------------------------------------------------- |
-| `openFile`         | User opens file                  | Render immediately, discover deps, start watching          |
+| `render`           | User opens file                  | Render immediately, discover deps, start watching          |
 | `updateParameters` | User adjusts slider/input        | Store params, debounce 50ms, re-render                     |
 | `setOptions`       | User changes tessellation/format | Store options, re-render                                   |
 | `export`           | User clicks export               | Export from the last native handle (or self-render inline) |
@@ -120,15 +120,15 @@ The protocol is asymmetric: few commands in, many event types out, plus a transp
 
 ### Transport abort channel (out-of-band)
 
-The active [transport](../api/client) owns the abort channel end-to-end. The runtime client calls `transport.signalAbort('superseded')` **before** posting `openFile`/`updateParameters`/`setOptions`; the transport bumps its abort generation (backed by `SharedArrayBuffer` + `Atomics` on SAB-capable transports, or serialised as a wire-format `'abort'` command on SAB-less transports) and the worker's OC Proxy observes the new generation at the next WASM call boundary. The stale render throws an internal abort marker — never surfaced as a consumer-visible error. The runtime client itself never reads `Atomics` or touches a SAB. See [Worker Model](./worker-model) for details.
+The active [transport](../api/client) owns the abort channel end-to-end. The runtime client calls `transport.signalAbort('superseded')` **before** posting `render`/`updateParameters`/`setOptions`; the transport bumps its abort generation (backed by `SharedArrayBuffer` + `Atomics` on SAB-capable transports, or serialised as a wire-format `'abort'` command on SAB-less transports) and the worker's OC Proxy observes the new generation at the next WASM call boundary. The stale render throws an internal abort marker — never surfaced as a consumer-visible error. The runtime client itself never reads `Atomics` or touches a SAB. See [Worker Model](./worker-model) for details.
 
 ### One-shot Export Mode
 
-For programmatic one-shot pipelines, `client.export(format, input)` self-renders and resolves a single `ExportResult`. The client sends the command, the worker renders, exports the geometry, and returns the bytes. The single-argument form `client.export(format)` reuses the most recent render result — calling it without one throws `NoRenderOutcomeError`.
+For programmatic one-shot pipelines, `client.export(format, input)` self-renders and resolves an `ExportResult` whose success payload is an ordered, non-empty array of files. The client sends the command, the worker renders, exports the geometry, and returns the complete artifact set; companion files such as glTF + BIN or OBJ + MTL are never discarded. The single-argument form `client.export(format)` reuses the most recent render result — calling it without one throws `NoRenderOutcomeError`.
 
 ## Autonomous Data Flow
 
-The primary interaction pattern. After `openFile`, the worker manages its own render lifecycle. When the user edits a file, the editor writes to the filesystem, the kernel worker detects the change via its watch subscription, and re-renders autonomously:
+The primary interaction pattern. After `render`, the worker manages its own render lifecycle. When the user edits a file, the editor writes to the filesystem, the kernel worker detects the change via its watch subscription, and re-renders autonomously:
 
 ```mermaid
 sequenceDiagram
@@ -137,9 +137,9 @@ sequenceDiagram
     participant Worker as Kernel Worker
     participant FSW as File Manager Worker
 
-    Editor->>Client: openFile(path, params)
+    Editor->>Client: render(source, parameters)
     Client->>Client: transport.signalAbort('superseded')
-    Client->>Worker: openFile command
+    Client->>Worker: render command
     Worker->>Worker: render immediately
     Worker-->>Editor: geometryComputed event
     Worker->>Worker: discover deps
@@ -161,7 +161,7 @@ sequenceDiagram
     Worker-->>Editor: geometryComputed event
 ```
 
-The main thread sends `openFile` and `updateParameters`. File edits flow through the filesystem bridge. Everything else -- scheduling, dependency watching, cache invalidation, abort, and result delivery -- happens inside the worker.
+The main thread sends `render` and `updateParameters`. File edits flow through the filesystem bridge. Everything else -- scheduling, dependency watching, cache invalidation, abort, and result delivery -- happens inside the worker.
 
 ## Layer Responsibilities
 
@@ -169,7 +169,7 @@ Within the thread topology, four layers stack vertically. Each layer depends onl
 
 ### Client Layer (RuntimeClient)
 
-The [`RuntimeClient`](../api/client) is the consumer-facing API. `createRuntimeClient(options)` returns a client whose transport handle is materialized during construction (`TransportPlugin.materialize()`); worker spawn and the transport handshake remain lazy until `connect()` or an auto-connect command (`openFile` / `export`). Inline `code:` input runs in an in-memory filesystem. Hosts that own a filesystem supply a wired transport plugin at construction (`transport: webWorkerTransport({ fileSystem: fromChannelFs(...) })`) and call `client.connect()` (no arguments); see [Embedding in a Host](../guides/embedding-in-a-host). `client.on(event, handler)` consumes the event stream, and the active transport owns the abort channel and `postMessage` event delivery — the client itself never touches `SharedArrayBuffer` or `Atomics`. See [Client API](../api/client) for the full reference.
+The [`RuntimeClient`](../api/client) is the consumer-facing API. `createRuntimeClient(options)` returns a client whose transport handle is materialized during construction (`TransportPlugin.materialize()`); worker spawn and the transport handshake remain lazy until `connect()` or an auto-connect command (`render` / `export`). Inline `source.files` input is staged into the transport-owned filesystem. High-level helpers provide that filesystem automatically; raw transports require `fileSystem`. Hosts that own a filesystem supply a wired transport plugin at construction (`transport: webWorkerTransport({ fileSystem: fromFileSystemBridge(openConnection) })`) and call `client.connect()` (no arguments); see [Embedding in a Host](../guides/embedding-in-a-host). For persisted projects, `openConnection` returns a fresh writable rooted bridge. A [runtime path](./path-namespaces) is local to that supplied filesystem, so its leading `/` is not the host operating system's root. `client.on(event, handler)` consumes the event stream, and the active transport owns the abort channel and `postMessage` event delivery — the client itself never touches `SharedArrayBuffer` or `Atomics`. See [Client API](../api/client) for the full reference.
 
 ### Transport Layer (MessagePort)
 
@@ -181,8 +181,8 @@ The framework runs inside the kernel worker. [`KernelRuntimeWorker`](./worker-mo
 
 - **Kernel selection** -- selects the active kernel per file via extension, regex, or bundler-assisted detection. See [Kernel Selection](./kernel-selection).
 - **Middleware chain** -- onion-model wrappers around `createGeometry`, `getParameters`, and `exportGeometry`. See [Middleware Model](./middleware-model).
-- **Bundler** -- lazy-loaded for JS/TS kernels. Bundles entry files and dependencies, executes code.
-- **Autonomous render loop** -- `openFile` renders immediately; file changes debounce at 500ms; parameter changes debounce at 50ms. See [Render Lifecycle](./render-lifecycle).
+- **Bundler** -- lazy-loaded for JS/TS kernels. Bundles entry paths and dependencies, executes code.
+- **Autonomous render loop** -- `render` renders immediately; file changes debounce at 500ms; parameter changes debounce at 50ms. See [Render Lifecycle](./render-lifecycle).
 - **Abort infrastructure** -- Cooperative abort delivered via the transport's abort channel (SAB-backed where available, wire-format elsewhere) for cancelling superseded renders. The framework never owns the SAB itself.
 
 ### Kernel Layer (defineKernel)
@@ -191,9 +191,9 @@ Kernels are plain objects returned by `defineKernel`. They implement `getDepende
 
 ## Key Relationships
 
-- **Editor and FileSystem**: The editor writes files to the File Manager Worker through Bridge A (`createBridgeProxy<FileManagerProtocol>`). This is the write path that triggers autonomous re-renders. The main thread never writes files through the kernel worker.
+- **Editor and FileSystem**: The editor writes files to the File Manager Worker through Bridge A (`createFileSystemBridgeProxy`). This is the write path that triggers autonomous re-renders. The main thread never writes files through the kernel worker.
 - **Client and Worker**: The client creates or receives a transport and passes it to `RuntimeWorkerClient`. The transport carries `RuntimeCommand` and `RuntimeResponse` messages. Custom transports enable testing or non-browser environments.
-- **Worker and FileSystem**: The kernel worker accesses the filesystem through Bridge B. In autonomous mode, it subscribes to file change events scoped to the current file's dependency graph. Watch events flow directly from the File Manager Worker -- they never pass through the main thread.
+- **Worker and FileSystem**: The kernel worker accesses the filesystem through Bridge B. In autonomous mode, it subscribes to file change events scoped to the current file's dependency graph. Watch events flow directly from the File Manager Worker -- they never pass through the main thread. With an inline Node filesystem (`fromNodeFs`) there is no File Manager Worker: the adapter watches the host directories and delivers the same events in-isolate.
 - **Framework and Kernel**: The framework loads kernel modules by URL, initializes them, and invokes their methods. Kernels receive `KernelRuntime` (filesystem, logger, bundler, execute, tracer) and their own context.
 - **Middleware and Kernel**: Middleware sits between the framework and the kernel. It has no direct reference to the kernel; it calls `handler(input)` to continue the chain.
 
@@ -212,4 +212,5 @@ Kernels are plain objects returned by `defineKernel`. They implement `getDepende
 - [API: Client](../api/client) -- `createRuntimeClient` and `RuntimeClient` types
 - [API: Transport](../api/client) -- `RuntimeTransport` and `createWorkerTransport`
 - [Set Up the Filesystem](../guides/filesystem-setup) -- Connecting a filesystem to the worker
+- [Path Namespaces](./path-namespaces) -- How consumer, plugin, and host paths relate
 - [Quick Start](../getting-started/quick-start) -- End-to-end setup

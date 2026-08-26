@@ -49,10 +49,9 @@ export type ChatPersistenceMachineInput = {
  * `chat.sendMessage` / `chat.regenerate` call so the wire body always carries
  * an `agent` block — never the cookie-bleed-prone per-message metadata path.
  *
- * Optional because the legacy hydration-driven `regenerate` (auto-fired on
- * pending-tail load) still runs before the chat-client mounts; the
- * `regenerateTail` chat-client verb is what eventually replaces that
- * untyped path (see t17).
+ * Optional because startup-request hydration can still run before the
+ * chat-client mounts; `ChatSessionStore` falls back to the latest published
+ * agent body when no explicit body is attached.
  *
  * @public
  */
@@ -207,7 +206,7 @@ type ChatPersistenceMachineEmitted =
   /**
    * User-initiated stop that landed before any assistant content streamed
    * in. The store listener lifts `userMessage` back into the composer draft
-   * (via `draftMachine.loadDraftFromMessage`) and replaces `chat.messages`
+   * (via `draftMachine.loadDraftFromMessageTransient`) and replaces `chat.messages`
    * with `truncatedMessages` so the cancelled turn disappears from the
    * transcript entirely. `chat-history.tsx` also subscribes to refocus the
    * composer in the same frame.
@@ -249,7 +248,7 @@ function hasNoAssistantContent(messages: readonly MyUIMessage[]): boolean {
  * Build the `restoreCancelledDraft` emit payload from the in-flight
  * messages array. The trailing zero-part assistant placeholder (if any)
  * and the trailing user message are sliced off; the user message itself
- * is forwarded so the listener can hand it to `draftMachine.loadDraftFromMessage`.
+ * is forwarded so the listener can hand it to `draftMachine.loadDraftFromMessageTransient`.
  *
  * Caller guarantees `hasNoAssistantContent(messages) === true`, so the
  * walk lands on a user message within at most two steps from the tail.

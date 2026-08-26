@@ -158,23 +158,6 @@ type BoundaryEdgeResult = {
   interiorEdges: Array<[number, number]>;
 };
 
-function getRaycastIntersection(
-  mesh: THREE.Mesh,
-  raycaster: THREE.Raycaster,
-): THREE.Intersection<THREE.Mesh> | undefined {
-  const intersects = raycaster.intersectObject(mesh, true);
-  if (intersects.length === 0) {
-    return undefined;
-  }
-
-  const intersection = intersects[0];
-  if (!intersection?.face) {
-    return undefined;
-  }
-
-  return intersection as THREE.Intersection<THREE.Mesh>;
-}
-
 function buildCanonicalVertexIndices(worldPositions: THREE.Vector3[]): number[] {
   const positionKey = (v: THREE.Vector3): string => `${v.x.toFixed(5)},${v.y.toFixed(5)},${v.z.toFixed(5)}`;
   const keyToCanonical = new Map<string, number>();
@@ -423,33 +406,30 @@ function computeFaceCenter(parameters: FaceCenterParameters): THREE.Vector3 {
   return center;
 }
 
-export function detectSnapPoints(mesh: THREE.Mesh, raycaster: THREE.Raycaster): SnapPoint[] {
-  // 1. Get raycast intersection
-  const intersection = getRaycastIntersection(mesh, raycaster);
-  if (!intersection) {
+export function detectSnapPoints(mesh: THREE.Mesh, intersection: THREE.Intersection<THREE.Mesh>): SnapPoint[] {
+  if (!intersection.face) {
     return [];
   }
 
-  // 2. Extract geometry data
-  const { object } = intersection;
-  const { geometry } = object;
+  // 1. Extract geometry data
+  const { geometry } = mesh;
   const triangles = getTriangleIndexArray(geometry);
-  const worldPositions = computeWorldPositions(object, geometry);
+  const worldPositions = computeWorldPositions(mesh, geometry);
 
-  // 3. Build canonical vertex indices to merge coincident vertices
+  // 2. Build canonical vertex indices to merge coincident vertices
   const canonicalIndex = buildCanonicalVertexIndices(worldPositions);
 
-  // 4. Find the hit triangle
-  const triIndex = findHitTriangleIndex(intersection.face!, triangles);
+  // 3. Find the hit triangle
+  const triIndex = findHitTriangleIndex(intersection.face, triangles);
 
-  // 5. Compute reference plane from hit triangle
+  // 4. Compute reference plane from hit triangle
   const {
     normal: referenceNormal,
     constant: referenceConstant,
     point: referencePoint,
   } = computeReferencePlane(triangles[triIndex]!, worldPositions);
 
-  // 6. Collect contiguous coplanar face region
+  // 5. Collect contiguous coplanar face region
   const faceTriangleIndices = collectCoplanarContiguousFace({
     hitTriIndex: triIndex,
     triangles,
@@ -459,10 +439,10 @@ export function detectSnapPoints(mesh: THREE.Mesh, raycaster: THREE.Raycaster): 
     canonicalIndex,
   });
 
-  // 7. Gather boundary edges
+  // 6. Gather boundary edges
   const { boundaryEdges } = gatherBoundaryEdges(faceTriangleIndices, triangles, canonicalIndex);
 
-  // 8. Try circular face detection first
+  // 7. Try circular face detection first
   const maybeCircle = tryDetectCircularFace({
     boundaryEdges,
     worldPositions,
@@ -473,10 +453,10 @@ export function detectSnapPoints(mesh: THREE.Mesh, raycaster: THREE.Raycaster): 
     return maybeCircle;
   }
 
-  // 9. Collect boundary snap points
+  // 8. Collect boundary snap points
   const { snapPoints, addPoint } = collectBoundarySnapPoints(boundaryEdges, worldPositions);
 
-  // 10. Compute and add face center
+  // 9. Compute and add face center
   const { ordered, boundaryVertexIndexSet } = orderBoundaryVertices(boundaryEdges);
   const center = computeFaceCenter({
     ordered,

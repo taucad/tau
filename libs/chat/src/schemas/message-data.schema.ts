@@ -24,6 +24,49 @@ export const usageDataSchema = z.object({
 /** @public */
 export type UsageData = z.infer<typeof usageDataSchema>;
 
+/** @public */
+export const contextCompactionStatusSchema = z.enum(['skipped', 'compacted', 'failed', 'overflow_retry_succeeded']);
+
+/** @public */
+export type ContextCompactionStatus = z.infer<typeof contextCompactionStatusSchema>;
+
+/** @public */
+export const contextBudgetKindSchema = z.enum(['estimated']);
+
+/** @public */
+export type ContextBudgetKind = z.infer<typeof contextBudgetKindSchema>;
+
+/** @public */
+export const contextCompactionTriggerReasonSchema = z.enum(['none', 'estimate', 'previous_usage', 'overflow']);
+
+/** @public */
+export type ContextCompactionTriggerReason = z.infer<typeof contextCompactionTriggerReasonSchema>;
+
+/** @public */
+export const contextCompactionScheduleStatusSchema = z.enum(['none', 'scheduled_next_turn']);
+
+/** @public */
+export type ContextCompactionScheduleStatus = z.infer<typeof contextCompactionScheduleStatusSchema>;
+
+/** @public */
+export const contextCompactionFailureKindSchema = z.enum([
+  'morph_transport_error',
+  'morph_http_error',
+  'morph_contract_error',
+  'transcript_commit_failed',
+  'context_overflow_retry_failed',
+  'unexpected_error',
+]);
+
+/** @public */
+export type ContextCompactionFailureKind = z.infer<typeof contextCompactionFailureKindSchema>;
+
+/** @public */
+export const contextCompactionFailureDispositionSchema = z.enum(['blocked_before_provider']);
+
+/** @public */
+export type ContextCompactionFailureDisposition = z.infer<typeof contextCompactionFailureDispositionSchema>;
+
 /**
  * Schema for context compaction event data.
  * Emitted when the compaction middleware compresses conversation history.
@@ -32,11 +75,23 @@ export type UsageData = z.infer<typeof usageDataSchema>;
 export const contextCompactionDataSchema = z.object({
   type: z.literal('context-compaction'),
   id: z.string(),
+  status: contextCompactionStatusSchema.optional(),
+  triggerReason: contextCompactionTriggerReasonSchema.optional(),
+  budgetKind: contextBudgetKindSchema.optional(),
+  estimatedInputTokens: z.number().optional(),
+  contextWindow: z.number().optional(),
+  triggerThreshold: z.number().optional(),
+  compactionId: z.string().optional(),
   tokensBeforeCompaction: z.number(),
   tokensAfterCompaction: z.number(),
   compressionRatio: z.number(),
   messagesEvicted: z.number(),
   transcriptFilePath: z.string().nullable(),
+  compactionFailureKind: contextCompactionFailureKindSchema.optional(),
+  failureDisposition: contextCompactionFailureDispositionSchema.optional(),
+  debugId: z.string().optional(),
+  providerNativeReplayMetadataPresent: z.boolean().optional(),
+  missingFunctionCallSignatureCount: z.number().optional(),
 });
 
 /** @public */
@@ -54,6 +109,14 @@ export const contextUsageDataSchema = z.object({
   contextWindow: z.number(),
   percentUsed: z.number(),
   modelId: z.string(),
+  budgetKind: contextBudgetKindSchema.optional(),
+  triggerReason: contextCompactionTriggerReasonSchema.optional(),
+  triggerThreshold: z.number().optional(),
+  lastCompactionId: z.string().optional(),
+  lastCompactionStatus: contextCompactionStatusSchema.optional(),
+  compactionScheduleStatus: contextCompactionScheduleStatusSchema.optional(),
+  scheduledTriggerReason: contextCompactionTriggerReasonSchema.optional(),
+  scheduledInputTokens: z.number().optional(),
 });
 
 /** @public */

@@ -63,3 +63,27 @@ export const User = createParamDecorator(
     return user;
   },
 );
+
+/**
+ * Like {@link User}, but returns `undefined` when there is no authenticated session.
+ * Use only on routes marked {@link OptionalAuth}.
+ */
+export function readOptionalUser<K extends keyof AuthUser>(
+  property: K | undefined,
+  context: ExecutionContext,
+): AuthUser | AuthUser[K] | undefined {
+  const request = context.switchToHttp().getRequest<FastifyRequest & { user?: AuthUser }>();
+  const user = request.user ?? undefined;
+
+  if (!user) {
+    return undefined;
+  }
+
+  if (property) {
+    return user[property];
+  }
+
+  return user;
+}
+
+export const OptionalUser = createParamDecorator(readOptionalUser);

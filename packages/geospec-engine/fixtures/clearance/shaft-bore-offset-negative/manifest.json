@@ -1,0 +1,72 @@
+{
+  "family": "clearance",
+  "fixture": "clearance.shaft-bore-offset-negative",
+  "generator": {
+    "script": "scripts/clearance/shaft-bore/main.ts",
+    "parameters": {
+      "boreRadius": 25.06,
+      "axisOffset": 0.08
+    }
+  },
+  "tolerances": {
+    "clearanceMin": 0.02,
+    "clearanceMax": 0.06,
+    "measurement": 0.001
+  },
+  "selectors": [
+    {
+      "selector": "housing.bore",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 25.06
+      }
+    },
+    {
+      "selector": "shaft.journal",
+      "status": "resolved",
+      "entityCount": 1,
+      "facts": {
+        "radius": 25,
+        "axisOrigin": [0.08, 0, 0]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "coaxial",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "tolerance": 0.02
+      },
+      "expected": {
+        "verdict": "fail",
+        "final": {
+          "method": "analytic",
+          "measured": {
+            "radialOffset": 0.08
+          }
+        },
+        "mentions": ["shaft.journal"]
+      }
+    },
+    {
+      "kind": "clearance",
+      "subject": "shaft.journal",
+      "target": "housing.bore",
+      "options": {
+        "min": 0.02,
+        "max": 0.06,
+        "tolerance": 0.001
+      },
+      "expected": {
+        "verdict": "fail",
+        "broadPhase": {
+          "candidate": true
+        }
+      }
+    }
+  ],
+  "notes": "Nominal radius difference is plausible, but the off-center shaft interferes locally (25 + 0.08 > 25.06): extrema distance collapses to 0."
+}

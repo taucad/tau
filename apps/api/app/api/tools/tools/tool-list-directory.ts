@@ -15,7 +15,7 @@ Use this tool to:
 - Find files in specific directories
 - Understand the organization of the codebase
 
-The path should be relative to the project root. Use an empty string "" to list the root directory.`,
+Omit the path to list the project root.`,
   schema: listDirectoryInputSchema,
 } as const;
 

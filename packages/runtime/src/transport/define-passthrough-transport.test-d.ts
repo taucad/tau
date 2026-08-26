@@ -7,18 +7,15 @@ import { assertType, describe, it } from 'vitest';
 import { z } from 'zod';
 
 import { definePassthroughTransport } from '#transport/define-runtime-transport.js';
-import type {
-  RuntimeTransportClient,
-  TransportClientReady,
-  TransportDescriptor,
-} from '#transport/runtime-transport.types.js';
+import type { RuntimeTransportClient, TransportClientReady } from '#transport/runtime-transport.types.js';
+import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { TransportPluginId } from '#transport/transport-projections.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 
 const stubDescriptor = <Id extends string>(id: Id): TransportDescriptor<Id> => ({
   id,
   wire: 'in-process',
-  memory: { geometryDelivery: 'copy', fileDelivery: 'copy', abortSignal: 'wire-notify' },
+  memory: { geometryDelivery: 'copy', abortSignal: 'wire-notify' },
   fileSystem: 'unbound',
 });
 
@@ -36,12 +33,15 @@ const stubClient = <Id extends string>(
     async initialize() {
       throw new Error('stub');
     },
-    abort() {},
+    reservePreview() {
+      return {};
+    },
+    renderTimeoutRecovery: { kind: 'unsupported' },
     async resolveGeometry() {
       throw new Error('stub');
     },
     async close() {},
-    closed: Promise.resolve(),
+    closed: Promise.resolve({ cause: 'requested' }),
   }) as RuntimeTransportClient<RuntimeProtocol, Readonly<Record<string, unknown>>, Id>;
 
 describe('definePassthroughTransport — TypeScript surface', () => {

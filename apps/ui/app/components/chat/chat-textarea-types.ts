@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
+import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
@@ -7,6 +8,12 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { toast } from '#components/ui/sonner.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
+import {
+  getClipboardImageFiles,
+  handleClipboardImagePaste,
+  readFileAsDataUrl,
+} from '#components/chat/chat-paste-handler.js';
+import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 
 /**
  * Payload the chat textarea hands to its host's `onSubmit` callback.
@@ -47,19 +54,19 @@ export const focusTrapAttribute = 'data-chat-textarea-focustrap';
 
 /**
  * Pure helper: parses a `tauViewerPanelDragMime` payload and returns the
- * `entryFile` if the payload is well-formed, else `undefined`.
+ * `entryPath` if the payload is well-formed, else `undefined`.
  */
-const parseViewerEntryFile = (raw: string): string | undefined => {
+const parseViewerEntryPath = (raw: string): string | undefined => {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (
       typeof parsed === 'object' &&
       parsed !== null &&
-      'entryFile' in parsed &&
-      typeof parsed.entryFile === 'string' &&
-      parsed.entryFile !== ''
+      'entryPath' in parsed &&
+      typeof parsed.entryPath === 'string' &&
+      parsed.entryPath !== ''
     ) {
-      return parsed.entryFile;
+      return parsed.entryPath;
     }
   } catch {
     // Malformed payload — caller should fall through to the next handler.
@@ -110,30 +117,6 @@ const parseFileDragPaths = (raw: string): string[] => {
   return [];
 };
 
-/**
- * Reads a file as a data URL using FileReader.
- * Returns a Promise that resolves with the data URL string.
- */
-const readFileAsDataUrl = async (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener('load', (event) => {
-      const result = event.target?.result;
-      if (typeof result === 'string' && result !== '') {
-        resolve(result);
-      } else {
-        reject(new Error('Invalid file read result'));
-      }
-    });
-
-    reader.addEventListener('error', () => {
-      reject(new Error('Failed to read file'));
-    });
-
-    reader.readAsDataURL(file);
-  });
-};
-
 export type ChatTextareaHandle = {
   focus: () => void;
 };
@@ -167,7 +150,7 @@ export type ChatTextareaLogicOptions = Pick<
   'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode'
 > & {
   /** Called when a viewer panel tab is dropped — the host should screenshot the matching pane. */
-  readonly onViewerScreenshotDrop?: (entryFile: string) => void;
+  readonly onViewerScreenshotDrop?: (entryPath: string) => void;
   /** Called when an editor tab or file-tree row is dropped — the host should insert file-link chips. */
   readonly onAddContextChips?: (paths: string[]) => void;
 };
@@ -199,6 +182,7 @@ export function useChatTextareaLogic({
   selectedToolChoice: ToolSelection;
   status: string;
   selectedModel: ResolvedModel;
+  imageInputSupported: boolean;
   formattedCancelKeyCombination: string;
 
   // Refs
@@ -216,6 +200,7 @@ export function useChatTextareaLogic({
   handleDragOver: (event: React.DragEvent) => void;
   handleDragLeave: () => void;
   handleDrop: (event: React.DragEvent) => Promise<void>;
+  handlePaste: (event: ClipboardPasteEvent) => boolean;
   handleFileSelect: () => void;
   handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleTextChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
@@ -223,6 +208,7 @@ export function useChatTextareaLogic({
   handleContextImageAdd: (image: string) => void;
   handleAddText: (text: string) => void;
   handleAddImage: (image: string) => void;
+  rejectUnsupportedImageInput: () => void;
   handleTextareaBlur: () => void;
   handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   focusInput: () => void;
@@ -253,6 +239,7 @@ export function useChatTextareaLogic({
     status,
     stop,
   } = useChatComposer();
+  const imageInputSupported = modelSupportsInput(selectedModel.model?.support, 'image');
 
   // Read draft state from machine based on mode
   const inputText = useDraftSelector((state) => (mode === 'main' ? state.draftText : state.editDraftText));
@@ -283,15 +270,26 @@ export function useChatTextareaLogic({
     [mode, setDraftText, setEditDraftText],
   );
 
+  const rejectUnsupportedImageInput = useCallback((): void => {
+    toast.error('This model cannot read images', {
+      description: 'Switch to a vision-capable model to attach images, or continue with text and GeoSpec.',
+    });
+  }, []);
+
   const addImage = useCallback(
     (image: string) => {
+      if (!imageInputSupported) {
+        rejectUnsupportedImageInput();
+        return;
+      }
+
       if (mode === 'main') {
         addDraftImage(image);
       } else {
         addEditDraftImage(image);
       }
     },
-    [mode, addDraftImage, addEditDraftImage],
+    [mode, addDraftImage, addEditDraftImage, imageInputSupported, rejectUnsupportedImageInput],
   );
 
   const removeImage = useCallback(
@@ -412,9 +410,14 @@ export function useChatTextareaLogic({
 
       // 1. Viewer panel drop → request a screenshot of the matching pane
       const viewerData = dataTransfer.getData(tauViewerPanelDragMime);
-      const viewerEntryFile = viewerData ? parseViewerEntryFile(viewerData) : undefined;
-      if (viewerEntryFile !== undefined) {
-        onViewerScreenshotDrop?.(viewerEntryFile);
+      const viewerEntryPath = viewerData ? parseViewerEntryPath(viewerData) : undefined;
+      if (viewerEntryPath !== undefined) {
+        if (!imageInputSupported) {
+          rejectUnsupportedImageInput();
+          return;
+        }
+
+        onViewerScreenshotDrop?.(viewerEntryPath);
         return;
       }
 
@@ -439,6 +442,12 @@ export function useChatTextareaLogic({
       // `imageProcessing` chokepoint inside `draftMachine`; the only failure
       // class we still own here is the file-read step itself.
       if (dataTransfer.files.length > 0) {
+        const hasImageFile = [...dataTransfer.files].some((file) => file.type.startsWith('image/'));
+        if (hasImageFile && !imageInputSupported) {
+          rejectUnsupportedImageInput();
+          return;
+        }
+
         for (const file of dataTransfer.files) {
           if (file.type.startsWith('image/')) {
             try {
@@ -454,16 +463,27 @@ export function useChatTextareaLogic({
         }
       }
     },
-    [addImage, onViewerScreenshotDrop, onAddContextChips],
+    [addImage, imageInputSupported, onViewerScreenshotDrop, onAddContextChips, rejectUnsupportedImageInput],
   );
 
   const handleFileSelect = useCallback((): void => {
+    if (!imageInputSupported) {
+      rejectUnsupportedImageInput();
+      return;
+    }
+
     fileInputReference.current?.click();
-  }, []);
+  }, [imageInputSupported, rejectUnsupportedImageInput]);
 
   const handleFileChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
       if (event.target.files && event.target.files.length > 0) {
+        if (!imageInputSupported) {
+          rejectUnsupportedImageInput();
+          event.target.value = '';
+          return;
+        }
+
         for (const file of event.target.files) {
           if (file.type.startsWith('image/')) {
             try {
@@ -480,7 +500,7 @@ export function useChatTextareaLogic({
         event.target.value = '';
       }
     },
-    [addImage],
+    [addImage, imageInputSupported, rejectUnsupportedImageInput],
   );
 
   const focusInput = useCallback((): void => {
@@ -495,41 +515,23 @@ export function useChatTextareaLogic({
   // Expose focus method via ref
   useImperativeHandle(ref, () => ({ focus: focusInput }), [focusInput]);
 
-  /**
-   * Handle paste event to add images to the chat
-   */
   const handlePaste = useCallback(
-    async (event: ClipboardEvent): Promise<void> => {
-      // Check if the textarea is the active element or its ancestor contains focus
-      const isTextareaFocused =
-        document.activeElement === textareaReference.current ||
-        textareaReference.current?.contains(document.activeElement);
-
-      if (!isTextareaFocused) {
-        return;
+    (event: ClipboardPasteEvent): boolean => {
+      if (!imageInputSupported && getClipboardImageFiles(event.clipboardData).length > 0) {
+        event.preventDefault();
+        rejectUnsupportedImageInput();
+        return true;
       }
 
-      const items = event.clipboardData?.items;
-      if (!items) {
-        return;
-      }
-
-      for (const item of items) {
-        if (item.type.startsWith('image/')) {
-          const file = item.getAsFile();
-          if (file) {
-            try {
-              // oxlint-disable-next-line no-await-in-loop -- reading files sequentially
-              const dataUrl = await readFileAsDataUrl(file);
-              addImage(dataUrl);
-            } catch {
-              toast.error('Failed to read image');
-            }
-          }
-        }
-      }
+      return handleClipboardImagePaste({
+        event,
+        onImage: addImage,
+        onReadError: () => {
+          toast.error('Failed to read image');
+        },
+      });
     },
-    [addImage],
+    [addImage, imageInputSupported, rejectUnsupportedImageInput],
   );
 
   const handleAddText = useCallback(
@@ -659,16 +661,6 @@ export function useChatTextareaLogic({
   }, [enableAutoFocus, focusInput]);
 
   useEffect(() => {
-    if (!textareaReference.current) {
-      return;
-    }
-    document.addEventListener('paste', handlePaste);
-    return () => {
-      document.removeEventListener('paste', handlePaste);
-    };
-  }, [handlePaste]);
-
-  useEffect(() => {
     // Handle clicking outside the context menu to close it
     const handleClickOutside = (event: MouseEvent): void => {
       if (showContextMenu && textareaReference.current && !textareaReference.current.contains(event.target as Node)) {
@@ -734,6 +726,7 @@ export function useChatTextareaLogic({
     selectedToolChoice,
     status,
     selectedModel,
+    imageInputSupported,
     formattedCancelKeyCombination,
 
     // Refs
@@ -748,6 +741,7 @@ export function useChatTextareaLogic({
     handleDragOver,
     handleDragLeave,
     handleDrop,
+    handlePaste,
     handleFileSelect,
     handleFileChange,
     handleTextChange,
@@ -755,6 +749,7 @@ export function useChatTextareaLogic({
     handleContextImageAdd,
     handleAddText,
     handleAddImage,
+    rejectUnsupportedImageInput,
     handleTextareaBlur,
     handlePointerDown,
     focusInput,

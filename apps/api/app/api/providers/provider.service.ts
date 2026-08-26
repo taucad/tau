@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+// oxlint-disable-next-line typescript/consistent-type-imports -- Nest DI needs runtime constructor metadata.
 import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
 import type { ChatOpenAIFields } from '@langchain/openai';
@@ -8,11 +9,19 @@ import { ChatOllama } from '@langchain/ollama';
 import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
 import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
-import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ChatCerebras } from '@langchain/cerebras';
 import type { ChatCerebrasInput } from '@langchain/cerebras';
 import type { Environment } from '#config/environment.config.ts';
 import type { ProviderId, Provider } from '#api/providers/provider.schema.js';
+import type { ProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
+import { createGoogleProviderDiagnosticsFetch } from '#api/chat/utils/provider-diagnostics.js';
+import { TauChatXaiResponses } from '#api/providers/xai-responses.adapter.js';
+import type { TauChatXaiResponsesInput } from '#api/providers/xai-responses.adapter.js';
+import { TauChatKimiCompletions } from '#api/providers/kimi-completions.adapter.js';
+import type { TauChatKimiCompletionsInput } from '#api/providers/kimi-completions.adapter.js';
+import { TAU_REPLAY_MODEL_PROVIDER } from '#api/tau-replay/tau-replay.contract.js';
+import type { TauReplayModelProvider } from '#api/tau-replay/tau-replay.contract.js';
 
 // Type for mapping provider IDs to their option types
 type ProviderOptionsMap = {
@@ -22,26 +31,52 @@ type ProviderOptionsMap = {
   vertexai: ChatVertexAIInput & { model: string };
   cerebras: ChatCerebrasInput;
   together: ChatOpenAIFields;
+  morph: ChatOpenAIFields & {
+    model: string;
+    configuration?: Provider['configuration'];
+    streaming?: boolean;
+    reasoning?: {
+      effort?: 'low' | 'medium' | 'high';
+      summary?: 'auto' | 'concise' | 'detailed';
+    };
+  };
+  xai: TauChatXaiResponsesInput;
+  moonshot: Omit<TauChatKimiCompletionsInput, 'modelProvider'> & { configuration?: Provider['configuration'] };
+  tau: { model: string; configuration?: Provider['configuration']; streaming?: boolean; temperature?: number };
+};
+
+type ProviderRuntimeOptions = {
+  diagnosticsContext?: ProviderDiagnosticsContext;
 };
 
 // Enhanced type that includes the createClass method
 type ProviderType<T extends ProviderId> = Provider & {
-  createClass: (options: ProviderOptionsMap[T]) => BaseChatModel;
+  createClass: (options: ProviderOptionsMap[T], runtimeOptions?: ProviderRuntimeOptions) => BaseChatModel;
 };
 
+// oxlint-disable-next-line new-cap -- NestJS decorators are invoked by decorator syntax.
 @Injectable()
 export class ProviderService {
-  public constructor(private readonly configService: ConfigService<Environment, true>) {}
+  public constructor(
+    private readonly configService: ConfigService<Environment, true>,
+    // Present only when TauReplayModule is loaded (TAU_TEST_MODE); undefined in prod.
+    // oxlint-disable-next-line new-cap -- NestJS param decorators are invoked by decorator syntax.
+    @Optional() @Inject(TAU_REPLAY_MODEL_PROVIDER) private readonly tauReplay?: TauReplayModelProvider,
+  ) {}
 
   public getProvider(providerId: ProviderId): Provider {
     const providers = this.getProviders();
     return providers[providerId];
   }
 
-  public createModelClass<T extends ProviderId>(providerId: T, options: ProviderOptionsMap[T]): BaseChatModel {
+  public createModelClass<T extends ProviderId>(
+    providerId: T,
+    options: ProviderOptionsMap[T],
+    runtimeOptions?: ProviderRuntimeOptions,
+  ): BaseChatModel {
     const providers = this.getProviders();
     const provider = providers[providerId];
-    return provider.createClass(options);
+    return provider.createClass(options, runtimeOptions);
   }
 
   private getProviders(): {
@@ -109,8 +144,14 @@ export class ProviderService {
         },
         inputTokensIncludesCacheReadTokens: true,
         inputTokensIncludesCacheWriteTokens: false,
-        createClass(options) {
+        createClass(options, runtimeOptions) {
           const credentials = configService.get('GOOGLE_VERTEX_AI_CREDENTIALS', { infer: true });
+          const diagnosticsFetch = runtimeOptions?.diagnosticsContext
+            ? createGoogleProviderDiagnosticsFetch({
+                baseFetch: globalThis.fetch,
+                context: runtimeOptions.diagnosticsContext,
+              })
+            : globalThis.fetch;
 
           return new ChatVertexAI({
             ...options,
@@ -122,6 +163,13 @@ export class ProviderService {
             authOptions: {
               credentials,
               projectId: credentials.project_id,
+              clientOptions: {
+                transporterOptions: {
+                  // Gaxios defaults to node-fetch in Node; node-fetch emits an unhandled
+                  // request-body Readable error when aborted before/during a POST.
+                  fetchImplementation: diagnosticsFetch,
+                },
+              },
             },
           });
         },
@@ -143,6 +191,30 @@ export class ProviderService {
           apiKey: configService.get('TOGETHER_API_KEY', { infer: true }),
           baseURL: 'https://api.together.xyz/v1',
         },
+        inputTokensIncludesCacheReadTokens: true,
+        inputTokensIncludesCacheWriteTokens: false,
+        createClass: (options) => {
+          if (options.model === 'moonshotai/Kimi-K3') {
+            return new TauChatKimiCompletions({
+              ...options,
+              modelProvider: 'together',
+              outputVersion: 'v1',
+            });
+          }
+
+          return new ChatOpenAI({
+            outputVersion: 'v1',
+            ...options,
+          });
+        },
+      },
+      morph: {
+        provider: 'morph',
+        otelProviderName: 'morph',
+        configuration: {
+          apiKey: configService.get('MORPH_API_KEY', { infer: true }),
+          baseURL: 'https://api.morphllm.com/v1',
+        },
         inputTokensIncludesCacheReadTokens: false,
         inputTokensIncludesCacheWriteTokens: false,
         createClass: (options) =>
@@ -150,6 +222,58 @@ export class ProviderService {
             outputVersion: 'v1',
             ...options,
           }),
+      },
+      xai: {
+        provider: 'xai',
+        otelProviderName: 'xai',
+        configuration: {
+          apiKey: configService.get('XAI_API_KEY', { infer: true }),
+          baseURL: 'https://api.x.ai/v1',
+        },
+        inputTokensIncludesCacheReadTokens: true,
+        inputTokensIncludesCacheWriteTokens: false,
+        createClass: (options, runtimeOptions) =>
+          new TauChatXaiResponses({
+            apiKey: configService.get('XAI_API_KEY', { infer: true }),
+            baseURL: 'https://api.x.ai/v1',
+            conversationId: runtimeOptions?.diagnosticsContext?.chatId,
+            ...options,
+          }),
+      },
+      moonshot: {
+        provider: 'moonshot',
+        otelProviderName: 'moonshot',
+        configuration: {
+          apiKey: configService.get('MOONSHOT_API_KEY', { infer: true }),
+          baseURL: 'https://api.moonshot.ai/v1',
+        },
+        inputTokensIncludesCacheReadTokens: true,
+        inputTokensIncludesCacheWriteTokens: false,
+        createClass: (options, runtimeOptions) =>
+          new TauChatKimiCompletions({
+            ...options,
+            modelProvider: 'moonshot',
+            configuration: {
+              apiKey: configService.get('MOONSHOT_API_KEY', { infer: true }),
+              baseURL: 'https://api.moonshot.ai/v1',
+            },
+            promptCacheKey: runtimeOptions?.diagnosticsContext?.chatId,
+            outputVersion: 'v1',
+          }),
+      },
+      tau: {
+        provider: 'tau',
+        otelProviderName: 'tau',
+        configuration: {},
+        inputTokensIncludesCacheReadTokens: false,
+        inputTokensIncludesCacheWriteTokens: false,
+        // Delegates to the replay module; only reachable when TAU_TEST_MODE loaded it.
+        createClass: (options) => {
+          if (this.tauReplay === undefined) {
+            throw new Error('The "tau" replay provider is unavailable (requires TAU_TEST_MODE).');
+          }
+          return this.tauReplay.createModel(options.model);
+        },
       },
     };
   }

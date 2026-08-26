@@ -8,7 +8,7 @@ const HeroViewerLazy = lazy(async () => {
 
 /**
  * Viewport-gated wrapper for HeroViewer.
- * Defers loading of Three.js, the runtime, and the OpenSCAD kernel
+ * Defers loading of Three.js, the runtime, and the OpenRSCAD kernel
  * until the section scrolls into view.
  */
 export function LazyHeroViewer(): React.JSX.Element {

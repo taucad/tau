@@ -1,0 +1,34 @@
+{
+  "family": "selector",
+  "fixture": "selector.bolt-circle-drift-negative",
+  "generator": {
+    "script": "scripts/selector/bolt-circle/main.ts",
+    "parameters": {
+      "holeCount": 7
+    }
+  },
+  "selectors": [
+    {
+      "selector": {
+        "kind": "group",
+        "name": "flange.boltHole",
+        "expect": {
+          "exactly": 8
+        }
+      },
+      "status": "unmatched",
+      "mentions": ["flange.boltHole[8]", "7 of 8"]
+    },
+    {
+      "selector": "flange.boltHole[*]",
+      "status": "resolved",
+      "entityCount": 7
+    },
+    {
+      "selector": "flange.boltHole[7]",
+      "status": "resolved",
+      "entityCount": 1
+    }
+  ],
+  "notes": "Master acceptance case 7: the artifact authors boltHole[1..7] (the last station is skipped, never redistributed); resolving with expect exactly 8 must fail naming the missing member and its expected facts."
+}

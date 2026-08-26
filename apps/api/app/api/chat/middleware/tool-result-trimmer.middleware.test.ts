@@ -1,17 +1,24 @@
 import { ToolMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { toolName } from '@taucad/chat/constants';
-import type { TestModelOutput, TestFailure } from '@taucad/testing';
-import type { CreateFileOutput, EditFileOutput, GetKernelResultOutput, ScreenshotOutput } from '@taucad/chat';
+import type { TestModelOutput, TestFailure } from '@taucad/chat/schemas/tools/test-model';
+import type {
+  CreateFileOutput,
+  DeleteFileOutput,
+  EditFileOutput,
+  GetKernelResultOutput,
+  ScreenshotOutput,
+  ScreenshotView,
+} from '@taucad/chat';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { toolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
+import { createToolResultTrimmerMiddleware } from '#api/chat/middleware/tool-result-trimmer.middleware.js';
 
 const defaultTargetFile = 'main.scad';
 
 /**
  * Creates a mock TestModelOutput with the given failures.
  *
- * Per the multi-file test.json migration every failure/pass carries a
+ * Per the multi-file GeoSpec runner contract every failure/pass carries a
  * `targetFile`. Tests pass already-tagged failures in; this helper tags any
  * passes with the same default file so fixtures stay terse.
  */
@@ -25,7 +32,6 @@ function createTestModelOutput(failures: TestFailure[], passed: number): TestMod
     })),
     passed,
     total: failures.length + passed,
-    geometryArtifactPaths: { [defaultTargetFile]: `.tau/artifacts/call_default__${defaultTargetFile}.glb` },
   };
 }
 
@@ -89,10 +95,15 @@ function parseTestModelOutput(message: ToolMessage): TestModelOutput {
 
 // Helper type for the request shape we're testing
 type TestRequest = { messages: BaseMessage[] };
+type TestTrimmerOptions = Parameters<typeof createToolResultTrimmerMiddleware>[0];
 
 // Helper to call wrapModelCall with proper typing
-async function callWrapModelCall(request: TestRequest, handler: ReturnType<typeof vi.fn>): Promise<void> {
-  const { wrapModelCall } = toolResultTrimmerMiddleware;
+async function callWrapModelCall(
+  request: TestRequest,
+  handler: ReturnType<typeof vi.fn>,
+  options?: TestTrimmerOptions,
+): Promise<void> {
+  const { wrapModelCall } = createToolResultTrimmerMiddleware(options);
   if (!wrapModelCall) {
     throw new Error('wrapModelCall is not defined on middleware');
   }
@@ -101,7 +112,7 @@ async function callWrapModelCall(request: TestRequest, handler: ReturnType<typeo
   await wrapModelCall(request as Parameters<typeof wrapModelCall>[0], handler as Parameters<typeof wrapModelCall>[1]);
 }
 
-describe('toolResultTrimmerMiddleware', () => {
+describe('createToolResultTrimmerMiddleware', () => {
   let handler: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -361,7 +372,7 @@ describe('toolResultTrimmerMiddleware', () => {
   });
 
   // ==========================================================================
-  // Multi-file test.json migration
+  // Multi-file GeoSpec trimming
   // ==========================================================================
 
   describe('multi-file test_model trimming', () => {
@@ -394,31 +405,6 @@ describe('toolResultTrimmerMiddleware', () => {
       expect(parsed.failures.map((f) => f.targetFile)).toEqual(['main.scad', 'lib/bracket.scad']);
     });
 
-    it('should drop geometryArtifactPaths from trimmed test_model output', async () => {
-      const failures: TestFailure[] = [
-        {
-          id: 'req_1',
-          requirement: 'Width = 100mm',
-          reason: 'Width is 80mm',
-          suggestion: 'Adjust',
-          targetFile: 'main.scad',
-        },
-      ];
-      const toolMessage = createTestModelToolMessage(failures, 1);
-
-      await callWrapModelCall({ messages: [toolMessage] }, handler);
-
-      const [request] = handler.mock.calls[0] as [TestRequest];
-      const trimmedMessage = request.messages[0] as ToolMessage;
-      const parsed = JSON.parse(trimmedMessage.content as string) as Record<string, unknown>;
-
-      expect(parsed['geometryArtifactPaths']).toBeUndefined();
-      expect(parsed['passes']).toBeUndefined();
-      expect(parsed['passed']).toBeUndefined();
-      expect(parsed['failures']).toBeDefined();
-      expect(parsed['total']).toBe(2);
-    });
-
     it('should still detect test_model shape via isTestModelShape on multi-file output', async () => {
       const failures: TestFailure[] = [
         {
@@ -441,7 +427,6 @@ describe('toolResultTrimmerMiddleware', () => {
       // If detection failed the message would pass through unchanged with passed/passes still present.
       expect(parsed['passed']).toBeUndefined();
       expect(parsed['passes']).toBeUndefined();
-      expect(parsed['geometryArtifactPaths']).toBeUndefined();
     });
   });
 
@@ -547,6 +532,62 @@ describe('toolResultTrimmerMiddleware', () => {
     });
   });
 
+  describe('delete_file trimmer', () => {
+    function createDeleteFileOutput(): DeleteFileOutput {
+      return {
+        message: 'File deleted: src/old.ts',
+        diffStats: {
+          linesAdded: 0,
+          linesRemoved: 3,
+          originalContent: 'line1\nline2\nline3',
+          modifiedContent: '',
+        },
+      };
+    }
+
+    it('should remove captured originalContent and modifiedContent from diffStats while keeping message and line counts', async () => {
+      const output = createDeleteFileOutput();
+      const toolMessage = new ToolMessage({
+        content: JSON.stringify(output),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_delete_1',
+        name: toolName.deleteFile,
+      });
+
+      await callWrapModelCall({ messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const trimmedMessage = request.messages[0] as ToolMessage;
+      const parsed = JSON.parse(trimmedMessage.content as string) as unknown;
+
+      expect(parsed).toEqual({
+        message: 'File deleted: src/old.ts',
+        diffStats: {
+          linesAdded: 0,
+          linesRemoved: 3,
+        },
+      });
+    });
+
+    it('should leave a delete result without diffStats unchanged (missing/binary/legacy)', async () => {
+      const output: DeleteFileOutput = { message: 'File deleted: gone.ts' };
+      const toolMessage = new ToolMessage({
+        content: JSON.stringify(output),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_delete_2',
+        name: toolName.deleteFile,
+      });
+
+      await callWrapModelCall({ messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const trimmedMessage = request.messages[0] as ToolMessage;
+      const parsed = JSON.parse(trimmedMessage.content as string) as unknown;
+
+      expect(parsed).toEqual({ message: 'File deleted: gone.ts' });
+    });
+  });
+
   describe('get_kernel_result trimmer', () => {
     function createGetKernelResultOutput(): GetKernelResultOutput {
       return {
@@ -610,6 +651,96 @@ describe('toolResultTrimmerMiddleware', () => {
       });
     });
 
+    it('should preserve bounded GEOMETRY_INVALID details for agent repair evidence', async () => {
+      const output: GetKernelResultOutput = {
+        status: 'ready',
+        kernelIssues: [
+          {
+            message: "JSCAD part 'Planet Carrier' is not a closed oriented solid.",
+            code: 'GEOMETRY_INVALID',
+            severity: 'warning',
+            type: 'kernel',
+            details: {
+              producer: { kernelId: 'jscad', validator: 'geom3.validate' },
+              geometry: {
+                partName: 'Planet Carrier',
+                topology: { openBoundaryEdges: 236 },
+                hints: ['Prefer 2D profile composition followed by one extrusion.'],
+              },
+            },
+          },
+        ],
+      };
+      const toolMessage = new ToolMessage({
+        content: JSON.stringify(output),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_kernel_details',
+        name: toolName.getKernelResult,
+      });
+
+      await callWrapModelCall({ messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const trimmedMessage = request.messages[0] as ToolMessage;
+      const parsed = JSON.parse(trimmedMessage.content as string) as GetKernelResultOutput;
+
+      expect(parsed.kernelIssues?.[0]?.details).toEqual(output.kernelIssues?.[0]?.details);
+    });
+
+    it('should bound oversized GEOMETRY_INVALID details while retaining topology and hints', async () => {
+      const output: GetKernelResultOutput = {
+        status: 'ready',
+        kernelIssues: [
+          {
+            message: "JSCAD part 'Planet Carrier' is not a closed oriented solid.",
+            code: 'GEOMETRY_INVALID',
+            severity: 'warning',
+            type: 'kernel',
+            details: {
+              producer: { kernelId: 'jscad', validator: 'geom3.validate' },
+              geometry: {
+                partName: 'Planet Carrier',
+                partIndex: 3,
+                topology: { openBoundaryEdges: 236 },
+                hints: ['Prefer 2D profile composition followed by one extrusion.'],
+                rawMeshDump: 'x'.repeat(7000),
+              },
+            },
+          },
+        ],
+      };
+      const toolMessage = new ToolMessage({
+        content: JSON.stringify(output),
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+        tool_call_id: 'call_kernel_large_details',
+        name: toolName.getKernelResult,
+      });
+
+      await callWrapModelCall({ messages: [toolMessage] }, handler);
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const trimmedMessage = request.messages[0] as ToolMessage;
+      const parsed = JSON.parse(trimmedMessage.content as string) as GetKernelResultOutput;
+      const details = parsed.kernelIssues?.[0]?.details as {
+        producer?: unknown;
+        geometry?: Record<string, unknown>;
+        _trimmed?: boolean;
+      };
+
+      expect(JSON.stringify(details).length).toBeLessThan(6000);
+      expect(details).toMatchObject({
+        producer: { kernelId: 'jscad', validator: 'geom3.validate' },
+        geometry: {
+          partName: 'Planet Carrier',
+          partIndex: 3,
+          topology: { openBoundaryEdges: 236 },
+          hints: ['Prefer 2D profile composition followed by one extrusion.'],
+        },
+        _trimmed: true,
+      });
+      expect(details.geometry?.['rawMeshDump']).toBeUndefined();
+    });
+
     it('should handle kernel result with ready status and no issues', async () => {
       const output: GetKernelResultOutput = { status: 'ready' };
       const toolMessage = new ToolMessage({
@@ -636,15 +767,13 @@ describe('toolResultTrimmerMiddleware', () => {
   describe('screenshot trimmer', () => {
     const base64Stub = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ';
 
-    function createScreenshotOutput(views: string[]): ScreenshotOutput {
-      return {
-        images: views.map((view) => ({ view, dataUrl: base64Stub })),
-      };
-    }
+    const createScreenshotOutput = (views: readonly ScreenshotView[]): ScreenshotOutput => ({
+      images: views.map((view) => ({ view, dataUrl: base64Stub })),
+    });
 
     it('should strip dataUrl from older screenshot messages, keeping only view names', async () => {
       const olderScreenshot = createScreenshotOutput(['front', 'back', 'top', 'bottom', 'left', 'right']);
-      const latestScreenshot = createScreenshotOutput(['current']);
+      const latestScreenshot = createScreenshotOutput(['isometric']);
 
       const messages: BaseMessage[] = [
         new HumanMessage('Take a screenshot'),
@@ -702,9 +831,33 @@ describe('toolResultTrimmerMiddleware', () => {
       expect(latestContent[1]).toHaveProperty('type', 'image_url');
     });
 
+    it('should strip screenshot dataUrl blocks when image blocks are disabled for the model', async () => {
+      const screenshot = createScreenshotOutput(['isometric']);
+      const messages: BaseMessage[] = [
+        new ToolMessage({
+          content: JSON.stringify(screenshot),
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- LangChain API uses snake_case
+          tool_call_id: 'call_ss_text_only',
+          name: toolName.screenshot,
+        }),
+      ];
+
+      await callWrapModelCall({ messages }, handler, { allowImageBlocks: false });
+
+      const [request] = handler.mock.calls[0] as [TestRequest];
+      const resultMessage = request.messages[0] as ToolMessage;
+      expect(typeof resultMessage.content).toBe('string');
+      const parsed = JSON.parse(resultMessage.content as string) as Record<string, unknown>;
+
+      expect(parsed).toEqual({
+        images: [{ view: 'isometric' }],
+        _trimmed: true,
+      });
+    });
+
     it('should trim screenshot by content shape detection when name is missing', async () => {
       const olderOutput = createScreenshotOutput(['front', 'back']);
-      const latestOutput = createScreenshotOutput(['current']);
+      const latestOutput = createScreenshotOutput(['isometric']);
 
       const messages: BaseMessage[] = [
         new ToolMessage({
@@ -735,7 +888,7 @@ describe('toolResultTrimmerMiddleware', () => {
 
     it('should handle older screenshot with empty images array', async () => {
       const emptyOutput: ScreenshotOutput = { images: [] };
-      const latestOutput = createScreenshotOutput(['current']);
+      const latestOutput = createScreenshotOutput(['isometric']);
 
       const messages: BaseMessage[] = [
         new ToolMessage({
@@ -766,7 +919,7 @@ describe('toolResultTrimmerMiddleware', () => {
 
     it('should not inject image blocks when dataUrl values are offloaded placeholders', async () => {
       const offloadedOutput = {
-        images: [{ view: 'composite', dataUrl: '[offloaded: 50000 chars]' }],
+        images: [{ view: 'isometric', dataUrl: '[offloaded: 50000 chars]' }],
         _offloadedTo: '.tau/tool-results/chat-1/call_ss_offloaded.txt',
       };
 
@@ -789,7 +942,7 @@ describe('toolResultTrimmerMiddleware', () => {
       const parsed = JSON.parse(resultMessage.content as string) as Record<string, unknown>;
       const images = parsed['images'] as Array<Record<string, unknown>>;
       expect(images).toHaveLength(1);
-      expect(images[0]!['view']).toBe('composite');
+      expect(images[0]!['view']).toBe('isometric');
       expect(images[0]!['dataUrl']).toBe('[offloaded: 50000 chars]');
     });
   });

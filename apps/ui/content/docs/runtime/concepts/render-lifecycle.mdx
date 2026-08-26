@@ -6,7 +6,7 @@ icon: lucide:refresh-cw
 
 # Render Lifecycle
 
-The runtime worker manages its own render lifecycle autonomously. After receiving `openFile`, it renders immediately, discovers dependencies, watches for changes, and re-renders on file or parameter updates. Three cancellation strategies ensure that superseded renders are aborted as quickly as possible while guaranteeing correctness.
+The runtime worker manages its own render lifecycle autonomously. After receiving `render`, it renders immediately, discovers dependencies, watches for changes, and re-renders on file or parameter updates. A watched-file rerender can therefore supersede the originating public call without a second API call. Every admitted preview reaches `idle` or `error` before its successor becomes active, and selected geometry is published over the `geometry` event. Three cancellation strategies ensure that superseded renders are aborted as quickly as possible while guaranteeing correctness.
 
 ## Context and Motivation
 
@@ -18,7 +18,7 @@ In a traditional command-driven model, the main thread decides when to render. B
 
 ```mermaid
 flowchart TD
-    OpenFile["openFile(file, params)"] --> Render1["render immediately"]
+    Render["render(source, parameters)"] --> Render1["render immediately"]
     Render1 --> Deps["discover dependencies"]
     Deps --> Watch["set up watch subscription"]
     Watch --> Push1["push geometryComputed"]
@@ -39,7 +39,7 @@ flowchart TD
     ExportGeom --> Push4["push exported"]
 ```
 
-**openFile(file, params):** Store the file and params. Render immediately (aborting any in-progress render). After rendering, discover the file's dependencies. Set up a filesystem watch subscription scoped to the dependency set. Push `geometryComputed` to the main thread.
+**render(source, parameters):** Normalize the source entry to a [runtime path](./path-namespaces), store it with the parameters, and render immediately (aborting any in-progress render). After rendering, discover the entry's dependencies. Set up a filesystem watch subscription scoped to the dependency set. Push `geometryComputed` to the main thread.
 
 **Watch event (file in dependency graph changed):** Watch events arrive directly from the File Manager Worker via the [filesystem bridge](./worker-model#filesystem-bridge) MessagePort -- they do not relay through the main thread. Invalidate the relevant caches (sync `Map.delete()`, atomic). Start or reset a 500ms debounce timer. When the timer fires, render again (aborting any in-progress render). After rendering, discover new dependencies and diff the watch set (add new paths, remove stale ones). Push `geometryComputed`.
 
@@ -170,7 +170,7 @@ Cache invalidation (`Map.delete()`) is synchronous and monotonically correct:
 
 - **Render Loop and Worker**: The render loop is internal to the worker. The main thread never orchestrates render scheduling.
 - **Abort and Transport**: The transport-owned abort channel crosses the thread boundary without MessagePort. On SAB-capable transports it is backed by `SharedArrayBuffer` so the worker can observe it mid-WASM; on SAB-less transports it serialises to a wire-format `'abort'` command. Either way the main-thread runtime client just calls `transport.signalAbort(reason)` before posting the supersession message.
-- **Dependencies and Watch**: `getDependencies` returns file paths that the worker subscribes to via the filesystem bridge. Watch events arrive directly from the File Manager Worker via MessagePort. Changes to watched files trigger re-renders.
+- **Dependencies and Watch**: `getDependencies` returns runtime paths that the worker subscribes to via the filesystem bridge. Watch events use that same namespace and arrive directly from the File Manager Worker via MessagePort. Changes to watched files trigger re-renders.
 - **Debounce and Parameters**: Parameter debounce (50ms) is independent of file debounce (500ms). The shorter timer wins when both change.
 
 ## Implications
@@ -178,11 +178,12 @@ Cache invalidation (`Map.delete()`) is synchronous and monotonically correct:
 - **Latency** -- Proxy-based abort provides sub-millisecond cancellation for OC-based kernels. Users see responsive updates when dragging sliders.
 - **Correctness** -- The generation counter is the universal safety net. Even if a render cannot be interrupted, stale results are never displayed.
 - **Memory** -- Only one render's geometry is ever live at a time. Superseded geometry is discarded before transfer.
-- **OpenSCAD limitation** -- OpenSCAD runs as a single synchronous `callMain()` WASM invocation with no JS/WASM boundary to intercept. The generation counter handles correctness, but the full render must complete before a new one starts.
+- **OpenRSCAD limitation** -- OpenRSCAD evaluates a model synchronously inside its worker. The generation counter handles correctness, but the current evaluation must complete before a newer render begins.
 
 ## Further Reading
 
 - [Worker Model](./worker-model) -- Web Worker isolation, transport abort channel, and per-kernel abort table
 - [Architecture](./architecture) -- How the render loop fits in the layered design
+- [Path Namespaces](./path-namespaces) -- The shared namespace for entries, dependencies, and watch events
 - [Handle Errors](../guides/error-handling) -- Handling `RenderTimeoutError` and `RenderOutcome` supersession
-- [API: Client](../api/client) -- `openFile`, `updateParameters`, and event subscription
+- [API: Client](../api/client) -- `render`, `updateParameters`, and event subscription

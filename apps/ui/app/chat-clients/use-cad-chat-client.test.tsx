@@ -112,6 +112,47 @@ describe('useCadChatClient', () => {
     expect(options).toEqual({ body: { agent: buildAgent() } });
   });
 
+  it.each(['submitted', 'streaming'] as const)(
+    'should ignore submit/edit/retry/regenerate while a %s request is in flight',
+    (status) => {
+      const chat = mock<Chat<MyUIMessage>>();
+      useActiveChatInstanceMock.mockReturnValue(chat);
+      useChatSelectorMock.mockReturnValue(status);
+      const actions = buildActions();
+      installActions(actions);
+
+      const { result } = renderHook(() => useCadChatClient());
+
+      act(() => {
+        result.current.submit({ text: 'double submit' });
+        result.current.edit('msg_edit', { text: 'edit while busy' });
+        result.current.retry('msg_retry');
+        result.current.regenerateTail();
+      });
+
+      expect(actions.sendMessage).not.toHaveBeenCalled();
+      expect(actions.editMessage).not.toHaveBeenCalled();
+      expect(actions.retryMessage).not.toHaveBeenCalled();
+      expect(actions.regenerate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should still allow stop while a request is in flight', () => {
+    const chat = mock<Chat<MyUIMessage>>();
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    useChatSelectorMock.mockReturnValue('streaming');
+    const actions = buildActions();
+    installActions(actions);
+
+    const { result } = renderHook(() => useCadChatClient());
+
+    act(() => {
+      result.current.stop();
+    });
+
+    expect(actions.stop).toHaveBeenCalledTimes(1);
+  });
+
   it('should call actions.retryMessage with body.agent and the supplied messageId when retry fires', () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);

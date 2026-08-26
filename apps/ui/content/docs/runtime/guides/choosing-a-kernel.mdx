@@ -1,240 +1,71 @@
 ---
 title: Choose a Kernel
-description: Compare Replicad, OpenCASCADE, Manifold, OpenSCAD, JSCAD, Zoo, and Tau kernels for your project.
+description: Select and compose first-party CAD kernel plugins.
 icon: lucide:git-compare
 ---
 
 # Choose a Kernel
 
-Compare the built-in kernels and select the right one for your CAD workflow. This guide helps you decide based on language, export formats, and use cases.
+Choose by source language or import format, then install only the packages your host needs.
 
-## Prerequisites
+| Kernel package        | Input                                     | Best fit                                     |
+| --------------------- | ----------------------------------------- | -------------------------------------------- |
+| `@taucad/replicad`    | TypeScript/JavaScript using Replicad      | High-level parametric BRep                   |
+| `@taucad/opencascade` | TypeScript/JavaScript using OCCT bindings | Direct BRep and topology control             |
+| `@taucad/manifold`    | TypeScript/JavaScript using Manifold      | Mesh-first robust booleans                   |
+| `@taucad/jscad`       | TypeScript/JavaScript using JSCAD         | CSG modeling                                 |
+| `@taucad/openrscad`   | OpenSCAD                                  | `.scad` models in browser or Node            |
+| `@taucad/zoo`         | KCL                                       | Configured remote Zoo execution              |
+| `@taucad/gltf`        | glTF/GLB                                  | glTF import with sidecars and Draco          |
+| `@taucad/brep`        | STEP/STP/IGES/IGS/BREP                    | BRep-family file import                      |
+| `@taucad/rhino`       | 3DM                                       | Rhino file import                            |
+| `@taucad/assimp`      | Mesh and scene formats                    | OBJ, FBX, STL, PLY, DAE, and related imports |
 
-- [Install @taucad/runtime](../getting-started/installation)
-- Completed the [Quick Start](../getting-started/quick-start)
+There is no catch-all Tau kernel. Every first-party import extension has an explicit owner.
 
-## Goal
-
-Select the best kernel for your project based on modeling paradigm (BRep, mesh, CSG), language (TypeScript, OpenSCAD, KCL), and export requirements (STEP, STL, glTF).
-
-## Steps
-
-### 1. Compare the Kernels
-
-| Kernel          | Language      | Strengths                                                           | Export Formats                   | Use Cases                                               |
-| --------------- | ------------- | ------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------- |
-| **Replicad**    | TypeScript/JS | Parametric BRep via OpenCASCADE. STEP export. Strong typing.        | glTF, GLB, STEP, STL, STL-binary | Professional CAD, mechanical parts, STEP interchange    |
-| **OpenCASCADE** | TypeScript/JS | Direct OpenCASCADE API. Full BRep control over shapes and topology. | glTF, GLB, STEP, IGES, STL       | Advanced geometry, direct OCCT scripting, BRep kernels  |
-| **Manifold**    | TypeScript/JS | Mesh-first modeling with robust booleans and fast WASM execution.   | glTF, GLB                        | Browser-native CAD, procedural booleans, mesh workflows |
-| **OpenSCAD**    | OpenSCAD      | CSG modeling. Familiar `.scad` syntax. Mature ecosystem.            | glTF, GLB, STL, STL-binary       | 3D printing, functional parts, CSG workflows            |
-| **JSCAD**       | TypeScript/JS | Parametric CSG with `@jscad/modeling`. Browser-native.              | glTF, GLB                        | Web-based CAD, parametric designs, lightweight models   |
-| **Zoo (KCL)**   | KCL           | Cloud-native CAD. AI integration via Zoo API.                       | glTF, GLB, STEP, STL, STL-binary | Cloud workflows, AI-assisted modeling, remote execution |
-| **Tau**         | Any           | Catch-all file converter. Imports STEP, STL, 3MF, OBJ, etc.         | glTF, GLB                        | File import/preview, format conversion                  |
-
-### 2. Evaluate Language and Ecosystem
-
-- **TypeScript/JS**: Choose Replicad, OpenCASCADE, Manifold, or JSCAD for TypeScript-based CAD. Replicad provides a high-level API over OpenCASCADE, while the OpenCASCADE kernel gives direct API access. Manifold is mesh-first and boolean-focused, and JSCAD is CSG-focused.
-- **OpenSCAD**: Choose OpenSCAD if you have existing `.scad` files or prefer the OpenSCAD language.
-- **KCL**: Choose Zoo if you need cloud execution or AI integration via the Zoo API.
-
-### 3. Determine Export Requirements
-
-- **STEP**: Required for professional CAD interchange. Use Replicad, OpenCASCADE, or Zoo.
-- **STL for 3D printing**: Replicad, OpenCASCADE, OpenSCAD, and Zoo support STL (ASCII/binary).
-- **glTF/GLB for web viewers**: All kernels produce glTF/GLB, including Manifold.
-
-### 4. Choose by Modeling Paradigm
-
-- **BRep high-level (Replicad)**: Best for precise mechanical parts, fillets, chamfers, and STEP export with a convenient API.
-- **BRep low-level (OpenCASCADE)**: Best when you need direct control over OpenCASCADE topology, operations, and data structures.
-- **Mesh-first booleans (Manifold)**: Best for robust boolean-heavy modeling and fast browser-native mesh generation.
-- **CSG (OpenSCAD, JSCAD)**: Best for boolean operations, 3D printing, and procedural designs.
-
-### 5. Configure Your Chosen Kernel
-
-#### Replicad
-
-Use Replicad when you need:
-
-- STEP export for CAD interchange
-- BRep modeling with fillets and chamfers
-- TypeScript/JS with strong typing
-- Professional mechanical design
+## Compose toolkits
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { assimp } from '@taucad/assimp';
+import { brep } from '@taucad/brep';
+import { gltf } from '@taucad/gltf';
+import { rhino } from '@taucad/rhino';
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+export const importRuntime = defineRuntime({
+  plugins: [gltf(), brep(), rhino(), assimp({ preset: 'import' })],
 });
 ```
 
-#### OpenCASCADE
-
-Use OpenCASCADE when you need:
-
-- Direct access to the OpenCASCADE Technology (OCCT) API
-- Full control over BRep topology and operations
-- Advanced geometry construction beyond Replicad's API
+For source-code kernels, include a bundler:
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { opencascade } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [opencascade()],
-  bundlers: [esbuild()],
+export const modelingRuntime = defineRuntime({ plugins: [esbuild(), replicad()] });
+```
+
+## Configure a packaged capability
+
+Presets select capability sets. Role-nested plugin options configure the factories selected by that preset:
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { zoo } from '@taucad/zoo';
+
+export const runtime = defineRuntime({
+  plugins: [zoo({ kernels: { default: { baseUrl: 'wss://example.com/v1/kernels/zoo' } } })],
 });
 ```
 
-#### OpenSCAD
+Use a direct role factory for app-local capabilities, isolated tests, or when a whole role must interleave outside plugin expansion.
 
-Use OpenSCAD when you have:
-
-- Existing `.scad` files
-- CSG-based designs for 3D printing
-- Familiarity with OpenSCAD syntax
-
-> **Note:** OpenSCAD ships as the standalone `@taucad/openscad` package (GPL-2.0-or-later) so it stays isolated from the MIT-licensed runtime. Install it explicitly: `pnpm add @taucad/openscad`.
-
-```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { openscad } from '@taucad/openscad';
-
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [openscad()],
-});
-```
-
-#### Manifold
-
-Use Manifold when you need:
-
-- High-performance boolean operations in TypeScript
-- Mesh-first modeling pipelines
-- Browser-friendly WASM performance with robust topology
-
-```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { manifold } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
-
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [manifold()],
-  bundlers: [esbuild()],
-});
-```
-
-#### JSCAD
-
-Use JSCAD when you need:
-
-- Parametric CSG in TypeScript
-- Lightweight browser-based CAD
-- No STEP or STL export (glTF/GLB only)
-
-```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { jscad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
-
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [jscad()],
-  bundlers: [esbuild()],
-});
-```
-
-#### Zoo (KCL)
-
-Use Zoo when you need:
-
-- Cloud execution via Zoo API
-- AI-assisted modeling
-- KCL language with remote engine
-
-```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { zoo } from '@taucad/runtime/kernels';
-
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [zoo({ baseUrl: 'wss://your-zoo-server/v1/kernels/zoo' })],
-});
-```
-
-#### Tau (Converter)
-
-Use Tau when you need:
-
-- Import and preview existing CAD files (STEP, STL, 3MF, OBJ, etc.)
-- Format conversion to glTF without writing code
-- A catch-all fallback for file formats not handled by other kernels
-
-```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { tau } from '@taucad/runtime/kernels';
-
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [tau()],
-});
-```
-
-### 6. Register Multiple Kernels
-
-Register multiple kernels in a single client. The framework selects the kernel automatically based on file extension and import detection:
-
-```typescript
-import { createRuntimeClient, presets } from '@taucad/runtime';
-
-const client = createRuntimeClient(presets.all());
-```
-
-Or configure kernels individually for tree-shaking:
-
-```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad, opencascade, manifold, jscad, tau } from '@taucad/runtime/kernels';
-import { openscad } from '@taucad/openscad';
-import { esbuild } from '@taucad/runtime/bundler';
-
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromMemoryFs() }),
-  kernels: [replicad(), opencascade(), manifold(), openscad(), jscad(), tau()],
-  bundlers: [esbuild()],
-});
-```
-
-Kernel selection order follows the order in the `kernels` array. The first kernel whose extension or import detection matches is used. See [Kernel Selection](../concepts/kernel-selection) for details.
-
-## Variations
-
-- **presets.all()**: Returns `{ kernels, middleware, bundlers }` with all built-in plugins. Pass directly to [`createRuntimeClient`](../api/client).
-- **Replicad options**: Pass `{ wasm: 'single-exceptions' }` to `replicad()` for detailed OpenCASCADE error messages during development.
-- **OpenCASCADE options**: Pass `{ wasm: 'full' }` to `opencascade()` for the full WASM build.
-- **Manifold options**: `manifold()` currently has no runtime options; behavior is controlled by your model code.
-- **Zoo options**: Zoo requires `baseUrl` for the WebSocket connection to the Zoo engine.
+Registration order is deterministic. If two kernels deliberately claim the same extension, the first matching registration wins. Duplicate capability IDs fail with diagnostics naming both origins.
 
 ## Related
 
-- [Kernel Selection](../concepts/kernel-selection) -- How the framework chooses a kernel
-- [Plugin System](../concepts/plugin-system) -- Extend with custom kernels
-- [API Reference: Kernels](../api/kernels) -- Kernel factory functions
-- [Create a Custom Kernel](./custom-kernel) -- Build your own kernel plugin
+- [Kernel Selection](../concepts/kernel-selection)
+- [Kernel Plugins](../api/kernels)
+- [Plugin System](../concepts/plugin-system)

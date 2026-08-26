@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { VirtualPathError } from '@taucad/utils/path';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { getErrorCode, getErrorMessage, toRpcError } from '#rpc/rpc-error.js';
 
@@ -9,6 +10,13 @@ function makeErrnoError(message: string, code: string): Error {
 }
 
 describe('getErrorCode', () => {
+  it.each(['INVALID_PATH', 'PATH_OUTSIDE_ROOT'] as const)(
+    'should map VirtualPathError %s to VALIDATION_ERROR',
+    (code) => {
+      expect(getErrorCode(new VirtualPathError(code, '../secret'))).toBe(rpcClientErrorCode.validationError);
+    },
+  );
+
   describe('errno code lookup (primary signal)', () => {
     it('should map ENOENT to FILE_NOT_FOUND', () => {
       const error = makeErrnoError('No such file or directory', 'ENOENT');
@@ -40,7 +48,7 @@ describe('getErrorCode', () => {
 
   describe('Node.js-style errors (ErrnoException)', () => {
     it('should classify ENOENT ErrnoException as FILE_NOT_FOUND', () => {
-      const error = makeErrnoError("ENOENT: no such file or directory, open '/test.json'", 'ENOENT');
+      const error = makeErrnoError("ENOENT: no such file or directory, open '/missing.json'", 'ENOENT');
       expect(getErrorCode(error)).toBe(rpcClientErrorCode.fileNotFound);
     });
 
@@ -52,7 +60,7 @@ describe('getErrorCode', () => {
 
   describe('fromMemoryFS-style errors (with code property)', () => {
     it('should classify ENOENT memoryFS error as FILE_NOT_FOUND', () => {
-      const error = makeErrnoError('ENOENT: no such file: /test.json', 'ENOENT');
+      const error = makeErrnoError('ENOENT: no such file: /missing.json', 'ENOENT');
       expect(getErrorCode(error)).toBe(rpcClientErrorCode.fileNotFound);
     });
   });
@@ -130,6 +138,14 @@ describe('getErrorMessage', () => {
 });
 
 describe('toRpcError', () => {
+  it('should preserve VirtualPathError details as a validation failure', () => {
+    expect(toRpcError(new VirtualPathError('PATH_OUTSIDE_ROOT', '../secret'))).toStrictEqual({
+      success: false,
+      errorCode: rpcClientErrorCode.validationError,
+      message: 'Virtual path escapes the filesystem root.',
+    });
+  });
+
   it('should produce a structured RpcHandlerError with correct shape', () => {
     const error = makeErrnoError('No such file or directory', 'ENOENT');
     const result = toRpcError(error);

@@ -1,0 +1,133 @@
+{
+  "name": "geospec",
+  "version": "0.1.0-beta.1",
+  "description": "Geometry specification API for CAD models: DSL, selector language, diagnostics schema, and the executor seam",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/geospec"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/geospec#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./brep": "./src/brep/index.ts",
+    "./engine": "./src/engine/index.ts",
+    "./inspection": "./src/inspection/index.ts",
+    "./mesh": "./src/mesh/index.ts",
+    "./model": "./src/model/index.ts",
+    "./proofs": "./src/proofs/index.ts",
+    "./runner": "./src/runner/index.ts",
+    "./runner/node": "./src/runner/node/index.ts",
+    "./runner/web": "./src/runner/web/index.ts",
+    "./runner/worker": "./src/runner/worker/index.ts",
+    "./selector": "./src/selector/index.ts",
+    "./step": "./src/step/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./brep": {
+        "types": "./dist/brep/index.d.mts",
+        "import": "./dist/brep/index.mjs",
+        "default": "./dist/brep/index.mjs"
+      },
+      "./engine": {
+        "types": "./dist/engine/index.d.mts",
+        "import": "./dist/engine/index.mjs",
+        "default": "./dist/engine/index.mjs"
+      },
+      "./inspection": {
+        "types": "./dist/inspection/index.d.mts",
+        "import": "./dist/inspection/index.mjs",
+        "default": "./dist/inspection/index.mjs"
+      },
+      "./mesh": {
+        "types": "./dist/mesh/index.d.mts",
+        "import": "./dist/mesh/index.mjs",
+        "default": "./dist/mesh/index.mjs"
+      },
+      "./model": {
+        "types": "./dist/model/index.d.mts",
+        "import": "./dist/model/index.mjs",
+        "default": "./dist/model/index.mjs"
+      },
+      "./proofs": {
+        "types": "./dist/proofs/index.d.mts",
+        "import": "./dist/proofs/index.mjs",
+        "default": "./dist/proofs/index.mjs"
+      },
+      "./runner": {
+        "types": "./dist/runner/index.d.mts",
+        "import": "./dist/runner/index.mjs",
+        "default": "./dist/runner/index.mjs"
+      },
+      "./runner/node": {
+        "types": "./dist/runner/node/index.d.mts",
+        "import": "./dist/runner/node/index.mjs",
+        "default": "./dist/runner/node/index.mjs"
+      },
+      "./runner/web": {
+        "types": "./dist/runner/web/index.d.mts",
+        "import": "./dist/runner/web/index.mjs",
+        "default": "./dist/runner/web/index.mjs"
+      },
+      "./runner/worker": {
+        "types": "./dist/runner/worker/index.d.mts",
+        "import": "./dist/runner/worker/index.mjs",
+        "default": "./dist/runner/worker/index.mjs"
+      },
+      "./selector": {
+        "types": "./dist/selector/index.d.mts",
+        "import": "./dist/selector/index.mjs",
+        "default": "./dist/selector/index.mjs"
+      },
+      "./step": {
+        "types": "./dist/step/index.d.mts",
+        "import": "./dist/step/index.mjs",
+        "default": "./dist/step/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.4.0"
+  }
+}

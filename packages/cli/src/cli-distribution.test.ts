@@ -10,8 +10,9 @@ const execFileAsync = promisify(execFile);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
-const cliBinPath = resolve(repoRoot, 'packages/cli/dist/bin/taucad.js');
+const cliBinPath = resolve(repoRoot, 'packages/cli/dist/bin/taucad.mjs');
 const birdhouse = resolve(repoRoot, 'libs/tau-examples/src/kernels/replicad/birdhouse/main.ts');
+const openrscadKitchenSink = resolve(repoRoot, 'libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad');
 
 const gltfMagicBytes = 0x46_54_6c_67;
 
@@ -54,11 +55,22 @@ describe('taucad CLI dist (real binary)', () => {
     }
   });
 
-  it('should ship a hashbang executable at dist/bin/taucad.js', async () => {
+  it('should ship a hashbang executable at dist/bin/taucad.mjs', async () => {
     const head = await readFile(cliBinPath, 'utf8');
 
     expect(head.startsWith('#!/usr/bin/env node')).toBe(true);
   });
+
+  it('should report the version declared in its own package.json for --version', async () => {
+    const manifest = JSON.parse(await readFile(resolve(repoRoot, 'packages/cli/package.json'), 'utf8')) as {
+      version: string;
+    };
+
+    const result = await runCli(['--version']);
+
+    expect(result.exitCode, `stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout.trim()).toBe(manifest.version);
+  }, 60_000);
 
   it('should exit 0 and emit a valid glTF 2.0 binary when exporting the birdhouse fixture to GLB', async () => {
     const outputPath = join(workspace, 'birdhouse-default.glb');
@@ -73,7 +85,18 @@ describe('taucad CLI dist (real binary)', () => {
     expect(view.getUint32(0, true)).toBe(gltfMagicBytes);
   }, 120_000);
 
-  it('should exit non-zero and list the supported formats in stderr when --ext is invalid', async () => {
+  it('should export OpenRSCAD source through the built-in plugin', async () => {
+    const outputPath = join(workspace, 'openrscad.glb');
+
+    const result = await runCli(['export', openrscadKitchenSink, '--ext=glb', `--output=${outputPath}`]);
+
+    expect(result.exitCode, `stderr: ${result.stderr}`).toBe(0);
+    const bytes = await readFile(outputPath);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    expect(view.getUint32(0, true)).toBe(gltfMagicBytes);
+  }, 120_000);
+
+  it('should exit non-zero with an unrecognized-extension error when --ext is invalid', async () => {
     const result = await runCli([
       'export',
       birdhouse,
@@ -82,8 +105,8 @@ describe('taucad CLI dist (real binary)', () => {
     ]);
 
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toMatch(/Unsupported format: "not-a-format"/);
-    expect(result.stderr).toMatch(/glb/);
+    expect(result.stderr).toMatch(/Unrecognized target extension: "not-a-format"/);
+    expect(result.stderr).not.toMatch(/Supported:/);
   }, 60_000);
 
   it('should produce a different output size when parameters override the default geometry', async () => {

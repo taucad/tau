@@ -1,0 +1,72 @@
+{
+  "name": "@taucad/runtime-testing",
+  "version": "0.1.0-beta.0",
+  "description": "Runtime and geometry test utilities for Tau plugin authors",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/runtime-testing"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/runtime-testing#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "cad",
+    "testing",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@gltf-transform/functions": "catalog:",
+    "@taucad/geometry-core": "workspace:*",
+    "deepmerge": "catalog:"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "vitest": ">=2.0.0"
+  },
+  "devDependencies": {
+    "@taucad/runtime": "workspace:*",
+    "vitest": "catalog:"
+  },
+  "taucad": {
+    "hostTarget": "browser"
+  }
+}

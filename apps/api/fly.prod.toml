@@ -18,16 +18,25 @@ LANGSMITH_TRACING = true
 LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'
 LANGSMITH_PROJECT = 'tau-api-prod'
 AUTH_URL = 'https://api.tau.new'
+# Browser-facing origin of this API, used to build authenticated publication file
+# proxy URLs. Required by the env schema with no default.
+TAU_API_URL = 'https://api.tau.new'
 LOG_SERVICE = 'fly'
 LOG_LEVEL = 'info'
 OTEL_METRICS_PORT = '9464'
 OTEL_EXPORTER_OTLP_COMPRESSION = 'gzip'
-# Additional CORS origins for the Netlify-hosted UI:
-#   - https://deploy-preview-*--taucad-prod.netlify.app : per-PR Netlify deploy previews
-#   - https://taucad-prod.netlify.app                   : Netlify default domain for the `taucad-prod` site
-# The narrow `deploy-preview-*` glob is intentional — do not broaden to `*--taucad-prod.netlify.app`,
-# which would silently allow non-PR branch deploys (currently disabled per allowed_branches).
-ADDITIONAL_CORS_ORIGINS = '["https://deploy-preview-*--taucad-prod.netlify.app","https://taucad-prod.netlify.app"]'
+# Additional CORS origin for the Netlify default domain of the prod-us site
+# (`taucad-prod-us.netlify.app`). Required for pre-cutover smoke-testing the
+# Netlify deploy before `tau.new` NS authority moves to Cloudflare. After
+# cutover this entry can be dropped — `https://tau.new` matches
+# `TAU_FRONTEND_URL` directly. No deploy-preview glob: prod-us is CI-only
+# (no Git integration, no PR previews — those live on staging).
+ADDITIONAL_CORS_ORIGINS = '["https://taucad-prod-us.netlify.app"]'
+# TAU_S3_BUCKET, TAU_S3_ENDPOINT, TAU_S3_ACCESS_KEY_ID, TAU_S3_SECRET_ACCESS_KEY
+# are pushed as Fly secrets by module.fly_api_secrets (repos/cloud-infra) — not set here.
+TAU_S3_PUBLIC_BASE_URL = 'https://cdn.tau.new'
+TAU_S3_REGION = 'auto'
+TAU_S3_FORCE_PATH_STYLE = 'false'
 
 [http_service]
 internal_port = 3000

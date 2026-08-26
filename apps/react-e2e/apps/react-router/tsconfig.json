@@ -1,0 +1,24 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "rootDirs": [".", "./.react-router/types"],
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "../../support/browser-cancellation-harness.tsx",
+    "../../support/browser-cancellation-kernels.ts",
+    "../../support/glb-bounds.ts",
+    "../../support/replicad-cylinder.ts",
+    "../../support/runtime-fixture.tsx",
+    "../../../src/**/*.ts",
+    ".react-router/types/**/*.ts",
+    "react-router.config.ts",
+    "vite.config.ts"
+  ]
+}

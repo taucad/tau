@@ -1,14 +1,33 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import process from 'node:process';
 
 import matter from 'gray-matter';
 import { z } from 'zod';
 
+import { readManifest, repoPath } from '#repos/lib.js';
+
 const root = resolve(import.meta.dirname, '../..');
 const policyDirectory = join(root, 'docs/policy');
 const researchDirectory = join(root, 'docs/research');
 const stalenessDays = 180;
+
+// Docs/research and docs/reference are symlinks into the private tau-brain repo.
+// Repos/tau-brain is gitignored. On a public clone without tau-brain, the symlink
+// target is absent: skip listing/validating those directories and existence checks
+// for references into them, so public CI stays green without a private-repo secret.
+const relocatableDirectories = ['docs/research', 'docs/reference'];
+const unavailableRelocatable = relocatableDirectories.filter((directory) => !existsSync(join(root, directory)));
+const { manifest: repositories } = readManifest(root);
+const unavailableRepositories = Object.entries(repositories.repos)
+  .map(([name, repo]) => repoPath({ name, repo, manifest: repositories, root }))
+  .filter((directory) => !existsSync(directory));
+const skipsMissingReference = (reference: string): boolean =>
+  unavailableRelocatable.some((d) => reference === d || reference.startsWith(`${d}/`)) ||
+  unavailableRepositories.some((directory) => {
+    const absolute = resolve(root, reference);
+    return absolute === directory || absolute.startsWith(`${directory}${sep}`);
+  });
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be ISO 8601 date (YYYY-MM-DD)');
 
@@ -37,9 +56,11 @@ type Diagnostic = { level: 'ERROR' | 'WARN'; message: string };
 type FileResult = { path: string; diagnostics: Diagnostic[] };
 
 const listMarkdown = (directory: string): string[] =>
-  readdirSync(directory)
-    .filter((f) => f.endsWith('.md'))
-    .map((f) => join(directory, f));
+  existsSync(directory)
+    ? readdirSync(directory)
+        .filter((f) => f.endsWith('.md'))
+        .map((f) => join(directory, f))
+    : [];
 
 const extractH1 = (content: string): string | undefined => {
   const match = /^#\s+(.+)$/m.exec(content);
@@ -93,7 +114,7 @@ const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape>): Fil
     if (Array.isArray(data.related)) {
       for (const reference of data.related) {
         const absReference = resolve(root, reference);
-        if (!existsSync(absReference)) {
+        if (!existsSync(absReference) && !skipsMissingReference(reference)) {
           diagnostics.push({
             level: 'ERROR',
             message: `related: "${reference}" does not exist`,
@@ -104,7 +125,7 @@ const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape>): Fil
 
     if (data.superseded_by) {
       const absReference = resolve(root, data.superseded_by);
-      if (!existsSync(absReference)) {
+      if (!existsSync(absReference) && !skipsMissingReference(data.superseded_by)) {
         diagnostics.push({
           level: 'ERROR',
           message: `superseded_by: "${data.superseded_by}" does not exist`,
@@ -136,6 +157,18 @@ const validateFile = (filePath: string, schema: z.ZodObject<z.ZodRawShape>): Fil
 
 const policies = listMarkdown(policyDirectory);
 const research = listMarkdown(researchDirectory);
+
+if (unavailableRelocatable.length > 0) {
+  console.log(
+    `Note: ${unavailableRelocatable.join(', ')} unavailable (private tau-brain not cloned) — skipping their validation and references into them.`,
+  );
+}
+
+if (unavailableRepositories.length > 0) {
+  console.log(
+    `Note: ${unavailableRepositories.length} managed repositories unavailable — skipping references into those optional checkouts.`,
+  );
+}
 
 const results: FileResult[] = [
   ...policies.map((f) => validateFile(f, policySchema)),

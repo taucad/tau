@@ -1,0 +1,898 @@
+{
+  "brep": {
+    "boundingBox": {
+      "center": [
+        0,
+        0,
+        10
+      ],
+      "max": [
+        30.00493449634269,
+        30.00493449634269,
+        20.00493449634269
+      ],
+      "min": [
+        -30.00493449634269,
+        -30.00493449634269,
+        -0.004934496342686708
+      ],
+      "size": [
+        60.00986899268538,
+        60.00986899268538,
+        20.009868992685377
+      ]
+    },
+    "chamferFeatures": [],
+    "circularHolePatterns": [
+      {
+        "axis": "z",
+        "boltCircleDiameter": 62.22539674441618,
+        "center": [
+          2.7711166694643907e-13,
+          0,
+          10
+        ],
+        "count": 8,
+        "holeDiameter": 8.4
+      },
+      {
+        "axis": "z",
+        "boltCircleDiameter": 8,
+        "center": [
+          4.000000000000657,
+          1.146276991987213e-16,
+          10
+        ],
+        "count": 2,
+        "holeDiameter": 20
+      }
+    ],
+    "circularHoles": [
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004904747304233,
+          "min": -0.004904747304232568
+        },
+        "center": [
+          22.000000000000277,
+          -22,
+          5
+        ],
+        "diameter": 8.4,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004904747304233,
+          "min": -0.004904747304232568
+        },
+        "center": [
+          -21.999999999999723,
+          -22,
+          5
+        ],
+        "diameter": 8.4,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004904747304233,
+          "min": -0.004904747304232568
+        },
+        "center": [
+          22.000000000000277,
+          22,
+          5
+        ],
+        "diameter": 8.4,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004934496342687,
+          "min": -0.004934496342686437
+        },
+        "center": [
+          6.572520305780927e-13,
+          1.146276991987213e-16,
+          5
+        ],
+        "diameter": 20,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004904747304233,
+          "min": -0.004904747304232568
+        },
+        "center": [
+          -21.999999999999723,
+          22,
+          5
+        ],
+        "diameter": 8.4,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.004904747304234,
+          "min": 9.995095252695767
+        },
+        "center": [
+          22.000000000000277,
+          -22,
+          15
+        ],
+        "diameter": 8.4,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.004904747304234,
+          "min": 9.995095252695767
+        },
+        "center": [
+          -21.999999999999723,
+          -22,
+          15
+        ],
+        "diameter": 8.4,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.00493449634269,
+          "min": 9.995065503657313
+        },
+        "center": [
+          8.000000000000657,
+          1.146276991987213e-16,
+          15.000000000000002
+        ],
+        "diameter": 20,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.004904747304234,
+          "min": 9.995095252695767
+        },
+        "center": [
+          22.000000000000277,
+          22,
+          15
+        ],
+        "diameter": 8.4,
+        "through": false
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.004904747304234,
+          "min": 9.995095252695767
+        },
+        "center": [
+          -21.999999999999723,
+          22,
+          15
+        ],
+        "diameter": 8.4,
+        "through": false
+      }
+    ],
+    "cylindricalFaces": [
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004904747304233,
+          "min": -0.004904747304232568
+        },
+        "center": [
+          22.000000000000277,
+          -22,
+          5
+        ],
+        "radius": 4.2
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004904747304233,
+          "min": -0.004904747304232568
+        },
+        "center": [
+          -21.999999999999723,
+          -22,
+          5
+        ],
+        "radius": 4.2
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004904747304233,
+          "min": -0.004904747304232568
+        },
+        "center": [
+          22.000000000000277,
+          22,
+          5
+        ],
+        "radius": 4.2
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004934496342687,
+          "min": -0.004934496342686437
+        },
+        "center": [
+          6.572520305780927e-13,
+          1.146276991987213e-16,
+          5
+        ],
+        "radius": 10
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 10.004904747304233,
+          "min": -0.004904747304232568
+        },
+        "center": [
+          -21.999999999999723,
+          22,
+          5
+        ],
+        "radius": 4.2
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.004904747304234,
+          "min": 9.995095252695767
+        },
+        "center": [
+          22.000000000000277,
+          -22,
+          15
+        ],
+        "radius": 4.2
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.004904747304234,
+          "min": 9.995095252695767
+        },
+        "center": [
+          -21.999999999999723,
+          -22,
+          15
+        ],
+        "radius": 4.2
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.00493449634269,
+          "min": 9.995065503657313
+        },
+        "center": [
+          8.000000000000657,
+          1.146276991987213e-16,
+          15.000000000000002
+        ],
+        "radius": 10
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.004904747304234,
+          "min": 9.995095252695767
+        },
+        "center": [
+          22.000000000000277,
+          22,
+          15
+        ],
+        "radius": 4.2
+      },
+      {
+        "axis": "z",
+        "axisRange": {
+          "max": 20.004904747304234,
+          "min": 9.995095252695767
+        },
+        "center": [
+          -21.999999999999723,
+          22,
+          15
+        ],
+        "radius": 4.2
+      }
+    ],
+    "filletFeatures": [],
+    "massProperties": {
+      "centerOfMass": [
+        -0.41010684102710115,
+        -8.904480311486462e-16,
+        9.999999999999986
+      ],
+      "surfaceArea": 20424.467152663372,
+      "volume": 61283.39914007419
+    },
+    "minimumWallThickness": {
+      "algorithm": "occt-brep-extrema-material-interval",
+      "location": [
+        22,
+        28.1,
+        10
+      ],
+      "pointA": [
+        22,
+        30,
+        10
+      ],
+      "pointB": [
+        22,
+        26.2,
+        10
+      ],
+      "solidIndex": 0,
+      "supportA": {
+        "faceIndex": 0,
+        "supportType": "edge",
+        "surfaceType": "plane"
+      },
+      "supportB": {
+        "faceIndex": 8,
+        "supportType": "edge",
+        "surfaceType": "cylinder"
+      },
+      "tieCount": 44,
+      "tolerance": 0.000001,
+      "value": 3.8000000000000007
+    },
+    "planarFaces": [
+      {
+        "area": 600,
+        "center": [
+          -6.522560269672795e-16,
+          30,
+          5
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 600,
+        "center": [
+          -30,
+          -6.522560269672795e-16,
+          5
+        ],
+        "normal": [
+          -1,
+          0,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 600,
+        "center": [
+          30,
+          6.522560269672795e-16,
+          5
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 3064.1699570037244,
+        "center": [
+          -1.332267629550188e-15,
+          -5.936320207657612e-16,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": 0
+      },
+      {
+        "area": 3064.1699570037244,
+        "center": [
+          -1.332267629550188e-15,
+          -5.936320207657612e-16,
+          10
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 10
+      },
+      {
+        "area": 600,
+        "center": [
+          6.522560269672795e-16,
+          -30,
+          5
+        ],
+        "normal": [
+          0,
+          -1,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 600,
+        "center": [
+          -6.522560269672795e-16,
+          30,
+          15
+        ],
+        "normal": [
+          0,
+          1,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 600,
+        "center": [
+          -30,
+          -6.522560269672795e-16,
+          15
+        ],
+        "normal": [
+          -1,
+          0,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 600,
+        "center": [
+          30,
+          6.522560269672795e-16,
+          15
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "offset": 30
+      },
+      {
+        "area": 3064.169957003725,
+        "center": [
+          -0.82021368205353,
+          -5.936320207657611e-16,
+          10
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "offset": -10
+      },
+      {
+        "area": 3064.169957003725,
+        "center": [
+          -0.82021368205353,
+          -5.936320207657611e-16,
+          20
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "offset": 20
+      },
+      {
+        "area": 600,
+        "center": [
+          6.522560269672795e-16,
+          -30,
+          15
+        ],
+        "normal": [
+          0,
+          -1,
+          0
+        ],
+        "offset": 30
+      }
+    ],
+    "topologyCounts": {
+      "compounds": 1,
+      "edges": 108,
+      "faces": 22,
+      "shells": 2,
+      "solids": 2,
+      "vertices": 216,
+      "wires": 42
+    },
+    "validity": {
+      "closedSolids": true,
+      "invalidSolidCount": 0,
+      "openEdgeCount": 0,
+      "solidCount": 2,
+      "valid": true
+    }
+  },
+  "capabilities": [
+    {
+      "feature": "bounding-box",
+      "kind": "brep"
+    },
+    {
+      "feature": "bounding-box",
+      "kind": "mesh"
+    },
+    {
+      "feature": "center-of-mass",
+      "kind": "mesh"
+    },
+    {
+      "feature": "chamfer-features",
+      "kind": "brep"
+    },
+    {
+      "feature": "circular-hole-patterns",
+      "kind": "brep"
+    },
+    {
+      "feature": "circular-holes",
+      "kind": "brep"
+    },
+    {
+      "feature": "component-overlap",
+      "kind": "mesh"
+    },
+    {
+      "feature": "connected-components",
+      "kind": "mesh"
+    },
+    {
+      "feature": "cylindrical-faces",
+      "kind": "brep"
+    },
+    {
+      "feature": "distance",
+      "kind": "mesh"
+    },
+    {
+      "feature": "fillet-features",
+      "kind": "brep"
+    },
+    {
+      "feature": "mass-properties",
+      "kind": "brep"
+    },
+    {
+      "feature": "planar-faces",
+      "kind": "brep"
+    },
+    {
+      "feature": "product-structure",
+      "kind": "step"
+    },
+    {
+      "feature": "reader-provenance",
+      "kind": "step"
+    },
+    {
+      "feature": "schema",
+      "kind": "step"
+    },
+    {
+      "feature": "surface-area",
+      "kind": "mesh"
+    },
+    {
+      "feature": "topology-counts",
+      "kind": "brep"
+    },
+    {
+      "feature": "triangles",
+      "kind": "mesh"
+    },
+    {
+      "feature": "units",
+      "kind": "step"
+    },
+    {
+      "feature": "validity",
+      "kind": "brep"
+    },
+    {
+      "feature": "volume",
+      "kind": "mesh"
+    },
+    {
+      "feature": "wall-thickness",
+      "kind": "brep"
+    },
+    {
+      "feature": "watertightness",
+      "kind": "mesh"
+    }
+  ],
+  "diagnostics": [],
+  "mesh": {
+    "format": "mesh-buffer",
+    "meshCount": 1,
+    "signedVolume": 61294.43353249495,
+    "surfaceArea": 20425.645498540332,
+    "triangleCount": 2944,
+    "triangleDigest": "sha256:cd82b754aef4a25a92be8cb8d503b338938bc83a24d88169ca9dcf4a1fc255e0",
+    "vertexCount": 8832,
+    "watertight": false
+  },
+  "provenance": {
+    "contentHash": "sha256:4233c74ae571e5634a91fc3fa6a64233feef37b0128d782e18cac3313b57c027",
+    "loader": "opencascade-step",
+    "unit": "mm"
+  },
+  "step": {
+    "capabilities": [
+      {
+        "feature": "product-structure",
+        "supported": true
+      },
+      {
+        "feature": "color",
+        "supported": false
+      },
+      {
+        "feature": "material",
+        "supported": false
+      },
+      {
+        "feature": "geometric-tolerance",
+        "reason": "GeoSpec P0 reports unsupported AP242 PMI/GD&T evidence explicitly.",
+        "supported": false
+      }
+    ],
+    "productStructure": [
+      {
+        "name": "manifold",
+        "path": "manifold",
+        "transform": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      {
+        "name": "runnerFlange",
+        "path": "runnerFlange",
+        "transform": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    ],
+    "readStrategy": {
+      "bytesRead": 83467,
+      "copiedToEmscriptenFs": false,
+      "inputKind": "path",
+      "nativeReadStream": true,
+      "strategy": "native-stream"
+    },
+    "schema": "AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF {1 0 10303 442 1 1 4 }",
+    "unit": "mm",
+    "xde": {
+      "datumPlacements": [],
+      "datumSystems": [],
+      "freeShapeCount": 0,
+      "occurrences": [
+        {
+          "bounds": {
+            "max": [
+              30,
+              30,
+              10
+            ],
+            "min": [
+              -30,
+              -30,
+              0
+            ]
+          },
+          "instanceName": "manifold",
+          "path": "manifold",
+          "productName": "manifold",
+          "shapeIndex": 0,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "bounds": {
+            "max": [
+              30,
+              30,
+              20
+            ],
+            "min": [
+              -30,
+              -30,
+              10
+            ]
+          },
+          "instanceName": "runnerFlange",
+          "path": "runnerFlange",
+          "productName": "runnerFlange",
+          "shapeIndex": 1,
+          "transform": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ]
+        }
+      ],
+      "semanticDatums": [],
+      "subshapeNames": [
+        {
+          "faceIndex": 4,
+          "name": "face",
+          "occurrencePath": "manifold",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 6,
+          "name": "boltHole[2]",
+          "occurrencePath": "manifold",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 7,
+          "name": "boltHole[1]",
+          "occurrencePath": "manifold",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 8,
+          "name": "boltHole[4]",
+          "occurrencePath": "manifold",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 9,
+          "name": "port",
+          "occurrencePath": "manifold",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 10,
+          "name": "boltHole[3]",
+          "occurrencePath": "manifold",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 3,
+          "name": "face",
+          "occurrencePath": "runnerFlange",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 6,
+          "name": "boltHole[2]",
+          "occurrencePath": "runnerFlange",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 7,
+          "name": "boltHole[1]",
+          "occurrencePath": "runnerFlange",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 8,
+          "name": "port",
+          "occurrencePath": "runnerFlange",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 9,
+          "name": "boltHole[4]",
+          "occurrencePath": "runnerFlange",
+          "shapeType": "face"
+        },
+        {
+          "faceIndex": 10,
+          "name": "boltHole[3]",
+          "occurrencePath": "runnerFlange",
+          "shapeType": "face"
+        }
+      ],
+      "supplementalPlanes": []
+    }
+  }
+}

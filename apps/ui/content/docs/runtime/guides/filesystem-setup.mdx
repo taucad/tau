@@ -6,7 +6,7 @@ icon: lucide:folder-cog
 
 # Set Up the Filesystem
 
-Configure the filesystem backend that kernels use to read project files. The framework provides three built-in constructors: `fromNodeFs` for disk access, `fromMemoryFs` for in-memory content, and `fromFsLike` for any fs-compatible object (BrowserFS, memfs, polyfills).
+Configure the filesystem backend that kernels use to read project files. The framework provides adapters for Node directories, browser directory handles, in-memory content, already-confined fs-compatible objects, and host-owned filesystem bridges.
 
 ## Prerequisites
 
@@ -21,11 +21,12 @@ Choose and configure a filesystem implementation so your runtime client can read
 
 ### 1. Import Filesystem Constructors
 
-`fromMemoryFs` and `fromFsLike` are available from the main entry. `fromNodeFs` requires the Node.js subpath (it depends on Node.js APIs):
+`fromMemoryFs`, `fromFsLike`, and `fromFileSystemBridge` are available from the filesystem entry. Environment-specific adapters use their Node.js and browser subpaths:
 
 ```typescript
-import { fromMemoryFs, fromFsLike } from '@taucad/runtime';
+import { fromMemoryFs, fromFsLike, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { fromBrowserFs } from '@taucad/runtime/filesystem/browser';
 ```
 
 ### 2. Use fromNodeFs for Disk-Based Projects
@@ -36,13 +37,16 @@ Use `fromNodeFs` when your project files live on disk. Pass the base path; all f
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
 
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: fromNodeFs('/path/to/project') }),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
 });
 ```
 
@@ -53,10 +57,12 @@ Use this when running in Node.js (CLI, tests, server-side) and when you need per
 Use `fromMemoryFs` when file content is passed directly (e.g., from an editor) or when you want no disk I/O. Optionally seed with initial files:
 
 ```typescript
-import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 
 const filesystem = fromMemoryFs({
   'main.ts': `
@@ -68,42 +74,65 @@ const filesystem = fromMemoryFs({
   'lib/utils.ts': 'export function helper() { return 42; }',
 });
 
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
+
 const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: filesystem }),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
+  transport: inProcessTransport({ runtime, fileSystem: filesystem }),
 });
 ```
 
-### 4. Use fromFsLike for Any fs-Compatible Object
+### 4. Use fromFsLike for an Already-Confined fs-Compatible Object
 
-Use `fromFsLike` when you have an fs-compatible object with a `promises` namespace (e.g., BrowserFS, memfs, or any polyfill). The `FsLike` interface requires `promises.readFile`, `promises.writeFile`, `promises.mkdir`, and the other standard `fs.promises` methods:
+Use `fromFsLike` when an fs-compatible object with a `promises` namespace already exposes exactly the virtual tree the runtime may access (for example BrowserFS or memfs). It adapts that existing namespace and does not select or enforce a root. The `FsLike` interface requires `promises.readFile`, `promises.writeFile`, `promises.mkdir`, and the other standard `fs.promises` methods:
 
 ```typescript
-import nodeFs from 'node:fs';
-import { createRuntimeClient, fromFsLike } from '@taucad/runtime';
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromFsLike, type FsLike } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { replicad } from '@taucad/runtime/kernels';
-import { esbuild } from '@taucad/runtime/bundler';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
 
-const filesystem = fromFsLike(nodeFs, '/path/to/project');
+export const createClientForFs = (alreadyConfinedVirtualFs: FsLike) => {
+  const filesystem = fromFsLike(alreadyConfinedVirtualFs);
+  const runtime = defineRuntime({
+    plugins: [replicad(), esbuild()],
+  });
 
-const client = createRuntimeClient({
-  transport: inProcessTransport({ fileSystem: filesystem }),
-  kernels: [replicad()],
-  bundlers: [esbuild()],
-});
+  return createRuntimeClient({
+    transport: inProcessTransport({ runtime, fileSystem: filesystem }),
+  });
+};
 ```
 
-### 5. Understand RuntimeFileSystemBase, RuntimeFileSystem, and RuntimeFileSystem (opaque)
+For a raw Node filesystem, use `fromNodeFs('/path/to/project')`; that adapter maps the selected host directory to virtual `/` and enforces lexical and symlink containment at the adapter boundary.
+
+### 5. Use fromBrowserFs for a Browser Directory
+
+Use `fromBrowserFs` when the user grants a `FileSystemDirectoryHandle`. The selected handle becomes runtime `/`; runtime `/main.ts` refers to `main.ts` beneath that handle and never to the host operating system's root:
+
+```typescript
+import { fromBrowserFs } from '@taucad/runtime/filesystem/browser';
+
+const directory = await (
+  window as typeof window & {
+    showDirectoryPicker(): Promise<Parameters<typeof fromBrowserFs>[0]>;
+  }
+).showDirectoryPicker();
+const filesystem = fromBrowserFs(directory);
+```
+
+### 6. Understand RuntimeFileSystemBase, KernelFileSystem, and RuntimeFileSystem (opaque)
 
 The framework uses three related filesystem types:
 
-**`RuntimeFileSystem`** -- The opaque connect-time value returned by `fromNodeFs`, `fromMemoryFs`, `fromFsLike`, `fromBrowserFs`, and `fromChannelFs`. Hand it to the wired transport callable at construction (`webWorkerTransport({ fileSystem })`, `inProcessTransport({ fileSystem })`, …); consumers cannot inspect its internals.
+**`RuntimeFileSystem`** -- The opaque connect-time value returned by `fromNodeFs`, `fromMemoryFs`, `fromFsLike`, `fromBrowserFs`, and `fromFileSystemBridge`. Hand it to the wired transport callable at construction (`webWorkerTransport({ fileSystem })`, `inProcessTransport({ runtime, fileSystem })`, …); consumers cannot inspect its internals.
 
 **`RuntimeFileSystemBase`** -- The 11-method contract bridged to the kernel. Matches `fs.promises` semantics: `readFile`, `writeFile`, `mkdir`, `readdir`, `unlink`, `rmdir`, `rename`, `stat`, `lstat`, `exists`.
 
-**[`RuntimeFileSystem`](../api/filesystem)** (framework view) -- An enhanced interface that extends the base with convenience methods inside the worker. The framework wraps the base automatically via `createRuntimeFileSystem(base)`:
+**`KernelFileSystem`** (framework view) -- An enhanced interface that extends the base with convenience methods. The runtime worker decorates the primitive base automatically at its confinement boundary:
 
 | Method            | Signature                                          | Default Implementation                       |
 | ----------------- | -------------------------------------------------- | -------------------------------------------- |
@@ -112,52 +141,52 @@ The framework uses three related filesystem types:
 | `readdirStat`     | `(dirPath) => Promise<FileStatEntry[]>`            | `readdir` + `stat` per entry                 |
 | `ensureDir`       | `(path) => Promise<void>`                          | `mkdir(path, { recursive: true })`           |
 
-All paths are absolute. Backends can supply optimized overrides for any enhanced method (e.g., batch reads at the storage layer).
+Every method accepts a [runtime path](../concepts/path-namespaces) within the supplied filesystem. For a project-rooted filesystem, `/main.ts`, `/.tau/cache`, and `/node_modules` are local to that project; the leading slash is not the host OS root. The worker owns the helper implementations so a backend cannot bypass path canonicalization with an override.
 
-### 6. Use Filesystem Bridges for Cross-Worker Communication
+The rooted filesystem preserves the exact local paths carried by concrete create, change, delete, and rename events, independent of backing-filesystem case behavior. Only explicit information-loss signals such as reset, overflow, stale-root detection, backend replacement, or an irreducibly summarized change trigger broad recovery. Runtime never invents lowercase or Unicode equivalence. Concrete `/.tau/cache/**` events are excluded, while `/node_modules/**` remains observable because package files may be live bundle inputs. A rare out-of-band case-only or Unicode-equivalent edit on a Web Access root may require a refresh or project reopen.
 
-When the filesystem owns a **`Worker`** (**`exposeFileSystem`** there) and the client runs in another isolate (**`createFileSystemBridge(worker)`** on the owning thread), the returned **`FileSystemBridge.port`** is already a **`Port`** suited for **`createBridgeProxy`** in that isolate — no duplicate public helper exists for forwarding; opaque **`fromChannelFs`** builds the transferable **`MessagePort`** internally (**`packages/runtime`** `transport/_internal`).
+`fromNodeFs` is watch-capable: it opens one non-recursive `fs.watch` on the parent directory of each path in the kernel's dependency set, filters events by filename against that set, and classifies each hit by `stat`. A Node- or Electron-hosted runtime therefore rerenders autonomously when something outside the runtime edits a dependency.
 
-For the inverse pattern — you host handler objects in-process and hand a port to a worker that will call you — use **`createBridgePort(handlers)`**, which returns **`BridgePort`** (`raw` **`MessagePort`**) for **`postMessage(..., [port])`**.
+Watcherless adapters (`fromMemoryFs`, `fromBrowserFs`, and arbitrary `fromFsLike`) do not fabricate subscriptions. Each explicit source-bearing render/export operation rereads its current filesystem snapshot while keeping kernel initialization and persistent `/.tau/cache` entries reusable. Autonomous rerendering requires a real watch-capable filesystem.
 
-```typescript
-import { createBridgePort } from '@taucad/runtime/transport-internals';
-import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+### 7. Use Filesystem Bridges for Cross-Worker Communication
 
-const fileSystem = fromNodeFs('/path/to/project');
-const { port, dispose } = createBridgePort(fileSystem);
+When the filesystem owns a **`Worker`**, **`exposeFileSystem`** runs there.
 
-const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-worker.postMessage({ port }, [port]);
+When the client runs in another isolate, pass a factory to **`fromFileSystemBridge(openConnection)`** from **`@taucad/runtime/filesystem`**.
 
-const cleanup = () => {
-  worker.terminate();
-  dispose();
-};
-```
+For a persisted project, the factory calls **`openFileSystemBridge(worker, { root: '/projects/widget' })`** from **`@taucad/runtime/filesystem`** so every runtime binding or retry gets a fresh rooted connection. Use **`createFileSystemBridge(worker)`** plus **`createFileSystemBridgeProxy(bridge)`** from the same subpath when the current isolate needs to call filesystem methods directly.
 
-**`createFileSystemBridge(worker, options?)`** -- Creates a **`MessageChannel`**, posts the server end to the FS worker, returns **`FileSystemBridge`** with a **`wrapMessagePort`**-backed **`port`** for same-isolate **`createBridgeProxy`**.
+**`openFileSystemBridge(worker, options?)`** -- Creates a **`MessageChannel`**, posts the server end to the FS worker, and returns a raw transferable filesystem bridge connection for another consumer such as runtime.
 
-**`exposeFileSystem(handlers, options?)`** -- Worker-side counterpart; listens for the connect envelope (see **`filesystemBridgeConnectMessageType`** in **`@taucad/runtime/transport-internals`**).
+**`createFileSystemBridge(worker, options?)`** -- Creates a **`MessageChannel`**, posts the server end to the FS worker, returns **`FileSystemBridge`** with a **`wrapMessagePort`**-backed **`port`** for same-isolate **`createFileSystemBridgeProxy`**.
+
+**`exposeFileSystem(handlers, options?)`** -- Worker-side counterpart from **`@taucad/runtime/filesystem`**; listens for the filesystem bridge connect envelope.
 
 Call `dispose()` on either handle when the bridge is no longer needed.
 
 ## When to Use Each
 
-| Constructor                 | Use when                                                   |
-| --------------------------- | ---------------------------------------------------------- |
-| `fromNodeFs(basePath)`      | Node.js environment, disk-based projects, persistent cache |
-| `fromMemoryFs(files?)`      | Editor-driven content, tests, no disk I/O, ephemeral cache |
-| `fromFsLike(fs, rootPath?)` | Any fs-compatible object (BrowserFS, memfs, polyfills)     |
+| Constructor                  | Use when                                                    |
+| ---------------------------- | ----------------------------------------------------------- |
+| `fromNodeFs(basePath)`       | Node.js environment, disk-based projects, persistent cache  |
+| `fromMemoryFs(files?)`       | Editor-driven content, tests, no disk I/O, ephemeral cache  |
+| `fromFsLike(fs)`             | An already-rooted/confined virtual filesystem               |
+| `fromBrowserFs(root)`        | Browser File System Access directory handle                 |
+| `fromFileSystemBridge(open)` | Host-owned worker filesystem with a fresh rooted connection |
 
 ## Variations
 
 - **Custom implementation**: Implement `RuntimeFileSystemBase` directly for custom backends (e.g., cloud storage, virtual mounts). See [API Reference: Filesystem](../api/filesystem) for the full interface.
-- **Filesystem bridge**: For custom worker topologies, use **`createBridgePort`** and **`createFileSystemBridge`** from **`@taucad/runtime/transport-internals`**. For opaque transport wiring, prefer **`fromChannelFs(worker)`** on the main package.
+- **Raw Node.js**: Use `fromNodeFs(hostRoot)`, not `fromFsLike`, so host paths are contained lexically and through symlink resolution.
+- **Filesystem bridge authorities**: Use **`openFileSystemBridge`** / **`createFileSystemBridge`** from **`@taucad/runtime/filesystem`**.
+- **Runtime transport wiring**: Use **`fromFileSystemBridge(openConnection)`** from **`@taucad/runtime/filesystem`**.
 
 ## Related
 
 - [Use Middleware](./using-middleware) -- Caching middleware requires a writable filesystem
 - [Worker Model](../concepts/worker-model) -- How the filesystem is bridged to the worker
+- [Path Namespaces](../concepts/path-namespaces) -- What runtime `/` means for each adapter
 - [API Reference: Filesystem](../api/filesystem) -- Full filesystem API reference
 - [API Reference: Client](../api/client) -- createRuntimeClient filesystem option
+- [RPC Wire Spec](https://github.com/taucad/tau/blob/main/docs/architecture/rpc-wire-spec.md) -- Low-level protocol reference for custom transport authors

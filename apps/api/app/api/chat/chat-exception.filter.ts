@@ -15,6 +15,8 @@ import { errorCategory } from '@taucad/types/constants';
 import type { ChatError } from '@taucad/types';
 import { httpStatusToCategory, errorCategoryTitles } from '@taucad/chat/utils';
 import { httpHeader } from '#constants/http-header.constant.js';
+import { normalizeError } from '#api/chat/utils/error-normalizer.js';
+import { isCompactionPipelineError } from '#api/chat/utils/compaction-errors.js';
 
 @Catch()
 export class ChatExceptionFilter implements ExceptionFilter {
@@ -86,6 +88,13 @@ export class ChatExceptionFilter implements ExceptionFilter {
         title: errorCategoryTitles[category],
         message,
         code,
+        httpStatus: statusCode,
+        requestId,
+      };
+    } else if (isCompactionPipelineError(exception)) {
+      statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
+      chatError = {
+        ...(JSON.parse(normalizeError(exception)) as ChatError),
         httpStatus: statusCode,
         requestId,
       };

@@ -4,10 +4,12 @@ import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { screenshotCapabilityMachine } from '#machines/screenshot-capability.machine.js';
 import { cameraCapabilityMachine } from '#machines/camera-capability.machine.js';
+import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ScreenshotCapabilityRef = ActorRefFrom<typeof screenshotCapabilityMachine>;
 type CameraCapabilityRef = ActorRefFrom<typeof cameraCapabilityMachine>;
+type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
 type GraphicsContextValue = {
   graphicsRef: GraphicsActorRef;
@@ -93,4 +95,25 @@ export function useCameraCapability(): CameraCapabilityRef {
 export function useGraphicsSelector<T>(selector: (state: SnapshotFrom<typeof graphicsMachine>) => T): T {
   const graphicsRef = useGraphics();
   return useSelector(graphicsRef, selector);
+}
+
+export function useModelInteractionRef(): ModelInteractionRef {
+  const graphicsRef = useGraphics();
+  const modelInteractionRef = useSelector(
+    graphicsRef,
+    (state) => state.children['modelInteraction'] as ModelInteractionRef | undefined,
+  );
+
+  if (!modelInteractionRef) {
+    throw new Error('modelInteraction actor is not available on the graphics machine');
+  }
+
+  return modelInteractionRef;
+}
+
+export function useModelInteractionSelector<T>(
+  selector: (state: SnapshotFrom<typeof modelInteractionMachine>) => T,
+): T {
+  const modelInteractionRef = useModelInteractionRef();
+  return useSelector(modelInteractionRef, selector);
 }

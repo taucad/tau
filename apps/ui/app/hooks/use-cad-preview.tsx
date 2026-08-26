@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useEffect, useMemo, useCallback } from 'react';
+import { createContext, useContext, useEffect, useMemo, useCallback, useId, useRef } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -24,7 +24,7 @@ export type CadPreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
  * Context value exposed by CadPreviewProvider via the useCadPreview() hook.
  */
 export type CadPreviewContextValue = {
-  readonly geometries: Geometry[];
+  readonly geometry: Geometry | undefined;
   readonly status: CadPreviewStatus;
   readonly error: Error | undefined;
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
@@ -74,6 +74,21 @@ function deriveStatus(cadState: string): CadPreviewStatus {
 }
 
 /**
+ * Combines CAD machine phase and initialization errors into the preview status
+ * exposed by {@link useCadPreview}.
+ */
+export const deriveCadPreviewStatus = (args: {
+  readonly initError: Error | undefined;
+  readonly cadState: string;
+}): CadPreviewStatus => {
+  if (args.initError) {
+    return 'error';
+  }
+
+  return deriveStatus(args.cadState);
+};
+
+/**
  * Provider that creates a lightweight CAD rendering pipeline (cadMachine + graphicsMachine),
  * optionally writes files to the filesystem, and exposes all rendering state via the useCadPreview() hook.
  *
@@ -81,7 +96,12 @@ function deriveStatus(cadState: string): CadPreviewStatus {
  * Uses cadPreviewMachine to orchestrate file preparation and kernel initialization,
  * following the same invoke+fromPromise pattern as projectMachine.
  *
- * @example <caption>Simple thumbnail</caption>
+ * When `files` is supplied, each provider instance owns a distinct ephemeral
+ * `/previews/<instance>` memory root. Preview setup and teardown therefore
+ * cannot replace a persistent `/projects/<projectId>` route. When `files` is
+ * omitted, the CAD machine reads the existing persistent project route.
+ *
+ * @example <caption>Simple thumbnail (isolated ephemeral mount)</caption>
  * ```tsx
  * <CadPreviewProvider projectId="my-project" mainFile="main.ts" files={files}>
  *   <CadPreviewViewer className="size-full" />
@@ -104,13 +124,24 @@ export function CadPreviewProvider({
   kernelOptionsFactory = defaultKernelOptions,
   children,
 }: CadPreviewProviderProps): React.JSX.Element {
-  const { fileManagerRef } = useFileManager();
+  const { fileManagerRef, client, workspace } = useFileManager();
+  const previewInstance = useId().replaceAll(':', '');
+  const previewPrefix = joinPath('/previews', previewInstance);
+  const fileSystemRoot = files === undefined ? joinPath('/projects', projectId) : previewPrefix;
+
+  // Set only after this provider instance successfully installs its isolated mount.
+  const mountedPrefixRef = useRef<string | undefined>(undefined);
+  // Capture `workspace.unmount` so the cleanup effect uses a stable reference
+  // even if the gated facade re-renders.
+  const unmountRef = useRef(workspace.unmount);
+  unmountRef.current = workspace.unmount;
 
   const cadRef = useActorRef(cadMachine, {
     input: {
       shouldInitializeKernelOnStart: false,
       fileManagerRef,
       kernelOptionsFactory,
+      fileSystemRoot,
     },
   });
 
@@ -149,25 +180,22 @@ export function CadPreviewProvider({
 
             signal.throwIfAborted();
 
-            const { contentService } = snapshot.context;
-            if (!contentService) {
-              throw new Error('File manager services not available after initialization');
-            }
-
-            signal.throwIfAborted();
-
-            // Always write the full snapshot to the filesystem. A previous optimization skipped writes when
-            // `exists(firstKey)` was true; first key order follows Map insertion (arbitrary), so a
-            // stale match could skip the entire write while the kernel still read from disk — ENOENT,
-            // empty geometry, and broken tree refresh. Preview imports are not hot enough to require skipping.
+            // Always write the full snapshot. Preview imports are not hot enough
+            // to justify stale-file detection, and every instance has its own root.
             const projectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};
             for (const [path, file] of Object.entries(input.files)) {
-              projectFiles[joinPath('/projects', input.projectId, path)] = {
+              projectFiles[joinPath(previewPrefix, path)] = {
                 content: new Uint8Array(file.content),
               };
             }
 
-            await contentService.writeFiles(projectFiles, 'machine');
+            await workspace.mount(previewPrefix, {
+              backend: 'memory',
+              storageRootKey: `memory:preview:${previewInstance}`,
+            });
+            mountedPrefixRef.current = previewPrefix;
+            signal.throwIfAborted();
+            await client.writeFiles(projectFiles);
           }
         }),
       },
@@ -190,8 +218,24 @@ export function CadPreviewProvider({
     }
   }, [isEnabled, previewRef]);
 
+  // Unmount the preview-owned ephemeral prefix on React teardown.
+  // The effect intentionally has an empty dependency array — it should run
+  // exactly once at unmount (or `projectId` change, which remounts the
+  // provider via the `key={projectId-mainFile}` callers use). React invokes
+  // cleanup on unmount; the actor is what sets the ref between mount and
+  // cleanup.
+  useEffect(() => {
+    return () => {
+      const previewPrefix = mountedPrefixRef.current;
+      if (previewPrefix !== undefined) {
+        mountedPrefixRef.current = undefined;
+        unmountRef.current(previewPrefix);
+      }
+    };
+  }, []);
+
   // Selectors on cadRef for reactive state
-  const geometries = useSelector(cadRef, (s) => s.context.geometries);
+  const geometry = useSelector(cadRef, (s) => s.context.geometry);
   const cadStateValue = useSelector(cadRef, (s) => s.value);
   const kernelIssues = useSelector(cadRef, (s) => s.context.kernelIssues);
   const defaultParameters = useSelector(cadRef, (s) => s.context.defaultParameters);
@@ -201,7 +245,14 @@ export function CadPreviewProvider({
   // Initialization error from the preview machine
   const initError = useSelector(previewRef, (s) => s.context.initError);
 
-  const status = initError ? 'error' : deriveStatus(typeof cadStateValue === 'string' ? cadStateValue : 'idle');
+  const status = useMemo(
+    () =>
+      deriveCadPreviewStatus({
+        initError,
+        cadState: typeof cadStateValue === 'string' ? cadStateValue : 'idle',
+      }),
+    [initError, cadStateValue],
+  );
 
   const error = useMemo(() => {
     if (initError) {
@@ -220,16 +271,16 @@ export function CadPreviewProvider({
     return new Error('Unknown CAD error');
   }, [status, kernelIssues, initError]);
 
-  // Forward geometries to graphics machine
+  // Forward geometry to graphics machine
   useEffect(() => {
-    if (geometries.length > 0) {
+    if (geometry) {
       graphicsRef.send({
-        type: 'updateGeometries',
-        geometries,
+        type: 'updateGeometry',
+        geometry,
         units: cadUnits,
       });
     }
-  }, [geometries, cadUnits, graphicsRef]);
+  }, [geometry, cadUnits, graphicsRef]);
 
   const setParameters = useCallback(
     (newParameters: Record<string, unknown>) => {
@@ -240,7 +291,7 @@ export function CadPreviewProvider({
 
   const value = useMemo<CadPreviewContextValue>(
     () => ({
-      geometries,
+      geometry,
       status,
       error,
       cadRef,
@@ -249,7 +300,7 @@ export function CadPreviewProvider({
       jsonSchema,
       setParameters,
     }),
-    [geometries, status, error, cadRef, graphicsRef, defaultParameters, jsonSchema, setParameters],
+    [geometry, status, error, cadRef, graphicsRef, defaultParameters, jsonSchema, setParameters],
   );
 
   return <CadPreviewContext.Provider value={value}>{children}</CadPreviewContext.Provider>;
@@ -260,7 +311,7 @@ export function CadPreviewProvider({
  *
  * @example <caption>Read preview state</caption>
  * ```tsx
- * const { geometries, status, setParameters } = useCadPreview();
+ * const { geometry, status, setParameters } = useCadPreview();
  * ```
  */
 export function useCadPreview(): CadPreviewContextValue;

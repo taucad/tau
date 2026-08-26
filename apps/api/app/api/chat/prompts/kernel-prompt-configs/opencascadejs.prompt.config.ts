@@ -7,10 +7,12 @@ export const opencascadejsConfig: KernelConfig = {
   fileExtension: '.ts',
   languageName: 'OpenCascade.js',
 
-  codeStandards: `Output TypeScript with \`import { ClassName } from 'opencascade.js'\` using named imports. Export \`defaultParams\` and a default \`main(params)\` function returning a \`TopoDS_Shape\`. Always call \`.delete()\` on OCCT objects in a \`finally\` block to prevent memory leaks.`,
+  codeStandards: `Output TypeScript with \`import { ClassName } from 'libcascade'\` using named imports. Export \`defaultParams\` and a default \`main(params)\` function returning a \`TopoDS_Shape\`. Always call \`.delete()\` on OCCT objects in a \`finally\` block to prevent memory leaks.`,
 
   commonErrorPatterns:
     'memory leaks from missing .delete() calls, wrong constructor overload suffix (e.g. _2 vs _3), unfreed gp_Pnt/gp_Dir temporaries, using Shape() before Build()',
+
+  testingProfile: { includeBrepFeatureExamples: true },
 
   topologyHints: `- Curves: \`GC_MakeArcOfCircle\`, \`Geom_Circle\`, \`Geom_BSplineCurve\`, \`Geom2dAPI_PointsToBSpline\` (for data-driven fits), \`BRepBuilderAPI_MakeEdge\` from a \`Geom\`-curve. Never chain \`BRepBuilderAPI_MakePolygon\` for what is a single analytical edge.
 - Profile sketches: build wires from analytical edges, not polylines. Close every wire explicitly.

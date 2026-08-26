@@ -30,13 +30,10 @@ Use `scope:ui` for UI-only app-libs. Use `scope:shared` only with named UI and A
 pnpm nx g @taucad/workspace-plugin:package <name> --description="..."
 ```
 
-For a package that supplies runtime capabilities, use the **plugin** generator instead — it scaffolds under `packages/plugins/`, declares the package-named factory, re-exports it as `plugin`, and emits one file per capability:
-
-```bash
-pnpm nx g @taucad/workspace-plugin:plugin <name> --capabilities=kernel,transcoder --description="..."
-```
-
-See `.agents/skills/new-kernel/SKILL.md` for the kernel-specific walkthrough.
+For a package that supplies runtime plugin capabilities, stop and use
+`.agents/skills/create-plugin/SKILL.md`. For a kernel specifically, use
+`.agents/skills/new-kernel/SKILL.md`. Those workflows own their generators and
+integration requirements; this skill does not duplicate them.
 
 ### Options
 

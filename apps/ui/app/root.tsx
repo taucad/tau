@@ -71,7 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cookie,
     // Allowlisted subset only — this value is serialised into page source both
     // by the `window.ENV` script below and React Router's `<Scripts />` payload.
-    env: await getClientEnvironment(new URL(request.url)),
+    env: await getClientEnvironment(),
   };
 }
 

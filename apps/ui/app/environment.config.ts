@@ -80,8 +80,10 @@ const environmentSchema = z.preprocess(
   }),
 );
 
-export const getEnvironment = async (): Promise<Environment> => {
-  const result = environmentSchema.safeParse(process.env);
+export type Environment = z.infer<typeof environmentSchema>;
+
+const parseEnvironment = (rawEnvironment: RawEnvironment): Environment => {
+  const result = environmentSchema.safeParse(rawEnvironment);
 
   if (!result.success) {
     const formattedError = z.treeifyError(result.error).properties;
@@ -93,9 +95,65 @@ export const getEnvironment = async (): Promise<Environment> => {
   return result.data;
 };
 
-export type Environment = z.infer<typeof environmentSchema>;
+export const getEnvironment = async (): Promise<Environment> => parseEnvironment(process.env);
+
+/**
+ * Keys serialised into `window.ENV` and shipped to every visitor in page
+ * source. Add a key only if it is safe to publish (public URLs, publishable
+ * keys, feature flags). Everything else stays server-only and is read through
+ * `getEnvironment()`.
+ */
+const clientEnvironmentKeys = [
+  'TAU_API_URL',
+  'TAU_WEBSOCKET_URL',
+  'TAU_FRONTEND_URL',
+  'TAU_DEBUG',
+  'NODE_ENV',
+  'POSTHOG_API_HOST',
+  'POSTHOG_UI_HOST',
+  'POSTHOG_ASSET_HOST',
+  'POSTHOG_CLIENT_KEY',
+] as const satisfies ReadonlyArray<keyof Environment>;
+
+export type ClientEnvironment = Pick<Environment, (typeof clientEnvironmentKeys)[number]>;
+
+const selectClientEnvironment = (environment: Environment): ClientEnvironment => {
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- fromEntries cannot retain tuple-key completeness.
+  return Object.fromEntries(clientEnvironmentKeys.map((key) => [key, environment[key]])) as ClientEnvironment;
+};
+
+/**
+ * The allowlisted subset safe to inject into the document. Use this — never
+ * `getEnvironment()` — for anything that reaches a loader's return value.
+ */
+export const getClientEnvironment = async (): Promise<ClientEnvironment> =>
+  selectClientEnvironment(await getEnvironment());
+
+/**
+ * Isomorphic environment access, narrowed to the client-safe allowlist so a
+ * server-only key cannot be read from code that also runs in the browser.
+ * Server-only code reads the full environment via `getEnvironment()`.
+ */
+const resolveIsomorphicClientEnvironment = (): ClientEnvironment => {
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent during SSR.
+  if (globalThis.window) {
+    return globalThis.window.ENV;
+  }
+
+  return selectClientEnvironment(parseEnvironment(globalThis.process.env));
+};
+
+const createEnvironmentFacade = (): ClientEnvironment => {
+  const facade = {};
+  for (const key of clientEnvironmentKeys) {
+    Object.defineProperty(facade, key, {
+      enumerable: true,
+      get: () => resolveIsomorphicClientEnvironment()[key],
+    });
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- every ClientEnvironment key is defined above.
+  return facade as ClientEnvironment;
+};
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- easier to distinguish this constant with UPPER_CASE.
-export const ENV =
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window can be undefined in SSR
-  globalThis.window ? globalThis.window.ENV : globalThis.process.env;
+export const ENV = createEnvironmentFacade();

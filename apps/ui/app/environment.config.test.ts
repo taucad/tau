@@ -2,7 +2,7 @@
 import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getEnvironment, resolveFrontendUrl } from '#environment.config.js';
+import { ENV, getClientEnvironment, getEnvironment, resolveFrontendUrl } from '#environment.config.js';
 
 const originalEnvironment = { ...process.env };
 
@@ -191,5 +191,88 @@ describe('getEnvironment', () => {
     expect(error.message).toContain('Invalid environment configuration');
     expect(error.message).toContain('TAU_API_URL');
     expect(error.message).toContain('TAU_WEBSOCKET_URL');
+  });
+});
+
+describe('getClientEnvironment', () => {
+  const secretToken = 'ghp_pretend_this_is_a_real_token_00000';
+
+  const setEnvironmentWithSecret = (): void => {
+    setProcessEnvironment(
+      withBaseEnvironment([
+        ['TAU_FRONTEND_URL', 'https://taucad.dev'],
+        ['GITHUB_API_TOKEN', secretToken],
+      ]),
+    );
+  };
+
+  afterEach(() => {
+    process.env = originalEnvironment;
+  });
+
+  // This payload is serialised into page source for every visitor, so a
+  // server-only key reaching it is a leak.
+  it('should omit GITHUB_API_TOKEN from the client payload', async () => {
+    setEnvironmentWithSecret();
+
+    const clientEnvironment = await getClientEnvironment();
+
+    expect(clientEnvironment).not.toHaveProperty('GITHUB_API_TOKEN');
+    expect(JSON.stringify(clientEnvironment)).not.toContain(secretToken);
+  });
+
+  it('should still expose GITHUB_API_TOKEN to server-side callers', async () => {
+    setEnvironmentWithSecret();
+
+    const environment = await getEnvironment();
+
+    expect(environment.GITHUB_API_TOKEN).toBe(secretToken);
+  });
+
+  it('should carry the client-safe keys through to the browser', async () => {
+    setEnvironmentWithSecret();
+
+    const clientEnvironment = await getClientEnvironment();
+
+    /* eslint-disable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
+    expect(clientEnvironment).toMatchObject({
+      TAU_API_URL: 'https://api.taucad.dev',
+      TAU_WEBSOCKET_URL: 'wss://api.taucad.dev',
+      TAU_FRONTEND_URL: 'https://taucad.dev',
+      TAU_DEBUG: false,
+      NODE_ENV: 'production',
+      POSTHOG_API_HOST: 'https://us.i.posthog.com',
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
+  });
+
+  it('should expose parsed server values without treating string booleans as truthy', () => {
+    setEnvironmentWithSecret();
+    process.env['TAU_DEBUG'] = 'true';
+    expect(ENV.TAU_DEBUG).toBe(true);
+
+    process.env['TAU_DEBUG'] = 'false';
+    expect(ENV.TAU_DEBUG).toBe(false);
+  });
+
+  // Pins the fail-closed property: a key added to the schema stays server-only
+  // until it is deliberately added to `clientEnvironmentKeys`. This list is the
+  // exact set of values published in page source — extend it deliberately.
+  it('should expose only allowlisted keys, never the whole schema', async () => {
+    setEnvironmentWithSecret();
+
+    const clientEnvironment = await getClientEnvironment();
+
+    expect(Object.keys(clientEnvironment).toSorted()).toStrictEqual([
+      'NODE_ENV',
+      'POSTHOG_API_HOST',
+      'POSTHOG_ASSET_HOST',
+      'POSTHOG_CLIENT_KEY',
+      'POSTHOG_UI_HOST',
+      'TAU_API_URL',
+      'TAU_DEBUG',
+      'TAU_FRONTEND_URL',
+      'TAU_WEBSOCKET_URL',
+    ]);
   });
 });

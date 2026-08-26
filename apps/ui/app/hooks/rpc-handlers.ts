@@ -8,7 +8,6 @@
  * adapts browser-specific deps into the abstract RpcDependencies interface.
  */
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
-import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-fresh-render.js';
 import type {
   RpcCall,
@@ -33,7 +32,7 @@ import type {
   RpcGraphicsExportGeometryResult,
   RpcDirectoryEntry,
 } from '@taucad/chat/rpc';
-import type { ExportFile, FileExtension, FileStat } from '@taucad/types';
+import type { FileExtension, FileStat } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 import { DirectoryListingFailedError, DirectoryListingErrorCode } from '@taucad/fs-client/directory-listing';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
@@ -42,11 +41,14 @@ import { getErrno } from '@taucad/utils/error';
 import { recordRpcOutcome } from '#services/rpc-ledger.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
+import { createSourceModelInteractionUnitId } from '#machines/model-interaction.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { canonicalCaptureViews, captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
 
 /** Source of file write operations */
 type FileWriteSource = 'editor' | 'user' | 'machine';
@@ -440,57 +442,28 @@ function createBrowserGraphicsClient(projectRef: ActorRefFrom<typeof projectMach
   };
 }
 
-const captureViews = {
-  single: [{ id: 'isometric', label: 'Isometric', phi: 60, theta: -45 }],
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- RPC wire value is part of the public capture-mode contract.
-  multi_angle: [
-    { id: 'front', label: 'Front — View From −Y', phi: 90, theta: 270 },
-    { id: 'back', label: 'Back — View From +Y', phi: 90, theta: 90 },
-    { id: 'right', label: 'Right — View From +X', phi: 90, theta: 0 },
-    { id: 'left', label: 'Left — View From −X', phi: 90, theta: 180 },
-    { id: 'top', label: 'Top — View From +Z', phi: 0, theta: 0 },
-    { id: 'bottom', label: 'Bottom — View From −Z', phi: 180, theta: 0 },
-  ],
-} as const;
-
-const bytesToWebpDataUrl = (bytes: Uint8Array<ArrayBuffer>): string => {
-  return `data:image/webp;base64,${uint8ArrayToBase64(bytes)}`;
-};
-
-/**
- * Match the renderer's artifacts to the requested views by position: nanoraster
- * documents result order as an API guarantee (one result per view, in view
- * order; the singular request yields exactly one). Filenames are the renderer's
- * to choose — Tau's own `thumbnail.webp` storage naming is applied downstream at
- * write time — so only the count and the payloads are checked here.
- */
-const requireCapturedWebps = (files: ExportFile[], expectedCount: number): ExportFile[] => {
-  if (
-    files.length !== expectedCount ||
-    files.some((file) => file.mimeType !== 'image/webp' || file.bytes.length === 0)
-  ) {
-    const actual = files.map((file) => `${file.mimeType} ${file.bytes.length}B`);
-    throw new Error(
-      `Image capture expected ${expectedCount} non-empty WebP artifact(s), received ${files.length} [${actual.join(', ')}]`,
-    );
-  }
-  return files;
-};
-
 function createBrowserImageClient(
   projectRef: ActorRefFrom<typeof projectMachine>,
   imageService: Pick<HeadlessImageService, 'export'>,
   fileSystem: RuntimeFileSystem,
 ): RpcImageClient {
+  const findGraphicsRef = (targetFile: string): ActorRefFrom<typeof graphicsMachine> | undefined => {
+    const unitId = createSourceModelInteractionUnitId(targetFile);
+    for (const graphicsRef of projectRef.getSnapshot().context.viewGraphics.values()) {
+      if (graphicsRef.getSnapshot().context.modelInteractionUnitId === unitId) {
+        return graphicsRef;
+      }
+    }
+    return undefined;
+  };
+
   return {
     async captureImages(input: CaptureImagesRpcInput): Promise<CaptureImagesRpcResult> {
       const resolved = await ensureGeometryUnit(projectRef, input.targetFile);
       if (!resolved.ok) {
         return { success: false, errorCode: resolved.errorCode, message: resolved.message };
       }
-
-      const { entryPath, parameters } = resolved.cadSnapshot.context;
-      if (!entryPath) {
+      if (!resolved.cadSnapshot.context.entryPath) {
         return {
           success: false,
           errorCode: rpcClientErrorCode.unknown,
@@ -500,48 +473,27 @@ function createBrowserImageClient(
 
       const includeEdges = input.includeEdges ?? true;
       try {
-        const views = captureViews[input.mode];
-        const files = await imageService.export({
-          kind: 'capture',
-          identity: `capture:${input.targetFile}:${input.mode}:${includeEdges}`,
+        const files = await captureCadImages({
+          cadRef: resolved.cadUnit,
+          graphicsRef: findGraphicsRef(input.targetFile),
           fileSystem,
-          format: 'webp',
-          source: { path: entryPath },
-          parameters,
-          includeEdges,
-          exportOptions:
-            input.mode === 'single'
-              ? {
-                  mode: 'single',
-                  width: 800,
-                  height: 800,
-                  margin: 0.1,
-                  phi: views[0].phi,
-                  theta: views[0].theta,
-                  projection: 'perspective',
-                  label: views[0].label,
-                  axes: true,
-                  scaleBar: true,
-                }
-              : {
-                  mode: 'batch',
-                  width: 800,
-                  height: 800,
-                  margin: 0.1,
-                  projection: 'orthographic',
-                  axes: true,
-                  scaleBar: true,
-                  views,
-                },
+          imageService,
+          recipe: {
+            purpose: 'agent',
+            mode: input.mode === 'single' ? 'isometric' : 'orthographic',
+            includeEdges,
+          },
         });
-        if (!files) {
-          throw new Error('Image capture returned no artifacts');
-        }
-
-        const webps = requireCapturedWebps(files, views.length);
+        const views =
+          resolved.cadSnapshot.context.geometry?.format === 'svg'
+            ? (['drawing'] as const)
+            : input.mode === 'single'
+              ? (['isometric'] as const)
+              : canonicalCaptureViews.map((view) => view.id);
+        const dataUrls = captureFilesToDataUrls(files);
         const images = views.map((view, index) => ({
-          view: view.id,
-          dataUrl: bytesToWebpDataUrl(webps[index]!.bytes),
+          view,
+          dataUrl: dataUrls[index]!,
         }));
         return { success: true, images };
       } catch (error) {

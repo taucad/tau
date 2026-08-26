@@ -1,26 +1,29 @@
-import { useCallback, useMemo, useEffect, useState, useRef } from 'react';
+import { useCallback, useMemo, useEffect } from 'react';
 import { AtSign, Image, AlertTriangle, AlertCircle, Camera } from 'lucide-react';
 import { useSelector } from '@xstate/react';
-import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { CodeIssue, ScreenshotOverlay } from '@taucad/types';
+import type { CodeIssue } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 import { TooltipTrigger, TooltipContent, Tooltip } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { toast } from '#components/ui/sonner.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { orthographicViews, screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { cn } from '#utils/ui.utils.js';
 import { menuItemLayoutClass } from '#components/ui/menu.variants.js';
-import { useImageQuality } from '#hooks/use-image-quality.js';
-import { buildScreenshotOverlayForPath, resolveScreenshotOverlay } from '#machines/resolve-screenshot-overlay.js';
+import type { DraftImageOptions } from '#hooks/use-chat.js';
+import { useHeadlessImageService } from '#providers/headless-image-provider.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
+import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
+import { useCameraRegistryVersion } from '#hooks/use-graphics.js';
+import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
 
 type ChatContextActionsProperties = {
-  readonly addImage: (image: string) => void;
+  readonly addImage: (image: string, options?: DraftImageOptions) => void;
   readonly addText: (text: string) => void;
-  readonly imageInputSupported?: boolean;
+  readonly isImageInputSupported?: boolean;
   readonly asPopoverMenu?: boolean;
   readonly onClose?: () => void;
   readonly searchQuery?: string;
@@ -42,7 +45,7 @@ type ContextActionItem = {
 export function ChatContextActions({
   addImage,
   addText,
-  imageInputSupported = true,
+  isImageInputSupported = true,
   asPopoverMenu,
   onClose,
   searchQuery = '',
@@ -56,7 +59,9 @@ export function ChatContextActions({
   const mainGraphicsRef = useMainGraphics();
   const cadActor = geometryUnits.get(mainEntryPath);
 
-  const isScreenshotReady = useSelector(mainGraphicsRef, (state) => state?.context.isScreenshotReady ?? false);
+  useCameraRegistryVersion();
+  const mainCameraReady = hasGraphicsCameraRig(mainGraphicsRef);
+  const mainGeometryFormat = useSelector(cadActor, (state) => state?.context.geometry?.format);
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
 
   // Get the kernel error for the main entry path from its geometry unit
@@ -69,235 +74,55 @@ export function ChatContextActions({
   });
 
   const codeIssues = useSelector(cadActor, (state) => state?.context.codeIssues ?? []);
-  const { quality: screenshotQuality } = useImageQuality();
+  const imageService = useHeadlessImageService();
+  const { runtimeFileSystem } = useFileManager();
 
-  // Reactively track isScreenshotReady for all view graphics actors.
-  // getSnapshot() inside useMemo is a one-time read; we need subscriptions so that
-  // when a view's capability registers asynchronously, the menu item updates.
-  const [viewReadiness, setViewReadiness] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    // Seed initial state from current snapshots
-    const initial: Record<string, boolean> = {};
-    for (const [viewId, graphicsRef] of viewGraphics) {
-      initial[viewId] = graphicsRef.getSnapshot().context.isScreenshotReady;
-    }
-
-    setViewReadiness(initial);
-
-    // Subscribe to future changes
-    const subscriptions: Array<{ unsubscribe: () => void }> = [];
-    for (const [viewId, graphicsRef] of viewGraphics) {
-      const subscription = graphicsRef.subscribe((snapshot) => {
-        setViewReadiness((previous) => {
-          const ready = snapshot.context.isScreenshotReady;
-          if (previous[viewId] === ready) {
-            return previous;
-          }
-
-          return { ...previous, [viewId]: ready };
-        });
-      });
-      subscriptions.push(subscription);
-    }
-
-    return () => {
-      for (const subscription of subscriptions) {
-        subscription.unsubscribe();
-      }
-    };
-  }, [viewGraphics]);
-
-  // Track active screenshot actors for lifecycle cleanup
-  const activeScreenshotActorsRef = useRef(new Set<{ stop: () => void }>());
-
-  useEffect(() => {
-    const actors = activeScreenshotActorsRef;
-    return () => {
-      for (const actor of actors.current) {
-        actor.stop();
-      }
-
-      actors.current.clear();
-    };
-  }, []);
-
-  // Helper to take a screenshot of a specific view's graphicsRef (creates actor on-demand)
-  const takeScreenshot = useCallback(
-    (
-      graphicsRef: ActorRefFrom<typeof graphicsMachine>,
-      options: {
-        type: 'single' | 'composite';
-        overlay?: ScreenshotOverlay;
-        onSuccess: (dataUrls: string[]) => void;
-        onError: (error: unknown) => void;
-      },
+  const capture = useCallback(
+    async (
+      targetCadRef: ActorRefFrom<typeof cadMachine> | undefined,
+      graphicsRef: ActorRefFrom<typeof graphicsMachine> | undefined,
+      mode: 'current' | 'orthographic',
     ) => {
-      const actor = createActor(screenshotRequestMachine, {
-        input: { graphicsRef },
-      });
-      const actors = activeScreenshotActorsRef.current;
-      actors.add(actor);
-      actor.start();
-
-      const cleanup = () => {
-        actor.stop();
-        actors.delete(actor);
-      };
-
-      if (options.type === 'single') {
-        actor.send({
-          type: 'requestScreenshot',
-          options: {
-            output: {
-              format: 'image/webp',
-              quality: screenshotQuality,
-            },
-            aspectRatio: 16 / 9,
-            maxResolution: 1200,
-            zoomLevel: 1.4,
-            overlay: options.overlay,
-          },
-          onSuccess(dataUrls) {
-            cleanup();
-            options.onSuccess(dataUrls);
-          },
-          onError(error) {
-            cleanup();
-            options.onError(error);
-          },
-        });
-      } else {
-        actor.send({
-          type: 'requestCompositeScreenshot',
-          options: {
-            output: {
-              format: 'image/webp',
-              quality: screenshotQuality,
-              isPreview: true,
-            },
-            cameraAngles: orthographicViews.slice(0, 6),
-            aspectRatio: 1,
-            maxResolution: 800,
-            zoomLevel: 1.2,
-            overlay: options.overlay,
-            composite: {
-              enabled: true,
-              preferredRatio: { columns: 3, rows: 2 },
-              showLabels: true,
-              padding: 12,
-              labelHeight: 24,
-              backgroundColor: 'transparent',
-              dividerColor: 'var(--border)',
-              dividerWidth: 1,
-            },
-          },
-          onSuccess(dataUrls) {
-            cleanup();
-            options.onSuccess(dataUrls);
-          },
-          onError(error) {
-            cleanup();
-            options.onError(error);
-          },
-        });
+      if (!targetCadRef) {
+        toast.error('No CAD view available for image capture');
+        return;
       }
-    },
-    [screenshotQuality],
-  );
-
-  /** Resolve the overlay for the main entry — used by the main-view + composite handlers. */
-  const resolveMainOverlay = useCallback((): ScreenshotOverlay | undefined => {
-    return (
-      resolveScreenshotOverlay(cadActor) ?? (mainEntryPath ? buildScreenshotOverlayForPath(mainEntryPath) : undefined)
-    );
-  }, [cadActor, mainEntryPath]);
-
-  const handleViewScreenshot = useCallback(
-    (graphicsRef: ActorRefFrom<typeof graphicsMachine>, viewEntryPath: string | undefined) => {
       if (asPopoverMenu) {
         onClose?.();
       }
-
-      const overlay =
-        resolveScreenshotOverlay(viewEntryPath ? geometryUnits.get(viewEntryPath) : undefined) ??
-        (viewEntryPath ? buildScreenshotOverlayForPath(viewEntryPath) : undefined);
-
-      takeScreenshot(graphicsRef, {
-        type: 'single',
-        overlay,
-        onSuccess(dataUrls) {
-          const dataUrl = dataUrls[0];
-          if (dataUrl) {
-            addImage(dataUrl);
-          } else {
-            console.error('No screenshot data received');
-            toast.error('Failed to capture view screenshot');
-          }
-        },
-        onError(error) {
-          console.error('View screenshot failed:', error);
-          toast.error(`View screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
-        },
-      });
+      try {
+        const files = await captureCadImages({
+          cadRef: targetCadRef,
+          graphicsRef,
+          cameraState: mode === 'current' ? getGraphicsCameraState(graphicsRef) : undefined,
+          imageService,
+          fileSystem: runtimeFileSystem,
+          recipe: { purpose: 'chat', mode },
+        });
+        for (const dataUrl of captureFilesToDataUrls(files)) {
+          addImage(dataUrl, { preserveOriginal: true });
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Image capture failed');
+      }
     },
-    [addImage, asPopoverMenu, onClose, takeScreenshot, geometryUnits],
+    [addImage, asPopoverMenu, imageService, onClose, runtimeFileSystem],
+  );
+
+  const handleViewScreenshot = useCallback(
+    (graphicsRef: ActorRefFrom<typeof graphicsMachine>, viewEntryPath: string | undefined) => {
+      void capture(viewEntryPath ? geometryUnits.get(viewEntryPath) : undefined, graphicsRef, 'current');
+    },
+    [capture, geometryUnits],
   );
 
   const handleAddModelScreenshot = useCallback(() => {
-    if (!mainGraphicsRef) {
-      return;
-    }
-
-    if (asPopoverMenu) {
-      onClose?.();
-    }
-
-    takeScreenshot(mainGraphicsRef, {
-      type: 'single',
-      overlay: resolveMainOverlay(),
-      onSuccess(dataUrls) {
-        const dataUrl = dataUrls[0];
-        if (dataUrl) {
-          addImage(dataUrl);
-        } else {
-          console.error('No screenshot data received');
-          toast.error('Failed to capture model screenshot');
-        }
-      },
-      onError(error) {
-        console.error('Screenshot failed:', error);
-        toast.error(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
-      },
-    });
-  }, [addImage, asPopoverMenu, onClose, takeScreenshot, mainGraphicsRef, resolveMainOverlay]);
+    void capture(cadActor, mainGraphicsRef, 'current');
+  }, [cadActor, capture, mainGraphicsRef]);
 
   const handleAddAllViewsScreenshots = useCallback(() => {
-    if (!mainGraphicsRef) {
-      return;
-    }
-
-    if (asPopoverMenu) {
-      onClose?.();
-    }
-
-    takeScreenshot(mainGraphicsRef, {
-      type: 'composite',
-      overlay: resolveMainOverlay(),
-      onSuccess(dataUrls) {
-        const compositeDataUrl = dataUrls[0];
-        if (compositeDataUrl) {
-          addImage(compositeDataUrl);
-        } else {
-          console.error('No composite screenshot data received');
-          toast.error('Failed to capture all views screenshot');
-        }
-      },
-      onError(error) {
-        console.error('All views screenshot failed:', error);
-        toast.error(`All views screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
-      },
-    });
-  }, [addImage, asPopoverMenu, onClose, takeScreenshot, mainGraphicsRef, resolveMainOverlay]);
+    void capture(cadActor, mainGraphicsRef, 'orthographic');
+  }, [cadActor, capture, mainGraphicsRef]);
 
   const handleAddCodeIssues = useCallback(() => {
     const errors = codeIssues.map(
@@ -343,7 +168,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
   }, [addText, kernelIssue, asPopoverMenu, onClose]);
 
   const contextItems = useMemo((): ContextActionItem[] => {
-    const items: ContextActionItem[] = imageInputSupported
+    const items: ContextActionItem[] = isImageInputSupported
       ? [
           {
             id: 'add-current-view-screenshot',
@@ -351,7 +176,10 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
             group: 'Screenshot',
             icon: <Image />,
             action: handleAddModelScreenshot,
-            disabled: !isScreenshotReady,
+            disabled:
+              !mainGeometryFormat ||
+              mainGeometryFormat === 'webrtc' ||
+              (mainGeometryFormat === 'gltf' && !mainCameraReady),
           },
           {
             id: 'add-all-views-screenshots',
@@ -359,13 +187,13 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
             group: 'Screenshot',
             icon: <Camera />,
             action: handleAddAllViewsScreenshots,
-            disabled: !isScreenshotReady,
+            disabled: mainGeometryFormat !== 'gltf',
           },
         ]
       : [];
 
     // Add per-view screenshot items for non-main views when there are 2+ views
-    if (imageInputSupported && viewGraphics.size >= 2) {
+    if (isImageInputSupported && viewGraphics.size >= 2) {
       for (const [viewId, graphicsRef] of viewGraphics) {
         const settings = viewSettings[viewId];
         // Skip the main entry path view (already covered by "Current view screenshot")
@@ -374,7 +202,8 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
         }
 
         const fileName = settings?.entryPath?.split('/').pop() ?? 'Untitled';
-        const isReady = viewReadiness[viewId] ?? false;
+        const viewCadRef = settings?.entryPath ? geometryUnits.get(settings.entryPath) : undefined;
+        const format = viewCadRef?.getSnapshot().context.geometry?.format;
         items.push({
           id: `view-screenshot-${viewId}`,
           label: fileName,
@@ -383,7 +212,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
           action() {
             handleViewScreenshot(graphicsRef, settings?.entryPath);
           },
-          disabled: !isReady,
+          disabled: !format || format === 'webrtc' || (format === 'gltf' && !hasGraphicsCameraRig(graphicsRef)),
         });
       }
     }
@@ -410,8 +239,9 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     return items;
   }, [
     handleAddModelScreenshot,
-    imageInputSupported,
-    isScreenshotReady,
+    isImageInputSupported,
+    mainCameraReady,
+    mainGeometryFormat,
     handleAddAllViewsScreenshots,
     handleAddCodeIssues,
     codeIssues.length,
@@ -419,7 +249,6 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     kernelIssue,
     viewGraphics,
     viewSettings,
-    viewReadiness,
     mainEntryPath,
     handleViewScreenshot,
   ]);
@@ -550,8 +379,8 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
                 <button
                   key={item.id}
                   type='button'
-                  className={`hover:text-accent-foreground flex w-full items-center px-2 py-1.5 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 ${
-                    isSelected ? 'text-accent-foreground bg-accent' : ''
+                  className={`flex w-full items-center px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isSelected ? 'bg-accent text-accent-foreground' : ''
                   }`}
                   disabled={isContextItemDisabled(item)}
                   onClick={() => {

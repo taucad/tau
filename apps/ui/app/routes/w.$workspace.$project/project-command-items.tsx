@@ -1,12 +1,24 @@
-import { Clipboard, Download, GalleryThumbnails, History, ImageDown, RotateCcw } from 'lucide-react';
-import { useCallback, useEffect, useRef } from 'react';
+import {
+  Activity,
+  Clipboard,
+  Download,
+  FileBox,
+  Files,
+  GalleryThumbnails,
+  History,
+  ImageDown,
+  Info,
+  RotateCcw,
+  Share2,
+  SlidersHorizontal,
+  Terminal,
+} from 'lucide-react';
+import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
-import { createActor } from 'xstate';
 import type { UIMatch } from 'react-router';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { toast } from '#components/ui/sonner.js';
 import { downloadBlob } from '@taucad/utils/file';
-import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -14,49 +26,44 @@ import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
-import { useRevisionPane } from '#routes/w.$workspace.$project/revision-pane-context.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { useProjectShare } from '#routes/w.$workspace.$project/project-share-action.js';
+import { useFeature } from '#flags/use-feature.js';
+import { useHeadlessImageService } from '#providers/headless-image-provider.js';
+import { captureCadImages } from '#services/headless-capture.js';
+import { useCameraRegistryVersion } from '#hooks/use-graphics.js';
+import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
-  const { projectRef, editorRef } = useProject();
+  const { projectRef, geometryUnits, mainEntryPath } = useProject();
+  const { openPanel } = useProjectWorkspace();
+  const { openShare } = useProjectShare();
+  const isTauDebugEnabled = useFeature('tauDebug');
   const mainGraphicsRef = useMainGraphics();
   const { regenerate: regenerateThumbnail } = useThumbnailGenerator();
   const fileManager = useFileManager();
+  const imageService = useHeadlessImageService();
   const fileTree = useFileTreeMap();
   const hasExportableGeometry = useSelector(projectRef, (state) => state.context.exportableGeometryUnitPaths.size > 0);
   const project = useSelector(projectRef, (state) => state.context.project);
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'file';
 
-  const isScreenshotReady = useSelector(mainGraphicsRef, (state) => state?.context.isScreenshotReady ?? false);
+  const mainCadRef = geometryUnits.get(mainEntryPath);
+  const geometryFormat = useSelector(mainCadRef, (state) => state?.context.geometry?.format);
+  useCameraRegistryVersion();
+  const cameraReady = hasGraphicsCameraRig(mainGraphicsRef);
+  const canCapturePng = Boolean(
+    geometryFormat && geometryFormat !== 'webrtc' && (geometryFormat !== 'gltf' || cameraReady),
+  );
   const fileCount = fileTree.size;
 
   // Chat-restore time-travel (R13) — keyboard-first discovery of the pane + redo.
-  const { setOpen: setRevisionPaneOpen } = useRevisionPane();
   const { returnToLatest } = useRestoreToPoint();
   const { canReturnToLatest } = useVisibleRevisions();
 
-  // Track active screenshot actors for lifecycle cleanup
-  const activeScreenshotActorsRef = useRef(new Set<{ stop: () => void }>());
-
-  useEffect(() => {
-    const actors = activeScreenshotActorsRef;
-    return () => {
-      for (const actor of actors.current) {
-        actor.stop();
-      }
-
-      actors.current.clear();
-    };
-  }, []);
-
   const handleOpenExporter = useCallback(() => {
-    editorRef.send({
-      type: 'setPanelState',
-      panelState: {
-        openPanels: { converter: true },
-        mobileActiveTab: 'converter',
-      },
-    });
-  }, [editorRef]);
+    openPanel('export');
+  }, [openPanel]);
 
   const handleDownloadZip = useCallback(async () => {
     if (!project) {
@@ -80,86 +87,41 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
     );
   }, [project, projectName, fileManager]);
 
-  // Helper: create a screenshot actor on-demand with the current mainGraphicsRef
-  const sendScreenshotRequest = useCallback(
-    (event: Parameters<ReturnType<typeof createActor<typeof screenshotRequestMachine>>['send']>[0]) => {
-      if (!mainGraphicsRef) {
-        return;
-      }
-
-      const actor = createActor(screenshotRequestMachine, {
-        input: { graphicsRef: mainGraphicsRef },
-      });
-      const actors = activeScreenshotActorsRef.current;
-      actors.add(actor);
-
-      // Auto-stop actor once the screenshot request completes (returns to idle after requesting)
-      let sawRequesting = false;
-      const subscription = actor.subscribe((snapshot) => {
-        if (snapshot.value === 'requesting') {
-          sawRequesting = true;
-        } else if (sawRequesting) {
-          subscription.unsubscribe();
-          actor.stop();
-          actors.delete(actor);
-        }
-      });
-
-      actor.start();
-      actor.send(event);
-    },
-    [mainGraphicsRef],
-  );
+  const capturePng = useCallback(async (): Promise<Blob> => {
+    if (!mainCadRef) {
+      throw new Error('No settled CAD unit is available');
+    }
+    const files = await captureCadImages({
+      cadRef: mainCadRef,
+      graphicsRef: mainGraphicsRef,
+      cameraState: getGraphicsCameraState(mainGraphicsRef),
+      imageService,
+      fileSystem: fileManager.runtimeFileSystem,
+      recipe: { purpose: 'utility', mode: 'current' },
+    });
+    const file = files[0]!;
+    return new Blob([file.bytes], { type: file.mimeType });
+  }, [fileManager.runtimeFileSystem, imageService, mainCadRef, mainGraphicsRef]);
 
   const handleDownloadPng = useCallback(
     async (filename: string) => {
-      toast.promise(
-        new Promise<Blob>((resolve, reject) => {
-          sendScreenshotRequest({
-            type: 'requestScreenshot',
-            options: {
-              output: {
-                format: 'image/png',
-                quality: 0.92,
-              },
-            },
-            async onSuccess(dataUrls) {
-              try {
-                const dataUrl = dataUrls[0];
-                if (!dataUrl) {
-                  throw new Error('No screenshot data received');
-                }
-
-                const response = await fetch(dataUrl);
-                const blob = await response.blob();
-                resolve(blob);
-              } catch (error) {
-                reject(error instanceof Error ? error : new Error('Failed to fetch screenshot'));
-              }
-            },
-            onError(error) {
-              reject(new Error(error));
-            },
-          });
-        }),
-        {
-          loading: `Downloading ${filename}...`,
-          success(blob) {
-            downloadBlob(blob, filename);
-            return `Downloaded ${filename}`;
-          },
-          error(error) {
-            let message = `Failed to download ${filename}`;
-            if (error instanceof Error) {
-              message = `${message}: ${error.message}`;
-            }
-
-            return message;
-          },
+      toast.promise(capturePng(), {
+        loading: `Downloading ${filename}...`,
+        success(blob) {
+          downloadBlob(blob, filename);
+          return `Downloaded ${filename}`;
         },
-      );
+        error(error) {
+          let message = `Failed to download ${filename}`;
+          if (error instanceof Error) {
+            message = `${message}: ${error.message}`;
+          }
+
+          return message;
+        },
+      });
     },
-    [sendScreenshotRequest],
+    [capturePng],
   );
 
   const handleUpdateThumbnail = useCallback(() => {
@@ -173,43 +135,8 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   const handleCopyPngToClipboard = useCallback(async () => {
     toast.promise(
       async () => {
-        return new Promise<void>((resolve, reject) => {
-          sendScreenshotRequest({
-            type: 'requestScreenshot',
-            options: {
-              output: {
-                format: 'image/png',
-                quality: 0.92,
-                isPreview: false,
-              },
-            },
-            async onSuccess(dataUrls) {
-              try {
-                const dataUrl = dataUrls[0];
-                if (!dataUrl) {
-                  throw new Error('No screenshot data received');
-                }
-
-                // Convert dataURL to Blob
-                const response = await fetch(dataUrl);
-                const blob = await response.blob();
-
-                // Copy to clipboard
-                await navigator.clipboard.write([
-                  new ClipboardItem({
-                    [blob.type]: blob,
-                  }),
-                ]);
-                resolve();
-              } catch (error) {
-                reject(error instanceof Error ? error : new Error('Failed to copy to clipboard'));
-              }
-            },
-            onError(error) {
-              reject(new Error(error));
-            },
-          });
-        });
+        const blob = await capturePng();
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
       },
       {
         loading: `Copying ${projectName}.png to clipboard...`,
@@ -217,18 +144,81 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
         error: `Failed to copy ${projectName}.png to clipboard`,
       },
     );
-  }, [projectName, sendScreenshotRequest]);
+  }, [capturePng, projectName]);
 
   useCommandPaletteItems(
     match.id,
     (): CommandPaletteItem[] => [
+      {
+        id: 'share-project',
+        label: 'Share project',
+        group: 'Project',
+        icon: <Share2 />,
+        action: openShare,
+      },
+      {
+        id: 'open-parameters',
+        label: 'Open parameters',
+        group: 'Workbench',
+        icon: <SlidersHorizontal />,
+        action: () => {
+          openPanel('parameters');
+        },
+      },
+      {
+        id: 'open-files',
+        label: 'Open files',
+        group: 'Workbench',
+        icon: <Files />,
+        action: () => {
+          openPanel('files');
+        },
+      },
+      {
+        id: 'open-model',
+        label: 'Open model structure',
+        group: 'Workbench',
+        icon: <FileBox />,
+        action: () => {
+          openPanel('model');
+        },
+      },
+      {
+        id: 'open-details',
+        label: 'Open project details',
+        group: 'Workbench',
+        icon: <Info />,
+        action: () => {
+          openPanel('details');
+        },
+      },
+      {
+        id: 'open-kernel',
+        label: 'Open telemetry',
+        group: 'Workbench',
+        icon: <Activity />,
+        action: () => {
+          openPanel('kernel');
+        },
+        visible: isTauDebugEnabled,
+      },
+      {
+        id: 'open-console',
+        label: 'Open console',
+        group: 'Workbench',
+        icon: <Terminal />,
+        action: () => {
+          openPanel('console');
+        },
+        visible: isTauDebugEnabled,
+      },
       {
         id: 'revision-history',
         label: 'Open revision history',
         group: 'Revisions',
         icon: <History />,
         action: () => {
-          setRevisionPaneOpen(true);
+          openPanel('revisions');
         },
       },
       {
@@ -261,7 +251,7 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
         group: 'Preview',
         icon: <GalleryThumbnails />,
         action: handleUpdateThumbnail,
-        disabled: !isScreenshotReady,
+        disabled: !mainCadRef,
       },
       {
         id: 'copy-png',
@@ -269,7 +259,7 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
         group: 'Preview',
         icon: <Clipboard />,
         action: handleCopyPngToClipboard,
-        disabled: !isScreenshotReady,
+        disabled: !canCapturePng,
         visible: import.meta.env.DEV,
       },
       {
@@ -278,12 +268,16 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
         group: 'Preview',
         icon: <ImageDown />,
         action: async () => handleDownloadPng(`${projectName}.png`),
-        disabled: !isScreenshotReady,
+        disabled: !canCapturePng,
       },
     ],
     [
       handleUpdateThumbnail,
-      isScreenshotReady,
+      openShare,
+      openPanel,
+      isTauDebugEnabled,
+      mainCadRef,
+      canCapturePng,
       handleCopyPngToClipboard,
       handleDownloadPng,
       projectName,

@@ -11,13 +11,25 @@ import { rpcName } from '@taucad/chat/constants';
 import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.js';
 
 const gltfGeometry = { format: 'gltf', content: new Uint8Array(), hash: 'geometry-hash' };
+const presentationGltfGeometry = {
+  format: 'gltf',
+  content: new TextEncoder().encode(
+    JSON.stringify({
+      scene: 0,
+      scenes: [{ nodes: [0, 1] }],
+      nodes: [{ mesh: 0 }, { mesh: 1 }],
+      meshes: [{ primitives: [{}] }, { primitives: [{}] }],
+    }),
+  ),
+  hash: 'presentation-geometry-hash',
+};
 const captureWebp = (index = 0): Uint8Array<ArrayBuffer> => {
   const bytes = new Uint8Array(31);
   bytes.set(new TextEncoder().encode('RIFF'), 0);
   bytes.set(new TextEncoder().encode('WEBP'), 8);
   bytes.set(new TextEncoder().encode('VP8X'), 12);
-  bytes.set([0x1f, 0x03, 0], 24);
-  bytes.set([0x1f, 0x03, 0], 27);
+  bytes.set([0x3f, 0x06, 0], 24);
+  bytes.set([0x3f, 0x06, 0], 27);
   bytes[30] = index;
   return bytes;
 };
@@ -27,8 +39,8 @@ const capturePng = (): Uint8Array<ArrayBuffer> => {
   const bytes = new Uint8Array(24);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10]);
   const view = new DataView(bytes.buffer);
-  view.setUint32(16, 800);
-  view.setUint32(20, 800);
+  view.setUint32(16, 1600);
+  view.setUint32(20, 1600);
   return bytes;
 };
 
@@ -157,12 +169,17 @@ function createMockFileManager() {
   };
 }
 
-function createMockProjectRef(options?: { geometryUnits?: Map<string, unknown>; mainEntryPath?: string }) {
+function createMockProjectRef(options?: {
+  geometryUnits?: Map<string, unknown>;
+  viewGraphics?: Map<string, unknown>;
+  mainEntryPath?: string;
+}) {
   return {
     getSnapshot: vi.fn().mockReturnValue({
       context: {
         projectId: 'proj-test',
         geometryUnits: options?.geometryUnits ?? new Map<string, unknown>(),
+        viewGraphics: options?.viewGraphics ?? new Map<string, unknown>(),
         mainEntryPath: options?.mainEntryPath ?? 'main.scad',
       },
     }),
@@ -876,15 +893,21 @@ describe('rpc-handlers', () => {
           includeEdges: true,
           exportOptions: {
             mode: 'single',
-            width: 800,
-            height: 800,
-            margin: 0.1,
-            phi: 60,
-            theta: -45,
-            projection: 'perspective',
+            width: 1600,
+            height: 1600,
+            lineWidth: 3,
+            background: '#242424',
+            camera: {
+              framing: 'fit',
+              direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+              up: [0, 0, 1],
+              margin: 0.1,
+              projection: { kind: 'perspective', verticalFieldOfView: 45 },
+            },
             label: 'Isometric',
             axes: true,
             scaleBar: true,
+            quality: 1,
           },
         });
         const job = exportImage.mock.calls[0]![0];
@@ -892,7 +915,66 @@ describe('rpc-handlers', () => {
           throw new Error('Expected a GLTF image job');
         }
         expect(job.source.path).toBe(entryPath);
-        expect(job.exportOptions).not.toHaveProperty('quality');
+        expect(job.exportOptions).toHaveProperty('quality', 1);
+      });
+
+      it('should reuse matching viewer presentation state for agent capture', async () => {
+        const entryPath = 'src/pen.ts';
+        const cadUnit = createMockCadUnit({ entryPath, geometry: presentationGltfGeometry });
+        const modelRef = {
+          getSnapshot: () => ({
+            context: {
+              unitsById: {
+                'file:src/pen.ts': {
+                  hiddenComponentIds: ['component:node-0'],
+                  isolatedComponentIds: [],
+                },
+              },
+            },
+          }),
+        };
+        const graphicsRef = {
+          getSnapshot: () => ({
+            context: {
+              enableSurfaces: false,
+              enableLines: true,
+              isSectionViewActive: true,
+              availableSectionViews: [{ id: 'yz', normal: [1, 0, 0] }],
+              selectedSectionViewId: 'yz',
+              sectionViewPivot: [1000, 0, 0],
+              sectionViewRotation: [0, 0, 0],
+              sectionViewDirection: -1,
+              enableClippingMesh: true,
+              enableClippingLines: false,
+              modelInteractionUnitId: 'file:src/pen.ts',
+              modelInteractionRef: modelRef,
+            },
+          }),
+        };
+        const projectRef = createMockProjectRef({
+          geometryUnits: new Map([[entryPath, cadUnit]]),
+          viewGraphics: new Map([['view', graphicsRef]]),
+        });
+        mockWaitFor.mockResolvedValue(cadUnit.getSnapshot());
+        const exportImage = vi
+          .fn<NonNullable<RpcHandlerDependencies['headlessImageService']>['export']>()
+          .mockResolvedValue([{ name: 'render.webp', mimeType: 'image/webp', bytes: captureWebp() }]);
+        const deps = buildDeps({ projectRef, headlessImageService: { export: exportImage } });
+
+        await expect(deps.images!.captureImages({ mode: 'single', targetFile: entryPath })).resolves.toMatchObject({
+          success: true,
+        });
+        expect(exportImage.mock.calls[0]![0]).toMatchObject({
+          exportOptions: {
+            surfaces: false,
+            visiblePrimitives: [{ nodeIndex: 1, meshIndex: 1, primitiveIndex: 0 }],
+            sections: {
+              planes: [{ point: [1, 0, 0], normal: [1, 0, 0] }],
+              clipSurfaces: true,
+              clipLines: false,
+            },
+          },
+        });
       });
 
       it('should forward the exact settled source to all six orthographic views', async () => {
@@ -941,24 +1023,85 @@ describe('rpc-handlers', () => {
           includeEdges: false,
           exportOptions: {
             mode: 'batch',
-            width: 800,
-            height: 800,
-            margin: 0.1,
-            projection: 'orthographic',
+            width: 1600,
+            height: 1600,
+            lineWidth: 3,
+            background: '#242424',
             axes: true,
             scaleBar: true,
             views: [
-              { id: 'front', label: 'Front — View From −Y', phi: 90, theta: 270 },
-              { id: 'back', label: 'Back — View From +Y', phi: 90, theta: 90 },
-              { id: 'right', label: 'Right — View From +X', phi: 90, theta: 0 },
-              { id: 'left', label: 'Left — View From −X', phi: 90, theta: 180 },
-              { id: 'top', label: 'Top — View From +Z', phi: 0, theta: 0 },
-              { id: 'bottom', label: 'Bottom — View From −Z', phi: 180, theta: 0 },
+              {
+                id: 'front',
+                label: 'Front — View From −Y',
+                camera: {
+                  framing: 'fit',
+                  direction: [0, -1, 0],
+                  up: [0, 0, 1],
+                  margin: 0.1,
+                  projection: { kind: 'orthographic' },
+                },
+              },
+              {
+                id: 'back',
+                label: 'Back — View From +Y',
+                camera: {
+                  framing: 'fit',
+                  direction: [0, 1, 0],
+                  up: [0, 0, 1],
+                  margin: 0.1,
+                  projection: { kind: 'orthographic' },
+                },
+              },
+              {
+                id: 'right',
+                label: 'Right — View From +X',
+                camera: {
+                  framing: 'fit',
+                  direction: [1, 0, 0],
+                  up: [0, 0, 1],
+                  margin: 0.1,
+                  projection: { kind: 'orthographic' },
+                },
+              },
+              {
+                id: 'left',
+                label: 'Left — View From −X',
+                camera: {
+                  framing: 'fit',
+                  direction: [-1, 0, 0],
+                  up: [0, 0, 1],
+                  margin: 0.1,
+                  projection: { kind: 'orthographic' },
+                },
+              },
+              {
+                id: 'top',
+                label: 'Top — View From +Z',
+                camera: {
+                  framing: 'fit',
+                  direction: [0, 0, 1],
+                  up: [0, 1, 0],
+                  margin: 0.1,
+                  projection: { kind: 'orthographic' },
+                },
+              },
+              {
+                id: 'bottom',
+                label: 'Bottom — View From −Z',
+                camera: {
+                  framing: 'fit',
+                  direction: [0, 0, -1],
+                  up: [0, 1, 0],
+                  margin: 0.1,
+                  projection: { kind: 'orthographic' },
+                },
+              },
             ],
+            quality: 1,
           },
         });
         const batchOptions = exportImage.mock.calls[0]![0].exportOptions;
-        expect(batchOptions).not.toHaveProperty('quality');
+        expect(batchOptions).toHaveProperty('quality', 1);
         const requestedViews = (batchOptions as { readonly views: ReadonlyArray<Readonly<Record<string, unknown>>> })
           .views;
         for (const view of requestedViews) {
@@ -998,14 +1141,14 @@ describe('rpc-handlers', () => {
         expect(await deps.images!.captureImages({ mode: 'single', targetFile: 'pen.ts' })).toEqual({
           success: false,
           errorCode: 'IO_ERROR',
-          message: 'Image capture expected non-empty image/webp 800×800 artifacts',
+          message: 'Image capture expected non-empty image/webp 1600×1600 artifacts',
         });
 
         exportImage.mockResolvedValue([{ name: 'render.webp', mimeType: 'image/png', bytes: new Uint8Array([1]) }]);
         expect(await deps.images!.captureImages({ mode: 'single', targetFile: 'pen.ts' })).toEqual({
           success: false,
           errorCode: 'IO_ERROR',
-          message: 'Image capture expected non-empty image/webp 800×800 artifacts',
+          message: 'Image capture expected non-empty image/webp 1600×1600 artifacts',
         });
       });
 

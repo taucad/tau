@@ -3,7 +3,7 @@ title: 'Tool Output Location Policy'
 description: 'Rules for placing caches, temporary work, reports, artifacts, and persistent machine state created by Tau workspace tooling.'
 status: active
 created: '2026-08-22'
-updated: '2026-08-22'
+updated: '2026-08-23'
 related:
   - docs/research/workspace-root-generated-output-hygiene-blueprint.md
   - docs/policy/npm-policy.md
@@ -48,11 +48,12 @@ Never create per-run, per-worker, random, or timestamped entries directly under 
 
 The approved machine-output root entries are:
 
-| Root entry     | Purpose                                                                |
-| -------------- | ---------------------------------------------------------------------- |
-| `node_modules` | Installed dependencies and install-coupled disposable state            |
-| `out`          | Reports, test results, and artifacts that survive dependency reinstall |
-| `.nx`          | Existing Nx-owned state; unchanged by this policy                      |
+| Root entry     | Purpose                                                                                                                                         |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node_modules` | Installed dependencies and install-coupled disposable state                                                                                     |
+| `out`          | Reports, test results, and artifacts that survive dependency reinstall                                                                          |
+| `out-tsc`      | TypeScript emit and build info for the root solution config, matching the per-project `out-tsc` convention that Nx task outputs already declare |
+| `.nx`          | Existing Nx-owned state; unchanged by this policy                                                                                               |
 
 Existing authored, configuration, and explicitly persistent workspace entries are not machine-output destinations. Adding another machine-output root requires changing this policy first.
 
@@ -152,7 +153,7 @@ Let each producer delete only the descendants it owns. Never use broad root glob
 
 Upload required CI reports and diagnostics before cleanup. Verify root hygiene after representative tasks have run; checking only before execution cannot detect a producer that writes to the wrong location.
 
-The root-hygiene check should permit tracked top-level entries, `.git`, `node_modules`, `out`, `.nx`, and documented persistent exceptions such as `repos`. It should reject unexpected untracked root entries.
+The root-hygiene check should permit tracked top-level entries, `.git`, `node_modules`, `out`, `out-tsc`, `.nx`, and documented persistent exceptions such as `repos`. It should reject unexpected untracked root entries.
 
 **Why**: Narrow ownership prevents one tool from deleting another tool's evidence or human work.
 

@@ -1267,6 +1267,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           id,
           createMiddlewareRuntime({
             signal: this.operationSignal ?? neverAbortedSignal,
+            tracer: this.tracer,
             onLog: this.onLog,
             middlewareName: middleware.name,
             filesystem: this.filesystem,
@@ -1974,6 +1975,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           id,
           createMiddlewareRuntime({
             signal: this.operationSignal ?? neverAbortedSignal,
+            tracer: this.tracer,
             onLog: this.onLog,
             middlewareName: middleware.name,
             filesystem: this.filesystem,
@@ -2794,6 +2796,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             id,
             createMiddlewareRuntime({
               signal: this.operationSignal ?? neverAbortedSignal,
+              tracer: this.tracer,
               onLog: this.onLog,
               middlewareName: middleware.name,
               filesystem: this.filesystem,
@@ -3372,6 +3375,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         id,
         createMiddlewareRuntime({
           signal: this.operationSignal ?? neverAbortedSignal,
+          tracer: this.tracer,
           onLog: this.onLog,
           middlewareName: middleware.name,
           filesystem: this.filesystem,
@@ -4418,6 +4422,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         const inner = sourceHandler;
         const middlewareRuntime = createMiddlewareRuntime({
           signal: runtime.signal,
+          tracer: runtime.tracer,
           onLog: this.onLog,
           middlewareName: contributor.middleware.name,
           filesystem: this.filesystem,

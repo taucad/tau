@@ -1043,6 +1043,22 @@ describe('geometryCacheMiddleware', () => {
       issues,
     });
 
+    it('should share one retention scan across build and export writes', async () => {
+      const { input: buildInput, runtime } = createCacheTestContext({ cacheExists: false });
+      const buildHandler = createMockCreateGeometryHandler(createGltfSuccessResult(new Uint8Array([1, 2, 3])));
+      const exportHandler: ExportGeometryHandler = vi
+        .fn()
+        .mockResolvedValue(createExportSuccess(new Uint8Array([4, 5, 6])));
+
+      await geometryCacheMiddleware.wrapCreateGeometry!(buildInput, buildHandler, runtime);
+      await geometryCacheMiddleware.wrapExportGeometry!({ format: 'step', options: {} }, exportHandler, runtime);
+
+      expect(runtime.filesystem.mocks.writeFile).toHaveBeenCalledTimes(2);
+      expect(runtime.filesystem.mocks.readdirStat).toHaveBeenCalledOnce();
+      expect(runtime.tracer.startSpan).toHaveBeenCalledWith('cache.geometry.build.prune');
+      expect(runtime.tracer.startSpan).toHaveBeenCalledWith('cache.geometry.export.prune');
+    });
+
     it('should return cached export result from L2 and not call handler', async () => {
       const cachedBytes = new Uint8Array([1, 2, 3, 4]);
       const { input, runtime } = createExportCacheTestContext({

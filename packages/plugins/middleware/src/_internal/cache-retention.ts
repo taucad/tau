@@ -8,11 +8,23 @@
 
 import type { KernelFileSystem } from '@taucad/runtime/types';
 
+type CacheRetentionSnapshot = {
+  readonly paths: readonly string[];
+  readonly nextExpiry: number;
+};
+
+type CacheRetentionState = CacheRetentionSnapshot & {
+  readonly maxAge: number;
+  readonly maxEntries: number;
+};
+
 /**
  * Clean up old cache entries to prevent unbounded cache growth.
  * Deletes entries older than `maxAge` and keeps only `maxEntries` most recent files.
+ *
+ * @returns The exact retained paths and next expiry after a successful scan.
  */
-export async function cleanupOldCacheEntries({
+const cleanupOldCacheEntries = async ({
   filesystem,
   cacheDirectory,
   extension,
@@ -29,18 +41,18 @@ export async function cleanupOldCacheEntries({
   maxAge: number;
   /** Maximum number of cache entries to keep */
   maxEntries: number;
-}): Promise<void> {
+}): Promise<CacheRetentionSnapshot | undefined> => {
   try {
     const files = await filesystem.readdirStat(cacheDirectory);
 
     // Filter to only this cache's own entries; a sibling cache may share the directory.
     const cacheFiles = files.filter((file) => file.type === 'file' && file.name.endsWith(extension));
+    const now = Date.now();
 
     if (cacheFiles.length === 0) {
-      return;
+      return { paths: [], nextExpiry: now + maxAge };
     }
 
-    const now = Date.now();
     const filesToDelete: string[] = [];
 
     // First pass: identify files older than maxAge
@@ -70,7 +82,64 @@ export async function cleanupOldCacheEntries({
 
     // Delete identified files
     await Promise.all(filesToDelete.map(async (path) => filesystem.unlink(path)));
+    const deletedPaths = new Set(filesToDelete);
+    const retainedFiles = remainingFiles.filter(({ path }) => !deletedPaths.has(path));
+    let nextExpiry = now + maxAge;
+    for (const { mtimeMs } of retainedFiles) {
+      nextExpiry = Math.min(nextExpiry, mtimeMs + maxAge);
+    }
+    return {
+      paths: retainedFiles.map(({ path }) => path),
+      nextExpiry,
+    };
   } catch {
     // Cleanup errors are non-fatal - silently ignore
+    return undefined;
   }
-}
+};
+
+/**
+ * Coalesce retention scans while the exact post-prune count and age deadline remain valid.
+ *
+ * @returns A registration-local retention operation.
+ */
+export const createCacheRetentionTracker = (): ((options: {
+  filesystem: KernelFileSystem;
+  cacheDirectory: string;
+  extension: string;
+  writtenPath: string;
+  maxAge: number;
+  maxEntries: number;
+}) => Promise<void>) => {
+  const stateByFilesystem = new WeakMap<KernelFileSystem, CacheRetentionState>();
+
+  return async ({ filesystem, cacheDirectory, extension, writtenPath, maxAge, maxEntries }) => {
+    const state = stateByFilesystem.get(filesystem);
+    const now = Date.now();
+    const knownPath = state?.paths.includes(writtenPath) ?? false;
+    if (
+      state?.maxAge === maxAge &&
+      state.maxEntries === maxEntries &&
+      now < state.nextExpiry &&
+      (knownPath || state.paths.length < maxEntries)
+    ) {
+      stateByFilesystem.set(filesystem, {
+        ...state,
+        paths: knownPath ? state.paths : [...state.paths, writtenPath],
+        nextExpiry: Math.min(state.nextExpiry, now + maxAge),
+      });
+      return;
+    }
+
+    const snapshot = await cleanupOldCacheEntries({
+      filesystem,
+      cacheDirectory,
+      extension,
+      maxAge,
+      maxEntries,
+    });
+    if (snapshot) {
+      stateByFilesystem.set(filesystem, { ...snapshot, maxAge, maxEntries });
+    }
+  };
+};

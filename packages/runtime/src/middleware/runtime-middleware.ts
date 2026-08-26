@@ -21,6 +21,7 @@ import {
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type { ContentKeysOf, RuntimeContentDeclaration, RuntimeContentKey } from '#types/runtime-content.types.js';
 import { validateRuntimeContentDeclarations } from '#types/runtime-content.types.js';
+import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 
 /**
  * Type alias for an empty Zod object schema.
@@ -398,6 +399,8 @@ export function createMiddlewareState<State extends Record<string, unknown> = Em
 export type CreateMiddlewareRuntimeOptions = {
   /** Operation-scoped cancellation signal. */
   signal: AbortSignal;
+  /** Span tracer shared with the active runtime operation. */
+  tracer: RuntimeSpanTracer;
   /** The log callback from KernelWorker */
   onLog: OnWorkerLog;
   /** Name of the middleware */
@@ -427,11 +430,22 @@ export function createMiddlewareRuntime<
   State extends Record<string, unknown> = EmptyState,
   Options extends Record<string, unknown> = EmptyState,
 >(runtimeOptions: CreateMiddlewareRuntimeOptions): KernelMiddlewareRuntime<State, Options> {
-  const { signal, onLog, middlewareName, filesystem, dependencies, dependencyHash, stateSchema, options, logger } =
-    runtimeOptions;
+  const {
+    signal,
+    tracer,
+    onLog,
+    middlewareName,
+    filesystem,
+    dependencies,
+    dependencyHash,
+    stateSchema,
+    options,
+    logger,
+  } = runtimeOptions;
 
   return {
     signal,
+    tracer,
     logger: logger ?? createMiddlewareLogger(onLog, middlewareName),
     filesystem,
     state: createMiddlewareState<State>(stateSchema),

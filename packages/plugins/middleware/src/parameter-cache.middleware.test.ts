@@ -3,7 +3,7 @@
  * Tests the wrap-style hook with onion model execution.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { GetParametersResult, Dependency } from '@taucad/runtime/types';
 import { LruMap } from '@taucad/runtime/middleware';
@@ -497,6 +497,62 @@ describe('parameterCacheMiddleware', () => {
         await wrapGetParameters!(input, handler, runtime);
 
         expect(runtime.filesystem.mocks.readdirStat).toHaveBeenCalledWith('/.tau/cache/parameters');
+      });
+
+      it('should coalesce retention scans below the configured entry limit', async () => {
+        const { input, runtime } = createCacheContext({ cacheExists: false });
+        const handler = createMockGetParametersHandler(createSuccessResult());
+
+        await parameterCacheMiddleware.wrapGetParameters!(input, handler, runtime);
+        Object.assign(runtime, { dependencyHash: 'b'.repeat(64) });
+        await parameterCacheMiddleware.wrapGetParameters!(input, handler, runtime);
+
+        expect(runtime.filesystem.mocks.writeFile).toHaveBeenCalledTimes(2);
+        expect(runtime.filesystem.mocks.readdirStat).toHaveBeenCalledOnce();
+        expect(runtime.tracer.startSpan).toHaveBeenCalledWith('cache.parameter.prune');
+      });
+
+      it('should rescan before a new write would exceed maxEntries', async () => {
+        const firstName = `${'a'.repeat(64)}.json`;
+        const firstPath = `/.tau/cache/parameters/${firstName}`;
+        const { input, runtime } = createCacheContext({
+          cacheExists: false,
+          cacheOptions: { maxEntries: 1, maxAge: 7 * 24 * 60 * 60 * 1000 },
+        });
+        runtime.filesystem.mocks.readdirStat.mockResolvedValue([
+          { path: firstPath, name: firstName, type: 'file', size: 100, mtimeMs: Date.now() },
+        ]);
+        const handler = createMockGetParametersHandler(createSuccessResult());
+
+        await parameterCacheMiddleware.wrapGetParameters!(input, handler, runtime);
+        Object.assign(runtime, { dependencyHash: 'b'.repeat(64) });
+        await parameterCacheMiddleware.wrapGetParameters!(input, handler, runtime);
+
+        expect(runtime.filesystem.mocks.readdirStat).toHaveBeenCalledTimes(2);
+      });
+
+      it('should rescan after the age-sweep deadline', async () => {
+        vi.useFakeTimers();
+        try {
+          const firstName = `${'a'.repeat(64)}.json`;
+          const firstPath = `/.tau/cache/parameters/${firstName}`;
+          const { input, runtime } = createCacheContext({
+            cacheExists: false,
+            cacheOptions: { maxEntries: 100, maxAge: 0 },
+          });
+          runtime.filesystem.mocks.readdirStat.mockResolvedValue([
+            { path: firstPath, name: firstName, type: 'file', size: 100, mtimeMs: Date.now() },
+          ]);
+          const handler = createMockGetParametersHandler(createSuccessResult());
+
+          await parameterCacheMiddleware.wrapGetParameters!(input, handler, runtime);
+          Object.assign(runtime, { dependencyHash: 'b'.repeat(64) });
+          await parameterCacheMiddleware.wrapGetParameters!(input, handler, runtime);
+
+          expect(runtime.filesystem.mocks.readdirStat).toHaveBeenCalledTimes(2);
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it('should delete cache entries older than maxAge', async () => {

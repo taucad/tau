@@ -34,7 +34,8 @@ import type {
   NativeBuildInputCarrier,
 } from '@taucad/runtime/middleware';
 
-import { cleanupOldCacheEntries } from '#_internal/cache-retention.js';
+import { createCacheRetentionTracker } from '#_internal/cache-retention.js';
+import { traceCacheOperation } from '#_internal/cache-span.js';
 
 type BuildCacheResult = KernelSuccessResult<GeometryResponse | undefined> & NativeBuildInputCarrier;
 
@@ -317,19 +318,18 @@ function hasVideoStreamGeometry(geometry: GeometryResponse): boolean {
  * @param caches - the L1 caches this registration owns
  * @returns The middleware plugin factory.
  */
-const defineGeometryCacheMiddleware = ({
-  geometryMemoryCache,
-  meshMemoryCache,
-  exportMemoryCache,
-}: GeometryCaches): GeometryCachePluginFactory =>
-  defineMiddleware({
+const defineGeometryCacheMiddleware = (caches: GeometryCaches): GeometryCachePluginFactory => {
+  const { geometryMemoryCache, meshMemoryCache, exportMemoryCache } = caches;
+  const retainCache = createCacheRetentionTracker();
+
+  return defineMiddleware({
     id: 'geometryCache',
     name: 'GeometryCache',
     version: '1.0.0',
 
     optionsSchema: geometryCacheOptionsSchema,
 
-    async wrapCreateGeometry(input, handler, { logger, filesystem, dependencyHash, options }) {
+    async wrapCreateGeometry(input, handler, { logger, filesystem, dependencyHash, options, tracer }) {
       const cacheKey = dependencyHash;
 
       // L1: In-memory cache (fast, no I/O or deserialization)
@@ -342,10 +342,14 @@ const defineGeometryCacheMiddleware = ({
       // L2: Filesystem cache
       const cachePath = getCachePath(cacheKey);
       try {
-        const cachedData = await filesystem.readFile(cachePath);
+        const cachedData = await traceCacheOperation(tracer, 'cache.geometry.build.read', async () =>
+          filesystem.readFile(cachePath),
+        );
         logger.debug(`Cache hit for ${cacheKey}`);
 
-        const result = deserializeBuildResult(cachedData);
+        const result = await traceCacheOperation(tracer, 'cache.geometry.build.decode', () =>
+          deserializeBuildResult(cachedData),
+        );
         geometryMemoryCache.set(cacheKey, cloneBuildSuccessResult(result));
         return result;
       } catch (error) {
@@ -371,19 +375,25 @@ const defineGeometryCacheMiddleware = ({
           geometryMemoryCache.set(cacheKey, cloneBuildSuccessResult(result));
 
           try {
-            await filesystem.ensureDir(cacheDirectory);
-
-            const serialized = serializeBuildResult(result);
-            await filesystem.writeFile(cachePath, serialized);
+            const serialized = await traceCacheOperation(tracer, 'cache.geometry.build.encode', () =>
+              serializeBuildResult(result),
+            );
+            await traceCacheOperation(tracer, 'cache.geometry.build.write', async () => {
+              await filesystem.ensureDir(cacheDirectory);
+              await filesystem.writeFile(cachePath, serialized);
+            });
             logger.debug(`Cached geometry at ${cacheKey}`);
 
-            await cleanupOldCacheEntries({
-              filesystem,
-              cacheDirectory,
-              extension: '.bin',
-              maxAge: options.maxAge,
-              maxEntries: options.maxEntries,
-            });
+            await traceCacheOperation(tracer, 'cache.geometry.build.prune', async () =>
+              retainCache({
+                filesystem,
+                cacheDirectory,
+                extension: '.bin',
+                writtenPath: cachePath,
+                maxAge: options.maxAge,
+                maxEntries: options.maxEntries,
+              }),
+            );
           } catch (error) {
             logger.warn(`Cache write error for ${cacheKey}: ${String(error)}`);
           }
@@ -393,7 +403,7 @@ const defineGeometryCacheMiddleware = ({
       return result;
     },
 
-    async wrapMeshGeometry(input, handler, { logger, filesystem, dependencyHash, options }) {
+    async wrapMeshGeometry(input, handler, { logger, filesystem, dependencyHash, options, tracer }) {
       const cacheKey = dependencyHash;
 
       // L1: In-memory cache
@@ -406,10 +416,14 @@ const defineGeometryCacheMiddleware = ({
       // L2: Filesystem cache
       const cachePath = getMeshCachePath(cacheKey);
       try {
-        const cachedData = await filesystem.readFile(cachePath);
+        const cachedData = await traceCacheOperation(tracer, 'cache.geometry.mesh.read', async () =>
+          filesystem.readFile(cachePath),
+        );
         logger.debug(`Mesh cache hit for ${cacheKey}`);
 
-        const result = deserializeMeshResult(cachedData);
+        const result = await traceCacheOperation(tracer, 'cache.geometry.mesh.decode', () =>
+          deserializeMeshResult(cachedData),
+        );
         meshMemoryCache.set(cacheKey, cloneSuccessResult(result));
         return result;
       } catch (error) {
@@ -426,19 +440,25 @@ const defineGeometryCacheMiddleware = ({
         meshMemoryCache.set(cacheKey, cloneSuccessResult(result));
 
         try {
-          await filesystem.ensureDir(cacheDirectory);
-
-          const serialized = serializeMeshResult(result);
-          await filesystem.writeFile(cachePath, serialized);
+          const serialized = await traceCacheOperation(tracer, 'cache.geometry.mesh.encode', () =>
+            serializeMeshResult(result),
+          );
+          await traceCacheOperation(tracer, 'cache.geometry.mesh.write', async () => {
+            await filesystem.ensureDir(cacheDirectory);
+            await filesystem.writeFile(cachePath, serialized);
+          });
           logger.debug(`Cached display mesh at ${cacheKey}`);
 
-          await cleanupOldCacheEntries({
-            filesystem,
-            cacheDirectory,
-            extension: '.bin',
-            maxAge: options.maxAge,
-            maxEntries: options.maxEntries,
-          });
+          await traceCacheOperation(tracer, 'cache.geometry.mesh.prune', async () =>
+            retainCache({
+              filesystem,
+              cacheDirectory,
+              extension: '.bin',
+              writtenPath: cachePath,
+              maxAge: options.maxAge,
+              maxEntries: options.maxEntries,
+            }),
+          );
         } catch (error) {
           logger.warn(`Mesh cache write error for ${cacheKey}: ${String(error)}`);
         }
@@ -447,7 +467,7 @@ const defineGeometryCacheMiddleware = ({
       return result;
     },
 
-    async wrapExportGeometry(input, handler, { logger, filesystem, dependencyHash, options }) {
+    async wrapExportGeometry(input, handler, { logger, filesystem, dependencyHash, options, tracer }) {
       const cacheKey = dependencyHash;
 
       const memoryCached = exportMemoryCache.get(cacheKey);
@@ -458,10 +478,14 @@ const defineGeometryCacheMiddleware = ({
 
       const cachePath = getExportCachePath(cacheKey);
       try {
-        const cachedData = await filesystem.readFile(cachePath);
+        const cachedData = await traceCacheOperation(tracer, 'cache.geometry.export.read', async () =>
+          filesystem.readFile(cachePath),
+        );
         logger.debug(`Export cache hit for ${cacheKey}`);
 
-        const result = deserializeExportResult(cachedData);
+        const result = await traceCacheOperation(tracer, 'cache.geometry.export.decode', () =>
+          deserializeExportResult(cachedData),
+        );
         exportMemoryCache.set(cacheKey, cloneExportSuccessResult(result));
         return result;
       } catch (error) {
@@ -473,19 +497,25 @@ const defineGeometryCacheMiddleware = ({
         exportMemoryCache.set(cacheKey, cloneExportSuccessResult(result));
 
         try {
-          await filesystem.ensureDir(cacheDirectory);
-
-          const serialized = serializeExportResult(result);
-          await filesystem.writeFile(cachePath, serialized);
+          const serialized = await traceCacheOperation(tracer, 'cache.geometry.export.encode', () =>
+            serializeExportResult(result),
+          );
+          await traceCacheOperation(tracer, 'cache.geometry.export.write', async () => {
+            await filesystem.ensureDir(cacheDirectory);
+            await filesystem.writeFile(cachePath, serialized);
+          });
           logger.debug(`Cached ${result.data.length} exports at ${cacheKey}`);
 
-          await cleanupOldCacheEntries({
-            filesystem,
-            cacheDirectory,
-            extension: '.bin',
-            maxAge: options.maxAge,
-            maxEntries: options.maxEntries,
-          });
+          await traceCacheOperation(tracer, 'cache.geometry.export.prune', async () =>
+            retainCache({
+              filesystem,
+              cacheDirectory,
+              extension: '.bin',
+              writtenPath: cachePath,
+              maxAge: options.maxAge,
+              maxEntries: options.maxEntries,
+            }),
+          );
         } catch (error) {
           logger.warn(`Export cache write error for ${cacheKey}: ${String(error)}`);
         }
@@ -494,6 +524,7 @@ const defineGeometryCacheMiddleware = ({
       return result;
     },
   });
+};
 
 /**
  * Geometry cache middleware factory. Each registration owns its own L1 caches.

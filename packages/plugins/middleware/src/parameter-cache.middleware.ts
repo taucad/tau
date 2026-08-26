@@ -15,7 +15,8 @@ import { LruMap, defineMiddleware, getParametersResultSchema } from '@taucad/run
 import type { MiddlewarePluginFactory, MiddlewarePluginRegistration } from '@taucad/runtime/middleware';
 import type { GetParametersResult } from '@taucad/runtime/types';
 
-import { cleanupOldCacheEntries } from '#_internal/cache-retention.js';
+import { createCacheRetentionTracker } from '#_internal/cache-retention.js';
+import { traceCacheOperation } from '#_internal/cache-span.js';
 
 /**
  * Get the cache file path for a given cache key.
@@ -59,15 +60,17 @@ type ParameterCachePluginFactory = MiddlewarePluginFactory<
  */
 const defineParameterCacheMiddleware = (
   parameterMemoryCache: LruMap<GetParametersResult>,
-): ParameterCachePluginFactory =>
-  defineMiddleware({
+): ParameterCachePluginFactory => {
+  const retainCache = createCacheRetentionTracker();
+
+  return defineMiddleware({
     id: 'parameterCache',
     name: 'ParameterCache',
     version: '1.0.0',
 
     optionsSchema: parameterCacheOptionsSchema,
 
-    async wrapGetParameters(input, handler, { logger, filesystem, dependencyHash, options }) {
+    async wrapGetParameters(input, handler, { logger, filesystem, dependencyHash, options, tracer }) {
       const cacheKey = dependencyHash;
 
       // L1: In-memory cache (fast, no I/O)
@@ -80,14 +83,18 @@ const defineParameterCacheMiddleware = (
       // L2: Filesystem cache
       const cachePath = getCachePath(cacheKey);
       try {
-        const cachedData = await filesystem.readFile(cachePath, 'utf8');
+        const cachedData = await traceCacheOperation(tracer, 'cache.parameter.read', async () =>
+          filesystem.readFile(cachePath, 'utf8'),
+        );
         logger.debug(`Parameter cache hit for ${cacheKey}`);
 
-        const parsed = getParametersResultSchema.safeParse(JSON.parse(cachedData));
-        if (!parsed.success) {
-          throw parsed.error;
-        }
-        const cachedResult = parsed.data as GetParametersResult;
+        const cachedResult = await traceCacheOperation(tracer, 'cache.parameter.decode', () => {
+          const parsed = getParametersResultSchema.safeParse(JSON.parse(cachedData));
+          if (!parsed.success) {
+            throw parsed.error;
+          }
+          return parsed.data as GetParametersResult;
+        });
         parameterMemoryCache.set(cacheKey, cachedResult);
         return cachedResult;
       } catch (error) {
@@ -101,18 +108,24 @@ const defineParameterCacheMiddleware = (
       if (result.success) {
         parameterMemoryCache.set(cacheKey, result);
         try {
-          await filesystem.ensureDir(cacheDirectory);
+          const encoded = await traceCacheOperation(tracer, 'cache.parameter.encode', () => JSON.stringify(result));
 
-          await filesystem.writeFile(cachePath, JSON.stringify(result));
+          await traceCacheOperation(tracer, 'cache.parameter.write', async () => {
+            await filesystem.ensureDir(cacheDirectory);
+            await filesystem.writeFile(cachePath, encoded);
+          });
           logger.debug(`Cached parameters at ${cacheKey}`);
 
-          await cleanupOldCacheEntries({
-            filesystem,
-            cacheDirectory,
-            extension: '.json',
-            maxAge: options.maxAge,
-            maxEntries: options.maxEntries,
-          });
+          await traceCacheOperation(tracer, 'cache.parameter.prune', async () =>
+            retainCache({
+              filesystem,
+              cacheDirectory,
+              extension: '.json',
+              writtenPath: cachePath,
+              maxAge: options.maxAge,
+              maxEntries: options.maxEntries,
+            }),
+          );
         } catch (error) {
           logger.warn(`Parameter cache write error for ${cacheKey}: ${String(error)}`);
         }
@@ -121,6 +134,7 @@ const defineParameterCacheMiddleware = (
       return result;
     },
   });
+};
 
 /**
  * Parameter cache middleware factory. Each registration owns its own L1 cache.

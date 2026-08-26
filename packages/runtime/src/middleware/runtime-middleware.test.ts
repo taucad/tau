@@ -30,6 +30,7 @@ const mockDependencies: readonly Dependency[] = [
   { type: 'framework', name: 'tau', version: '0.0.1' },
 ];
 const testSignal = new AbortController().signal;
+const testTracer = { startSpan: vi.fn(() => ({ end: vi.fn() })) };
 
 describe('defineMiddleware', () => {
   it('should create public plugin metadata and hide lifecycle details', async () => {
@@ -268,6 +269,7 @@ describe('createMiddlewareRuntime', () => {
 
     const runtime = createMiddlewareRuntime({
       signal: testSignal,
+      tracer: testTracer,
       onLog: onLog as OnWorkerLog,
       middlewareName: 'TestMiddleware',
       filesystem,
@@ -276,6 +278,7 @@ describe('createMiddlewareRuntime', () => {
     });
 
     expect(runtime.logger).toBeDefined();
+    expect(runtime.tracer).toBe(testTracer);
     expect(runtime.filesystem).toBe(filesystem);
     expect(runtime.state).toBeDefined();
     expect(runtime.state.value).toEqual({});
@@ -292,6 +295,7 @@ describe('createMiddlewareRuntime', () => {
 
     const runtime = createMiddlewareRuntime<z.infer<typeof stateSchema>>({
       signal: testSignal,
+      tracer: testTracer,
       onLog: onLog as OnWorkerLog,
       middlewareName: 'TestMiddleware',
       filesystem,
@@ -313,6 +317,7 @@ describe('createMiddlewareRuntime', () => {
 
     const runtime = createMiddlewareRuntime({
       signal: testSignal,
+      tracer: testTracer,
       onLog: onLog as OnWorkerLog,
       middlewareName: 'MyMiddleware',
       filesystem,
@@ -358,6 +363,7 @@ describe('wrap hook behavior', () => {
 
     const runtime = createMiddlewareRuntime({
       signal: testSignal,
+      tracer: testTracer,
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),
@@ -415,6 +421,7 @@ describe('wrap hook behavior', () => {
     } as const;
     const runtime = createMiddlewareRuntime({
       signal: testSignal,
+      tracer: testTracer,
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),
@@ -468,6 +475,7 @@ describe('wrap hook behavior', () => {
 
     const runtime = createMiddlewareRuntime<TestState>({
       signal: testSignal,
+      tracer: testTracer,
       onLog: vi.fn() as OnWorkerLog,
       middlewareName: 'Test',
       filesystem: createMockFileSystem(),

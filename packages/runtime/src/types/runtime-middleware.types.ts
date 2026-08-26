@@ -21,6 +21,7 @@ import type {
   GetParametersInput,
 } from '#types/runtime-kernel.types.js';
 import type { ContentHookInputFor, RuntimeContentKey } from '#types/runtime-content.types.js';
+import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 
 // =============================================================================
 // Middleware State & Runtime
@@ -72,6 +73,8 @@ export type KernelMiddlewareRuntime<
    * Fresh for each operation; pass it to cancellable APIs and do not retain it.
    */
   readonly signal: AbortSignal;
+  /** Span tracer for middleware-authored performance instrumentation. */
+  readonly tracer: RuntimeSpanTracer;
   /** Logger with middleware name pre-configured as the component */
   logger: RuntimeLogger;
   /** Filesystem capability for runtime-path operations. `/` is the supplied filesystem root. */

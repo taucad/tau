@@ -108,6 +108,8 @@ function renderViewerModelComponentActionMenu({
         source: 'viewer',
         isFocused,
         isIsolated: false,
+        hasHiddenComponents: false,
+        hasOpacityOverrides: false,
         opacity: 1,
       }}
       onOpenChange={vi.fn()}
@@ -147,6 +149,8 @@ describe('model component action menu', () => {
         source='viewer'
         isFocused={false}
         isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
         shouldShowActions
         actionButtonClassName='size-5'
         opacity={1}
@@ -194,6 +198,8 @@ describe('model component action menu', () => {
           source: 'viewer',
           isFocused: false,
           isIsolated: false,
+          hasHiddenComponents: false,
+          hasOpacityOverrides: false,
           opacity: 1,
         }}
         onOpenChange={onOpenChange}
@@ -206,7 +212,9 @@ describe('model component action menu', () => {
     expect(screen.getByRole('menuitem', { name: 'Reveal in Explorer' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Hide' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Isolate' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Show all' })).toBeDisabled();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Reset all opacities' })).toBeDisabled();
 
     await user.click(screen.getByRole('menuitem', { name: 'Hide' }));
 
@@ -237,6 +245,8 @@ describe('model component action menu', () => {
           source: 'viewer',
           isFocused: false,
           isIsolated: false,
+          hasHiddenComponents: false,
+          hasOpacityOverrides: false,
           opacity: 1,
         }}
         onOpenChange={vi.fn()}
@@ -268,6 +278,8 @@ describe('model component action menu', () => {
         source='explorer'
         isFocused={false}
         isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
         shouldShowActions
         actionButtonClassName='size-5'
         opacity={1}
@@ -277,6 +289,51 @@ describe('model component action menu', () => {
     await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
 
     expect(screen.queryByText('Reveal in Explorer')).not.toBeInTheDocument();
+  });
+
+  it('should enable and dispatch unit-wide visibility and opacity recovery actions', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node, 'src/main.ts')}
+        node={node}
+        graphicsRef={graphicsRef}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents
+        hasOpacityOverrides
+        shouldShowActions
+        actionButtonClassName='size-5'
+        opacity={0.5}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    const isolate = screen.getByRole('menuitem', { name: 'Isolate' });
+    const showAll = screen.getByRole('menuitem', { name: 'Show all' });
+    expect(showAll).toBeEnabled();
+    expect(isolate.nextElementSibling).toBe(showAll);
+    await user.click(showAll);
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'showHiddenModelComponents',
+      unitId,
+      source: 'explorer',
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    const resetOpacity = screen.getByRole('menuitem', { name: 'Reset all opacities' });
+    expect(resetOpacity).toBeEnabled();
+    await user.click(resetOpacity);
+    expect(graphicsRef.send).toHaveBeenCalledWith({
+      type: 'resetModelComponentOpacities',
+      unitId,
+      source: 'explorer',
+    });
   });
 
   it('should move coordinate-anchored viewer menu focus to enabled items on pointer hover', async () => {

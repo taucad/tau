@@ -146,12 +146,6 @@ export type GraphicsViewSettings = {
    */
   graphicsBackend?: GraphicsBackendPreference;
   /**
-   * Persisted per-component display state for geometry explorer controls.
-   * Keyed by deterministic model-interaction unit id, then canonical
-   * `GeometryComponentNode.id`.
-   */
-  componentDisplay?: PersistedModelComponentDisplayState;
-  /**
    * Settings schema version. Absent / `1` = legacy seconds-based renderTimeout
    * persisted before the milliseconds-only migration; values are multiplied
    * by 1000 on parse. `2` = milliseconds-only + no graphics backend column.
@@ -159,8 +153,9 @@ export type GraphicsViewSettings = {
    * `4` = drops `'auto'`; persisted `'auto'` migrates to `'webgl'`.
    * `5` = adds optional per-component display state.
    * `6` = adds the optional canonical camera view.
+   * `7` = moves component display state to project-level EditorState.
    */
-  schemaVersion?: 2 | 3 | 4 | 5 | 6;
+  schemaVersion?: 2 | 3 | 4 | 5 | 6 | 7;
 };
 
 // ============================================================================
@@ -220,8 +215,11 @@ export const graphicsViewSettingsSchema = z.object({
    * `4` = drops `'auto'`; persisted `'auto'` migrates to `'webgl'`.
    * `5` = adds optional per-component display state.
    * `6` = adds the optional canonical camera view.
+   * `7` = moves component display state to project-level EditorState.
    */
-  schemaVersion: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]).optional(),
+  schemaVersion: z
+    .union([z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6), z.literal(7)])
+    .optional(),
 });
 
 const parsePersistedCameraView = (
@@ -272,48 +270,37 @@ export function omitEmptyComponentDisplayState(
   return isComponentDisplayStateEmpty(componentDisplay) ? undefined : componentDisplay;
 }
 
+/** Reads the legacy per-view display payload without retaining it in current view settings. */
+export function parseLegacyModelComponentDisplay(raw: unknown): PersistedModelComponentDisplayState | undefined {
+  const result = graphicsViewSettingsSchema.safeParse(raw);
+  return result.success ? omitEmptyComponentDisplayState(result.data.componentDisplay) : undefined;
+}
+
 /**
  * Safely parse persisted graphics view settings.
  * Returns validated settings on success, or defaults if the data is
  * missing / corrupt / from an older schema version.
  *
- * Backward-compat migration: persisted settings without `schemaVersion: 2`
- * are interpreted as v1 (seconds) and multiplied by 1000 to upgrade
- * `renderTimeout` to milliseconds. After upgrade the result is stamped
- * with `schemaVersion: 2`.
+ * Backward-compat migration: persisted settings without a schema version are
+ * interpreted as v1 (seconds) and multiplied by 1000. Every valid version is
+ * returned as v7.
  */
 export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   const result = graphicsViewSettingsSchema.safeParse(raw);
-  if (!result.success) return { ...defaultGraphicsSettings };
+  if (!result.success) {
+    return { ...defaultGraphicsSettings };
+  }
 
   const parsed = result.data;
   const cameraView = parsePersistedCameraView(parsed.cameraView, parsed.cameraFovAngle);
-  if (parsed.schemaVersion === 6) {
-    return {
-      ...parsed,
-      cameraView,
-      componentDisplay: omitEmptyComponentDisplayState(parsed.componentDisplay),
-      graphicsBackend: 'webgl',
-    };
-  }
-  if (parsed.schemaVersion === 5) {
-    return {
-      ...parsed,
-      cameraView,
-      componentDisplay: omitEmptyComponentDisplayState(parsed.componentDisplay),
-      graphicsBackend: 'webgl',
-      schemaVersion: 6,
-    };
-  }
-  if (parsed.schemaVersion === 4 || parsed.schemaVersion === 3 || parsed.schemaVersion === 2) {
-    return { ...parsed, cameraView, graphicsBackend: 'webgl', schemaVersion: 6 };
-  }
+  const { componentDisplay: _legacyComponentDisplay, ...settings } = parsed;
+
   return {
-    ...parsed,
+    ...settings,
     cameraView,
-    renderTimeout: parsed.renderTimeout * 1000,
+    renderTimeout: parsed.schemaVersion === undefined ? parsed.renderTimeout * 1000 : parsed.renderTimeout,
     graphicsBackend: 'webgl',
-    schemaVersion: 6,
+    schemaVersion: 7,
   };
 }
 
@@ -334,7 +321,7 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   renderTimeout: defaultRenderTimeout,
   environmentPreset: 'performance',
   graphicsBackend: 'webgl',
-  schemaVersion: 6,
+  schemaVersion: 7,
 };
 
 // ============================================================================

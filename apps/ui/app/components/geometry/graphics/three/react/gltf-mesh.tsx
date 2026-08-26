@@ -47,7 +47,13 @@ import {
   getModelComponentIdInHierarchy,
   setModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
-import { useCameraRig, useGraphics, useModelInteractionRef, useModelInteractionSelector } from '#hooks/use-graphics.js';
+import {
+  useCameraRig,
+  useGraphics,
+  useGraphicsSelector,
+  useModelInteractionRef,
+  useModelInteractionSelector,
+} from '#hooks/use-graphics.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
@@ -1112,20 +1118,14 @@ export function GltfMesh({
   const modelRaycasterRef = useRef(new Raycaster());
   const modelPickableMeshesSceneRef = useRef<Group | undefined>(undefined);
   const modelPickableMeshesRef = useRef<readonly Mesh[]>([]);
-  const modelVisualState = useModelInteractionSelector((state) => {
-    const unit = getModelInteractionUnitState(state.context, unitId);
-    return {
-      manifest: unit.manifest,
-      hoveredComponentId: unit.hoveredComponentId,
-      selectedComponentIds: unit.selectedComponentIds,
-      focusedComponentId: unit.focusedComponentId,
-      hiddenComponentIds: unit.hiddenComponentIds,
-      isolatedComponentIds: unit.isolatedComponentIds,
-      opacityByComponentId: unit.opacityByComponentId,
-      isViewerHoverSuppressed: state.context.isViewerHoverSuppressed,
-      revision: state.context.revision,
-    };
-  });
+  const modelUnitState = useModelInteractionSelector((state) => getModelInteractionUnitState(state.context, unitId));
+  const isViewerHoverSuppressed = useGraphicsSelector(
+    (state) => state.context.viewerHoverSuppressionReasons.length > 0,
+  );
+  const modelVisualState = useMemo(
+    () => ({ ...modelUnitState, isViewerHoverSuppressed }),
+    [isViewerHoverSuppressed, modelUnitState],
+  );
   const modelRaycastClipState = useMemo<RaycastClipState | undefined>(() => {
     return createSectionViewRaycastClipState(sectionView);
   }, [sectionView.enableMesh, sectionView.isActive, sectionView.plane]);

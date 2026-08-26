@@ -81,7 +81,7 @@ import {
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
-import { useModelInteractionRef, useModelInteractionSelector } from '#hooks/use-graphics.js';
+import { useGraphicsSelector, useModelInteractionRef, useModelInteractionSelector } from '#hooks/use-graphics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
@@ -816,7 +816,10 @@ export function SectionContourFills({
   const edgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
   const isTauDebugEnabled = useFeature('tauDebug');
   const modelInteractionRef = useModelInteractionRef();
-  const modelInteractionRevision = useModelInteractionSelector((state) => state.context.revision);
+  const modelInteractionUnitId = useGraphicsSelector((state) => state.context.modelInteractionUnitId);
+  const modelInteractionUnitState = useModelInteractionSelector((state) =>
+    modelInteractionUnitId ? getModelInteractionUnitState(state.context, modelInteractionUnitId) : undefined,
+  );
   const { invalidate, size } = useThree();
   const resolution = React.useMemo(() => new THREE.Vector2(size.width, size.height), [size.height, size.width]);
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
@@ -840,7 +843,7 @@ export function SectionContourFills({
     if (enabled) {
       invalidate();
     }
-  }, [edgeColor, enabled, invalidate, modelInteractionRevision, resolution]);
+  }, [edgeColor, enabled, invalidate, modelInteractionUnitState, resolution]);
 
   React.useEffect(
     () => () => {

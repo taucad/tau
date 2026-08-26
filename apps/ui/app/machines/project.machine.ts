@@ -12,6 +12,7 @@ import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
+import { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 import {
   updateGroupValues,
@@ -36,6 +37,8 @@ export type ProjectContext = {
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
+  /** Project-scoped model appearance shared by every viewer of the same geometry unit. */
+  modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
   /** Geometry unit file paths that currently have geometry and at least one export route. */
@@ -93,6 +96,7 @@ const projectActors = {
   writeProjectActor,
   writeParameterFileActor,
   graphics: graphicsMachine,
+  modelInteraction: modelInteractionMachine,
   // Having the cadMachine typed results in:
   // `The inferred type of this node exceeds the maximum length the compiler will serialize`.
   // We need to dig into this and possibly simplify the external type inferred from the machine.
@@ -390,6 +394,8 @@ export const projectMachine = setup({
       for (const gfx of context.viewGraphics.values()) {
         enqueue.stopChild(gfx);
       }
+
+      enqueue.stopChild(context.modelInteractionRef);
     }),
     updateGeometryUnitExportAvailability: assign(({ context, event }) => {
       assertEvent(event, 'geometryUnit.exportAvailabilityChanged');
@@ -582,6 +588,12 @@ export const projectMachine = setup({
       const rewrite = (path: string): string =>
         path === oldPath ? newPath : path.startsWith(`${oldPath}/`) ? `${newPath}${path.slice(oldPath.length)}` : path;
 
+      enqueue.sendTo(context.modelInteractionRef, {
+        type: 'rekeySourceUnits',
+        oldPath,
+        newPath,
+      });
+
       enqueue.assign(({ context }) => {
         // ParameterEntries: Map<filePath, entry>
         const newEntries = new Map(context.parameterEntries);
@@ -655,6 +667,7 @@ export const projectMachine = setup({
     applyFileDeleted: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'fileDeleted');
       const { path } = event;
+      enqueue.sendTo(context.modelInteractionRef, { type: 'pruneSourceUnits', path });
       const unit = context.geometryUnits.get(path);
       if (unit) {
         enqueue.stopChild(unit);
@@ -677,6 +690,7 @@ export const projectMachine = setup({
     applyDirectoryDeleted: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'directoryDeleted');
       const { path } = event;
+      enqueue.sendTo(context.modelInteractionRef, { type: 'pruneSourceUnits', path });
       const prefix = `${path}/`;
       const matches = (filePath: string): boolean => filePath === path || filePath.startsWith(prefix);
 
@@ -739,7 +753,7 @@ export const projectMachine = setup({
             environmentPreset: settings.environmentPreset,
             pinnedMeasurements: settings.pinnedMeasurements,
             graphicsBackendPreference: settings.graphicsBackend ?? 'webgl',
-            componentDisplay: settings.componentDisplay,
+            modelInteractionRef: context.modelInteractionRef,
           },
         });
 
@@ -820,6 +834,10 @@ export const projectMachine = setup({
     const logRef = spawn('logs', {
       id: `log-${projectId}`,
     });
+    const modelInteractionRef = spawn('modelInteraction', {
+      id: `model-interaction-${projectId}`,
+      input: {},
+    });
 
     // Compilation units are created dynamically after project loads (when we know the main file).
     // The primary geometry unit is created by initializeKernelIfNeeded.
@@ -839,6 +857,7 @@ export const projectMachine = setup({
       kernelOptionsFactory,
       fileManagerRef,
       viewGraphics,
+      modelInteractionRef,
       geometryUnits,
       exportableGeometryUnitPaths,
       mainEntryPath: '',

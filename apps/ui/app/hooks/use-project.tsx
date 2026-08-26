@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect } from 'react';
+import { createContext, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -22,6 +22,8 @@ import { editorMachine } from '#machines/editor.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
+import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import { serializeModelComponentDisplayState } from '#machines/model-interaction.machine.js';
 import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -36,6 +38,7 @@ type ProjectContextType = {
   editorRef: ActorRefFrom<typeof editorMachine>;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
+  modelInteractionRef: ActorRefFrom<typeof modelInteractionMachine>;
   /** Dynamic geometry units keyed by entry path. Each is a headless CadMachine+KernelMachine. */
   geometryUnits: Map<string, ActorRefFrom<typeof cadMachine>>;
   /** The main entry path from project.assets.main.entryPath. */
@@ -317,6 +320,7 @@ export function ProjectProvider({
 
   // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
+  const modelInteractionRef = useSelector(actorRef, (state) => state.context.modelInteractionRef);
   const geometryUnits = useSelector(actorRef, (state) => state.context.geometryUnits);
   const mainEntryPath = useSelector(
     actorRef,
@@ -325,10 +329,47 @@ export function ProjectProvider({
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
   const parameterEntries = useSelector(actorRef, (state) => state.context.parameterEntries);
+  const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
+  const modelComponentDisplay = useSelector(editorRef, (state) => state.context.modelComponentDisplay);
+  const needsModelComponentDisplayMigration = useSelector(
+    editorRef,
+    (state) => state.context.needsModelComponentDisplayMigration,
+  );
+  const modelDisplayRevision = useSelector(modelInteractionRef, (state) => state.context.displayRevision);
+  const restoredModelInteractionRef = useRef<ActorRefFrom<typeof modelInteractionMachine> | undefined>(undefined);
 
   useEffect(() => {
     editorRef.send({ type: 'load' });
   }, [editorRef]);
+
+  useEffect(() => {
+    if (!focusedChatResolved || restoredModelInteractionRef.current === modelInteractionRef) {
+      return;
+    }
+    modelInteractionRef.send({ type: 'restoreComponentDisplay', componentDisplay: modelComponentDisplay });
+    restoredModelInteractionRef.current = modelInteractionRef;
+  }, [focusedChatResolved, modelComponentDisplay, modelInteractionRef]);
+
+  useEffect(() => {
+    if (!focusedChatResolved || restoredModelInteractionRef.current !== modelInteractionRef) {
+      return;
+    }
+    const componentDisplay = serializeModelComponentDisplayState(modelInteractionRef.getSnapshot().context);
+    if (
+      !needsModelComponentDisplayMigration &&
+      JSON.stringify(componentDisplay) === JSON.stringify(modelComponentDisplay)
+    ) {
+      return;
+    }
+    editorRef.send({ type: 'setModelComponentDisplay', componentDisplay });
+  }, [
+    editorRef,
+    focusedChatResolved,
+    modelComponentDisplay,
+    modelDisplayRevision,
+    modelInteractionRef,
+    needsModelComponentDisplayMigration,
+  ]);
 
   useEffect(() => {
     const subscription = actorRef.on('projectUpdated', () => {
@@ -495,6 +536,7 @@ export function ProjectProvider({
       projectRef: actorRef,
       editorRef,
       viewGraphics,
+      modelInteractionRef,
       geometryUnits,
       mainEntryPath,
       logRef,
@@ -517,6 +559,7 @@ export function ProjectProvider({
     actorRef,
     editorRef,
     viewGraphics,
+    modelInteractionRef,
     geometryUnits,
     mainEntryPath,
     logRef,

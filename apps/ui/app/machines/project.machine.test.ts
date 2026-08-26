@@ -635,14 +635,39 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
-    it('should support multiple independent view graphics', async () => {
+    it('should share one project model interaction actor across multiple view graphics', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createViewGraphics', viewId: 'v1' });
       actor.send({ type: 'createViewGraphics', viewId: 'v2' });
-      expect(actor.getSnapshot().context.viewGraphics.size).toBe(2);
+      const { modelInteractionRef, viewGraphics } = actor.getSnapshot().context;
+      expect(viewGraphics.get('v1')?.getSnapshot().context.modelInteractionRef).toBe(modelInteractionRef);
+      expect(viewGraphics.get('v2')?.getSnapshot().context.modelInteractionRef).toBe(modelInteractionRef);
       actor.send({ type: 'destroyViewGraphics', viewId: 'v1' });
-      expect(actor.getSnapshot().context.viewGraphics.size).toBe(1);
+      expect(modelInteractionRef.getSnapshot().status).toBe('active');
       expect(actor.getSnapshot().context.viewGraphics.has('v2')).toBe(true);
+      actor.stop();
+      expect(modelInteractionRef.getSnapshot().status).toBe('stopped');
+    });
+
+    it('should rekey and prune shared model display state with source files', async () => {
+      const actor = await startAndLoad();
+      const { modelInteractionRef } = actor.getSnapshot().context;
+      modelInteractionRef.send({
+        type: 'restoreComponentDisplay',
+        componentDisplay: {
+          schemaVersion: 1,
+          unitsById: { 'file:main.ts': { hiddenComponentIds: ['node-1'] } },
+        },
+      });
+
+      actor.send({ type: 'fileMoved', oldPath: 'main.ts', newPath: 'renamed.ts' });
+      expect(modelInteractionRef.getSnapshot().context.unitsById['file:main.ts']).toBeUndefined();
+      expect(modelInteractionRef.getSnapshot().context.unitsById['file:renamed.ts']?.hiddenComponentIds).toEqual([
+        'node-1',
+      ]);
+
+      actor.send({ type: 'fileDeleted', path: 'renamed.ts' });
+      expect(modelInteractionRef.getSnapshot().context.unitsById['file:renamed.ts']).toBeUndefined();
       actor.stop();
     });
   });

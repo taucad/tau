@@ -239,18 +239,18 @@ describe('editorMachine', () => {
       const actor = await startAndLoad({
         loadResult: {
           ...stubEditorState,
+          modelComponentDisplay: {
+            schemaVersion: 1,
+            unitsById: {
+              [oldMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
+              [otherUnitId]: { hiddenComponentIds: ['component:Other'] },
+            },
+          },
           viewSettings: {
             view1: {
               entryPath: 'src/main.ts',
               graphicsSettings: {
                 ...defaultGraphicsSettings,
-                componentDisplay: {
-                  schemaVersion: 1,
-                  unitsById: {
-                    [oldMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
-                    [otherUnitId]: { hiddenComponentIds: ['component:Other'] },
-                  },
-                },
                 cameraView,
               },
             },
@@ -263,13 +263,71 @@ describe('editorMachine', () => {
       const settings = actor.getSnapshot().context.viewSettings['view1'];
       expect(settings?.entryPath).toBe('src/index.ts');
       expect(settings?.graphicsSettings.cameraView).toEqual(cameraView);
-      expect(settings?.graphicsSettings.componentDisplay).toEqual({
+      expect(actor.getSnapshot().context.modelComponentDisplay).toEqual({
         schemaVersion: 1,
         unitsById: {
           [newMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
           [otherUnitId]: { hiddenComponentIds: ['component:Other'] },
         },
       });
+      actor.stop();
+    });
+
+    it('should merge legacy per-view display state into the project field in stable view order', async () => {
+      const legacyState = {
+        ...stubEditorState,
+        viewSettings: {
+          'view-b': {
+            entryPath: 'src/main.ts',
+            graphicsSettings: {
+              ...defaultGraphicsSettings,
+              schemaVersion: 6,
+              componentDisplay: {
+                schemaVersion: 1,
+                unitsById: {
+                  'file:src/main.ts': {
+                    isolatedComponentIds: ['component:Gear'],
+                    opacityByComponentId: { 'component:Housing': 0.7 },
+                  },
+                },
+              },
+            },
+          },
+          'view-a': {
+            entryPath: 'src/main.ts',
+            graphicsSettings: {
+              ...defaultGraphicsSettings,
+              schemaVersion: 6,
+              componentDisplay: {
+                schemaVersion: 1,
+                unitsById: {
+                  'file:src/main.ts': {
+                    hiddenComponentIds: ['component:Cover'],
+                    opacityByComponentId: { 'component:Housing': 0.3 },
+                  },
+                },
+              },
+            },
+          },
+        },
+      } as unknown as EditorState;
+      const actor = await startAndLoad({ loadResult: legacyState });
+
+      expect(actor.getSnapshot().context.modelComponentDisplay).toEqual({
+        schemaVersion: 1,
+        unitsById: {
+          'file:src/main.ts': {
+            hiddenComponentIds: ['component:Cover'],
+            isolatedComponentIds: ['component:Gear'],
+            opacityByComponentId: { 'component:Housing': 0.7 },
+          },
+        },
+      });
+      expect(actor.getSnapshot().context.needsModelComponentDisplayMigration).toBe(true);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty(
+        'componentDisplay',
+      );
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(7);
       actor.stop();
     });
 
@@ -314,18 +372,18 @@ describe('editorMachine', () => {
       const actor = await startAndLoad({
         loadResult: {
           ...stubEditorState,
+          modelComponentDisplay: {
+            schemaVersion: 1,
+            unitsById: {
+              [oldMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
+              [oldNestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
+            },
+          },
           viewSettings: {
             view1: {
               entryPath: 'src/foo/main.ts',
               graphicsSettings: {
                 ...defaultGraphicsSettings,
-                componentDisplay: {
-                  schemaVersion: 1,
-                  unitsById: {
-                    [oldMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
-                    [oldNestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
-                  },
-                },
               },
             },
           },
@@ -336,7 +394,7 @@ describe('editorMachine', () => {
 
       const settings = actor.getSnapshot().context.viewSettings['view1'];
       expect(settings?.entryPath).toBe('src/bar/main.ts');
-      expect(settings?.graphicsSettings.componentDisplay).toEqual({
+      expect(actor.getSnapshot().context.modelComponentDisplay).toEqual({
         schemaVersion: 1,
         unitsById: {
           [newMainUnitId]: { hiddenComponentIds: ['component:Housing'] },
@@ -353,19 +411,19 @@ describe('editorMachine', () => {
       const actor = await startAndLoad({
         loadResult: {
           ...stubEditorState,
+          modelComponentDisplay: {
+            schemaVersion: 1,
+            unitsById: {
+              [mainUnitId]: { hiddenComponentIds: ['component:Housing'] },
+              [nestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
+              [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
+            },
+          },
           viewSettings: {
             view1: {
               entryPath: 'src/foo/main.ts',
               graphicsSettings: {
                 ...defaultGraphicsSettings,
-                componentDisplay: {
-                  schemaVersion: 1,
-                  unitsById: {
-                    [mainUnitId]: { hiddenComponentIds: ['component:Housing'] },
-                    [nestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
-                    [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
-                  },
-                },
               },
             },
           },
@@ -374,7 +432,7 @@ describe('editorMachine', () => {
 
       actor.send({ type: 'pruneComponentDisplayForDeletedPath', path: 'src/foo' });
 
-      expect(actor.getSnapshot().context.viewSettings['view1']?.graphicsSettings.componentDisplay).toEqual({
+      expect(actor.getSnapshot().context.modelComponentDisplay).toEqual({
         schemaVersion: 1,
         unitsById: {
           [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
@@ -647,6 +705,32 @@ describe('editorMachine', () => {
         await waitFor(actor, (s) => s.matches({ ready: { storing: 'idle' } }));
 
         expect(savedFocusedChatId).toBe('chat-42');
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('should persist project-scoped model component display through the storing region', async () => {
+      vi.useFakeTimers();
+      try {
+        let savedDisplay: EditorState['modelComponentDisplay'];
+        const actor = await startAndLoad({
+          loadResult: undefined,
+          saveResult: async () => {
+            savedDisplay = actor.getSnapshot().context.modelComponentDisplay;
+          },
+        });
+        const modelComponentDisplay: NonNullable<EditorState['modelComponentDisplay']> = {
+          schemaVersion: 1,
+          unitsById: { 'file:src/main.ts': { hiddenComponentIds: ['component:Housing'] } },
+        };
+
+        actor.send({ type: 'setModelComponentDisplay', componentDisplay: modelComponentDisplay });
+        await vi.advanceTimersByTimeAsync(500);
+        await waitFor(actor, (state) => state.matches({ ready: { storing: 'idle' } }));
+
+        expect(savedDisplay).toEqual(modelComponentDisplay);
         actor.stop();
       } finally {
         vi.useRealTimers();

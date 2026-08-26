@@ -7,6 +7,7 @@ import {
   defaultRenderTimeout,
   defaultGraphicsSettings,
   parseGraphicsViewSettings,
+  parseLegacyModelComponentDisplay,
   omitEmptyComponentDisplayState,
 } from '#constants/editor.constants.js';
 
@@ -55,8 +56,8 @@ describe('graphics view settings parsing', () => {
     expect(defaultGraphicsSettings.renderTimeout).toBe(defaultRenderTimeout);
   });
 
-  it('should parse v6 component display and canonical camera state', () => {
-    const settings = parseGraphicsViewSettings({
+  it('should migrate v6 camera state while extracting legacy component display separately', () => {
+    const persisted = {
       ...defaultGraphicsSettings,
       schemaVersion: 6,
       cameraFovAngle: 0,
@@ -76,9 +77,10 @@ describe('graphics view settings parsing', () => {
           },
         },
       },
-    });
+    } as const;
+    const settings = parseGraphicsViewSettings(persisted);
 
-    expect(settings.schemaVersion).toBe(6);
+    expect(settings.schemaVersion).toBe(7);
     expect(settings.cameraFovAngle).toBe(0);
     expect(settings.cameraView).toEqual({
       target: [3, 4, 5],
@@ -86,7 +88,8 @@ describe('graphics view settings parsing', () => {
       up: [0, 0, 1],
       verticalSpan: 12,
     });
-    expect(settings.componentDisplay).toEqual({
+    expect(settings).not.toHaveProperty('componentDisplay');
+    expect(parseLegacyModelComponentDisplay(persisted)).toEqual({
       schemaVersion: 1,
       unitsById: {
         [componentDisplayUnitId]: {
@@ -98,19 +101,19 @@ describe('graphics view settings parsing', () => {
     });
   });
 
-  it.each([2, 3, 4, 5] as const)('should migrate schema v%s settings to v6', (schemaVersion) => {
+  it.each([2, 3, 4, 5, 6] as const)('should migrate schema v%s settings to v7', (schemaVersion) => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
       schemaVersion,
       graphicsBackend: schemaVersion === 3 ? 'auto' : 'webgl',
     });
 
-    expect(settings.schemaVersion).toBe(6);
+    expect(settings.schemaVersion).toBe(7);
     expect(settings.cameraView).toBeUndefined();
     expect(settings.graphicsBackend).toBe('webgl');
   });
 
-  it.each([3, 4, 5, 6] as const)('should normalize persisted WebGPU from schema v%s to WebGL', (schemaVersion) => {
+  it.each([3, 4, 5, 6, 7] as const)('should normalize persisted WebGPU from schema v%s to WebGL', (schemaVersion) => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
       schemaVersion,
@@ -118,7 +121,7 @@ describe('graphics view settings parsing', () => {
       enableGrid: false,
     });
 
-    expect(settings.schemaVersion).toBe(6);
+    expect(settings.schemaVersion).toBe(7);
     expect(settings.graphicsBackend).toBe('webgl');
     expect(settings.enableGrid).toBe(false);
   });
@@ -154,7 +157,7 @@ describe('graphics view settings parsing', () => {
       cameraView,
     });
 
-    expect(settings).toMatchObject({ schemaVersion: 6, enableGrid: false, cameraFovAngle: 42 });
+    expect(settings).toMatchObject({ schemaVersion: 7, enableGrid: false, cameraFovAngle: 42 });
     expect(settings.cameraView).toBeUndefined();
   });
 

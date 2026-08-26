@@ -99,7 +99,6 @@ describe('modelInteractionMachine', () => {
     expect(unit.manifest?.rootId).toBe('root');
     expect(unit.selectedComponentIds).toEqual([]);
     expect(context.unitOrder).toEqual([mainUnitId]);
-    expect(context.activeUnitId).toBe(mainUnitId);
     expect(context.lastInteractionSource).toBe('viewer');
     actor.stop();
   });
@@ -237,120 +236,6 @@ describe('modelInteractionMachine', () => {
     expect(getModelInteractionUnitState(context, alternateUnitId).hiddenComponentIds).toEqual([]);
     expect(getModelInteractionUnitState(context, alternateUnitId).isolatedComponentIds).toEqual([housingComponentId]);
     expect(context.unitOrder).toEqual([mainUnitId, alternateUnitId]);
-    expect(context.activeUnitId).toBe(alternateUnitId);
-    actor.stop();
-  });
-
-  it('should clear all unit hovers and suppress only viewer-origin hover while preserving durable state', () => {
-    const actor = createActor(modelInteractionMachine, { input: {} });
-    actor.start();
-    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest(mainSourceFile) });
-    actor.send({ type: 'loadManifest', unitId: alternateUnitId, manifest: createManifest(alternateSourceFile) });
-    actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
-    actor.send({
-      type: 'setHoveredComponent',
-      unitId: alternateUnitId,
-      componentId: gearComponentId,
-      source: 'explorer',
-    });
-    actor.send({ type: 'focusComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'explorer' });
-    actor.send({ type: 'hideComponent', unitId: mainUnitId, componentId: gearComponentId, source: 'explorer' });
-    actor.send({ type: 'isolateComponent', unitId: alternateUnitId, componentId: gearComponentId, source: 'explorer' });
-    actor.send({
-      type: 'setComponentOpacity',
-      unitId: mainUnitId,
-      componentId: housingComponentId,
-      opacity: 0.5,
-      source: 'explorer',
-    });
-
-    actor.send({ type: 'beginViewerHoverSuppression', reason: 'cameraControls', source: 'viewer' });
-
-    let { context } = actor.getSnapshot();
-    expect(context.isViewerHoverSuppressed).toBe(true);
-    expect(context.viewerHoverSuppressionReasons).toEqual(['cameraControls']);
-    expect(getModelInteractionUnitState(context, mainUnitId).hoveredComponentId).toBeUndefined();
-    expect(getModelInteractionUnitState(context, alternateUnitId).hoveredComponentId).toBeUndefined();
-    expect(getModelInteractionUnitState(context, mainUnitId).focusedComponentId).toBe(housingComponentId);
-    expect(getModelInteractionUnitState(context, mainUnitId).selectedComponentIds).toEqual([housingComponentId]);
-    expect(getModelInteractionUnitState(context, mainUnitId).hiddenComponentIds).toEqual([gearComponentId]);
-    expect(getModelInteractionUnitState(context, alternateUnitId).isolatedComponentIds).toEqual([gearComponentId]);
-    expect(getModelInteractionUnitState(context, mainUnitId).opacityByComponentId).toEqual({
-      [housingComponentId]: 0.5,
-    });
-
-    actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
-    actor.send({
-      type: 'setHoveredComponent',
-      unitId: mainUnitId,
-      componentId: missingComponentId,
-      source: 'explorer',
-    });
-    context = actor.getSnapshot().context;
-    expect(getModelInteractionUnitState(context, mainUnitId).hoveredComponentId).toBeUndefined();
-
-    actor.send({
-      type: 'setHoveredComponent',
-      unitId: mainUnitId,
-      componentId: housingComponentId,
-      source: 'explorer',
-    });
-    context = actor.getSnapshot().context;
-    expect(getModelInteractionUnitState(context, mainUnitId).hoveredComponentId).toBe(housingComponentId);
-
-    actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: undefined, source: 'viewer' });
-    context = actor.getSnapshot().context;
-    expect(getModelInteractionUnitState(context, mainUnitId).hoveredComponentId).toBe(housingComponentId);
-
-    actor.send({ type: 'endViewerHoverSuppression', reason: 'cameraControls', source: 'viewer' });
-    actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: gearComponentId, source: 'viewer' });
-    context = actor.getSnapshot().context;
-    expect(context.isViewerHoverSuppressed).toBe(false);
-    expect(getModelInteractionUnitState(context, mainUnitId).hoveredComponentId).toBe(gearComponentId);
-    actor.stop();
-  });
-
-  it('should keep overlapping viewer hover suppression reasons independent and idempotent', () => {
-    const actor = createActor(modelInteractionMachine, { input: {} });
-    actor.start();
-    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
-    actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
-
-    actor.send({ type: 'beginViewerHoverSuppression', reason: 'cameraControls', source: 'viewer' });
-    const afterFirstBegin = actor.getSnapshot().context.revision;
-    actor.send({ type: 'beginViewerHoverSuppression', reason: 'cameraControls', source: 'viewer' });
-    expect(actor.getSnapshot().context.revision).toBe(afterFirstBegin);
-    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['cameraControls']);
-
-    actor.send({ type: 'beginViewerHoverSuppression', reason: 'measureTool', source: 'viewer' });
-    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['cameraControls', 'measureTool']);
-
-    actor.send({ type: 'endViewerHoverSuppression', reason: 'cameraControls', source: 'viewer' });
-    expect(actor.getSnapshot().context.isViewerHoverSuppressed).toBe(true);
-    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['measureTool']);
-
-    actor.send({ type: 'endViewerHoverSuppression', reason: 'measureTool', source: 'viewer' });
-    expect(actor.getSnapshot().context.isViewerHoverSuppressed).toBe(false);
-    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
-    actor.stop();
-  });
-
-  it('should treat missing and unknown hover sources as viewer-origin during suppression', () => {
-    const actor = createActor(modelInteractionMachine, { input: {} });
-    actor.start();
-    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
-    actor.send({ type: 'beginViewerHoverSuppression', reason: 'viewportGizmo', source: 'viewer' });
-
-    actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: housingComponentId });
-    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).hoveredComponentId).toBeUndefined();
-
-    actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'unknown' });
-    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).hoveredComponentId).toBeUndefined();
-
-    actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'chat' });
-    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).hoveredComponentId).toBe(
-      housingComponentId,
-    );
     actor.stop();
   });
 
@@ -512,9 +397,7 @@ describe('modelInteractionMachine', () => {
     actor.send({ type: 'toggleComponentSelection', unitId: mainUnitId, componentId: housingComponentId });
     actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: housingComponentId });
     actor.send({ type: 'focusComponent', unitId: mainUnitId, componentId: housingComponentId });
-    actor.send({ type: 'beginViewerHoverSuppression', reason: 'cameraControls', source: 'viewer' });
     actor.send({ type: 'setHoveredComponent', unitId: mainUnitId, componentId: gearComponentId, source: 'viewer' });
-    actor.send({ type: 'endViewerHoverSuppression', reason: 'cameraControls', source: 'viewer' });
     expect(actor.getSnapshot().context.displayRevision).toBe(afterManifest);
 
     actor.send({ type: 'hideComponent', unitId: mainUnitId, componentId: gearComponentId });
@@ -522,6 +405,68 @@ describe('modelInteractionMachine', () => {
 
     actor.send({ type: 'setComponentOpacity', unitId: mainUnitId, componentId: housingComponentId, opacity: 0.5 });
     expect(actor.getSnapshot().context.displayRevision).toBe(afterManifest + 2);
+    actor.stop();
+  });
+
+  it('should no-op when the same source manifest hash is loaded again', () => {
+    const actor = createActor(modelInteractionMachine, { input: {} }).start();
+    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
+    const firstContext = actor.getSnapshot().context;
+    const firstUnit = getModelInteractionUnitState(firstContext, mainUnitId);
+
+    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: { ...createManifest() } });
+
+    expect(actor.getSnapshot().context.revision).toBe(firstContext.revision);
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId)).toBe(firstUnit);
+    actor.stop();
+  });
+
+  it('should reset every opacity override in one unit atomically', () => {
+    const actor = createActor(modelInteractionMachine, { input: {} }).start();
+    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
+    actor.send({ type: 'loadManifest', unitId: alternateUnitId, manifest: createManifest(alternateSourceFile) });
+    actor.send({ type: 'setComponentOpacity', unitId: mainUnitId, componentId: housingComponentId, opacity: 0.5 });
+    actor.send({ type: 'setComponentOpacity', unitId: mainUnitId, componentId: gearComponentId, opacity: 0.25 });
+    actor.send({ type: 'setComponentOpacity', unitId: alternateUnitId, componentId: gearComponentId, opacity: 0.75 });
+    const beforeReset = actor.getSnapshot().context.displayRevision;
+
+    actor.send({ type: 'resetComponentOpacities', unitId: mainUnitId, source: 'viewer' });
+
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).opacityByComponentId).toEqual({});
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, alternateUnitId).opacityByComponentId).toEqual({
+      [gearComponentId]: 0.75,
+    });
+    expect(actor.getSnapshot().context.displayRevision).toBe(beforeReset + 1);
+    const afterReset = actor.getSnapshot().context;
+    const afterResetUnit = getModelInteractionUnitState(afterReset, mainUnitId);
+    actor.send({ type: 'resetComponentOpacities', unitId: mainUnitId, source: 'viewer' });
+    expect(actor.getSnapshot().context.revision).toBe(afterReset.revision);
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId)).toBe(afterResetUnit);
+    actor.stop();
+  });
+
+  it('should restore, rekey, and prune project-scoped display units', () => {
+    const actor = createActor(modelInteractionMachine, { input: {} }).start();
+    actor.send({
+      type: 'restoreComponentDisplay',
+      componentDisplay: {
+        schemaVersion: 1,
+        unitsById: { [mainUnitId]: { hiddenComponentIds: [gearComponentId] } },
+      },
+    });
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).hiddenComponentIds).toEqual([
+      gearComponentId,
+    ]);
+
+    actor.send({ type: 'rekeySourceUnits', oldPath: 'src', newPath: 'lib' });
+    const movedUnitId = createSourceModelInteractionUnitId('lib/main.ts');
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).hiddenComponentIds).toEqual([]);
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, movedUnitId).hiddenComponentIds).toEqual([
+      gearComponentId,
+    ]);
+
+    actor.send({ type: 'pruneSourceUnits', path: 'lib' });
+    expect(actor.getSnapshot().context.unitOrder).toEqual([]);
     actor.stop();
   });
 

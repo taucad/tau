@@ -37,6 +37,7 @@ vi.mock('#components/geometry/graphics/three/three-graphics-backend-context.js',
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
+  useGraphicsSelector: () => 'file:src/main.ts',
   useModelInteractionRef: () => hoistedMocks.modelInteractionRef,
   useModelInteractionSelector: () => hoistedMocks.getRevision(),
 }));

@@ -393,7 +393,7 @@ function LiveCompilationUnitTree({
 }): React.JSX.Element {
   const modelRef = useSelector(
     graphicsRef,
-    (state) => state.children['modelInteraction'] as ModelInteractionRef | undefined,
+    (state) => state.context.modelInteractionRef as ModelInteractionRef | undefined,
   );
 
   if (!modelRef) {
@@ -598,6 +598,8 @@ function ComponentRows({
               isHidden={hiddenComponentIds.includes(child.id)}
               isIsolated={isolatedComponentIds.includes(child.id)}
               isFocused={focusedComponentId === child.id}
+              hasHiddenComponents={hiddenComponentIds.length > 0}
+              hasOpacityOverrides={Object.keys(opacityByComponentId).length > 0}
               opacity={opacityByComponentId[child.id] ?? 1}
             />
             {child.childIds.length > 0 ? (
@@ -634,6 +636,8 @@ export function ComponentRow({
   isHidden,
   isIsolated,
   isFocused,
+  hasHiddenComponents = false,
+  hasOpacityOverrides = false,
   opacity,
 }: {
   readonly manifest: GeometryComponentManifest;
@@ -646,6 +650,8 @@ export function ComponentRow({
   readonly isHidden: boolean;
   readonly isIsolated: boolean;
   readonly isFocused: boolean;
+  readonly hasHiddenComponents?: boolean;
+  readonly hasOpacityOverrides?: boolean;
   readonly opacity: number;
 }): React.JSX.Element {
   const isHovered = hoveredComponentId === node.id;
@@ -752,6 +758,8 @@ export function ComponentRow({
             isFocused={isFocused}
             isIsolated={isIsolated}
             shouldShowActions={showActions}
+            hasHiddenComponents={hasHiddenComponents}
+            hasOpacityOverrides={hasOpacityOverrides}
             actionButtonClassName={actionButtonClassName}
             opacity={opacity}
           />
@@ -765,6 +773,8 @@ export function ComponentRow({
         source='explorer'
         isFocused={isFocused}
         isIsolated={isIsolated}
+        hasHiddenComponents={hasHiddenComponents}
+        hasOpacityOverrides={hasOpacityOverrides}
         opacity={opacity}
       />
     </ContextMenu>

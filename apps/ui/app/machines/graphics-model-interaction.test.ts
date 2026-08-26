@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { createActor, fromPromise } from 'xstate';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { graphicsMachine } from '#machines/graphics.machine.js';
-import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import type { ActorRefFrom } from 'xstate';
+import {
+  deriveModelInteractionUnitId,
+  getModelInteractionUnitState,
+  modelInteractionMachine,
+} from '#machines/model-interaction.machine.js';
 
 const capabilities = {
   canHide: true,
@@ -62,7 +64,7 @@ function createManifest(sourceFile = unitId): GeometryComponentManifest {
   };
 }
 
-describe('graphicsMachine model interaction child', () => {
+describe('graphicsMachine model interaction', () => {
   it('should forward model interaction events without storing Three objects in graphics context', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
@@ -74,7 +76,7 @@ describe('graphicsMachine model interaction child', () => {
 
     actor.send({ type: 'loadModelComponentManifest', unitId, manifest: createManifest(), source: 'viewer' });
 
-    const modelRef = actor.getSnapshot().children['modelInteraction'] as ActorRefFrom<typeof modelInteractionMachine>;
+    const modelRef = actor.getSnapshot().context.modelInteractionRef;
     actor.send({ type: 'toggleModelComponentSelection', unitId, componentId: housingComponentId, source: 'viewer' });
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).selectedComponentIds).toEqual([
       housingComponentId,
@@ -142,7 +144,7 @@ describe('graphicsMachine model interaction child', () => {
       source: 'explorer',
     });
 
-    const modelRef = actor.getSnapshot().children['modelInteraction'] as ActorRefFrom<typeof modelInteractionMachine>;
+    const modelRef = actor.getSnapshot().context.modelInteractionRef;
     const { context } = modelRef.getSnapshot();
     expect(getModelInteractionUnitState(context, unitId).hiddenComponentIds).toEqual([housingComponentId]);
     expect(getModelInteractionUnitState(context, unitId).isolatedComponentIds).toEqual([]);
@@ -153,14 +155,14 @@ describe('graphicsMachine model interaction child', () => {
     actor.stop();
   });
 
-  it('should hydrate component display input into the model interaction child', () => {
+  it('should use an externally owned model interaction actor', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
         probeWebGpu: fromPromise(async () => false),
       },
     });
     const sourceUnitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });
-    const actor = createActor(providedMachine, {
+    const modelRef = createActor(modelInteractionMachine, {
       input: {
         componentDisplay: {
           schemaVersion: 1,
@@ -169,14 +171,18 @@ describe('graphicsMachine model interaction child', () => {
           },
         },
       },
+    }).start();
+    const actor = createActor(providedMachine, {
+      input: { modelInteractionRef: modelRef },
     });
     actor.start();
 
-    const modelRef = actor.getSnapshot().children['modelInteraction'] as ActorRefFrom<typeof modelInteractionMachine>;
+    expect(actor.getSnapshot().context.modelInteractionRef).toBe(modelRef);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, sourceUnitId).hiddenComponentIds).toEqual([
       housingComponentId,
     ]);
     actor.stop();
+    modelRef.stop();
   });
 
   it('should eagerly extract GLTF component manifests from updateGeometry', () => {
@@ -205,7 +211,7 @@ describe('graphicsMachine model interaction child', () => {
     });
 
     const sourceUnitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });
-    const modelRef = actor.getSnapshot().children['modelInteraction'] as ActorRefFrom<typeof modelInteractionMachine>;
+    const modelRef = actor.getSnapshot().context.modelInteractionRef;
     const unit = getModelInteractionUnitState(modelRef.getSnapshot().context, sourceUnitId);
     expect(unit.manifest?.sourceFile).toBe('src/main.ts');
     expect(unit.manifest?.nodesById[housingComponentId]?.name).toBe('Housing');
@@ -223,14 +229,13 @@ describe('graphicsMachine model interaction child', () => {
     actor.send({ type: 'loadModelComponentManifest', unitId, manifest: createManifest(), source: 'viewer' });
     actor.send({ type: 'setHoveredModelComponent', unitId, componentId: housingComponentId, source: 'viewer' });
 
-    const modelRef = actor.getSnapshot().children['modelInteraction'] as ActorRefFrom<typeof modelInteractionMachine>;
+    const modelRef = actor.getSnapshot().context.modelInteractionRef;
     actor.send({ type: 'controlsInteractionStart' });
 
     expect(actor.getSnapshot().context.cameraInteracting).toBe(true);
     expect(actor.getSnapshot().context.cameraInteractionHadMovement).toBe(false);
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(false);
-    expect(modelRef.getSnapshot().context.isViewerHoverSuppressed).toBe(false);
-    expect(modelRef.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hoveredComponentId).toBe(
       housingComponentId,
     );
@@ -243,16 +248,14 @@ describe('graphicsMachine model interaction child', () => {
     actor.send({ type: 'controlsInteractionMoved' });
     expect(actor.getSnapshot().context.cameraInteractionHadMovement).toBe(true);
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(true);
-    expect(modelRef.getSnapshot().context.isViewerHoverSuppressed).toBe(true);
-    expect(modelRef.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['cameraControls']);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['cameraControls']);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hoveredComponentId).toBeUndefined();
 
-    actor.send({ type: 'controlsInteractionEnd', zoom: 2 });
-    expect(actor.getSnapshot().context.currentZoom).toBe(2);
+    actor.send({ type: 'controlsInteractionEnd' });
     expect(actor.getSnapshot().context.cameraInteracting).toBe(false);
     expect(actor.getSnapshot().context.cameraInteractionHadMovement).toBe(false);
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(true);
-    expect(modelRef.getSnapshot().context.isViewerHoverSuppressed).toBe(false);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
 
     actor.send({ type: 'clearModelPointerClickGuard' });
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(false);
@@ -269,22 +272,21 @@ describe('graphicsMachine model interaction child', () => {
     actor.start();
     actor.send({ type: 'loadModelComponentManifest', unitId, manifest: createManifest(), source: 'viewer' });
     actor.send({ type: 'setHoveredModelComponent', unitId, componentId: housingComponentId, source: 'viewer' });
-    const modelRef = actor.getSnapshot().children['modelInteraction'] as ActorRefFrom<typeof modelInteractionMachine>;
+    const modelRef = actor.getSnapshot().context.modelInteractionRef;
 
     actor.send({ type: 'controlsInteractionMoved' });
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(false);
 
     actor.send({ type: 'controlsInteractionStart' });
-    expect(modelRef.getSnapshot().context.isViewerHoverSuppressed).toBe(false);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hoveredComponentId).toBe(
       housingComponentId,
     );
-    actor.send({ type: 'controlsInteractionEnd', zoom: 1.5 });
+    actor.send({ type: 'controlsInteractionEnd' });
 
     expect(actor.getSnapshot().context.cameraInteracting).toBe(false);
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(false);
-    expect(actor.getSnapshot().context.currentZoom).toBe(1.5);
-    expect(modelRef.getSnapshot().context.isViewerHoverSuppressed).toBe(false);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
     expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hoveredComponentId).toBe(
       housingComponentId,
     );
@@ -300,13 +302,12 @@ describe('graphicsMachine model interaction child', () => {
     const actor = createActor(providedMachine, { input: {} });
     actor.start();
 
-    const modelRef = actor.getSnapshot().children['modelInteraction'] as ActorRefFrom<typeof modelInteractionMachine>;
     actor.send({
       type: 'beginViewerModelHoverSuppression',
       reason: 'sectionViewTransform',
       source: 'viewer',
     });
-    expect(modelRef.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['sectionViewTransform']);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['sectionViewTransform']);
 
     actor.send({ type: 'markModelPointerGestureMoved' });
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(true);
@@ -316,7 +317,7 @@ describe('graphicsMachine model interaction child', () => {
       reason: 'sectionViewTransform',
       source: 'viewer',
     });
-    expect(modelRef.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
 
     actor.send({ type: 'clearModelPointerClickGuard' });
     expect(actor.getSnapshot().context.suppressNextModelPointerClick).toBe(false);
@@ -332,16 +333,53 @@ describe('graphicsMachine model interaction child', () => {
     const actor = createActor(providedMachine, { input: {} });
     actor.start();
 
-    const modelRef = actor.getSnapshot().children['modelInteraction'] as ActorRefFrom<typeof modelInteractionMachine>;
     actor.send({ type: 'setMeasureActive', payload: true });
     expect(actor.getSnapshot().context.isMeasureActive).toBe(true);
     expect(actor.getSnapshot().context.modelPointerClickSuppressionReasons).toEqual(['measureTool']);
-    expect(modelRef.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['measureTool']);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['measureTool']);
 
     actor.send({ type: 'setMeasureActive', payload: false });
     expect(actor.getSnapshot().context.isMeasureActive).toBe(false);
     expect(actor.getSnapshot().context.modelPointerClickSuppressionReasons).toEqual([]);
-    expect(modelRef.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
+    expect(actor.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
     actor.stop();
+  });
+
+  it('should synchronize same-unit appearance across graphics actors while keeping suppression local', () => {
+    const providedMachine = graphicsMachine.provide({
+      actors: { probeWebGpu: fromPromise(async () => false) },
+    });
+    const modelRef = createActor(modelInteractionMachine, { input: {} }).start();
+    const first = createActor(providedMachine, { input: { modelInteractionRef: modelRef } }).start();
+    const second = createActor(providedMachine, { input: { modelInteractionRef: modelRef } }).start();
+    const manifest = createManifest();
+    first.send({ type: 'loadModelComponentManifest', unitId, manifest, source: 'viewer' });
+    second.send({ type: 'loadModelComponentManifest', unitId, manifest, source: 'viewer' });
+
+    first.send({ type: 'hideModelComponent', unitId, componentId: housingComponentId, source: 'viewer' });
+    expect(first.getSnapshot().context.modelInteractionRef).toBe(modelRef);
+    expect(second.getSnapshot().context.modelInteractionRef).toBe(modelRef);
+    expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).hiddenComponentIds).toEqual([
+      housingComponentId,
+    ]);
+
+    second.send({
+      type: 'setModelComponentOpacity',
+      unitId,
+      componentId: housingComponentId,
+      opacity: 0.4,
+      source: 'viewer',
+    });
+    first.send({ type: 'resetModelComponentOpacities', unitId, source: 'viewer' });
+    expect(getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).opacityByComponentId).toEqual({});
+
+    first.send({ type: 'beginViewerModelHoverSuppression', reason: 'toolOverlay', source: 'viewer' });
+    expect(first.getSnapshot().context.viewerHoverSuppressionReasons).toEqual(['toolOverlay']);
+    expect(second.getSnapshot().context.viewerHoverSuppressionReasons).toEqual([]);
+
+    first.stop();
+    second.stop();
+    expect(modelRef.getSnapshot().status).toBe('active');
+    modelRef.stop();
   });
 });

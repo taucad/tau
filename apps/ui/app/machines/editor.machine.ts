@@ -18,7 +18,12 @@ import type {
   PersistedModelComponentDisplayState,
   PersistedModelComponentDisplayUnitState,
 } from '#constants/editor.constants.js';
-import { defaultPanelState, omitEmptyComponentDisplayState } from '#constants/editor.constants.js';
+import {
+  defaultPanelState,
+  omitEmptyComponentDisplayState,
+  parseGraphicsViewSettings,
+  parseLegacyModelComponentDisplay,
+} from '#constants/editor.constants.js';
 import { createSourceModelInteractionUnitId } from '#machines/model-interaction.machine.js';
 
 const maxOpenFiles = 200;
@@ -124,6 +129,18 @@ function normalizeComponentDisplayUnits(
   });
 }
 
+function mergeComponentDisplayStates(
+  displays: readonly PersistedModelComponentDisplayState[],
+): PersistedModelComponentDisplayState | undefined {
+  const unitsById: Record<string, PersistedModelComponentDisplayUnitState> = {};
+  for (const display of displays) {
+    for (const [unitId, unit] of Object.entries(display.unitsById)) {
+      unitsById[unitId] = unitsById[unitId] ? mergeComponentDisplayUnits(unitsById[unitId], unit) : unit;
+    }
+  }
+  return normalizeComponentDisplayUnits(unitsById);
+}
+
 function rekeyComponentDisplayForRename(
   componentDisplay: PersistedModelComponentDisplayState | undefined,
   oldPath: string,
@@ -177,35 +194,6 @@ function rekeyViewSettingsForRename(
       {
         ...viewState,
         entryPath: rewritePathIfMatched(viewState.entryPath, oldPath, newPath),
-        graphicsSettings: {
-          ...viewState.graphicsSettings,
-          componentDisplay: rekeyComponentDisplayForRename(
-            viewState.graphicsSettings.componentDisplay,
-            oldPath,
-            newPath,
-          ),
-        },
-      },
-    ]),
-  );
-}
-
-function pruneViewSettingsForDeletedPath(
-  viewSettings: Record<string, ViewState>,
-  deletedPath: string,
-): Record<string, ViewState> {
-  return Object.fromEntries(
-    Object.entries(viewSettings).map(([viewId, viewState]) => [
-      viewId,
-      {
-        ...viewState,
-        graphicsSettings: {
-          ...viewState.graphicsSettings,
-          componentDisplay: pruneComponentDisplayForDeletedPath(
-            viewState.graphicsSettings.componentDisplay,
-            deletedPath,
-          ),
-        },
       },
     ]),
   );
@@ -233,6 +221,10 @@ export type EditorStateContext = {
   viewerLayout: SerializedDockview | undefined;
   /** Per-viewer-panel state, keyed by Dockview panel ID */
   viewSettings: Record<string, ViewState>;
+  /** Project-scoped model appearance shared by every viewer panel. */
+  modelComponentDisplay: PersistedModelComponentDisplayState | undefined;
+  /** Legacy per-view display data must be rewritten into the canonical top-level field. */
+  needsModelComponentDisplayMigration: boolean;
   isLoading: boolean;
   error: Error | undefined;
   /** Flag indicating changes occurred during a write operation that need persisting */
@@ -289,6 +281,7 @@ type EditorStateEvent =
   | { type: 'setViewSettings'; viewId: string; viewState: ViewState }
   | { type: 'updateViewSettings'; viewId: string; settings: Partial<GraphicsViewSettings> }
   | { type: 'removeViewSettings'; viewId: string }
+  | { type: 'setModelComponentDisplay'; componentDisplay?: PersistedModelComponentDisplayState }
   | { type: 'pruneComponentDisplayForDeletedPath'; path: string }
   // Flush pending state immediately (bypasses debounce, used on tab close)
   | { type: 'flushNow' }
@@ -420,17 +413,39 @@ export const editorMachine = setup({
       let editorLayout: SerializedDockview | undefined;
       let viewerLayout: SerializedDockview | undefined;
       let viewSettings: Record<string, ViewState> = {};
+      let modelComponentDisplay = loadedState?.modelComponentDisplay;
+      let needsModelComponentDisplayMigration = false;
       try {
         editorLayout = loadedState?.editorLayout;
 
         viewerLayout = loadedState?.viewerLayout;
 
-        viewSettings = loadedState?.viewSettings ?? {};
+        const persistedViewSettings = loadedState?.viewSettings ?? {};
+        const orderedViewSettings = Object.entries(persistedViewSettings).sort(([left], [right]) =>
+          left.localeCompare(right),
+        );
+        const legacyDisplays = orderedViewSettings
+          .map(([, viewState]) => parseLegacyModelComponentDisplay(viewState.graphicsSettings))
+          .filter((display): display is PersistedModelComponentDisplayState => display !== undefined);
+        needsModelComponentDisplayMigration = orderedViewSettings.some(
+          ([, viewState]) =>
+            (viewState.graphicsSettings as GraphicsViewSettings & { componentDisplay?: unknown }).componentDisplay !==
+            undefined,
+        );
+        modelComponentDisplay ??= mergeComponentDisplayStates(legacyDisplays);
+        viewSettings = Object.fromEntries(
+          orderedViewSettings.map(([viewId, viewState]) => [
+            viewId,
+            { ...viewState, graphicsSettings: parseGraphicsViewSettings(viewState.graphicsSettings) },
+          ]),
+        );
       } catch {
         // Corrupt/incompatible persisted data -- silently default
         editorLayout = undefined;
         viewerLayout = undefined;
         viewSettings = {};
+        modelComponentDisplay = undefined;
+        needsModelComponentDisplayMigration = false;
       }
 
       const openFiles: OpenFile[] = [...(loadedState?.openFiles ?? [])];
@@ -454,6 +469,8 @@ export const editorMachine = setup({
         editorLayout,
         viewerLayout,
         viewSettings,
+        modelComponentDisplay: omitEmptyComponentDisplayState(modelComponentDisplay),
+        needsModelComponentDisplayMigration,
         isLoading: false,
       });
 
@@ -706,6 +723,7 @@ export const editorMachine = setup({
       enqueue.assign({
         openFiles: updatedOpenFiles,
         viewSettings: rekeyViewSettingsForRename(context.viewSettings, oldPath, newPath),
+        modelComponentDisplay: rekeyComponentDisplayForRename(context.modelComponentDisplay, oldPath, newPath),
       });
 
       const activePath = selectActiveFilePath(context.openFiles, context.activePaneId);
@@ -821,10 +839,18 @@ export const editorMachine = setup({
       return { viewSettings: rest };
     }),
 
+    setModelComponentDisplayInContext: assign(({ event }) => {
+      assertEvent(event, 'setModelComponentDisplay');
+      return {
+        modelComponentDisplay: omitEmptyComponentDisplayState(event.componentDisplay),
+        needsModelComponentDisplayMigration: false,
+      };
+    }),
+
     pruneComponentDisplayForDeletedPathInContext: assign(({ event, context }) => {
       assertEvent(event, 'pruneComponentDisplayForDeletedPath');
       return {
-        viewSettings: pruneViewSettingsForDeletedPath(context.viewSettings, event.path),
+        modelComponentDisplay: pruneComponentDisplayForDeletedPath(context.modelComponentDisplay, event.path),
       };
     }),
 
@@ -869,6 +895,8 @@ export const editorMachine = setup({
       editorLayout: undefined,
       viewerLayout: undefined,
       viewSettings: {},
+      modelComponentDisplay: undefined,
+      needsModelComponentDisplayMigration: false,
       isLoading: false,
       error: undefined,
       hasPendingChanges: false,
@@ -1048,6 +1076,9 @@ export const editorMachine = setup({
             removeViewSettings: {
               actions: 'removeViewSettingsInContext',
             },
+            setModelComponentDisplay: {
+              actions: 'setModelComponentDisplayInContext',
+            },
             pruneComponentDisplayForDeletedPath: {
               actions: 'pruneComponentDisplayForDeletedPathInContext',
             },
@@ -1070,6 +1101,7 @@ export const editorMachine = setup({
                 setViewSettings: { target: 'pending' },
                 updateViewSettings: { target: 'pending' },
                 removeViewSettings: { target: 'pending' },
+                setModelComponentDisplay: { target: 'pending' },
                 pruneComponentDisplayForDeletedPath: { target: 'pending' },
                 registerMaterialiseModel: { target: 'pending' },
               },
@@ -1091,6 +1123,7 @@ export const editorMachine = setup({
                 setViewSettings: { target: 'pending', reenter: true },
                 updateViewSettings: { target: 'pending', reenter: true },
                 removeViewSettings: { target: 'pending', reenter: true },
+                setModelComponentDisplay: { target: 'pending', reenter: true },
                 pruneComponentDisplayForDeletedPath: { target: 'pending', reenter: true },
                 registerMaterialiseModel: { target: 'pending', reenter: true },
                 // Immediately bypass debounce and write
@@ -1111,6 +1144,7 @@ export const editorMachine = setup({
                       editorLayout: context.editorLayout,
                       viewerLayout: context.viewerLayout,
                       viewSettings: context.viewSettings,
+                      modelComponentDisplay: context.modelComponentDisplay,
                     },
                   };
                 },
@@ -1138,6 +1172,7 @@ export const editorMachine = setup({
                 setViewSettings: { actions: 'setPendingChanges' },
                 updateViewSettings: { actions: 'setPendingChanges' },
                 removeViewSettings: { actions: 'setPendingChanges' },
+                setModelComponentDisplay: { actions: 'setPendingChanges' },
                 pruneComponentDisplayForDeletedPath: { actions: 'setPendingChanges' },
                 registerMaterialiseModel: { actions: 'setPendingChanges' },
               },

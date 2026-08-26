@@ -1,4 +1,4 @@
-import { AtSign, Eye, EyeOff, FileBox, Focus, MoreHorizontal, Target } from 'lucide-react';
+import { AtSign, Eye, EyeOff, FileBox, Focus, MoreHorizontal, RotateCcw, Target } from 'lucide-react';
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentReference } from '@taucad/types';
 import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
@@ -35,6 +35,8 @@ export type ModelComponentActionMenuData = {
   readonly source: ModelComponentActionMenuSource;
   readonly isFocused: boolean;
   readonly isIsolated: boolean;
+  readonly hasHiddenComponents: boolean;
+  readonly hasOpacityOverrides: boolean;
   readonly opacity: number;
 };
 
@@ -53,13 +55,15 @@ type ModelComponentActions = {
   readonly focusComponent: () => void;
   readonly hideComponent: () => void;
   readonly toggleIsolation: () => void;
+  readonly showAll: () => void;
   readonly setOpacityPercent: (value: number) => void;
+  readonly resetAllOpacities: () => void;
 };
 
 type ModelComponentActionDescriptor =
   | {
       readonly type: 'item';
-      readonly id: 'focus' | 'addToChat' | 'revealInExplorer' | 'hide' | 'isolate';
+      readonly id: 'focus' | 'addToChat' | 'revealInExplorer' | 'hide' | 'isolate' | 'showAll' | 'resetOpacity';
       readonly label: string;
       readonly icon: React.ReactNode;
       readonly isDisabled?: boolean;
@@ -213,6 +217,14 @@ function useModelComponentActionDescriptors(
       icon: <Target className='size-3.5' />,
       onSelect: actions.toggleIsolation,
     },
+    {
+      type: 'item',
+      id: 'showAll',
+      label: 'Show all',
+      icon: <Eye className='size-3.5' />,
+      isDisabled: !data.hasHiddenComponents,
+      onSelect: actions.showAll,
+    },
     { type: 'separator', id: 'visibility' },
     {
       type: 'slider',
@@ -225,6 +237,14 @@ function useModelComponentActionDescriptors(
       step: 1,
       formatValue: (value) => `${value}%`,
       onValueChange: actions.setOpacityPercent,
+    },
+    {
+      type: 'item',
+      id: 'resetOpacity',
+      label: 'Reset all opacities',
+      icon: <RotateCcw className='size-3.5' />,
+      isDisabled: !data.hasOpacityOverrides,
+      onSelect: actions.resetAllOpacities,
     },
   ];
 }
@@ -401,6 +421,9 @@ function useModelComponentActions({
           : { type: 'isolateModelComponent', unitId, componentId: node.id, source },
       );
     },
+    showAll: () => {
+      graphicsRef.send({ type: 'showHiddenModelComponents', unitId, source });
+    },
     setOpacityPercent: (value) => {
       graphicsRef.send({
         type: 'setModelComponentOpacity',
@@ -409,6 +432,9 @@ function useModelComponentActions({
         opacity: value / 100,
         source,
       });
+    },
+    resetAllOpacities: () => {
+      graphicsRef.send({ type: 'resetModelComponentOpacities', unitId, source });
     },
   };
 }

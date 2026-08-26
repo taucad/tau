@@ -269,14 +269,14 @@ describe('headless capture adapter', () => {
       sectionViewDirection: -1 as const,
       enableClippingMesh: true,
       enableClippingLines: false,
-    };
-    const modelInteractionRef = {
-      getSnapshot: () => ({ context: { activeUnitId: 'unit', unitsById: { unit: liveUnit } } }),
+      modelInteractionUnitId: 'unit',
+      modelInteractionRef: {
+        getSnapshot: () => ({ context: { unitsById: { unit: liveUnit } } }),
+      },
     };
     const graphicsRef = {
       getSnapshot: () => ({
         context: liveContext,
-        children: { modelInteraction: modelInteractionRef },
       }),
     } as unknown as Parameters<typeof captureCadImages>[0]['graphicsRef'];
     const exportImage = vi.fn<ExportImage>(async (_job) => [webp(2400, 1350)]);

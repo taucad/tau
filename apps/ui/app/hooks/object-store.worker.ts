@@ -154,6 +154,7 @@ const objectStoreWorker = {
         editorLayout: undefined,
         viewerLayout: undefined,
         viewSettings: {},
+        modelComponentDisplay: options.editorState?.modelComponentDisplay,
       });
     } catch (editorStateError) {
       // Rollback: delete chat and project since editor state update failed
@@ -214,6 +215,7 @@ const objectStoreWorker = {
         editorLayout: sourceEditorState?.editorLayout,
         viewerLayout: sourceEditorState?.viewerLayout,
         viewSettings: sourceEditorState?.viewSettings ?? {},
+        modelComponentDisplay: sourceEditorState?.modelComponentDisplay,
       });
     }
 

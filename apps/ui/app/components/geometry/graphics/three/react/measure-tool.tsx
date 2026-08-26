@@ -20,7 +20,7 @@ import {
   hasSceneTagInHierarchy,
 } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
-import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useGraphics, useGraphicsSelector, useModelInteractionSelector } from '#hooks/use-graphics.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import type { RafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
@@ -121,6 +121,7 @@ export function MeasureTool(): React.JSX.Element {
   const sectionView = useSectionView();
   const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
   const pickableMeshesVersion = useGraphicsSelector((state) => state.context.pickableMeshesVersion);
+  const modelDisplayRevision = useModelInteractionSelector((state) => state.context.displayRevision);
   const measurements = useGraphicsSelector((state) => state.context.measurements);
   const currentStart = useGraphicsSelector((state) => state.context.currentMeasurementStart);
   const snapDistance = useGraphicsSelector((state) => state.context.measureSnapDistance);
@@ -160,13 +161,15 @@ export function MeasureTool(): React.JSX.Element {
   geometryKeyRef.current = geometryKey;
   const pickableMeshesVersionRef = useRef(pickableMeshesVersion);
   pickableMeshesVersionRef.current = pickableMeshesVersion;
+  const modelDisplayRevisionRef = useRef(modelDisplayRevision);
+  modelDisplayRevisionRef.current = modelDisplayRevision;
 
   // Cache detectSnapPoints results keyed by (mesh.id, faceIndex) to avoid
   // running the expensive geometry pipeline on every mouse move over the same face.
   const snapCacheRef = useRef(new Map<string, SnapPoint[]>());
 
   const getCachedMeshes = useRef((): THREE.Mesh[] => {
-    const currentKey = `${geometryKeyRef.current}:${pickableMeshesVersionRef.current}`;
+    const currentKey = `${geometryKeyRef.current}:${pickableMeshesVersionRef.current}:${modelDisplayRevisionRef.current}`;
     if (currentKey === cachedMeshKeyRef.current) {
       return cachedMeshesRef.current;
     }

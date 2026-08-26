@@ -1,5 +1,10 @@
 import type { SerializedDockview } from 'dockview-react';
-import type { PanelId, DesktopPanelId, GraphicsViewSettings } from '#constants/editor.constants.js';
+import type {
+  PanelId,
+  DesktopPanelId,
+  GraphicsViewSettings,
+  PersistedModelComponentDisplayState,
+} from '#constants/editor.constants.js';
 import { allotmentPanelOrder } from '#constants/editor.constants.js';
 
 // ============================================================================
@@ -132,6 +137,8 @@ export type EditorState = {
   viewerLayout: SerializedDockview | undefined;
   /** Per-viewer-panel state, keyed by Dockview panel ID */
   viewSettings: Record<string, ViewState>;
+  /** Project-scoped model appearance shared by all viewer panels. */
+  modelComponentDisplay?: PersistedModelComponentDisplayState;
   /** Timestamp of last update */
   updatedAt: number;
 };

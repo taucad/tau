@@ -405,6 +405,8 @@ const ViewerContent = memo(function ({
       source: 'viewer',
       isFocused: unit.focusedComponentId === viewerActionMenu.target.componentId,
       isIsolated: unit.isolatedComponentIds.includes(viewerActionMenu.target.componentId),
+      hasHiddenComponents: unit.hiddenComponentIds.length > 0,
+      hasOpacityOverrides: Object.keys(unit.opacityByComponentId).length > 0,
       opacity: unit.opacityByComponentId[viewerActionMenu.target.componentId] ?? 1,
     };
   });

@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useState } from 'react';
 import { Plus, Wrench, Paperclip, ChevronRight } from 'lucide-react';
 import type { ToolSelection } from '@taucad/chat';
 import { Button } from '#components/ui/button.js';
@@ -39,8 +39,6 @@ type ChatTextareaMobileProperties = {
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
-  readonly creationLocationControl?: React.ReactNode;
-  readonly isSubmitDisabled?: boolean;
 
   // State from hook
   readonly dragKind: ChatTextareaDragKind | undefined;
@@ -64,7 +62,6 @@ type ChatTextareaMobileProperties = {
   readonly fileInputReference: React.RefObject<HTMLInputElement | null>;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly containerReference: React.RefObject<HTMLDivElement | null>;
-  readonly closeOptionsRef?: React.RefObject<(() => void) | undefined>;
 
   // Handlers
   readonly handleSubmit: () => Promise<void>;
@@ -121,8 +118,6 @@ export const ChatTextareaMobile = memo(function ({
   enableAutoFocus = true,
   enableContextActions = true,
   enableKernelSelector = true,
-  creationLocationControl,
-  isSubmitDisabled = false,
 
   // State
   dragKind,
@@ -143,7 +138,6 @@ export const ChatTextareaMobile = memo(function ({
   textareaReference,
   fileInputReference,
   containerReference,
-  closeOptionsRef,
 
   // Handlers
   handleSubmit,
@@ -170,19 +164,6 @@ export const ChatTextareaMobile = memo(function ({
   setSelectedMenuIndex,
 }: ChatTextareaMobileProperties): React.JSX.Element {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-
-  useEffect(() => {
-    if (!closeOptionsRef) {
-      return;
-    }
-    closeOptionsRef.current = () => {
-      setIsDrawerOpen(false);
-      focusInput();
-    };
-    return () => {
-      closeOptionsRef.current = undefined;
-    };
-  }, [closeOptionsRef, focusInput]);
 
   const handleDrawerAddImage = (image: string, options?: DraftImageOptions): void => {
     handleAddImage(image, options);
@@ -229,8 +210,6 @@ export const ChatTextareaMobile = memo(function ({
         <Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
           <DrawerTrigger asChild>
             <Button
-              type='button'
-              aria-label='Open chat options'
               data-chat-textarea-focustrap={focusTrapAttribute}
               variant='outline'
               size='icon'
@@ -239,13 +218,7 @@ export const ChatTextareaMobile = memo(function ({
               <Plus className='size-5' />
             </Button>
           </DrawerTrigger>
-          <DrawerContent
-            data-chat-textarea-focustrap={focusTrapAttribute}
-            onCloseAutoFocus={(event) => {
-              event.preventDefault();
-              focusInput();
-            }}
-          >
+          <DrawerContent data-chat-textarea-focustrap={focusTrapAttribute}>
             <DrawerTitle className='sr-only'>Chat Options</DrawerTitle>
             <DrawerDescription className='sr-only'>Configure chat settings and add context</DrawerDescription>
             <Command className='bg-transparent'>
@@ -277,8 +250,6 @@ export const ChatTextareaMobile = memo(function ({
                       </div>
                     )}
                   </ChatModelSelector>
-
-                  {creationLocationControl}
 
                   {/* Kernel Selector */}
                   {enableKernelSelector ? (
@@ -355,7 +326,7 @@ export const ChatTextareaMobile = memo(function ({
                     <ChatContextActions
                       asPopoverMenu
                       data-chat-textarea-focustrap={focusTrapAttribute}
-                      isImageInputSupported={imageInputSupported}
+                      imageInputSupported={imageInputSupported}
                       addImage={handleDrawerAddImage}
                       addText={handleDrawerAddText}
                       onClose={() => {
@@ -429,7 +400,7 @@ export const ChatTextareaMobile = memo(function ({
               searchQuery={contextSearchQuery}
               selectedIndex={selectedMenuIndex}
               onSelectedIndexChange={setSelectedMenuIndex}
-              isImageInputSupported={imageInputSupported}
+              imageInputSupported={imageInputSupported}
               addImage={handleContextImageAdd}
               addText={handleContextMenuSelect}
               onSelectItem={handleContextMenuSelect}
@@ -464,7 +435,7 @@ export const ChatTextareaMobile = memo(function ({
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}
-          isDisabled={isSubmitDisabled || (inputText.trim().length === 0 && images.length === 0)}
+          isDisabled={inputText.trim().length === 0 && images.length === 0}
           formattedCancelKeyCombination={formattedCancelKeyCombination}
           onSubmit={handleSubmit}
           onCancel={handleCancelClick}

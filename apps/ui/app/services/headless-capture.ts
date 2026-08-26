@@ -9,6 +9,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import {
@@ -79,9 +80,12 @@ const snapshotPresentationIntent = (
     return undefined;
   }
   const { context } = graphicsSnapshot;
-  const modelContext = context.modelInteractionRef.getSnapshot().context;
-  const unit = context.modelInteractionUnitId
-    ? getModelInteractionUnitState(modelContext, context.modelInteractionUnitId)
+  const modelRef = graphicsSnapshot.children['modelInteraction'] as
+    | ActorRefFrom<typeof modelInteractionMachine>
+    | undefined;
+  const modelContext = modelRef?.getSnapshot().context;
+  const unit = modelContext?.activeUnitId
+    ? getModelInteractionUnitState(modelContext, modelContext.activeUnitId)
     : undefined;
   const selectedPlane = context.availableSectionViews.find(({ id }) => id === context.selectedSectionViewId);
   const section =

@@ -1,5 +1,4 @@
 import { assign, assertEvent, setup, emit, enqueueActions, fromPromise, sendTo } from 'xstate';
-import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { LengthSymbol, UnitSystem } from '@taucad/units';
@@ -9,6 +8,7 @@ import type {
   EnvironmentPreset,
   GraphicsBackendPreference,
   PinnedMeasurement,
+  PersistedModelComponentDisplayState,
   ResolvedGraphicsBackend,
 } from '#constants/editor.constants.js';
 import {
@@ -18,8 +18,6 @@ import {
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
-
-export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
 export type ModelPointerClickSuppressionReason = 'measureTool';
 
@@ -139,17 +137,15 @@ export type GraphicsContext = {
   cameraInteractionHadMovement: boolean;
   suppressNextModelPointerClick: boolean;
   modelPointerClickSuppressionReasons: ModelPointerClickSuppressionReason[];
-  viewerHoverSuppressionReasons: ViewerHoverSuppressionReason[];
   /** Bumps when geometry or component display changes can invalidate renderer-side picking caches. */
   pickableMeshesVersion: number;
-  modelInteractionRef: ModelInteractionRef;
-  ownsModelInteractionRef: boolean;
-  modelInteractionUnitId?: string;
 
   // Geometry data from CAD
   geometry: Geometry | undefined;
   /** Deterministic key derived from the geometry content hash. Used for skip-when-unchanged optimizations. */
   geometryKey: string;
+  /** Restored per-component display state passed through to the model-interaction child. */
+  componentDisplay?: PersistedModelComponentDisplayState;
 };
 
 // Event types
@@ -217,8 +213,7 @@ export type GraphicsEvent =
       source?: ModelInteractionSource;
     }
   | { type: 'markModelPointerGestureMoved' }
-  | { type: 'clearModelPointerClickGuard' }
-  // Geometry updates from CAD
+  | { type: 'clearModelPointerClickGuard' } // Geometry updates from CAD
   | {
       type: 'updateGeometry';
       geometry: Geometry;
@@ -254,7 +249,6 @@ export type GraphicsEvent =
       opacity: number;
       source?: ModelInteractionSource;
     }
-  | { type: 'resetModelComponentOpacities'; unitId: string; source?: ModelInteractionSource }
   | { type: 'focusModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'clearModelComponentFocus'; unitId: string; source?: ModelInteractionSource }
   // Scene radius update from Three.js bounding sphere (sent by Stage)
@@ -283,7 +277,7 @@ export type GraphicsInput = {
   /** Saved pinned measurements to restore */
   pinnedMeasurements?: PinnedMeasurement[];
   graphicsBackendPreference?: GraphicsBackendPreference;
-  modelInteractionRef?: ModelInteractionRef;
+  componentDisplay?: PersistedModelComponentDisplayState;
 };
 
 type LengthUnitData = {
@@ -510,7 +504,6 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
  * Manages all graphics-related state including:
  * - Grid sizing and units
  * - Camera position and controls
- * - Screenshot capabilities
  * - Geometry rendering from CAD
  *
  * State Architecture:
@@ -527,7 +520,7 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
  * Future modes can be added as siblings:
  *   ├── annotation (future)
  *
- * Common events (grid, camera, visibility, screenshots) are handled
+ * Common events (grid, camera, visibility) are handled
  * once at the operational parent level to avoid duplication.
  */
 export const graphicsMachine = setup({
@@ -633,8 +626,6 @@ export const graphicsMachine = setup({
         cameraVisibleSpan: event.verticalSpan,
       });
 
-      // Recalculate grid sizes based on new controls state
-      // Use relative factor × 1000 for grid calculations
       const gridUnitFactor = context.units.length.factor * 1000;
       const newGridSizes = calculateGridSizes({
         visibleSpan: event.verticalSpan,
@@ -664,48 +655,41 @@ export const graphicsMachine = setup({
       enqueue.assign({
         cameraInteractionHadMovement: true,
         suppressNextModelPointerClick: true,
-        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, 'cameraControls'),
       });
-      if (!context.viewerHoverSuppressionReasons.includes('cameraControls') && context.modelInteractionUnitId) {
-        enqueue.sendTo(context.modelInteractionRef, {
-          type: 'setHoveredComponent',
-          unitId: context.modelInteractionUnitId,
-          componentId: undefined,
-          source: 'viewer',
-        });
-      }
+      enqueue.sendTo('modelInteraction', {
+        type: 'beginViewerHoverSuppression',
+        reason: 'cameraControls',
+        source: 'viewer',
+      });
     }),
 
-    handleControlsInteractionEnd: enqueueActions(({ enqueue, context }) => {
+    handleControlsInteractionEnd: enqueueActions(({ enqueue }) => {
       enqueue.assign({
         cameraInteracting: false,
         cameraInteractionHadMovement: false,
-        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'cameraControls'),
+      });
+      enqueue.sendTo('modelInteraction', {
+        type: 'endViewerHoverSuppression',
+        reason: 'cameraControls',
+        source: 'viewer',
       });
     }),
 
-    beginViewerModelHoverSuppression: enqueueActions(({ enqueue, context, event }) => {
+    beginViewerModelHoverSuppression: sendTo('modelInteraction', ({ event }) => {
       assertEvent(event, 'beginViewerModelHoverSuppression');
-      if (context.viewerHoverSuppressionReasons.includes(event.reason)) {
-        return;
-      }
-      enqueue.assign({
-        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
-      });
-      if (context.modelInteractionUnitId) {
-        enqueue.sendTo(context.modelInteractionRef, {
-          type: 'setHoveredComponent',
-          unitId: context.modelInteractionUnitId,
-          componentId: undefined,
-          source: event.source ?? 'viewer',
-        });
-      }
+      return {
+        type: 'beginViewerHoverSuppression',
+        reason: event.reason,
+        source: event.source ?? 'viewer',
+      };
     }),
 
-    endViewerModelHoverSuppression: assign(({ context, event }) => {
+    endViewerModelHoverSuppression: sendTo('modelInteraction', ({ event }) => {
       assertEvent(event, 'endViewerModelHoverSuppression');
       return {
-        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, event.reason),
+        type: 'endViewerHoverSuppression',
+        reason: event.reason,
+        source: event.source ?? 'viewer',
       };
     }),
 
@@ -723,16 +707,12 @@ export const graphicsMachine = setup({
           context.modelPointerClickSuppressionReasons,
           'measureTool',
         ),
-        viewerHoverSuppressionReasons: addSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
       });
-      if (!context.viewerHoverSuppressionReasons.includes('measureTool') && context.modelInteractionUnitId) {
-        enqueue.sendTo(context.modelInteractionRef, {
-          type: 'setHoveredComponent',
-          unitId: context.modelInteractionUnitId,
-          componentId: undefined,
-          source: 'viewer',
-        });
-      }
+      enqueue.sendTo('modelInteraction', {
+        type: 'beginViewerHoverSuppression',
+        reason: 'measureTool',
+        source: 'viewer',
+      });
     }),
 
     endMeasureHoverSuppression: enqueueActions(({ enqueue, context }) => {
@@ -741,7 +721,11 @@ export const graphicsMachine = setup({
           context.modelPointerClickSuppressionReasons,
           'measureTool',
         ),
-        viewerHoverSuppressionReasons: removeSuppressionReason(context.viewerHoverSuppressionReasons, 'measureTool'),
+      });
+      enqueue.sendTo('modelInteraction', {
+        type: 'endViewerHoverSuppression',
+        reason: 'measureTool',
+        source: 'viewer',
       });
     }),
 
@@ -764,9 +748,6 @@ export const graphicsMachine = setup({
       enqueue.assign({
         geometry: event.geometry,
         geometryKey: event.geometry.hash,
-        modelInteractionUnitId:
-          componentManifestUpdate?.unitId ??
-          (event.sourceFile ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile }) : undefined),
         pickableMeshesVersion: context.pickableMeshesVersion + 1,
         cadUnits: {
           length: {
@@ -784,7 +765,7 @@ export const graphicsMachine = setup({
       });
 
       if (componentManifestUpdate) {
-        enqueue.sendTo(context.modelInteractionRef, {
+        enqueue.sendTo('modelInteraction', {
           type: 'loadManifest',
           unitId: componentManifestUpdate.unitId,
           manifest: componentManifestUpdate.manifest,
@@ -793,7 +774,7 @@ export const graphicsMachine = setup({
       }
 
       if (event.sourceFile && !componentManifestUpdate) {
-        enqueue.sendTo(context.modelInteractionRef, {
+        enqueue.sendTo('modelInteraction', {
           type: 'clearManifest',
           unitId: deriveModelInteractionUnitId({ sourceFile: event.sourceFile }),
           source: 'viewer',
@@ -1147,140 +1128,82 @@ export const graphicsMachine = setup({
       },
     }),
 
-    loadModelComponentManifest: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'loadModelComponentManifest');
-        return { type: 'loadManifest', unitId: event.unitId, manifest: event.manifest, source: event.source };
-      },
-    ),
-    clearModelComponentManifest: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'clearModelComponentManifest');
-        return { type: 'clearManifest', unitId: event.unitId, source: event.source };
-      },
-    ),
-    setHoveredModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'setHoveredModelComponent');
-        return {
-          type: 'setHoveredComponent',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    bindModelInteractionUnit: assign(({ event }) => {
+    loadModelComponentManifest: sendTo('modelInteraction', ({ event }) => {
       assertEvent(event, 'loadModelComponentManifest');
-      return { modelInteractionUnitId: event.unitId };
+      return { type: 'loadManifest', unitId: event.unitId, manifest: event.manifest, source: event.source };
     }),
-    toggleModelComponentSelection: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'toggleModelComponentSelection');
-        return {
-          type: 'toggleComponentSelection',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    selectModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'selectModelComponent');
-        return {
-          type: 'selectComponent',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          source: event.source,
-        };
-      },
-    ),
-    clearModelComponentSelection: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'clearModelComponentSelection');
-        return { type: 'clearSelection', unitId: event.unitId, source: event.source };
-      },
-    ),
-    hideModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'hideModelComponent');
-        return { type: 'hideComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
-      },
-    ),
-    showModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'showModelComponent');
-        return { type: 'showComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
-      },
-    ),
-    showHiddenModelComponents: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'showHiddenModelComponents');
-        return { type: 'showHiddenComponents', unitId: event.unitId, source: event.source };
-      },
-    ),
-    isolateModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'isolateModelComponent');
-        return { type: 'isolateComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
-      },
-    ),
-    clearModelComponentIsolation: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'clearModelComponentIsolation');
-        return { type: 'clearIsolation', unitId: event.unitId, source: event.source };
-      },
-    ),
-    setModelComponentOpacity: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'setModelComponentOpacity');
-        return {
-          type: 'setComponentOpacity',
-          unitId: event.unitId,
-          componentId: event.componentId,
-          opacity: event.opacity,
-          source: event.source,
-        };
-      },
-    ),
-    resetModelComponentOpacities: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'resetModelComponentOpacities');
-        return { type: 'resetComponentOpacities', unitId: event.unitId, source: event.source };
-      },
-    ),
-    focusModelComponent: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'focusModelComponent');
-        return { type: 'focusComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
-      },
-    ),
-    clearModelComponentFocus: sendTo(
-      ({ context }) => context.modelInteractionRef,
-      ({ event }) => {
-        assertEvent(event, 'clearModelComponentFocus');
-        return { type: 'clearFocus', unitId: event.unitId, source: event.source };
-      },
-    ),
-    stopOwnedModelInteraction: enqueueActions(({ enqueue, context }) => {
-      if (context.ownsModelInteractionRef) {
-        enqueue.stopChild(context.modelInteractionRef);
-      }
+    clearModelComponentManifest: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'clearModelComponentManifest');
+      return { type: 'clearManifest', unitId: event.unitId, source: event.source };
+    }),
+    setHoveredModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'setHoveredModelComponent');
+      return {
+        type: 'setHoveredComponent',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        source: event.source,
+      };
+    }),
+    toggleModelComponentSelection: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'toggleModelComponentSelection');
+      return {
+        type: 'toggleComponentSelection',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        source: event.source,
+      };
+    }),
+    selectModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'selectModelComponent');
+      return {
+        type: 'selectComponent',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        source: event.source,
+      };
+    }),
+    clearModelComponentSelection: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'clearModelComponentSelection');
+      return { type: 'clearSelection', unitId: event.unitId, source: event.source };
+    }),
+    hideModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'hideModelComponent');
+      return { type: 'hideComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+    }),
+    showModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'showModelComponent');
+      return { type: 'showComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+    }),
+    showHiddenModelComponents: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'showHiddenModelComponents');
+      return { type: 'showHiddenComponents', unitId: event.unitId, source: event.source };
+    }),
+    isolateModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'isolateModelComponent');
+      return { type: 'isolateComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+    }),
+    clearModelComponentIsolation: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'clearModelComponentIsolation');
+      return { type: 'clearIsolation', unitId: event.unitId, source: event.source };
+    }),
+    setModelComponentOpacity: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'setModelComponentOpacity');
+      return {
+        type: 'setComponentOpacity',
+        unitId: event.unitId,
+        componentId: event.componentId,
+        opacity: event.opacity,
+        source: event.source,
+      };
+    }),
+    focusModelComponent: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'focusModelComponent');
+      return { type: 'focusComponent', unitId: event.unitId, componentId: event.componentId, source: event.source };
+    }),
+    clearModelComponentFocus: sendTo('modelInteraction', ({ event }) => {
+      assertEvent(event, 'clearModelComponentFocus');
+      return { type: 'clearFocus', unitId: event.unitId, source: event.source };
     }),
   },
   guards: {
@@ -1324,6 +1247,13 @@ export const graphicsMachine = setup({
 
   invoke: [
     {
+      src: 'modelInteraction',
+      id: 'modelInteraction',
+      input: ({ context }) => ({
+        componentDisplay: context.componentDisplay,
+      }),
+    },
+    {
       src: 'probeWebGpu',
       id: 'probeWebGpuInvocation',
       onDone: { actions: 'recordWebGpuProbeResult' },
@@ -1331,15 +1261,8 @@ export const graphicsMachine = setup({
     },
   ],
 
-  context: ({ input, spawn }) => {
+  context: ({ input }) => {
     const preference = input.graphicsBackendPreference ?? 'webgl';
-    const ownsModelInteractionRef = input.modelInteractionRef === undefined;
-    const modelInteractionRef =
-      input.modelInteractionRef ??
-      spawn('modelInteraction', {
-        id: 'model-interaction',
-        input: {},
-      });
 
     return {
       // Grid state
@@ -1427,18 +1350,14 @@ export const graphicsMachine = setup({
       cameraInteractionHadMovement: false,
       suppressNextModelPointerClick: false,
       modelPointerClickSuppressionReasons: [],
-      viewerHoverSuppressionReasons: [],
       pickableMeshesVersion: 0,
-      modelInteractionRef,
-      ownsModelInteractionRef,
-      modelInteractionUnitId: undefined,
 
       // Shapes
       geometry: undefined,
       geometryKey: '',
+      componentDisplay: input.componentDisplay,
     };
   },
-  exit: 'stopOwnedModelInteraction',
   initial: 'operational',
   states: {
     operational: {
@@ -1536,7 +1455,7 @@ export const graphicsMachine = setup({
 
         // Model/component interaction
         loadModelComponentManifest: {
-          actions: ['bindModelInteractionUnit', 'loadModelComponentManifest'],
+          actions: 'loadModelComponentManifest',
         },
         clearModelComponentManifest: {
           actions: 'clearModelComponentManifest',
@@ -1554,25 +1473,22 @@ export const graphicsMachine = setup({
           actions: 'clearModelComponentSelection',
         },
         hideModelComponent: {
-          actions: 'hideModelComponent',
+          actions: ['hideModelComponent', 'bumpPickableMeshesVersion'],
         },
         showModelComponent: {
-          actions: 'showModelComponent',
+          actions: ['showModelComponent', 'bumpPickableMeshesVersion'],
         },
         showHiddenModelComponents: {
-          actions: 'showHiddenModelComponents',
+          actions: ['showHiddenModelComponents', 'bumpPickableMeshesVersion'],
         },
         isolateModelComponent: {
-          actions: 'isolateModelComponent',
+          actions: ['isolateModelComponent', 'bumpPickableMeshesVersion'],
         },
         clearModelComponentIsolation: {
-          actions: 'clearModelComponentIsolation',
+          actions: ['clearModelComponentIsolation', 'bumpPickableMeshesVersion'],
         },
         setModelComponentOpacity: {
           actions: 'setModelComponentOpacity',
-        },
-        resetModelComponentOpacities: {
-          actions: 'resetModelComponentOpacities',
         },
         focusModelComponent: {
           actions: 'focusModelComponent',

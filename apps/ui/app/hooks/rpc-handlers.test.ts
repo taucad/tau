@@ -924,6 +924,7 @@ describe('rpc-handlers', () => {
         const modelRef = {
           getSnapshot: () => ({
             context: {
+              activeUnitId: 'file:src/pen.ts',
               unitsById: {
                 'file:src/pen.ts': {
                   hiddenComponentIds: ['component:node-0'],
@@ -946,9 +947,8 @@ describe('rpc-handlers', () => {
               sectionViewDirection: -1,
               enableClippingMesh: true,
               enableClippingLines: false,
-              modelInteractionUnitId: 'file:src/pen.ts',
-              modelInteractionRef: modelRef,
             },
+            children: { modelInteraction: modelRef },
           }),
         };
         const projectRef = createMockProjectRef({

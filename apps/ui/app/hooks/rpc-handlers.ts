@@ -43,6 +43,7 @@ import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { createSourceModelInteractionUnitId } from '#machines/model-interaction.machine.js';
+import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { decodeTextFile, encodeTextFile } from '#utils/filesystem.utils.js';
 import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
@@ -450,7 +451,10 @@ function createBrowserImageClient(
   const findGraphicsRef = (targetFile: string): ActorRefFrom<typeof graphicsMachine> | undefined => {
     const unitId = createSourceModelInteractionUnitId(targetFile);
     for (const graphicsRef of projectRef.getSnapshot().context.viewGraphics.values()) {
-      if (graphicsRef.getSnapshot().context.modelInteractionUnitId === unitId) {
+      const modelRef = graphicsRef.getSnapshot().children['modelInteraction'] as
+        | ActorRefFrom<typeof modelInteractionMachine>
+        | undefined;
+      if (modelRef?.getSnapshot().context.activeUnitId === unitId) {
         return graphicsRef;
       }
     }

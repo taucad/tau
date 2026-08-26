@@ -23,7 +23,7 @@ import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics
 type ChatContextActionsProperties = {
   readonly addImage: (image: string, options?: DraftImageOptions) => void;
   readonly addText: (text: string) => void;
-  readonly isImageInputSupported?: boolean;
+  readonly imageInputSupported?: boolean;
   readonly asPopoverMenu?: boolean;
   readonly onClose?: () => void;
   readonly searchQuery?: string;
@@ -45,7 +45,7 @@ type ContextActionItem = {
 export function ChatContextActions({
   addImage,
   addText,
-  isImageInputSupported = true,
+  imageInputSupported = true,
   asPopoverMenu,
   onClose,
   searchQuery = '',
@@ -168,7 +168,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
   }, [addText, kernelIssue, asPopoverMenu, onClose]);
 
   const contextItems = useMemo((): ContextActionItem[] => {
-    const items: ContextActionItem[] = isImageInputSupported
+    const items: ContextActionItem[] = imageInputSupported
       ? [
           {
             id: 'add-current-view-screenshot',
@@ -193,7 +193,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
       : [];
 
     // Add per-view screenshot items for non-main views when there are 2+ views
-    if (isImageInputSupported && viewGraphics.size >= 2) {
+    if (imageInputSupported && viewGraphics.size >= 2) {
       for (const [viewId, graphicsRef] of viewGraphics) {
         const settings = viewSettings[viewId];
         // Skip the main entry path view (already covered by "Current view screenshot")
@@ -239,7 +239,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     return items;
   }, [
     handleAddModelScreenshot,
-    isImageInputSupported,
+    imageInputSupported,
     mainCameraReady,
     mainGeometryFormat,
     handleAddAllViewsScreenshots,

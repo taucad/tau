@@ -120,7 +120,6 @@ const parseFileDragPaths = (raw: string): string[] => {
 
 export type ChatTextareaHandle = {
   focus: () => void;
-  closeOptions?: () => void;
 };
 
 export type ChatTextareaProperties = {
@@ -132,12 +131,6 @@ export type ChatTextareaProperties = {
   readonly className?: string;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
-  readonly creationLocationControls?: {
-    readonly toolbar: React.ReactNode;
-    readonly field: React.ReactNode;
-  };
-  /** Blocks every submit path while external prerequisites are unresolved. */
-  readonly isSubmitDisabled?: boolean;
   readonly mode?: 'main' | 'edit';
 };
 
@@ -155,7 +148,7 @@ export const cancelChatStreamKeyCombination = {
  */
 export type ChatTextareaLogicOptions = Pick<
   ChatTextareaProperties,
-  'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode' | 'isSubmitDisabled'
+  'ref' | 'onSubmit' | 'enableAutoFocus' | 'onEscapePressed' | 'onBlur' | 'mode'
 > & {
   /** Called when a viewer panel tab is dropped — the host should screenshot the matching pane. */
   readonly onViewerScreenshotDrop?: (entryPath: string) => void;
@@ -174,7 +167,6 @@ export function useChatTextareaLogic({
   onEscapePressed,
   onBlur,
   mode = 'main',
-  isSubmitDisabled = false,
   onViewerScreenshotDrop,
   onAddContextChips,
 }: ChatTextareaLogicOptions): {
@@ -319,17 +311,11 @@ export function useChatTextareaLogic({
   imagesRef.current = images;
   const isSubmittingRef = useRef(isSubmitting);
   isSubmittingRef.current = isSubmitting;
-  const isSubmitDisabledRef = useRef(isSubmitDisabled);
-  isSubmitDisabledRef.current = isSubmitDisabled;
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
 
   const handleSubmit = useCallback(async (): Promise<void> => {
-    if (
-      (inputTextRef.current.trim().length === 0 && imagesRef.current.length === 0) ||
-      isSubmittingRef.current ||
-      isSubmitDisabledRef.current
-    ) {
+    if ((inputTextRef.current.trim().length === 0 && imagesRef.current.length === 0) || isSubmittingRef.current) {
       return;
     }
 

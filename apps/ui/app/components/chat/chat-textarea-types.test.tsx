@@ -157,22 +157,6 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
       expect(Object.keys(submittedPayload).sort()).toEqual(['content', 'imageUrls']);
     }
   });
-
-  it('blocks programmatic and Enter submission while an external prerequisite is unresolved', async () => {
-    const onSubmit = vi.fn(async () => undefined);
-    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit, isSubmitDisabled: true }));
-
-    await act(async () => result.current.handleSubmit());
-    act(() => {
-      result.current.handleTextareaKeyDown({
-        key: 'Enter',
-        shiftKey: false,
-        preventDefault: vi.fn(),
-      } as unknown as React.KeyboardEvent);
-    });
-
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
 });
 
 /**

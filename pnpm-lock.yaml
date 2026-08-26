@@ -1225,8 +1225,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.10(three@0.184.0)
       three-viewport-gizmo:
-        specifier: file:tarballs/three-viewport-gizmo-fork/three-viewport-gizmo-2.2.2-tau.2.tgz
-        version: file:tarballs/three-viewport-gizmo-fork/three-viewport-gizmo-2.2.2-tau.2.tgz(three@0.184.0)
+        specifier: npm:@taulabs/three-viewport-gizmo@2.2.3
+        version: '@taulabs/three-viewport-gizmo@2.2.3(three@0.184.0)'
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -10777,6 +10777,11 @@ packages:
 
   '@taucad/replicad@0.23.3-beta.1':
     resolution: {integrity: sha512-ho9deRCHLx6PuRYYDP4KZ60+7KroxSlIOqXH86Rco3fedq1Hes75+eUYsMAhi3A72tt+UdITQHcD4iDu+xyzUQ==}
+
+  '@taulabs/three-viewport-gizmo@2.2.3':
+    resolution: {integrity: sha512-+/Lo5FsmRXDtMLqQZQzGhPKnptl6wF76VVVUBTOdQLo6x7OTZdEypTRRsd0M/xumEp2pOez2q809jgYVd7bA0A==}
+    peerDependencies:
+      three: '>=0.162.0 <1.0.0'
 
   '@testing-library/dom@10.4.1':
     resolution: {integrity: sha512-o4PXJQidqJl82ckFaXUeoAW+XysPLauYI43Abki5hABd853iMhitooc6znOnczgbTYmEP6U6/y1ZyKAIsvMKGg==}
@@ -21265,12 +21270,6 @@ packages:
     resolution: {integrity: sha512-XyGQrFmNQ5O/IoKm556ftwKsBg11TIb301MB5dWNicziQBEs2g3gtOYIf7pFiLa0zI2gUwhtCjv9fmjnxKZ1Cg==}
     peerDependencies:
       three: '>=0.128.0'
-
-  three-viewport-gizmo@file:tarballs/three-viewport-gizmo-fork/three-viewport-gizmo-2.2.2-tau.2.tgz:
-    resolution: {integrity: sha512-zoxtA7gFZSacWB1YHpD4Xh2avx0YFUuVXShJ8iWt0UjgtMVV8RFwf3L9PgAQPtrdUlY4hhvCFUnoq2y+SxB2Pg==, tarball: file:tarballs/three-viewport-gizmo-fork/three-viewport-gizmo-2.2.2-tau.2.tgz}
-    version: 2.2.2-tau.2
-    peerDependencies:
-      three: '>=0.162.0 <1.0.0'
 
   three@0.184.0:
     resolution: {integrity: sha512-wtTRjG92pM5eUg/KuUnHsqSAlPM296brTOcLgMRqEeylYTh/CdtvKUvCyyCQTzFuStieWxvZb8mVTMvdPyUpxg==}
@@ -31914,6 +31913,10 @@ snapshots:
       flatbush: 4.5.0
       opentype.js: 1.3.4
       replicad-opencascadejs: '@taucad/replicad-opencascadejs@0.23.0-beta.0'
+
+  '@taulabs/three-viewport-gizmo@2.2.3(three@0.184.0)':
+    dependencies:
+      three: 0.184.0
 
   '@testing-library/dom@10.4.1':
     dependencies:
@@ -44985,10 +44988,6 @@ snapshots:
       draco3d: 1.5.7
       fflate: 0.6.10
       potpack: 1.0.2
-      three: 0.184.0
-
-  three-viewport-gizmo@file:tarballs/three-viewport-gizmo-fork/three-viewport-gizmo-2.2.2-tau.2.tgz(three@0.184.0):
-    dependencies:
       three: 0.184.0
 
   three@0.184.0: {}

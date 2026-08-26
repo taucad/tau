@@ -48,7 +48,7 @@ export type ClassicTargetControlsLike = {
   removeEventListener?: (type: string, listener: ControlEventListener) => void;
 };
 
-export type CameraControlSurface = CameraControlsLike | ClassicTargetControlsLike;
+type CameraControlSurface = CameraControlsLike | ClassicTargetControlsLike;
 
 export type ControlsListenerEventNames = {
   readonly start: string;

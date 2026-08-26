@@ -4,9 +4,6 @@
   "include": [],
   "references": [
     {
-      "path": "../camera/tsconfig.lib.json"
-    },
-    {
       "path": "./tsconfig.lib.json"
     },
     {

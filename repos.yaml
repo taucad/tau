@@ -501,7 +501,7 @@ repos:
     upstream: Fennec-hub/three-viewport-gizmo
     description: Three Viewport Gizmo - interactive three.js view helper
     fork: taucad/three-viewport-gizmo
-    commit: af81ccf4923343d0f285300e9b230390b673e5dd
+    commit: bbad36f3e1a2b80650a9d31831c8b1bb7443eefb
   terraform-provider-netlify:
     upstream: netlify/terraform-provider-netlify
     description: Netlify Terraform provider source (schema/release reference for Tau cloud-infra stacks).

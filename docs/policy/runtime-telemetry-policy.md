@@ -3,7 +3,7 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-08-17'
+updated: '2026-08-25'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/first-party-runtime-library-tracing-blueprint.md
@@ -16,13 +16,14 @@ Internal reference for the runtime worker telemetry system: span naming, hierarc
 
 ## Rationale
 
-Structured telemetry enables performance debugging and kernel panel visualization. A strict span hierarchy and attribute policy ensures consistent data for aggregation. Negligible overhead (monotonic IDs, single performance.mark per span) keeps instrumentation from affecting render latency.
+Structured telemetry enables performance debugging and kernel panel visualization. A strict span hierarchy and attribute policy ensures consistent data for aggregation. Runtime spans flow directly into an explicit worker-side batch so normal rendering does not pay Performance Timeline or observer overhead.
 
 ## Design Principles
 
 - Every span must have a parent. No orphan root spans except the three permitted roots (`kernel.bootstrap`, `kernel.render`, `kernel.export`).
 - The worker does the heavy lifting: span hierarchy, timing, and attributes are computed entirely on the worker thread. Consumers (UI, DevTools) receive pre-structured data and never need to reconstruct relationships.
-- Span overhead must be negligible: monotonic counter IDs (not UUIDs), single `performance.mark()` per span start, no string concatenation in hot loops.
+- Span overhead must be negligible: use monotonic counter IDs (not UUIDs), `performance.now()` timing, direct entry batching, and no string concatenation in hot loops.
+- Do not write runtime spans to the realm-wide Performance Timeline during normal operation. Mirror uniquely named `tau:*` measures only when `devtoolsTelemetry` is explicitly enabled.
 - The `RuntimeTracer` uses stack-based parent tracking via `activeSpanId`. Async/await naturally preserves hierarchy as long as spans are started and ended in the correct order within the same async context.
 
 ## Naming Convention
@@ -164,9 +165,9 @@ The Replicad kernel supports automatic OpenCASCADE API call tracing via a JavaSc
 
 | Mode       | Overhead | Behavior                                                                                                                          | Default     |
 | ---------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `summary`  | ~2-5%    | Accumulates per-class call counts and total durations. Emits a single `oc.summary` span at flush time with aggregated attributes. | Yes         |
+| `summary`  | ~2-5%    | Accumulates per-class call counts and total durations. Emits a single `oc.summary` span at flush time with aggregated attributes. | No (opt-in) |
 | `per-call` | ~10-20%  | Creates individual `oc.{ClassName}` spans via `tracer.startSpan()` for every OC constructor/method call.                          | No (opt-in) |
-| `off`      | 0%       | No OC tracing.                                                                                                                    | No          |
+| `off`      | 0%       | No OC tracing.                                                                                                                    | Yes         |
 
 ### Proxy Architecture
 
@@ -214,7 +215,7 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 - Use `{kernelId}.library.{operation}` for per-call spans and `{kernelId}.library.summary` for aggregated summary spans.
 - Parent library spans under the semantic user-code span, for example `replicad.run-main`.
 - Do not attach `phase` to library tracing spans.
-- Use summary mode for normal benchmark attribution and per-call mode only for focused profiling.
+- Opt into summary mode for benchmark attribution and per-call mode only for focused profiling.
 - Keep semantic pipeline spans explicit. Do not replace spans such as `replicad.render-output`, `replicad.tessellate.faces`, `replicad.tessellate.edges`, or `replicad.mesh-to-gltf` with library tracer output.
 - Use trace scopes to suppress Tau-owned render/export internals so library tracing represents user-authored library activity.
 
@@ -224,9 +225,11 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 
 ### Worker Side
 
-- `RuntimeTracer.startSpan()` is O(1): monotonic ID increment, single `performance.mark()` call, push to active span stack.
-- `RuntimeTracer.reset()` is called once per render cycle (at the start of `render`), not per span. It clears all accumulated marks and measures.
-- `WorkerTelemetryCollector` batches entries via `PerformanceObserver`. No timers are used -- flushing is explicit only, so the collector adds zero overhead when idle and does not keep the event loop alive.
+- `RuntimeTracer.startSpan()` is O(1): monotonic ID increment, one `performance.now()` call, and an active-parent update.
+- `SpanHandle.end()` creates one `TelemetryEntry` and sends it directly to `WorkerTelemetryCollector`; normal operation MUST NOT call `performance.mark()` or `performance.measure()`.
+- `RuntimeTracer.reset()` is called once per render cycle and only advances the span epoch and clears active ancestry. It MUST NOT clear realm-wide marks or measures.
+- `WorkerTelemetryCollector` is a pending-entry batch sink. It MUST NOT create a `PerformanceObserver` or timer.
+- `devtoolsTelemetry: true` MAY mirror uniquely named `tau:*` measures into the worker Performance Timeline. This mode is diagnostic and MUST remain opt-in.
 - Telemetry is explicitly flushed by the dispatcher after each `render()` and `export()` operation (before the response is sent) to ensure spans arrive before results.
 
 ### Main Thread
@@ -243,14 +246,14 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 
 ## Implementation References
 
-| Component                   | File                                                          | Role                                                         |
-| --------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------ |
-| `RuntimeTracer`             | `packages/runtime/src/framework/runtime-tracer.ts`            | Span creation with parent-child hierarchy                    |
-| `createKernelLibraryTracer` | `packages/runtime/src/framework/kernel-library-tracing.ts`    | First-party kernel library attribution proxy                 |
-| `WorkerTelemetryCollector`  | `packages/runtime/src/framework/worker-telemetry.ts`          | Batched collection via PerformanceObserver                   |
-| `KernelWorkerDispatcher`    | `packages/runtime/src/framework/runtime-worker-dispatcher.ts` | Telemetry flush on render completion                         |
-| `KernelWorker`              | `packages/runtime/src/framework/kernel-worker.ts`             | Framework span instrumentation                               |
-| `KernelRuntimeWorker`       | `packages/runtime/src/framework/kernel-runtime-worker.ts`     | Kernel selection spans                                       |
-| `wrapOcWithTracing`         | `packages/runtime/src/kernels/occt/oc-tracing.ts`             | OC API call tracing proxy (shared by Replicad + OpenCascade) |
-| `buildSpanTree`             | `apps/ui/app/routes/projects_.$id/chat-kernel.tsx`            | UI tree reconstruction                                       |
-| `createTelemetryAggregator` | `apps/ui/app/machines/kernel.machine.ts`                      | Main-thread forwarding                                       |
+| Component                   | File                                                                    | Role                                                         |
+| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `RuntimeTracer`             | `packages/runtime/src/framework/runtime-tracer.ts`                      | Span creation with parent-child hierarchy                    |
+| `createKernelLibraryTracer` | `packages/runtime/src/framework/kernel-library-tracing.ts`              | First-party kernel library attribution proxy                 |
+| `WorkerTelemetryCollector`  | `packages/runtime/src/framework/worker-telemetry.ts`                    | Direct-entry batching                                        |
+| `KernelWorkerDispatcher`    | `packages/runtime/src/transport/_internal/runtime-worker-dispatcher.ts` | Telemetry wiring and flush on render completion              |
+| `KernelWorker`              | `packages/runtime/src/framework/kernel-worker.ts`                       | Framework span instrumentation                               |
+| `KernelRuntimeWorker`       | `packages/runtime/src/framework/kernel-runtime-worker.ts`               | Kernel selection spans                                       |
+| `wrapOcWithTracing`         | `packages/runtime/src/kernels/occt/oc-tracing.ts`                       | OC API call tracing proxy (shared by Replicad + OpenCascade) |
+| `buildSpanTree`             | `apps/ui/app/routes/projects_.$id/chat-kernel.tsx`                      | UI tree reconstruction                                       |
+| `createTelemetryAggregator` | `apps/ui/app/machines/kernel.machine.ts`                                | Main-thread forwarding                                       |

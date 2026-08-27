@@ -13,6 +13,18 @@ const treeItem = (path: string): Locator =>
 const editorTab = (path: string): Locator => selectors.getByCss(`.dv-tab[aria-label="${path}"]`);
 const tabTooltipTrigger = (path: string): Locator =>
   selectors.getByCss(`.dv-tab[aria-label="${path}"] .dv-default-tab[data-slot="tooltip-trigger"]`);
+const tabGroup = (path: string): Locator => selectors.getByCss(`.dv-groupview:has(.dv-tab[aria-label="${path}"])`);
+const overflowPicker = (path: string): Locator => tabGroup(path).getByRole('button', { name: 'Open tabs' });
+const viewerGroup = (): Locator =>
+  selectors.getByCss('.dv-groupview:has([data-testid="cad-viewer-canvas-region"])').first();
+
+const openViewerFile = async (name: RegExp, path: string): Promise<void> => {
+  await target.click(viewerGroup().getByRole('button', { name: 'Open file' }));
+  const fileDrawer = selectors.getByRole('dialog', { name: 'Open File' });
+  await target.expectVisible(fileDrawer);
+  await target.click(fileDrawer.getByRole('option', { name }));
+  await target.expectVisible(editorTab(path), 15_000);
+};
 
 const expandPath = async (path: string): Promise<void> => {
   const segments = path.split('/');
@@ -145,6 +157,58 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   });
   expect(stripMetrics.scrollWidth).toBeGreaterThan(stripMetrics.clientWidth);
 
+  const tabList = tabGroup('package.json').getByRole('tablist');
+  await target.expectVisible(tabList);
+  await target.expectAttribute(longTab, 'role', 'tab');
+  await target.expectAttribute(longTab, 'aria-selected', 'true');
+  await target.expectVisible(overflowPicker('package.json'));
+
+  await target.hover(overflowPicker('package.json'));
+  const overflowTooltip = selectors.getByCss('[data-slot="tooltip-content"]');
+  await target.expectContainingText(overflowTooltip, 'Open tabs');
+  await target.mouseMove(1, 1);
+
+  await target.click(overflowPicker('package.json'));
+  await target.expectAttribute(overflowPicker('package.json'), 'aria-expanded', 'true');
+  const overflowPopover = selectors.getByCss('[data-slot="popover-content"]');
+  const overflowSearch = overflowPopover.getByPlaceholder('Search open tabs...');
+  await target.expectVisible(overflowSearch);
+  await target.fill(overflowSearch, 'package.json');
+  const packageOption = overflowPopover.getByRole('option', { name: /package\.json/u });
+  await target.expectVisible(packageOption);
+  await target.click(packageOption);
+  await target.expectAttribute(shortTab, 'aria-selected', 'true');
+  await target.expectFocused(overflowPicker('package.json'));
+
+  await target.click(overflowPicker('package.json'));
+  await target.expectVisible(overflowSearch);
+  await target.press(overflowSearch, 'Escape');
+  await target.expectCount(overflowPopover, 0);
+  await target.expectFocused(overflowPicker('package.json'));
+
+  await target.click(longTab);
+  await target.expectAttribute(longTab, 'aria-selected', 'true');
+  await target.focus(shortTab);
+  await target.press(shortTab, 'ArrowRight');
+  await target.expectFocused(dragTarget);
+  await target.expectAttribute(longTab, 'aria-selected', 'true');
+  await target.press(dragTarget, 'Enter');
+  await target.expectAttribute(dragTarget, 'aria-selected', 'true');
+  await target.press(dragTarget, 'End');
+  const lastTab = editorTab('src/readme.md');
+  await target.expectFocused(lastTab);
+  await target.expectAttribute(dragTarget, 'aria-selected', 'true');
+  await target.press(lastTab, 'Home');
+  await target.expectFocused(shortTab);
+  await target.press(shortTab, ' ');
+  await target.expectAttribute(shortTab, 'aria-selected', 'true');
+  await target.click(longTab);
+
+  await target.setViewport({ width: 3200, height: 900 });
+  await target.expectCount(overflowPicker('package.json'), 0);
+  await target.setViewport({ width: 1440, height: 900 });
+  await target.expectVisible(overflowPicker('package.json'));
+
   const wheelState = await target.evaluateLocator(longTab, (element) => {
     const strip = element.parentElement;
     if (!(strip instanceof HTMLElement)) {
@@ -211,13 +275,18 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   expect(draggedTab.width).toBe(activeLight.width);
 
   await target.click(shortTab);
+  await target.click(overflowPicker('package.json'));
+  await target.expectVisible(overflowPopover);
+  await target.screenshot(tabGroup('package.json'), 'dockview-tabs-overflow-light.png');
   await target.screenshot(selectors.getByCss('body'), 'dockview-tabs-light.png');
   await target.emulateColorScheme('dark');
   await target.expectClass(selectors.getByCss('html'), /\bdark\b/u);
   const activeDark = await readTabVisualState(shortTab);
   expect(activeDark.backgroundColor).not.toBe(activeLight.backgroundColor);
   expect(activeDark.color).not.toBe(activeLight.color);
+  await target.screenshot(tabGroup('package.json'), 'dockview-tabs-overflow-dark.png');
   await target.screenshot(selectors.getByCss('body'), 'dockview-tabs-dark.png');
+  await target.press(overflowSearch, 'Escape');
 
   await target.scrollIntoView(longTab);
   await target.hover(longTab);
@@ -236,6 +305,15 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
   const secondStrip = workbenchTabStrips.nth(1);
   await target.drag(editorTab('public/models/box-corner.js'), secondStrip);
   await target.drag(editorTab('src/readme.md'), secondStrip);
+
+  const secondGroupPicker = overflowPicker('public/models/box-corner.js');
+  await target.expectVisible(secondGroupPicker);
+  await target.click(secondGroupPicker);
+  const splitPopover = selectors.getByCss('[data-slot="popover-content"]');
+  await target.expectVisible(splitPopover.getByRole('option', { name: /box-corner\.js/u }));
+  await target.expectVisible(splitPopover.getByRole('option', { name: /readme\.md/u }));
+  await target.expectCount(splitPopover.getByRole('option', { name: /package\.json/u }), 0);
+  await target.press(splitPopover.getByPlaceholder('Search open tabs...'), 'Escape');
 
   const splitWheelState = await target.evaluateLocator(secondStrip, (strip) => {
     const firstStrip = strip.closest('[data-slot="omni-scroller"]')?.querySelector<HTMLElement>('.dv-tabs-container');
@@ -265,4 +343,30 @@ test('keeps fixed fading tabs usable across visual and interaction states', asyn
     prevented: true,
     secondScrollLeft: 70,
   });
+
+  await target.setViewport({ width: 390, height: 844 });
+  const modelTab = selectors.getByRole('tab', { name: 'Model', exact: true }).last();
+  await target.click(modelTab);
+  await target.expectVisible(viewerGroup());
+  await openViewerFile(/box-corner\.js/u, 'public/models/box-corner.js');
+  await openViewerFile(/strainer\.js/u, 'public/models/nested/strainer.js');
+
+  const viewerPicker = viewerGroup().getByRole('button', { name: 'Open tabs' });
+  await target.expectVisible(viewerPicker);
+  await target.click(viewerPicker);
+  const overflowDrawer = selectors.getByRole('dialog', { name: 'Open tabs' });
+  await target.expectVisible(overflowDrawer);
+  await target.expectCount(selectors.getByCss('[data-slot="popover-content"]'), 0);
+  const viewerSearch = overflowDrawer.getByPlaceholder('Search open tabs...');
+  await target.fill(viewerSearch, 'public/models/nested/strainer.js');
+  await target.click(overflowDrawer.getByRole('option', { name: /strainer\.js/u }));
+  await target.expectAttribute(editorTab('public/models/nested/strainer.js'), 'aria-selected', 'true');
+  await target.expectFocused(viewerPicker);
+
+  const chatTab = selectors.getByRole('tab', { name: 'Chat', exact: true }).last();
+  await target.click(chatTab);
+  await target.expectAttribute(chatTab, 'data-state', 'active');
+  await target.expectVisible(selectors.getByRole('dialog', { name: 'Chat Interface' }));
+  await target.click(modelTab);
+  await target.expectVisible(viewerPicker);
 });

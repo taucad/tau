@@ -16,7 +16,10 @@ const entryPath = 'src/main.ts';
 const replicadModel = `import { makeBaseBox } from 'replicad';
 
 export default function main() {
-  return makeBaseBox(30, 22, 8);
+  return [
+    { shape: makeBaseBox(16, 18, 8).translate([-18, -9, -4]), name: 'Left box', color: '#22c55e' },
+    { shape: makeBaseBox(16, 18, 8).translate([2, -9, -4]), name: 'Right box', color: '#3b82f6' },
+  ];
 }
 `;
 

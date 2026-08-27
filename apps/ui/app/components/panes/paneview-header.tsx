@@ -1,21 +1,23 @@
-import { ChevronRight } from 'lucide-react';
-import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PaneviewPanelApi } from 'dockview-react';
 import { cn } from '#utils/ui.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
 const defaultExpandedHeight = 200;
 
+export const paneviewHeaderSize = 40;
+
 /**
  * Shared CSS variable overrides for PaneviewReact containers.
  *
- * Sets the built-in `--dv-paneview-header-border-color` for a 1px separator
- * between stacked panels, and configures sash (resize handle) appearance to
- * match the Allotment sash pattern used in the main editor layout.
+ * Removes Paneview's full-width header separator and configures sash (resize
+ * handle) appearance to match the Allotment sash pattern used in the main
+ * editor layout.
  */
 export const paneviewStyleOverrides = cn(
   'h-full',
-  '[--dv-paneview-header-border-color:var(--border)]',
+  '[--dv-paneview-header-border-color:transparent]',
   '[--dv-paneview-active-outline-color:transparent]',
   '[--dv-sash-color:transparent]',
   '[--dv-active-sash-color:var(--primary)]',
@@ -24,6 +26,15 @@ export const paneviewStyleOverrides = cn(
   '[&_.dv-split-view-container.dv-vertical_>_.dv-sash-container_>_.dv-sash.dv-enabled]:!cursor-row-resize',
   '[&_.dv-split-view-container.dv-vertical_>_.dv-sash-container_>_.dv-sash.dv-maximum]:!cursor-row-resize',
   '[&_.dv-split-view-container.dv-vertical_>_.dv-sash-container_>_.dv-sash.dv-minimum]:!cursor-row-resize',
+);
+
+/** Paneview layout overrides for headers visually attached to bordered panel bodies. */
+export const paneviewAttachedSurfaceStyleOverrides = cn(
+  paneviewStyleOverrides,
+  '[&_.dv-pane-body]:overflow-y-hidden! [&_.dv-pane-body]:px-2! [&_.dv-pane-body]:pb-2!',
+  '[&_[data-slot=paneview-header]]:mt-2! [&_[data-slot=paneview-header]]:mb-0!',
+  '[&_[data-slot=paneview-header][data-state=open]]:rounded-b-none!',
+  '[&_[data-slot=paneview-header][data-state=open]]:border-b-0!',
 );
 
 type PaneviewHeaderContextValue = { expanded: boolean };
@@ -58,6 +69,28 @@ export function PaneviewHeader({
   readonly children?: React.ReactNode;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(api.isExpanded);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const frameworkHeader = rootRef.current?.closest<HTMLElement>('.dv-pane-header');
+    if (!frameworkHeader) {
+      return;
+    }
+
+    const previousTabIndex = frameworkHeader.getAttribute('tabindex');
+    frameworkHeader.tabIndex = -1;
+
+    return () => {
+      if (frameworkHeader.tabIndex !== -1) {
+        return;
+      }
+      if (previousTabIndex === null) {
+        frameworkHeader.removeAttribute('tabindex');
+        return;
+      }
+      frameworkHeader.setAttribute('tabindex', previousTabIndex);
+    };
+  }, []);
 
   useEffect(() => {
     const disposable = api.onDidExpansionChange(({ isExpanded }) => {
@@ -81,31 +114,30 @@ export function PaneviewHeader({
   return (
     <PaneviewHeaderContext value={contextValue}>
       <div
-        role='button'
-        tabIndex={0}
-        onClick={handleClick}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            handleClick();
-          }
-        }}
+        ref={rootRef}
+        data-slot='paneview-header'
+        data-state={expanded ? 'open' : 'closed'}
         className={cn(
-          // Matches dockview tab styling (see `dockview-tab.tsx` /
-          // `--dv-tabs-and-actions-container-*`): gap-1.5, 13px font, 2px
-          // horizontal padding. `.dv-pane-header` is height-pinned by
-          // `paneviewStyleOverrides`, so `h-full` resolves correctly here.
-          'group/paneview-header flex h-full w-full cursor-pointer items-center gap-1.5 pl-2 text-[13px] select-none',
-          expanded ? 'pr-1' : 'pr-2',
+          'group/paneview-header mx-2 my-1 flex h-8 min-w-0 items-center overflow-hidden rounded-lg border border-transparent bg-transparent pr-1 text-[13px] select-none',
+          'transition-colors duration-150 hover:bg-accent data-[state=open]:border-border data-[state=open]:bg-card data-[state=open]:hover:bg-accent motion-reduce:transition-none',
         )}
       >
-        <ChevronRight
-          className={cn(
-            'size-3.5 shrink-0 text-muted-foreground transition-transform duration-200',
-            expanded && 'rotate-90',
-          )}
-        />
-        {title === undefined ? undefined : <PaneviewHeaderTitle>{title}</PaneviewHeaderTitle>}
+        <button
+          type='button'
+          aria-expanded={expanded}
+          aria-label={title === undefined ? 'Toggle panel' : undefined}
+          draggable
+          className='flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset'
+          onClick={handleClick}
+        >
+          <ChevronDown
+            className={cn(
+              'size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out motion-reduce:transition-none',
+              expanded && 'rotate-180',
+            )}
+          />
+          {title === undefined ? undefined : <PaneviewHeaderTitle>{title}</PaneviewHeaderTitle>}
+        </button>
         {children}
       </div>
     </PaneviewHeaderContext>
@@ -126,7 +158,7 @@ export function PaneviewHeaderTitle({
   readonly className?: string;
 }): React.JSX.Element {
   return (
-    <span className={cn('truncate text-[13px] text-foreground', className)} dir='rtl'>
+    <span className={cn('truncate text-[13px] font-medium text-foreground', className)} dir='rtl'>
       {children}
     </span>
   );
@@ -134,21 +166,33 @@ export function PaneviewHeaderTitle({
 
 /**
  * Interactive area within a paneview header that stops event propagation,
- * preventing clicks and key events from toggling the panel.
+ * preventing controls from toggling or initiating a drag on the panel.
  *
  * Pushes content to the trailing edge via `ml-auto`. Accepts arbitrary div
- * attributes (e.g. `data-testid`) — internal `onClick` / `onKeyDown` handlers
- * are not overridable since they own the propagation contract.
+ * attributes (e.g. `data-testid`) — internal event handlers are not
+ * overridable since they own the propagation contract.
  */
 export function PaneviewHeaderControls({
   children,
   className,
   ...rest
-}: Omit<React.ComponentProps<'div'>, 'onClick' | 'onKeyDown'>): React.JSX.Element {
+}: Omit<React.ComponentProps<'div'>, 'onClick' | 'onKeyDown' | 'onPointerDown'>): React.JSX.Element {
   return (
     <div
       {...rest}
-      className={cn('ml-auto flex items-center gap-1', className)}
+      data-slot='paneview-header-controls'
+      className={cn(
+        'ml-auto flex items-center gap-1',
+        '[&_button]:rounded-md [&_button]:text-muted-foreground [&_button]:transition-colors [&_button]:duration-150 [&_button]:outline-none',
+        '[&_button:hover]:bg-muted-foreground/10 [&_button:hover]:text-foreground',
+        '[&_button:focus-visible]:bg-muted-foreground/10 [&_button:focus-visible]:text-foreground [&_button:focus-visible]:ring-2 [&_button:focus-visible]:ring-ring/50',
+        '[&_button[data-state=open]]:bg-muted-foreground/10 [&_button[data-state=open]]:text-foreground',
+        'motion-reduce:[&_button]:transition-none',
+        className,
+      )}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+      }}
       onClick={(event) => {
         event.stopPropagation();
       }}
@@ -180,20 +224,14 @@ export function PaneviewHeaderContentActions({
     return undefined;
   }
 
-  if (className === undefined) {
-    return <div>{children}</div>;
-  }
-
-  return <div className={className}>{children}</div>;
+  return <div className={cn('flex items-center', className)}>{children}</div>;
 }
 
 /**
  * Compact icon button for paneview panel headers.
  *
- * Sized at 20px (`size-5`) to match the dockview tab close button — see
- * `dockview-tab.tsx`'s `dv-default-tab-action`. Default svg sizing is `size-3.5`
- * to match the tab's `<X className='size-3.5' />`. Wraps in a `Tooltip` when
- * the `tooltip` prop is provided.
+ * Sized at 24px (`size-6`) for a compact WCAG 2.2 target. Wraps in a
+ * `Tooltip` when the `tooltip` prop is provided.
  */
 export function PaneviewHeaderAction({
   tooltip,
@@ -209,9 +247,9 @@ export function PaneviewHeaderAction({
     <button
       type='button'
       className={cn(
-        'flex size-5 items-center justify-center rounded-sm',
-        'text-muted-foreground transition-colors',
-        'hover:bg-accent hover:text-accent-foreground',
+        'flex size-6 items-center justify-center rounded-md',
+        'text-muted-foreground transition-colors duration-150 motion-reduce:transition-none',
+        'hover:bg-muted-foreground/10 hover:text-foreground',
         'outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
         'disabled:pointer-events-none disabled:opacity-50',
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
@@ -243,9 +281,11 @@ export function PaneviewHeaderAction({
 export function PaneviewHeaderActionGroup({
   children,
   className,
-}: {
-  readonly children: React.ReactNode;
-  readonly className?: string;
-}): React.JSX.Element {
-  return <div className={cn('flex items-center gap-1', className)}>{children}</div>;
+  ...properties
+}: React.ComponentProps<'div'>): React.JSX.Element {
+  return (
+    <div className={cn('flex items-center gap-1', className)} {...properties}>
+      {children}
+    </div>
+  );
 }

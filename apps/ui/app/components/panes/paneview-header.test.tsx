@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { PaneviewPanelApi } from 'dockview-react';
 import {
   PaneviewHeader,
@@ -8,6 +9,8 @@ import {
   PaneviewHeaderControls,
   PaneviewHeaderContentActions,
   PaneviewHeaderTitle,
+  paneviewAttachedSurfaceStyleOverrides,
+  paneviewHeaderSize,
   paneviewStyleOverrides,
 } from '#components/panes/paneview-header.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
@@ -44,27 +47,28 @@ describe('PaneviewHeader', () => {
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
     expect(screen.getByText('main.ts')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'main.ts' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('renders chevron rotated when expanded', () => {
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
-    const chevron = screen.getByRole('button').querySelector('svg')!;
-    expect(chevron.classList.contains('rotate-90')).toBe(true);
+    const chevron = screen.getByRole('button', { name: 'main.ts' }).querySelector('svg')!;
+    expect(chevron.classList.contains('rotate-180')).toBe(true);
   });
 
   it('renders chevron un-rotated when collapsed', () => {
     mockApi = createMockApi(false);
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
-    const chevron = screen.getByRole('button').querySelector('svg')!;
-    expect(chevron.classList.contains('rotate-90')).toBe(false);
+    const chevron = screen.getByRole('button', { name: 'main.ts' }).querySelector('svg')!;
+    expect(chevron.classList.contains('rotate-180')).toBe(false);
   });
 
   it('collapses panel on click when expanded', () => {
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
-    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByRole('button', { name: 'main.ts' }));
 
     expect(mockApi.setExpanded).toHaveBeenCalledWith(false);
     expect(mockApi.setSize).not.toHaveBeenCalled();
@@ -74,7 +78,7 @@ describe('PaneviewHeader', () => {
     mockApi = createMockApi(false);
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
-    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByRole('button', { name: 'main.ts' }));
 
     expect(mockApi.setExpanded).toHaveBeenCalledWith(true);
     expect(mockApi.setSize).toHaveBeenCalledWith({ size: 200 });
@@ -83,14 +87,16 @@ describe('PaneviewHeader', () => {
   it('updates chevron when expansion changes externally', () => {
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
-    const chevron = screen.getByRole('button').querySelector('svg')!;
-    expect(chevron.classList.contains('rotate-90')).toBe(true);
+    const disclosure = screen.getByRole('button', { name: 'main.ts' });
+    const chevron = disclosure.querySelector('svg')!;
+    expect(chevron.classList.contains('rotate-180')).toBe(true);
 
     act(() => {
       mockApi.triggerExpansionChange(false);
     });
 
-    expect(chevron.classList.contains('rotate-90')).toBe(false);
+    expect(chevron.classList.contains('rotate-180')).toBe(false);
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('disposes expansion listener on unmount', () => {
@@ -126,29 +132,64 @@ describe('PaneviewHeader', () => {
     expect(screen.getByTestId('child-content')).toBeInTheDocument();
   });
 
-  it('toggles on Enter key', () => {
+  it('toggles on Enter key', async () => {
+    const user = userEvent.setup();
     mockApi = createMockApi(false);
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
-    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter' });
+    screen.getByRole('button', { name: 'main.ts' }).focus();
+    await user.keyboard('{Enter}');
 
     expect(mockApi.setExpanded).toHaveBeenCalledWith(true);
     expect(mockApi.setSize).toHaveBeenCalledWith({ size: 200 });
   });
 
-  it('toggles on Space key', () => {
+  it('toggles on Space key', async () => {
+    const user = userEvent.setup();
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
-    fireEvent.keyDown(screen.getByRole('button'), { key: ' ' });
+    screen.getByRole('button', { name: 'main.ts' }).focus();
+    await user.keyboard(' ');
 
     expect(mockApi.setExpanded).toHaveBeenCalledWith(false);
   });
 
-  it('applies group/paneview-header class', () => {
+  it('renders a non-interactive state root around the disclosure', () => {
     render(<PaneviewHeader api={mockApi} title='main.ts' />);
 
-    const root = screen.getByRole('button');
+    const disclosure = screen.getByRole('button', { name: 'main.ts' });
+    const root = disclosure.closest('[data-slot="paneview-header"]')!;
     expect(root.classList.contains('group/paneview-header')).toBe(true);
+    expect(root).not.toHaveAttribute('role');
+    expect(root).toHaveAttribute('data-state', 'open');
+    expect(disclosure).toHaveAttribute('draggable', 'true');
+  });
+
+  it('keeps interactive children outside the disclosure button', () => {
+    render(
+      <PaneviewHeader api={mockApi} title='main.ts'>
+        <button type='button'>More</button>
+      </PaneviewHeader>,
+    );
+
+    const disclosure = screen.getByRole('button', { name: 'main.ts' });
+    const action = screen.getByRole('button', { name: 'More' });
+    expect(disclosure).not.toContainElement(action);
+    expect(disclosure.closest('[data-slot="paneview-header"]')).toContainElement(action);
+  });
+
+  it('removes and restores the framework header tab stop', () => {
+    const frameworkHeader = document.createElement('div');
+    frameworkHeader.className = 'dv-pane-header';
+    frameworkHeader.tabIndex = 0;
+    document.body.append(frameworkHeader);
+
+    const { unmount } = render(<PaneviewHeader api={mockApi} title='main.ts' />, { container: frameworkHeader });
+    expect(frameworkHeader.tabIndex).toBe(-1);
+
+    unmount();
+    expect(frameworkHeader.tabIndex).toBe(0);
+    frameworkHeader.remove();
   });
 });
 
@@ -231,6 +272,25 @@ describe('PaneviewHeaderControls', () => {
     expect(mockApi.setExpanded).not.toHaveBeenCalled();
   });
 
+  it('stops pointerdown from reaching the draggable header lane', () => {
+    const handlePointerDown = vi.fn();
+    render(
+      <div onPointerDown={handlePointerDown}>
+        <PaneviewHeader api={mockApi} title='main.ts'>
+          <PaneviewHeaderControls>
+            <button type='button' data-testid='inner-btn'>
+              Click me
+            </button>
+          </PaneviewHeaderControls>
+        </PaneviewHeader>
+      </div>,
+    );
+
+    fireEvent.pointerDown(screen.getByTestId('inner-btn'));
+
+    expect(handlePointerDown).not.toHaveBeenCalled();
+  });
+
   it('applies ml-auto for trailing positioning', () => {
     const { container } = render(
       <PaneviewHeader api={mockApi} title='main.ts'>
@@ -242,6 +302,26 @@ describe('PaneviewHeaderControls', () => {
 
     const controls = container.querySelector('[class*="ml-auto"]');
     expect(controls).toBeInTheDocument();
+  });
+
+  it('applies the shared neutral action treatment at the controls boundary', () => {
+    render(
+      <PaneviewHeader api={mockApi} title='main.ts'>
+        <PaneviewHeaderControls>
+          <button type='button'>Action</button>
+        </PaneviewHeaderControls>
+      </PaneviewHeader>,
+    );
+
+    const controls = screen.getByRole('button', { name: 'Action' }).closest('[data-slot="paneview-header-controls"]');
+    expect(controls).toHaveAttribute('data-slot', 'paneview-header-controls');
+    expect(controls?.className).toContain('[&_button:hover]:bg-muted-foreground/10');
+    expect(controls?.className).toContain('[&_button:hover]:text-foreground');
+    expect(controls?.className).toContain('[&_button:focus-visible]:bg-muted-foreground/10');
+    expect(controls?.className).toContain('[&_button:focus-visible]:text-foreground');
+    expect(controls?.className).toContain('[&_button:focus-visible]:ring-2');
+    expect(controls?.className).toContain('[&_button[data-state=open]]:bg-muted-foreground/10');
+    expect(controls?.className).toContain('[&_button[data-state=open]]:text-foreground');
   });
 });
 
@@ -308,8 +388,12 @@ describe('PaneviewHeaderContentActions', () => {
 });
 
 describe('paneviewStyleOverrides', () => {
-  it('should include the paneview header border color variable', () => {
-    expect(paneviewStyleOverrides).toContain('--dv-paneview-header-border-color');
+  it('should remove the full-width paneview header separator', () => {
+    expect(paneviewStyleOverrides).toContain('--dv-paneview-header-border-color:transparent');
+  });
+
+  it('should allocate 40px for the rounded header row', () => {
+    expect(paneviewHeaderSize).toBe(40);
   });
 
   it('should disable active outline on focused pane panels', () => {
@@ -331,6 +415,13 @@ describe('paneviewStyleOverrides', () => {
 
   it('should include h-full for container sizing', () => {
     expect(paneviewStyleOverrides).toContain('h-full');
+  });
+
+  it('should attach open headers to inset bordered panel bodies', () => {
+    expect(paneviewAttachedSurfaceStyleOverrides).toContain(paneviewStyleOverrides);
+    expect(paneviewAttachedSurfaceStyleOverrides).toContain('[&_.dv-pane-body]:px-2!');
+    expect(paneviewAttachedSurfaceStyleOverrides).toContain('[data-state=open]]:rounded-b-none!');
+    expect(paneviewAttachedSurfaceStyleOverrides).toContain('[data-state=open]]:border-b-0!');
   });
 });
 
@@ -358,7 +449,7 @@ describe('PaneviewHeaderAction', () => {
     expect(handleClick).toHaveBeenCalledOnce();
   });
 
-  it('applies ghost hover classes', () => {
+  it('applies the Dockview action hover classes', () => {
     render(
       <PaneviewHeaderAction>
         <svg data-testid='icon' />
@@ -366,10 +457,11 @@ describe('PaneviewHeaderAction', () => {
     );
 
     const button = screen.getByRole('button');
-    expect(button.classList.contains('hover:bg-accent')).toBe(true);
+    expect(button.classList.contains('hover:bg-muted-foreground/10')).toBe(true);
+    expect(button.classList.contains('hover:text-foreground')).toBe(true);
   });
 
-  it('renders with size-5 for compact header fit', () => {
+  it('renders with a 24px target', () => {
     render(
       <PaneviewHeaderAction>
         <svg data-testid='icon' />
@@ -377,7 +469,7 @@ describe('PaneviewHeaderAction', () => {
     );
 
     const button = screen.getByRole('button');
-    expect(button.classList.contains('size-5')).toBe(true);
+    expect(button.classList.contains('size-6')).toBe(true);
   });
 
   it('wraps in tooltip when tooltip prop is provided', () => {

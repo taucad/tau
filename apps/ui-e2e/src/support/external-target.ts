@@ -113,7 +113,7 @@ export const emulateColorScheme = (
   surface?: TargetSurface,
 ): Promise<void> => server.commands.uiEmulateColorScheme(colorScheme, surface);
 export const click = (selector: TargetSelector, options?: TargetClickOptions, surface?: TargetSurface): Promise<void> =>
-  server.commands.uiClickTarget(selectorFor(selector), options, surface);
+  server.commands.uiClickTarget(selectorFor(selector), options ?? {}, surface);
 export const fill = (selector: TargetSelector, value: string, surface?: TargetSurface): Promise<void> =>
   server.commands.uiFillTarget(selectorFor(selector), value, surface);
 export const press = (selector: TargetSelector, key: string, surface?: TargetSurface): Promise<void> =>
@@ -130,7 +130,7 @@ export const read = (
   selector: TargetSelector,
   options?: TargetReadOptions,
   surface?: TargetSurface,
-): Promise<TargetState> => server.commands.uiReadTarget(selectorFor(selector), options, surface);
+): Promise<TargetState> => server.commands.uiReadTarget(selectorFor(selector), options ?? {}, surface);
 export const textContent = async (selector: TargetSelector, surface?: TargetSurface): Promise<string | null> =>
   (await read(selector, undefined, surface)).text;
 export const getAttribute = async (
@@ -148,7 +148,12 @@ export const evaluate = async <Result, Argument = undefined>(
   callback: (argument: Argument) => Result | Promise<Result>,
   argument?: Argument,
   surface?: TargetSurface,
-): Promise<Result> => server.commands.uiEvaluateTarget(callback.toString(), argument, surface) as Promise<Result>;
+): Promise<Result> =>
+  server.commands.uiEvaluateTarget(
+    callback.toString(),
+    argument ?? (surface ? null : undefined),
+    surface,
+  ) as Promise<Result>;
 export const evaluateLocator = async <Result, Argument = undefined>(
   selector: TargetSelector,
   callback: (element: Element, argument: Argument) => Result | Promise<Result>,
@@ -158,7 +163,7 @@ export const evaluateLocator = async <Result, Argument = undefined>(
   server.commands.uiEvaluateTargetLocator(
     selectorFor(selector),
     callback.toString(),
-    argument,
+    argument ?? (surface ? null : undefined),
     surface,
   ) as Promise<Result>;
 export const addInitScript = <Argument>(
@@ -192,7 +197,12 @@ export const screenshot = (
   selector?: TargetSelector,
   artifactName?: string,
   surface?: TargetSurface,
-): Promise<string> => server.commands.uiScreenshotTarget(selector && selectorFor(selector), artifactName, surface);
+): Promise<string> =>
+  server.commands.uiScreenshotTarget(
+    selector && selectorFor(selector),
+    artifactName ?? (surface ? '' : undefined),
+    surface,
+  );
 export const sampleCameraDuringClick = <Camera>(selector: TargetSelector, frameCount: number): Promise<Camera[]> =>
   server.commands.uiSampleCameraDuringClick(selectorFor(selector), frameCount) as Promise<Camera[]>;
 export const openSecondary = (path: string): Promise<void> => server.commands.uiOpenSecondaryTarget(path);

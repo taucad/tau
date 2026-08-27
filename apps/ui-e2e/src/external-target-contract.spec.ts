@@ -24,3 +24,15 @@ test('preserves native locator semantics and plain target evidence', async () =>
   await target.expectVisible(selectors.getByText(/fixture ready$/i).first());
   await target.expectText(status, 'Project creation location fixture ready');
 });
+
+test('preserves the secondary surface when optional command arguments are omitted', async () => {
+  await target.navigate('/__e2e/project-creation-location?fixture=secondary-surface-contract');
+  await target.openSecondary('/projects/new');
+  try {
+    const heading = selectors.getByRole('heading', { name: /create new project/i });
+    await target.expectVisible(heading, 60_000, 'secondary');
+    expect(await target.screenshot(heading, undefined, 'secondary')).toMatch(/^[A-Za-z0-9+/]+=*$/u);
+  } finally {
+    await target.closeSecondary();
+  }
+});

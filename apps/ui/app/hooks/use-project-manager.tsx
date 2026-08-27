@@ -47,7 +47,7 @@ import { createMessage } from '#utils/chat.utils.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
-import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import type {
   PendingProjectOperation,
   PendingProjectRecovery,
@@ -158,6 +158,8 @@ type ProjectManagerContextType = {
   /** Drop a pending operation the user has given up on (DF11). */
   discardRecovery: (operationId: string) => Promise<void>;
   assertWorkspaceMutationAllowed: (workspaceId: string) => Promise<void>;
+  getAppUiPreferences: () => Promise<AppUiPreferences>;
+  setProjectDisclosure: (projectId: string, expanded: boolean | undefined) => Promise<AppUiPreferences | undefined>;
   // Chat methods
   createChat: (
     resourceId: string,
@@ -179,6 +181,7 @@ type ProjectManagerContextType = {
   clearMessageEdit: (chatId: string, messageId: string) => Promise<Chat | undefined>;
   softDeleteChat: (chatId: string) => Promise<Chat | undefined>;
   duplicateChat: (chatId: string) => Promise<Chat>;
+  getAllChats: (options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
   getChatsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
   getChat: (chatId: string) => Promise<Chat | undefined>;
   deleteChat: (chatId: string) => Promise<void>;
@@ -573,6 +576,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }
         try {
           await worker.deleteProjectResources(operation.projectId);
+          const updatedPreferences = await worker.setProjectDisclosure(operation.projectId, undefined);
+          if (updatedPreferences) {
+            void queryClient.invalidateQueries({ queryKey: ['app-ui-preferences'] });
+          }
           await deleteProjectFileSystemConfig(operation.projectId);
           await fileManager.workspace.syncProjectRoots();
           await worker.completePendingProjectOperation(operation.operationId);
@@ -613,7 +620,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         throw new PendingProjectRecoveryError('local-state-error', { cause: error });
       }
     },
-    [assertProjectAbsentAfterDelete, fileManager, getReadiedWorker],
+    [assertProjectAbsentAfterDelete, fileManager, getReadiedWorker, queryClient],
   );
 
   const createProject = useCallback(
@@ -1347,6 +1354,19 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   // Chat Methods
   // ============================================================================
 
+  const getAppUiPreferences = useCallback(async (): Promise<AppUiPreferences> => {
+    const worker = await getReadiedWorker();
+    return worker.getAppUiPreferences();
+  }, [getReadiedWorker]);
+
+  const setProjectDisclosure = useCallback(
+    async (projectId: string, expanded: boolean | undefined): Promise<AppUiPreferences | undefined> => {
+      const worker = await getReadiedWorker();
+      return worker.setProjectDisclosure(projectId, expanded);
+    },
+    [getReadiedWorker],
+  );
+
   const createChat = useCallback(
     async (
       resourceId: string,
@@ -1499,6 +1519,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [getReadiedWorker],
   );
 
+  const getAllChats = useCallback(
+    async (options?: { includeDeleted?: boolean }): Promise<Chat[]> => {
+      const worker = await getReadiedWorker();
+      return worker.getAllChats(options);
+    },
+    [getReadiedWorker],
+  );
+
   const getChat = useCallback(
     async (chatId: string): Promise<Chat | undefined> => {
       const worker = await getReadiedWorker();
@@ -1541,6 +1569,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       adoptProject,
       discardRecovery,
       assertWorkspaceMutationAllowed,
+      getAppUiPreferences,
+      setProjectDisclosure,
       createChat,
       createNavigationRepairChat,
       updateChat,
@@ -1552,6 +1582,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       clearMessageEdit,
       softDeleteChat,
       duplicateChat,
+      getAllChats,
       getChatsForResource,
       getChat,
       deleteChat,
@@ -1576,6 +1607,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     adoptProject,
     discardRecovery,
     assertWorkspaceMutationAllowed,
+    getAppUiPreferences,
+    setProjectDisclosure,
     createChat,
     createNavigationRepairChat,
     updateChat,
@@ -1587,6 +1620,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     clearMessageEdit,
     softDeleteChat,
     duplicateChat,
+    getAllChats,
     getChatsForResource,
     getChat,
     deleteChat,

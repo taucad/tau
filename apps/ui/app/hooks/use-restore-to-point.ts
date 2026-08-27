@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
-import { useRevisionActor } from '#routes/projects_.$id/revision-provider.js';
+import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provider.js';
 import type { RestoreTarget } from '#machines/revision.machine.js';
 
 export type UseRestoreToPoint = {

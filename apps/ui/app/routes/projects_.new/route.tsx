@@ -117,9 +117,12 @@ function useProjectCreation() {
           },
           chatName: 'Initial design',
           location: projectData.location,
-          // Set initial panel state: editor open
+          // Start in the code-oriented Workbench lane.
           editorState: {
-            panelState: { openPanels: { editor: true, files: true } },
+            panelState: {
+              desktopLayout: { workbenchOpen: true, compactAuxiliary: 'workbench' },
+              mobileActiveTab: 'editor',
+            },
           },
         });
 

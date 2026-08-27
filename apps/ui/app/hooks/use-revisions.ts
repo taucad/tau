@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import { useChats } from '#hooks/use-chats.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useProject } from '#hooks/use-project.js';
-import { useRevisionActor } from '#routes/projects_.$id/revision-provider.js';
+import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provider.js';
 import { activeOps, buildRevisions, buildTimeline } from '#lib/file-restore-timeline.js';
 import type { Revision } from '#lib/file-restore-timeline.js';
+import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
 
 export type RevisionsView = {
   /** Non-superseded Revisions across every project chat, contiguous 1..N. */
@@ -21,9 +23,11 @@ export type RevisionsView = {
 };
 
 /**
- * Derives the Revision list (and head) from the chat timeline plus the
- * machine's persisted `headTurnId` / `supersededTurnIds`. One source of
- * truth for the inline button, the ring/tag, the top-bar chip, and the pane.
+ * Derives the raw Revision list (and head) from the chat timeline plus the
+ * machine's persisted `headTurnId` / `supersededTurnIds`. Raw milestone
+ * revisions remain available while a request runs so restore and recovery
+ * mechanics retain their durable filesystem evidence. UI surfaces should use
+ * `useVisibleRevisions`, which withholds unfinished turns.
  *
  * The chat fetch is deduped by React Query (shared `['chats', …]` key), and the
  * derivation is memoized per render.
@@ -60,4 +64,130 @@ export function useRevisions(): RevisionsView {
       canReturnToLatest: maxRevision > 0 && (headRevision?.n ?? 0) < maxRevision,
     };
   }, [chats, supersededTurnIds, headTurnId, isDirty]);
+}
+
+const inFlightTurnIdDelimiter = '\0';
+
+/**
+ * Resolves the active turn from the authoritative persistence lifecycle.
+ * `invoking`, `retrying`, and `stopping` all represent unfinished requests;
+ * AI SDK `error` alone is not terminal because transparent retries retain it.
+ *
+ * The initial `invoking` transition can precede the Chat instance appending a
+ * new user message. Waiting for either an active transport status or a retry
+ * attempt prevents the previously completed turn from disappearing during
+ * that hand-off window.
+ */
+const inFlightTurnId = (store: ChatSessionStore, session: ChatSession): string | undefined => {
+  const snapshot = session.persistenceActorRef.getSnapshot();
+  if (snapshot.matches({ requestLifecycle: 'idle' })) {
+    return undefined;
+  }
+
+  const lifecycleHasCurrentTurn =
+    !snapshot.matches({ requestLifecycle: 'invoking' }) ||
+    store.getStatus(session.chatId) !== 'ready' ||
+    snapshot.context.retryAttempt > 0;
+  if (!lifecycleHasCurrentTurn) {
+    return undefined;
+  }
+
+  return session.chat.messages.findLast((message) => message.role === 'user')?.id;
+};
+
+/** Subscribe to every live session belonging to the project, including background chats. */
+function useInFlightTurnIds(chatIds: readonly string[]): ReadonlySet<string> {
+  const store = useChatSessionStore();
+
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      let sessionCleanups: Array<() => void> = [];
+
+      const bindSessions = (): void => {
+        for (const cleanup of sessionCleanups) {
+          cleanup();
+        }
+        sessionCleanups = [];
+
+        for (const chatId of chatIds) {
+          const session = store.get(chatId);
+          if (!session) {
+            continue;
+          }
+          const actorSubscription = session.persistenceActorRef.subscribe(listener);
+          const unsubscribeChat = store.subscribeChat(chatId, listener);
+          sessionCleanups.push(() => {
+            actorSubscription.unsubscribe();
+            unsubscribeChat();
+          });
+        }
+      };
+
+      bindSessions();
+      const unsubscribeMembership = store.subscribeMembership(() => {
+        bindSessions();
+        listener();
+      });
+
+      return () => {
+        unsubscribeMembership();
+        for (const cleanup of sessionCleanups) {
+          cleanup();
+        }
+      };
+    },
+    [store, chatIds],
+  );
+
+  const getSnapshot = useCallback(
+    () =>
+      chatIds
+        .map((chatId) => store.get(chatId))
+        .filter((session): session is ChatSession => session !== undefined)
+        .map((session) => inFlightTurnId(store, session))
+        .filter((turnId): turnId is string => turnId !== undefined)
+        .sort()
+        .join(inFlightTurnIdDelimiter),
+    [store, chatIds],
+  );
+
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useMemo(() => new Set(snapshot === '' ? [] : snapshot.split(inFlightTurnIdDelimiter)), [snapshot]);
+}
+
+/**
+ * Completed-turn projection for every revision UI surface. In-flight turns are
+ * removed and the remaining revisions are renumbered contiguously without
+ * changing raw cutoffs, anchors, or stable turn identities.
+ */
+export function useVisibleRevisions(): RevisionsView {
+  const raw = useRevisions();
+  const { projectId } = useProject();
+  const { chats } = useChats(projectId, { includeDeleted: true });
+  const chatIds = useMemo(() => chats.map((chat) => chat.id), [chats]);
+  const inFlightTurnIds = useInFlightTurnIds(chatIds);
+
+  return useMemo(() => {
+    if (inFlightTurnIds.size === 0) {
+      return raw;
+    }
+
+    const revisions = raw.revisions
+      .filter((revision) => !inFlightTurnIds.has(revision.messageId))
+      .map((revision, index) => ({ ...revision, n: index + 1 }));
+    const byMessageId = new Map(revisions.map((revision) => [revision.messageId, revision]));
+    const latest = revisions.at(-1);
+    const headRevision = raw.headTurnId === '' ? latest : (byMessageId.get(raw.headTurnId) ?? latest);
+    const maxRevision = latest?.n ?? 0;
+
+    return {
+      revisions,
+      byMessageId,
+      headRevision,
+      maxRevision,
+      headTurnId: raw.headTurnId,
+      isDirty: raw.isDirty,
+      canReturnToLatest: maxRevision > 0 && (headRevision?.n ?? 0) < maxRevision,
+    };
+  }, [raw, inFlightTurnIds]);
 }

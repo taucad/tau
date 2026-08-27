@@ -4,7 +4,7 @@ import { createActor, waitFor } from 'xstate';
 import { getActiveGroupValues, projectToManifest } from '@taucad/types';
 import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine } from '#machines/project.machine.js';
-import type { ProjectContext } from '#machines/project.machine.js';
+import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -56,9 +56,14 @@ function createTestActor(options?: {
 
   const machine = projectMachine.provide({
     actors: {
-      loadProjectActor: fromSafeAsync(async () => {
+      loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async () => {
         const project = await loadFunction();
-        return { type: 'projectRetrieved', project, parameterEntries: parameterEntries ?? new Map() };
+        return {
+          type: 'projectRetrieved',
+          project,
+          revisionState: undefined,
+          parameterEntries: parameterEntries ?? new Map<string, FileParameterEntry>(),
+        };
       }),
       ...(options?.writeResult
         ? {
@@ -153,8 +158,13 @@ describe('projectMachine', () => {
     it('should go to ssr when isNotBrowser is true', () => {
       const machine = projectMachine.provide({
         actors: {
-          loadProjectActor: fromSafeAsync(async () => {
-            return { type: 'projectRetrieved', project: stubProject, parameterEntries: new Map() };
+          loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async () => {
+            return {
+              type: 'projectRetrieved',
+              project: stubProject,
+              revisionState: undefined,
+              parameterEntries: new Map(),
+            };
           }),
         },
         guards: {

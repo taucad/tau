@@ -528,15 +528,6 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
   }
 
   const columns = createColumns(actions);
-  const seenProjectNames = new Set<string>();
-  const duplicateProjectNames = new Set<string>();
-  for (const project of projects) {
-    if (seenProjectNames.has(project.name)) {
-      duplicateProjectNames.add(project.name);
-    }
-    seenProjectNames.add(project.name);
-  }
-
   return (
     <div className='space-y-4'>
       <div className='flex items-center justify-between gap-2'>
@@ -562,7 +553,6 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
               key={row.original.id}
               project={row.original}
               actions={actions}
-              shouldShowProjectSlug={duplicateProjectNames.has(row.original.name)}
               isSelected={row.getIsSelected()}
               onSelect={() => {
                 row.toggleSelected();
@@ -584,7 +574,6 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
 type ProjectLibraryCardProps = {
   readonly project: ProjectListItem;
   readonly actions: ProjectActions;
-  readonly shouldShowProjectSlug?: boolean;
   readonly isSelected?: boolean;
   readonly onSelect?: () => void;
 };
@@ -592,7 +581,6 @@ type ProjectLibraryCardProps = {
 export function ProjectLibraryCard({
   project,
   actions,
-  shouldShowProjectSlug = false,
   isSelected,
   onSelect,
 }: ProjectLibraryCardProps): React.JSX.Element {
@@ -607,6 +595,9 @@ export function ProjectLibraryCard({
   );
   const LocationIcon = project.locator.backend === 'webaccess' ? FolderOpen : House;
   const fullLocationLabel = projectLocationFullLabel(location);
+  const slugPath = project.slugs
+    ? `${project.slugs.workspaceSlug}/${project.slugs.projectSlug}`
+    : projectSlugOf(project.locator);
 
   return (
     <ProjectCard
@@ -651,17 +642,12 @@ export function ProjectLibraryCard({
                 className='flex w-fit max-w-full items-center gap-1.5 px-2 text-xs text-muted-foreground'
                 aria-label={`Location: ${fullLocationLabel}`}
               >
-                <LocationIcon className='size-3.5 shrink-0' />
-                <span className='truncate'>{location.label}</span>
+                <LocationIcon className='size-3 shrink-0' />
+                <span className='truncate'>{slugPath}</span>
               </div>
             </TooltipTrigger>
             <TooltipContent side='right'>{fullLocationLabel}</TooltipContent>
           </Tooltip>
-          {shouldShowProjectSlug ? (
-            <div className='w-full truncate px-2 font-mono text-xs text-muted-foreground'>
-              {projectSlugOf(project.locator)}
-            </div>
-          ) : null}
         </div>
       </CardHeader>
       <CardFooter className='mt-auto flex items-center justify-between'>

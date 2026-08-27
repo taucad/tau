@@ -144,11 +144,11 @@ describe('ProjectLibrary', () => {
     expect(screen.getByText('Gearbox Alpha')).toBeInTheDocument();
     expect(screen.getByText('Bracket Beta')).toBeInTheDocument();
     expect(screen.getAllByLabelText('Location: Home in this browser')).toHaveLength(2);
-    expect(screen.queryByText('gearbox-alpha')).not.toBeInTheDocument();
-    expect(screen.queryByText('bracket-beta')).not.toBeInTheDocument();
+    expect(screen.getByText('gearbox-alpha')).toBeInTheDocument();
+    expect(screen.getByText('bracket-beta')).toBeInTheDocument();
   });
 
-  it('labels same-named projects with their directory slug', () => {
+  it('keeps same-named projects distinct with their directory slug', () => {
     mockUseProjectsResult = {
       ...createUseProjectsResult(),
       // Same display name — only the slug tells the two rows apart (F5).

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Chat } from '@taucad/chat';
+import { defaultPanelState } from '#constants/editor.constants.js';
 import { pickDuplicatedFocusedChatId } from '#hooks/object-store.worker.js';
+import { mergePanelState } from '#utils/panel-state.utils.js';
 
 function makeChat(overrides: Partial<Chat> & { id: string; updatedAt: number }): Chat {
   return {
@@ -16,8 +18,8 @@ describe('pickDuplicatedFocusedChatId', () => {
   it('returns undefined when no chats were cloned (caller skips the editor-state write)', () => {
     expect(
       pickDuplicatedFocusedChatId({
-        sourceFocusedChatId: 'chat_source',
-        chatIdMapping: { chat_source: 'chat_clone' },
+        sourceFocusedChatId: 'chatSource',
+        chatIdMapping: { chatSource: 'chat_clone' },
         clonedChats: [],
       }),
     ).toBeUndefined();
@@ -30,8 +32,8 @@ describe('pickDuplicatedFocusedChatId', () => {
     ];
     expect(
       pickDuplicatedFocusedChatId({
-        sourceFocusedChatId: 'chat_a_source',
-        chatIdMapping: { chat_a_source: 'chat_a_clone', chat_b_source: 'chat_b_clone' },
+        sourceFocusedChatId: 'sourceChatOne',
+        chatIdMapping: { sourceChatOne: 'chat_a_clone', sourceChatTwo: 'chat_b_clone' },
         clonedChats,
       }),
     ).toBe('chat_a_clone');
@@ -64,9 +66,28 @@ describe('pickDuplicatedFocusedChatId', () => {
     expect(
       pickDuplicatedFocusedChatId({
         sourceFocusedChatId: 'chat_already_deleted',
-        chatIdMapping: { chat_other: 'chat_first_clone' },
+        chatIdMapping: { chatOther: 'chat_first_clone' },
         clonedChats,
       }),
     ).toBe('chat_last_clone');
+  });
+});
+
+describe('mergePanelState', () => {
+  it('adds Paneview defaults to older state while preserving supplied entries', () => {
+    expect(
+      mergePanelState(defaultPanelState, {
+        kernelPaneview: { main: { isExpanded: false, size: 120 } },
+        modelPaneview: { helper: { isExpanded: true, size: 200 } },
+        consolePaneview: { main: { isExpanded: true, size: 160 } },
+      }),
+    ).toMatchObject({
+      kernelPaneview: { main: { isExpanded: false, size: 120 } },
+      modelPaneview: { helper: { isExpanded: true, size: 200 } },
+      parametersPaneview: {},
+      consolePaneview: { main: { isExpanded: true, size: 160 } },
+    });
+
+    expect(mergePanelState(defaultPanelState, { kernelPaneview: {} })).toMatchObject({ modelPaneview: {} });
   });
 });

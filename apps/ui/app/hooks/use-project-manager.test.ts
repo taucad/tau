@@ -227,7 +227,7 @@ const pendingCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
     activePaneId: undefined,
     focusedChatId: 'cht_create',
     panelState: defaultPanelState,
-    editorLayout: undefined,
+    workbenchLayout: undefined,
     viewerLayout: undefined,
     viewSettings: {},
     updatedAt: 10,
@@ -267,6 +267,10 @@ const mockGetPendingProjectOperations = vi.fn(async (): Promise<PendingProjectOp
 const mockBeginPermanentDeleteProject = vi.fn(async () => pendingPermanentDelete.operationId);
 const mockDeleteProjectResources = vi.fn(async () => {
   phaseOrder.push('resources-cleanup');
+});
+const mockSetProjectDisclosure = vi.fn(async () => {
+  phaseOrder.push('disclosure-cleanup');
+  return true;
 });
 const mockGenerateProjectName = vi.fn(async () => {
   phaseOrder.push('name');
@@ -318,6 +322,7 @@ vi.mock('xstate', async (importOriginal) => {
           restoreProject: mockRestoreProject,
           beginPermanentDeleteProject: mockBeginPermanentDeleteProject,
           deleteProjectResources: mockDeleteProjectResources,
+          setProjectDisclosure: mockSetProjectDisclosure,
         },
       },
     })),
@@ -391,6 +396,7 @@ describe('useProjectManager.createProject', () => {
       mockGetHomeStorageBackend,
       mockGetProjectCreationLocation,
       mockSetProjectCreationLocation,
+      mockSetProjectDisclosure,
       mockGetWorkspace,
       mockCheckHandlePermission,
     ]) {
@@ -410,6 +416,10 @@ describe('useProjectManager.createProject', () => {
     mockGetProjectCreationLocation.mockResolvedValue({ location: { kind: 'home' }, repaired: undefined });
     mockSetProjectCreationLocation.mockImplementation(async () => {
       phaseOrder.push('preference');
+    });
+    mockSetProjectDisclosure.mockImplementation(async () => {
+      phaseOrder.push('disclosure-cleanup');
+      return true;
     });
     libraryFileContent = undefined;
     projectRootConfigurationListener = undefined;
@@ -1396,7 +1406,8 @@ describe('useProjectManager.createProject', () => {
       providerBasePath: pendingPermanentDelete.storage.providerBasePath,
       scope: { backend: 'opfs' },
     });
-    expect(phaseOrder).toEqual(['resources-cleanup', 'locator-cleanup', 'roots', 'complete']);
+    expect(mockSetProjectDisclosure).toHaveBeenCalledWith(fakeProject.id, undefined);
+    expect(phaseOrder).toEqual(['resources-cleanup', 'disclosure-cleanup', 'locator-cleanup', 'roots', 'complete']);
   });
 
   it('journals the freshly discovered locator instead of stale persisted configuration', async () => {

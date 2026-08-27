@@ -1,4 +1,4 @@
-import type { Project, File } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
 
 export type CreateInitialProjectOptions = {
   projectName: string;
@@ -7,8 +7,8 @@ export type CreateInitialProjectOptions = {
 };
 
 export type CreateInitialProjectResult = {
-  projectData: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>;
-  files: Record<string, File>;
+  projectData: Omit<ProjectManifest, '$schema' | 'id'>;
+  files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
 };
 
 const defaultPackageJsonText = JSON.stringify(
@@ -22,19 +22,13 @@ const defaultPackageJsonText = JSON.stringify(
 export function createInitialProject(options: CreateInitialProjectOptions): CreateInitialProjectResult {
   const { projectName, mainFileName, emptyCodeContent } = options;
 
-  const projectData: Omit<Project, 'id' | 'createdAt' | 'updatedAt'> = {
+  const projectData: Omit<ProjectManifest, '$schema' | 'id'> = {
     name: projectName,
     description: '',
-    author: {
-      name: 'You',
-      avatar: '/avatar-sample.png',
-    },
     tags: [],
-    thumbnail: '',
     assets: {
-      mechanical: {
-        main: mainFileName,
-        parameters: {},
+      main: {
+        entryPath: mainFileName,
       },
     },
   };
@@ -42,7 +36,7 @@ export function createInitialProject(options: CreateInitialProjectOptions): Crea
   const files = Object.fromEntries([
     [mainFileName, { content: new Uint8Array(emptyCodeContent) }],
     ['package.json', { content: new TextEncoder().encode(defaultPackageJsonText) }],
-  ]) as Record<string, File>;
+  ]);
 
   return { projectData, files };
 }

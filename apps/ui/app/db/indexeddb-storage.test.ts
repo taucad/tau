@@ -3,9 +3,17 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { Chat, MyUIMessage } from '@taucad/chat';
-import type { ChatError, Project } from '@taucad/types';
+import type { ChatError, ProjectManifest } from '@taucad/types';
+import { projectToManifest } from '@taucad/types';
 import { errorCategory } from '@taucad/types/constants';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
+import { defaultPanelState } from '#constants/editor.constants.js';
+import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
+import type { EditorState } from '#types/editor.types.js';
+import type { ProjectLibraryState } from '#types/project.types.js';
+
+const projectOneId = 'proj_one';
+const projectTwoId = 'proj_two';
 
 // ===========================================================================
 // Helpers
@@ -39,16 +47,18 @@ const sampleError = (title: string): ChatError => ({
   message: title,
 });
 
-const sampleProject = (
-  overrides: Partial<Pick<Project, 'name' | 'description'>> = {},
-): Omit<Project, 'id' | 'createdAt' | 'updatedAt'> => ({
-  name: overrides.name ?? 'Test Project',
-  description: overrides.description ?? 'test project',
-  author: { name: 'tester', avatar: '' },
-  tags: [],
-  thumbnail: '',
-  assets: { mechanical: { main: '/index.ts', parameters: {} } },
-});
+let projectSequence = 0;
+
+const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(21, '0')}`;
+
+const sampleManifest = (id = nextProjectId()): ProjectManifest =>
+  projectToManifest({
+    id,
+    name: 'Test Project',
+    description: 'test project',
+    tags: [],
+    assets: { main: { entryPath: 'index.ts' } },
+  });
 
 async function freshChat(provider: IndexedDbStorageProvider): Promise<Chat> {
   return provider.createChat('resource_test', {
@@ -57,8 +67,8 @@ async function freshChat(provider: IndexedDbStorageProvider): Promise<Chat> {
   });
 }
 
-async function freshProject(provider: IndexedDbStorageProvider): Promise<Project> {
-  return provider.createProject(sampleProject());
+async function freshProject(provider: IndexedDbStorageProvider): Promise<ProjectLibraryState> {
+  return provider.createProjectLibraryState({ projectId: nextProjectId(), lastActivityAt: 1 });
 }
 
 const sleep = async (ms: number): Promise<void> => {
@@ -69,6 +79,50 @@ const sleep = async (ms: number): Promise<void> => {
   });
 };
 
+type TrackedConnection = { readonly db: IDBDatabase; closeCalls: number };
+
+/** Record every connection the provider opens so leaks are observable. */
+const trackConnections = (): TrackedConnection[] => {
+  const factory = globalThis.indexedDB;
+  const openDatabase = factory.open.bind(factory);
+  const connections: TrackedConnection[] = [];
+  factory.open = ((name: string, version?: number) => {
+    const request = openDatabase(name, version);
+    request.addEventListener('success', () => {
+      const { result: db } = request;
+      const entry: TrackedConnection = { db, closeCalls: 0 };
+      const close = db.close.bind(db);
+      db.close = () => {
+        entry.closeCalls++;
+        close();
+      };
+      connections.push(entry);
+    });
+    return request;
+  }) as typeof factory.open;
+  return connections;
+};
+
+/** Create the pre-v8 database and keep the connection open, as a stale tab would. */
+const openStaleLegacyConnection = async (): Promise<IDBDatabase> =>
+  new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('tau-db', 7);
+    request.addEventListener('upgradeneeded', () => {
+      const db = request.result;
+      db.createObjectStore('projects', { keyPath: 'id' });
+      db.createObjectStore('chats', { keyPath: 'id' }).createIndex('resourceId', 'resourceId', { unique: false });
+      db.createObjectStore('editor', { keyPath: 'projectId' });
+      db.createObjectStore('pendingProjectOperations', { keyPath: 'operationId' });
+      db.createObjectStore('projectLibraryStates', { keyPath: 'projectId' });
+    });
+    request.addEventListener('success', () => {
+      resolve(request.result);
+    });
+    request.addEventListener('error', () => {
+      reject(request.error ?? new Error('Failed to create the legacy database fixture'));
+    });
+  });
+
 // ===========================================================================
 // Test setup -- reset fake IndexedDB between every test for full isolation.
 // IndexedDbStorageProvider uses a fixed `tau-db` name, so we replace the
@@ -77,9 +131,301 @@ const sleep = async (ms: number): Promise<void> => {
 
 beforeEach(() => {
   globalThis.indexedDB = new IDBFactory();
+  projectSequence = 0;
 });
 
 describe('IndexedDbStorageProvider', () => {
+  // The v10 cutover preserves durable domain rows, adds browser-local chrome
+  // preferences, and intentionally clears the incompatible editor layout.
+  it('upgrades v9 to v10, preserves domain rows, and clears editor layout rows', async () => {
+    const libraryRow: ProjectLibraryState = { projectId: 'proj_kept0000000000000000', lastActivityAt: 42 };
+    const chatRow = { id: 'cht_kept', resourceId: 'proj_kept0000000000000000', name: 'Kept chat', messages: [] };
+    const editorRow: EditorState = {
+      projectId: libraryRow.projectId,
+      openFiles: [],
+      activePaneId: undefined,
+      focusedChatId: chatRow.id,
+      panelState: defaultPanelState,
+      workbenchLayout: undefined,
+      viewerLayout: undefined,
+      viewSettings: {},
+      updatedAt: 42,
+    };
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open('tau-db', 9);
+      request.addEventListener('upgradeneeded', () => {
+        const db = request.result;
+        const chats = db.createObjectStore('chats', { keyPath: 'id' });
+        chats.createIndex('resourceId', 'resourceId', { unique: false });
+        chats.put(chatRow);
+        db.createObjectStore('editor', { keyPath: 'projectId' }).put(editorRow);
+        db.createObjectStore('pendingProjectOperations', { keyPath: 'operationId' });
+        db.createObjectStore('projectLibraryStates', { keyPath: 'projectId' }).put(libraryRow);
+      });
+      request.addEventListener('success', () => {
+        request.result.close();
+        resolve();
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('Failed to create the v8 database fixture'));
+      });
+    });
+
+    const provider = new IndexedDbStorageProvider();
+    await expect(provider.getProjectLibraryState(libraryRow.projectId)).resolves.toEqual(libraryRow);
+    await expect(provider.getChat(chatRow.id)).resolves.toMatchObject({ id: chatRow.id, name: chatRow.name });
+    await expect(provider.getEditorState(libraryRow.projectId)).resolves.toBeUndefined();
+    await expect(provider.getAppUiPreferences()).resolves.toEqual({ id: 'singleton', projectDisclosure: {} });
+
+    const upgraded = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('tau-db');
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('Failed to reopen the database'));
+      });
+    });
+    expect(upgraded.version).toBe(10);
+    expect([...upgraded.objectStoreNames]).toContain('appUiPreferences');
+    upgraded.close();
+  });
+
+  // A profile that never had the database gets the same stores from the same
+  // handler — there is no version-conditional branch left to diverge.
+  it('bootstraps every current store on a fresh profile', async () => {
+    const provider = new IndexedDbStorageProvider();
+    await provider.getProjectLibraryState('proj_missing');
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('tau-db');
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('Failed to open the database'));
+      });
+    });
+    expect(db.version).toBe(10);
+    expect([...db.objectStoreNames].sort()).toEqual([
+      'appUiPreferences',
+      'chats',
+      'editor',
+      'pendingProjectOperations',
+      'projectLibraryStates',
+    ]);
+    expect([...db.transaction('chats').objectStore('chats').indexNames]).toEqual(['resourceId']);
+    db.close();
+  });
+
+  describe('application UI preferences', () => {
+    it('persists sparse disclosure overrides and skips no-op writes', async () => {
+      const provider = new IndexedDbStorageProvider();
+
+      await expect(provider.getAppUiPreferences()).resolves.toEqual({ id: 'singleton', projectDisclosure: {} });
+      await expect(provider.setProjectDisclosure(projectOneId, true)).resolves.toEqual({
+        id: 'singleton',
+        projectDisclosure: { [projectOneId]: true },
+      });
+      await expect(new IndexedDbStorageProvider().getAppUiPreferences()).resolves.toEqual({
+        id: 'singleton',
+        projectDisclosure: { [projectOneId]: true },
+      });
+      await expect(provider.setProjectDisclosure(projectOneId, true)).resolves.toBeUndefined();
+      await expect(provider.setProjectDisclosure(projectOneId, undefined)).resolves.toEqual({
+        id: 'singleton',
+        projectDisclosure: {},
+      });
+      await expect(provider.setProjectDisclosure(projectOneId, undefined)).resolves.toBeUndefined();
+    });
+
+    it('serialises concurrent field writes to the singleton row', async () => {
+      const provider = new IndexedDbStorageProvider();
+
+      for (let iteration = 0; iteration < 100; iteration++) {
+        const firstExpanded = iteration % 2 === 0;
+        // oxlint-disable-next-line no-await-in-loop -- each iteration verifies one complete serialised update.
+        await Promise.all([
+          provider.setProjectDisclosure(projectOneId, firstExpanded),
+          provider.setProjectDisclosure(projectTwoId, !firstExpanded),
+        ]);
+        // oxlint-disable-next-line no-await-in-loop -- read after the iteration's writes have settled.
+        await expect(provider.getAppUiPreferences()).resolves.toEqual({
+          id: 'singleton',
+          projectDisclosure: { [projectOneId]: firstExpanded, [projectTwoId]: !firstExpanded },
+        });
+      }
+    });
+  });
+
+  it('reads all non-deleted chats without adding an index', async () => {
+    const provider = new IndexedDbStorageProvider();
+    const first = await provider.createChat('proj_one', { name: 'First', messages: [] });
+    const second = await provider.createChat('proj_two', { name: 'Second', messages: [] });
+    await provider.softDeleteChat(second.id);
+
+    await expect(provider.getAllChats()).resolves.toMatchObject([{ id: first.id }]);
+    await expect(provider.getAllChats({ includeDeleted: true })).resolves.toHaveLength(2);
+  });
+
+  // =========================================================================
+  // Connection hygiene (DF17): a leaked or upgrade-blocking connection wedges
+  // every later schema bump behind a spinner.
+  // =========================================================================
+  describe('connection hygiene', () => {
+    it('closes the connection when another tab requests a version upgrade', async () => {
+      const connections = trackConnections();
+      const provider = new IndexedDbStorageProvider();
+      await provider.getProjectLibraryState('proj_missing');
+
+      expect(connections).toHaveLength(1);
+      const tracked = connections[0]!;
+      const closesBefore = tracked.closeCalls;
+      expect(tracked.db.onversionchange).toBeTypeOf('function');
+      tracked.db.onversionchange?.(new Event('versionchange') as unknown as IDBVersionChangeEvent);
+      expect(tracked.closeCalls).toBeGreaterThan(closesBefore);
+    });
+
+    it('rejects a blocked upgrade with an actionable close-other-tabs error', async () => {
+      const stale = await openStaleLegacyConnection();
+      const provider = new IndexedDbStorageProvider();
+
+      await expect(provider.getProjectLibraryState('proj_missing')).rejects.toThrow(/other tau tabs/i);
+      stale.close();
+    });
+
+    it('closes the connection when a transaction aborts', async () => {
+      const connections = trackConnections();
+      const provider = new IndexedDbStorageProvider();
+
+      await expect(
+        provider.createProjectLibraryState({
+          projectId: nextProjectId(),
+          lastActivityAt: 1,
+          // A function is unclonable, so `add` throws and the transaction aborts.
+          revisionState: (() => undefined) as unknown as ProjectLibraryState['revisionState'],
+        }),
+      ).rejects.toThrow();
+
+      expect(connections).toHaveLength(1);
+      expect(connections[0]!.closeCalls).toBeGreaterThan(0);
+    });
+  });
+
+  describe('pending project operations', () => {
+    it('round-trips and removes an exact replay record', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = await freshProject(provider);
+      const manifest = sampleManifest();
+      const operation: PendingProjectOperation = {
+        operationId: 'req_pending_create',
+        kind: 'duplicate',
+        backend: 'opfs',
+        providerBasePath: '/test',
+        sourceProjectId: project.projectId,
+        manifest,
+        library: { projectId: manifest.id, lastActivityAt: 3 },
+        files: { 'main.ts': { content: new Uint8Array([1]) } },
+        chats: [],
+      };
+
+      await provider.putPendingProjectOperation(operation);
+      const expectedOperation = structuredClone(operation);
+
+      expect(structuredClone(await provider.getPendingProjectOperation(operation.operationId))).toEqual(
+        expectedOperation,
+      );
+      expect(structuredClone(await provider.getPendingProjectOperations())).toEqual([expectedOperation]);
+
+      await provider.deletePendingProjectOperation(operation.operationId);
+      expect(await provider.getPendingProjectOperations()).toEqual([]);
+    });
+
+    it('uses idempotent puts for replayed chat and editor records', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const chat: Chat = {
+        id: 'chat_replay',
+        resourceId: 'proj_replay',
+        name: 'Replay',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const editorState: EditorState = {
+        projectId: chat.resourceId,
+        openFiles: [],
+        activePaneId: undefined,
+        focusedChatId: chat.id,
+        panelState: defaultPanelState,
+        workbenchLayout: undefined,
+        viewerLayout: undefined,
+        viewSettings: {},
+        updatedAt: 1,
+      };
+
+      await provider.putChatRecord(chat);
+      await provider.putChatRecord(chat);
+      await provider.putEditorStateRecord(editorState);
+      await provider.putEditorStateRecord(editorState);
+
+      expect(await provider.getChatsForResource(chat.resourceId)).toEqual([chat]);
+      expect(await provider.getEditorState(chat.resourceId)).toEqual(editorState);
+    });
+
+    it('admits permanent deletion only while the project is atomically trashed', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = await freshProject(provider);
+      const operation = {
+        operationId: 'req_permanent_delete',
+        kind: 'permanent-delete',
+        projectId: project.projectId,
+        storage: { backend: 'indexeddb', providerBasePath: '/delete' },
+      } as const;
+
+      await expect(provider.beginPermanentDeleteProject(operation)).rejects.toThrow(
+        'Permanent delete is available only for trashed projects',
+      );
+      expect(await provider.getPendingProjectOperations()).toEqual([]);
+
+      await provider.trashProject(project.projectId, 42);
+      await provider.beginPermanentDeleteProject(operation);
+      await expect(provider.restoreProject(project.projectId)).rejects.toThrow(
+        'Cannot restore project while permanent deletion is pending',
+      );
+      expect(await provider.getProjectLibraryState(project.projectId)).toMatchObject({ deletedAt: 42 });
+      expect(await provider.getPendingProjectOperations()).toEqual([operation]);
+    });
+
+    it('serializes restore against permanent-delete admission across storage instances', async () => {
+      const first = new IndexedDbStorageProvider();
+      const second = new IndexedDbStorageProvider();
+      const project = await freshProject(first);
+      await first.trashProject(project.projectId, 42);
+      const operation = {
+        operationId: 'req_permanent_delete_race',
+        kind: 'permanent-delete',
+        projectId: project.projectId,
+        storage: { backend: 'opfs', providerBasePath: '/delete' },
+      } as const;
+
+      const [begin, restore] = await Promise.allSettled([
+        first.beginPermanentDeleteProject(operation),
+        second.restoreProject(project.projectId),
+      ]);
+      const finalState = await first.getProjectLibraryState(project.projectId);
+      const pending = await first.getPendingProjectOperations();
+
+      expect([begin.status, restore.status].sort()).toEqual(['fulfilled', 'rejected']);
+      if (begin.status === 'fulfilled') {
+        expect(finalState?.deletedAt).toBe(42);
+        expect(pending).toEqual([operation]);
+      } else {
+        expect(finalState?.deletedAt).toBeUndefined();
+        expect(pending).toEqual([]);
+      }
+    });
+  });
+
   // =========================================================================
   // Concurrent updateChat preserves disjoint field writes
   // =========================================================================
@@ -319,231 +665,83 @@ describe('IndexedDbStorageProvider', () => {
     });
   });
 
-  describe('updateProject atomic single-transaction semantics', () => {
-    it('should return undefined when project does not exist', async () => {
+  describe('project library state', () => {
+    it('creates idempotently without overwriting an existing row', async () => {
       const provider = new IndexedDbStorageProvider();
-      const result = await provider.updateProject('project_missing', { name: 'never' });
-      expect(result).toBeUndefined();
+      const state = await freshProject(provider);
+
+      const result = await provider.createProjectLibraryState({
+        projectId: state.projectId,
+        lastActivityAt: 999,
+      });
+
+      expect(result).toEqual(state);
+      expect(await provider.getProjectLibraryState(state.projectId)).toEqual(state);
     });
 
-    it('should preserve both name and description when concurrent updateProject calls race', async () => {
-      const iterations = 50;
+    it('keeps activity monotonic and preserves deletion/revision fields', async () => {
       const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
+      const state = await freshProject(provider);
+      const revisionState = { headTurnId: 'turn_1', supersededTurnIds: ['turn_0'], dirty: true };
+      await provider.setProjectRevisionState(state.projectId, revisionState);
+      await provider.trashProject(state.projectId, 50);
 
-      /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
-      for (let i = 0; i < iterations; i++) {
-        const name = `name-${i}`;
-        const description = `desc-${i}`;
+      await provider.touchProjectActivity(state.projectId, 40);
+      expect(await provider.getProjectLibraryState(state.projectId)).toEqual({
+        projectId: state.projectId,
+        lastActivityAt: 40,
+        deletedAt: 50,
+        revisionState,
+      });
 
-        await Promise.all([
-          provider.updateProject(project.id, { name }),
-          provider.updateProject(project.id, { description }),
-        ]);
-
-        const final = await provider.getProject(project.id);
-        expect(final?.name).toBe(name);
-        expect(final?.description).toBe(description);
-      }
-      /* oxlint-enable no-await-in-loop */
+      await provider.touchProjectActivity(state.projectId, 30);
+      const stored = await provider.getProjectLibraryState(state.projectId);
+      expect(stored?.lastActivityAt).toBe(40);
     });
 
-    it('should return undefined and preserve updatedAt when updateProject is a no-op', async () => {
+    it('trashes and restores by mutating only deletedAt', async () => {
       const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      await sleep(2);
+      const state = await freshProject(provider);
+      const revisionState = { headTurnId: 'turn_1', supersededTurnIds: [], dirty: false };
+      await provider.setProjectRevisionState(state.projectId, revisionState);
 
-      const result = await provider.updateProject(project.id, { name: project.name });
-      const stored = await provider.getProject(project.id);
-
-      expect(result).toBeUndefined();
-      expect(stored?.updatedAt).toBe(project.updatedAt);
-    });
-  });
-
-  // =========================================================================
-  // touchProject + chat cascade → parent Project.updatedAt
-  // =========================================================================
-  describe('touchProject', () => {
-    it('should bump updatedAt and leave other fields unchanged', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const nameBefore = project.name;
-      await sleep(2);
-
-      const result = await provider.touchProject(project.id);
-      const stored = await provider.getProject(project.id);
-
-      expect(result?.updatedAt).toBeGreaterThan(project.updatedAt);
-      expect(stored?.name).toBe(nameBefore);
-      expect(stored?.updatedAt).toBe(result?.updatedAt);
+      expect(await provider.trashProject(state.projectId, 10)).toEqual({
+        ...state,
+        deletedAt: 10,
+        revisionState,
+      });
+      expect(await provider.restoreProject(state.projectId)).toEqual({ ...state, revisionState });
     });
 
-    it('should return undefined when project does not exist', async () => {
+    it('returns undefined for field mutations on a missing row', async () => {
       const provider = new IndexedDbStorageProvider();
-      const result = await provider.touchProject('project_missing');
-      expect(result).toBeUndefined();
+
+      await expect(provider.touchProjectActivity('proj_missing', 1)).resolves.toBeUndefined();
+      await expect(provider.trashProject('proj_missing', 1)).resolves.toBeUndefined();
+      await expect(provider.restoreProject('proj_missing')).resolves.toBeUndefined();
     });
 
-    it('should no-op when project is soft-deleted', async () => {
+    it('never changes activity from chat persistence', async () => {
       const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      await provider.deleteProject(project.id);
-      const afterDelete = await provider.getProject(project.id);
-      expect(afterDelete?.deletedAt).toBeDefined();
-
-      const touchResult = await provider.touchProject(project.id);
-      expect(touchResult).toBeUndefined();
-
-      const afterTouch = await provider.getProject(project.id);
-      expect(afterTouch?.updatedAt).toBe(afterDelete?.updatedAt);
-    });
-
-    it('should serialize concurrent touchProject calls on the same project', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-
-      await Promise.all(
-        Array.from({ length: 30 }, async () => {
-          await provider.touchProject(project.id);
-        }),
-      );
-
-      const stored = await provider.getProject(project.id);
-      expect(stored?.updatedAt).toBeGreaterThanOrEqual(project.updatedAt);
-    });
-  });
-
-  describe('chat activity cascades to parent Project.updatedAt', () => {
-    it('should bump project when createChat completes', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const before = project.updatedAt;
-      await sleep(2);
-
-      const chat = await provider.createChat(project.id, { name: 'New', messages: [] });
-      const proj = await provider.getProject(project.id);
-
-      expect(proj?.updatedAt).toBeGreaterThan(before);
-      expect(proj?.updatedAt).toBeGreaterThanOrEqual(chat.updatedAt);
-    });
-
-    it('should not bump project when navigation repair creates an empty chat', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const before = project.updatedAt;
-      await sleep(2);
-
-      const chat = await provider.createNavigationRepairChat(project.id);
-      const proj = await provider.getProject(project.id);
-
-      expect(chat.updatedAt).toBeGreaterThan(before);
-      expect(chat.startupRequest).toBeUndefined();
-      expect(proj?.updatedAt).toBe(before);
-    });
-
-    it('should bump project on material updateChat and preserve it for no-op updateChat', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const chat = await provider.createChat(project.id, { name: 'A', messages: [] });
-      await sleep(2);
-
-      const afterCreate = (await provider.getProject(project.id))!.updatedAt;
-
-      const bumped = await provider.updateChat(chat.id, { name: 'B' });
-      const projAfterBump = await provider.getProject(project.id);
-      expect(projAfterBump?.updatedAt).toBeGreaterThan(afterCreate);
-      expect(projAfterBump?.updatedAt).toBeGreaterThanOrEqual(bumped!.updatedAt);
-
-      await sleep(2);
-      const frozen = await provider.updateChat(chat.id, { name: 'B' });
-      const projAfterNoBump = await provider.getProject(project.id);
-      const stored = await provider.getChat(chat.id);
-      expect(frozen).toBeUndefined();
-      expect(projAfterNoBump?.updatedAt).toBe(projAfterBump?.updatedAt);
-      expect(stored?.updatedAt).toBe(bumped?.updatedAt);
-    });
-
-    it('should bump project on patchChat', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const chat = await provider.createChat(project.id, { name: 'x', messages: [] });
-      const p0 = (await provider.getProject(project.id))!.updatedAt;
-      await sleep(2);
-
+      const state = await freshProject(provider);
+      const chat = await provider.createChat(state.projectId, { name: 'A', messages: [] });
+      await provider.updateChat(chat.id, { name: 'B' });
       await provider.patchChat(chat.id, 'messages', [userMessage('hi')]);
-      const p1 = (await provider.getProject(project.id))!.updatedAt;
-      expect(p1).toBeGreaterThan(p0);
+      await provider.softDeleteChat(chat.id);
+
+      expect(await provider.getProjectLibraryState(state.projectId)).toEqual(state);
     });
 
-    it('should not bump project when clearMessageEdit is a no-op', async () => {
+    it('preserves activity when applying a generated navigation chat name', async () => {
       const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const chat = await provider.createChat(project.id, { name: 'x', messages: [] });
-      const p0 = (await provider.getProject(project.id))!.updatedAt;
-      await sleep(2);
-
-      const result = await provider.clearMessageEdit(chat.id, 'nonexistent');
-      const p1 = (await provider.getProject(project.id))!.updatedAt;
-      expect(result).toBeUndefined();
-      expect(p1).toBe(p0);
-    });
-
-    it('should preserve chat and project timestamps when generated chat name is applied', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const chat = await provider.createNavigationRepairChat(project.id);
-      await sleep(2);
+      const state = await freshProject(provider);
+      const chat = await provider.createNavigationRepairChat(state.projectId);
 
       const result = await provider.applyGeneratedChatName(chat.id, 'Generated Bracket');
-      const storedProject = await provider.getProject(project.id);
 
       expect(result?.name).toBe('Generated Bracket');
       expect(result?.updatedAt).toBe(chat.updatedAt);
-      expect(storedProject?.updatedAt).toBe(project.updatedAt);
-    });
-
-    it('should not apply generated chat names to user-named chats', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const chat = await provider.createChat(project.id, { name: 'Manual Name', messages: [] });
-      const projectAfterCreate = await provider.getProject(project.id);
-      await sleep(2);
-
-      const result = await provider.applyGeneratedChatName(chat.id, 'Generated Name');
-      const storedChat = await provider.getChat(chat.id);
-      const storedProject = await provider.getProject(project.id);
-
-      expect(result).toBeUndefined();
-      expect(storedChat?.name).toBe('Manual Name');
-      expect(storedChat?.updatedAt).toBe(chat.updatedAt);
-      expect(storedProject?.updatedAt).toBe(projectAfterCreate?.updatedAt);
-    });
-
-    it('should bump project on softDeleteChat', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const chat = await provider.createChat(project.id, { name: 'x', messages: [] });
-      const p0 = (await provider.getProject(project.id))!.updatedAt;
-      await sleep(2);
-
-      await provider.softDeleteChat(chat.id);
-      const p1 = (await provider.getProject(project.id))!.updatedAt;
-      expect(p1).toBeGreaterThan(p0);
-    });
-
-    it('should not bump soft-deleted project when chat is patched', async () => {
-      const provider = new IndexedDbStorageProvider();
-      const project = await freshProject(provider);
-      const chat = await provider.createChat(project.id, { name: 'x', messages: [] });
-      await provider.deleteProject(project.id);
-      const pDeleted = await provider.getProject(project.id);
-      const frozenUpdatedAt = pDeleted!.updatedAt;
-      await sleep(2);
-
-      await provider.patchChat(chat.id, 'name', 'renamed');
-      const pAfter = await provider.getProject(project.id);
-      expect(pAfter?.updatedAt).toBe(frozenUpdatedAt);
+      expect(await provider.getProjectLibraryState(state.projectId)).toEqual(state);
     });
   });
 
@@ -874,13 +1072,13 @@ describe('IndexedDbStorageProvider', () => {
       const sourceProject = await freshProject(provider);
       const targetProject = await freshProject(provider);
       const message = userMessage('initial');
-      const original = await provider.createChat(sourceProject.id, {
+      const original = await provider.createChat(sourceProject.projectId, {
         name: 'Original',
         messages: [message],
         startupRequest: startupRequest(message.id),
       });
 
-      const mapping = await provider.duplicateResourceChats(sourceProject.id, targetProject.id);
+      const mapping = await provider.duplicateResourceChats(sourceProject.projectId, targetProject.projectId);
       const copiedChat = await provider.getChat(mapping[original.id]!);
 
       expect(copiedChat?.messages).toEqual(original.messages);

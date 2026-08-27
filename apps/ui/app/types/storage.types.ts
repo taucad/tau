@@ -1,7 +1,7 @@
-import type { PartialDeep } from 'type-fest';
-import type { Project } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
+import type { PartialDeep } from 'type-fest';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
+import type { PersistedRevisionState, ProjectLibraryState } from '#types/project.types.js';
 
 export type CommitCancelledDraftRestoreInput = {
   messages: Chat['messages'];
@@ -9,13 +9,19 @@ export type CommitCancelledDraftRestoreInput = {
   clearStartupRequestId?: string;
 };
 
+/** Browser/profile-local application chrome state. */
+export type AppUiPreferences = {
+  readonly id: 'singleton';
+  readonly projectDisclosure: Record<string, boolean>;
+};
+
 /**
- * Persistent storage contract for projects, chats, and editor state.
+ * Persistent storage contract for project-local library state, chats, and editor state.
  *
  * Implementors MUST honour the atomic read-modify-write rules captured in
  * `docs/policy/storage-policy.md`:
- *  - `updateChat`/`updateProject` must perform `get → merge → put` inside a
- *    single transaction (or equivalent isolation primitive).
+ *  - `updateChat` must perform `get → merge → put` inside a single transaction
+ *    (or equivalent isolation primitive).
  *  - The field-scoped helpers (`patchChat`, `setMessageEdit`,
  *    `clearMessageEdit`, `softDeleteChat`) must mutate only the named slot,
  *    never round-trip the entire row through a partial merge.
@@ -23,18 +29,25 @@ export type CommitCancelledDraftRestoreInput = {
  */
 export type StorageProvider = {
   // ---------------------------------------------------------------------------
-  // Project operations
+  // Application UI preference operations
   // ---------------------------------------------------------------------------
-  createProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<Project>;
-  updateProject(projectId: string, update: PartialDeep<Project>): Promise<Project | undefined>;
-  /**
-   * Bump `updatedAt` only — no field merges. No-op when the project is missing
-   * or soft-deleted (`deletedAt` set).
-   */
-  touchProject(projectId: string): Promise<Project | undefined>;
-  getProjects(options?: { includeDeleted?: boolean }): Promise<Project[]>;
-  getProject(projectId: string): Promise<Project | undefined>;
-  deleteProject(projectId: string): Promise<void>;
+  getAppUiPreferences(): Promise<AppUiPreferences>;
+  setProjectDisclosure(projectId: string, expanded: boolean | undefined): Promise<AppUiPreferences | undefined>;
+
+  // ---------------------------------------------------------------------------
+  // Project-library operations
+  // ---------------------------------------------------------------------------
+  createProjectLibraryState(state: ProjectLibraryState): Promise<ProjectLibraryState>;
+  getProjectLibraryState(projectId: string): Promise<ProjectLibraryState | undefined>;
+  getProjectLibraryStates(projectIds?: readonly string[]): Promise<ProjectLibraryState[]>;
+  touchProjectActivity(projectId: string, activityAt?: number): Promise<ProjectLibraryState | undefined>;
+  trashProject(projectId: string, deletedAt?: number): Promise<ProjectLibraryState | undefined>;
+  restoreProject(projectId: string): Promise<ProjectLibraryState | undefined>;
+  setProjectRevisionState(
+    projectId: string,
+    revisionState: PersistedRevisionState,
+  ): Promise<ProjectLibraryState | undefined>;
+  deleteProjectLibraryState(projectId: string): Promise<void>;
 
   // ---------------------------------------------------------------------------
   // Chat operations
@@ -86,6 +99,7 @@ export type StorageProvider = {
    */
   softDeleteChat(chatId: string): Promise<Chat | undefined>;
   getChat(chatId: string): Promise<Chat | undefined>;
+  getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   deleteChat(chatId: string): Promise<void>;
   duplicateChat(chatId: string): Promise<Chat>;

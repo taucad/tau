@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
+import { mock } from 'vitest-mock-extended';
 import type { Chat, MyUIMessage } from '@taucad/chat';
-import { useRevisions } from '#hooks/use-revisions.js';
+import { useRevisions, useVisibleRevisions } from '#hooks/use-revisions.js';
+import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 // ---------------------------------------------------------------------------
 // useRevisions head-derivation regression: the stale "Revision 0 · baseline"
@@ -35,7 +38,11 @@ vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ chats: chatsRef.current }),
 }));
 
-vi.mock('#routes/projects_.$id/revision-provider.js', () => ({
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: vi.fn(),
+}));
+
+vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
   useRevisionActor: () => ({ getSnapshot: () => ({ context: actorContext }) }),
 }));
 
@@ -74,15 +81,53 @@ const user = (id: string, createdAt?: number): MyUIMessage =>
 const assistant = (createdAt: number, parts: MyUIMessage['parts']): MyUIMessage =>
   ({ id: `a-${createdAt}`, role: 'assistant', parts, metadata: { createdAt } }) as unknown as MyUIMessage;
 
-const chat = (createdAt: number, messages: MyUIMessage[]): Chat =>
+const chat = (createdAt: number, messages: MyUIMessage[], id = 'chatA'): Chat =>
   ({
-    id: 'chatA',
+    id,
     resourceId: 'p',
     name: 'Initial design',
     messages,
     createdAt,
     updatedAt: createdAt,
   }) as unknown as Chat;
+
+const sessions = new Map<string, ChatSession>();
+const sessionStore = mock<ChatSessionStore>();
+
+const installSession = (
+  chatId: string,
+  messages: MyUIMessage[],
+  options: {
+    requestLifecycle: 'idle' | 'invoking' | 'retrying' | 'stopping';
+    status?: 'ready' | 'submitted' | 'streaming' | 'error';
+  },
+): void => {
+  const { requestLifecycle, status = requestLifecycle === 'idle' ? 'ready' : 'streaming' } = options;
+  const persistenceActorRef = mock<ChatSession['persistenceActorRef']>();
+  const snapshot = {
+    context: {
+      isLoadingChat: false,
+      retryAttempt: requestLifecycle === 'retrying' ? 1 : 0,
+    },
+    matches: (value: unknown) =>
+      typeof value === 'object' &&
+      value !== null &&
+      'requestLifecycle' in value &&
+      value.requestLifecycle === requestLifecycle,
+  } as unknown as ReturnType<ChatSession['persistenceActorRef']['getSnapshot']>;
+  persistenceActorRef.getSnapshot.mockReturnValue(snapshot);
+  persistenceActorRef.subscribe.mockReturnValue({ unsubscribe: vi.fn() });
+  const liveChat = { messages, status } as unknown as ChatSession['chat'];
+  sessions.set(chatId, { chatId, chat: liveChat, persistenceActorRef } as unknown as ChatSession);
+};
+
+beforeEach(() => {
+  sessions.clear();
+  sessionStore.get.mockImplementation((chatId) => sessions.get(chatId));
+  sessionStore.subscribeMembership.mockReturnValue(() => undefined);
+  sessionStore.subscribeChat.mockReturnValue(() => undefined);
+  vi.mocked(useChatSessionStore).mockReturnValue(sessionStore);
+});
 
 // The "Cube Design" session, as it looks AFTER a reload that dropped the user
 // messages' `createdAt`: two mutating turns, both anchoring onto chat.createdAt.
@@ -160,5 +205,89 @@ describe('useRevisions — stale head derivation (REGRESSION)', () => {
     expect(result.current.headRevision?.messageId).toBe('u1');
     expect(result.current.headRevision?.n).toBe(1);
     expect(result.current.canReturnToLatest).toBe(true);
+  });
+});
+
+describe('useVisibleRevisions — turn completion visibility', () => {
+  it.each(['invoking', 'retrying', 'stopping'] as const)(
+    'should withhold the latest mutating turn while its request lifecycle is %s',
+    (requestLifecycle) => {
+      const messages = [
+        user('u1', 100),
+        assistant(200, [createPart('main.scad', 'a')]),
+        user('u2', 300),
+        assistant(400, [editPart('main.scad', 'a', 'b')]),
+      ];
+      chatsRef.current = [chat(50, messages)];
+      installSession('chatA', messages, {
+        requestLifecycle,
+        status: requestLifecycle === 'retrying' ? 'error' : 'streaming',
+      });
+
+      const { result } = renderHook(() => useVisibleRevisions());
+
+      expect(result.current.revisions.map((revision) => revision.messageId)).toEqual(['u1']);
+      expect(result.current.byMessageId.has('u2')).toBe(false);
+      expect(result.current.maxRevision).toBe(1);
+      expect(result.current.headRevision?.messageId).toBe('u1');
+    },
+  );
+
+  it('should reveal a partial mutating turn after terminal failure settles to idle', () => {
+    const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'a')])];
+    chatsRef.current = [chat(50, messages)];
+    installSession('chatA', messages, { requestLifecycle: 'idle', status: 'error' });
+
+    const { result } = renderHook(() => useVisibleRevisions());
+
+    expect(result.current.revisions.map((revision) => revision.messageId)).toEqual(['u1']);
+    expect(result.current.headRevision?.messageId).toBe('u1');
+  });
+
+  it('should withhold in-progress turns from background chats and keep completed-only numbering contiguous', () => {
+    const firstMessages = [user('u1', 100), assistant(200, [createPart('a.scad', 'a')])];
+    const secondMessages = [user('u2', 300), assistant(400, [createPart('b.scad', 'b')])];
+    chatsRef.current = [chat(50, firstMessages, 'chatA'), chat(60, secondMessages, 'chatB')];
+    installSession('chatB', secondMessages, { requestLifecycle: 'invoking' });
+
+    const { result } = renderHook(() => useVisibleRevisions());
+
+    expect(result.current.revisions.map(({ messageId, n }) => ({ messageId, n }))).toEqual([{ messageId: 'u1', n: 1 }]);
+    expect(result.current.maxRevision).toBe(1);
+  });
+
+  it('should preserve a contiguous sequence when multiple concurrent turns are hidden', () => {
+    const chatA = [user('u1', 100), assistant(110, [createPart('a.scad', 'a')])];
+    const chatB = [user('u2', 200), assistant(210, [createPart('b.scad', 'b')])];
+    const chatC = [user('u3', 300), assistant(310, [createPart('c.scad', 'c')])];
+    const chatD = [user('u4', 400), assistant(410, [createPart('d.scad', 'd')])];
+    chatsRef.current = [
+      chat(50, chatA, 'chatA'),
+      chat(60, chatB, 'chatB'),
+      chat(70, chatC, 'chatC'),
+      chat(80, chatD, 'chatD'),
+    ];
+    installSession('chatB', chatB, { requestLifecycle: 'invoking' });
+    installSession('chatD', chatD, { requestLifecycle: 'stopping' });
+
+    const { result } = renderHook(() => useVisibleRevisions());
+
+    expect(result.current.revisions.map(({ messageId, n }) => ({ messageId, n }))).toEqual([
+      { messageId: 'u1', n: 1 },
+      { messageId: 'u3', n: 2 },
+    ]);
+    expect(result.current.maxRevision).toBe(2);
+  });
+
+  it('should leave raw milestone revisions available while the visible view withholds them', () => {
+    const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'a')])];
+    chatsRef.current = [chat(50, messages)];
+    installSession('chatA', messages, { requestLifecycle: 'invoking' });
+
+    const raw = renderHook(() => useRevisions());
+    const visible = renderHook(() => useVisibleRevisions());
+
+    expect(raw.result.current.revisions.map((revision) => revision.messageId)).toEqual(['u1']);
+    expect(visible.result.current.revisions).toEqual([]);
   });
 });

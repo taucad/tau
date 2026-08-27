@@ -1,17 +1,25 @@
 import { expose } from 'comlink';
 import type { PartialDeep } from 'type-fest';
-import type { Project } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import type { Chat } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
-import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
-import type { EditorState, EditorStateInput, OpenFile, PanelState } from '#types/editor.types.js';
+import type { AppUiPreferences, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+import type { EditorState, EditorStateInput, OpenFile } from '#types/editor.types.js';
+import type { PersistedRevisionState, ProjectLibraryState } from '#types/project.types.js';
+import type {
+  PendingCreateProjectOperation,
+  PendingDuplicateProjectOperation,
+  PendingProjectOperation,
+  PendingProjectStorage,
+} from '#types/pending-project-operation.types.js';
 import { defaultPanelState } from '#constants/editor.constants.js';
+import { mergePanelState } from '#utils/panel-state.utils.js';
 
 /**
  * Type for initial editor state overrides during project creation.
- * Uses PartialDeep to allow partial nested objects (e.g., openPanels: { chat: true }).
+ * Uses PartialDeep to allow partial nested layout objects.
  * Excludes projectId and focusedChatId as those are set automatically.
  */
 export type InitialEditorState = PartialDeep<Omit<EditorStateInput, 'projectId' | 'focusedChatId'>>;
@@ -59,195 +67,234 @@ export function pickDuplicatedFocusedChatId(args: {
   return mostRecent.id;
 }
 
+const createInitialEditorState = (args: {
+  readonly project: ProjectManifest;
+  readonly chatId: string;
+  readonly overrides?: InitialEditorState;
+  readonly timestamp: number;
+}): EditorState => {
+  const mainFile = args.project.assets.main.entryPath;
+  const seedPaneId = mainFile ? generatePrefixedId(idPrefix.pane) : undefined;
+  const openFiles: OpenFile[] =
+    args.overrides?.openFiles && args.overrides.openFiles.length > 0
+      ? args.overrides.openFiles
+      : mainFile && seedPaneId
+        ? [
+            {
+              paneId: seedPaneId,
+              path: mainFile,
+              name: mainFile.split('/').pop() ?? mainFile,
+              lastAccessedAt: args.timestamp,
+            },
+          ]
+        : [];
+
+  const panelState = mergePanelState(defaultPanelState, args.overrides?.panelState);
+
+  return {
+    projectId: args.project.id,
+    openFiles,
+    activePaneId: args.overrides?.activePaneId ?? seedPaneId,
+    focusedChatId: args.chatId,
+    panelState,
+    workbenchLayout: args.overrides?.workbenchLayout as EditorState['workbenchLayout'],
+    viewerLayout: args.overrides?.viewerLayout as EditorState['viewerLayout'],
+    viewSettings: (args.overrides?.viewSettings ?? {}) as EditorState['viewSettings'],
+    modelComponentDisplay: args.overrides?.modelComponentDisplay as EditorState['modelComponentDisplay'],
+    updatedAt: args.timestamp,
+  };
+};
+
 // Define the worker's API
 const objectStoreWorker = {
+  // ============================================================================
+  // Application UI Preference Methods
+  // ============================================================================
+
+  async getAppUiPreferences(): Promise<AppUiPreferences> {
+    return storage.getAppUiPreferences();
+  },
+
+  async setProjectDisclosure(projectId: string, expanded: boolean | undefined): Promise<AppUiPreferences | undefined> {
+    return storage.setProjectDisclosure(projectId, expanded);
+  },
+
   // ============================================================================
   // Project Methods
   // ============================================================================
 
-  async createProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<Project> {
-    return storage.createProject(project);
-  },
-
-  /**
-   * Atomic method to create a project with its associated chat and Editor state in one call.
-   * This reduces roundtrips between main thread and worker.
-   * Implements rollback on partial failure to maintain atomicity.
-   *
-   * @param options - Options for project creation
-   * @param options.project - The project data to create
-   * @param options.chat - The chat data to create
-   * @param options.editorState - Optional initial editor state overrides (e.g., panelState for initial panel layout)
-   */
-  // oxlint-disable-next-line complexity -- TODO: Refactor this function to make it more readable.
-  async createProjectWithResources(options: {
-    project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>;
+  /** Prepare stable replay data before any cross-store project creation writes. */
+  async prepareProjectCreation(options: {
+    manifest: ProjectManifest;
     chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>;
     editorState?: InitialEditorState;
-  }): Promise<{ project: Project; chat: Chat }> {
-    const project = await storage.createProject(options.project);
-
-    let chat: Chat;
-    try {
-      chat = await storage.createChat(project.id, options.chat);
-    } catch (chatError) {
-      // Rollback: delete the project since chat creation failed
-      try {
-        await storage.deleteProject(project.id);
-      } catch (cleanupError) {
-        console.error('Failed to cleanup project after chat creation failure:', cleanupError);
-      }
-
-      throw chatError;
-    }
-
-    try {
-      // Derive main file from project assets for auto-populating editor state
-      const mainFile = options.project.assets.mechanical?.main;
-
-      // Auto-populate openFiles + activePaneId from main file if not provided.
-      // New panes always mint a stable paneId so persistence carries the
-      // identity forward and downstream consumers can key off it.
-      const seedPaneId = mainFile ? generatePrefixedId(idPrefix.pane) : undefined;
-      const openFiles: OpenFile[] =
-        options.editorState?.openFiles && options.editorState.openFiles.length > 0
-          ? options.editorState.openFiles
-          : mainFile && seedPaneId
-            ? [
-                {
-                  paneId: seedPaneId,
-                  path: mainFile,
-                  name: mainFile.split('/').pop() ?? mainFile,
-                  lastAccessedAt: Date.now(),
-                },
-              ]
-            : [];
-      const activePaneId = options.editorState?.activePaneId ?? seedPaneId;
-
-      // Merge provided panelState with defaults
-      const mergedPanelState: PanelState = {
-        openPanels: {
-          ...defaultPanelState.openPanels,
-          ...options.editorState?.panelState?.openPanels,
-        },
-        panelSizes: {
-          ...defaultPanelState.panelSizes,
-          ...options.editorState?.panelState?.panelSizes,
-        },
-        mobileActiveTab: options.editorState?.panelState?.mobileActiveTab ?? defaultPanelState.mobileActiveTab,
-        kernelPaneview: {
-          ...defaultPanelState.kernelPaneview,
-          ...options.editorState?.panelState?.kernelPaneview,
-        },
-        parametersPaneview: {
-          ...defaultPanelState.parametersPaneview,
-          ...options.editorState?.panelState?.parametersPaneview,
-        },
-      };
-
-      await storage.updateEditorState({
-        projectId: project.id,
-        openFiles,
-        activePaneId,
-        focusedChatId: chat.id,
-        panelState: mergedPanelState,
-        editorLayout: undefined,
-        viewerLayout: undefined,
-        viewSettings: {},
-        modelComponentDisplay: options.editorState?.modelComponentDisplay,
-      });
-    } catch (editorStateError) {
-      // Rollback: delete chat and project since editor state update failed
-      try {
-        await storage.deleteChat(chat.id);
-      } catch (cleanupError) {
-        console.error('Failed to cleanup chat after editor state update failure:', cleanupError);
-      }
-
-      try {
-        await storage.deleteProject(project.id);
-      } catch (cleanupError) {
-        console.error('Failed to cleanup project after editor state update failure:', cleanupError);
-      }
-
-      throw editorStateError;
-    }
-
-    return { project, chat };
+    files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
+    storage: PendingProjectStorage;
+  }): Promise<PendingCreateProjectOperation> {
+    const timestamp = Date.now();
+    const project = options.manifest;
+    const chat: Chat = {
+      ...options.chat,
+      id: generatePrefixedId(idPrefix.chat),
+      resourceId: project.id,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const operationId = generatePrefixedId(idPrefix.request);
+    const operation: PendingCreateProjectOperation = {
+      operationId,
+      kind: 'create',
+      ...options.storage,
+      manifest: project,
+      library: { projectId: project.id, lastActivityAt: timestamp },
+      files: options.files,
+      chat,
+      editorState: createInitialEditorState({
+        project,
+        chatId: chat.id,
+        overrides: options.editorState,
+        timestamp,
+      }),
+    };
+    await storage.putPendingProjectOperation(operation);
+    return operation;
   },
 
-  async duplicateProject(projectId: string): Promise<Project> {
-    const project = await storage.getProject(projectId);
-    if (!project) {
-      throw new Error(`Project not found: ${projectId}`);
-    }
-
-    // Create the duplicated project
-    const newProject = await storage.createProject({
-      ...project,
-      name: `${project.name} (Copy)`,
+  /** Prepare stable replay data before any cross-store duplicate writes. */
+  async prepareProjectDuplicate(options: {
+    sourceManifest: ProjectManifest;
+    targetManifest: ProjectManifest;
+    files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
+    storage: PendingProjectStorage;
+  }): Promise<PendingDuplicateProjectOperation> {
+    const timestamp = Date.now();
+    const newProject = options.targetManifest;
+    const sourceChats = await storage.getChatsForResource(options.sourceManifest.id);
+    const chatIdMapping: Record<string, string> = {};
+    const clonedChats = sourceChats.map((chat): Chat => {
+      const id = generatePrefixedId(idPrefix.chat);
+      chatIdMapping[chat.id] = id;
+      return {
+        ...chat,
+        id,
+        resourceId: newProject.id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        deletedAt: undefined,
+      };
     });
-
-    // Duplicate all chats for this project
-    const chatIdMapping = await storage.duplicateResourceChats(projectId, newProject.id);
-
-    // Always carry forward a valid `focusedChatId` to the duplicate. The
-    // editor route's `<ActiveChatProvider chatId>` is type-required (Layer
-    // 0), so persisting `undefined` here would force the load-time
-    // ensureFocusedChat actor to heal it on first open — correct but
-    // wasteful, and historically a producer of the project-chat crash-loop.
-    // Mirror the most-recent-update policy used by `pickNextFocusedChatId`
-    // so the duplicated project opens on the freshest cloned chat.
-    const clonedChats = await storage.getChatsForResource(newProject.id);
-    const sourceEditorState = await storage.getEditorState(projectId);
+    const sourceEditorState = await storage.getEditorState(options.sourceManifest.id);
     const mappedFocusedChatId = pickDuplicatedFocusedChatId({
       sourceFocusedChatId: sourceEditorState?.focusedChatId,
       chatIdMapping,
       clonedChats,
     });
-    if (mappedFocusedChatId) {
-      await storage.updateEditorState({
-        projectId: newProject.id,
-        openFiles: sourceEditorState?.openFiles ?? [],
-        activePaneId: sourceEditorState?.activePaneId,
-        focusedChatId: mappedFocusedChatId,
-        panelState: sourceEditorState?.panelState ?? defaultPanelState,
-        editorLayout: sourceEditorState?.editorLayout,
-        viewerLayout: sourceEditorState?.viewerLayout,
-        viewSettings: sourceEditorState?.viewSettings ?? {},
-        modelComponentDisplay: sourceEditorState?.modelComponentDisplay,
-      });
+    const editorState = mappedFocusedChatId
+      ? {
+          projectId: newProject.id,
+          openFiles: sourceEditorState?.openFiles ?? [],
+          activePaneId: sourceEditorState?.activePaneId,
+          focusedChatId: mappedFocusedChatId,
+          panelState: mergePanelState(defaultPanelState, sourceEditorState?.panelState),
+          workbenchLayout: sourceEditorState?.workbenchLayout,
+          viewerLayout: sourceEditorState?.viewerLayout,
+          viewSettings: sourceEditorState?.viewSettings ?? {},
+          modelComponentDisplay: sourceEditorState?.modelComponentDisplay,
+          updatedAt: timestamp,
+        }
+      : undefined;
+    const operationId = generatePrefixedId(idPrefix.request);
+    const operation: PendingDuplicateProjectOperation = {
+      operationId,
+      kind: 'duplicate',
+      ...options.storage,
+      sourceProjectId: options.sourceManifest.id,
+      manifest: newProject,
+      library: { projectId: newProject.id, lastActivityAt: timestamp },
+      files: options.files,
+      chats: clonedChats,
+      editorState,
+    };
+    await storage.putPendingProjectOperation(operation);
+    return operation;
+  },
+
+  async getPendingProjectOperations(): Promise<PendingProjectOperation[]> {
+    return storage.getPendingProjectOperations();
+  },
+
+  async hasPendingProjectOperationForWorkspace(workspaceId: string): Promise<boolean> {
+    const operations = await storage.getPendingProjectOperations();
+    return operations.some((operation) => {
+      const pendingStorage = operation.kind === 'permanent-delete' ? operation.storage : operation;
+      return pendingStorage.backend === 'webaccess' && pendingStorage.workspaceId === workspaceId;
+    });
+  },
+
+  async resumePendingProjectOperationResources(operationId: string): Promise<void> {
+    const operation = await storage.getPendingProjectOperation(operationId);
+    if (!operation || operation.kind === 'permanent-delete') {
+      return;
     }
-
-    return newProject;
+    const chats = operation.kind === 'create' ? [operation.chat] : operation.chats;
+    await storage.createProjectLibraryState(operation.library);
+    await Promise.all(chats.map(async (chat) => storage.putChatRecord(chat)));
+    if (operation.editorState) {
+      await storage.putEditorStateRecord(operation.editorState);
+    }
   },
 
-  async updateProject(projectId: string, update: PartialDeep<Project>): Promise<Project | undefined> {
-    return storage.updateProject(projectId, update);
+  async completePendingProjectOperation(operationId: string): Promise<void> {
+    await storage.deletePendingProjectOperation(operationId);
   },
 
-  async touchProject(projectId: string): Promise<Project | undefined> {
-    return storage.touchProject(projectId);
+  async beginPermanentDeleteProject(projectId: string, storageConfig: PendingProjectStorage): Promise<string> {
+    const operationId = generatePrefixedId(idPrefix.request);
+    await storage.beginPermanentDeleteProject({
+      operationId,
+      kind: 'permanent-delete',
+      projectId,
+      storage: storageConfig,
+    });
+    return operationId;
   },
 
-  async getProjects(options?: { includeDeleted?: boolean }): Promise<Project[]> {
-    return storage.getProjects(options);
-  },
-
-  async getProject(projectId: string): Promise<Project | undefined> {
-    return storage.getProject(projectId);
-  },
-
-  async deleteProject(projectId: string): Promise<void> {
-    // Delete all chats associated with the project
+  async deleteProjectResources(projectId: string): Promise<void> {
     const chats = await storage.getChatsForResource(projectId, { includeDeleted: true });
-    await Promise.all(chats.map(async (chat) => storage.deleteChat(chat.id)));
-
-    // Delete the Editor state for the project
+    await Promise.all(chats.map(async (chat) => storage.deleteChatRecord(chat.id)));
     await storage.deleteEditorState(projectId);
+    await storage.deleteProjectLibraryState(projectId);
+  },
 
-    // Delete the project itself
-    return storage.deleteProject(projectId);
+  async getProjectLibraryState(projectId: string): Promise<ProjectLibraryState | undefined> {
+    return storage.getProjectLibraryState(projectId);
+  },
+
+  async getProjectLibraryStates(projectIds?: readonly string[]): Promise<ProjectLibraryState[]> {
+    return storage.getProjectLibraryStates(projectIds);
+  },
+
+  async createProjectLibraryState(state: ProjectLibraryState): Promise<ProjectLibraryState> {
+    return storage.createProjectLibraryState(state);
+  },
+
+  async touchProjectActivity(projectId: string, activityAt?: number): Promise<ProjectLibraryState | undefined> {
+    return storage.touchProjectActivity(projectId, activityAt);
+  },
+
+  async trashProject(projectId: string, deletedAt?: number): Promise<ProjectLibraryState | undefined> {
+    return storage.trashProject(projectId, deletedAt);
+  },
+
+  async restoreProject(projectId: string): Promise<ProjectLibraryState | undefined> {
+    return storage.restoreProject(projectId);
+  },
+
+  async setProjectRevisionState(
+    projectId: string,
+    revisionState: PersistedRevisionState,
+  ): Promise<ProjectLibraryState | undefined> {
+    return storage.setProjectRevisionState(projectId, revisionState);
   },
 
   // ============================================================================
@@ -306,6 +353,10 @@ const objectStoreWorker = {
 
   async getChat(chatId: string): Promise<Chat | undefined> {
     return storage.getChat(chatId);
+  },
+
+  async getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]> {
+    return storage.getAllChats(options);
   },
 
   async getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> {

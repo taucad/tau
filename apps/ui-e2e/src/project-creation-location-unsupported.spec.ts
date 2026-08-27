@@ -37,7 +37,7 @@ test('Playwright WebKit exposes Home-only creation with no location picker', asy
   });
 
   await target.navigate('/projects/new');
-  await target.expectVisible(selectors.getByText('Home · in this browser', { exact: true }), 60_000);
+  await target.expectVisible(selectors.getByText('Home in this browser', { exact: true }), 60_000);
   await target.expectCount(selectors.getByRole('button', { name: /^Create in/u }), 0);
   await target.fill(selectors.getByLabelText('Project Name *'), 'WebKit Route Project');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));

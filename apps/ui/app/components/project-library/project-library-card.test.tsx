@@ -119,7 +119,6 @@ function LocationProbe(): React.JSX.Element {
 function renderCard(
   properties: {
     readonly project?: ProjectListItem;
-    readonly shouldShowProjectSlug?: boolean;
     readonly isSelected?: boolean;
     readonly onSelect?: () => void;
   } = {},
@@ -157,17 +156,17 @@ describe('ProjectLibraryCard live preview', () => {
     expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
   });
 
-  it('uses the existing metadata line for Home instead of repeating the project slug', () => {
+  it('shows the Home and project slugs in the location row', () => {
     renderCard();
 
     const location = screen.getByLabelText('Location: Home in this browser');
-    expect(location).toHaveTextContent('Home');
+    expect(location).toHaveTextContent('home/library');
     expect(location).toHaveClass('w-fit', 'max-w-full');
-    expect(location.querySelector('svg')).toHaveClass('size-3.5');
-    expect(screen.queryByText('library')).not.toBeInTheDocument();
+    expect(location.querySelector('span')).not.toHaveClass('font-mono');
+    expect(location.querySelector('svg')).toHaveClass('size-3');
   });
 
-  it('shows the connected workspace name and keeps an explicitly requested disambiguating slug', () => {
+  it('shows the workspace and project slugs for connected folders', () => {
     renderCard({
       project: {
         ...mockProject,
@@ -180,13 +179,12 @@ describe('ProjectLibraryCard live preview', () => {
         slugs: { workspaceSlug: 'workshop', projectSlug: 'library' },
         workspaceName: 'Workshop',
       },
-      shouldShowProjectSlug: true,
     });
 
     const location = screen.getByLabelText('Location: Workshop on your disk');
-    expect(location).toHaveTextContent('Workshop');
-    expect(location.querySelector('svg')).toHaveClass('size-3.5');
-    expect(screen.getByText('library')).toBeInTheDocument();
+    expect(location).toHaveTextContent('workshop/library');
+    expect(location.querySelector('span')).not.toHaveClass('font-mono');
+    expect(location.querySelector('svg')).toHaveClass('size-3');
   });
 
   it('should mount project-scoped FM and Case A CadPreviewProvider when preview is toggled on', async () => {

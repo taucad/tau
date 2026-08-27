@@ -1,11 +1,9 @@
 import type { SerializedDockview } from 'dockview-react';
 import type {
-  PanelId,
-  DesktopPanelId,
+  MobilePanelId,
   GraphicsViewSettings,
   PersistedModelComponentDisplayState,
 } from '#constants/editor.constants.js';
-import { allotmentPanelOrder } from '#constants/editor.constants.js';
 
 // ============================================================================
 // File Types
@@ -63,36 +61,24 @@ export type PaneviewPanelState = {
  * Panel layout state - stored per-project for persistence across page refreshes.
  */
 export type PanelState = {
-  /** Which panels are open (keyed by panel ID, order-independent) */
-  openPanels: Record<DesktopPanelId, boolean>;
-  /** Panel sizes in pixels (keyed by panel ID, order-independent) */
-  panelSizes: Record<PanelId, number>;
+  desktopLayout: {
+    chatOpen: boolean;
+    workbenchOpen: boolean;
+    chatWidth: number;
+    workbenchWidth: number;
+    compactAuxiliary: 'chat' | 'workbench';
+  };
   /** Mobile active tab ID */
-  mobileActiveTab: PanelId;
+  mobileActiveTab: MobilePanelId;
   /** Kernel paneview panel states (keyed by entry path) */
   kernelPaneview: Record<string, PaneviewPanelState>;
+  /** Model paneview panel states (keyed by entry path) */
+  modelPaneview: Record<string, PaneviewPanelState>;
   /** Parameters paneview panel states (keyed by entry path) */
   parametersPaneview: Record<string, PaneviewPanelState>;
+  /** Console paneview panel states (keyed by entry path) */
+  consolePaneview: Record<string, PaneviewPanelState>;
 };
-
-/**
- * Convert named panel sizes object to Allotment array format.
- * Uses allotmentPanelOrder for consistent ordering.
- */
-export function toAllotmentSizes(panelSizes: Record<PanelId, number>): number[] {
-  return allotmentPanelOrder.map((id) => panelSizes[id]);
-}
-
-/**
- * Convert Allotment array back to named panel sizes object.
- * Uses allotmentPanelOrder for consistent mapping.
- */
-export function fromAllotmentSizes(sizes: readonly number[]): Record<PanelId, number> {
-  return Object.fromEntries(allotmentPanelOrder.map((id, index) => [id, sizes[index] ?? 200])) as Record<
-    PanelId,
-    number
-  >;
-}
 
 // ============================================================================
 // View State Types
@@ -131,8 +117,8 @@ export type EditorState = {
   focusedChatId: string | undefined;
   /** Panel layout state (open/close, sizes, mobile tab) */
   panelState: PanelState;
-  /** Serialized DockviewReact layout for the code editor area */
-  editorLayout: SerializedDockview | undefined;
+  /** Serialized mixed file/utility Workbench Dockview layout */
+  workbenchLayout: SerializedDockview | undefined;
   /** Serialized DockviewReact layout for the geometry viewer area */
   viewerLayout: SerializedDockview | undefined;
   /** Per-viewer-panel state, keyed by Dockview panel ID */

@@ -1,15 +1,36 @@
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
-import type { Project } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import type { CommitCancelledDraftRestoreInput, StorageProvider } from '#types/storage.types.js';
+import type { AppUiPreferences, CommitCancelledDraftRestoreInput, StorageProvider } from '#types/storage.types.js';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
+import type {
+  PendingPermanentDeleteProjectOperation,
+  PendingProjectOperation,
+} from '#types/pending-project-operation.types.js';
+import type { PersistedRevisionState, ProjectLibraryState } from '#types/project.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 
 const defaultNavigationChatName = 'New chat';
+
+/** Pre-cutover store, dropped by the v9 bootstrap. Nothing reads it. */
+const legacyProjectsStoreName = 'projects';
+const appUiPreferencesId = 'singleton';
+const appUiPreferencesMutexKey = 'app-ui-preferences:singleton';
+
+/**
+ * Raised when an older connection — invariably another Tau tab — holds the
+ * database open so the schema upgrade cannot start. Without this the open
+ * request stays blocked forever and the app hangs on a spinner.
+ */
+export class StorageUpgradeBlockedError extends Error {
+  public constructor() {
+    super('Local storage could not be opened. Close other Tau tabs and reload.');
+    this.name = 'StorageUpgradeBlockedError';
+  }
+}
 
 function storageValuesEqual(left: unknown, right: unknown): boolean {
   if (left === right) {
@@ -57,8 +78,12 @@ export class IndexedDbStorageProvider implements StorageProvider {
     return `${metaConfig.databasePrefix}db`;
   }
 
-  private get projectsStoreName(): string {
-    return 'projects';
+  private get projectLibraryStatesStoreName(): string {
+    return 'projectLibraryStates';
+  }
+
+  private get appUiPreferencesStoreName(): string {
+    return 'appUiPreferences';
   }
 
   private get chatsStoreName(): string {
@@ -69,112 +94,338 @@ export class IndexedDbStorageProvider implements StorageProvider {
     return 'editor';
   }
 
+  private get pendingProjectOperationsStoreName(): string {
+    return 'pendingProjectOperations';
+  }
+
   private get version(): number {
-    return 5;
+    return 10;
   }
 
-  public async createProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<Project> {
-    const id = generatePrefixedId(idPrefix.project);
-    const timestamp = Date.now();
-    const projectWithId = {
-      ...project,
-      id,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-
+  public async getAppUiPreferences(): Promise<AppUiPreferences> {
     const db = await this.getDb();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.projectsStoreName, 'readwrite');
-      const store = transaction.objectStore(this.projectsStoreName);
-
-      const request = store.add(projectWithId);
-
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      request.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(request.error);
-      };
-
-      request.onsuccess = () => {
-        resolve(projectWithId);
-      };
-
-      transaction.oncomplete = () => {
-        db.close();
-      };
+    return new Promise<AppUiPreferences>((resolve, reject) => {
+      const transaction = db.transaction(this.appUiPreferencesStoreName, 'readonly');
+      const request = transaction.objectStore(this.appUiPreferencesStoreName).get(appUiPreferencesId);
+      request.addEventListener('success', () => {
+        resolve(
+          (request.result as AppUiPreferences | undefined) ?? {
+            id: appUiPreferencesId,
+            projectDisclosure: {},
+          },
+        );
+      });
+      transaction.addEventListener('error', () => {
+        reject(transaction.error ?? new Error('Failed to read application UI preferences'));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error('Reading application UI preferences was aborted'));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
-  public async touchProject(projectId: string): Promise<Project | undefined> {
-    return this.mutex.run(projectId, async () => this.touchProjectAtomic(projectId));
-  }
+  public async setProjectDisclosure(
+    projectId: string,
+    expanded: boolean | undefined,
+  ): Promise<AppUiPreferences | undefined> {
+    return this.mutex.run(appUiPreferencesMutexKey, async () => {
+      const db = await this.getDb();
+      return new Promise<AppUiPreferences | undefined>((resolve, reject) => {
+        const transaction = db.transaction(this.appUiPreferencesStoreName, 'readwrite');
+        const store = transaction.objectStore(this.appUiPreferencesStoreName);
+        let resolved: AppUiPreferences | undefined;
+        const request = store.get(appUiPreferencesId);
+        request.addEventListener('success', () => {
+          const existing = (request.result as AppUiPreferences | undefined) ?? {
+            id: appUiPreferencesId,
+            projectDisclosure: {},
+          };
+          const hasOverride = Object.hasOwn(existing.projectDisclosure, projectId);
+          if (
+            (!hasOverride && expanded === undefined) ||
+            (hasOverride && existing.projectDisclosure[projectId] === expanded)
+          ) {
+            return;
+          }
 
-  public async updateProject(projectId: string, update: PartialDeep<Project>): Promise<Project | undefined> {
-    return this.mutex.run(projectId, async () => this.updateProjectAtomic(projectId, update));
-  }
-
-  public async getProjects(options?: { includeDeleted?: boolean }): Promise<Project[]> {
-    const db = await this.getDb();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.projectsStoreName, 'readonly');
-      const store = transaction.objectStore(this.projectsStoreName);
-      const request = store.getAll();
-
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      request.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(request.error);
-      };
-
-      request.onsuccess = () => {
-        const projects = request.result as Project[];
-        // Filter out deleted projects unless explicitly requested
-        const filteredProjects = options?.includeDeleted ? projects : projects.filter((project) => !project.deletedAt);
-        resolve(filteredProjects);
-      };
-
-      transaction.oncomplete = () => {
+          const projectDisclosure = { ...existing.projectDisclosure };
+          if (expanded === undefined) {
+            Reflect.deleteProperty(projectDisclosure, projectId);
+          } else {
+            projectDisclosure[projectId] = expanded;
+          }
+          resolved = { id: appUiPreferencesId, projectDisclosure };
+          store.put(resolved);
+        });
+        transaction.addEventListener('complete', () => {
+          resolve(resolved);
+        });
+        transaction.addEventListener('error', () => {
+          reject(transaction.error ?? new Error('Failed to update project disclosure'));
+        });
+        transaction.addEventListener('abort', () => {
+          reject(transaction.error ?? new Error('Updating project disclosure was aborted'));
+        });
+      }).finally(() => {
         db.close();
-      };
+      });
     });
   }
 
-  public async getProject(projectId: string): Promise<Project | undefined> {
-    const db = await this.getDb();
+  public async putChatRecord(chat: Chat): Promise<void> {
+    await this.putRecord(this.chatsStoreName, chat);
+  }
 
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.projectsStoreName, 'readonly');
-      const store = transaction.objectStore(this.projectsStoreName);
-      const request = store.get(projectId);
+  public async deleteChatRecord(chatId: string): Promise<void> {
+    await this.deleteRecord(this.chatsStoreName, chatId);
+  }
 
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      request.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(request.error);
-      };
+  public async putEditorStateRecord(editorState: EditorState): Promise<void> {
+    await this.putRecord(this.editorStoreName, editorState);
+  }
 
-      request.onsuccess = () => {
-        resolve(request.result as Project | undefined);
-      };
+  public async putPendingProjectOperation(operation: PendingProjectOperation): Promise<void> {
+    await this.putRecord(this.pendingProjectOperationsStoreName, operation);
+  }
 
-      transaction.oncomplete = () => {
+  public async beginPermanentDeleteProject(operation: PendingPermanentDeleteProjectOperation): Promise<void> {
+    return this.mutex.run(operation.projectId, async () => {
+      const db = await this.getDb();
+      await new Promise<void>((resolve, reject) => {
+        const transaction = db.transaction(
+          [this.projectLibraryStatesStoreName, this.pendingProjectOperationsStoreName],
+          'readwrite',
+        );
+        const libraryStore = transaction.objectStore(this.projectLibraryStatesStoreName);
+        const pendingStore = transaction.objectStore(this.pendingProjectOperationsStoreName);
+        let validationError: Error | undefined;
+        const abortWith = (error: Error): void => {
+          validationError = error;
+          transaction.abort();
+        };
+
+        const stateRequest = libraryStore.get(operation.projectId);
+        stateRequest.addEventListener('success', () => {
+          const state = stateRequest.result as ProjectLibraryState | undefined;
+          if (state?.deletedAt === undefined) {
+            abortWith(new Error('Permanent delete is available only for trashed projects'));
+            return;
+          }
+          const pendingRequest = pendingStore.getAll();
+          pendingRequest.addEventListener('success', () => {
+            const alreadyPending = (pendingRequest.result as PendingProjectOperation[]).some(
+              (candidate) => candidate.kind === 'permanent-delete' && candidate.projectId === operation.projectId,
+            );
+            if (alreadyPending) {
+              abortWith(new Error(`Permanent delete is already pending for ${operation.projectId}`));
+              return;
+            }
+            pendingStore.add(operation);
+          });
+        });
+        transaction.addEventListener('complete', () => {
+          resolve();
+        });
+        transaction.addEventListener('error', () => {
+          reject(validationError ?? transaction.error ?? new Error('Failed to begin permanent project deletion'));
+        });
+        transaction.addEventListener('abort', () => {
+          reject(validationError ?? transaction.error ?? new Error('Beginning permanent project deletion was aborted'));
+        });
+      }).finally(() => {
         db.close();
-      };
+      });
     });
   }
 
-  public async deleteProject(projectId: string): Promise<void> {
-    // Get the project to make sure it exists
-    const project = await this.getProject(projectId);
-    if (!project) {
-      return;
+  public async getPendingProjectOperation(operationId: string): Promise<PendingProjectOperation | undefined> {
+    const db = await this.getDb();
+    return new Promise<PendingProjectOperation | undefined>((resolve, reject) => {
+      const transaction = db.transaction(this.pendingProjectOperationsStoreName, 'readonly');
+      const request = transaction.objectStore(this.pendingProjectOperationsStoreName).get(operationId);
+      request.addEventListener('success', () => {
+        resolve(request.result as PendingProjectOperation | undefined);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error(`Failed to read pending project operation ${operationId}`));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Reading pending project operation ${operationId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
+    });
+  }
+
+  public async getPendingProjectOperations(): Promise<PendingProjectOperation[]> {
+    const db = await this.getDb();
+    return new Promise<PendingProjectOperation[]>((resolve, reject) => {
+      const transaction = db.transaction(this.pendingProjectOperationsStoreName, 'readonly');
+      const request = transaction.objectStore(this.pendingProjectOperationsStoreName).getAll();
+      request.addEventListener('success', () => {
+        resolve(request.result as PendingProjectOperation[]);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('Failed to read pending project operations'));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error('Reading pending project operations was aborted'));
+      });
+    }).finally(() => {
+      db.close();
+    });
+  }
+
+  public async deletePendingProjectOperation(operationId: string): Promise<void> {
+    await this.deleteRecord(this.pendingProjectOperationsStoreName, operationId);
+  }
+
+  public async createProjectLibraryState(state: ProjectLibraryState): Promise<ProjectLibraryState> {
+    const db = await this.getDb();
+    return new Promise<ProjectLibraryState>((resolve, reject) => {
+      const transaction = db.transaction(this.projectLibraryStatesStoreName, 'readwrite');
+      const store = transaction.objectStore(this.projectLibraryStatesStoreName);
+      let resolved = state;
+      const request = store.get(state.projectId);
+      request.addEventListener('success', () => {
+        const existing = request.result as ProjectLibraryState | undefined;
+        if (existing) {
+          resolved = existing;
+          return;
+        }
+        store.add(state);
+      });
+      transaction.addEventListener('complete', () => {
+        resolve(resolved);
+      });
+      transaction.addEventListener('error', () => {
+        reject(transaction.error ?? new Error('Failed to create project library state'));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error('Creating project library state was aborted'));
+      });
+    }).finally(() => {
+      db.close();
+    });
+  }
+
+  public async getProjectLibraryState(projectId: string): Promise<ProjectLibraryState | undefined> {
+    const db = await this.getDb();
+    return new Promise<ProjectLibraryState | undefined>((resolve, reject) => {
+      const transaction = db.transaction(this.projectLibraryStatesStoreName, 'readonly');
+      const request = transaction.objectStore(this.projectLibraryStatesStoreName).get(projectId);
+      request.addEventListener('success', () => {
+        resolve(request.result as ProjectLibraryState | undefined);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error(`Failed to read project library state ${projectId}`));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Reading project library state ${projectId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
+    });
+  }
+
+  public async getProjectLibraryStates(projectIds?: readonly string[]): Promise<ProjectLibraryState[]> {
+    const db = await this.getDb();
+    const states = await new Promise<ProjectLibraryState[]>((resolve, reject) => {
+      const transaction = db.transaction(this.projectLibraryStatesStoreName, 'readonly');
+      const request = transaction.objectStore(this.projectLibraryStatesStoreName).getAll();
+      request.addEventListener('success', () => {
+        resolve(request.result as ProjectLibraryState[]);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('Failed to read project library states'));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error('Reading project library states was aborted'));
+      });
+    }).finally(() => {
+      db.close();
+    });
+    if (projectIds === undefined) {
+      return states;
     }
+    const requested = new Set(projectIds);
+    return states.filter((state) => requested.has(state.projectId));
+  }
 
-    // Perform soft delete by updating deletedAt timestamp
-    await this.updateProject(projectId, { deletedAt: Date.now() });
+  public async touchProjectActivity(
+    projectId: string,
+    activityAt = Date.now(),
+  ): Promise<ProjectLibraryState | undefined> {
+    return this.mutateProjectLibraryState(projectId, (state) =>
+      activityAt > state.lastActivityAt ? { ...state, lastActivityAt: activityAt } : state,
+    );
+  }
+
+  public async trashProject(projectId: string, deletedAt = Date.now()): Promise<ProjectLibraryState | undefined> {
+    return this.mutateProjectLibraryState(projectId, (state) => ({ ...state, deletedAt }));
+  }
+
+  public async restoreProject(projectId: string): Promise<ProjectLibraryState | undefined> {
+    return this.mutex.run(projectId, async () => {
+      const db = await this.getDb();
+      return new Promise<ProjectLibraryState | undefined>((resolve, reject) => {
+        const transaction = db.transaction(
+          [this.projectLibraryStatesStoreName, this.pendingProjectOperationsStoreName],
+          'readwrite',
+        );
+        const libraryStore = transaction.objectStore(this.projectLibraryStatesStoreName);
+        const pendingStore = transaction.objectStore(this.pendingProjectOperationsStoreName);
+        let restored: ProjectLibraryState | undefined;
+        let validationError: Error | undefined;
+        const pendingRequest = pendingStore.getAll();
+        pendingRequest.addEventListener('success', () => {
+          const permanentDeletePending = (pendingRequest.result as PendingProjectOperation[]).some(
+            (operation) => operation.kind === 'permanent-delete' && operation.projectId === projectId,
+          );
+          if (permanentDeletePending) {
+            validationError = new Error(`Cannot restore project while permanent deletion is pending: ${projectId}`);
+            transaction.abort();
+            return;
+          }
+          const stateRequest = libraryStore.get(projectId);
+          stateRequest.addEventListener('success', () => {
+            const state = stateRequest.result as ProjectLibraryState | undefined;
+            if (state === undefined) {
+              return;
+            }
+            const { deletedAt: _deletedAt, ...next } = state;
+            restored = next;
+            if (state.deletedAt !== undefined) {
+              libraryStore.put(next);
+            }
+          });
+        });
+        transaction.addEventListener('complete', () => {
+          resolve(restored);
+        });
+        transaction.addEventListener('error', () => {
+          reject(validationError ?? transaction.error ?? new Error(`Failed to restore project ${projectId}`));
+        });
+        transaction.addEventListener('abort', () => {
+          reject(validationError ?? transaction.error ?? new Error(`Restoring project ${projectId} was aborted`));
+        });
+      }).finally(() => {
+        db.close();
+      });
+    });
+  }
+
+  public async setProjectRevisionState(
+    projectId: string,
+    revisionState: PersistedRevisionState,
+  ): Promise<ProjectLibraryState | undefined> {
+    return this.mutateProjectLibraryState(projectId, (state) => ({ ...state, revisionState }));
+  }
+
+  public async deleteProjectLibraryState(projectId: string): Promise<void> {
+    await this.deleteRecord(this.projectLibraryStatesStoreName, projectId);
   }
 
   // ============================================================================
@@ -185,9 +436,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
     resourceId: string,
     chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
   ): Promise<Chat> {
-    const chatWithId = await this.createChatRecord(resourceId, chat);
-    await this.touchProject(resourceId);
-    return chatWithId;
+    return this.createChatRecord(resourceId, chat);
   }
 
   public async createNavigationRepairChat(resourceId: string): Promise<Chat> {
@@ -329,7 +578,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
   public async getChat(chatId: string): Promise<Chat | undefined> {
     const db = await this.getDb();
 
-    return new Promise((resolve, reject) => {
+    return new Promise<Chat | undefined>((resolve, reject) => {
       const transaction = db.transaction(this.chatsStoreName, 'readonly');
       const store = transaction.objectStore(this.chatsStoreName);
       const request = store.get(chatId);
@@ -344,16 +593,38 @@ export class IndexedDbStorageProvider implements StorageProvider {
         resolve(request.result as Chat | undefined);
       };
 
-      transaction.oncomplete = () => {
-        db.close();
-      };
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Reading chat ${chatId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
+    });
+  }
+
+  public async getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]> {
+    const db = await this.getDb();
+    return new Promise<Chat[]>((resolve, reject) => {
+      const transaction = db.transaction(this.chatsStoreName, 'readonly');
+      const request = transaction.objectStore(this.chatsStoreName).getAll();
+      request.addEventListener('success', () => {
+        const chats = request.result as Chat[];
+        resolve(options?.includeDeleted ? chats : chats.filter((chat) => chat.deletedAt === undefined));
+      });
+      transaction.addEventListener('error', () => {
+        reject(transaction.error ?? new Error('Failed to read chats'));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error('Reading chats was aborted'));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
   public async getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> {
     const db = await this.getDb();
 
-    return new Promise((resolve, reject) => {
+    return new Promise<Chat[]>((resolve, reject) => {
       const transaction = db.transaction(this.chatsStoreName, 'readonly');
       const store = transaction.objectStore(this.chatsStoreName);
       const index = store.index('resourceId');
@@ -372,9 +643,11 @@ export class IndexedDbStorageProvider implements StorageProvider {
         resolve(filteredChats);
       };
 
-      transaction.oncomplete = () => {
-        db.close();
-      };
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Reading chats for ${resourceId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
@@ -428,7 +701,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
   public async getEditorState(projectId: string): Promise<EditorState | undefined> {
     const db = await this.getDb();
 
-    return new Promise((resolve, reject) => {
+    return new Promise<EditorState | undefined>((resolve, reject) => {
       const transaction = db.transaction(this.editorStoreName, 'readonly');
       const store = transaction.objectStore(this.editorStoreName);
       const request = store.get(projectId);
@@ -443,9 +716,11 @@ export class IndexedDbStorageProvider implements StorageProvider {
         resolve(request.result as EditorState | undefined);
       };
 
-      transaction.oncomplete = () => {
-        db.close();
-      };
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Reading editor state ${projectId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
@@ -453,7 +728,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
     const db = await this.getDb();
     const stateWithTimestamp = { ...editorState, updatedAt: Date.now() };
 
-    return new Promise((resolve, reject) => {
+    return new Promise<EditorState>((resolve, reject) => {
       const transaction = db.transaction(this.editorStoreName, 'readwrite');
       const store = transaction.objectStore(this.editorStoreName);
       const request = store.put(stateWithTimestamp);
@@ -468,16 +743,18 @@ export class IndexedDbStorageProvider implements StorageProvider {
         resolve(stateWithTimestamp);
       };
 
-      transaction.oncomplete = () => {
-        db.close();
-      };
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Writing editor state ${editorState.projectId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
   public async deleteEditorState(projectId: string): Promise<void> {
     const db = await this.getDb();
 
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(this.editorStoreName, 'readwrite');
       const store = transaction.objectStore(this.editorStoreName);
       const request = store.delete(projectId);
@@ -492,9 +769,11 @@ export class IndexedDbStorageProvider implements StorageProvider {
         resolve();
       };
 
-      transaction.oncomplete = () => {
-        db.close();
-      };
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Deleting editor state ${projectId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
@@ -535,7 +814,6 @@ export class IndexedDbStorageProvider implements StorageProvider {
       };
 
       transaction.oncomplete = () => {
-        db.close();
         resolve();
       };
 
@@ -544,6 +822,12 @@ export class IndexedDbStorageProvider implements StorageProvider {
         // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
         reject(transaction.error);
       };
+
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Creating chat ${id} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
 
     return chatWithId;
@@ -552,7 +836,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
   private async applyGeneratedChatNameAtomic(chatId: string, name: string): Promise<Chat | undefined> {
     const db = await this.getDb();
 
-    return new Promise((resolve, reject) => {
+    return new Promise<Chat | undefined>((resolve, reject) => {
       const transaction = db.transaction(this.chatsStoreName, 'readwrite');
       const store = transaction.objectStore(this.chatsStoreName);
 
@@ -590,7 +874,6 @@ export class IndexedDbStorageProvider implements StorageProvider {
       };
 
       transaction.oncomplete = () => {
-        db.close();
         resolve(resolved);
       };
 
@@ -599,116 +882,59 @@ export class IndexedDbStorageProvider implements StorageProvider {
         // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
         reject(transaction.error);
       };
+
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Naming chat ${chatId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
-  private async updateProjectAtomic(projectId: string, update: PartialDeep<Project>): Promise<Project | undefined> {
-    const db = await this.getDb();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.projectsStoreName, 'readwrite');
-      const store = transaction.objectStore(this.projectsStoreName);
-
-      let resolved: Project | undefined;
-
-      const getRequest = store.get(projectId);
-
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      getRequest.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(getRequest.error);
-      };
-
-      getRequest.onsuccess = () => {
-        const existingProject = getRequest.result as Project | undefined;
-        if (!existingProject) {
-          return;
-        }
-
-        const isProject = 'id' in update && update.id === projectId;
-
-        const candidateProject = isProject ? (update as Project) : (deepmerge(existingProject, update) as Project);
-        if (storageValuesEqual(candidateProject, existingProject)) {
-          return;
-        }
-
-        const updatedProject = isProject ? candidateProject : { ...candidateProject, updatedAt: Date.now() };
-        const putRequest = store.put(updatedProject);
-        // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-        putRequest.onerror = () => {
-          // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-          reject(putRequest.error);
-        };
-        putRequest.onsuccess = () => {
-          resolved = updatedProject;
-        };
-      };
-
-      transaction.oncomplete = () => {
+  private async mutateProjectLibraryState(
+    projectId: string,
+    mutate: (state: ProjectLibraryState) => ProjectLibraryState,
+  ): Promise<ProjectLibraryState | undefined> {
+    return this.mutex.run(projectId, async () => {
+      const db = await this.getDb();
+      return new Promise<ProjectLibraryState | undefined>((resolve, reject) => {
+        const transaction = db.transaction(this.projectLibraryStatesStoreName, 'readwrite');
+        const store = transaction.objectStore(this.projectLibraryStatesStoreName);
+        let resolved: ProjectLibraryState | undefined;
+        const getRequest = store.get(projectId);
+        getRequest.addEventListener('error', () => {
+          reject(getRequest.error ?? new Error(`Failed to read project library state ${projectId}`));
+        });
+        getRequest.addEventListener('success', () => {
+          const existing = getRequest.result as ProjectLibraryState | undefined;
+          if (existing === undefined) {
+            return;
+          }
+          const updated = mutate(existing);
+          resolved = updated;
+          if (!storageValuesEqual(existing, updated)) {
+            store.put(updated);
+          }
+        });
+        transaction.addEventListener('complete', () => {
+          resolve(resolved);
+        });
+        transaction.addEventListener('error', () => {
+          reject(transaction.error ?? new Error(`Failed to update project library state ${projectId}`));
+        });
+        transaction.addEventListener('abort', () => {
+          reject(transaction.error ?? new Error(`Updating project library state ${projectId} was aborted`));
+        });
+      }).finally(() => {
         db.close();
-        resolve(resolved);
-      };
-
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      transaction.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(transaction.error);
-      };
-    });
-  }
-
-  private async touchProjectAtomic(projectId: string): Promise<Project | undefined> {
-    const db = await this.getDb();
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.projectsStoreName, 'readwrite');
-      const store = transaction.objectStore(this.projectsStoreName);
-
-      let resolved: Project | undefined;
-
-      const getRequest = store.get(projectId);
-
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      getRequest.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(getRequest.error);
-      };
-
-      getRequest.onsuccess = () => {
-        const existingProject = getRequest.result as Project | undefined;
-        if (!existingProject || existingProject.deletedAt) {
-          return;
-        }
-
-        const updatedProject: Project = { ...existingProject, updatedAt: Date.now() };
-        const putRequest = store.put(updatedProject);
-        // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-        putRequest.onerror = () => {
-          // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-          reject(putRequest.error);
-        };
-        putRequest.onsuccess = () => {
-          resolved = updatedProject;
-        };
-      };
-
-      transaction.oncomplete = () => {
-        db.close();
-        resolve(resolved);
-      };
-
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      transaction.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(transaction.error);
-      };
+      });
     });
   }
 
   private async updateChatAtomic(chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> {
     const db = await this.getDb();
 
-    return new Promise((resolve, reject) => {
+    return new Promise<Chat | undefined>((resolve, reject) => {
       const transaction = db.transaction(this.chatsStoreName, 'readwrite');
       const store = transaction.objectStore(this.chatsStoreName);
 
@@ -748,22 +974,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
       };
 
       transaction.oncomplete = () => {
-        db.close();
-        const next = resolved;
-        if (next) {
-          // async-iife: bootstrap — chat txn is durable; cascade project touch before resolving callers.
-          void (async (): Promise<void> => {
-            try {
-              await this.touchProject(next.resourceId);
-              resolve(next);
-            } catch (error) {
-              reject(error instanceof Error ? error : new Error('touchProject failed', { cause: error }));
-            }
-          })();
-          return;
-        }
-
-        resolve(next);
+        resolve(resolved);
       };
 
       // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
@@ -771,6 +982,12 @@ export class IndexedDbStorageProvider implements StorageProvider {
         // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
         reject(transaction.error);
       };
+
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Updating chat ${chatId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
@@ -786,12 +1003,11 @@ export class IndexedDbStorageProvider implements StorageProvider {
   private async atomicChatMutation(chatId: string, mutate: (chat: Chat) => boolean): Promise<Chat | undefined> {
     const db = await this.getDb();
 
-    return new Promise((resolve, reject) => {
+    return new Promise<Chat | undefined>((resolve, reject) => {
       const transaction = db.transaction(this.chatsStoreName, 'readwrite');
       const store = transaction.objectStore(this.chatsStoreName);
 
       let resolved: Chat | undefined;
-      let shouldCascadeProject = false;
 
       const getRequest = store.get(chatId);
 
@@ -813,7 +1029,6 @@ export class IndexedDbStorageProvider implements StorageProvider {
         }
 
         existingChat.updatedAt = Date.now();
-        shouldCascadeProject = true;
 
         const putRequest = store.put(existingChat);
         // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
@@ -827,22 +1042,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
       };
 
       transaction.oncomplete = () => {
-        db.close();
-        const next = resolved;
-        if (next && shouldCascadeProject) {
-          // async-iife: bootstrap — chat txn is durable; cascade project touch before resolving callers.
-          void (async (): Promise<void> => {
-            try {
-              await this.touchProject(next.resourceId);
-              resolve(next);
-            } catch (error) {
-              reject(error instanceof Error ? error : new Error('touchProject failed', { cause: error }));
-            }
-          })();
-          return;
-        }
-
-        resolve(next);
+        resolve(resolved);
       };
 
       // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
@@ -850,6 +1050,12 @@ export class IndexedDbStorageProvider implements StorageProvider {
         // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
         reject(transaction.error);
       };
+
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Mutating chat ${chatId} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 
@@ -867,32 +1073,85 @@ export class IndexedDbStorageProvider implements StorageProvider {
         reject(request.error);
       };
 
-      request.onsuccess = () => {
-        resolve(request.result);
+      request.onblocked = () => {
+        reject(new StorageUpgradeBlockedError());
       };
 
-      request.onupgradeneeded = (event) => {
+      request.onsuccess = () => {
         const db = request.result;
-        const { oldVersion } = event;
+        // Never be the tab that blocks another tab's upgrade.
+        db.onversionchange = () => {
+          db.close();
+        };
+        resolve(db);
+      };
 
-        // Version 1: Create projects store
-        if (oldVersion < 1 && !db.objectStoreNames.contains(this.projectsStoreName)) {
-          db.createObjectStore(this.projectsStoreName, { keyPath: 'id' });
-        }
+      // One bootstrap handler, no version-conditional branches: the v1–v8
+      // ladder was deleted at v9 (blueprint L5). Every profile — fresh or
+      // sitting at v8 — gets the current store set, and the dead `projects`
+      // store goes with the bump.
+      request.onupgradeneeded = () => {
+        const db = request.result;
 
-        // Version 2+: Create chats store with resourceId index
-        if (oldVersion < 2 && !db.objectStoreNames.contains(this.chatsStoreName)) {
+        if (!db.objectStoreNames.contains(this.chatsStoreName)) {
           const chatsStore = db.createObjectStore(this.chatsStoreName, { keyPath: 'id' });
           chatsStore.createIndex('resourceId', 'resourceId', { unique: false });
         }
-
-        // Version 3 was skipped for no good reason.
-
-        // Version 4+: Create editor store for transient Editor state
-        if (oldVersion < 4 && !db.objectStoreNames.contains(this.editorStoreName)) {
+        if (!db.objectStoreNames.contains(this.editorStoreName)) {
           db.createObjectStore(this.editorStoreName, { keyPath: 'projectId' });
         }
+        if (!db.objectStoreNames.contains(this.pendingProjectOperationsStoreName)) {
+          db.createObjectStore(this.pendingProjectOperationsStoreName, { keyPath: 'operationId' });
+        }
+        if (!db.objectStoreNames.contains(this.projectLibraryStatesStoreName)) {
+          db.createObjectStore(this.projectLibraryStatesStoreName, { keyPath: 'projectId' });
+        }
+        if (!db.objectStoreNames.contains(this.appUiPreferencesStoreName)) {
+          db.createObjectStore(this.appUiPreferencesStoreName, { keyPath: 'id' });
+        }
+        if (db.objectStoreNames.contains(legacyProjectsStoreName)) {
+          db.deleteObjectStore(legacyProjectsStoreName);
+        }
+        request.transaction?.objectStore(this.editorStoreName).clear();
       };
+    });
+  }
+
+  private async putRecord(storeName: string, value: unknown): Promise<void> {
+    const db = await this.getDb();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      transaction.objectStore(storeName).put(value);
+      transaction.addEventListener('complete', () => {
+        resolve();
+      });
+      transaction.addEventListener('error', () => {
+        reject(transaction.error ?? new Error(`Failed to write record in ${storeName}`));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Writing record in ${storeName} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
+    });
+  }
+
+  private async deleteRecord(storeName: string, key: IDBValidKey): Promise<void> {
+    const db = await this.getDb();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      transaction.objectStore(storeName).delete(key);
+      transaction.addEventListener('complete', () => {
+        resolve();
+      });
+      transaction.addEventListener('error', () => {
+        reject(transaction.error ?? new Error(`Failed to delete record from ${storeName}`));
+      });
+      transaction.addEventListener('abort', () => {
+        reject(transaction.error ?? new Error(`Deleting record from ${storeName} was aborted`));
+      });
+    }).finally(() => {
+      db.close();
     });
   }
 }

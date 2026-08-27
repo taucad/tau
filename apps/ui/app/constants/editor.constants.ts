@@ -6,22 +6,16 @@ import type { CameraView } from '@taucad/camera';
 // Panel Constants
 // ============================================================================
 
-/**
- * Minimum panel size constants for the chat interface layout (in pixels)
- * Used for both default sizes and minimum constraints on panes
- */
+/** Desktop lane minimum widths in pixels. */
 
-/** Minimum width for standard side panels (Explorer, Parameters, Converter, Details) */
-export const panelMinSizeStandard = 200;
-
-/** Minimum width for the Chat History panel */
-export const panelMinSizeChat = 240;
-
-/** Minimum width for the Editor panel (code editing area) */
-export const panelMinSizeEditor = 400;
+/** Minimum width for the Chat lane. */
+export const panelMinSizeChat = 280;
 
 /** Minimum width for the Viewer/center panel (main 3D CAD visualization area) */
 export const panelMinSizeViewer = 416;
+
+/** Minimum width for the mixed file/utility Workbench lane. */
+export const panelMinSizeWorkbench = 360;
 
 /** Mobile drawer snap points for the projects interface */
 export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
@@ -29,58 +23,8 @@ export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
 /** Default render timeout. Milliseconds. */
 export const defaultRenderTimeout = 60_000;
 
-/**
- * All panel identifiers - single source of truth for panel IDs.
- * Includes both toggleable panels and the always-visible viewer.
- */
-export const panelIds = [
-  'chat',
-  'files',
-  'explorer',
-  'kernel',
-  'viewer',
-  'parameters',
-  'editor',
-  'converter',
-  'details',
-  'revisions',
-] as const;
-
-/**
- * Desktop panel identifiers - panels that can be opened/closed.
- * Excludes viewer which is always visible.
- */
-export const desktopPanelIds = [
-  'chat',
-  'files',
-  'explorer',
-  'kernel',
-  'parameters',
-  'editor',
-  'converter',
-  'details',
-] as const;
-
-/**
- * Panel order for Allotment layout - single source of truth for visual ordering.
- * This determines the left-to-right order of panels in the desktop interface.
- *
- * INVARIANT: Every entry here MUST correspond to exactly one `<Allotment.Pane>`
- * rendered in `chat-interface-desktop.tsx` (in the same order). A mismatch
- * causes `allotment.resize(sizes)` to assign sizes to the wrong panes.
- */
-export const allotmentPanelOrder = [
-  'chat',
-  'files',
-  'explorer',
-  'kernel',
-  'viewer',
-  'parameters',
-  'editor',
-  'converter',
-  'details',
-  'revisions',
-] as const;
+/** Existing mobile drawer surfaces; desktop utilities are Workbench tabs. */
+export const mobilePanelIds = ['chat', 'files', 'viewer', 'parameters', 'editor', 'converter', 'details'] as const;
 
 // ============================================================================
 // Graphics View Settings
@@ -328,45 +272,36 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
 // Panel State Types (derived from constants above)
 // ============================================================================
 
-/** Type for all panel IDs (derived from panelIds constant) */
-export type PanelId = (typeof panelIds)[number];
-
-/** Type for desktop panel IDs (derived from desktopPanelIds constant) */
-export type DesktopPanelId = (typeof desktopPanelIds)[number];
+/** Mobile drawer panel IDs. Desktop utility tabs use `WorkbenchPanelId`. */
+export type MobilePanelId = (typeof mobilePanelIds)[number];
 
 /**
  * Default panel state for new projects or when no stored state exists.
  */
 export const defaultPanelState = {
-  openPanels: {
-    chat: true,
-    files: false,
-    explorer: false,
-    kernel: false,
-    parameters: true,
-    editor: false,
-    converter: false,
-    details: false,
-  },
-  panelSizes: {
-    chat: 300,
-    files: 200,
-    explorer: 300,
-    kernel: 350,
-    viewer: 420,
-    parameters: 300,
-    editor: 300,
-    converter: 300,
-    details: 300,
-    revisions: 320,
+  desktopLayout: {
+    chatOpen: true,
+    workbenchOpen: true,
+    chatWidth: 320,
+    workbenchWidth: 420,
+    compactAuxiliary: 'chat',
   },
   mobileActiveTab: 'chat',
   kernelPaneview: {},
+  modelPaneview: {},
   parametersPaneview: {},
+  consolePaneview: {},
 } as const satisfies {
-  openPanels: Record<DesktopPanelId, boolean>;
-  panelSizes: Record<PanelId, number>;
-  mobileActiveTab: PanelId;
+  desktopLayout: {
+    chatOpen: boolean;
+    workbenchOpen: boolean;
+    chatWidth: number;
+    workbenchWidth: number;
+    compactAuxiliary: 'chat' | 'workbench';
+  };
+  mobileActiveTab: MobilePanelId;
   kernelPaneview: Record<string, never>;
+  modelPaneview: Record<string, never>;
   parametersPaneview: Record<string, never>;
+  consolePaneview: Record<string, never>;
 };

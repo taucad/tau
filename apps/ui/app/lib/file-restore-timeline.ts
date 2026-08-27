@@ -131,6 +131,36 @@ function toFileOp(part: MyMessagePart, context: OpContext): Omit<FileOp, 'seq'> 
 }
 
 /**
+ * Whether the latest user turn contains at least one committed design-file
+ * mutation. Terminal request emits carry the settled message snapshot, so this
+ * reuses the canonical file-op extraction semantics without waiting for a
+ * React Query chat refetch or mistaking chat-only turns for revisions.
+ */
+export function latestTurnHasDesignOps(messages: readonly MyUIMessage[]): boolean {
+  const latestUserIndex = messages.findLastIndex((message) => message.role === 'user');
+  if (latestUserIndex === -1) {
+    return false;
+  }
+
+  const turnMessageId = messages[latestUserIndex]!.id;
+  for (const [messageOffset, message] of messages.slice(latestUserIndex).entries()) {
+    for (const [partIndex, part] of message.parts.entries()) {
+      const op = toFileOp(part, {
+        time: message.metadata?.createdAt ?? 0,
+        chatId: '',
+        order: (latestUserIndex + messageOffset) * 1e4 + partIndex,
+        turnMessageId,
+      });
+      if (op && isDesignPath(op.path)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Extract the design-file ops from one chat, in message order. Assistant
  * op-time is the assistant `createdAt`, falling back to the preceding user
  * anchor for legacy messages (H2). `.tau/` paths are excluded (H10).

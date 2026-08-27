@@ -62,16 +62,17 @@ type ProjectInput = {
   kernelOptionsFactory: LazyKernelOptionsFactory;
 };
 
+export type ProjectLoadInput = { readonly projectId: string };
+
+export type ProjectRetrievedEvent = {
+  readonly type: 'projectRetrieved';
+  readonly project: ProjectManifest;
+  readonly revisionState: PersistedRevisionState | undefined;
+  readonly parameterEntries: Map<string, FileParameterEntry>;
+};
+
 // Define the actors that the machine can invoke
-const loadProjectActor = fromSafeAsync<
-  {
-    type: 'projectRetrieved';
-    project: ProjectManifest;
-    revisionState: PersistedRevisionState | undefined;
-    parameterEntries: Map<string, FileParameterEntry>;
-  },
-  { projectId: string }
->(async () => {
+const loadProjectActor = fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async () => {
   throw new Error(
     'Not implemented. Please supply the `provide.actors.loadProjectActor` option to the project machine.',
   );
@@ -181,14 +182,7 @@ type ProjectEventInternal =
   | { type: 'projectFileActivity'; operation: ProjectFileActivityOperation; paths: readonly string[] }
   | { type: 'flushNow' };
 
-type ProjectEvent =
-  | ProjectEventInternal
-  | {
-      type: 'projectRetrieved';
-      project: ProjectManifest;
-      revisionState?: PersistedRevisionState;
-      parameterEntries: Map<string, FileParameterEntry>;
-    };
+type ProjectEvent = ProjectEventInternal | ProjectRetrievedEvent;
 
 /**
  * Project Machine Emitted Events

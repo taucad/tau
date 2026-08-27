@@ -7,6 +7,7 @@ import {
   computeAbandonedTurnIds,
   extractOps,
   isDesignPath,
+  latestTurnHasDesignOps,
   materializeAt,
   migrateHeadTurnId,
   resolveRestore,
@@ -115,6 +116,29 @@ describe('isDesignPath', () => {
     expect(isDesignPath('lib/part.ts')).toBe(true);
     expect(isDesignPath('.tau/parameters/main.json')).toBe(false);
     expect(isDesignPath('.tau/cache/x')).toBe(false);
+  });
+});
+
+describe('latestTurnHasDesignOps', () => {
+  it('should qualify the latest turn only when it contains a committed design-file mutation', () => {
+    const messages = [
+      user('u1', 100),
+      assistant(101, [createPart('main.ts', 'code')]),
+      user('u2', 200),
+      assistant(201, [textPart('No file changes.')]),
+    ];
+
+    expect(latestTurnHasDesignOps(messages)).toBe(false);
+    expect(latestTurnHasDesignOps(messages.slice(0, 2))).toBe(true);
+  });
+
+  it('should reject internal-state mutations and no-op edits', () => {
+    expect(
+      latestTurnHasDesignOps([
+        user('u1', 100),
+        assistant(101, [createPart('.tau/parameters/main.json', '{}'), editPart('main.ts', '', '')]),
+      ]),
+    ).toBe(false);
   });
 });
 

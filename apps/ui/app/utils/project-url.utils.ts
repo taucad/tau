@@ -25,6 +25,22 @@ export const homeWorkspaceSlug = 'home';
 export const projectUrl = ({ workspaceSlug, projectSlug }: ProjectSlugs): string =>
   `/w/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(projectSlug)}`;
 
+/** Canonical project URL with an optional focused-chat selection. */
+export const projectChatUrl = (slugs: ProjectSlugs, chatId?: string): string => {
+  const url = projectUrl(slugs);
+  if (!chatId) {
+    return url;
+  }
+
+  return `${url}?${new URLSearchParams({ chat: chatId })}`;
+};
+
+/** Requested chat ID from a route search string, if one was supplied. */
+export const projectChatIdFromSearch = (search: string | URLSearchParams): string | undefined => {
+  const chatId = (typeof search === 'string' ? new URLSearchParams(search) : search).get('chat');
+  return chatId === null || chatId.length === 0 ? undefined : chatId;
+};
+
 /** Canonical preview URL for a discovered project. */
 export const projectPreviewUrl = (slugs: ProjectSlugs): string => `${projectUrl(slugs)}/preview`;
 

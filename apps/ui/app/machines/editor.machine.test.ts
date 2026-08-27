@@ -41,7 +41,11 @@ function selectActivePath(context: {
 // Factory helpers
 // ---------------------------------------------------------------------------
 
-type EnsureFocusedChatInput = { projectId: string; candidateFocusedChatId: string | undefined };
+type EnsureFocusedChatInput = {
+  projectId: string;
+  requestedChatId: string | undefined;
+  persistedChatId: string | undefined;
+};
 type EnsureFocusedChatResult = { type: 'focusedChatEnsured'; focusedChatId: string };
 
 /**
@@ -52,7 +56,7 @@ type EnsureFocusedChatResult = { type: 'focusedChatEnsured'; focusedChatId: stri
  */
 const defaultEnsureFocusedChat = async (input: EnsureFocusedChatInput): Promise<EnsureFocusedChatResult> => ({
   type: 'focusedChatEnsured',
-  focusedChatId: input.candidateFocusedChatId ?? 'chat-default',
+  focusedChatId: input.requestedChatId ?? input.persistedChatId ?? 'chat-default',
 });
 
 function createTestActor(options?: {
@@ -60,6 +64,7 @@ function createTestActor(options?: {
   saveResult?: () => Promise<void>;
   ensureResult?: (input: EnsureFocusedChatInput) => Promise<EnsureFocusedChatResult>;
   projectId?: string;
+  requestedChatId?: string;
 }) {
   const loadResult = options?.loadResult;
   const loadFunction = typeof loadResult === 'function' ? loadResult : async () => loadResult;
@@ -83,7 +88,7 @@ function createTestActor(options?: {
   });
 
   return createActor(machine, {
-    input: { projectId: options?.projectId ?? 'test-build' },
+    input: { projectId: options?.projectId ?? 'test-build', requestedChatId: options?.requestedChatId },
   });
 }
 
@@ -662,7 +667,7 @@ describe('editorMachine', () => {
         loadResult: stubEditorState,
         ensureResult: async (input) => ({
           type: 'focusedChatEnsured',
-          focusedChatId: input.candidateFocusedChatId ?? 'chat-recovered',
+          focusedChatId: input.requestedChatId ?? input.persistedChatId ?? 'chat-recovered',
         }),
       });
       expect(actor.getSnapshot().context.focusedChatId).toBe('chat-1');
@@ -859,14 +864,14 @@ describe('ready – deferred model materialisation', () => {
 // ===========================================================================
 describe('loading.ensuringFocusedChat', () => {
   it('passes through a valid candidate focusedChatId from loaded state', async () => {
-    const ensureCalls: Array<{ projectId: string; candidateFocusedChatId: string | undefined }> = [];
+    const ensureCalls: EnsureFocusedChatInput[] = [];
     const actor = createTestActor({
       loadResult: stubEditorState,
       ensureResult: async (input) => {
         ensureCalls.push(input);
         return {
           type: 'focusedChatEnsured',
-          focusedChatId: input.candidateFocusedChatId ?? 'chat-fallback',
+          focusedChatId: input.requestedChatId ?? input.persistedChatId ?? 'chat-fallback',
         };
       },
     });
@@ -875,9 +880,48 @@ describe('loading.ensuringFocusedChat', () => {
     await waitFor(actor, (s) => s.matches({ ready: {} }));
 
     expect(ensureCalls).toHaveLength(1);
-    expect(ensureCalls[0]?.candidateFocusedChatId).toBe('chat-1');
+    expect(ensureCalls[0]).toEqual({
+      projectId: 'test-build',
+      requestedChatId: undefined,
+      persistedChatId: 'chat-1',
+    });
     expect(actor.getSnapshot().context.focusedChatId).toBe('chat-1');
     expect(actor.getSnapshot().context.focusedChatError).toBeUndefined();
+    actor.stop();
+  });
+
+  it('passes route-requested and persisted chat identities separately', async () => {
+    const ensureCalls: EnsureFocusedChatInput[] = [];
+    const actor = createTestActor({
+      loadResult: stubEditorState,
+      requestedChatId: 'chat-requested',
+      ensureResult: async (input) => {
+        ensureCalls.push(input);
+        return { type: 'focusedChatEnsured', focusedChatId: input.requestedChatId! };
+      },
+    });
+    actor.start();
+    actor.send({ type: 'load' });
+    await waitFor(actor, (state) => state.matches({ ready: {} }));
+
+    expect(ensureCalls[0]).toEqual({
+      projectId: 'test-build',
+      requestedChatId: 'chat-requested',
+      persistedChatId: 'chat-1',
+    });
+    expect(actor.getSnapshot().context.focusedChatId).toBe('chat-requested');
+    actor.stop();
+  });
+
+  it('revalidates route query changes without remounting the editor actor', async () => {
+    const actor = await startAndLoad({ loadResult: stubEditorState });
+
+    actor.send({ type: 'setRequestedChatId', chatId: 'chat-2' });
+    await waitFor(actor, (state) => state.context.focusedChatId === 'chat-2');
+    actor.send({ type: 'setRequestedChatId', chatId: 'chat-1' });
+    await waitFor(actor, (state) => state.context.focusedChatId === 'chat-1');
+
+    expect(actor.getSnapshot().context.requestedChatId).toBe('chat-1');
     actor.stop();
   });
 

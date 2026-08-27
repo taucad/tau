@@ -69,19 +69,21 @@ type FocusedChatWorker = Pick<StorageProvider, 'getChatsForResource' | 'createNa
 
 export async function ensureFocusedChatForProject({
   projectId,
-  candidateFocusedChatId,
+  requestedChatId,
+  persistedChatId,
   worker,
   onCreatedChat,
 }: {
   readonly projectId: string;
-  readonly candidateFocusedChatId: string | undefined;
+  readonly requestedChatId: string | undefined;
+  readonly persistedChatId: string | undefined;
   readonly worker: FocusedChatWorker;
   readonly onCreatedChat?: () => void;
 }): Promise<{ type: 'focusedChatEnsured'; focusedChatId: string }> {
   const chats = await worker.getChatsForResource(projectId);
 
-  if (candidateFocusedChatId !== undefined) {
-    const match = chats.find((chat) => chat.id === candidateFocusedChatId);
+  for (const candidateChatId of [requestedChatId, persistedChatId]) {
+    const match = chats.find((chat) => chat.id === candidateChatId);
     if (match) {
       return { type: 'focusedChatEnsured', focusedChatId: match.id };
     }
@@ -90,7 +92,13 @@ export async function ensureFocusedChatForProject({
   if (chats.length > 0) {
     let mostRecent = chats[0]!;
     for (const candidate of chats) {
-      if (candidate.updatedAt > mostRecent.updatedAt) {
+      if (
+        candidate.updatedAt > mostRecent.updatedAt ||
+        (candidate.updatedAt === mostRecent.updatedAt && candidate.createdAt > mostRecent.createdAt) ||
+        (candidate.updatedAt === mostRecent.updatedAt &&
+          candidate.createdAt === mostRecent.createdAt &&
+          candidate.id < mostRecent.id)
+      ) {
         mostRecent = candidate;
       }
     }
@@ -165,12 +173,16 @@ export async function resolveScopedProjectManifest({
 export function ProjectProvider({
   children,
   projectId,
+  requestedChatId,
+  onFocusedChatResolved,
   provide,
   input,
   kernelOptionsFactory = defaultKernelOptions,
 }: {
   readonly children: ReactNode;
   readonly projectId: string;
+  readonly requestedChatId?: string;
+  readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly provide?: Parameters<typeof projectMachine.provide>[0];
   readonly input?: Omit<
     Parameters<typeof useActorRef<typeof projectMachine>>[1]['input'],
@@ -186,7 +198,7 @@ export function ProjectProvider({
   const actorRef = useActorRef(
     projectMachine.provide({
       actors: {
-        loadProjectActor: fromSafeAsync(async ({ input }) => {
+        loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
           const readySnapshot = await waitFor(fileManager.fileManagerRef, (state) => state.matches('ready'));
 
           const parameterEntries = new Map<string, FileParameterEntry>();
@@ -302,7 +314,8 @@ export function ProjectProvider({
           const worker = await getReadiedWorker();
           return ensureFocusedChatForProject({
             projectId: input.projectId,
-            candidateFocusedChatId: input.candidateFocusedChatId,
+            requestedChatId: input.requestedChatId,
+            persistedChatId: input.persistedChatId,
             worker,
             onCreatedChat: () => {
               // Surface the new chat through TanStack Query so `useChats`
@@ -314,10 +327,14 @@ export function ProjectProvider({
       },
     }),
     {
-      input: { projectId },
+      input: { projectId, requestedChatId },
       inspect,
     },
   );
+
+  useEffect(() => {
+    editorRef.send({ type: 'setRequestedChatId', chatId: requestedChatId });
+  }, [editorRef, requestedChatId]);
 
   // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);
@@ -330,6 +347,7 @@ export function ProjectProvider({
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
   const parameterEntries = useSelector(actorRef, (state) => state.context.parameterEntries);
+  const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
   const modelComponentDisplay = useSelector(editorRef, (state) => state.context.modelComponentDisplay);
   const needsModelComponentDisplayMigration = useSelector(
@@ -371,6 +389,12 @@ export function ProjectProvider({
     modelInteractionRef,
     needsModelComponentDisplayMigration,
   ]);
+
+  useEffect(() => {
+    if (focusedChatResolved && focusedChatId !== undefined) {
+      onFocusedChatResolved?.(focusedChatId);
+    }
+  }, [focusedChatId, focusedChatResolved, onFocusedChatResolved]);
 
   useEffect(() => {
     const subscription = actorRef.on('projectUpdated', () => {

@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import type { UIMatch } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { projectToManifest } from '@taucad/types';
@@ -34,6 +34,7 @@ const workspaces: Workspace[] = [
 ];
 let projects: ProjectListItem[] = [];
 let isLoading = false;
+const focusedChatResolvedCallbacks = vi.hoisted(() => [] as Array<((chatId: string) => void) | undefined>);
 
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: () => ({ projects, isLoading }),
@@ -43,11 +44,26 @@ vi.mock('#filesystem/handle-store.js', () => ({
   listWorkspaces: async () => workspaces,
 }));
 vi.mock('#routes/w.$workspace.$project/project-route.js', () => ({
-  ProjectRouteProviders: ({ children, projectId }: React.PropsWithChildren<{ projectId: string }>) => (
-    <div data-testid='project-route' data-project-id={projectId}>
-      {children}
-    </div>
-  ),
+  ProjectRouteProviders: ({
+    children,
+    onFocusedChatResolved,
+    projectId,
+    requestedChatId,
+  }: React.PropsWithChildren<{
+    onFocusedChatResolved?: (chatId: string) => void;
+    projectId: string;
+    requestedChatId?: string;
+  }>) => {
+    focusedChatResolvedCallbacks.push(onFocusedChatResolved);
+    return (
+      <div data-testid='project-route' data-project-id={projectId} data-requested-chat-id={requestedChatId}>
+        {children}
+        <button type='button' onClick={() => onFocusedChatResolved?.('chat_resolved')}>
+          Resolve chat
+        </button>
+      </div>
+    );
+  },
   projectRouteHandle: {},
   ProjectChatRoute: () => <div>chat</div>,
 }));
@@ -67,7 +83,21 @@ const testMatch = {
 
 function LocationProbe(): React.JSX.Element {
   const location = useLocation();
-  return <div data-testid='location'>{location.pathname}</div>;
+  const navigate = useNavigate();
+  return (
+    <div>
+      <div data-testid='location'>{`${location.pathname}${location.search}`}</div>
+      <Link to={`${location.pathname}?chat=chat_two`}>Open chat two</Link>
+      <button
+        type='button'
+        onClick={() => {
+          void navigate(-1);
+        }}
+      >
+        Back
+      </button>
+    </div>
+  );
 }
 
 const renderAt = (path: string): void => {
@@ -93,6 +123,7 @@ const renderAt = (path: string): void => {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  focusedChatResolvedCallbacks.length = 0;
   globalThis.history.replaceState(null, '', '/');
   isLoading = false;
   projects = [
@@ -119,6 +150,47 @@ describe('/w/{workspace}/{project}', () => {
     renderAt('/w/home/scratch-part');
 
     expect(await screen.findByTestId('project-route')).toHaveAttribute('data-project-id', 'proj_ccccccccccccccccccccc');
+  });
+
+  it('passes decoded chat query changes through without remounting the project route', async () => {
+    renderAt('/w/tau-workspace/cube-design?chat=chat%2Fone');
+
+    const route = await screen.findByTestId('project-route');
+    expect(route).toHaveAttribute('data-requested-chat-id', 'chat/one');
+    fireEvent.click(screen.getByRole('link', { name: 'Open chat two' }));
+    await waitFor(() => {
+      expect(route).toHaveAttribute('data-requested-chat-id', 'chat_two');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => {
+      expect(route).toHaveAttribute('data-requested-chat-id', 'chat/one');
+    });
+  });
+
+  it('keeps the focused-chat resolver stable while only the chat query changes', async () => {
+    renderAt('/w/tau-workspace/cube-design?chat=chat_one');
+
+    await screen.findByTestId('project-route');
+    const resolver = focusedChatResolvedCallbacks.at(-1);
+    fireEvent.click(screen.getByRole('link', { name: 'Open chat two' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('project-route')).toHaveAttribute('data-requested-chat-id', 'chat_two');
+    });
+
+    expect(focusedChatResolvedCallbacks.at(-1)).toBe(resolver);
+  });
+
+  it('canonicalises an absent or invalid query to the resolved chat by replacement', async () => {
+    renderAt('/w/tau-workspace/cube-design?chat=missing');
+    await screen.findByTestId('project-route');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve chat' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent('/w/tau-workspace/cube-design?chat=chat_resolved');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/w/tau-workspace/cube-design?chat=chat_resolved');
   });
 
   it.each([

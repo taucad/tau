@@ -34,6 +34,7 @@ import { ProjectLoadError } from '#routes/w.$workspace.$project/project-load-err
 type ResolvedProjectRouteAccess = {
   readonly projectId: string;
   readonly access: ProjectRouteAccess;
+  readonly requestedChatId: string | undefined;
 };
 
 type ProjectSessionFlushRegistration = {
@@ -52,17 +53,26 @@ const editorFlushTimeoutMilliseconds = 10_000;
 function ProjectSession({
   children,
   projectId,
+  requestedChatId,
+  onFocusedChatResolved,
   onFlushRegistration,
 }: {
   readonly children?: React.ReactNode;
   readonly projectId: string;
+  readonly requestedChatId?: string;
+  readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
 }): React.ReactNode {
   return (
     <HomeFileManagerProvider projectId={projectId} rootDirectory={`/projects/${projectId}`}>
       <ChatRpcSocketProvider>
         <WebglContextTrackerProvider>
-          <ProjectProvider projectId={projectId} kernelOptionsFactory={debugKernelOptions}>
+          <ProjectProvider
+            projectId={projectId}
+            requestedChatId={requestedChatId}
+            onFocusedChatResolved={onFocusedChatResolved}
+            kernelOptionsFactory={debugKernelOptions}
+          >
             <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
             <MonacoModelServiceProvider>
               <RevisionProvider>{children}</RevisionProvider>
@@ -76,18 +86,24 @@ function ProjectSession({
 
 export function ProjectRouteGate({
   children,
+  onFocusedChatResolved,
   requestedProjectId,
+  requestedChatId,
 }: {
   readonly children?: React.ReactNode;
+  readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly requestedProjectId: string;
+  readonly requestedChatId?: string;
 }): React.ReactNode {
   const projectManager = useProjectManager();
   const latestRequestedProjectIdRef = useRef(requestedProjectId);
+  const latestRequestedChatIdRef = useRef(requestedChatId);
   const activeSessionFlushRef = useRef<ProjectSessionFlushRegistration | undefined>(undefined);
   const [resolved, setResolved] = useState<ResolvedProjectRouteAccess>();
   const [routeError, setRouteError] = useState<ProjectRouteError>();
   const [loadAttempt, setLoadAttempt] = useState(0);
   latestRequestedProjectIdRef.current = requestedProjectId;
+  latestRequestedChatIdRef.current = requestedChatId;
   const registerSessionFlush = useRef((registration: ProjectSessionFlushRegistration | undefined): void => {
     activeSessionFlushRef.current = registration;
   }).current;
@@ -131,6 +147,7 @@ export function ProjectRouteGate({
         setResolved({
           projectId: requestedProjectId,
           access,
+          requestedChatId: latestRequestedChatIdRef.current,
         });
       } catch {
         if (!isCancelled()) {
@@ -164,7 +181,11 @@ export function ProjectRouteGate({
     }
     setResolved((current) =>
       current?.projectId === projectId && current.access.status === 'trashed'
-        ? { projectId, access: { status: 'ready', project: access.project } }
+        ? {
+            projectId,
+            access: { status: 'ready', project: access.project },
+            requestedChatId: latestRequestedChatIdRef.current,
+          }
         : current,
     );
   };
@@ -192,7 +213,13 @@ export function ProjectRouteGate({
   switch (access.status) {
     case 'ready': {
       content = (
-        <ProjectSession key={projectId} projectId={projectId} onFlushRegistration={registerSessionFlush}>
+        <ProjectSession
+          key={projectId}
+          projectId={projectId}
+          requestedChatId={pending ? resolved.requestedChatId : requestedChatId}
+          onFocusedChatResolved={pending ? undefined : onFocusedChatResolved}
+          onFlushRegistration={registerSessionFlush}
+        >
           {children}
         </ProjectSession>
       );
@@ -285,14 +312,24 @@ export function ProjectRouteGate({
  */
 export function ProjectRouteProviders({
   children,
+  onFocusedChatResolved,
   projectId,
+  requestedChatId,
 }: {
   readonly children?: React.ReactNode;
+  readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly projectId: string;
+  readonly requestedChatId?: string;
 }): React.JSX.Element {
   return (
     <SharedWorkerGate>
-      <ProjectRouteGate requestedProjectId={projectId}>{children}</ProjectRouteGate>
+      <ProjectRouteGate
+        requestedProjectId={projectId}
+        requestedChatId={requestedChatId}
+        onFocusedChatResolved={onFocusedChatResolved}
+      >
+        {children}
+      </ProjectRouteGate>
     </SharedWorkerGate>
   );
 }

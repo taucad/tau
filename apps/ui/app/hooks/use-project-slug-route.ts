@@ -83,14 +83,21 @@ export function useProjectUrl(projectId: string | undefined): string {
  * @param projectId - The open project, once resolved.
  * @param suffix - Path appended to the canonical project URL (e.g. `/preview`).
  */
-export function useCanonicalProjectUrlCorrection(projectId: string | undefined, suffix = ''): void {
+export function useCanonicalProjectUrlCorrection(projectId: string | undefined, suffix = ''): ProjectSlugs | undefined {
   const canonical = useProjectSlugs(projectId);
-  const target = canonical.status === 'resolved' ? `${projectUrl(canonical.value)}${suffix}` : undefined;
+  const canonicalSlugs = canonical.status === 'resolved' ? canonical.value : undefined;
+  const target = canonicalSlugs ? `${projectUrl(canonicalSlugs)}${suffix}` : undefined;
   useEffect(() => {
     if (target !== undefined && globalThis.location.pathname !== target) {
-      globalThis.history.replaceState(globalThis.history.state, '', target);
+      globalThis.history.replaceState(
+        globalThis.history.state,
+        '',
+        `${target}${globalThis.location.search}${globalThis.location.hash}`,
+      );
     }
   }, [target]);
+
+  return canonicalSlugs;
 }
 
 /** `proj_` id addressed by slug or id segments in the `/w/` grammar. */

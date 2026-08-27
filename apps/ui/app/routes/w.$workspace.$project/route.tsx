@@ -6,8 +6,8 @@
  * Never add a static segment under `/w/`: it would shadow a workspace slug
  * (F13).
  */
-import { useParams } from 'react-router';
-import { useRef } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router';
+import { useCallback, useRef } from 'react';
 import type { Handle } from '#types/matches.types.js';
 import { Loader } from '#components/ui/loader.js';
 import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
@@ -17,10 +17,13 @@ import {
   projectRouteHandle,
 } from '#routes/w.$workspace.$project/project-route.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
+import { projectChatIdFromSearch, projectChatUrl } from '#utils/project-url.utils.js';
 
 // Module-level for a stable component identity across HMR.
 function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
   const { workspace = '', project = '' } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const resolution = useProjectIdBySlugs(workspace, project);
   // An external rename invalidates the URL, not the session: keep the resolved
   // project mounted and let the correction below rewrite the address bar (D8).
@@ -29,7 +32,19 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
     openProjectIdRef.current = resolution.value;
   }
   const projectId = resolution.status === 'resolved' ? resolution.value : openProjectIdRef.current;
-  useCanonicalProjectUrlCorrection(projectId);
+  const canonicalSlugs = useCanonicalProjectUrlCorrection(projectId);
+  const requestedChatId = projectChatIdFromSearch(location.search);
+  const currentUrlRef = useRef(`${location.pathname}${location.search}`);
+  currentUrlRef.current = `${location.pathname}${location.search}`;
+  const handleFocusedChatResolved = useCallback(
+    (chatId: string) => {
+      const target = projectChatUrl(canonicalSlugs ?? { workspaceSlug: workspace, projectSlug: project }, chatId);
+      if (currentUrlRef.current !== target) {
+        void navigate(target, { replace: true });
+      }
+    },
+    [canonicalSlugs, navigate, project, workspace],
+  );
 
   if (projectId === undefined) {
     return resolution.status === 'resolving' ? (
@@ -41,7 +56,15 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
     );
   }
 
-  return <ProjectRouteProviders projectId={projectId}>{children}</ProjectRouteProviders>;
+  return (
+    <ProjectRouteProviders
+      projectId={projectId}
+      requestedChatId={requestedChatId}
+      onFocusedChatResolved={handleFocusedChatResolved}
+    >
+      {children}
+    </ProjectRouteProviders>
+  );
 }
 
 export const handle: Handle = {

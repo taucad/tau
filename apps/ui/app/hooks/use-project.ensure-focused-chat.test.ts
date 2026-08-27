@@ -14,7 +14,6 @@ const makeChat = (overrides: Partial<Chat> & { id: string }): Chat => ({
 
 describe('ensureFocusedChatForProject', () => {
   it('should create a missing empty chat without bumping parent project recency', async () => {
-    const touchProject = vi.fn<StorageProvider['touchProject']>();
     const getChatsForResource = vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue([]);
     const createNavigationRepairChat = vi.fn<StorageProvider['createNavigationRepairChat']>().mockResolvedValue(
       makeChat({
@@ -26,37 +25,87 @@ describe('ensureFocusedChatForProject', () => {
     const worker = {
       getChatsForResource,
       createNavigationRepairChat,
-      touchProject,
     };
 
     const result = await ensureFocusedChatForProject({
       projectId: 'project_test',
-      candidateFocusedChatId: undefined,
+      requestedChatId: undefined,
+      persistedChatId: undefined,
       worker,
       onCreatedChat,
     });
 
     expect(result).toEqual({ type: 'focusedChatEnsured', focusedChatId: 'chat_created' });
     expect(createNavigationRepairChat).toHaveBeenCalledWith('project_test');
-    expect(touchProject).not.toHaveBeenCalled();
     expect(onCreatedChat).toHaveBeenCalledOnce();
   });
 
-  it('should prefer an existing focused chat without creating a navigation repair chat', async () => {
-    const existing = makeChat({ id: 'chat_existing' });
-    const getChatsForResource = vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue([existing]);
+  it('prefers a valid requested chat over the persisted selection', async () => {
+    const requested = makeChat({ id: 'chat_requested' });
+    const persisted = makeChat({ id: 'chat_persisted' });
+    const getChatsForResource = vi
+      .fn<StorageProvider['getChatsForResource']>()
+      .mockResolvedValue([persisted, requested]);
     const createNavigationRepairChat = vi.fn<StorageProvider['createNavigationRepairChat']>();
 
     const result = await ensureFocusedChatForProject({
       projectId: 'project_test',
-      candidateFocusedChatId: 'chat_existing',
+      requestedChatId: 'chat_requested',
+      persistedChatId: 'chat_persisted',
       worker: {
         getChatsForResource,
         createNavigationRepairChat,
       },
     });
 
-    expect(result).toEqual({ type: 'focusedChatEnsured', focusedChatId: 'chat_existing' });
+    expect(result).toEqual({ type: 'focusedChatEnsured', focusedChatId: 'chat_requested' });
     expect(createNavigationRepairChat).not.toHaveBeenCalled();
+  });
+
+  it.each(['chat_foreign', 'chat_deleted'])('falls back from invalid requested %s to persisted chat', async (id) => {
+    const persisted = makeChat({ id: 'chat_persisted' });
+
+    const result = await ensureFocusedChatForProject({
+      projectId: 'project_test',
+      requestedChatId: id,
+      persistedChatId: persisted.id,
+      worker: {
+        getChatsForResource: vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue([persisted]),
+        createNavigationRepairChat: vi.fn<StorageProvider['createNavigationRepairChat']>(),
+      },
+    });
+
+    expect(result.focusedChatId).toBe('chat_persisted');
+  });
+
+  it('uses deterministic recency ordering when neither requested nor persisted chat is valid', async () => {
+    const chats = [
+      makeChat({ id: 'chat_z', createdAt: 2000, updatedAt: 3000 }),
+      makeChat({ id: 'chat_b', createdAt: 2500, updatedAt: 3000 }),
+      makeChat({ id: 'chat_a', createdAt: 2500, updatedAt: 3000 }),
+      makeChat({ id: 'chat_newer_update', createdAt: 1000, updatedAt: 4000 }),
+    ];
+
+    const newestUpdate = await ensureFocusedChatForProject({
+      projectId: 'project_test',
+      requestedChatId: 'chat_missing',
+      persistedChatId: 'chat_stale',
+      worker: {
+        getChatsForResource: vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue(chats),
+        createNavigationRepairChat: vi.fn<StorageProvider['createNavigationRepairChat']>(),
+      },
+    });
+    const deterministicTie = await ensureFocusedChatForProject({
+      projectId: 'project_test',
+      requestedChatId: undefined,
+      persistedChatId: undefined,
+      worker: {
+        getChatsForResource: vi.fn<StorageProvider['getChatsForResource']>().mockResolvedValue(chats.slice(0, 3)),
+        createNavigationRepairChat: vi.fn<StorageProvider['createNavigationRepairChat']>(),
+      },
+    });
+
+    expect(newestUpdate.focusedChatId).toBe('chat_newer_update');
+    expect(deterministicTie.focusedChatId).toBe('chat_a');
   });
 });

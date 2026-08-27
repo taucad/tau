@@ -212,6 +212,8 @@ export type EditorStateContext = {
    * active-pane identity.
    */
   activePaneId: string | undefined;
+  /** Route-requested chat selection. Validated before it becomes focused. */
+  requestedChatId: string | undefined;
   focusedChatId: string | undefined;
   /** Panel layout state (open/close, sizes, mobile tab) */
   panelState: PanelState;
@@ -254,6 +256,7 @@ type PendingOpenFile = Readonly<{
  */
 type EditorStateMachineInput = {
   projectId: string;
+  requestedChatId?: string;
 };
 
 /**
@@ -271,6 +274,7 @@ type EditorStateEvent =
   | { type: 'renameFile'; oldPath: string; newPath: string }
   | { type: 'closeAll' }
   // Chat operations
+  | { type: 'setRequestedChatId'; chatId: string | undefined }
   | { type: 'setFocusedChatId'; chatId: string | undefined }
   // Panel operations
   | { type: 'setPanelState'; panelState: PartialDeep<PanelState> }
@@ -334,7 +338,7 @@ const materialiseOpenFileActor = fromSafeAsync<void, { path: string; materialise
 
 /**
  * Establishes the "focused chat is valid" invariant. Validates the
- * candidate against the project's live chat list and emits a
+ * requested and persisted candidates against the project's live chat list and emits a
  * `focusedChatEnsured` event with:
  *  - the candidate if it points to an extant chat,
  *  - the most-recently-updated chat, otherwise,
@@ -349,7 +353,7 @@ const materialiseOpenFileActor = fromSafeAsync<void, { path: string; materialise
  */
 const ensureFocusedChatActor = fromSafeAsync<
   { type: 'focusedChatEnsured'; focusedChatId: string },
-  { projectId: string; candidateFocusedChatId: string | undefined }
+  { projectId: string; requestedChatId: string | undefined; persistedChatId: string | undefined }
 >(async () => {
   throw new Error('Not implemented. Please supply via provide.');
 });
@@ -745,6 +749,11 @@ export const editorMachine = setup({
       return { focusedChatId: event.chatId };
     }),
 
+    setRequestedChatIdInContext: assign(({ event }) => {
+      assertEvent(event, 'setRequestedChatId');
+      return { requestedChatId: event.chatId };
+    }),
+
     /**
      * Assign the validated/created focused chat id emitted by
      * `ensureFocusedChatActor` via the `focusedChatEnsured` event to
@@ -890,6 +899,7 @@ export const editorMachine = setup({
       projectId: input.projectId,
       openFiles: [],
       activePaneId: undefined,
+      requestedChatId: input.requestedChatId,
       focusedChatId: undefined,
       panelState: defaultPanelState,
       editorLayout: undefined,
@@ -906,6 +916,11 @@ export const editorMachine = setup({
     };
   },
   initial: 'idle',
+  on: {
+    setRequestedChatId: {
+      actions: 'setRequestedChatIdInContext',
+    },
+  },
   states: {
     idle: {
       on: {
@@ -946,7 +961,8 @@ export const editorMachine = setup({
             src: 'ensureFocusedChatActor',
             input: ({ context }) => ({
               projectId: context.projectId,
-              candidateFocusedChatId: context.focusedChatId,
+              requestedChatId: context.requestedChatId,
+              persistedChatId: context.focusedChatId,
             }),
             onError: {
               // Surface the error to the route gate via `focusedChatError`.
@@ -974,7 +990,7 @@ export const editorMachine = setup({
             idle: {
               // Self-heal at runtime: any path that leaves `focusedChatId`
               // undefined (e.g. `setFocusedChatId(undefined)` from the
-              // last-chat deletion in `chat-history-selector`) immediately
+              // last-chat deletion in project chat navigation) immediately
               // re-enters `ensuringFocusedChat` so the route gate's
               // <ActiveChatProvider chatId> mount-precondition is always
               // restored.
@@ -1003,7 +1019,8 @@ export const editorMachine = setup({
                 src: 'ensureFocusedChatActor',
                 input: ({ context }) => ({
                   projectId: context.projectId,
-                  candidateFocusedChatId: context.focusedChatId,
+                  requestedChatId: context.requestedChatId,
+                  persistedChatId: context.focusedChatId,
                 }),
                 onError: {
                   target: 'focusedChatUnresolved',
@@ -1026,6 +1043,10 @@ export const editorMachine = setup({
             },
           },
           on: {
+            setRequestedChatId: {
+              target: '.ensuringFocusedChat',
+              actions: 'setRequestedChatIdInContext',
+            },
             registerMaterialiseModel: {
               actions: 'setMaterialiseModel',
             },

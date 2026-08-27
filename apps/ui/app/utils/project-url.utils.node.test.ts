@@ -19,9 +19,11 @@ function listSourceFiles(directory: string): string[] {
 }
 
 describe('legacy URL grammar removal (blueprint L1/L2/L3)', () => {
-  const sources = listSourceFiles(appRoot).filter((file) => !file.endsWith('project-url.utils.node.test.ts'));
+  const sources = listSourceFiles(appRoot).filter(
+    (file) => !file.includes('.test.') && !file.includes('project-url.utils'),
+  );
 
-  it.each([['projectUrlById'], ['/projects/library'], ['/projects/community']])(
+  it.each([['projectUrlById'], ['/projects/library'], ['/projects/community'], ['?chat=']])(
     'has zero references to %s',
     (needle) => {
       const offenders = sources.filter((file) => readFileSync(file, 'utf8').includes(needle));

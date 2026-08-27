@@ -13,11 +13,11 @@ import {
   ChatExplorerTree,
   ComponentRow,
   getComponentRowPaddingLeft,
-  shouldShowComponentRowActions,
 } from '#routes/w.$workspace.$project/chat-explorer.js';
 
 const mocks = vi.hoisted(() => ({
   addContextReferences: vi.fn(),
+  paneApis: new Map<string, { setExpanded: ReturnType<typeof vi.fn> }>(),
   useProject: vi.fn(),
 }));
 const unitId = 'src/main.ts';
@@ -39,6 +39,84 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 vi.mock('@xstate/react', () => ({
   useSelector: <Snapshot, Value>(actor: { getSnapshot: () => Snapshot }, selector: (snapshot: Snapshot) => Value) =>
     selector(actor.getSnapshot()),
+}));
+
+vi.mock('#routes/w.$workspace.$project/use-chat-interface-state.js', () => ({
+  usePaneviewPersistence: () => ({ savedState: {}, connectApi: vi.fn() }),
+  getInitialPanelOptions: (
+    _saved: Record<string, unknown>,
+    _panelId: string,
+    defaults: { isExpanded: boolean; size?: number },
+  ) => defaults,
+}));
+
+vi.mock('dockview-react', () => ({
+  PaneviewReact: ({
+    onReady,
+    components,
+    headerComponents,
+  }: {
+    onReady: (event: { api: Record<string, unknown> }) => void;
+    components: Record<string, React.ComponentType<{ params: Record<string, unknown> }>>;
+    headerComponents: Record<
+      string,
+      React.ComponentType<{ api: Record<string, unknown>; params: Record<string, unknown> }>
+    >;
+  }) => {
+    type MockPanel = {
+      id: string;
+      component: string;
+      headerComponent: string;
+      headerSize: number;
+      isExpanded: boolean;
+      minimumBodySize: number;
+      size: number;
+      params: Record<string, unknown>;
+      api: Record<string, unknown>;
+    };
+    const panels: MockPanel[] = [];
+    const api = {
+      panels,
+      addPanel: (options: Omit<MockPanel, 'api'>) => {
+        const setExpanded = vi.fn();
+        const panelApi = {
+          isExpanded: options.isExpanded,
+          onDidExpansionChange: () => ({ dispose: vi.fn() }),
+          setExpanded,
+          setSize: vi.fn(),
+          updateParameters: (next: Record<string, unknown>) => {
+            Object.assign(options.params, next);
+          },
+        };
+        mocks.paneApis.set(options.id, { setExpanded });
+        panels.push({ ...options, api: panelApi });
+      },
+      getPanel: (id: string) => panels.find((panel) => panel.id === id),
+    };
+    onReady({ api });
+
+    return (
+      <div data-testid='model-paneview'>
+        {panels.map((panel) => {
+          const Header = headerComponents[panel.headerComponent]!;
+          const Body = components[panel.component]!;
+          return (
+            <section
+              key={panel.id}
+              data-testid={`model-pane-${panel.id}`}
+              data-expanded={String(panel.isExpanded)}
+              data-header-size={panel.headerSize}
+              data-minimum-body-size={panel.minimumBodySize}
+              data-size={panel.size}
+            >
+              <Header api={panel.api} params={panel.params} />
+              <Body params={panel.params} />
+            </section>
+          );
+        })}
+      </div>
+    );
+  },
 }));
 
 const firstComponentId = 'component:first';
@@ -216,6 +294,7 @@ function renderComponentRow(properties: Parameters<typeof ComponentRow>[0]): Ret
 
 beforeEach(() => {
   mocks.addContextReferences.mockReset();
+  mocks.paneApis.clear();
   mocks.useProject.mockReset();
 });
 
@@ -225,10 +304,11 @@ describe('ChatExplorerTree', () => {
 
     renderExplorerTree();
 
+    expect(screen.getByRole('textbox', { name: 'Filter parts' })).toHaveAttribute('placeholder', 'Filter parts...');
     expect(screen.getByText('No model components available').closest('[data-slot="empty-items"]')).toBeTruthy();
   });
 
-  it('should render compilation unit sections and keep search hidden until requested', async () => {
+  it('should render default-open Paneview units and filter every unit from one permanent input', async () => {
     const user = userEvent.setup();
     const mainNode = createNode(firstComponentId, 'main_part');
     const helperNode = createNode(secondComponentId, 'helper_part');
@@ -249,28 +329,28 @@ describe('ChatExplorerTree', () => {
 
     renderExplorerTree();
 
-    expect(screen.getByText('src/main.ts')).toBeInTheDocument();
-    expect(screen.getByText('src/helper.ts')).toBeInTheDocument();
-    const sectionTitles = screen.getAllByTestId('explorer-section-title');
-    expect(sectionTitles[0]).toHaveTextContent('src/main.ts');
-    expect(sectionTitles[0]).toHaveAttribute('dir', 'rtl');
-    expect(sectionTitles[0]).toHaveClass('text-[13px]');
-    expect(sectionTitles[0]).not.toHaveClass('uppercase');
+    const unitHeaders = screen.getAllByRole('button', { name: /src\/.+\.ts/ });
+    expect(unitHeaders[0]).toHaveAccessibleName('src/main.ts');
+    expect(unitHeaders[1]).toHaveAccessibleName('src/helper.ts');
+    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-expanded', 'true');
+    expect(screen.getByTestId('model-pane-src/helper.ts')).toHaveAttribute('data-expanded', 'true');
+    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-size', '200');
+    expect(screen.getByTestId('model-pane-src/main.ts')).toHaveAttribute('data-minimum-body-size', '80');
     expect(screen.getByText('main_part')).toBeInTheDocument();
     expect(screen.getByText('helper_part')).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText('Search parts...')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show search' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Show search' }));
-    const searchInput = screen.getByPlaceholderText('Search parts...');
-    await user.type(searchInput, 'helper');
+    const filterInput = screen.getByRole('textbox', { name: 'Filter parts' });
+    await user.type(filterInput, 'helper');
 
     expect(screen.queryByText('main_part')).not.toBeInTheDocument();
-    expect(screen.getByText('helper_part')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'helper_part' })).toBeInTheDocument();
+    expect(screen.getByText('helper')).toHaveAttribute('data-slot', 'highlight');
     expect(screen.getByText('No matching parts').closest('[data-slot="empty-items"]')).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: 'Hide search' }));
+    await user.click(screen.getByRole('button', { name: 'Clear search' }));
 
-    expect(screen.queryByPlaceholderText('Search parts...')).not.toBeInTheDocument();
+    expect(filterInput).toHaveValue('');
     expect(screen.getByText('main_part')).toBeInTheDocument();
   });
 
@@ -313,11 +393,7 @@ describe('ChatExplorerTree', () => {
 
       renderExplorerTree({ setIsExpanded });
 
-      await user.click(screen.getByRole('button', { name: 'src/helper.ts' }));
-      expect(screen.queryByText('helper_part')).not.toBeInTheDocument();
-
-      await user.click(screen.getByRole('button', { name: 'Show search' }));
-      await user.type(screen.getByPlaceholderText('Search parts...'), 'main');
+      await user.type(screen.getByRole('textbox', { name: 'Filter parts' }), 'main');
 
       act(() => {
         editorRef.emit('modelComponentRevealRequested', {
@@ -332,7 +408,8 @@ describe('ChatExplorerTree', () => {
         expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
       });
       expect(setIsExpanded).toHaveBeenCalledWith(true);
-      expect(screen.queryByPlaceholderText('Search parts...')).not.toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'Filter parts' })).toHaveValue('');
+      expect(mocks.paneApis.get('src/helper.ts')?.setExpanded).toHaveBeenCalledWith(true);
       const rowButton = screen.getByRole('button', { name: 'helper_part' });
       const row = rowButton.parentElement;
       expect(rowButton).toHaveAttribute('aria-pressed', 'true');
@@ -346,7 +423,6 @@ describe('ChatExplorerTree', () => {
   });
 
   it('should open requested unavailable renderer sections', async () => {
-    const user = userEvent.setup();
     const setIsExpanded = vi.fn();
     const mainNode = createNode(firstComponentId, 'main_part');
     const editorRef = createTestEditorActor({
@@ -367,9 +443,7 @@ describe('ChatExplorerTree', () => {
     });
 
     renderExplorerTree({ setIsExpanded });
-
-    await user.click(screen.getByRole('button', { name: 'src/unopened.ts' }));
-    expect(screen.queryByText('Open renderer to inspect components')).not.toBeInTheDocument();
+    mocks.paneApis.get('src/unopened.ts')?.setExpanded.mockClear();
 
     act(() => {
       editorRef.emit('modelComponentRevealRequested', {
@@ -384,6 +458,7 @@ describe('ChatExplorerTree', () => {
       expect(screen.getByText('Open renderer to inspect components')).toBeInTheDocument();
     });
     expect(setIsExpanded).toHaveBeenCalledWith(true);
+    expect(mocks.paneApis.get('src/unopened.ts')?.setExpanded).toHaveBeenCalledWith(true);
   });
 
   it('should surface compilation units without an active renderer as unavailable', () => {
@@ -461,6 +536,7 @@ describe('Chat explorer component rows', () => {
 
     expect(getComponentRowPaddingLeft({ depth: node.depth, rootDepth: 0 })).toBe(8);
     expect(row).toHaveClass('h-7');
+    expect(row).toHaveClass('rounded-md');
     expect(row).toHaveClass('text-sm');
     expect(row).toHaveClass('leading-5');
     expect(row).toHaveStyle({ paddingLeft: '8px' });
@@ -730,12 +806,6 @@ describe('Chat explorer component rows', () => {
     expect(rowButton.children[1]).toHaveTextContent('sun_gear');
   });
 
-  it('should show row actions while hovered or isolated', () => {
-    expect(shouldShowComponentRowActions({ isHovered: true, isIsolated: false })).toBe(true);
-    expect(shouldShowComponentRowActions({ isHovered: false, isIsolated: true })).toBe(true);
-    expect(shouldShowComponentRowActions({ isHovered: false, isIsolated: false })).toBe(false);
-  });
-
   it('should keep isolate controls active for isolated rows while another row is hovered', () => {
     const firstNode = createNode(firstComponentId, 'planetary_housing');
     const secondNode = createNode(secondComponentId, 'sun_gear_assembly');
@@ -773,11 +843,8 @@ describe('Chat explorer component rows', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' })).toHaveAttribute(
-      'tabindex',
-      '0',
-    );
-    expect(screen.getByRole('button', { name: 'Isolate sun_gear_assembly' })).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('button', { name: 'Remove isolation for planetary_housing' }).tabIndex).toBe(0);
+    expect(screen.getByRole('button', { name: 'Isolate sun_gear_assembly' }).tabIndex).toBe(0);
   });
 
   it('should toggle isolation from the first-class target button', async () => {

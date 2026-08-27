@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
@@ -15,6 +15,7 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 const mocks = vi.hoisted(() => ({
   addContextReferences: vi.fn(),
   editorSend: vi.fn(),
+  openPanel: vi.fn(),
 }));
 
 vi.mock('#components/chat/chat-context-insertion.js', () => ({
@@ -24,6 +25,10 @@ vi.mock('#components/chat/chat-context-insertion.js', () => ({
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef: { send: mocks.editorSend } }),
+}));
+
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useProjectWorkspace: () => ({ openPanel: mocks.openPanel }),
 }));
 
 const componentId = 'component:first';
@@ -85,6 +90,15 @@ function createManifest(node = createNode(), sourceFile?: string): GeometryCompo
 beforeEach(() => {
   mocks.addContextReferences.mockReset();
   mocks.editorSend.mockReset();
+  mocks.openPanel.mockReset();
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 function renderViewerModelComponentActionMenu({
@@ -151,7 +165,6 @@ describe('model component action menu', () => {
         isIsolated={false}
         hasHiddenComponents={false}
         hasOpacityOverrides={false}
-        shouldShowActions
         actionButtonClassName='size-5'
         opacity={1}
       />,
@@ -261,12 +274,14 @@ describe('model component action menu', () => {
       componentId,
       source: 'viewer',
     });
+    expect(mocks.openPanel).toHaveBeenCalledWith('model');
     expect(mocks.editorSend).toHaveBeenCalledWith({
       type: 'revealModelComponentInExplorer',
       entryPath: 'src/main.ts',
       unitId,
       componentId,
     });
+    expect(mocks.openPanel.mock.invocationCallOrder[0]!).toBeLessThan(mocks.editorSend.mock.invocationCallOrder[0]!);
     unmount();
 
     render(
@@ -280,7 +295,6 @@ describe('model component action menu', () => {
         isIsolated={false}
         hasHiddenComponents={false}
         hasOpacityOverrides={false}
-        shouldShowActions
         actionButtonClassName='size-5'
         opacity={1}
       />,
@@ -307,7 +321,6 @@ describe('model component action menu', () => {
         isIsolated={false}
         hasHiddenComponents
         hasOpacityOverrides
-        shouldShowActions
         actionButtonClassName='size-5'
         opacity={0.5}
       />,

@@ -22,6 +22,7 @@ import { useProject } from '#hooks/use-project.js';
 import { MenuSliderItem } from '#components/ui/menu-slider-item.js';
 import { menuItemVariants, menuSeparatorVariants } from '#components/ui/menu.variants.js';
 import { cn } from '#utils/ui.utils.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 
@@ -41,7 +42,6 @@ export type ModelComponentActionMenuData = {
 };
 
 type ModelComponentActionDropdownProperties = ModelComponentActionMenuData & {
-  readonly shouldShowActions: boolean;
   readonly actionButtonClassName: string;
 };
 
@@ -112,19 +112,13 @@ export function buildModelComponentGeometryReference(
 }
 
 export function ModelComponentActionDropdown({
-  shouldShowActions,
   actionButtonClassName,
   ...data
 }: ModelComponentActionDropdownProperties): React.JSX.Element {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <button
-          type='button'
-          tabIndex={shouldShowActions ? 0 : -1}
-          className={actionButtonClassName}
-          aria-label={`Actions for ${data.node.name}`}
-        >
+        <button type='button' className={actionButtonClassName} aria-label={`Actions for ${data.node.name}`}>
           <MoreHorizontal className='size-3.5' />
         </button>
       </DropdownMenuTrigger>
@@ -379,6 +373,7 @@ function useModelComponentActions({
 }: ModelComponentActionMenuData): ModelComponentActions {
   const { addContextReferences } = useChatContextInsertion();
   const project = useProject({ enableNoContext: true });
+  const workspace = useProjectWorkspace({ enableNoContext: true });
 
   return {
     addToChat: () => {
@@ -401,11 +396,14 @@ function useModelComponentActions({
         return;
       }
       graphicsRef.send({ type: 'selectModelComponent', unitId, componentId: node.id, source: 'viewer' });
-      project.editorRef.send({
-        type: 'revealModelComponentInExplorer',
-        entryPath: manifest.sourceFile,
-        unitId,
-        componentId: node.id,
+      workspace?.openPanel('model');
+      requestAnimationFrame(() => {
+        project.editorRef.send({
+          type: 'revealModelComponentInExplorer',
+          entryPath: manifest.sourceFile!,
+          unitId,
+          componentId: node.id,
+        });
       });
     },
     focusComponent: () => {

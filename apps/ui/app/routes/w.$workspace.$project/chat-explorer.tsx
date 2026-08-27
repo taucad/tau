@@ -1,11 +1,14 @@
-import { XIcon, FileBox, ChevronRight, Box, Eye, EyeOff, Target, Search } from 'lucide-react';
+import { XIcon, Box, Eye, EyeOff, Target } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
+import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
+import { PaneviewReact } from 'dockview-react';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
 import { SearchInput } from '#components/search-input.js';
+import { HighlightText } from '#components/highlight-text.js';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -14,11 +17,7 @@ import {
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
-  FloatingPanelTrigger,
-  FloatingPanelMenuButton,
-  FloatingPanelButtonGroup,
 } from '#components/ui/floating-panel.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
 import { ContextMenu, ContextMenuTrigger } from '#components/ui/context-menu.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import {
@@ -30,15 +29,22 @@ import { useProject } from '#hooks/use-project.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
 import { cn } from '#utils/ui.utils.js';
 import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import {
+  PaneviewHeader,
+  PaneviewHeaderAction,
+  PaneviewHeaderControls,
+  paneviewAttachedSurfaceStyleOverrides,
+  paneviewHeaderSize,
+} from '#components/panes/paneview-header.js';
+import {
+  getInitialPanelOptions,
+  usePaneviewPersistence,
+} from '#routes/w.$workspace.$project/use-chat-interface-state.js';
+import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
-const keyCombinationEditor = {
-  key: 'a',
-  ctrlKey: true,
-} as const satisfies KeyCombination;
+const keyCombinationEditor = projectWorkspaceKeyCombinations.model;
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
@@ -58,16 +64,6 @@ export function getComponentRowPaddingLeft({
   readonly rootDepth: number;
 }): number {
   return 8 + Math.max(0, depth - rootDepth - 1) * 12;
-}
-
-export function shouldShowComponentRowActions({
-  isHovered,
-  isIsolated,
-}: {
-  readonly isHovered: boolean;
-  readonly isIsolated: boolean;
-}): boolean {
-  return isHovered || isIsolated;
 }
 
 function getVisibilityAction({
@@ -128,62 +124,16 @@ function getIsolationAction({
   };
 }
 
-export function ChatExplorerTrigger({
-  isOpen,
-  onToggle,
-}: {
-  readonly isOpen: boolean;
-  readonly onToggle: () => void;
-}): React.JSX.Element {
-  return (
-    <FloatingPanelTrigger
-      icon={FileBox}
-      tooltipContent={
-        <div className='flex items-center gap-2'>
-          {isOpen ? 'Close' : 'Open'} Explorer
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(keyCombinationEditor)}</KeyShortcut>
-        </div>
-      }
-      className={isOpen ? 'text-primary' : undefined}
-      tooltipSide='right'
-      onClick={onToggle}
-    />
-  );
-}
-
-export function ChatExplorerTree({
-  className,
-  isExpanded = true,
-  setIsExpanded,
-}: {
-  readonly className?: string;
-  readonly isExpanded: boolean;
-  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
-}): React.JSX.Element {
+export function ModelPanelBody({ onRequestOpen }: { readonly onRequestOpen?: () => void }): React.JSX.Element {
   const project = useProject({ enableNoContext: true });
-  const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [query, setQuery] = useState('');
   const [revealTarget, setRevealTarget] = useState<ModelComponentRevealTarget>();
-  const toggleEditor = () => {
-    setIsExpanded?.((current) => !current);
-  };
-  const { formattedKeyCombination: formattedEditorKeyCombination } = useKeybinding(keyCombinationEditor, toggleEditor);
-  const toggleSearch = useCallback(() => {
-    setIsSearchVisible((current) => {
-      const next = !current;
-      if (!next) {
-        setQuery('');
-      }
-      return next;
-    });
-  }, []);
   useEffect(() => {
     if (!project) {
       return undefined;
     }
     const subscription = project.editorRef.on('modelComponentRevealRequested', (event) => {
-      setIsExpanded?.(true);
-      setIsSearchVisible(false);
+      onRequestOpen?.();
       setQuery('');
       setRevealTarget((current) => ({
         entryPath: event.entryPath,
@@ -195,47 +145,71 @@ export function ChatExplorerTree({
     return () => {
       subscription.unsubscribe();
     };
-  }, [project, setIsExpanded]);
+  }, [onRequestOpen, project]);
 
+  return (
+    <div data-slot='model-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar text-sm'>
+      <div data-slot='model-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
+        <SearchInput
+          aria-label='Filter parts'
+          placeholder='Filter parts...'
+          value={query}
+          className='h-7 min-w-0 bg-background'
+          onChange={(event) => {
+            setQuery(event.target.value);
+          }}
+          onClear={() => {
+            setQuery('');
+          }}
+        />
+      </div>
+      <div className='min-h-0 flex-1 overflow-hidden'>
+        {project ? (
+          <ChatGeometryExplorerContent project={project} query={query} revealTarget={revealTarget} />
+        ) : (
+          <ExplorerEmptyState />
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ChatExplorerTree({
+  className,
+  isExpanded = true,
+  setIsExpanded,
+}: {
+  readonly className?: string;
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
+}): React.JSX.Element {
+  const toggleEditor = (): void => {
+    setIsExpanded?.((current) => !current);
+  };
+  const { formattedKeyCombination: formattedEditorKeyCombination } = useKeybinding(keyCombinationEditor, toggleEditor);
   return (
     <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelContent className='text-sm'>
         <FloatingPanelContentHeader>
-          <FloatingPanelContentTitle>Explorer</FloatingPanelContentTitle>
+          <FloatingPanelContentTitle>Model</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
-            <FloatingPanelButtonGroup>
-              <FloatingPanelMenuButton
-                className={cn(isSearchVisible && 'text-primary')}
-                aria-label={isSearchVisible ? 'Hide search' : 'Show search'}
-                tooltip={isSearchVisible ? 'Hide search' : 'Search parts'}
-                onClick={toggleSearch}
-              >
-                <Search className='size-4' />
-              </FloatingPanelMenuButton>
-            </FloatingPanelButtonGroup>
             <FloatingPanelClose
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>
-                  {isOpen ? 'Close' : 'Open'} Explorer
+                  {isOpen ? 'Close' : 'Open'} Model
                   <KeyShortcut variant='tooltip'>{formattedEditorKeyCombination}</KeyShortcut>
                 </div>
               )}
             />
           </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
-        <FloatingPanelContentBody className='flex flex-col px-0 py-0'>
-          {project ? (
-            <ChatGeometryExplorerContent
-              project={project}
-              query={query}
-              isSearchVisible={isSearchVisible}
-              revealTarget={revealTarget}
-              onQueryChange={setQuery}
-            />
-          ) : (
-            <ExplorerEmptyState />
-          )}
+        <FloatingPanelContentBody className='p-0'>
+          <ModelPanelBody
+            onRequestOpen={() => {
+              setIsExpanded?.(true);
+            }}
+          />
         </FloatingPanelContentBody>
       </FloatingPanelContent>
     </FloatingPanel>
@@ -245,23 +219,13 @@ export function ChatExplorerTree({
 function ChatGeometryExplorerContent({
   project,
   query,
-  isSearchVisible,
   revealTarget,
-  onQueryChange,
 }: {
   readonly project: NonNullable<ReturnType<typeof useProject>>;
   readonly query: string;
-  readonly isSearchVisible: boolean;
   readonly revealTarget: ModelComponentRevealTarget | undefined;
-  readonly onQueryChange: (query: string) => void;
 }): React.JSX.Element {
-  const [openByEntryPath, setOpenByEntryPath] = useState<Record<string, boolean>>({});
-  const contentRef = useRef<HTMLDivElement>(null);
   const viewSettings = useSelector(project.editorRef, (state) => state.context.viewSettings);
-  const entries = useMemo(
-    () => sortGeometryUnitEntries([...project.geometryUnits.entries()], project.mainEntryPath),
-    [project.geometryUnits, project.mainEntryPath],
-  );
   const resolveGraphicsForFile = useCallback(
     (entryPath: string): GraphicsActorRef | undefined => {
       for (const [viewId, graphicsRef] of project.viewGraphics) {
@@ -273,123 +237,112 @@ function ChatGeometryExplorerContent({
     },
     [project.viewGraphics, viewSettings],
   );
-  const setSectionOpen = useCallback((entryPath: string, isOpen: boolean): void => {
-    setOpenByEntryPath((current) => ({ ...current, [entryPath]: isOpen }));
-  }, []);
-  useEffect(() => {
-    if (!revealTarget || !entries.some(([entryPath]) => entryPath === revealTarget.entryPath)) {
-      return;
-    }
-    setOpenByEntryPath((current) =>
-      current[revealTarget.entryPath] ? current : { ...current, [revealTarget.entryPath]: true },
-    );
-  }, [entries, revealTarget]);
-  useEffect(() => {
-    if (!revealTarget) {
-      return;
-    }
-    const row = [...(contentRef.current?.querySelectorAll<HTMLElement>('[data-model-component-row]') ?? [])].find(
-      (candidate) =>
-        candidate.dataset['modelComponentUnitId'] === revealTarget.unitId &&
-        candidate.dataset['modelComponentId'] === revealTarget.componentId,
-    );
-    row?.scrollIntoView({ block: 'center' });
-  }, [openByEntryPath, query, revealTarget]);
+  const entries = useMemo(
+    () =>
+      sortGeometryUnitEntries([...project.geometryUnits.entries()], project.mainEntryPath).map(
+        ([entryPath]): [string, GraphicsActorRef | undefined] => [entryPath, resolveGraphicsForFile(entryPath)],
+      ),
+    [project.geometryUnits, project.mainEntryPath, resolveGraphicsForFile],
+  );
 
   if (entries.length === 0) {
     return <ExplorerEmptyState />;
   }
 
-  return (
-    <>
-      {isSearchVisible && (
-        <div className='flex w-full shrink-0 flex-row gap-1.5 border-b bg-sidebar px-2 py-1.5'>
-          <SearchInput
-            value={query}
-            placeholder='Search parts...'
-            className='h-6 w-full bg-background text-xs placeholder:text-xs'
-            onChange={(event) => {
-              onQueryChange(event.target.value);
-            }}
-            onClear={() => {
-              onQueryChange('');
-            }}
-          />
-        </div>
-      )}
-      <div ref={contentRef} className='flex min-h-0 flex-1 flex-col'>
-        {entries.map(([entryPath]) => (
-          <CompilationUnitExplorerSection
-            key={entryPath}
-            entryPath={entryPath}
-            graphicsRef={resolveGraphicsForFile(entryPath)}
-            query={query}
-            isMainEntryPath={entryPath === project.mainEntryPath}
-            openByEntryPath={openByEntryPath}
-            onOpenChange={setSectionOpen}
-          />
-        ))}
-      </div>
-    </>
-  );
+  return <ModelPaneview entries={entries} query={query} revealTarget={revealTarget} />;
 }
 
-function CompilationUnitExplorerSection({
-  entryPath,
-  graphicsRef,
+type ModelPaneviewPanelParams = {
+  entryPath: string;
+  graphicsRef?: GraphicsActorRef;
+  query: string;
+  revealTarget?: ModelComponentRevealTarget;
+};
+
+function ModelPaneview({
+  entries,
   query,
-  isMainEntryPath,
-  openByEntryPath,
-  onOpenChange,
+  revealTarget,
 }: {
-  readonly entryPath: string;
-  readonly graphicsRef: GraphicsActorRef | undefined;
+  readonly entries: Array<[string, GraphicsActorRef | undefined]>;
   readonly query: string;
-  readonly isMainEntryPath: boolean;
-  readonly openByEntryPath: Record<string, boolean>;
-  readonly onOpenChange: (entryPath: string, isOpen: boolean) => void;
+  readonly revealTarget: ModelComponentRevealTarget | undefined;
 }): React.JSX.Element {
-  if (!graphicsRef) {
-    return (
-      <ExplorerCollapsibleSection
-        title={entryPath}
-        count={0}
-        isOpen={openByEntryPath[entryPath] ?? true}
-        onOpenChange={(isOpen) => {
-          onOpenChange(entryPath, isOpen);
-        }}
-      >
-        <ExplorerUnavailableState />
-      </ExplorerCollapsibleSection>
-    );
-  }
+  const { savedState, connectApi } = usePaneviewPersistence('modelPaneview');
+  const paneviewApiRef = useRef<PaneviewApi | undefined>(undefined);
+  const paneviewKey = useMemo(() => entries.map(([entryPath]) => entryPath).join('\0'), [entries]);
+
+  const handleReady = useCallback(
+    ({ api }: { api: PaneviewApi }) => {
+      paneviewApiRef.current = api;
+      connectApi(api);
+
+      for (const [entryPath, graphicsRef] of entries) {
+        const initial = getInitialPanelOptions(savedState, entryPath, { isExpanded: true, size: 200 });
+        api.addPanel({
+          id: entryPath,
+          title: entryPath,
+          component: 'modelPanel',
+          headerComponent: 'modelHeader',
+          headerSize: paneviewHeaderSize,
+          isExpanded: initial.isExpanded,
+          minimumBodySize: 80,
+          size: initial.size,
+          params: { entryPath, graphicsRef, query, revealTarget } satisfies ModelPaneviewPanelParams,
+        });
+      }
+    },
+    [connectApi, entries, query, revealTarget, savedState],
+  );
+
+  useEffect(() => {
+    const api = paneviewApiRef.current;
+    if (!api) {
+      return;
+    }
+
+    for (const [entryPath, graphicsRef] of entries) {
+      api.getPanel(entryPath)?.api.updateParameters({
+        entryPath,
+        graphicsRef,
+        query,
+        revealTarget: revealTarget?.entryPath === entryPath ? revealTarget : undefined,
+      });
+    }
+  }, [entries, query, revealTarget]);
+
+  useEffect(() => {
+    if (!revealTarget) {
+      return;
+    }
+    paneviewApiRef.current?.getPanel(revealTarget.entryPath)?.api.setExpanded(true);
+  }, [revealTarget]);
 
   return (
-    <LiveCompilationUnitTree
-      entryPath={entryPath}
-      graphicsRef={graphicsRef}
-      query={query}
-      isMainEntryPath={isMainEntryPath}
-      openByEntryPath={openByEntryPath}
-      onOpenChange={onOpenChange}
+    <PaneviewReact
+      key={paneviewKey}
+      className={paneviewAttachedSurfaceStyleOverrides}
+      components={paneviewComponents}
+      headerComponents={paneviewHeaderComponents}
+      onReady={handleReady}
     />
   );
 }
 
-function LiveCompilationUnitTree({
-  entryPath,
+function ModelPaneviewPanel({ params }: { readonly params: ModelPaneviewPanelParams }): React.JSX.Element {
+  if (!params.graphicsRef) {
+    return <ModelPaneviewPanelSurface />;
+  }
+
+  return <LiveModelPaneviewPanel params={params} graphicsRef={params.graphicsRef} />;
+}
+
+function LiveModelPaneviewPanel({
+  params,
   graphicsRef,
-  query,
-  isMainEntryPath,
-  openByEntryPath,
-  onOpenChange,
 }: {
-  readonly entryPath: string;
+  readonly params: ModelPaneviewPanelParams;
   readonly graphicsRef: GraphicsActorRef;
-  readonly query: string;
-  readonly isMainEntryPath: boolean;
-  readonly openByEntryPath: Record<string, boolean>;
-  readonly onOpenChange: (entryPath: string, isOpen: boolean) => void;
 }): React.JSX.Element {
   const modelRef = useSelector(
     graphicsRef,
@@ -397,51 +350,23 @@ function LiveCompilationUnitTree({
   );
 
   if (!modelRef) {
-    return (
-      <ExplorerCollapsibleSection
-        title={entryPath}
-        count={0}
-        isOpen={openByEntryPath[entryPath] ?? true}
-        onOpenChange={(isOpen) => {
-          onOpenChange(entryPath, isOpen);
-        }}
-      >
-        <ExplorerUnavailableState />
-      </ExplorerCollapsibleSection>
-    );
+    return <ModelPaneviewPanelSurface />;
   }
 
-  return (
-    <LiveComponentTree
-      entryPath={entryPath}
-      graphicsRef={graphicsRef}
-      modelRef={modelRef}
-      query={query}
-      isMainEntryPath={isMainEntryPath}
-      openByEntryPath={openByEntryPath}
-      onOpenChange={onOpenChange}
-    />
-  );
+  return <LiveComponentTree params={params} graphicsRef={graphicsRef} modelRef={modelRef} />;
 }
 
 function LiveComponentTree({
-  entryPath,
+  params,
   graphicsRef,
   modelRef,
-  query,
-  isMainEntryPath,
-  openByEntryPath,
-  onOpenChange,
 }: {
-  readonly entryPath: string;
+  readonly params: ModelPaneviewPanelParams;
   readonly graphicsRef: GraphicsActorRef;
   readonly modelRef: ModelInteractionRef;
-  readonly query: string;
-  readonly isMainEntryPath: boolean;
-  readonly openByEntryPath: Record<string, boolean>;
-  readonly onOpenChange: (entryPath: string, isOpen: boolean) => void;
 }): React.JSX.Element {
-  const unitId = deriveModelInteractionUnitId({ sourceFile: entryPath });
+  const contentRef = useRef<HTMLDivElement>(null);
+  const unitId = deriveModelInteractionUnitId({ sourceFile: params.entryPath });
   const unitState = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
   const {
     manifest,
@@ -454,48 +379,33 @@ function LiveComponentTree({
   } = unitState;
   const root = manifest ? manifest.nodesById[manifest.rootId] : undefined;
   const childCount = root?.childIds.length ?? 0;
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = params.query.trim().toLowerCase();
   const matchingChildCount = manifest && root ? countMatchingChildren({ manifest, node: root, normalizedQuery }) : 0;
-  const isOpen = openByEntryPath[entryPath] ?? (isMainEntryPath || childCount > 0 || !manifest);
+
+  useEffect(() => {
+    if (!params.revealTarget || params.revealTarget.unitId !== unitId) {
+      return;
+    }
+    const row = [...(contentRef.current?.querySelectorAll<HTMLElement>('[data-model-component-row]') ?? [])].find(
+      (candidate) => candidate.dataset['modelComponentId'] === params.revealTarget?.componentId,
+    );
+    row?.scrollIntoView({ block: 'center' });
+  }, [params.query, params.revealTarget, unitId]);
 
   if (!manifest || !root || childCount === 0) {
-    return (
-      <ExplorerCollapsibleSection
-        title={entryPath}
-        count={0}
-        hiddenComponentCount={hiddenComponentIds.length}
-        onShowHiddenComponents={() => {
-          graphicsRef.send({ type: 'showHiddenModelComponents', unitId, source: 'explorer' });
-        }}
-        isOpen={isOpen}
-        onOpenChange={(nextOpen) => {
-          onOpenChange(entryPath, nextOpen);
-        }}
-      >
-        <ExplorerUnavailableState />
-      </ExplorerCollapsibleSection>
-    );
+    return <ModelPaneviewPanelSurface />;
   }
 
   return (
-    <ExplorerCollapsibleSection
-      title={entryPath}
-      count={childCount}
-      hiddenComponentCount={hiddenComponentIds.length}
-      onShowHiddenComponents={() => {
-        graphicsRef.send({ type: 'showHiddenModelComponents', unitId, source: 'explorer' });
-      }}
-      isOpen={isOpen}
-      onOpenChange={(nextOpen) => {
-        onOpenChange(entryPath, nextOpen);
-      }}
-    >
+    <ModelPaneviewPanelSurface contentRef={contentRef}>
       {normalizedQuery && matchingChildCount === 0 ? (
         <ExplorerNoMatchesState />
       ) : (
         <ComponentRows
+          ariaLabel={`Model components for ${params.entryPath}`}
           manifest={manifest}
           node={root}
+          query={params.query}
           normalizedQuery={normalizedQuery}
           graphicsRef={graphicsRef}
           unitId={unitId}
@@ -508,9 +418,126 @@ function LiveComponentTree({
           rootDepth={root.depth}
         />
       )}
-    </ExplorerCollapsibleSection>
+    </ModelPaneviewPanelSurface>
   );
 }
+
+function ModelPaneviewPanelSurface({
+  contentRef,
+  children,
+}: {
+  readonly contentRef?: React.Ref<HTMLDivElement>;
+  readonly children?: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <div data-slot='model-unit-surface' className='h-full overflow-hidden rounded-b-xl border border-border bg-card'>
+      <div
+        ref={contentRef}
+        data-slot='model-unit-scroller'
+        className='size-full scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
+      >
+        {children ?? <ExplorerUnavailableState />}
+      </div>
+    </div>
+  );
+}
+
+function ModelPaneviewHeader({
+  api,
+  params,
+}: {
+  readonly api: PaneviewPanelApi;
+  readonly params: ModelPaneviewPanelParams;
+}): React.JSX.Element {
+  if (!params.graphicsRef) {
+    return <ModelPaneviewHeaderSurface api={api} entryPath={params.entryPath} />;
+  }
+
+  return <LiveModelPaneviewHeader api={api} entryPath={params.entryPath} graphicsRef={params.graphicsRef} />;
+}
+
+function LiveModelPaneviewHeader({
+  api,
+  entryPath,
+  graphicsRef,
+}: {
+  readonly api: PaneviewPanelApi;
+  readonly entryPath: string;
+  readonly graphicsRef: GraphicsActorRef;
+}): React.JSX.Element {
+  const modelRef = useSelector(
+    graphicsRef,
+    (state) => state.context.modelInteractionRef as ModelInteractionRef | undefined,
+  );
+
+  if (!modelRef) {
+    return <ModelPaneviewHeaderSurface api={api} entryPath={entryPath} />;
+  }
+
+  return <LiveModelPaneviewHeaderState api={api} entryPath={entryPath} graphicsRef={graphicsRef} modelRef={modelRef} />;
+}
+
+function LiveModelPaneviewHeaderState({
+  api,
+  entryPath,
+  graphicsRef,
+  modelRef,
+}: {
+  readonly api: PaneviewPanelApi;
+  readonly entryPath: string;
+  readonly graphicsRef: GraphicsActorRef;
+  readonly modelRef: ModelInteractionRef;
+}): React.JSX.Element {
+  const unitId = deriveModelInteractionUnitId({ sourceFile: entryPath });
+  const unitState = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
+  const root = unitState.manifest?.nodesById[unitState.manifest.rootId];
+
+  return (
+    <ModelPaneviewHeaderSurface
+      api={api}
+      entryPath={entryPath}
+      count={root?.childIds.length ?? 0}
+      hiddenComponentCount={unitState.hiddenComponentIds.length}
+      onShowHiddenComponents={() => {
+        graphicsRef.send({ type: 'showHiddenModelComponents', unitId, source: 'explorer' });
+      }}
+    />
+  );
+}
+
+function ModelPaneviewHeaderSurface({
+  api,
+  entryPath,
+  count = 0,
+  hiddenComponentCount = 0,
+  onShowHiddenComponents,
+}: {
+  readonly api: PaneviewPanelApi;
+  readonly entryPath: string;
+  readonly count?: number;
+  readonly hiddenComponentCount?: number;
+  readonly onShowHiddenComponents?: () => void;
+}): React.JSX.Element {
+  return (
+    <PaneviewHeader api={api} title={entryPath}>
+      <PaneviewHeaderControls>
+        <span className='shrink-0 text-xs text-muted-foreground/60'>({count})</span>
+        {hiddenComponentCount > 0 ? (
+          <PaneviewHeaderAction
+            aria-label={`Show hidden components in ${entryPath}`}
+            tooltip='Show hidden components'
+            onClick={onShowHiddenComponents}
+          >
+            <Eye />
+          </PaneviewHeaderAction>
+        ) : undefined}
+      </PaneviewHeaderControls>
+    </PaneviewHeader>
+  );
+}
+
+const paneviewComponents = { modelPanel: ModelPaneviewPanel };
+const paneviewHeaderComponents = { modelHeader: ModelPaneviewHeader };
 
 function componentMatchesQuery({
   manifest,
@@ -549,8 +576,10 @@ function countMatchingChildren({
 }
 
 function ComponentRows({
+  ariaLabel,
   manifest,
   node,
+  query,
   normalizedQuery,
   graphicsRef,
   unitId,
@@ -562,8 +591,10 @@ function ComponentRows({
   opacityByComponentId,
   rootDepth,
 }: {
+  readonly ariaLabel?: string;
   readonly manifest: GeometryComponentManifest;
   readonly node: GeometryComponentNode;
+  readonly query: string;
   readonly normalizedQuery: string;
   readonly graphicsRef: GraphicsActorRef;
   readonly unitId: string;
@@ -576,7 +607,7 @@ function ComponentRows({
   readonly rootDepth: number;
 }): React.JSX.Element {
   return (
-    <div className='flex flex-col'>
+    <ul aria-label={ariaLabel} className='flex list-none flex-col gap-0.5'>
       {node.childIds.map((childId) => {
         const child = manifest.nodesById[childId];
         if (!child) {
@@ -586,10 +617,11 @@ function ComponentRows({
           return null;
         }
         return (
-          <div key={child.id} className='flex flex-col'>
+          <li key={child.id} className='flex list-none flex-col gap-0.5'>
             <ComponentRow
               manifest={manifest}
               node={child}
+              query={query}
               graphicsRef={graphicsRef}
               unitId={unitId}
               rootDepth={rootDepth}
@@ -606,6 +638,7 @@ function ComponentRows({
               <ComponentRows
                 manifest={manifest}
                 node={child}
+                query={query}
                 normalizedQuery={normalizedQuery}
                 graphicsRef={graphicsRef}
                 unitId={unitId}
@@ -618,16 +651,17 @@ function ComponentRows({
                 rootDepth={rootDepth}
               />
             ) : undefined}
-          </div>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }
 
 export function ComponentRow({
   manifest,
   node,
+  query = '',
   graphicsRef,
   unitId,
   rootDepth,
@@ -642,6 +676,7 @@ export function ComponentRow({
 }: {
   readonly manifest: GeometryComponentManifest;
   readonly node: GeometryComponentNode;
+  readonly query?: string;
   readonly graphicsRef: GraphicsActorRef;
   readonly unitId: string;
   readonly rootDepth: number;
@@ -655,14 +690,16 @@ export function ComponentRow({
   readonly opacity: number;
 }): React.JSX.Element {
   const isHovered = hoveredComponentId === node.id;
-  const showActions = shouldShowComponentRowActions({ isHovered, isIsolated });
   const visibilityAction = getVisibilityAction({ isHidden, nodeName: node.name, unitId, componentId: node.id });
   const isolationAction = getIsolationAction({ isIsolated, nodeName: node.name, unitId, componentId: node.id });
   const VisibilityIcon = visibilityAction.Icon;
   const actionButtonClassName = cn(
-    'flex size-5 items-center justify-center rounded-sm transition-opacity hover:bg-muted-foreground/15 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none',
-    showActions ? 'opacity-100' : 'opacity-0 group-hover/part:opacity-100',
+    'flex size-5 items-center justify-center rounded-md opacity-0 transition-[opacity,color,background-color] duration-150',
+    'hover:bg-muted-foreground/10 hover:text-foreground focus-visible:bg-muted-foreground/10 focus-visible:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none',
+    'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:bg-muted-foreground/10 data-[state=open]:text-foreground data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none',
+    (isHovered || isIsolated) && 'opacity-100',
   );
+  const guideCount = Math.max(0, node.depth - rootDepth - 1);
 
   const onHover = (componentId: string | undefined): void => {
     graphicsRef.send({ type: 'setHoveredModelComponent', unitId, componentId, source: 'explorer' });
@@ -684,7 +721,8 @@ export function ComponentRow({
           data-model-component-unit-id={unitId}
           data-model-component-id={node.id}
           className={cn(
-            'group/part flex h-7 w-full cursor-pointer items-center justify-between py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
+            'group/part relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
+            'focus-within:bg-sidebar-accent/50 focus-within:text-sidebar-accent-foreground focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/30',
             isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',
             !isSelected && isFocused
               ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30'
@@ -702,9 +740,22 @@ export function ComponentRow({
             onHover(undefined);
           }}
         >
+          {Array.from({ length: guideCount }, (_, depth) => (
+            <span
+              // oxlint-disable-next-line react/no-array-index-key -- each position represents a stable ancestor depth
+              key={depth}
+              aria-hidden='true'
+              className={cn(
+                'pointer-events-none absolute inset-y-0 w-px bg-border/60 transition-opacity group-hover/part:opacity-100 group-focus-within/part:opacity-100',
+                isSelected || isFocused ? 'opacity-100' : 'opacity-45',
+              )}
+              style={{ left: `${8 + depth * 12}px` }}
+            />
+          ))}
           <button
             type='button'
-            className='flex min-w-0 flex-1 items-center gap-2 text-left'
+            className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none'
+            aria-label={node.name}
             aria-pressed={isSelected}
             onClick={toggleSelection}
           >
@@ -714,13 +765,14 @@ export function ComponentRow({
               className='size-3.5 shrink-0'
               style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
             />
-            <span className='truncate'>{node.name}</span>
+            <span className='truncate'>
+              <HighlightText text={node.name} searchTerm={query} />
+            </span>
           </button>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type='button'
-                tabIndex={showActions ? 0 : -1}
                 className={actionButtonClassName}
                 aria-label={visibilityAction.ariaLabel}
                 onClick={() => {
@@ -736,7 +788,6 @@ export function ComponentRow({
             <TooltipTrigger asChild>
               <button
                 type='button'
-                tabIndex={showActions ? 0 : -1}
                 className={cn(actionButtonClassName, isolationAction.className)}
                 aria-label={isolationAction.ariaLabel}
                 aria-pressed={isolationAction.pressed}
@@ -757,7 +808,6 @@ export function ComponentRow({
             source='explorer'
             isFocused={isFocused}
             isIsolated={isIsolated}
-            shouldShowActions={showActions}
             hasHiddenComponents={hasHiddenComponents}
             hasOpacityOverrides={hasOpacityOverrides}
             actionButtonClassName={actionButtonClassName}
@@ -791,63 +841,4 @@ function ExplorerUnavailableState(): React.JSX.Element {
 
 function ExplorerNoMatchesState(): React.JSX.Element {
   return <EmptyItems className='min-h-16 break-all'>No matching parts</EmptyItems>;
-}
-
-type ExplorerCollapsibleSectionProps = {
-  readonly title: string;
-  readonly count: number;
-  readonly hiddenComponentCount?: number;
-  readonly onShowHiddenComponents?: () => void;
-  readonly isOpen: boolean;
-  readonly onOpenChange: (isOpen: boolean) => void;
-  readonly children: React.ReactNode;
-};
-
-function ExplorerCollapsibleSection({
-  title,
-  count,
-  hiddenComponentCount = 0,
-  onShowHiddenComponents,
-  isOpen,
-  onOpenChange,
-  children,
-}: ExplorerCollapsibleSectionProps): React.JSX.Element {
-  const hasHiddenComponents = hiddenComponentCount > 0;
-
-  return (
-    <Collapsible open={isOpen} className='w-full border-b border-border/50 last:border-b-0' onOpenChange={onOpenChange}>
-      <div className='group/collapsible flex h-7 w-full items-center gap-1 transition-colors hover:bg-sidebar-accent/50'>
-        <CollapsibleTrigger className='flex min-w-0 flex-1 items-center py-1 pl-2 text-left'>
-          <span data-testid='explorer-section-title' className='truncate text-[13px] text-foreground' dir='rtl'>
-            {title}
-          </span>
-        </CollapsibleTrigger>
-        {hasHiddenComponents ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type='button'
-                className='flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted-foreground/15 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none'
-                aria-label={`Show hidden components in ${title}`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onShowHiddenComponents?.();
-                }}
-              >
-                <Eye className='size-3.5' />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Show hidden components</TooltipContent>
-          </Tooltip>
-        ) : undefined}
-        <span className='shrink-0 text-xs text-muted-foreground/50'>({count})</span>
-        <CollapsibleTrigger className='group/section-chevron flex size-6 shrink-0 items-center justify-center pr-1'>
-          <ChevronRight className='size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/section-chevron:rotate-90' />
-        </CollapsibleTrigger>
-      </div>
-
-      <CollapsibleContent className='px-0 py-0.5'>{children}</CollapsibleContent>
-    </Collapsible>
-  );
 }

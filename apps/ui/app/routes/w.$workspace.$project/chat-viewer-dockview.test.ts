@@ -56,7 +56,7 @@ describe('viewer split launchers', () => {
     expect(inherited).not.toHaveProperty('componentDisplay');
   });
 
-  it('opens a closable New tab launcher in the newly split group', () => {
+  it('opens a Viewer launcher in the newly split group', () => {
     const addPanel = vi.fn();
     const group = { id: 'viewer-split' } as DockviewGroupPanel;
 
@@ -65,7 +65,7 @@ describe('viewer split launchers', () => {
     expect(addPanel).toHaveBeenCalledExactlyOnceWith({
       id: 'pane:new',
       component: 'newTab',
-      title: 'New tab',
+      title: 'Viewer',
       params: { mode: 'launcher' },
       position: { direction: 'within', referenceGroup: group },
     });
@@ -190,6 +190,7 @@ describe('ViewerEmptyFilePicker', () => {
     const { rerender } = render(createElement(ViewerEmptyFilePicker, { files, onSelect, onClose }));
 
     expect(screen.getByTestId('viewer-empty-file-list')).toHaveClass('overflow-y-auto');
+    expect(screen.getAllByText('Open')).toHaveLength(10);
     fireEvent.click(screen.getByRole('button', { name: 'part-0.scad' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close tab' }));
     expect(onSelect).toHaveBeenCalledExactlyOnceWith('parts/part-0.scad');

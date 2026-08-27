@@ -67,7 +67,7 @@ export function createViewerNewTab({
   api.addPanel({
     id,
     component: 'newTab',
-    title: 'New tab',
+    title: 'Viewer',
     params: { mode: 'launcher' },
     ...(group ? { position: { direction: 'within', referenceGroup: group } } : {}),
   });
@@ -215,10 +215,12 @@ export function ViewerEmptyFilePicker({
   files,
   onSelect,
   onClose,
+  closeLabel = 'Close tab',
 }: {
   readonly files: readonly ViewerSelectableFile[] | undefined;
   readonly onSelect: (path: string) => void;
-  readonly onClose: () => void;
+  readonly onClose?: () => void;
+  readonly closeLabel?: string;
 }): React.JSX.Element {
   const isScrollable = (files?.length ?? 0) >= 10;
 
@@ -247,11 +249,14 @@ export function ViewerEmptyFilePicker({
             >
               <FileExtensionIcon filename={file.name} className='size-3.5 shrink-0' />
               <span className='truncate'>{file.name}</span>
+              <span aria-hidden className='ml-auto text-xs text-muted-foreground'>
+                Open
+              </span>
             </DockviewEmptyAction>
           ))}
         </div>
       )}
-      <DockviewEmptyCloseAction onClick={onClose} />
+      {onClose ? <DockviewEmptyCloseAction onClick={onClose}>{closeLabel}</DockviewEmptyCloseAction> : null}
     </div>
   );
 }
@@ -261,11 +266,13 @@ function ViewerEmptyState({
   group,
   placeholderId,
   onClose,
+  closeLabel,
 }: {
   readonly containerApi: DockviewApi;
   readonly group?: DockviewGroupPanel;
   readonly placeholderId?: string;
-  readonly onClose: () => void;
+  readonly onClose?: () => void;
+  readonly closeLabel?: string;
 }): React.JSX.Element {
   const { projectRef, editorRef } = useProject();
   const files = useViewerSelectableFiles();
@@ -305,10 +312,10 @@ function ViewerEmptyState({
   return (
     <DockviewWatermark
       icon={Box}
-      title='No geometry selected'
-      description='Drag a file from the file tree, or select one below'
+      title='Choose a file to view'
+      description='Select a design file below, or drag one here from the file tree'
     >
-      <ViewerEmptyFilePicker files={files} onSelect={handleSelect} onClose={onClose} />
+      <ViewerEmptyFilePicker files={files} onSelect={handleSelect} onClose={onClose} closeLabel={closeLabel} />
     </DockviewWatermark>
   );
 }
@@ -318,9 +325,14 @@ function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.J
     <ViewerEmptyState
       containerApi={containerApi}
       group={group as DockviewGroupPanel | undefined}
-      onClose={() => {
-        group?.api.close();
-      }}
+      closeLabel='Close split'
+      onClose={
+        group && containerApi.groups.length > 1
+          ? () => {
+              group.api.close();
+            }
+          : undefined
+      }
     />
   );
 }

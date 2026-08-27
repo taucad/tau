@@ -363,6 +363,7 @@ function ProjectionRig({
       viewport: { width: size.width, height: size.height, pixelRatio: getPixelRatio() },
     });
     if (configuredGeometryRef.current === geometryHash) {
+      rig.actorRef.send({ type: 'frame', margin: 0.1 });
       return;
     }
     rig.actorRef.send({ type: 'setBounds', bounds: toCameraBounds(bounds) });

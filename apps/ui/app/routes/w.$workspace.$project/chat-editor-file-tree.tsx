@@ -900,7 +900,7 @@ export const ChatEditorFileTree = memo(function ({
   // Search is a permanent part of the Files toolbar.
   useEffect(() => {
     if (!tree.isSearchOpen()) {
-      tree.openSearch();
+      tree.setSearch('');
     }
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- tree object is not stable; search opens once on mount
   }, []);

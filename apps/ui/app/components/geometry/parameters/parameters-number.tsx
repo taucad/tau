@@ -9,6 +9,7 @@ type ParametersNumberProps = {
   readonly value: number;
   readonly defaultValue: number;
   readonly descriptor: MeasurementDescriptor;
+  readonly unitOverride?: string;
   readonly onChange: (value: number) => void;
   readonly min?: number;
   readonly max?: number;
@@ -30,6 +31,7 @@ export function ParametersNumber({
   value,
   defaultValue,
   descriptor,
+  unitOverride,
   onChange,
   min,
   max,
@@ -112,7 +114,7 @@ export function ParametersNumber({
       value={localValue}
       formattedValue={formattedValue}
       isApproximation={isApproximation}
-      unit={displayUnit}
+      unit={unitOverride ?? displayUnit}
       descriptor={descriptor}
       rangeMin={rangeMin}
       rangeMax={rangeMax}

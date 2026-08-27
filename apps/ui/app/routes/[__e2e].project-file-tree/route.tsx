@@ -11,10 +11,29 @@ const encoder = new TextEncoder();
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => encoder.encode(text);
 
-const replicadModel = `import { makeBaseBox } from 'replicad';
+const honeycombModel = `import { makeBaseBox } from 'replicad';
 
-export default function main() {
-  return makeBaseBox(20, 14, 4);
+export const defaultParams = {
+  dimensions: { width: 20, height: 14, depth: 4 },
+  pattern: { cellSize: 3, wallThickness: 1 },
+};
+
+export default function main(params = defaultParams) {
+  const { width, height, depth } = params.dimensions;
+  return makeBaseBox(width, height, depth);
+}
+`;
+
+const boxCornerModel = `import { makeBaseBox } from 'replicad';
+
+export const defaultParams = {
+  dimensions: { width: 16, height: 12, depth: 6 },
+  corner: { cornerRadius: 2, rounded: true },
+};
+
+export default function main(params = defaultParams) {
+  const { width, height, depth } = params.dimensions;
+  return makeBaseBox(width, height, depth);
 }
 `;
 
@@ -28,9 +47,9 @@ const packageJson = JSON.stringify(
 
 const seedFiles = Object.fromEntries([
   ['package.json', { content: encode(packageJson) }],
-  ['public/models/honeycomb.js', { content: encode(replicadModel) }],
-  ['public/models/box-corner.js', { content: encode(replicadModel) }],
-  ['public/models/nested/strainer.js', { content: encode(replicadModel) }],
+  ['public/models/honeycomb.js', { content: encode(honeycombModel) }],
+  ['public/models/box-corner.js', { content: encode(boxCornerModel) }],
+  ['public/models/nested/strainer.js', { content: encode(honeycombModel) }],
   ['src/readme.md', { content: encode('# File tree e2e fixture\n') }],
 ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
@@ -77,15 +96,11 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
           files: seedFiles,
           editorState: {
             panelState: {
-              openPanels: {
-                chat: false,
-                files: true,
-                parameters: false,
-                editor: true,
-              },
-              panelSizes: {
-                files: 260,
-                editor: 460,
+              desktopLayout: {
+                chatOpen: false,
+                workbenchOpen: true,
+                workbenchWidth: 460,
+                compactAuxiliary: 'workbench',
               },
             },
           },

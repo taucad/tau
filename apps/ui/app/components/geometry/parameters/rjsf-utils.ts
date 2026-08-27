@@ -2,6 +2,7 @@
  * Utility functions for React JSON Schema Form (RJSF) operations
  */
 import type { RJSFSchema } from '@rjsf/utils';
+import { formatDisplayLabel } from '#utils/string.utils.js';
 
 /**
  * The prefix used in RJSF IDs.
@@ -63,7 +64,11 @@ export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, p
   const lowerSearch = searchTerm.toLowerCase();
 
   // Check if the property name matches
-  if (propertyName?.toLowerCase().includes(lowerSearch)) {
+  if (
+    propertyName &&
+    (propertyName.toLowerCase().includes(lowerSearch) ||
+      formatDisplayLabel(propertyName).toLowerCase().includes(lowerSearch))
+  ) {
     return true;
   }
 

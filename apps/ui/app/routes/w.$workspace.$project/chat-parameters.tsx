@@ -1,7 +1,5 @@
 import {
   XIcon,
-  SlidersHorizontal,
-  Search,
   ChevronDown,
   CopyMinus,
   CopyPlus,
@@ -49,26 +47,23 @@ import {
   FloatingPanelContentBody,
   FloatingPanelContentHeader,
   FloatingPanelContentHeaderActions,
-  FloatingPanelMenuButton,
-  FloatingPanelButtonGroup,
   FloatingPanelContentTitle,
-  FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
+import { SearchInput } from '#components/search-input.js';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { cn } from '#utils/ui.utils.js';
 import {
   PaneviewHeader,
   PaneviewHeaderAction,
+  PaneviewHeaderActionGroup,
   PaneviewHeaderControls,
   PaneviewHeaderContentActions,
-  paneviewStyleOverrides,
+  paneviewAttachedSurfaceStyleOverrides,
+  paneviewHeaderSize,
 } from '#components/panes/paneview-header.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -79,11 +74,9 @@ import {
   usePaneviewPersistence,
   getInitialPanelOptions,
 } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
+import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
-const toggleParametersKeyCombination = {
-  key: 'x',
-  ctrlKey: true,
-} satisfies KeyCombination;
+const toggleParametersKeyCombination = projectWorkspaceKeyCombinations.parameters;
 
 type ParameterGroupItem = {
   name: string;
@@ -302,7 +295,7 @@ function ParameterGroupSelector({
       return (
         <div className='group flex w-full items-start justify-between'>
           <div className='flex min-w-0 flex-col'>
-            <span className={cn('text-sm font-medium', item.isActive && 'text-primary')}>{item.name}</span>
+            <span className='text-sm font-medium'>{item.name}</span>
             <span className='text-xs text-muted-foreground'>
               {item.parameterCount} {item.parameterCount === 1 ? 'override' : 'overrides'}
             </span>
@@ -375,7 +368,7 @@ function ParameterGroupSelector({
           <button
             type='button'
             aria-label='Parameter groups'
-            className='hover:text-accent-foreground flex h-5 max-w-28 items-center gap-0.5 rounded-sm px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent'
+            className='flex h-6 max-w-28 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors duration-150 motion-reduce:transition-none'
           >
             <span className='truncate'>{activeGroup}</span>
             <ChevronDown className='size-2.5 shrink-0 opacity-60' />
@@ -394,12 +387,12 @@ function ParameterGroupSelector({
 function GeometryUnitParameters({
   entryPath,
   cadRef,
-  enableSearch,
+  filterTerm,
   isAllExpanded,
 }: {
   readonly entryPath: string;
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
-  readonly enableSearch: boolean;
+  readonly filterTerm: string;
   readonly isAllExpanded: boolean;
 }): React.JSX.Element {
   const { parameterEntries, setGeometryUnitParameters } = useProject();
@@ -429,7 +422,9 @@ function GeometryUnitParameters({
       defaultParameters={defaultParameters}
       jsonSchema={jsonSchema}
       units={units}
-      enableSearch={enableSearch}
+      className='overflow-hidden rounded-b-xl border border-border bg-card [&_[data-slot=parameter-catalog]]:m-0 [&_[data-slot=parameter-catalog]]:rounded-none [&_[data-slot=parameter-catalog]]:border-0 [&_[data-slot=parameter-catalog]]:bg-transparent [&_[data-slot=parameter-catalog]]:p-2'
+      enableSearch={false}
+      filterTerm={filterTerm}
       isAllExpanded={isAllExpanded}
       onParametersChange={handleParametersChange}
     />
@@ -443,16 +438,16 @@ function GeometryUnitParameters({
 type ParametersPanelParams = {
   entryPath: string;
   cadRef: ActorRefFrom<typeof cadMachine>;
-  enableSearch: boolean;
+  filterTerm: string;
   isAllExpanded: boolean;
 };
 
-function ParametersPanelBody({ params }: { readonly params: ParametersPanelParams }): React.JSX.Element {
+function ParametersGeometryUnitPanel({ params }: { readonly params: ParametersPanelParams }): React.JSX.Element {
   return (
     <GeometryUnitParameters
       entryPath={params.entryPath}
       cadRef={params.cadRef}
-      enableSearch={params.enableSearch}
+      filterTerm={params.filterTerm}
       isAllExpanded={params.isAllExpanded}
     />
   );
@@ -511,75 +506,77 @@ function ParametersPanelHeader({
       <ContextMenuTrigger asChild>
         <div className='contents'>
           <PaneviewHeader api={api} title={params.entryPath}>
-            {hasModifiedParameters ? (
-              <ModifiedIndicator
-                onReset={handleReset}
-                tooltip='Reset parameters'
-                className='[.dv-pane:hover_&]:**:data-[slot=dot]:opacity-0 [.dv-pane:hover_&]:**:data-[slot=icon]:opacity-100'
-              />
-            ) : null}
-            <PaneviewHeaderControls
-              data-testid='paneview-header-controls'
-              className='opacity-0 transition-opacity duration-150 [&:has([data-state=open])]:opacity-100 [.dv-pane:hover_&]:opacity-100'
-            >
+            <PaneviewHeaderControls data-testid='paneview-header-controls'>
+              {hasModifiedParameters ? (
+                <ModifiedIndicator
+                  onReset={handleReset}
+                  tooltip='Reset parameters'
+                  className='size-6 [.dv-pane:hover_&]:**:data-[slot=dot]:opacity-0 [.dv-pane:hover_&]:**:data-[slot=icon]:opacity-100'
+                />
+              ) : null}
               <ParameterGroupSelector
                 filePath={params.entryPath}
                 groups={displayEntry.groups}
                 activeGroup={displayEntry.activeGroup}
               />
-              <PaneviewHeaderContentActions>
-                {showCollapseToggle ? (
-                  <PaneviewHeaderAction
-                    aria-expanded={params.isAllExpanded}
-                    aria-label={params.isAllExpanded ? 'Collapse all' : 'Expand all'}
-                    tooltip={params.isAllExpanded ? 'Collapse all' : 'Expand all'}
-                    onClick={handleToggleAllExpanded}
-                  >
-                    {params.isAllExpanded ? <CopyMinus /> : <CopyPlus />}
-                  </PaneviewHeaderAction>
-                ) : null}
-              </PaneviewHeaderContentActions>
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
-                  <PaneviewHeaderAction aria-label='Compilation unit actions' tooltip='More actions'>
-                    <MoreHorizontal />
-                  </PaneviewHeaderAction>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align='end' side='bottom'>
-                  <DropdownMenuItem onSelect={handleOpenInViewer}>
-                    <Box />
-                    <span>Open in viewer</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleOpenInEditor}>
-                    <FileCode />
-                    <span>Open in editor</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>
-                      <Download />
-                      <span>Quick export</span>
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className='p-0'>
-                      <ExportSelector
-                        cadActor={params.cadRef}
-                        filenameBase={projectName}
-                        defaultEntryPath={params.entryPath}
-                        variant='sub'
-                      />
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant='destructive'
-                    disabled={isLastGeometryUnit}
-                    onSelect={handleCloseGeometryUnit}
-                  >
-                    <CloseIcon />
-                    <span>Close renderer</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <PaneviewHeaderActionGroup
+                data-testid='paneview-header-actions'
+                className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100'
+              >
+                <PaneviewHeaderContentActions>
+                  {showCollapseToggle ? (
+                    <PaneviewHeaderAction
+                      aria-expanded={params.isAllExpanded}
+                      aria-label={params.isAllExpanded ? 'Collapse all' : 'Expand all'}
+                      tooltip={params.isAllExpanded ? 'Collapse all' : 'Expand all'}
+                      onClick={handleToggleAllExpanded}
+                    >
+                      {params.isAllExpanded ? <CopyMinus /> : <CopyPlus />}
+                    </PaneviewHeaderAction>
+                  ) : null}
+                </PaneviewHeaderContentActions>
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <PaneviewHeaderAction aria-label='Compilation unit actions' tooltip='More actions'>
+                      <MoreHorizontal />
+                    </PaneviewHeaderAction>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align='end' side='bottom'>
+                    <DropdownMenuItem onSelect={handleOpenInViewer}>
+                      <Box />
+                      <span>Open in viewer</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={handleOpenInEditor}>
+                      <FileCode />
+                      <span>Open in editor</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>
+                        <Download />
+                        <span>Quick export</span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className='p-0'>
+                        <ExportSelector
+                          cadActor={params.cadRef}
+                          filenameBase={projectName}
+                          defaultEntryPath={params.entryPath}
+                          variant='sub'
+                        />
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant='destructive'
+                      disabled={isLastGeometryUnit}
+                      onSelect={handleCloseGeometryUnit}
+                    >
+                      <CloseIcon />
+                      <span>Close renderer</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </PaneviewHeaderActionGroup>
             </PaneviewHeaderControls>
           </PaneviewHeader>
         </div>
@@ -618,7 +615,7 @@ function ParametersPanelHeader({
   );
 }
 
-const paneviewComponents = { parametersPanel: ParametersPanelBody };
+const paneviewComponents = { parametersPanel: ParametersGeometryUnitPanel };
 const paneviewHeaderComponents = { parametersHeader: ParametersPanelHeader };
 
 // ---------------------------------------------------------------------------
@@ -628,11 +625,11 @@ const paneviewHeaderComponents = { parametersHeader: ParametersPanelHeader };
 function ParametersPaneview({
   entries,
   mainEntryPath,
-  enableSearch,
+  filterTerm,
 }: {
   readonly entries: Array<[string, ActorRefFrom<typeof cadMachine>]>;
   readonly mainEntryPath: string;
-  readonly enableSearch: boolean;
+  readonly filterTerm: string;
 }): React.JSX.Element {
   const { savedState, connectApi } = usePaneviewPersistence('parametersPaneview');
   const paneviewApiRef = useRef<PaneviewApi | undefined>(undefined);
@@ -658,14 +655,15 @@ function ParametersPaneview({
           title: entryPath,
           component: 'parametersPanel',
           headerComponent: 'parametersHeader',
+          headerSize: paneviewHeaderSize,
           isExpanded: initial.isExpanded,
           minimumBodySize: 80,
           size: initial.size,
-          params: { entryPath, cadRef, enableSearch, isAllExpanded: true } satisfies ParametersPanelParams,
+          params: { entryPath, cadRef, filterTerm, isAllExpanded: true } satisfies ParametersPanelParams,
         });
       }
     },
-    [sortedEntries, mainEntryPath, enableSearch, savedState, connectApi],
+    [sortedEntries, mainEntryPath, filterTerm, savedState, connectApi],
   );
 
   useEffect(() => {
@@ -674,14 +672,14 @@ function ParametersPaneview({
       return;
     }
     for (const panel of api.panels) {
-      panel.api.updateParameters({ enableSearch });
+      panel.api.updateParameters({ filterTerm });
     }
-  }, [enableSearch]);
+  }, [filterTerm]);
 
   return (
     <PaneviewReact
       key={paneviewKey}
-      className={cn(paneviewStyleOverrides, '[&_.dv-pane-body]:overflow-y-hidden!')}
+      className={paneviewAttachedSurfaceStyleOverrides}
       components={paneviewComponents}
       headerComponents={paneviewHeaderComponents}
       onReady={handleReady}
@@ -693,7 +691,7 @@ function ParametersPaneview({
 // Parameters content: single vs multi geometry unit
 // ---------------------------------------------------------------------------
 
-function ParametersContent({ enableSearch }: { readonly enableSearch: boolean }): React.JSX.Element {
+function ParametersContent({ filterTerm }: { readonly filterTerm: string }): React.JSX.Element {
   const { geometryUnits, mainEntryPath } = useProject();
   const entries = useMemo(() => [...geometryUnits.entries()], [geometryUnits]);
 
@@ -701,35 +699,38 @@ function ParametersContent({ enableSearch }: { readonly enableSearch: boolean })
     return <p className='p-4 text-center text-xs text-muted-foreground'>No geometry units.</p>;
   }
 
-  return <ParametersPaneview entries={entries} mainEntryPath={mainEntryPath} enableSearch={enableSearch} />;
+  return <ParametersPaneview entries={entries} mainEntryPath={mainEntryPath} filterTerm={filterTerm} />;
+}
+
+export function ParametersPanelBody(): React.JSX.Element {
+  const [filterTerm, setFilterTerm] = useState('');
+
+  return (
+    <div data-slot='parameters-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar'>
+      <div data-slot='parameters-filter' className='shrink-0 bg-sidebar px-2 pt-2'>
+        <SearchInput
+          aria-label='Filter parameters'
+          placeholder='Filter parameters...'
+          value={filterTerm}
+          className='h-7 min-w-0 bg-background'
+          onChange={(event) => {
+            setFilterTerm(event.target.value);
+          }}
+          onClear={() => {
+            setFilterTerm('');
+          }}
+        />
+      </div>
+      <div className='min-h-0 flex-1 overflow-hidden'>
+        <ParametersContent filterTerm={filterTerm} />
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
-
-export const ChatParametersTrigger = memo(function ({
-  isOpen,
-  onToggle,
-}: {
-  readonly isOpen: boolean;
-  readonly onToggle: () => void;
-}) {
-  return (
-    <FloatingPanelTrigger
-      icon={SlidersHorizontal}
-      tooltipContent={
-        <div className='flex items-center gap-2'>
-          {isOpen ? 'Close' : 'Open'} Parameters
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleParametersKeyCombination)}</KeyShortcut>
-        </div>
-      }
-      tooltipSide='left'
-      className={isOpen ? 'text-primary' : undefined}
-      onClick={onToggle}
-    />
-  );
-});
 
 export const ChatParameters = memo(function (props: {
   readonly className?: string;
@@ -737,12 +738,6 @@ export const ChatParameters = memo(function (props: {
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }) {
   const { className, isExpanded = true, setIsExpanded } = props;
-
-  const [isSearchVisible, setIsSearchVisible] = useState(false);
-
-  const toggleSearch = useCallback(() => {
-    setIsSearchVisible((current) => !current);
-  }, []);
 
   const toggleParametersOpen = useCallback(() => {
     setIsExpanded?.((current) => !current);
@@ -759,16 +754,6 @@ export const ChatParameters = memo(function (props: {
         <FloatingPanelContentHeader>
           <FloatingPanelContentTitle>Parameters</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
-            <FloatingPanelButtonGroup>
-              <FloatingPanelMenuButton
-                className={cn(isSearchVisible && 'text-primary')}
-                aria-label={isSearchVisible ? 'Hide search' : 'Show search'}
-                tooltip={isSearchVisible ? 'Hide search' : 'Search parameters'}
-                onClick={toggleSearch}
-              >
-                <Search className='size-4' />
-              </FloatingPanelMenuButton>
-            </FloatingPanelButtonGroup>
             <FloatingPanelClose
               icon={XIcon}
               tooltipContent={(isOpen) => (
@@ -782,7 +767,7 @@ export const ChatParameters = memo(function (props: {
         </FloatingPanelContentHeader>
 
         <FloatingPanelContentBody className='overflow-y-hidden'>
-          <ParametersContent enableSearch={isSearchVisible} />
+          <ParametersPanelBody />
         </FloatingPanelContentBody>
       </FloatingPanelContent>
     </FloatingPanel>

@@ -68,7 +68,7 @@ describe('Parameters - Core Search Functionality', () => {
     );
 
     // Basic smoke test - should render the component
-    expect(screen.getByPlaceholderText('Search parameters...')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Filter parameters...')).toBeTruthy();
   });
 
   it('should render search input', () => {
@@ -85,7 +85,7 @@ describe('Parameters - Core Search Functionality', () => {
     );
 
     // Should show the search input
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
     expect(searchInput).toBeTruthy();
   });
 
@@ -261,7 +261,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Type "hi" in search
     await user.type(searchInput, 'hi');
@@ -287,7 +287,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Type "URL" in search
     await user.type(searchInput, 'URL');
@@ -313,7 +313,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Type "type" to match group titles like "wifiType", "phoneCallType"
     await user.type(searchInput, 'type');
@@ -337,7 +337,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Type "phone" to match "phoneNumber" parameter inside "phoneCallType" group
     await user.type(searchInput, 'phone');
@@ -360,7 +360,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Test different cases
     await user.type(searchInput, 'HIDDEN');
@@ -388,7 +388,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Type mixed case
     await user.type(searchInput, 'HiDdEn');
@@ -413,7 +413,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for something that doesn't exist
     await user.type(searchInput, 'nonexistent');
@@ -439,7 +439,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // First search for something specific
     await user.type(searchInput, 'hi');
@@ -471,7 +471,7 @@ describe('Parameters - Search Functionality', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for something that only exists in one group
     await user.type(searchInput, 'hidden');
@@ -483,6 +483,95 @@ describe('Parameters - Search Functionality', () => {
     // Should NOT show groups without matching content
     expect(screen.queryByLabelText('Group: Phone Call Type')).toBeNull();
     expect(screen.queryByLabelText('Group: V Card Type')).toBeNull();
+  });
+
+  it('filters from a controlled term while the local input is hidden', () => {
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={searchMockDefaultParameters}
+          jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
+          enableSearch={false}
+          filterTerm='hidden'
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    expect(screen.queryByPlaceholderText('Filter parameters...')).toBeNull();
+    expect(screen.getByLabelText('Parameter: Is Hidden')).toBeTruthy();
+    expect(screen.queryByLabelText('Parameter: Site Url')).toBeNull();
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={searchMockDefaultParameters}
+          jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
+          enableSearch={false}
+          filterTerm='url'
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    expect(screen.queryByLabelText('Parameter: Is Hidden')).toBeNull();
+    expect(screen.getByLabelText('Parameter: Site Url')).toBeTruthy();
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={searchMockDefaultParameters}
+          jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
+          enableSearch={false}
+          filterTerm=''
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    expect(screen.getByLabelText('Parameter: Is Hidden')).toBeTruthy();
+    expect(screen.getByLabelText('Parameter: Site Url')).toBeTruthy();
+    expect(screen.getByLabelText('Parameter: Phone Number')).toBeTruthy();
+  });
+
+  it('clears only local state when switching to a hidden controlled filter', async () => {
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={searchMockDefaultParameters}
+          jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    await user.type(screen.getByPlaceholderText('Filter parameters...'), 'hidden');
+
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={searchMockDefaultParameters}
+          jsonSchema={searchMockJsonSchema}
+          units={defaultUnits}
+          enableSearch={false}
+          filterTerm='url'
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    expect(screen.queryByPlaceholderText('Filter parameters...')).toBeNull();
+    expect(screen.queryByLabelText('Parameter: Is Hidden')).toBeNull();
+    expect(screen.getByLabelText('Parameter: Site Url')).toBeTruthy();
   });
 });
 
@@ -902,6 +991,43 @@ describe('Parameters - Expand/Collapse State via isAllExpanded prop', () => {
     const group = screen.getByLabelText('Group: Config');
     expect(group).toHaveAttribute('aria-expanded', 'false');
   });
+
+  it('should toggle a focused group with Enter and Space', async () => {
+    const user = userEvent.setup();
+    const defaultParameters = { config: { host: 'localhost' } };
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        config: {
+          type: 'object',
+          title: 'Config',
+          properties: { host: { type: 'string', default: 'localhost' } },
+        },
+      },
+    };
+
+    render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={defaultParameters}
+          jsonSchema={schema}
+          units={defaultUnits}
+          isInitialExpanded={false}
+          onParametersChange={mockOnParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    const group = screen.getByRole('button', { name: 'Group: Config' });
+    group.focus();
+
+    await user.keyboard('{Enter}');
+    expect(group).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard(' ');
+    expect(group).toHaveAttribute('aria-expanded', 'false');
+  });
 });
 
 describe('Parameters - Array and Object Count Display', () => {
@@ -1117,7 +1243,7 @@ describe('Parameters - Search Highlighting', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "network"
     await user.type(searchInput, 'network');
@@ -1161,7 +1287,7 @@ describe('Parameters - Search Highlighting', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "server"
     await user.type(searchInput, 'server');
@@ -1214,7 +1340,7 @@ describe('Parameters - Search Highlighting', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "config"
     await user.type(searchInput, 'config');
@@ -1274,7 +1400,7 @@ describe('Parameters - Force Open on Search', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "config" - should match the group title
     await user.type(searchInput, 'config');
@@ -1317,7 +1443,7 @@ describe('Parameters - Force Open on Search', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "tag" - should match the array title
     await user.type(searchInput, 'tag');
@@ -1363,7 +1489,7 @@ describe('Parameters - Force Open on Search', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "hostname" - should match child parameter, not group title
     await user.type(searchInput, 'hostname');
@@ -1423,7 +1549,7 @@ describe('Parameters - Filtered Count Display', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "host" - should match only 1 out of 4 properties
     await user.type(searchInput, 'host');
@@ -1514,7 +1640,7 @@ describe('Parameters - Filtered Count Display', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "config" - matches the group title, but properties don't match
     await user.type(searchInput, 'config');
@@ -1559,7 +1685,7 @@ describe('Parameters - Filtered Count Display', () => {
       </TestWrapper>,
     );
 
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
 
     // Search for "host" - matches both properties (hostname and hostPort)
     await user.type(searchInput, 'host');
@@ -2510,7 +2636,7 @@ describe('Parameters - Feature Flags', () => {
     );
 
     // Should not show search input
-    expect(screen.queryByPlaceholderText('Search parameters...')).toBeNull();
+    expect(screen.queryByPlaceholderText('Filter parameters...')).toBeNull();
   });
 
   it('should show search input when enableSearch is true (default)', () => {
@@ -2538,7 +2664,7 @@ describe('Parameters - Feature Flags', () => {
     );
 
     // Should show search input with default placeholder
-    expect(screen.getByPlaceholderText('Search parameters...')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Filter parameters...')).toBeTruthy();
   });
 
   it('should use custom search placeholder when provided', () => {
@@ -2568,7 +2694,7 @@ describe('Parameters - Feature Flags', () => {
 
     // Should show search input with custom placeholder
     expect(screen.getByPlaceholderText('Custom placeholder')).toBeTruthy();
-    expect(screen.queryByPlaceholderText('Search parameters...')).toBeNull();
+    expect(screen.queryByPlaceholderText('Filter parameters...')).toBeNull();
   });
 
   it('should hide controls bar when enableSearch is false and no parameters are modified', () => {
@@ -2597,7 +2723,7 @@ describe('Parameters - Feature Flags', () => {
     );
 
     // Controls bar should not be rendered when search is off and no modified parameters
-    expect(screen.queryByPlaceholderText('Search parameters...')).toBeNull();
+    expect(screen.queryByPlaceholderText('Filter parameters...')).toBeNull();
   });
 
   it('should NOT focus search input on initial render when enableSearch is true', () => {
@@ -2626,7 +2752,7 @@ describe('Parameters - Feature Flags', () => {
     );
 
     // Search input should exist but should NOT be focused on initial render
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
     expect(searchInput).toBeTruthy();
     expect(document.activeElement).not.toBe(searchInput);
   });
@@ -2657,7 +2783,7 @@ describe('Parameters - Feature Flags', () => {
     );
 
     // Search input should not exist when disabled
-    expect(screen.queryByPlaceholderText('Search parameters...')).toBeNull();
+    expect(screen.queryByPlaceholderText('Filter parameters...')).toBeNull();
 
     // Re-render with enableSearch = true
     rerender(
@@ -2674,7 +2800,7 @@ describe('Parameters - Feature Flags', () => {
     );
 
     // Search input should now be focused
-    const searchInput = screen.getByPlaceholderText('Search parameters...');
+    const searchInput = screen.getByPlaceholderText('Filter parameters...');
     expect(searchInput).toBeTruthy();
     expect(document.activeElement).toBe(searchInput);
   });

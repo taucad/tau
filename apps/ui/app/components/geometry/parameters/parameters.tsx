@@ -20,6 +20,7 @@ type ParametersProperties = {
   readonly onParametersChange: (parameters: Record<string, unknown>) => void;
   readonly className?: string;
   readonly enableSearch?: boolean;
+  readonly filterTerm?: string;
   readonly searchPlaceholder?: string;
   readonly emptyMessage?: string;
   readonly emptyDescription?: string;
@@ -35,7 +36,8 @@ export function Parameters({
   onParametersChange,
   className,
   enableSearch = true,
-  searchPlaceholder = 'Search parameters...',
+  filterTerm,
+  searchPlaceholder = 'Filter parameters...',
   emptyMessage = 'No parameters available',
   emptyDescription = 'Parameters will appear here when they become available for this model',
   units,
@@ -44,7 +46,8 @@ export function Parameters({
 }: ParametersProperties): React.JSX.Element {
   // Use controlled state if provided, otherwise use initial value
   const allExpanded = isAllExpanded ?? isInitialExpanded;
-  const [searchTerm, setSearchTerm] = useState('');
+  const [localFilterTerm, setLocalFilterTerm] = useState('');
+  const activeFilterTerm = filterTerm ?? localFilterTerm;
   const searchInputReference = React.useRef<HTMLInputElement>(null);
   // Ref to track current form data from RJSF's onChange handler
   const currentFormDataRef = React.useRef<Record<string, unknown>>({});
@@ -67,7 +70,7 @@ export function Parameters({
   // Clear search term when search is hidden
   React.useEffect(() => {
     if (!enableSearch) {
-      setSearchTerm('');
+      setLocalFilterTerm('');
     }
   }, [enableSearch]);
 
@@ -107,29 +110,29 @@ export function Parameters({
   );
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(event.target.value);
+    setLocalFilterTerm(event.target.value);
   }, []);
 
   const clearSearch = useCallback(() => {
-    setSearchTerm('');
+    setLocalFilterTerm('');
   }, []);
 
   const formContext = useMemo<RJSFContext>(
     () => ({
       allExpanded,
-      searchTerm,
+      searchTerm: activeFilterTerm,
       resetSingleParameter,
       defaultParameters,
       shouldShowField(text) {
-        if (!searchTerm) {
+        if (!activeFilterTerm) {
           return true;
         }
 
-        return text.toLowerCase().includes(searchTerm.toLowerCase());
+        return text.toLowerCase().includes(activeFilterTerm.toLowerCase());
       },
       units,
     }),
-    [allExpanded, searchTerm, resetSingleParameter, defaultParameters, units],
+    [allExpanded, activeFilterTerm, resetSingleParameter, defaultParameters, units],
   );
 
   const mergedData = useMemo(
@@ -172,7 +175,7 @@ export function Parameters({
               <SearchInput
                 ref={searchInputReference}
                 placeholder={searchPlaceholder}
-                value={searchTerm}
+                value={localFilterTerm}
                 className='h-6 w-full bg-background text-sm'
                 onChange={handleSearchChange}
                 onClear={clearSearch}
@@ -192,7 +195,7 @@ export function Parameters({
             widgets={widgets}
             formData={mergedData}
             formContext={formContext}
-            className='flex flex-1 scroll-shadows-y flex-col overflow-x-hidden px-0 py-0'
+            className='flex flex-1 scroll-shadows-y flex-col overflow-x-hidden px-0 py-0 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
             onChange={handleChange}
           />
         </>

@@ -1,4 +1,5 @@
 import type { LengthSymbol } from '@taucad/units';
+import type { MeasurementDescriptor } from '#constants/project-parameters.js';
 
 export type Units = {
   length: {
@@ -15,4 +16,5 @@ export type RJSFContext = {
   shouldShowField: (prettyLabel: string) => boolean;
   defaultParameters?: Record<string, unknown>;
   units: Units;
+  displayDescriptors?: Readonly<Record<string, { descriptor: MeasurementDescriptor; unit?: string }>>;
 };

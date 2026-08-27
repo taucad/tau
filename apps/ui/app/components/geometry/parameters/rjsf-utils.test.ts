@@ -50,6 +50,13 @@ describe('isSchemaMatchingSearch', () => {
       expect(isSchemaMatchingSearch(schema, 'name', 'UserName')).toBe(true);
     });
 
+    it('should match the displayed form of an identifier', () => {
+      const schema: RJSFSchema = {
+        type: 'number',
+      };
+      expect(isSchemaMatchingSearch(schema, 'corner radius', 'cornerRadius')).toBe(true);
+    });
+
     it('should not match when property name does not contain search term', () => {
       const schema: RJSFSchema = {
         type: 'string',

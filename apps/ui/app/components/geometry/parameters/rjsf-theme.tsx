@@ -11,7 +11,7 @@ import type {
   ErrorListProps,
   RJSFSchema,
 } from '@rjsf/utils';
-import { ChevronRight } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
@@ -49,29 +49,8 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
       return null;
     }
 
-    // Narrow down to check if root is an object with only nested children
-    const isRootNestedOnlyChildren =
-      isRoot &&
-      schema.type === 'object' &&
-      Object.values(schema.properties ?? {}).every(
-        (property) =>
-          property !== false && property !== true && (property.type === 'object' || property.type === 'array'),
-      );
-
     return (
-      <div
-        data-slot='field-group'
-        className={cn(
-          'field-group group/field-group',
-
-          // We can save some space by hiding the left border if the root is an object with only nested (object or array) children
-          'data-[is-root-nested-only=true]:-ml-0.5',
-
-          // Non root object fields: subtle left accent for nesting
-          !isRoot && 'ml-0 border-l-2 border-primary/20 hover:border-primary/40 transition-colors',
-        )}
-        data-is-root-nested-only={isRootNestedOnlyChildren}
-      >
+      <div data-slot='field-group' className='field-group group/field-group [&+.field-group]:mt-2'>
         {children}
       </div>
     );
@@ -210,10 +189,15 @@ function ObjectFieldTemplate(
   if (isRoot) {
     return (
       <div className='[&:has(.properties:not(:empty))_.no-params]:hidden'>
-        <EmptyItems className='no-params break-all group-data-[is-root-nested-only=true]/field-group:ml-5.5'>
+        <EmptyItems className='no-params break-all'>
           No parameters matching &quot;{formContext.searchTerm}&quot;
         </EmptyItems>
-        <div className='properties'>{properties.map((element) => element.content)}</div>
+        <div
+          data-slot='parameter-catalog'
+          className='properties m-2 overflow-hidden rounded-xl border border-border bg-card p-1 empty:hidden'
+        >
+          {properties.map((element) => element.content)}
+        </div>
       </div>
     );
   }
@@ -248,23 +232,32 @@ function ObjectFieldTemplate(
     : `(${totalPropertiesCount})`;
 
   return (
-    <Collapsible open={isOpen} className='w-full border-t border-border/40 first:border-t-0' onOpenChange={setIsOpen}>
+    <Collapsible
+      data-slot='parameter-group'
+      open={isOpen}
+      className='group/parameter-group w-full overflow-hidden rounded-lg border border-transparent transition-colors duration-150 data-[state=open]:border-border data-[state=open]:bg-background motion-reduce:transition-none'
+      onOpenChange={setIsOpen}
+    >
       <CollapsibleTrigger
-        className='group/collapsible flex h-7 w-full items-center justify-between px-2.5 py-1 transition-colors hover:bg-muted/50'
+        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
         aria-label={`Group: ${prettyTitle}`}
       >
-        <h3 className='flex min-w-0 flex-1 items-center text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
-          <span className='truncate'>
-            <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
-          </span>
-          <span className={cn('ml-1.5 shrink-0 text-muted-foreground/70', isCountFiltered && 'italic')}>
-            {countDisplay}
-          </span>
+        <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+          <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
         </h3>
-        <ChevronRight className='size-3 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90' />
+        <span className={cn('shrink-0 text-xs tabular-nums text-muted-foreground', isCountFiltered && 'italic')}>
+          {countDisplay}
+        </span>
+        <ChevronDown
+          aria-hidden='true'
+          className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
+        />
       </CollapsibleTrigger>
 
-      <CollapsibleContent className='px-0 py-0'>
+      <CollapsibleContent
+        data-slot='parameter-group-content'
+        className='border-t border-border/70 px-0 py-1 [&>.field-group]:mx-1'
+      >
         {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
         {properties.map((element) => element.content)}
       </CollapsibleContent>
@@ -317,21 +310,30 @@ function ArrayFieldTemplate(
   const countDisplay = `(${itemCount})`;
 
   return (
-    <Collapsible open={isOpen} className='w-full border-t border-border/40 first:border-t-0' onOpenChange={setIsOpen}>
+    <Collapsible
+      data-slot='parameter-group'
+      open={isOpen}
+      className='group/parameter-group w-full overflow-hidden rounded-lg border border-transparent transition-colors duration-150 data-[state=open]:border-border data-[state=open]:bg-background motion-reduce:transition-none'
+      onOpenChange={setIsOpen}
+    >
       <CollapsibleTrigger
-        className='group/collapsible flex h-7 w-full items-center justify-between px-2.5 py-1 transition-colors hover:bg-muted/50'
+        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
         aria-label={`Group: ${prettyTitle}`}
       >
-        <h3 className='flex min-w-0 flex-1 items-center text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
-          <span className='truncate'>
-            <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
-          </span>
-          <span className='ml-1.5 shrink-0 text-muted-foreground/70'>{countDisplay}</span>
+        <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+          <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
         </h3>
-        <ChevronRight className='size-3 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]/collapsible:rotate-90' />
+        <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>{countDisplay}</span>
+        <ChevronDown
+          aria-hidden='true'
+          className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
+        />
       </CollapsibleTrigger>
 
-      <CollapsibleContent className='px-0 py-0'>
+      <CollapsibleContent
+        data-slot='parameter-group-content'
+        className='border-t border-border/70 px-0 py-1 [&>.field-group]:mx-1'
+      >
         {items.map((item) => (
           <Fragment key={item.key}>{item.children}</Fragment>
         ))}
@@ -508,18 +510,11 @@ export const templates: TemplatesType = {
     const fieldPath = idSchema?.$id ? rjsfIdToJsonPath(idSchema.$id) : [];
     const fieldName = fieldPath.at(-1) ?? 'root';
     const isArrayType = schema.type === 'array';
-    const isObjectType = schema.type === 'object';
 
     return (
       <div
         aria-label={`Invalid Field: ${fieldName}`}
-        className={cn(
-          'flex flex-col gap-2.5 bg-warning/10 p-2.5',
-          '-my-px border-l-2 border-warning',
-          // Apply full border with rounded corners if the field is not an array or object,
-          // as we already have a border for those.
-          !isArrayType && !isObjectType && 'rounded-md border',
-        )}
+        className='flex flex-col gap-2.5 rounded-md border border-warning bg-warning/10 p-2.5'
       >
         <div className='flex items-start gap-2'>
           <div className='flex min-w-0 flex-1 flex-col gap-1.5'>

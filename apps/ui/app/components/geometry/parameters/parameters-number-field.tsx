@@ -35,7 +35,7 @@ function UnitIndicator({
   readonly unit: string;
   readonly isApproximation: boolean;
 }): React.ReactNode {
-  if (descriptor === 'count') {
+  if (!unit) {
     return null;
   }
 
@@ -51,7 +51,7 @@ function UnitIndicator({
             isApproximation && 'pointer-events-auto',
           )}
         >
-          {isAngle ? (
+          {isAngle && unit !== 'deg' ? (
             <Angle className='size-3.5 stroke-[1.5px]' />
           ) : isUnitless ? (
             <Hash className='size-2.5' />

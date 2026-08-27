@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors, server } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
+import { foregroundMaskIntersectionOverUnion, measureProjectCardForeground } from '#support/project-card-framing.js';
 
 const projectName = 'Thumbnail Generation E2E';
 
@@ -14,8 +15,9 @@ type ThumbnailState = {
 async function openProjectThumbnail(): Promise<Locator> {
   await target.navigate('/projects', 'secondary');
   await target.fill(selectors.getByPlaceholder('Search projects...'), projectName, 'secondary');
-  await target.expectVisible(selectors.getByRole('link', { name: `Open ${projectName}` }), 60_000, 'secondary');
-  return selectors.getByRole('img', { name: projectName });
+  const thumbnail = selectors.getByRole('img', { name: projectName });
+  await target.expectVisible(thumbnail, 60_000, 'secondary');
+  return thumbnail;
 }
 
 async function readGeneratedThumbnail(image: Locator): Promise<ThumbnailState | undefined> {
@@ -43,29 +45,29 @@ async function readGeneratedThumbnail(image: Locator): Promise<ThumbnailState | 
   );
 }
 
-test('user project thumbnail generation follows nested settled sources and refreshes the mounted card', async ({
-  skip,
-}) => {
+test('user project thumbnails follow settled sources, persist, and match the live card preview', async ({ skip }) => {
+  await target.navigate('/__e2e/user-project-thumbnail-generation');
   const hasWebGpu = await target.evaluate(() => 'gpu' in navigator);
   skip(!hasWebGpu || server.browser !== 'chromium', 'WebGPU is not available in this browser runtime.');
 
-  await target.navigate('/__e2e/user-project-thumbnail-generation');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), 'Open parameters');
+  await target.click(selectors.getByText('Open parameters', { exact: true }));
   const widthInput = selectors.getByLabelText('Input for Width');
   await target.expectCount(widthInput, 1, 60_000);
-  await target.expectVisible(selectors.getByRole('img', { name: /3d model preview/i }), 60_000);
+  await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
 
   await target.openSecondary('/projects');
   try {
-    const thumbnail = await openProjectThumbnail();
     let initialThumbnail: ThumbnailState | undefined;
     await expect
       .poll(
         async () => {
-          initialThumbnail = await readGeneratedThumbnail(thumbnail);
+          initialThumbnail = await readGeneratedThumbnail(await openProjectThumbnail());
           return initialThumbnail !== undefined;
         },
-        { timeout: 120_000 },
+        { timeout: 120_000, interval: 1000 },
       )
       .toBe(true);
 
@@ -80,13 +82,13 @@ test('user project thumbnail generation follows nested settled sources and refre
     await expect
       .poll(
         async () => {
-          const candidate = await readGeneratedThumbnail(thumbnail);
+          const candidate = await readGeneratedThumbnail(await openProjectThumbnail());
           if (candidate && candidate.digest !== initialThumbnail!.digest) {
             updatedThumbnail = candidate;
           }
           return updatedThumbnail !== undefined;
         },
-        { timeout: 120_000 },
+        { timeout: 120_000, interval: 1000 },
       )
       .toBe(true);
 
@@ -94,8 +96,8 @@ test('user project thumbnail generation follows nested settled sources and refre
 
     await target.reload('secondary');
     await target.fill(selectors.getByPlaceholder('Search projects...'), projectName, 'secondary');
-    await target.expectVisible(selectors.getByRole('link', { name: `Open ${projectName}` }), 60_000, 'secondary');
     const reloadedThumbnail = selectors.getByRole('img', { name: projectName });
+    await target.expectVisible(reloadedThumbnail, 60_000, 'secondary');
     await expect
       .poll(
         async () => {
@@ -105,6 +107,38 @@ test('user project thumbnail generation follows nested settled sources and refre
         { timeout: 60_000 },
       )
       .toBe(updatedThumbnail!.digest);
+
+    const card = `[data-slot="card"]:has(img[alt="${projectName}"])`;
+    const toggle = `${card} button[aria-label="Preview model"]`;
+    const media = `${card} div:has(> button[aria-label="Preview model"])`;
+    const thumbnailForeground = await measureProjectCardForeground(media, 'secondary');
+    expect(thumbnailForeground?.pixels).toBeGreaterThan(100);
+
+    await target.click(toggle, undefined, 'secondary');
+    const activeMedia = 'div:has(> button[aria-label="Preview model"][aria-pressed="true"])';
+    await target.expectVisible(`${activeMedia} canvas`, 60_000, 'secondary');
+    let previewForeground: Awaited<ReturnType<typeof measureProjectCardForeground>>;
+    await expect
+      .poll(
+        async () => {
+          previewForeground = await measureProjectCardForeground(activeMedia, 'secondary');
+          return previewForeground?.pixels ?? 0;
+        },
+        { timeout: 60_000 },
+      )
+      .toBeGreaterThan(100);
+
+    expect(thumbnailForeground).toBeDefined();
+    expect(previewForeground).toBeDefined();
+    expect(Math.abs(previewForeground!.centerX - thumbnailForeground!.centerX)).toBeLessThanOrEqual(3);
+    expect(Math.abs(previewForeground!.centerY - thumbnailForeground!.centerY)).toBeLessThanOrEqual(3);
+    expect(Math.abs(previewForeground!.width - thumbnailForeground!.width)).toBeLessThanOrEqual(
+      Math.max(4, thumbnailForeground!.width * 0.015),
+    );
+    expect(Math.abs(previewForeground!.height - thumbnailForeground!.height)).toBeLessThanOrEqual(
+      Math.max(4, thumbnailForeground!.height * 0.015),
+    );
+    expect(foregroundMaskIntersectionOverUnion(thumbnailForeground!, previewForeground!)).toBeGreaterThanOrEqual(0.94);
   } finally {
     await target.closeSecondary();
   }

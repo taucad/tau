@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Link } from 'react-router';
-import { NavHistory } from '#components/nav/nav-history.js';
+import { ProjectNavigation } from '#components/nav/project-navigation.js';
 import { NavMain } from '#components/nav/nav-main.js';
 import {
   Sidebar,
@@ -48,7 +48,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
         </div>
         <div className='flex-1 overflow-y-auto'>
           <div className='flex flex-col justify-between'>
-            <NavHistory />
+            <ProjectNavigation />
             <NavMain items={navMainItems} groupLabel='Platform' />
           </div>
         </div>

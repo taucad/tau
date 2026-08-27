@@ -27,6 +27,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     data: chats = [],
     isLoading,
     error,
+    refetch,
   } = useQuery({
     queryKey: ['chats', resourceId, { includeDeleted }],
     async queryFn() {
@@ -39,6 +40,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     async (chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>): Promise<Chat> => {
       const newChat = await createChatInManager(resourceId, chatData);
       void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+      void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
       return newChat;
     },
     [createChatInManager, resourceId, queryClient],
@@ -49,6 +51,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       const updatedChat = await updateChatInManager(chatId, update);
       if (updatedChat) {
         void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
         void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       }
       return updatedChat;
@@ -60,6 +63,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     async (chatId: string): Promise<void> => {
       await deleteChatInManager(chatId);
       void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+      void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
     },
     [deleteChatInManager, resourceId, queryClient],
@@ -69,6 +73,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     async (chatId: string): Promise<Chat> => {
       const newChat = await duplicateChatInManager(chatId);
       void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+      void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
       return newChat;
     },
     [duplicateChatInManager, resourceId, queryClient],
@@ -79,6 +84,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       const updatedChat = await patchChatInManager(chatId, 'name', name);
       if (updatedChat) {
         void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
         void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       }
       return updatedChat;
@@ -91,6 +97,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       const updatedChat = await applyGeneratedChatNameInManager(chatId, name);
       if (updatedChat) {
         void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
         void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       }
       return updatedChat;
@@ -103,6 +110,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       const updatedChat = await patchChatInManager(chatId, key, value);
       if (updatedChat) {
         void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
         void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       }
       return updatedChat;
@@ -119,6 +127,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       const updatedChat = await setMessageEditInManager(chatId, messageId, draft);
       if (updatedChat) {
         void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
         void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       }
       return updatedChat;
@@ -131,6 +140,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       const updatedChat = await clearMessageEditInManager(chatId, messageId);
       if (updatedChat) {
         void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
         void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       }
       return updatedChat;
@@ -142,6 +152,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     async (chatId: string): Promise<Chat | undefined> => {
       const updatedChat = await softDeleteChatInManager(chatId);
       void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+      void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       return updatedChat;
     },
@@ -152,6 +163,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     chats,
     isLoading,
     error: error instanceof Error ? error.message : undefined,
+    retry: refetch,
     getChat,
     createChat,
     updateChat,

@@ -1,7 +1,7 @@
 import { forwardRef, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
-import { XIcon, MessageCircle } from 'lucide-react';
+import { XIcon } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
@@ -14,7 +14,7 @@ import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/cha
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
-import { ChatHistorySelector } from '#routes/w.$workspace.$project/chat-history-selector.js';
+import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
 import { ChatHistoryStatus } from '#routes/w.$workspace.$project/chat-history-status.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
@@ -23,11 +23,9 @@ import {
   FloatingPanelContent,
   FloatingPanelContentHeader,
   FloatingPanelErrorContent,
-  FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '#utils/ui.utils.js';
 import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
@@ -110,30 +108,6 @@ const TurnGroup = memo(function ({
 const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: string }>(function (props, ref) {
   return (
     <div {...props} ref={ref} style={{ ...props.style, ...chatScrollerCssVariables }} className={cn(props.className)} />
-  );
-});
-
-// Chat History Trigger Component
-export const ChatHistoryTrigger = memo(function ({
-  isOpen,
-  onToggle,
-}: {
-  readonly isOpen: boolean;
-  readonly onToggle: () => void;
-}) {
-  return (
-    <FloatingPanelTrigger
-      icon={MessageCircle}
-      tooltipContent={
-        <div className='flex items-center gap-2'>
-          {isOpen ? 'Close' : 'Open'} Chat
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleChatHistoryKeyCombination)}</KeyShortcut>
-        </div>
-      }
-      tooltipSide='right'
-      className={isOpen ? 'text-primary' : undefined}
-      onClick={onToggle}
-    />
   );
 });
 
@@ -282,7 +256,7 @@ export const ChatHistory = memo(function (props: {
         <ForkDivider />
         {/* Header with chat selector */}
         <FloatingPanelContentHeader>
-          <ChatHistorySelector
+          <ChatTitleBar
             closeButton={
               <FloatingPanelClose
                 icon={XIcon}

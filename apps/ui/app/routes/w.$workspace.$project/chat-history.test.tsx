@@ -136,8 +136,8 @@ vi.mock('#routes/w.$workspace.$project/chat-error.js', () => ({
   ChatError: () => <div data-testid='chat-error-adornment' />,
 }));
 
-vi.mock('#routes/w.$workspace.$project/chat-history-selector.js', () => ({
-  ChatHistorySelector: () => null,
+vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({
+  ChatTitleBar: () => null,
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-history-status.js', () => ({
@@ -154,7 +154,6 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentHeader: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelErrorContent: () => null,
-  FloatingPanelTrigger: () => null,
 }));
 
 vi.mock('#components/ui/key-shortcut.js', () => ({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Chat } from '@taucad/chat';
-import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-history-selector.utils.js';
+import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
 
 function makeChat(id: string, updatedAt: number): Chat {
   return {

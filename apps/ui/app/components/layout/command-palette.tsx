@@ -1,4 +1,4 @@
-import { Menu } from 'lucide-react';
+import { Menu, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, createContext, useContext } from 'react';
 import { Fragment } from 'react/jsx-runtime';
 import { useNavigate } from 'react-router';
@@ -18,6 +18,8 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { menuItemLayoutClass } from '#components/ui/menu.variants.js';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
+import { ProjectNavigationCommandItems } from '#components/nav/project-navigation-command-items.js';
+import { SidebarMenuButton } from '#components/ui/sidebar.js';
 
 /**
  * Context for command palette item registration
@@ -60,6 +62,7 @@ export function useCommandPaletteItems(
 export type CommandPaletteItem = {
   id: string;
   label: string;
+  searchValue?: string;
   group: string;
   icon: React.JSX.Element;
   action?: () => void;
@@ -101,7 +104,7 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
 
   return (
     <CommandDialog open={isOpen} onOpenChange={onOpenChange}>
-      <CommandInput placeholder='Search for actions...' />
+      <CommandInput placeholder='Search projects, chats, and actions...' />
       <CommandList className='py-0'>
         <CommandEmpty>No results found.</CommandEmpty>
         {Object.entries(groupedItems).map(([groupName, groupItems]) => (
@@ -109,7 +112,7 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
             {groupItems.map((item) => (
               <CommandItem
                 key={item.id}
-                value={item.id}
+                value={`${item.searchValue ?? item.label} ${item.id}`}
                 disabled={item.disabled}
                 onSelect={() => {
                   onOpenChange(false);
@@ -152,17 +155,18 @@ function CommandPaletteTrigger({ items }: CommandPaletteTriggerProperties): Reac
 
   return (
     <>
-      <Button
+      <SidebarMenuButton
         variant='outline'
-        size='sm'
-        className='relative w-full max-w-sm justify-start pl-3 text-muted-foreground max-md:hidden sm:pr-12 md:w-32'
+        aria-label='Search'
+        className='text-muted-foreground max-md:hidden'
         onClick={() => {
           setOpen(true);
         }}
       >
-        <span className='inline-flex'>Search...</span>
-        <KeyShortcut className='absolute top-1/2 right-2 -translate-y-1/2'>{formattedKeyCombination}</KeyShortcut>
-      </Button>
+        <Search aria-hidden className='size-4 shrink-0' />
+        <span className='flex-1 whitespace-nowrap'>Search</span>
+        <KeyShortcut className='ml-2 shrink-0'>{formattedKeyCombination}</KeyShortcut>
+      </SidebarMenuButton>
       <CommandPalette isOpen={open} items={items} onOpenChange={setOpen} />
     </>
   );
@@ -205,7 +209,7 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
     [],
   );
 
-  const getItemValue = useCallback((item: CommandPaletteItem) => item.id, []);
+  const getItemValue = useCallback((item: CommandPaletteItem) => `${item.searchValue ?? item.label} ${item.id}`, []);
   const isItemDisabled = useCallback((item: CommandPaletteItem) => Boolean(item.disabled), []);
 
   return (
@@ -215,12 +219,12 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
         renderLabel={renderItemLabel}
         getValue={getItemValue}
         isDisabled={isItemDisabled}
-        searchPlaceHolder='Search commands...'
+        searchPlaceHolder='Search projects, chats, and actions...'
         placeholder='Actions'
-        title='Search commands...'
-        description='Search for actions on the current page or across the entire platform.'
-        onSelect={(itemId) => {
-          const selectedItem = items.find((item) => item.id === itemId);
+        title='Search projects, chats, and actions'
+        description='Navigate to any project or chat, or run an available action.'
+        onSelect={(itemValue) => {
+          const selectedItem = items.find((item) => getItemValue(item) === itemValue);
           if (selectedItem) {
             if (selectedItem.link) {
               void navigate(selectedItem.link);
@@ -298,6 +302,7 @@ function CommandsContent(): React.JSX.Element {
 
   return (
     <>
+      <ProjectNavigationCommandItems />
       {/* Render all command palette item providers (invisible components that register items) */}
       {commandPaletteMatches.map((match) => (
         <Fragment key={match.id}>{match.handle.commandPalette?.(match)}</Fragment>

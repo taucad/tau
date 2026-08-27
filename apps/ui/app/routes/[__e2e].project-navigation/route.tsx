@@ -52,7 +52,7 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
           location: homeProjectCreationLocation,
           editorState: {
             panelState: {
-              openPanels: { chat: true, files: true, parameters: false, editor: true },
+              desktopLayout: { chatOpen: true, workbenchOpen: true },
             },
           },
           project: createManifest('Project Navigation A', alphaEntryPath),
@@ -63,7 +63,7 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
           location: homeProjectCreationLocation,
           editorState: {
             panelState: {
-              openPanels: { chat: true, files: true, parameters: false, editor: true },
+              desktopLayout: { chatOpen: true, workbenchOpen: true },
             },
           },
           project: createManifest('Project Navigation B', betaEntryPath),

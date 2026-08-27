@@ -24,8 +24,12 @@ vi.mock('#hooks/use-mobile.js', () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock('#components/nav/nav-history.js', () => ({
-  NavHistory: () => null,
+vi.mock('#components/nav/project-navigation.js', () => ({
+  ProjectNavigation: () => <div>Projects</div>,
+}));
+
+vi.mock('#components/layout/command-palette.js', () => ({
+  Commands: () => <button type='button'>Search projects and chats</button>,
 }));
 
 vi.mock('#components/nav/nav-chat.js', () => ({

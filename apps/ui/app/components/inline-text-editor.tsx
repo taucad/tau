@@ -29,6 +29,7 @@ type InlineTextEditorProps = {
   readonly shouldSubmitOnBlur?: boolean;
   readonly shouldAutoSelectOnFocus?: boolean;
   readonly shouldStartEditing?: boolean;
+  readonly onEditingChange?: (isEditing: boolean) => void;
   readonly className?: string;
   readonly renderDisplay?: (value: string) => ReactNode;
 } & VariantProps<typeof inlineTextEditorVariants>;
@@ -41,6 +42,7 @@ export function InlineTextEditor({
   shouldSubmitOnBlur = true,
   shouldAutoSelectOnFocus = true,
   shouldStartEditing = false,
+  onEditingChange,
   variant = 'default',
   className,
   renderDisplay,
@@ -61,11 +63,13 @@ export function InlineTextEditor({
 
     setEditValue(value);
     setIsEditing(true);
+    onEditingChange?.(true);
   };
 
   const cancel = (): void => {
     setEditValue(value);
     setIsEditing(false);
+    onEditingChange?.(false);
   };
 
   const save = async (): Promise<void> => {
@@ -75,6 +79,7 @@ export function InlineTextEditor({
     }
 
     setIsEditing(false);
+    onEditingChange?.(false);
   };
 
   return (

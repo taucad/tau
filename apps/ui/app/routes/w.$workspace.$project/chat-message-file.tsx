@@ -4,6 +4,7 @@ import type { FileUIPart } from 'ai';
 import { File } from 'lucide-react';
 import { cn } from '#utils/ui.utils.js';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
+import { OmniScroller } from '#components/ui/omni-scroller.js';
 
 type ChatMessageFileProperties = {
   readonly part: FileUIPart;
@@ -112,10 +113,7 @@ export function ChatMessageFileAttachments({ parts }: ChatMessageFileAttachments
 
   return (
     <>
-      <div
-        aria-label='Attached files'
-        className='flex max-w-full scroll-shadows-x flex-row gap-2 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth'
-      >
+      <OmniScroller aria-label='Attached files' className='flex max-w-full scroll-shadows-x flex-row gap-2'>
         {attachmentEntries.map((entry, entryIndex) => {
           if (entry.type === 'file') {
             return (
@@ -165,7 +163,7 @@ export function ChatMessageFileAttachments({ parts }: ChatMessageFileAttachments
             </div>
           );
         })}
-      </div>
+      </OmniScroller>
       <ImageCarouselDialog
         initialIndex={previewInitialIndex}
         isOpen={previewOpen}

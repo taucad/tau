@@ -42,6 +42,51 @@ describe('chat image carousel', () => {
     await target.navigate('/__e2e/chat-image-carousel');
   });
 
+  test('should translate vertical wheel input in the overflowing composer rail and release it at the end', async () => {
+    const rail = selectors.getByCss('[aria-label="Attached images"]');
+    await target.expectVisible(rail);
+
+    const state = await target.evaluateLocator(rail, async (element) => {
+      if (!(element instanceof HTMLElement)) {
+        throw new TypeError('Attached images rail was not an HTML element.');
+      }
+
+      element.scrollLeft = 0;
+      const forward = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80 });
+      const forwardDispatch = element.dispatchEvent(forward);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 500);
+      });
+      const afterForward = element.scrollLeft;
+
+      element.scrollLeft = element.scrollWidth - element.clientWidth;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 500);
+      });
+      const boundary = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80 });
+      const boundaryDispatch = element.dispatchEvent(boundary);
+
+      return {
+        afterForward,
+        boundaryDispatch,
+        boundaryPrevented: boundary.defaultPrevented,
+        clientWidth: element.clientWidth,
+        forwardDispatch,
+        forwardPrevented: forward.defaultPrevented,
+        scrollWidth: element.scrollWidth,
+      };
+    });
+
+    expect(state.scrollWidth).toBeGreaterThan(state.clientWidth);
+    expect(state.afterForward).toBe(80);
+    expect(state.forwardPrevented).toBe(true);
+    expect(state.forwardDispatch).toBe(false);
+    expect(state.boundaryPrevented).toBe(false);
+    expect(state.boundaryDispatch).toBe(true);
+
+    await openComposerImage(5);
+  });
+
   test('should keep images visible after looping forward through five composer images', async () => {
     await openComposerImage(1);
     for (const imageNumber of [2, 3, 4, 5, 1, 2]) {

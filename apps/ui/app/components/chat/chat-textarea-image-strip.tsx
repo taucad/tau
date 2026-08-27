@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
+import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { cn } from '#utils/ui.utils.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
 
@@ -41,12 +42,9 @@ export const ChatTextareaImageStrip = memo(function ({
 
   return (
     <>
-      <div
+      <OmniScroller
         aria-label='Attached images'
-        className={cn(
-          'w-full overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth scroll-shadows-x',
-          size === 'desktop' ? 'px-3 pt-3 pb-2' : 'pb-1',
-        )}
+        className={cn('w-full scroll-shadows-x', size === 'desktop' ? 'px-3 pt-3 pb-2' : 'pb-1')}
       >
         <div
           className={cn(
@@ -100,7 +98,7 @@ export const ChatTextareaImageStrip = memo(function ({
             </div>
           ))}
         </div>
-      </div>
+      </OmniScroller>
       <ImageCarouselDialog
         dialogProps={{ [focusTrapAttribute]: focusTrapAttribute }}
         initialIndex={previewInitialIndex}

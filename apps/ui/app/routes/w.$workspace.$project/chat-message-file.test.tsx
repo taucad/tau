@@ -51,6 +51,28 @@ describe('ChatMessageFileAttachments', () => {
     expect(screen.getByText('application/pdf')).toBeInTheDocument();
   });
 
+  it('should scroll mixed attachments horizontally from vertical wheel input without breaking image preview', () => {
+    render(
+      <ChatMessageFileAttachments
+        parts={[imagePart('front.png', 1), filePart('spec.pdf'), filePart('drawing.step')]}
+      />,
+    );
+    const attachments = screen.getByLabelText('Attached files');
+    Object.defineProperties(attachments, {
+      clientWidth: { configurable: true, value: 200 },
+      scrollLeft: { configurable: true, value: 0, writable: true },
+      scrollWidth: { configurable: true, value: 500 },
+    });
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80 });
+
+    attachments.dispatchEvent(event);
+
+    expect(attachments.scrollLeft).toBe(80);
+    expect(event.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Open image front.png' }));
+    expect(screen.getByRole('region', { name: 'Image preview carousel' })).toBeInTheDocument();
+  });
+
   it('falls back to the file card when an image thumbnail fails to load', () => {
     render(<ChatMessageFileAttachments parts={[imagePart('broken.png', 1)]} />);
 

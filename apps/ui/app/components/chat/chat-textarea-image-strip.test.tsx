@@ -35,6 +35,29 @@ describe('ChatTextareaImageStrip', () => {
     expect(strip.firstElementChild?.className).not.toContain('justify-between');
   });
 
+  it('should translate vertical wheel input and release it at the horizontal boundary', () => {
+    render(<ChatTextareaImageStrip images={fiveImages} size='desktop' onRemoveImage={vi.fn()} />);
+    const strip = screen.getByLabelText('Attached images');
+    Object.defineProperties(strip, {
+      clientWidth: { configurable: true, value: 200 },
+      scrollLeft: { configurable: true, value: 0, writable: true },
+      scrollWidth: { configurable: true, value: 500 },
+    });
+
+    const movement = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80 });
+    strip.dispatchEvent(movement);
+
+    expect(strip.scrollLeft).toBe(80);
+    expect(movement.defaultPrevented).toBe(true);
+
+    strip.scrollLeft = 300;
+    const boundary = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 80 });
+    strip.dispatchEvent(boundary);
+
+    expect(strip.scrollLeft).toBe(300);
+    expect(boundary.defaultPrevented).toBe(false);
+  });
+
   it('renders mobile attachments larger than the old compact thumbnails', () => {
     render(<ChatTextareaImageStrip images={images} size='mobile' onRemoveImage={vi.fn()} />);
 
@@ -57,7 +80,7 @@ describe('ChatTextareaImageStrip', () => {
     expect(onRemoveImage).toHaveBeenCalledWith(1);
   });
 
-  it('opens a carousel dialog at the clicked image', () => {
+  it('opens a carousel dialog at the clicked image', async () => {
     render(<ChatTextareaImageStrip images={images} size='desktop' onRemoveImage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open uploaded image 2' }));
@@ -98,9 +121,11 @@ describe('ChatTextareaImageStrip', () => {
     expect(
       screen.getAllByRole('img', { name: 'Uploaded 2' }).some((image) => image.getAttribute('loading') === 'eager'),
     ).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Close image preview' }));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   });
 
-  it('hides carousel navigation chrome for a single image', () => {
+  it('hides carousel navigation chrome for a single image', async () => {
     render(<ChatTextareaImageStrip images={[images[0]!]} size='desktop' onRemoveImage={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open uploaded image 1' }));
@@ -111,7 +136,10 @@ describe('ChatTextareaImageStrip', () => {
     const downloadLink = screen.getByRole('link', { name: 'Download uploaded-image-1.png' });
     expect(downloadLink).toHaveAttribute('href', images[0]);
     expect(downloadLink).toHaveAttribute('download', 'uploaded-image-1.png');
-    expect(screen.getByRole('button', { name: 'Close image preview' })).toBeInTheDocument();
+    const closeButton = screen.getByRole('button', { name: 'Close image preview' });
+    expect(closeButton).toBeInTheDocument();
     expect(screen.queryByText('1 / 1')).toBeNull();
+    fireEvent.click(closeButton);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   });
 });

@@ -1,6 +1,27 @@
+import { render, screen } from '@testing-library/react';
+import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DockviewApi } from 'dockview-react';
-import { scrollActiveTabIntoView } from '#components/panes/dockview.js';
+import { Dockview, dockviewStyleOverrides, scrollActiveTabIntoView } from '#components/panes/dockview.js';
+
+vi.mock('dockview-react', async () => {
+  const { createElement } = await import('react');
+  const dockviewReact = ({ className, scrollbars }: { className?: string; scrollbars?: string }) =>
+    createElement(
+      'div',
+      { className, 'data-scrollbars': scrollbars, 'data-testid': 'dockview-react' },
+      createElement(
+        'div',
+        { className: 'dv-tabs-container', 'data-testid': 'dockview-tabs' },
+        createElement('button', { type: 'button' }, 'Tab'),
+      ),
+    );
+
+  return {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock key mirrors the upstream export.
+    DockviewReact: dockviewReact,
+  };
+});
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -326,5 +347,122 @@ describe('scrollActiveTabIntoView', () => {
       // After rAF fires, scrollLeft should be corrected
       expect(tabsContainer!.scrollLeft).toBe(120);
     });
+  });
+});
+
+describe('dockviewStyleOverrides', () => {
+  it('keeps the header surface transparent', () => {
+    expect(dockviewStyleOverrides).toContain('[--dv-tabs-and-actions-container-background-color:transparent]');
+  });
+
+  it('fully fades overflowing tabs beneath the header actions', () => {
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tabs-container]:[--scroll-fade-size:42px]');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tabs-container]:[--scroll-fade-end:transparent]');
+  });
+
+  it('uses the compact 36px tab strip geometry', () => {
+    expect(dockviewStyleOverrides).toContain('[--dv-tabs-and-actions-container-height:2.25rem]');
+    expect(dockviewStyleOverrides).toContain('[--dv-tabs-and-actions-container-font-size:13px]');
+    expect(dockviewStyleOverrides).toContain('[--dv-tab-font-size:13px]');
+    expect(dockviewStyleOverrides).toContain('[--dv-tab-margin:0.25rem_0.125rem]');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tabs-container:not(.dv-tabs-container-vertical)]:px-[0.125rem]');
+    expect(dockviewStyleOverrides).not.toContain('[&_.dv-left-actions-container]:pl-1');
+
+    for (const container of ['left', 'right', 'pre']) {
+      expect(dockviewStyleOverrides).toContain(`[&_.dv-${container}-actions-container_button]:!h-7`);
+      expect(dockviewStyleOverrides).toContain(
+        `[&_.dv-${container}-actions-container_button:has(>svg:only-child)]:!w-7`,
+      );
+    }
+
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tabs-overflow-dropdown-default]:!size-7');
+    expect(dockviewStyleOverrides).toContain(
+      '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
+    );
+    expect(dockviewStyleOverrides).toContain(
+      '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-muted-foreground/15',
+    );
+  });
+
+  it('shrinks horizontal tabs equally from 160px to 112px before scrolling', () => {
+    const horizontalTabSelector = '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]';
+
+    expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:w-40`);
+    expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:min-w-28`);
+    expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:max-w-40`);
+    expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:grow`);
+    expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:!shrink`);
+    expect(dockviewStyleOverrides).toContain(`${horizontalTabSelector}:!p-0`);
+    expect(dockviewStyleOverrides).not.toContain(`${horizontalTabSelector}:basis-40`);
+    expect(dockviewStyleOverrides).not.toContain('.dv-tab--dragging');
+    expect(dockviewStyleOverrides).not.toContain('.dv-tab--group-collapsed');
+  });
+
+  it('uses rounded neutral selection, hover, and focus states', () => {
+    expect(dockviewStyleOverrides).toContain('[--dv-activegroup-visiblepanel-tab-background-color:var(--accent)]');
+    expect(dockviewStyleOverrides).toContain('[--dv-activegroup-hiddenpanel-tab-background-color:transparent]');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab]:rounded-sm');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:not(.dv-active-tab):hover]:!bg-accent');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:not(.dv-active-tab):hover]:!text-muted-foreground');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:focus-visible]:ring-2');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:focus-visible]:ring-ring/50');
+  });
+
+  it('uses a tab-matching close-action backdrop until the action itself is hovered', () => {
+    const closeSelector = '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action]';
+
+    expect(dockviewStyleOverrides).not.toContain(`${closeSelector}:bg-muted-foreground/10`);
+    expect(dockviewStyleOverrides).toContain(`${closeSelector}:bg-transparent`);
+    expect(dockviewStyleOverrides).toContain(
+      '[&_.dv-tab:hover_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
+    );
+    expect(dockviewStyleOverrides).toContain(
+      '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
+    );
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--scroll-fade-size:42px]');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-input');
+  });
+
+  it('shows short dividers only between adjacent inactive tabs', () => {
+    const dividerSelector =
+      '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]';
+
+    expect(dockviewStyleOverrides).not.toContain('border-t-primary');
+    expect(dockviewStyleOverrides).not.toContain('.dv-tab:not(:first-child)::before');
+    expect(dockviewStyleOverrides).not.toContain('.dv-tab:last-child::after');
+    expect(dockviewStyleOverrides).not.toContain('.dv-tab.dv-active-tab]:border-b-background');
+    expect(dockviewStyleOverrides).toContain(`${dividerSelector}:content-['']`);
+    expect(dockviewStyleOverrides).toContain(`${dividerSelector}:absolute`);
+    expect(dockviewStyleOverrides).toContain(`${dividerSelector}:!left-[-0.125rem]`);
+    expect(dockviewStyleOverrides).toContain(`${dividerSelector}:!w-px`);
+    expect(dockviewStyleOverrides).toContain(`${dividerSelector}:!top-1/2`);
+    expect(dockviewStyleOverrides).toContain(`${dividerSelector}:!h-4`);
+    expect(dockviewStyleOverrides).toContain(`${dividerSelector}:!-translate-y-1/2`);
+    expect(dockviewStyleOverrides).toContain(`${dividerSelector}:!bg-border`);
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tabs-container]:border-b-border');
+  });
+});
+
+describe('Dockview', () => {
+  it('should delegate vertical wheel input to native Dockview tab viewports', () => {
+    render(createElement(Dockview, { className: 'caller-class', components: {}, onReady: vi.fn() }));
+    const dockview = screen.getByTestId('dockview-react');
+    const wrapper = dockview.parentElement;
+    const tabs = screen.getByTestId('dockview-tabs');
+    Object.defineProperties(tabs, {
+      clientWidth: { configurable: true, value: 100 },
+      scrollLeft: { configurable: true, value: 0, writable: true },
+      scrollWidth: { configurable: true, value: 300 },
+    });
+
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 60 });
+    screen.getByRole('button', { name: 'Tab' }).dispatchEvent(event);
+
+    expect(wrapper).toHaveAttribute('data-slot', 'omni-scroller');
+    expect(wrapper).toHaveClass('size-full');
+    expect(dockview).toHaveAttribute('data-scrollbars', 'native');
+    expect(dockview).toHaveClass('caller-class');
+    expect(tabs.scrollLeft).toBe(60);
+    expect(event.defaultPrevented).toBe(true);
   });
 });

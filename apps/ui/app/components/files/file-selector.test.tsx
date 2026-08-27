@@ -357,6 +357,21 @@ describe('FileSelector (context auto-wiring)', () => {
       expect(screen.getAllByText('main.kcl').length).toBeGreaterThanOrEqual(1);
     });
 
+    const breadcrumbScroller = document.querySelector<HTMLElement>('[data-slot="omni-scroller"]');
+    if (!breadcrumbScroller) {
+      throw new Error('File selector breadcrumb scroller was missing.');
+    }
+    Object.defineProperties(breadcrumbScroller, {
+      clientWidth: { configurable: true, value: 100 },
+      scrollLeft: { configurable: true, value: 10, writable: true },
+      scrollWidth: { configurable: true, value: 400 },
+    });
+    const breadcrumbWheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 70 });
+    breadcrumbScroller.lastElementChild?.dispatchEvent(breadcrumbWheel);
+
+    expect(breadcrumbScroller.scrollLeft).toBe(80);
+    expect(breadcrumbWheel.defaultPrevented).toBe(true);
+
     await userEvent.click(screen.getByText('kcl-samples'));
 
     await waitFor(() => {

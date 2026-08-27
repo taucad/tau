@@ -7,7 +7,6 @@ import type { DirectoryListingError, ListedDirectoryEntry } from '@taucad/fs-cli
 import { classifyDirectoryListingError } from '@taucad/fs-client/directory-listing';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
-import { useHorizontalScroll } from '#hooks/use-horizontal-scroll.js';
 import { Command, CommandInput, CommandItem, CommandList } from '#components/ui/command.js';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '#components/ui/drawer.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
@@ -16,6 +15,7 @@ import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { cn } from '#utils/ui.utils.js';
 import { menuItemLayoutClass } from '#components/ui/menu.variants.js';
 import { Loader } from '#components/ui/loader.js';
+import { OmniScroller } from '#components/ui/omni-scroller.js';
 
 export type FileSelectorEntry = {
   name: string;
@@ -273,14 +273,11 @@ function BreadcrumbNav({
     }
   }, [currentPath]);
 
-  // Enable horizontal scrolling with mouse wheel
-  useHorizontalScroll(scrollContainerRef);
-
   return (
     <div className='flex items-center border-b text-sm'>
-      <div
+      <OmniScroller
         ref={scrollContainerRef}
-        className='mx-2 flex flex-1 snap-x snap-mandatory [scrollbar-width:none] items-center gap-0.5 overflow-x-auto overscroll-x-none [&::-webkit-scrollbar]:hidden'
+        className='mx-2 flex flex-1 snap-x snap-mandatory [scrollbar-width:none] items-center gap-0.5 overscroll-x-none [&::-webkit-scrollbar]:hidden'
       >
         {/* "Files" root button - inside scrollable area */}
         <button
@@ -319,7 +316,7 @@ function BreadcrumbNav({
             </div>
           );
         })}
-      </div>
+      </OmniScroller>
     </div>
   );
 }

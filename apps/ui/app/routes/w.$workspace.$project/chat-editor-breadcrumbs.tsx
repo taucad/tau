@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
-import { Fragment, useMemo, useCallback, useRef } from 'react';
+import { Fragment, useCallback, useMemo } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { useProject } from '#hooks/use-project.js';
-import { useHorizontalScroll } from '#hooks/use-horizontal-scroll.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { FileSelector } from '#components/files/file-selector.js';
+import { OmniScroller } from '#components/ui/omni-scroller.js';
 
 type ChatEditorBreadcrumbsProperties = {
   readonly filePath: string;
@@ -13,10 +13,6 @@ type ChatEditorBreadcrumbsProperties = {
 
 export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcrumbsProperties): ReactNode {
   const { editorRef } = useProject();
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-  // Enable horizontal scrolling with mouse wheel
-  useHorizontalScroll(scrollContainerRef);
 
   // Derive breadcrumb data from the panel's own file path
   const activeFile = useMemo(
@@ -54,10 +50,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
 
   return (
     <div className='flex flex-row items-center justify-between px-2 py-1 text-muted-foreground'>
-      <div
-        ref={scrollContainerRef}
-        className='flex min-w-0 flex-1 [scrollbar-width:none] flex-row items-center gap-0.5 overflow-x-auto overscroll-x-none [&::-webkit-scrollbar]:hidden'
-      >
+      <OmniScroller className='flex min-w-0 flex-1 [scrollbar-width:none] flex-row items-center gap-0.5 overscroll-x-none [&::-webkit-scrollbar]:hidden'>
         {breadcrumbs.length > 0 ? (
           breadcrumbs.map((crumb) => (
             <Fragment key={crumb.path}>
@@ -83,7 +76,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
           // Maintain height with invisible content when empty
           <span className='opacity-0'>placeholder</span>
         )}
-      </div>
+      </OmniScroller>
       {children}
     </div>
   );

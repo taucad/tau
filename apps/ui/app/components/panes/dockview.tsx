@@ -2,20 +2,20 @@ import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { DockviewApi, DockviewReadyEvent, DockviewTheme } from 'dockview-react';
 import { DockviewReact } from 'dockview-react';
+import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { cn } from '#utils/ui.utils.js';
-import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 
 /**
  * Custom Dockview theme. The `dockview-theme-tau` class is applied to the root
  * element; all visual overrides are expressed as Tailwind className selectors
- * in `dockviewTailwindOverrides` below (no separate CSS file).
+ * in `dockviewStyleOverrides` below (no separate CSS file).
  */
 const tauDockviewTheme: DockviewTheme = {
   name: 'tau',
   className: 'dockview-theme-tau',
 };
 
-type DockviewProperties = Omit<ComponentProps<typeof DockviewReact>, 'theme'>;
+type DockviewProperties = Omit<ComponentProps<typeof DockviewReact>, 'scrollbars' | 'theme'>;
 
 /**
  * Complete Tailwind-based theme for Dockview.
@@ -25,7 +25,7 @@ type DockviewProperties = Omit<ComponentProps<typeof DockviewReact>, 'theme'>;
  * Pseudo-element overrides use `[&_selector::before]` / `[&_selector::after]`
  * as arbitrary variants so Tailwind does not inject default `content`.
  */
-const dockviewTailwindOverrides = cn(
+export const dockviewStyleOverrides = cn(
   // ═══════════════════════════════════════════════════════════════════════════
   // CSS VARIABLE DECLARATIONS
   // Map Dockview's --dv-* tokens to the app's design tokens.
@@ -35,10 +35,12 @@ const dockviewTailwindOverrides = cn(
   // ── Core layout ──
   '[--dv-paneview-active-outline-color:transparent]',
   '[--dv-tabs-and-actions-container-font-size:13px]',
-  '[--dv-tabs-and-actions-container-height:1.9375rem]',
-  '[--dv-tab-font-size:var(--text-sm)]',
+  '[--dv-tabs-and-actions-container-height:2.25rem]',
+  '[--dv-tab-font-size:13px]',
   '[--dv-border-radius:0px]',
-  '[--dv-tab-margin:0]',
+  '[--dv-tab-border-radius:var(--radius-sm)]',
+  // Two 2px horizontal margins combine into the same 4px gap as the vertical inset.
+  '[--dv-tab-margin:0.25rem_0.125rem]',
   '[--dv-overlay-z-index:999]',
   // ── Drag & drop ──
   '[--dv-drag-over-background-color:color-mix(in_oklch,var(--primary),transparent_80%)]',
@@ -63,7 +65,8 @@ const dockviewTailwindOverrides = cn(
   //   Layer 1 – border strips: 1px top + 1px bottom always fully opaque
   //   Layer 2 – horizontal scroll-fade gradient (animated via scroll-fade-x)
   // The union ensures tab borders remain crisp at the fade edges.
-  '[&_.dv-tabs-container]:[--scroll-fade-size:14px]',
+  '[&_.dv-tabs-container]:[--scroll-fade-size:42px]',
+  '[&_.dv-tabs-container]:[--scroll-fade-end:transparent]',
   '[&_.dv-tabs-container]:[mask-image:linear-gradient(to_bottom,#000_1px,transparent_1px,transparent_calc(100%_-_1px),#000_calc(100%_-_1px)),linear-gradient(to_right,var(--scroll-fade-left),#000_var(--scroll-fade-size),#000_calc(100%_-_var(--scroll-fade-size)),var(--scroll-fade-right))]',
   '[&_.dv-tabs-container]:[mask-composite:add]',
   '[&_.dv-tabs-container]:[animation:scroll-fade-x_linear]',
@@ -73,19 +76,19 @@ const dockviewTailwindOverrides = cn(
   '[--dv-icon-hover-background-color:var(--accent)]',
   // ── Group / panel backgrounds ──
   '[--dv-group-view-background-color:var(--background)]',
-  '[--dv-tabs-and-actions-container-background-color:var(--muted)]',
+  '[--dv-tabs-and-actions-container-background-color:transparent]',
   // ── Active group tab colors ──
-  '[--dv-activegroup-visiblepanel-tab-background-color:var(--background)]',
-  '[--dv-activegroup-hiddenpanel-tab-background-color:var(--muted)]',
+  '[--dv-activegroup-visiblepanel-tab-background-color:var(--accent)]',
+  '[--dv-activegroup-hiddenpanel-tab-background-color:transparent]',
   '[--dv-activegroup-visiblepanel-tab-color:var(--foreground)]',
   '[--dv-activegroup-hiddenpanel-tab-color:var(--muted-foreground)]',
   // ── Inactive group tab colors ──
-  '[--dv-inactivegroup-visiblepanel-tab-background-color:var(--background)]',
-  '[--dv-inactivegroup-hiddenpanel-tab-background-color:var(--muted)]',
-  '[--dv-inactivegroup-visiblepanel-tab-color:var(--muted-foreground)]',
+  '[--dv-inactivegroup-visiblepanel-tab-background-color:var(--accent)]',
+  '[--dv-inactivegroup-hiddenpanel-tab-background-color:transparent]',
+  '[--dv-inactivegroup-visiblepanel-tab-color:var(--foreground)]',
   '[--dv-inactivegroup-hiddenpanel-tab-color:var(--muted-foreground)]',
   // ── Borders / separators ──
-  '[--dv-tab-divider-color:var(--border)]',
+  '[--dv-tab-divider-color:transparent]',
   '[--dv-separator-border:var(--border)]',
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -97,10 +100,36 @@ const dockviewTailwindOverrides = cn(
   '[&_.dv-drop-target-container_.dv-drop-target-anchor.dv-drop-target-anchor-container-changed]:transition-none',
 
   // ── Tab bar container ──
-  // position: relative + z-index lifts the tab bar above the dv-separator-border
-  // ::before pseudo-element so the primary top indicator is not clipped.
   '[&_.dv-tabs-and-actions-container]:relative',
   '[&_.dv-tabs-and-actions-container]:z-6',
+
+  // ── Adaptive horizontal tab geometry ──
+  // Share available width equally from 160px down to a 112px floor, then scroll.
+  // Width stays auto-basis so Dockview's !important zero-width drag states still win.
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:w-40',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:min-w-28',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:max-w-40',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:grow',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:!shrink',
+  // Complete the outer inline inset without widening the gap between tabs.
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)]:px-[0.125rem]',
+  // The shared tab trigger owns the inset so its hover and tooltip hit areas
+  // exactly match Dockview's outer tab box.
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab]:!p-0',
+  '[&_.dv-tabs-container]:border-b',
+  '[&_.dv-tabs-container]:border-b-border',
+
+  // Short separators only mark boundaries between two inactive tabs.
+  "[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:content-['']",
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:absolute',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:!left-[-0.125rem]',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:!w-px',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:!top-1/2',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:!h-4',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:!-translate-y-1/2',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:!bg-border',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:z-5',
+  '[&_.dv-tabs-container:not(.dv-tabs-container-vertical)_>_.dv-tab:not(.dv-active-tab)_+_.dv-tab:not(.dv-active-tab)::before]:pointer-events-none',
 
   // ── Separator replacements for split views ──
   // Border-top for vertical splits, border-left for horizontal splits, only
@@ -120,26 +149,31 @@ const dockviewTailwindOverrides = cn(
   '[&_.dv-left-actions-container]:border-b-border',
   '[&_.dv-pre-actions-container]:border-b',
   '[&_.dv-pre-actions-container]:border-b-border',
-  // Left actions left padding (calc(var(--spacing)) = pl-1)
-  '[&_.dv-left-actions-container]:pl-1',
-
   // ── Close button styling ──
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action]:text-muted-foreground',
+  '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action]:bg-transparent',
+  // Match the tab until the close action itself is hovered. The opaque fill
+  // masks the title beneath the close action without showing a separate pill.
+  '[&_.dv-tab:hover_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
+  '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
+  '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--scroll-fade-size:42px]',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:text-foreground',
-  '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:bg-accent',
-  '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:rounded-[2px]',
+  '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-input',
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // TAB BORDERS
+  // TAB STATES
   // ═══════════════════════════════════════════════════════════════════════════
 
-  // ── Default tab borders ──
-  // Top: 1px transparent (primary for active tab in focused group).
-  // Bottom: 1px var(--border) for separation; active tab uses bg colour → seamless.
-  '[&_.dv-tab]:border-t',
-  '[&_.dv-tab]:border-t-transparent',
-  '[&_.dv-tab]:border-b',
-  '[&_.dv-tab]:border-b-border',
+  '[&_.dv-tab]:rounded-sm',
+  '[&_.dv-tab]:transition-colors',
+  '[&_.dv-tab:not(.dv-active-tab):hover]:!bg-accent',
+  '[&_.dv-tab:not(.dv-active-tab):hover]:!text-muted-foreground',
+  '[&_.dv-tab:focus-visible]:outline-none',
+  '[&_.dv-tab:focus-visible]:ring-2',
+  '[&_.dv-tab:focus-visible]:ring-ring/50',
+  '[&_.dv-tab.dv-active-tab_.dv-default-tab-action]:opacity-100',
+  '[&_.dv-tab:focus-within_.dv-default-tab-action]:visible',
+  '[&_.dv-tab:focus-within_.dv-default-tab-action]:opacity-100',
 
   // ── Tab focus overlay ──
   // Dockview's core CSS (un-layered) creates a full-size ::after on
@@ -155,39 +189,6 @@ const dockviewTailwindOverrides = cn(
   '[&_.dv-tab:focus::after]:![outline:none]',
   '[&_.dv-tab:focus-within::after]:![outline:none]',
 
-  // ── Inter-tab divider (v6 no longer adds .dv-horizontal on .dv-tabs-container,
-  // so upstream's divider rule never matches; paint ::before ourselves.)
-  "[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:content-['_']",
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:absolute',
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:[top:-1px]',
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:[bottom:-1px]',
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:left-0',
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:w-px',
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:h-auto',
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:z-5',
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:pointer-events-none',
-  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:[background-color:var(--dv-tab-divider-color)]',
-
-  // ── Last-tab right divider ──
-  // Separator between the last tab and the void / actions area.
-  "[&_.dv-tabs-container_.dv-tab:last-child::after]:content-['_']",
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:absolute',
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:[top:-1px]',
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:[bottom:-1px]',
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:right-0',
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:z-5',
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:pointer-events-none',
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:[background-color:var(--dv-tab-divider-color)]',
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:w-px',
-  '[&_.dv-tabs-container_.dv-tab:last-child::after]:h-auto',
-
-  // ── Active tab bottom border → seamless with content ──
-  '[&_.dv-tab.dv-active-tab]:border-b-background',
-  // ── Active group: primary top indicator on active tab ──
-  '[&_.dv-groupview.dv-active-group_>_.dv-tabs-and-actions-container_.dv-tabs-container_>_.dv-tab.dv-active-tab]:border-t-primary',
-  // ── Inactive group: no top indicator ──
-  '[&_.dv-groupview.dv-inactive-group_>_.dv-tabs-and-actions-container_.dv-tabs-container_>_.dv-tab.dv-active-tab]:border-t-transparent',
-
   // ═══════════════════════════════════════════════════════════════════════════
   // ACTION CONTAINER & HOVER VISIBILITY
   // ═══════════════════════════════════════════════════════════════════════════
@@ -200,6 +201,14 @@ const dockviewTailwindOverrides = cn(
   '[&_.dv-right-actions-container_>_.dv-react-part]:pr-1',
   '[&_.dv-left-actions-container_>_.dv-react-part]:flex',
   '[&_.dv-left-actions-container_>_.dv-react-part]:items-center',
+  '[&_.dv-left-actions-container_button]:!h-7',
+  '[&_.dv-right-actions-container_button]:!h-7',
+  '[&_.dv-pre-actions-container_button]:!h-7',
+  '[&_.dv-left-actions-container_button:has(>svg:only-child)]:!w-7',
+  '[&_.dv-right-actions-container_button:has(>svg:only-child)]:!w-7',
+  '[&_.dv-pre-actions-container_button:has(>svg:only-child)]:!w-7',
+  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
+  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-muted-foreground/15',
 
   // ── Group-hover action button visibility ──
   // Hidden by default, shown on group hover to reduce visual noise.
@@ -228,7 +237,7 @@ const dockviewTailwindOverrides = cn(
   '[&_.dv-tabs-overflow-dropdown-root]:p-0',
   // Button -- match PaneButton sizing and hover
   '[&_.dv-tabs-overflow-dropdown-default]:flex',
-  '[&_.dv-tabs-overflow-dropdown-default]:size-6',
+  '[&_.dv-tabs-overflow-dropdown-default]:!size-7',
   '[&_.dv-tabs-overflow-dropdown-default]:items-center',
   '[&_.dv-tabs-overflow-dropdown-default]:justify-center',
   '[&_.dv-tabs-overflow-dropdown-default]:gap-0',
@@ -312,12 +321,9 @@ export function scrollActiveTabIntoView(api: DockviewApi): void {
  * Themed Dockview wrapper.
  *
  * Renders `DockviewReact` with the `tauDockviewTheme` applied automatically.
- * Includes a "split right" button in the right side of each group's tab bar
- * (visible on hover).
- *
- * All theme styling -- CSS variable declarations, tab borders, pseudo-element
- * dividers, action button visibility, overflow dropdown, containment overrides
- * -- is expressed as Tailwind className selectors in `dockviewTailwindOverrides`
+ * All theme styling -- CSS variable declarations, tab states, action button
+ * visibility, overflow dropdown, containment overrides
+ * -- is expressed as Tailwind className selectors in `dockviewStyleOverrides`
  * above, keeping everything co-located with the component and in sync with the
  * Tailwind theme.
  *
@@ -332,7 +338,7 @@ export function scrollActiveTabIntoView(api: DockviewApi): void {
  * scroll that fires before the browser reflows newly-added tab elements.
  */
 export function Dockview({ className, onReady, ...properties }: DockviewProperties): React.JSX.Element {
-  const mergedClassName = useMemo(() => cn(dockviewTailwindOverrides, className), [className]);
+  const mergedClassName = useMemo(() => cn(dockviewStyleOverrides, className), [className]);
   const disposableRef = useRef<{ dispose(): void } | undefined>(undefined);
 
   const handleReady = useCallback(
@@ -353,12 +359,14 @@ export function Dockview({ className, onReady, ...properties }: DockviewProperti
   }, []);
 
   return (
-    <DockviewReact
-      {...properties}
-      className={mergedClassName}
-      theme={tauDockviewTheme}
-      onReady={handleReady}
-      rightHeaderActionsComponent={properties.rightHeaderActionsComponent ?? DockviewSplitAction}
-    />
+    <OmniScroller className='size-full' viewportSelector='.dv-tabs-container'>
+      <DockviewReact
+        {...properties}
+        className={mergedClassName}
+        scrollbars='native'
+        theme={tauDockviewTheme}
+        onReady={handleReady}
+      />
+    </OmniScroller>
   );
 }

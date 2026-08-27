@@ -44,7 +44,7 @@ const ChatImageCarouselDebugRoute = (): React.JSX.Element => {
 
   return (
     <main className='flex min-h-screen items-end justify-center bg-background p-10'>
-      <section className='w-full max-w-3xl rounded-xl border bg-background p-4 shadow-sm'>
+      <section className='w-80 rounded-xl border bg-background p-4 shadow-sm'>
         <ChatTextareaImageStrip
           images={images}
           size='desktop'

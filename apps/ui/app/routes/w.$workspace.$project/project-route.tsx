@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
+import { waitFor } from 'xstate';
 import { toast } from 'sonner';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
@@ -35,18 +36,34 @@ type ResolvedProjectRouteAccess = {
   readonly access: ProjectRouteAccess;
 };
 
+type ProjectSessionFlushRegistration = {
+  projectId: string;
+  flush: () => Promise<void>;
+  inFlight?: Promise<void>;
+};
+
+type ProjectRouteError = Readonly<{
+  projectId: string;
+  error: Error;
+}>;
+
+const editorFlushTimeoutMilliseconds = 10_000;
+
 function ProjectSession({
   children,
   projectId,
+  onFlushRegistration,
 }: {
   readonly children?: React.ReactNode;
   readonly projectId: string;
+  readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
 }): React.ReactNode {
   return (
     <HomeFileManagerProvider projectId={projectId} rootDirectory={`/projects/${projectId}`}>
       <ChatRpcSocketProvider>
         <WebglContextTrackerProvider>
           <ProjectProvider projectId={projectId} kernelOptionsFactory={debugKernelOptions}>
+            <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
             <MonacoModelServiceProvider>
               <RevisionProvider>{children}</RevisionProvider>
             </MonacoModelServiceProvider>
@@ -66,35 +83,73 @@ export function ProjectRouteGate({
 }): React.ReactNode {
   const projectManager = useProjectManager();
   const latestRequestedProjectIdRef = useRef(requestedProjectId);
+  const activeSessionFlushRef = useRef<ProjectSessionFlushRegistration | undefined>(undefined);
   const [resolved, setResolved] = useState<ResolvedProjectRouteAccess>();
-  const [loadErrorProjectId, setLoadErrorProjectId] = useState<string>();
+  const [routeError, setRouteError] = useState<ProjectRouteError>();
   const [loadAttempt, setLoadAttempt] = useState(0);
   latestRequestedProjectIdRef.current = requestedProjectId;
+  const registerSessionFlush = useRef((registration: ProjectSessionFlushRegistration | undefined): void => {
+    activeSessionFlushRef.current = registration;
+  }).current;
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const isCancelled = (): boolean => controller.signal.aborted;
     const loadAccess = async (): Promise<void> => {
+      let access: ProjectRouteAccess;
       try {
-        const access = await projectManager.getProjectRouteAccess(requestedProjectId);
-        if (!cancelled) {
-          setLoadErrorProjectId(undefined);
-          setResolved({ projectId: requestedProjectId, access });
-        }
+        access = await projectManager.getProjectRouteAccess(requestedProjectId);
       } catch {
-        if (!cancelled) {
-          setLoadErrorProjectId(requestedProjectId);
+        if (!isCancelled()) {
+          setRouteError({
+            projectId: requestedProjectId,
+            error: new Error('Tau could not check this project. Try again.'),
+          });
+        }
+        return;
+      }
+      if (isCancelled()) {
+        return;
+      }
+      try {
+        const session = activeSessionFlushRef.current;
+        if (session && session.projectId !== requestedProjectId) {
+          const pendingFlush = session.inFlight ?? session.flush();
+          session.inFlight = pendingFlush;
+          try {
+            await pendingFlush;
+          } finally {
+            if (activeSessionFlushRef.current === session && session.inFlight === pendingFlush) {
+              session.inFlight = undefined;
+            }
+          }
+        }
+        if (isCancelled()) {
+          return;
+        }
+        setRouteError(undefined);
+        setResolved({
+          projectId: requestedProjectId,
+          access,
+        });
+      } catch {
+        if (!isCancelled()) {
+          setRouteError({
+            projectId: requestedProjectId,
+            error: new Error('Tau could not save the current project view. Try again before leaving.'),
+          });
         }
       }
     };
     // async-iife: bootstrap -- the effect cancellation flag owns this route-access request.
     void loadAccess();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [requestedProjectId, projectManager, loadAttempt]);
 
   const handleRetryLoad = (): void => {
-    setLoadErrorProjectId(undefined);
+    setRouteError(undefined);
     setLoadAttempt((attempt) => attempt + 1);
   };
 
@@ -114,13 +169,10 @@ export function ProjectRouteGate({
     );
   };
 
-  if (!resolved && loadErrorProjectId === requestedProjectId) {
+  if (!resolved && routeError?.projectId === requestedProjectId) {
     return (
       <div className='relative h-full'>
-        <ProjectLoadError
-          error={new Error('Tau could not check this project. Try again.')}
-          onReload={handleRetryLoad}
-        />
+        <ProjectLoadError error={routeError.error} onReload={handleRetryLoad} />
       </div>
     );
   }
@@ -140,7 +192,7 @@ export function ProjectRouteGate({
   switch (access.status) {
     case 'ready': {
       content = (
-        <ProjectSession key={projectId} projectId={projectId}>
+        <ProjectSession key={projectId} projectId={projectId} onFlushRegistration={registerSessionFlush}>
           {children}
         </ProjectSession>
       );
@@ -209,7 +261,7 @@ export function ProjectRouteGate({
       <div className='contents' inert={pending || undefined} aria-busy={pending}>
         {content}
       </div>
-      {pending && loadErrorProjectId !== requestedProjectId ? (
+      {pending && routeError?.projectId !== requestedProjectId ? (
         <div
           className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
           role='status'
@@ -218,11 +270,8 @@ export function ProjectRouteGate({
           <Loader className='size-8' />
         </div>
       ) : null}
-      {loadErrorProjectId === requestedProjectId ? (
-        <ProjectLoadError
-          error={new Error('Tau could not check this project. Try again.')}
-          onReload={handleRetryLoad}
-        />
+      {routeError?.projectId === requestedProjectId ? (
+        <ProjectLoadError error={routeError.error} onReload={handleRetryLoad} />
       ) : null}
     </>
   );
@@ -312,7 +361,8 @@ function Chat(): React.JSX.Element {
  * Persistence + draft `flushNow` is dispatched centrally by
  * `<GlobalChatFlushGuard>` (mounted in `apps/ui/app/root.tsx`) — every
  * live session in the store is fanned out automatically. Project + editor
- * machine flushing remains route-scoped via `FlushOnCloseGuard` below.
+ * machine flushing remains route-scoped via `ProjectPersistenceGuard` in the
+ * retained project session.
  */
 function ChatWithProvider(): React.JSX.Element {
   const { projectRef } = useProject();
@@ -334,7 +384,13 @@ function ChatWithProvider(): React.JSX.Element {
  * Inner component that wires up the flush-on-close handler.
  * Needs to be a child of ProjectProvider to access project + editor refs.
  */
-function FlushOnCloseGuard(): React.JSX.Element {
+function ProjectPersistenceGuard({
+  projectId,
+  onFlushRegistration,
+}: {
+  readonly projectId: string;
+  readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
+}): React.JSX.Element {
   const { projectRef, editorRef } = useProject();
 
   useFlushOnClose(() => {
@@ -343,6 +399,22 @@ function FlushOnCloseGuard(): React.JSX.Element {
   useFlushOnClose(() => {
     editorRef.send({ type: 'flushNow' });
   });
+
+  useEffect(() => {
+    const registration: ProjectSessionFlushRegistration = {
+      projectId,
+      async flush() {
+        editorRef.send({ type: 'flushNow' });
+        await waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+          timeout: editorFlushTimeoutMilliseconds,
+        });
+      },
+    };
+    onFlushRegistration(registration);
+    return () => {
+      onFlushRegistration(undefined);
+    };
+  }, [editorRef, onFlushRegistration, projectId]);
 
   // oxlint-disable-next-line react/jsx-no-useless-fragment -- Headless component
   return <></>;

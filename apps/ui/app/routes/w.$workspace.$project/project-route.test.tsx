@@ -19,6 +19,45 @@ const mounts: string[] = [];
 const unmounts: string[] = [];
 const fileManagerInputs: Array<{ projectId: string; rootDirectory: string }> = [];
 const projectProviderInputs: string[] = [];
+const editorSend = vi.fn();
+const projectSend = vi.fn();
+let editorIsIdle = true;
+type EditorSnapshot = Readonly<{
+  status: 'active';
+  matches: () => boolean;
+}>;
+const editorSnapshot = (): EditorSnapshot => ({
+  status: 'active',
+  matches: () => editorIsIdle,
+});
+const editorObservers = new Set<{
+  next?: (snapshot: ReturnType<typeof editorSnapshot>) => void;
+  error?: (error: unknown) => void;
+}>();
+const editorRef = {
+  send: editorSend,
+  getSnapshot: editorSnapshot,
+  subscribe: (observer: {
+    next?: (snapshot: ReturnType<typeof editorSnapshot>) => void;
+    error?: (error: unknown) => void;
+  }) => {
+    editorObservers.add(observer);
+    return { unsubscribe: () => editorObservers.delete(observer) };
+  },
+};
+const setEditorIdle = (isIdle: boolean): void => {
+  editorIsIdle = isIdle;
+  const snapshot = editorSnapshot();
+  for (const observer of editorObservers) {
+    observer.next?.(snapshot);
+  }
+};
+const failEditorFlush = (error: Error): void => {
+  for (const observer of editorObservers) {
+    observer.error?.(error);
+  }
+};
+const projectRef = { send: projectSend };
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => projectManager,
@@ -51,8 +90,9 @@ vi.mock('#hooks/use-project.js', () => ({
     projectProviderInputs.push(projectId);
     return <div>{children}</div>;
   },
-  useProject: vi.fn(),
+  useProject: () => ({ projectRef, editorRef }),
 }));
+vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
 vi.mock('#hooks/use-chat-rpc-socket.js', () => ({
   ChatRpcSocketProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
@@ -76,9 +116,10 @@ vi.mock('#routes/w.$workspace.$project/project-not-found.js', () => ({
   ProjectNotFound: () => <div>Project Not Found</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/project-load-error.js', () => ({
-  ProjectLoadError: ({ onReload }: { readonly onReload: () => void }) => (
+  ProjectLoadError: ({ error, onReload }: { readonly error: Error; readonly onReload: () => void }) => (
     <div>
       Project access failed
+      <span data-testid='project-route-error'>{error.message}</span>
       <button type='button' onClick={onReload}>
         Retry project
       </button>
@@ -86,7 +127,7 @@ vi.mock('#routes/w.$workspace.$project/project-load-error.js', () => ({
   ),
 }));
 
-const routeModulePromise = import('./project-route.js');
+const routeModule = await import('./project-route.js');
 
 const project = (id: string) =>
   projectToManifest({
@@ -120,13 +161,12 @@ const deferred = <T,>(): { promise: Promise<T>; resolve: (value: T) => void } =>
  * after slug resolution and the legacy id resolver after its redirect. The gate
  * is therefore exercised through the shared component, parameterised by id.
  */
-const renderRouteProvider = async (): Promise<{
+const renderRouteProvider = (): {
   Provider: React.JSXElementConstructor<React.PropsWithChildren>;
   view: ReturnType<typeof render>;
-}> => {
-  const route = await routeModulePromise;
+} => {
   const Provider = ({ children }: React.PropsWithChildren): React.JSX.Element => (
-    <route.ProjectRouteProviders projectId={currentProjectId}>{children}</route.ProjectRouteProviders>
+    <routeModule.ProjectRouteProviders projectId={currentProjectId}>{children}</routeModule.ProjectRouteProviders>
   );
   return {
     Provider,
@@ -146,13 +186,17 @@ beforeEach(() => {
   unmounts.length = 0;
   fileManagerInputs.length = 0;
   projectProviderInputs.length = 0;
+  editorSend.mockReset();
+  projectSend.mockReset();
+  editorObservers.clear();
+  editorIsIdle = true;
 });
 
 describe('project route session identity', () => {
   it('should render only the route status while initial access is unresolved', async () => {
     const pendingA = deferred<ProjectRouteAccess>();
     getProjectRouteAccess.mockReturnValue(pendingA.promise);
-    const { view } = await renderRouteProvider();
+    const { view } = renderRouteProvider();
 
     expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
     expect(screen.queryByTestId('project-session')).not.toBeInTheDocument();
@@ -167,9 +211,10 @@ describe('project route session identity', () => {
 
   it('should leave the initial loader for a retryable access error', async () => {
     getProjectRouteAccess.mockRejectedValueOnce(new Error('discovery failed')).mockResolvedValueOnce(ready(projectA));
-    await renderRouteProvider();
+    renderRouteProvider();
 
     expect(await screen.findByText('Project access failed')).toBeInTheDocument();
+    expect(screen.getByTestId('project-route-error')).toHaveTextContent('could not check this project');
     expect(screen.queryByRole('status', { name: 'Opening project' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry project' }));
@@ -180,7 +225,7 @@ describe('project route session identity', () => {
     const pendingA = deferred<ProjectRouteAccess>();
     const pendingB = deferred<ProjectRouteAccess>();
     getProjectRouteAccess.mockImplementation(async (id) => (id === projectA ? pendingA.promise : pendingB.promise));
-    const { Provider, view } = await renderRouteProvider();
+    const { Provider, view } = renderRouteProvider();
 
     await act(async () => {
       pendingA.resolve(ready(projectA));
@@ -214,6 +259,77 @@ describe('project route session identity', () => {
     expect(mounts.filter((id) => id === projectB)).toHaveLength(1);
   });
 
+  it('should flush and await pending EditorState before replacing the current project session', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { Provider, view } = renderRouteProvider();
+    await screen.findByTestId('project-session');
+    setEditorIdle(false);
+
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+
+    await waitFor(() => {
+      expect(editorSend).toHaveBeenCalledWith({ type: 'flushNow' });
+    });
+    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    expect(unmounts).not.toContain(projectA);
+
+    act(() => {
+      setEditorIdle(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectB);
+    });
+  });
+
+  it('should share one pending flush across rapid navigation and commit only the latest project', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { Provider, view } = renderRouteProvider();
+    await screen.findByTestId('project-session');
+    setEditorIdle(false);
+
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await waitFor(() => {
+      expect(editorSend).toHaveBeenCalledTimes(1);
+    });
+    currentProjectId = projectC;
+    view.rerender(<Provider>content</Provider>);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(editorSend).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      setEditorIdle(true);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectC);
+    });
+    expect(mounts).not.toContain(projectB);
+  });
+
+  it('should keep the current session mounted when its editor flush fails', async () => {
+    getProjectRouteAccess.mockImplementation(async (id) => ready(id));
+    const { Provider, view } = renderRouteProvider();
+    await screen.findByTestId('project-session');
+    setEditorIdle(false);
+
+    currentProjectId = projectB;
+    view.rerender(<Provider>content</Provider>);
+    await waitFor(() => {
+      expect(editorSend).toHaveBeenCalledWith({ type: 'flushNow' });
+    });
+    act(() => {
+      failEditorFlush(new Error('storage failed'));
+    });
+
+    expect(await screen.findByText('Project access failed')).toBeInTheDocument();
+    expect(screen.getByTestId('project-route-error')).toHaveTextContent('could not save the current project view');
+    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    expect(unmounts).not.toContain(projectA);
+  });
+
   it('should commit only project C during rapid A to B to C navigation', async () => {
     const pendingB = deferred<ProjectRouteAccess>();
     const pendingC = deferred<ProjectRouteAccess>();
@@ -223,7 +339,7 @@ describe('project route session identity', () => {
       }
       return id === projectB ? pendingB.promise : pendingC.promise;
     });
-    const { Provider, view } = await renderRouteProvider();
+    const { Provider, view } = renderRouteProvider();
     await screen.findByTestId('project-session');
 
     await act(async () => {
@@ -258,7 +374,7 @@ describe('project route session identity', () => {
   ] as const)('should render %s access without mounting project B resources', async (status, message) => {
     const pendingB = deferred<ProjectRouteAccess>();
     getProjectRouteAccess.mockImplementation(async (id) => (id === projectA ? ready(projectA) : pendingB.promise));
-    const { Provider, view } = await renderRouteProvider();
+    const { Provider, view } = renderRouteProvider();
     await screen.findByTestId('project-session');
 
     currentProjectId = projectB;
@@ -304,7 +420,7 @@ describe('project route session identity', () => {
     ],
   ])('should render pending-operation access without mounting project resources', async (access, message) => {
     getProjectRouteAccess.mockResolvedValue(access);
-    await renderRouteProvider();
+    renderRouteProvider();
 
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(screen.queryByTestId('project-session')).not.toBeInTheDocument();
@@ -317,7 +433,7 @@ describe('project route session identity', () => {
       }
       throw new Error('discovery failed');
     });
-    const { Provider, view } = await renderRouteProvider();
+    const { Provider, view } = renderRouteProvider();
     await screen.findByTestId('project-session');
 
     currentProjectId = projectB;
@@ -336,7 +452,7 @@ describe('project route session identity', () => {
   it('should restore the project ID carried by the trashed result', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => (id === projectA ? ready(projectA) : trashed(projectB)));
     restoreProject.mockResolvedValue();
-    const { Provider, view } = await renderRouteProvider();
+    const { Provider, view } = renderRouteProvider();
     await screen.findByTestId('project-session');
 
     currentProjectId = projectB;
@@ -352,7 +468,7 @@ describe('project route session identity', () => {
   it('should ignore pending access after the route gate unmounts', async () => {
     const pendingA = deferred<ProjectRouteAccess>();
     getProjectRouteAccess.mockReturnValue(pendingA.promise);
-    const { view } = await renderRouteProvider();
+    const { view } = renderRouteProvider();
 
     view.unmount();
     pendingA.resolve(ready(projectA));

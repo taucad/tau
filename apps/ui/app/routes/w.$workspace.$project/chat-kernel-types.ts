@@ -1,4 +1,4 @@
-import type { RenderPhase, TelemetryEntry } from '@taucad/runtime';
+import type { TelemetryEntry } from '@taucad/runtime';
 import { logLevels } from '@taucad/types/constants';
 
 export type SpanNode = {
@@ -8,9 +8,27 @@ export type SpanNode = {
   selfTime: number;
 };
 
-export type PipelineData = {
-  phaseDurations: Map<RenderPhase, number>;
-  totalDuration: number;
+export type TelemetryTraceKind = 'bootstrap' | 'render' | 'export' | 'unattributed';
+
+export type TelemetryTrace = {
+  id: string;
+  kind: TelemetryTraceKind;
+  root: SpanNode;
+  spanCount: number;
+  absoluteStart: number;
+  duration: number;
+};
+
+export type PhaseInterval = {
+  start: number;
+  duration: number;
+};
+
+export type PipelineLane = {
+  phase: string;
+  label: string;
+  intervals: PhaseInterval[];
+  coveredDuration: number;
 };
 
 export type SpanCategory = 'framework' | 'middleware' | 'kernel' | 'fs' | 'deps';
@@ -18,19 +36,21 @@ export type SpanCategory = 'framework' | 'middleware' | 'kernel' | 'fs' | 'deps'
 export type DisplaySettings = {
   showLatency: boolean;
   showSelfTime: boolean;
-  showAttributes: boolean;
   visibility: 'all' | 'relevant';
 };
 
-export type ViewMode = 'standard' | 'waterfall';
+export type ViewMode = 'trace' | 'timeline';
 
 export type FlatSpanRow = {
   node: SpanNode;
   isLast: boolean;
   ancestorIsLast: boolean[];
+  positionInSet: number;
+  setSize: number;
+  parentId?: string;
 };
 
-export const phaseLabels: Record<RenderPhase, string> = {
+export const phaseLabels: Record<string, string> = {
   resolvingDeps: 'Resolving Dependencies',
   bundling: 'Bundling',
   extractingParams: 'Extracting Parameters',
@@ -38,13 +58,13 @@ export const phaseLabels: Record<RenderPhase, string> = {
   postProcessing: 'Post-Processing',
 };
 
-export const phaseOrder: RenderPhase[] = [
+export const phaseOrder = [
   'resolvingDeps',
   'bundling',
   'extractingParams',
   'computingGeometry',
   'postProcessing',
-];
+] as const;
 
 export const logLevelColors: Record<string, string> = {
   [logLevels.error]: 'text-destructive',
@@ -52,6 +72,14 @@ export const logLevelColors: Record<string, string> = {
   [logLevels.info]: 'text-primary',
   [logLevels.debug]: 'text-muted-foreground',
   [logLevels.trace]: 'text-muted-foreground/60',
+};
+
+export const categoryLabels: Record<SpanCategory, string> = {
+  framework: 'Framework',
+  kernel: 'Kernel',
+  middleware: 'Middleware',
+  fs: 'File system',
+  deps: 'Dependencies',
 };
 
 export const categoryDotColors: Record<SpanCategory, string> = {
@@ -73,16 +101,7 @@ export const categorySvgColors: Record<SpanCategory, string> = {
 export const defaultDisplaySettings: DisplaySettings = {
   showLatency: true,
   showSelfTime: true,
-  showAttributes: false,
   visibility: 'all',
 };
 
-export const emptyPipelineData: PipelineData = {
-  phaseDurations: new Map(),
-  totalDuration: 0,
-};
-
-export const waterfallRowHeight = 28;
-export const waterfallBarHeight = 14;
-export const waterfallLabelOffset = -3;
-export const waterfallLeftPadding = 8;
+export const timelineBarHeight = 14;

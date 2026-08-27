@@ -20,6 +20,7 @@ export function useTypedMatches<Selected>(
       actions: [],
       commandPalette: [],
       enablePageWrapper: [],
+      enablePageHeader: [],
       enableFloatingSidebar: [],
       enableOverflowY: [],
       providers: [],

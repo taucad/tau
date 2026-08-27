@@ -31,13 +31,15 @@ export const headerHeight = 'calc(var(--spacing) * 12)';
  * or to the content wrapper when rendering errors on floating sidebar routes.
  */
 const sidebarPositioningClasses =
-  'mt-(--header-height) h-[calc(100dvh-var(--header-height)-1px)] transition-[margin] duration-200 ease-linear md:ml-[calc(var(--sidebar-width-current)-var(--spacing)*2)]';
+  'transition-[margin] duration-200 ease-linear md:ml-[calc(var(--sidebar-width-current)-var(--spacing)*2)]';
+const headerOffsetClasses = 'mt-(--header-height) h-[calc(100dvh-var(--header-height)-1px)]';
 
 type SectionContentProps = {
   readonly error: ReactNode | undefined;
   readonly enablePageFooter: boolean;
   readonly enableFloatingSidebar: boolean;
   readonly shouldApplyPositioning: boolean;
+  readonly enablePageHeader: boolean;
 };
 
 /**
@@ -53,6 +55,7 @@ function SectionContent({
   enablePageFooter,
   enableFloatingSidebar,
   shouldApplyPositioning,
+  enablePageHeader,
 }: SectionContentProps): React.JSX.Element {
   const content = error ?? <Outlet />;
 
@@ -60,7 +63,11 @@ function SectionContent({
   if (enablePageFooter) {
     return (
       <div
-        className={cn('flex min-h-full flex-col overflow-clip', shouldApplyPositioning && sidebarPositioningClasses)}
+        className={cn(
+          'flex min-h-full flex-col overflow-clip',
+          shouldApplyPositioning && sidebarPositioningClasses,
+          shouldApplyPositioning && enablePageHeader && headerOffsetClasses,
+        )}
       >
         <div className='flex flex-1 flex-col'>{content}</div>
         {enableFloatingSidebar ? (
@@ -76,7 +83,11 @@ function SectionContent({
 
   // Error on floating sidebar route (no footer): wrap with positioning
   if (shouldApplyPositioning) {
-    return <div className={cn('flex flex-col', sidebarPositioningClasses)}>{content}</div>;
+    return (
+      <div className={cn('flex flex-col', sidebarPositioningClasses, enablePageHeader && headerOffsetClasses)}>
+        {content}
+      </div>
+    );
   }
 
   // Default: render content directly
@@ -98,6 +109,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enableOverflowY,
     providers,
     enablePageFooter,
+    enablePageHeaderMatches,
   } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
@@ -108,7 +120,9 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     enableOverflowY: handles.enableOverflowY.some((match) => match.handle.enableOverflowY === true),
     providers: handles.providers,
     enablePageFooter: handles.enablePageFooter.some((match) => match.handle.enablePageFooter === true),
+    enablePageHeaderMatches: handles.enablePageHeader,
   }));
+  const enablePageHeader = !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
 
   // Resolve `enablePageWrapper` per match: a match disables the wrapper when its
   // value is `false`, or when its function form returns `false` for the current
@@ -161,61 +175,64 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     <Compose components={Providers}>
       <SidebarProvider>
         <AppSidebar />
-        <SidebarInset style={{ '--header-height': headerHeight }}>
-          <header className='pointer-events-none absolute top-0 z-20 flex h-(--header-height) w-full shrink-0 items-center justify-between gap-2'>
-            <div className='pointer-events-auto ml-2 flex h-8 items-center gap-0.25 rounded-md border bg-sidebar p-0.25 pl-2.75 transition-[margin] duration-200 ease-linear md:ml-(--sidebar-width-current) md:gap-1'>
-              <SidebarTrigger className='group/sidebar-trigger -ml-2.5 rounded-sm'>
-                <PanelLeftIcon className='size-4 group-data-[open=true]/sidebar-trigger:block' />
-              </SidebarTrigger>
-              {hasBreadcrumbItems ? (
-                <span className='h-4'>
-                  <Separator orientation='vertical' />
-                </span>
-              ) : null}
-              <Breadcrumb className='hidden [&:has(>:not(:empty))]:block'>
-                <BreadcrumbList
-                  className={cn(
-                    'sm:gap-0',
-                    '[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:rounded-sm [&_[data-slot=button]]:p-2',
-                    "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:rounded-sm [&_[data-slot='tooltip-trigger']]:p-2",
-                    "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:rounded-sm [&_[data-slot='breadcrumb-link']]:p-2",
-                    '[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm',
-                  )}
-                >
-                  {breadcrumbItems.map((match) => {
-                    const breadcrumb = match.handle.breadcrumb?.(match);
-                    // Normalize to always be an array
-                    const breadcrumbArray = Array.isArray(breadcrumb) ? breadcrumb : [breadcrumb];
+        <SidebarInset style={{ '--header-height': enablePageHeader ? headerHeight : '0px' }}>
+          {enablePageHeader ? (
+            <header className='pointer-events-none absolute top-0 z-20 flex h-(--header-height) w-full shrink-0 items-center justify-between gap-2'>
+              <div className='pointer-events-auto ml-2 flex h-8 items-center gap-0.25 rounded-md border bg-sidebar p-0.25 pl-2.75 transition-[margin] duration-200 ease-linear md:ml-(--sidebar-width-current) md:gap-1'>
+                <SidebarTrigger className='group/sidebar-trigger -ml-2.5 rounded-sm'>
+                  <PanelLeftIcon className='size-4 group-data-[open=true]/sidebar-trigger:block' />
+                </SidebarTrigger>
+                {hasBreadcrumbItems ? (
+                  <span className='h-4'>
+                    <Separator orientation='vertical' />
+                  </span>
+                ) : null}
+                <Breadcrumb className='hidden [&:has(>:not(:empty))]:block'>
+                  <BreadcrumbList
+                    className={cn(
+                      'sm:gap-0',
+                      '[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:rounded-sm [&_[data-slot=button]]:p-2',
+                      "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:rounded-sm [&_[data-slot='tooltip-trigger']]:p-2",
+                      "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:rounded-sm [&_[data-slot='breadcrumb-link']]:p-2",
+                      '[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm',
+                    )}
+                  >
+                    {breadcrumbItems.map((match) => {
+                      const breadcrumb = match.handle.breadcrumb?.(match);
+                      // Normalize to always be an array
+                      const breadcrumbArray = Array.isArray(breadcrumb) ? breadcrumb : [breadcrumb];
 
-                    return (
-                      <Fragment key={match.id}>
-                        {breadcrumbArray.map((item, index) => (
-                          // oxlint-disable-next-line react/no-array-index-key -- these are stable.
-                          <Fragment key={`${match.id}-${index}`}>
-                            <BreadcrumbSeparator className='hidden first:hidden lg:block' />
-                            <BreadcrumbItem className='hidden last:block hover:text-foreground lg:block'>
-                              <BreadcrumbLink asChild>{item}</BreadcrumbLink>
-                            </BreadcrumbItem>
-                          </Fragment>
-                        ))}
-                      </Fragment>
-                    );
-                  })}
-                </BreadcrumbList>
-              </Breadcrumb>
-            </div>
+                      return (
+                        <Fragment key={match.id}>
+                          {breadcrumbArray.map((item, index) => (
+                            // oxlint-disable-next-line react/no-array-index-key -- these are stable.
+                            <Fragment key={`${match.id}-${index}`}>
+                              <BreadcrumbSeparator className='hidden first:hidden lg:block' />
+                              <BreadcrumbItem className='hidden last:block hover:text-foreground lg:block'>
+                                <BreadcrumbLink asChild>{item}</BreadcrumbLink>
+                              </BreadcrumbItem>
+                            </Fragment>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
+                  </BreadcrumbList>
+                </Breadcrumb>
+              </div>
 
-            <div className='pointer-events-auto flex items-center gap-2 px-2'>
-              {hasActionItems
-                ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
-                : null}
-            </div>
-          </header>
+              <div className='pointer-events-auto flex items-center gap-2 px-2'>
+                {hasActionItems
+                  ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
+                  : null}
+              </div>
+            </header>
+          ) : null}
           <section
             className={cn(
               'h-dvh',
               enableOverflowY && 'overflow-y-auto',
               shouldSectionApplyPositioning && sidebarPositioningClasses,
+              shouldSectionApplyPositioning && enablePageHeader && headerOffsetClasses,
             )}
           >
             <SectionContent
@@ -223,6 +240,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               enablePageFooter={enablePageFooter}
               enableFloatingSidebar={enableFloatingSidebar}
               shouldApplyPositioning={shouldContentApplyPositioning}
+              enablePageHeader={enablePageHeader}
             />
           </section>
         </SidebarInset>

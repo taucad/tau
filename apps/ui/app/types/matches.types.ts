@@ -49,6 +49,8 @@ export type Handle = {
    * checks are indeterminate so the CDN-cached HTML stays viewer-neutral.
    */
   enablePageWrapper?: boolean | ((context: PageChromeContext) => boolean);
+  /** Render the generic page header. Defaults to true. */
+  enablePageHeader?: boolean;
   /**
    * Enable floating sidebar mode where the sidebar overlays content.
    *

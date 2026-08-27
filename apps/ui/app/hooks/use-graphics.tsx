@@ -59,10 +59,12 @@ const createInitialCameraRig = ({
   graphicsRef,
   connectorRef,
   cameraView,
+  initialVerticalFieldOfView,
 }: {
   readonly graphicsRef: GraphicsActorRef;
   readonly connectorRef: RefObject<CameraUpdateHandler | undefined>;
   readonly cameraView?: PersistedCameraView;
+  readonly initialVerticalFieldOfView?: number;
 }): ThreeCameraRig => {
   const graphics = graphicsRef.getSnapshot().context;
   const up =
@@ -83,7 +85,7 @@ const createInitialCameraRig = ({
   return createThreeCameraRig({
     pixelBudget: 0.25,
     initialView: createCameraView({
-      requestedVerticalFieldOfView: graphics.initialCameraFovAngle,
+      requestedVerticalFieldOfView: initialVerticalFieldOfView ?? graphics.initialCameraFovAngle,
       ...initialView,
       viewport: { width: 1, height: 1, pixelRatio: getPixelRatio() },
       bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
@@ -102,10 +104,12 @@ const createInitialCameraRig = ({
 export function GraphicsProvider({
   graphicsRef,
   cameraViewRestore,
+  initialVerticalFieldOfView,
   children,
 }: {
   readonly graphicsRef: GraphicsActorRef;
   readonly cameraViewRestore?: CameraViewRestore;
+  readonly initialVerticalFieldOfView?: number;
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   const cameraConnectorRef = useRef<CameraUpdateHandler | undefined>(undefined);
@@ -126,8 +130,9 @@ export function GraphicsProvider({
         graphicsRef,
         connectorRef: cameraConnectorRef,
         cameraView: initialCameraViewRef.current.cameraView,
+        initialVerticalFieldOfView,
       }),
-    [graphicsRef],
+    [graphicsRef, initialVerticalFieldOfView],
   );
   const cleanupTicketsRef = useRef(new WeakMap<ThreeCameraRig, symbol>());
   const cameraViewInitializationRef = useRef({

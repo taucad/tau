@@ -41,11 +41,7 @@ export function ImportViewer({ files, mainFile, owner, repo }: ImportViewerPrope
 
   return (
     <CadPreviewProvider key={`${projectId}-${mainFile}`} projectId={projectId} mainFile={mainFile} files={projectFiles}>
-      <CadPreviewViewer
-        className='size-full'
-        stageOptions={{ zoomLevel: 1.5 }}
-        graphicsOptions={{ enableLines: false, viewerClassName: 'bg-muted' }}
-      />
+      <CadPreviewViewer className='size-full' graphicsOptions={{ enableLines: false, viewerClassName: 'bg-muted' }} />
     </CadPreviewProvider>
   );
 }

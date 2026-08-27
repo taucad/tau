@@ -1,7 +1,6 @@
 import { Eye } from 'lucide-react';
 import type { To } from 'react-router';
 import { Link } from 'react-router';
-import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import { CadPreviewViewer } from '#components/cad-preview.js';
 import type { CadPreviewGraphicsOptions } from '#components/cad-preview.js';
 import { Button } from '#components/ui/button.js';
@@ -22,13 +21,11 @@ type ProjectCardMediaProps = {
   readonly children: React.ReactNode;
 };
 
-const projectCardStageOptions = { zoomLevel: 1.5 } satisfies StageOptions;
-
 const projectCardGraphicsOptions = {
   enableAxes: false,
   enableGizmo: false,
   enableGrid: false,
-  enableLines: false,
+  enableLines: true,
   viewerClassName: 'bg-muted',
 } satisfies CadPreviewGraphicsOptions;
 
@@ -100,7 +97,7 @@ export function ProjectCardCadPreview(): React.JSX.Element {
     <CadPreviewViewer
       className='size-full'
       enablePan={false}
-      stageOptions={projectCardStageOptions}
+      initialVerticalFieldOfView={45}
       graphicsOptions={projectCardGraphicsOptions}
     />
   );

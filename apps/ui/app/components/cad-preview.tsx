@@ -16,6 +16,7 @@ type CadPreviewViewerProps = {
   readonly className?: string;
   readonly enablePan?: boolean;
   readonly enableZoom?: boolean;
+  readonly initialVerticalFieldOfView?: number;
   readonly stageOptions?: StageOptions;
   readonly graphicsOptions?: CadPreviewGraphicsOptions;
 };
@@ -51,6 +52,7 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   className,
   enablePan,
   enableZoom,
+  initialVerticalFieldOfView,
   stageOptions,
   graphicsOptions,
 }: CadPreviewViewerProps): React.JSX.Element {
@@ -70,6 +72,7 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
       className={className}
       enablePan={enablePan}
       enableZoom={enableZoom}
+      initialVerticalFieldOfView={initialVerticalFieldOfView}
       stageOptions={stageOptions}
       graphicsOptions={{
         enableLines,

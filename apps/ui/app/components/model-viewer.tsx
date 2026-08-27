@@ -50,6 +50,7 @@ export type ModelViewerProps = {
   readonly className?: string;
   readonly enablePan?: boolean;
   readonly enableZoom?: boolean;
+  readonly initialVerticalFieldOfView?: number;
   readonly stageOptions?: StageOptions;
   readonly graphicsOptions?: ModelViewerGraphicsOptions;
   /** Error to display. When set, shows an error overlay instead of the viewer. */
@@ -71,6 +72,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
   className,
   enablePan,
   enableZoom,
+  initialVerticalFieldOfView,
   stageOptions,
   graphicsOptions,
   error,
@@ -113,7 +115,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
 
   return (
     <div role='img' aria-label='3D model preview' className={cn('size-full', className)}>
-      <GraphicsProvider graphicsRef={graphicsRef}>
+      <GraphicsProvider graphicsRef={graphicsRef} initialVerticalFieldOfView={initialVerticalFieldOfView}>
         <CadViewer
           geometry={geometry}
           enablePan={enablePan}

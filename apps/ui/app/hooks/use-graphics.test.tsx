@@ -81,6 +81,23 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(hasGraphicsCameraRig(graphicsActor)).toBe(true);
   });
 
+  it('constructs a card camera at its requested field of view before the first frame', () => {
+    const graphicsActor = createGraphicsActor();
+    let rig: ThreeCameraRig | undefined;
+    render(
+      <GraphicsProvider graphicsRef={graphicsActor} initialVerticalFieldOfView={45}>
+        <RigProbe
+          onRig={(value) => {
+            rig = value;
+          }}
+        />
+      </GraphicsProvider>,
+    );
+
+    expect(rig?.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(45);
+    expect(rig?.perspectiveCamera.fov).toBe(45);
+  });
+
   it('unregisters and disposes the committed rig once after StrictMode unmount', async () => {
     const graphicsActor = createGraphicsActor();
     let rig: ThreeCameraRig | undefined;

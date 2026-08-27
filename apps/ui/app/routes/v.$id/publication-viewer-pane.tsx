@@ -42,13 +42,7 @@ export function PublicationViewerPane({ className }: PublicationViewerPaneProps)
       data-slot='publication-viewer-pane'
       className={cn('relative size-full overflow-hidden bg-muted', className)}
     >
-      <CadPreviewViewer
-        className='size-full'
-        enablePan
-        enableZoom
-        stageOptions={{ zoomLevel: 1.5 }}
-        graphicsOptions={{ viewerClassName: 'bg-muted' }}
-      />
+      <CadPreviewViewer className='size-full' enablePan enableZoom graphicsOptions={{ viewerClassName: 'bg-muted' }} />
       <div
         role='status'
         aria-live='polite'

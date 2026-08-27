@@ -110,19 +110,19 @@ describe('ProjectCardMedia', () => {
 });
 
 describe('ProjectCardCadPreview', () => {
-  it('should disable card-only scene helpers and line rendering', () => {
+  it('should match thumbnail perspective and show card-only edge lines', () => {
     render(<ProjectCardCadPreview />);
 
     expect(cadPreviewViewerMock).toHaveBeenCalledWith(
       expect.objectContaining({
         className: 'size-full',
         enablePan: false,
-        stageOptions: { zoomLevel: 1.5 },
+        initialVerticalFieldOfView: 45,
         graphicsOptions: {
           enableAxes: false,
           enableGizmo: false,
           enableGrid: false,
-          enableLines: false,
+          enableLines: true,
           viewerClassName: 'bg-muted',
         },
       }),

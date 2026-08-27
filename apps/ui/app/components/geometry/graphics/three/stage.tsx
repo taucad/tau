@@ -13,10 +13,6 @@ import { useGraphicsSelector } from '#hooks/use-graphics.js';
 
 export type StageOptions = {
   /**
-   * The ratio of the scene's radius to offset the camera from the center. Adjusting this value will change the applied perspective of the scene.
-   */
-  offsetRatio?: number;
-  /**
    * The near plane of the camera.
    */
   nearPlane?: number;
@@ -29,11 +25,6 @@ export type StageOptions = {
    * bounds-derived orthographic far plane.
    */
   farPlaneRadiusMultiplier?: number;
-  /**
-   * Perspective selector used to derive the radius-relative camera distance.
-   * Final screen occupancy is controlled by projected-corner fitting.
-   */
-  zoomLevel?: number;
   /** Fractional outer margin applied by projected-corner fitting. */
   fitMargin?: number;
   rotation?: {
@@ -51,11 +42,9 @@ export type StageOptions = {
 
 // Default configuration constants
 export const defaultStageOptions = {
-  offsetRatio: 2,
   nearPlane: 1e-3,
   minimumFarPlane: 10_000_000_000,
   farPlaneRadiusMultiplier: 5,
-  zoomLevel: 1,
   fitMargin: 0.1,
   rotation: {
     side: -Math.PI / 4, // Default rotation is 45 degrees counter-clockwise

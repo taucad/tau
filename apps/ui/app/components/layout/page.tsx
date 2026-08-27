@@ -13,14 +13,9 @@ import {
 } from '#components/ui/breadcrumb.js';
 import { Separator } from '#components/ui/separator.js';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '#components/ui/sidebar.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { Badge } from '#components/ui/badge.js';
-import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
-import { NavUser } from '#components/nav/nav-user.js';
 import { cn } from '#utils/ui.utils.js';
 import { Compose } from '#components/ui/utils/compose.js';
-import { Commands } from '#components/layout/command-palette.js';
 import { PageFooter } from '#components/layout/page-footer.js';
 import { SidebarOffset } from '#components/layout/sidebar-offset.js';
 import { CookieConsent } from '#components/cookie-consent.js';
@@ -136,8 +131,6 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     return providerComponents;
   }, [providers]);
 
-  const isOnline = useNetworkConnectivity();
-
   // Compute positioning logic once
   // Section handles positioning for standard routes (non-floating sidebar)
   const shouldSectionApplyPositioning = !enableFloatingSidebar;
@@ -213,21 +206,9 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             </div>
 
             <div className='pointer-events-auto flex items-center gap-2 px-2'>
-              {isOnline ? null : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge className='h-8 font-mono font-normal' variant='outline'>
-                      OFFLINE
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>You are offline. Reconnect to access online features.</TooltipContent>
-                </Tooltip>
-              )}
               {hasActionItems
                 ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
                 : null}
-              <Commands />
-              <NavUser />
             </div>
           </header>
           <section

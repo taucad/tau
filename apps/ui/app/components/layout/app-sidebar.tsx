@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { PanelLeftClose } from 'lucide-react';
 import { Link } from 'react-router';
 import { ProjectNavigation } from '#components/nav/project-navigation.js';
 import { NavMain } from '#components/nav/nav-main.js';
@@ -9,14 +10,16 @@ import {
   SidebarHeader,
   SidebarMenuButton,
   SidebarRail,
+  SidebarTrigger,
   useSidebar,
 } from '#components/ui/sidebar.js';
 import { ReleaseBadge } from '#components/release-badge.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { NavChat } from '#components/nav/nav-chat.js';
 import { navRoutes } from '#constants/route.constants.js';
-import { NavFooter } from '#components/nav/nav-footer.js';
 import { useFeatureFlags } from '#flags/use-feature.js';
+import { Commands } from '#components/layout/command-palette.js';
+import { NavUser } from '#components/nav/nav-user.js';
 
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   const { state, isMobile, openMobile } = useSidebar();
@@ -28,7 +31,7 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
   );
 
   return (
-    <Sidebar variant='floating' collapsible='offcanvas' {...properties}>
+    <Sidebar variant='sidebar' collapsible='offcanvas' {...properties}>
       <SidebarHeader className='flex flex-row items-center gap-1 p-1'>
         <SidebarMenuButton
           asChild
@@ -41,9 +44,13 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           </Link>
         </SidebarMenuButton>
         {showAlphaBadge ? <ReleaseBadge /> : null}
+        <SidebarTrigger className='shrink-0'>
+          <PanelLeftClose className='size-4' />
+        </SidebarTrigger>
       </SidebarHeader>
       <SidebarContent className='gap-0'>
-        <div className='sticky top-0 z-10'>
+        <div className='sticky top-0 z-10 space-y-1 bg-sidebar px-2 pb-1'>
+          <Commands />
           <NavChat />
         </div>
         <div className='flex-1 overflow-y-auto'>
@@ -56,8 +63,8 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           <NavMain items={navRoutes.navSecondary} />
         </div>
       </SidebarContent>
-      <SidebarFooter className='flex flex-row items-center justify-between border-t'>
-        <NavFooter />
+      <SidebarFooter className='border-t p-1'>
+        <NavUser />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

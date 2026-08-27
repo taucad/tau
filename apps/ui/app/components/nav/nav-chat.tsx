@@ -21,7 +21,7 @@ export function NavChat(): React.JSX.Element {
   );
   return (
     // Elevate the sidebar group above the other items to ensure the new project button is always clickable
-    <SidebarGroup className='z-10'>
+    <SidebarGroup className='z-10 px-0'>
       <NavLink to='/'>
         {({ isActive, isPending }) => (
           <SidebarMenuButton

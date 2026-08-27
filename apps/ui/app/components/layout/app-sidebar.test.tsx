@@ -36,8 +36,8 @@ vi.mock('#components/nav/nav-chat.js', () => ({
   NavChat: () => null,
 }));
 
-vi.mock('#components/nav/nav-footer.js', () => ({
-  NavFooter: () => null,
+vi.mock('#components/nav/nav-user.js', () => ({
+  NavUser: () => <button type='button'>Account</button>,
 }));
 
 vi.mock('#components/release-badge.js', () => ({
@@ -48,8 +48,8 @@ vi.mock('#components/icons/tau-wordmark.js', () => ({
   TauWordmark: ({ className }: { readonly className?: string }) => <span className={className}>Tau</span>,
 }));
 
-function renderSidebar(): void {
-  render(
+function renderSidebar(): ReturnType<typeof render> {
+  return render(
     <MemoryRouter>
       <KeyboardProvider>
         <TooltipProvider>
@@ -86,5 +86,17 @@ describe('AppSidebar', () => {
 
     expect(getNavLink('Plugins')).toHaveAttribute('href', '/plugins');
     expect(getNavLink('Projects')).toHaveAttribute('href', '/projects');
+  });
+
+  it('uses a flush desktop shell with neutral navigation selection', () => {
+    const { container } = renderSidebar();
+    const sidebar = container.querySelector('[data-slot=sidebar][data-variant]');
+    const projectsButton = getNavLink('Projects')?.querySelector('[data-sidebar=menu-button]');
+
+    expect(sidebar).toHaveAttribute('data-variant', 'sidebar');
+    expect(projectsButton).toHaveClass('data-[active=true]:text-sidebar-accent-foreground');
+    expect(projectsButton).not.toHaveClass('data-[active=true]:text-primary');
+    expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
+    expect(container.querySelector('[data-slot=sidebar-header] [data-slot=sidebar-trigger]')).toBeInTheDocument();
   });
 });

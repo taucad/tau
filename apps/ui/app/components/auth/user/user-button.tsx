@@ -38,6 +38,7 @@ export type UserButtonLink = {
 export type UserButtonProps = {
   className?: string;
   align?: 'center' | 'end' | 'start' | undefined;
+  side?: 'top' | 'right' | 'bottom' | 'left';
   sideOffset?: number;
   size?: 'default' | 'icon';
   variant?: 'default' | 'destructive' | 'ghost' | 'link' | 'outline' | 'secondary';
@@ -85,6 +86,7 @@ function renderUserLink(
 export function UserButton({
   className,
   align,
+  side,
   sideOffset,
   size = 'default',
   variant = 'ghost',
@@ -136,6 +138,7 @@ export function UserButton({
       <DropdownMenuContent
         className='w-[--radix-dropdown-menu-trigger-width] max-w-[48svw] min-w-40 md:min-w-56'
         sideOffset={sideOffset}
+        side={side}
         align={align}
         onCloseAutoFocus={(e) => {
           e.preventDefault();

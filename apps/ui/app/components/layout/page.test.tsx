@@ -42,17 +42,6 @@ vi.mock('#components/ui/breadcrumb.js', () => ({
   BreadcrumbSeparator: () => <span>/</span>,
 }));
 vi.mock('#components/ui/separator.js', () => ({ Separator: () => <span /> }));
-vi.mock('#components/ui/tooltip.js', () => ({
-  Tooltip: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
-  TooltipContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
-  TooltipTrigger: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
-}));
-vi.mock('#components/ui/badge.js', () => ({
-  Badge: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
-}));
-vi.mock('#hooks/use-network-connectivity.js', () => ({ useNetworkConnectivity: () => true }));
-vi.mock('#components/nav/nav-user.js', () => ({ NavUser: () => null }));
-vi.mock('#components/layout/command-palette.js', () => ({ Commands: () => null }));
 vi.mock('#components/ui/utils/compose.js', () => ({
   Compose: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));

@@ -13,6 +13,7 @@ import {
   SidebarMenuSubItem,
 } from '#components/ui/sidebar.js';
 import { Loader } from '#components/ui/loader.js';
+import { cn } from '#utils/ui.utils.js';
 
 export function NavMain({
   items,
@@ -34,7 +35,7 @@ export function NavMain({
   readonly className?: string;
 }): React.JSX.Element {
   return (
-    <SidebarGroup className={className}>
+    <SidebarGroup className={cn('px-2', className)}>
       {groupLabel ? <SidebarGroupLabel>{groupLabel}</SidebarGroupLabel> : null}
       <SidebarMenu>
         {items.map((item) => {

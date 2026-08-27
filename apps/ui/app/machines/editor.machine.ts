@@ -25,6 +25,7 @@ import {
   parseLegacyModelComponentDisplay,
 } from '#constants/editor.constants.js';
 import { createSourceModelInteractionUnitId } from '#machines/model-interaction.machine.js';
+import { mergePanelState } from '#utils/panel-state.utils.js';
 
 const maxOpenFiles = 200;
 
@@ -48,32 +49,6 @@ export function selectActiveFilePath(
     return undefined;
   }
   return openFiles.find((f) => f.paneId === activePaneId)?.path;
-}
-
-/**
- * Deep merge utility for panel state.
- * Merges partial updates into the current state while preserving unspecified values.
- */
-function deepMergePanelState(current: PanelState, update: PartialDeep<PanelState>): PanelState {
-  return {
-    openPanels: {
-      ...current.openPanels,
-      ...update.openPanels,
-    },
-    panelSizes: {
-      ...current.panelSizes,
-      ...update.panelSizes,
-    },
-    mobileActiveTab: update.mobileActiveTab ?? current.mobileActiveTab,
-    kernelPaneview: {
-      ...current.kernelPaneview,
-      ...(update.kernelPaneview as PanelState['kernelPaneview'] | undefined),
-    },
-    parametersPaneview: {
-      ...current.parametersPaneview,
-      ...(update.parametersPaneview as PanelState['parametersPaneview'] | undefined),
-    },
-  };
 }
 
 function pathMatchesPathOrDescendant(path: string, targetPath: string): boolean {
@@ -217,8 +192,8 @@ export type EditorStateContext = {
   focusedChatId: string | undefined;
   /** Panel layout state (open/close, sizes, mobile tab) */
   panelState: PanelState;
-  /** Serialized DockviewReact layout for the code editor area */
-  editorLayout: SerializedDockview | undefined;
+  /** Serialized mixed file/utility Workbench Dockview layout */
+  workbenchLayout: SerializedDockview | undefined;
   /** Serialized DockviewReact layout for the geometry viewer area */
   viewerLayout: SerializedDockview | undefined;
   /** Per-viewer-panel state, keyed by Dockview panel ID */
@@ -279,7 +254,7 @@ type EditorStateEvent =
   // Panel operations
   | { type: 'setPanelState'; panelState: PartialDeep<PanelState> }
   // Dockview layout operations
-  | { type: 'setEditorLayout'; layout: SerializedDockview }
+  | { type: 'setWorkbenchLayout'; layout: SerializedDockview }
   | { type: 'setViewerLayout'; layout: SerializedDockview }
   // View settings operations
   | { type: 'setViewSettings'; viewId: string; viewState: ViewState }
@@ -410,17 +385,17 @@ export const editorMachine = setup({
 
       // Merge loaded panelState with defaults to handle missing fields from old data
       const mergedPanelState = loadedState?.panelState
-        ? deepMergePanelState(defaultPanelState, loadedState.panelState)
+        ? mergePanelState(defaultPanelState, loadedState.panelState)
         : defaultPanelState;
 
       // Safe loading for Dockview layout fields -- older persisted data may not have these
-      let editorLayout: SerializedDockview | undefined;
+      let workbenchLayout: SerializedDockview | undefined;
       let viewerLayout: SerializedDockview | undefined;
       let viewSettings: Record<string, ViewState> = {};
       let modelComponentDisplay = loadedState?.modelComponentDisplay;
       let needsModelComponentDisplayMigration = false;
       try {
-        editorLayout = loadedState?.editorLayout;
+        workbenchLayout = loadedState?.workbenchLayout;
 
         viewerLayout = loadedState?.viewerLayout;
 
@@ -445,7 +420,7 @@ export const editorMachine = setup({
         );
       } catch {
         // Corrupt/incompatible persisted data -- silently default
-        editorLayout = undefined;
+        workbenchLayout = undefined;
         viewerLayout = undefined;
         viewSettings = {};
         modelComponentDisplay = undefined;
@@ -470,7 +445,7 @@ export const editorMachine = setup({
         // an extant chat id.
         focusedChatId: loadedState?.focusedChatId,
         panelState: mergedPanelState,
-        editorLayout,
+        workbenchLayout,
         viewerLayout,
         viewSettings,
         modelComponentDisplay: omitEmptyComponentDisplayState(modelComponentDisplay),
@@ -797,16 +772,16 @@ export const editorMachine = setup({
     setPanelStateInContext: assign(({ event, context }) => {
       assertEvent(event, 'setPanelState');
       return {
-        panelState: deepMergePanelState(context.panelState, event.panelState),
+        panelState: mergePanelState(context.panelState, event.panelState),
       };
     }),
 
     // ============================================================================
     // Dockview layout operations
     // ============================================================================
-    setEditorLayoutInContext: assign(({ event }) => {
-      assertEvent(event, 'setEditorLayout');
-      return { editorLayout: event.layout };
+    setWorkbenchLayoutInContext: assign(({ event }) => {
+      assertEvent(event, 'setWorkbenchLayout');
+      return { workbenchLayout: event.layout };
     }),
 
     setViewerLayoutInContext: assign(({ event }) => {
@@ -902,7 +877,7 @@ export const editorMachine = setup({
       requestedChatId: input.requestedChatId,
       focusedChatId: undefined,
       panelState: defaultPanelState,
-      editorLayout: undefined,
+      workbenchLayout: undefined,
       viewerLayout: undefined,
       viewSettings: {},
       modelComponentDisplay: undefined,
@@ -1082,8 +1057,8 @@ export const editorMachine = setup({
             setPanelState: {
               actions: 'setPanelStateInContext',
             },
-            setEditorLayout: {
-              actions: 'setEditorLayoutInContext',
+            setWorkbenchLayout: {
+              actions: 'setWorkbenchLayoutInContext',
             },
             setViewerLayout: {
               actions: 'setViewerLayoutInContext',
@@ -1117,7 +1092,7 @@ export const editorMachine = setup({
                 renameFile: { target: 'pending' },
                 setFocusedChatId: { target: 'pending' },
                 setPanelState: { target: 'pending' },
-                setEditorLayout: { target: 'pending' },
+                setWorkbenchLayout: { target: 'pending' },
                 setViewerLayout: { target: 'pending' },
                 setViewSettings: { target: 'pending' },
                 updateViewSettings: { target: 'pending' },
@@ -1139,7 +1114,7 @@ export const editorMachine = setup({
                 renameFile: { target: 'pending', reenter: true },
                 setFocusedChatId: { target: 'pending', reenter: true },
                 setPanelState: { target: 'pending', reenter: true },
-                setEditorLayout: { target: 'pending', reenter: true },
+                setWorkbenchLayout: { target: 'pending', reenter: true },
                 setViewerLayout: { target: 'pending', reenter: true },
                 setViewSettings: { target: 'pending', reenter: true },
                 updateViewSettings: { target: 'pending', reenter: true },
@@ -1162,7 +1137,7 @@ export const editorMachine = setup({
                       activePaneId: context.activePaneId,
                       focusedChatId: context.focusedChatId,
                       panelState: context.panelState,
-                      editorLayout: context.editorLayout,
+                      workbenchLayout: context.workbenchLayout,
                       viewerLayout: context.viewerLayout,
                       viewSettings: context.viewSettings,
                       modelComponentDisplay: context.modelComponentDisplay,
@@ -1188,7 +1163,7 @@ export const editorMachine = setup({
                 renameFile: { actions: 'setPendingChanges' },
                 setFocusedChatId: { actions: 'setPendingChanges' },
                 setPanelState: { actions: 'setPendingChanges' },
-                setEditorLayout: { actions: 'setPendingChanges' },
+                setWorkbenchLayout: { actions: 'setPendingChanges' },
                 setViewerLayout: { actions: 'setPendingChanges' },
                 setViewSettings: { actions: 'setPendingChanges' },
                 updateViewSettings: { actions: 'setPendingChanges' },

@@ -83,12 +83,7 @@ const UserProjectThumbnailGenerationDebugRoute = (): React.JSX.Element => {
           files: seedFiles,
           editorState: {
             panelState: {
-              openPanels: {
-                chat: false,
-                files: false,
-                parameters: true,
-                editor: true,
-              },
+              desktopLayout: { chatOpen: false, workbenchOpen: true, compactAuxiliary: 'workbench' },
             },
           },
         });

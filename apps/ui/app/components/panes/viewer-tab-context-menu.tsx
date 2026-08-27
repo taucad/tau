@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
-import { Columns2, Copy, FileCode, FolderTree, Rows2, X, XCircle } from 'lucide-react';
+import { Columns2, Copy, FileCode, FolderTree, Plus, Rows2, X, XCircle } from 'lucide-react';
 import { ContextMenuItem, ContextMenuSeparator } from '#components/ui/context-menu.js';
 import {
   closeOtherPanels,
@@ -11,6 +11,7 @@ import {
 } from '#components/panes/tab-context-menu-actions.js';
 import { useProject } from '#hooks/use-project.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type ViewerPanelParameters = {
   viewId: string;
@@ -24,8 +25,9 @@ type ViewerPanelParameters = {
  * and cross-dock navigation (open in editor, reveal in file tree).
  */
 function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.Element {
-  const { api, containerApi } = properties;
+  const { api } = properties;
   const { editorRef } = useProject();
+  const workspace = useProjectWorkspace({ enableNoContext: true });
 
   const entryPath = (properties.params as ViewerPanelParameters | undefined)?.entryPath;
 
@@ -70,18 +72,12 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
 
   // ── Split actions ──
   const handleSplitRight = useCallback(() => {
-    containerApi.addGroup({
-      referenceGroup: api.group,
-      direction: 'right',
-    });
-  }, [api, containerApi]);
+    api.moveTo({ group: api.group, position: 'right' });
+  }, [api]);
 
   const handleSplitDown = useCallback(() => {
-    containerApi.addGroup({
-      referenceGroup: api.group,
-      direction: 'below',
-    });
-  }, [api, containerApi]);
+    api.moveTo({ group: api.group, position: 'bottom' });
+  }, [api]);
 
   // ── Navigation actions ──
   const handleOpenInEditor = useCallback(() => {
@@ -92,9 +88,12 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
 
   const handleRevealInFileTree = useCallback(() => {
     if (entryPath) {
-      editorRef.send({ type: 'revealFileInTree', path: entryPath });
+      workspace?.openPanel('files');
+      requestAnimationFrame(() => {
+        editorRef.send({ type: 'revealFileInTree', path: entryPath });
+      });
     }
-  }, [editorRef, entryPath]);
+  }, [editorRef, entryPath, workspace]);
 
   return (
     <>
@@ -156,4 +155,8 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
  */
 export const ViewerDockviewTab = withTabContextMenu(ViewerTabContextMenu, {
   leadingIcon: 'viewer',
+  getIcon: (properties) =>
+    (properties.params as { mode?: unknown } | undefined)?.mode === 'launcher' ? (
+      <Plus aria-hidden className='size-3 shrink-0' />
+    ) : undefined,
 });

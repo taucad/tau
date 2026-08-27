@@ -22,7 +22,9 @@ vi.mock('#hooks/use-project.js', () => ({
         context: {
           panelState: {
             kernelPaneview: mockPaneviewState,
+            modelPaneview: {},
             parametersPaneview: {},
+            consolePaneview: {},
           },
         },
         matches: vi.fn(() => true),
@@ -39,7 +41,9 @@ vi.mock('@xstate/react', () => ({
       context: {
         panelState: {
           kernelPaneview: mockPaneviewState,
+          modelPaneview: {},
           parametersPaneview: {},
+          consolePaneview: {},
         },
       },
     }),
@@ -214,11 +218,11 @@ describe('usePaneviewPersistence', () => {
     });
   });
 
-  it('uses the correct paneview key in setPanelState', () => {
+  it('uses the Model paneview key without mutating sibling paneviews', () => {
     const mockApi = createMockPaneviewApi();
     mockApi.panels = [createMockPanel('main.ts', true, 200)];
 
-    const { result } = renderHook(() => usePaneviewPersistence('parametersPaneview'));
+    const { result } = renderHook(() => usePaneviewPersistence('modelPaneview'));
 
     act(() => {
       result.current.connectApi(mockApi);
@@ -229,8 +233,30 @@ describe('usePaneviewPersistence', () => {
     });
 
     const call = mockSend.mock.calls[0]![0] as { panelState: Record<string, unknown> };
-    expect(call.panelState).toHaveProperty('parametersPaneview');
+    expect(call.panelState).toHaveProperty('modelPaneview');
     expect(call.panelState).not.toHaveProperty('kernelPaneview');
+    expect(call.panelState).not.toHaveProperty('parametersPaneview');
+  });
+
+  it('uses the Console paneview key without mutating sibling paneviews', () => {
+    const mockApi = createMockPaneviewApi();
+    mockApi.panels = [createMockPanel('main.ts', true, 200)];
+
+    const { result } = renderHook(() => usePaneviewPersistence('consolePaneview'));
+
+    act(() => {
+      result.current.connectApi(mockApi);
+    });
+
+    act(() => {
+      mockApi.triggerLayoutChange();
+    });
+
+    const call = mockSend.mock.calls[0]![0] as { panelState: Record<string, unknown> };
+    expect(call.panelState).toHaveProperty('consolePaneview');
+    expect(call.panelState).not.toHaveProperty('kernelPaneview');
+    expect(call.panelState).not.toHaveProperty('modelPaneview');
+    expect(call.panelState).not.toHaveProperty('parametersPaneview');
   });
   /* eslint-enable @typescript-eslint/naming-convention -- file path keys in test fixtures */
 });

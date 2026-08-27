@@ -79,16 +79,7 @@ const ViewerContextMenuDebugRoute = (): React.JSX.Element => {
           files: seedFiles,
           editorState: {
             panelState: {
-              openPanels: {
-                chat: false,
-                files: false,
-                explorer: false,
-                kernel: false,
-                parameters: false,
-                editor: false,
-                converter: false,
-                details: false,
-              },
+              desktopLayout: { chatOpen: false, workbenchOpen: false },
             },
           },
         });

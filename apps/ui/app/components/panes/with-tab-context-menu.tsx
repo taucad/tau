@@ -5,6 +5,7 @@ import type { DockviewTabProps } from '#components/panes/dockview-tab.js';
 
 export type WithTabContextMenuOptions = {
   readonly leadingIcon?: DockviewTabProps['leadingIcon'];
+  readonly getIcon?: (properties: IDockviewPanelHeaderProps) => DockviewTabProps['icon'];
 };
 
 /**
@@ -26,7 +27,7 @@ export function withTabContextMenu(
     return (
       <ContextMenu>
         <ContextMenuTrigger className='contents'>
-          <DockviewTab {...properties} leadingIcon={leadingIcon} />
+          <DockviewTab {...properties} leadingIcon={leadingIcon} icon={options?.getIcon?.(properties)} />
         </ContextMenuTrigger>
         <ContextMenuContent>
           <MenuContent {...properties} />

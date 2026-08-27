@@ -644,4 +644,10 @@
   mask-image: linear-gradient(to bottom, black, black calc(100% - var(--scroll-fade-size)), var(--scroll-fade-end));
 }
 
+/* Static inline-end fade for clipped labels such as fixed-width tabs. */
+@utility scroll-shadow-right {
+  --scroll-fade-size: 14px;
+  mask-image: linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), transparent);
+}
+
 /* END SCROLL SHADOWS */

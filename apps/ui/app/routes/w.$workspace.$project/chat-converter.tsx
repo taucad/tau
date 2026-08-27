@@ -1,5 +1,6 @@
 import { XIcon, Download, Info, Check, ChevronDown, ChevronRight, Settings2 } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useEffect, useRef } from 'react';
+import type { ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { RuntimeContentInput } from '@taucad/runtime';
@@ -18,11 +19,8 @@ import {
   FloatingPanelContentHeader,
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
-  FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
 import { useProject } from '#hooks/use-project.js';
 import { toast } from '#components/ui/sonner.js';
 import { EmptyItems } from '#components/ui/empty-items.js';
@@ -52,34 +50,9 @@ import { deleteValueAtPath, extractModifiedProperties } from '#utils/object.util
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { downloadBlob } from '@taucad/utils/file';
+import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
-const toggleConverterKeyCombination = {
-  key: 'd',
-  ctrlKey: true,
-} satisfies KeyCombination;
-
-export const ChatConverterTrigger = memo(function ({
-  isOpen,
-  onToggle,
-}: {
-  readonly isOpen: boolean;
-  readonly onToggle: () => void;
-}) {
-  return (
-    <FloatingPanelTrigger
-      icon={Download}
-      tooltipContent={
-        <div className='flex items-center gap-2'>
-          {isOpen ? 'Close' : 'Open'} Exporter
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleConverterKeyCombination)}</KeyShortcut>
-        </div>
-      }
-      tooltipSide='left'
-      className={isOpen ? 'text-primary' : undefined}
-      onClick={onToggle}
-    />
-  );
-});
+const toggleConverterKeyCombination = projectWorkspaceKeyCombinations.export;
 
 // =============================================================================
 // Types
@@ -740,12 +713,7 @@ function useExportPreferences(fileManager: ReturnType<typeof useFileManager>) {
 // Main component
 // =============================================================================
 
-export const ChatConverter = memo(function (properties: {
-  readonly className?: string;
-  readonly isExpanded?: boolean;
-  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
-}) {
-  const { className, isExpanded = true, setIsExpanded } = properties;
+export const ConverterPanelBody = function (): ReactElement {
   const { geometryUnits, mainEntryPath, projectRef } = useProject();
   const fileManager = useFileManager();
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'model';
@@ -971,15 +939,110 @@ export const ChatConverter = memo(function (properties: {
     hasDestination,
   ]);
 
+  return (
+    <div className='flex flex-col gap-3 p-3'>
+      <GeometryUnitSelector
+        entries={cuEntries}
+        selectedEntryPath={selectedEntryPath}
+        mainEntryPath={mainEntryPath}
+        onSelect={setSelectedEntryPath}
+      />
+
+      {geometry ? (
+        availableFormats.length > 0 ? (
+          <>
+            <FormatGrid formats={availableFormats} selectedFormats={selectedFormats} onToggle={handleFormatToggle} />
+
+            <ExportSettings
+              selectedFormats={selectedFormats}
+              client={kernelClient}
+              activeKernelId={activeKernelId}
+              formatContent={formatContent}
+              formatOptions={formatOptions}
+              onContentChange={handleContentChange}
+              onOptionsChange={handleOptionsChange}
+            />
+
+            <div className='flex flex-col gap-2'>
+              <div className='flex items-center space-x-2'>
+                <Checkbox id='download-to-disk' checked={shouldDownload} onCheckedChange={handleDownloadToggle} />
+                <Label
+                  htmlFor='download-to-disk'
+                  className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                >
+                  Download to disk
+                </Label>
+              </div>
+
+              <div className='flex items-center space-x-2'>
+                <Checkbox id='save-to-project' checked={shouldSaveToProject} onCheckedChange={handleSaveToggle} />
+                <Label
+                  htmlFor='save-to-project'
+                  className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                >
+                  Save to project
+                </Label>
+              </div>
+
+              {shouldDownload && selectedFormats.length > 1 ? (
+                <div className='flex items-center space-x-2'>
+                  <Checkbox id='zip-multiple' checked={zipMultiple} onCheckedChange={handleZipToggle} />
+                  <Label
+                    htmlFor='zip-multiple'
+                    className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                  >
+                    Zip multiple exports
+                  </Label>
+                </div>
+              ) : null}
+            </div>
+
+            <Button
+              className='w-full whitespace-normal'
+              variant='outline'
+              size='sm'
+              disabled={selectedFormats.length === 0 || isExporting || !hasDestination}
+              onClick={handleExport}
+            >
+              <Download />
+              <span className='min-w-0 wrap-break-word'>
+                {formatButtonLabel(selectedFormats, isExporting, hasDestination)}
+              </span>
+            </Button>
+          </>
+        ) : (
+          <p className='text-sm text-muted-foreground'>
+            No export formats available. The kernel is still initializing.
+          </p>
+        )
+      ) : (
+        <EmptyItems className='m-0'>
+          <div className='mb-3 rounded-full bg-muted/50 p-2'>
+            <Info className='size-6 text-muted-foreground' strokeWidth={1.5} />
+          </div>
+          <h3 className='mb-1 text-base font-medium'>No geometry to export for this file</h3>
+          <p className='wrap-break-word text-muted-foreground'>
+            Generate or compute geometry for {selectedEntryPath} to enable export options
+          </p>
+        </EmptyItems>
+      )}
+    </div>
+  );
+};
+
+export const ChatConverter = memo(function (properties: {
+  readonly className?: string;
+  readonly isExpanded?: boolean;
+  readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
+}) {
+  const { className, isExpanded = true, setIsExpanded } = properties;
   const toggleConverterOpen = useCallback(() => {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
-
   const { formattedKeyCombination: formattedConverterKeyCombination } = useKeybinding(
     toggleConverterKeyCombination,
     toggleConverterOpen,
   );
-
   return (
     <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelContent>
@@ -997,99 +1060,8 @@ export const ChatConverter = memo(function (properties: {
             />
           </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
-
-        <FloatingPanelContentBody className='p-2'>
-          <div className='flex flex-col gap-3 px-1'>
-            <GeometryUnitSelector
-              entries={cuEntries}
-              selectedEntryPath={selectedEntryPath}
-              mainEntryPath={mainEntryPath}
-              onSelect={setSelectedEntryPath}
-            />
-
-            {geometry ? (
-              availableFormats.length > 0 ? (
-                <>
-                  <FormatGrid
-                    formats={availableFormats}
-                    selectedFormats={selectedFormats}
-                    onToggle={handleFormatToggle}
-                  />
-
-                  <ExportSettings
-                    selectedFormats={selectedFormats}
-                    client={kernelClient}
-                    activeKernelId={activeKernelId}
-                    formatContent={formatContent}
-                    formatOptions={formatOptions}
-                    onContentChange={handleContentChange}
-                    onOptionsChange={handleOptionsChange}
-                  />
-
-                  <div className='flex flex-col gap-2'>
-                    <div className='flex items-center space-x-2'>
-                      <Checkbox id='download-to-disk' checked={shouldDownload} onCheckedChange={handleDownloadToggle} />
-                      <Label
-                        htmlFor='download-to-disk'
-                        className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
-                      >
-                        Download to disk
-                      </Label>
-                    </div>
-
-                    <div className='flex items-center space-x-2'>
-                      <Checkbox id='save-to-project' checked={shouldSaveToProject} onCheckedChange={handleSaveToggle} />
-                      <Label
-                        htmlFor='save-to-project'
-                        className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
-                      >
-                        Save to project
-                      </Label>
-                    </div>
-
-                    {shouldDownload && selectedFormats.length > 1 ? (
-                      <div className='flex items-center space-x-2'>
-                        <Checkbox id='zip-multiple' checked={zipMultiple} onCheckedChange={handleZipToggle} />
-                        <Label
-                          htmlFor='zip-multiple'
-                          className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
-                        >
-                          Zip multiple exports
-                        </Label>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <Button
-                    className='w-full whitespace-normal'
-                    variant='outline'
-                    size='sm'
-                    disabled={selectedFormats.length === 0 || isExporting || !hasDestination}
-                    onClick={handleExport}
-                  >
-                    <Download />
-                    <span className='min-w-0 wrap-break-word'>
-                      {formatButtonLabel(selectedFormats, isExporting, hasDestination)}
-                    </span>
-                  </Button>
-                </>
-              ) : (
-                <p className='text-sm text-muted-foreground'>
-                  No export formats available. The kernel is still initializing.
-                </p>
-              )
-            ) : (
-              <EmptyItems className='m-0'>
-                <div className='mb-3 rounded-full bg-muted/50 p-2'>
-                  <Info className='size-6 text-muted-foreground' strokeWidth={1.5} />
-                </div>
-                <h3 className='mb-1 text-base font-medium'>No geometry to export for this file</h3>
-                <p className='wrap-break-word text-muted-foreground'>
-                  Generate or compute geometry for {selectedEntryPath} to enable export options
-                </p>
-              </EmptyItems>
-            )}
-          </div>
+        <FloatingPanelContentBody className='p-0'>
+          <ConverterPanelBody />
         </FloatingPanelContentBody>
       </FloatingPanelContent>
     </FloatingPanel>

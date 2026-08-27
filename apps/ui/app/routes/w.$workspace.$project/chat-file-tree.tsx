@@ -1,43 +1,45 @@
-import { memo, useCallback, useState } from 'react';
-import { XIcon, Files } from 'lucide-react';
-import {
-  FloatingPanel,
-  FloatingPanelClose,
-  FloatingPanelContent,
-  FloatingPanelTrigger,
-} from '#components/ui/floating-panel.js';
+import { memo, useCallback } from 'react';
+import { XIcon } from 'lucide-react';
+import { FloatingPanel, FloatingPanelClose } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { ChatEditorFileTree } from '#routes/w.$workspace.$project/chat-editor-file-tree.js';
+import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
-const toggleFileTreeKeyCombination = {
-  key: 'f',
-  ctrlKey: true,
-} satisfies KeyCombination;
+const toggleFileTreeKeyCombination = projectWorkspaceKeyCombinations.files;
 
-// File Tree Trigger Component
-export const ChatFileTreeTrigger = memo(function ({
-  isOpen,
-  onToggle,
+export const FileTreePanelBody = memo(function ({
+  className,
+  isOpen = true,
+  onOpenChange,
+  closeButton,
+  showTitle = false,
+  onRequestOpen,
+  borderless = false,
+  onOpenFile,
+  shouldHandleReveal,
 }: {
-  readonly isOpen: boolean;
-  readonly onToggle: () => void;
-}) {
+  readonly className?: string;
+  readonly isOpen?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
+  readonly closeButton?: React.ReactNode;
+  readonly showTitle?: boolean;
+  readonly onRequestOpen?: () => void;
+  readonly borderless?: boolean;
+  readonly onOpenFile?: (path: string, readOnly?: boolean) => void;
+  readonly shouldHandleReveal?: () => boolean;
+}): React.JSX.Element {
   return (
-    <FloatingPanelTrigger
-      icon={Files}
-      tooltipContent={
-        <div className='flex items-center gap-2'>
-          {isOpen ? 'Close' : 'Open'} Files
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleFileTreeKeyCombination)}</KeyShortcut>
-        </div>
-      }
-      tooltipSide='right'
-      className={isOpen ? 'text-primary' : undefined}
-      onClick={onToggle}
-    />
+    <FloatingPanel isOpen={isOpen} side='right' className={className} onOpenChange={onOpenChange}>
+      <ChatEditorFileTree
+        closeButton={closeButton}
+        showTitle={showTitle}
+        borderless={borderless}
+        onRequestOpen={onRequestOpen}
+        onOpenFile={onOpenFile}
+        shouldHandleReveal={shouldHandleReveal}
+      />
+    </FloatingPanel>
   );
 });
 
@@ -48,9 +50,6 @@ export const ChatFileTree = memo(function (props: {
 }) {
   const { className, isExpanded = true, setIsExpanded } = props;
 
-  // State to toggle search visibility (blur-resistant)
-  const [isSearchVisible, setIsSearchVisible] = useState(false);
-
   const toggleFileTree = useCallback(() => {
     setIsExpanded?.((current) => !current);
   }, [setIsExpanded]);
@@ -58,24 +57,25 @@ export const ChatFileTree = memo(function (props: {
   const { formattedKeyCombination } = useKeybinding(toggleFileTreeKeyCombination, toggleFileTree);
 
   return (
-    <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
-      <FloatingPanelContent>
-        <ChatEditorFileTree
-          enableSearch={isSearchVisible}
-          closeButton={
-            <FloatingPanelClose
-              icon={XIcon}
-              tooltipContent={(isOpen) => (
-                <div className='flex items-center gap-2'>
-                  {isOpen ? 'Close' : 'Open'} Files
-                  <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
-                </div>
-              )}
-            />
-          }
-          onSearchChange={setIsSearchVisible}
+    <FileTreePanelBody
+      className={className}
+      isOpen={isExpanded}
+      onOpenChange={setIsExpanded}
+      showTitle
+      onRequestOpen={() => {
+        setIsExpanded?.(true);
+      }}
+      closeButton={
+        <FloatingPanelClose
+          icon={XIcon}
+          tooltipContent={(isOpen) => (
+            <div className='flex items-center gap-2'>
+              {isOpen ? 'Close' : 'Open'} Files
+              <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
+            </div>
+          )}
         />
-      </FloatingPanelContent>
-    </FloatingPanel>
+      }
+    />
   );
 });

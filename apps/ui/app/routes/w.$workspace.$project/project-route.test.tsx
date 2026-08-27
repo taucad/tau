@@ -106,11 +106,14 @@ vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
   RevisionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 vi.mock('#routes/w.$workspace.$project/project-chat-rpc-bindings.js', () => ({ ProjectChatRpcBindings: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-name-editor.js', () => ({ ProjectNameEditor: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ ProjectCommandPaletteItems: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({ ProjectShareAction: () => null }));
-vi.mock('#routes/w.$workspace.$project/active-revision-indicator.js', () => ({ RevisionChip: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
+  ProjectShareProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+}));
 vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({ ChatInterface: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-not-found.js', () => ({
   ProjectNotFound: () => <div>Project Not Found</div>,

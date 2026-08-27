@@ -10,6 +10,11 @@ vi.mock('#hooks/use-mobile.js', () => ({
 }));
 
 const editorSend = vi.hoisted(() => vi.fn());
+const openPanel = vi.hoisted(() => vi.fn());
+
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useProjectWorkspace: () => ({ openPanel }),
+}));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
@@ -20,10 +25,16 @@ vi.mock('#hooks/use-project.js', () => ({
 beforeEach(() => {
   mobileState.isMobile = false;
   editorSend.mockReset();
+  openPanel.mockReset();
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe('DirectoryLink', () => {
@@ -34,16 +45,14 @@ describe('DirectoryLink', () => {
 
       await user.click(screen.getByRole('button', { name: 'src/utils' }));
 
-      expect(editorSend).toHaveBeenCalledTimes(2);
-      expect(editorSend).toHaveBeenNthCalledWith(1, {
-        type: 'setPanelState',
-        panelState: { openPanels: { files: true } },
-      });
-      expect(editorSend).toHaveBeenNthCalledWith(2, {
+      expect(openPanel).toHaveBeenCalledWith('files');
+      expect(editorSend).toHaveBeenCalledOnce();
+      expect(editorSend).toHaveBeenCalledWith({
         type: 'revealFileInTree',
         path: 'src/utils',
         expandTarget: true,
       });
+      expect(openPanel.mock.invocationCallOrder[0]).toBeLessThan(editorSend.mock.invocationCallOrder[0]!);
     });
 
     it('activates on Enter and Space keypresses', async () => {
@@ -54,16 +63,15 @@ describe('DirectoryLink', () => {
       link.focus();
 
       await user.keyboard('{Enter}');
-      expect(editorSend).toHaveBeenCalledTimes(2);
+      expect(editorSend).toHaveBeenCalledOnce();
+      expect(openPanel).toHaveBeenCalledWith('files');
 
       editorSend.mockReset();
+      openPanel.mockReset();
       await user.keyboard(' ');
-      expect(editorSend).toHaveBeenCalledTimes(2);
-      expect(editorSend).toHaveBeenNthCalledWith(1, {
-        type: 'setPanelState',
-        panelState: { openPanels: { files: true } },
-      });
-      expect(editorSend).toHaveBeenNthCalledWith(2, {
+      expect(openPanel).toHaveBeenCalledWith('files');
+      expect(editorSend).toHaveBeenCalledOnce();
+      expect(editorSend).toHaveBeenCalledWith({
         type: 'revealFileInTree',
         path: 'lib',
         expandTarget: true,
@@ -95,12 +103,9 @@ describe('DirectoryLink', () => {
 
       await user.click(screen.getByTestId('child'));
 
-      expect(editorSend).toHaveBeenCalledTimes(2);
-      expect(editorSend).toHaveBeenNthCalledWith(1, {
-        type: 'setPanelState',
-        panelState: { openPanels: { files: true } },
-      });
-      expect(editorSend).toHaveBeenNthCalledWith(2, {
+      expect(openPanel).toHaveBeenCalledWith('files');
+      expect(editorSend).toHaveBeenCalledOnce();
+      expect(editorSend).toHaveBeenCalledWith({
         type: 'revealFileInTree',
         path: 'a/b',
         expandTarget: true,
@@ -120,6 +125,7 @@ describe('DirectoryLink', () => {
       await user.click(screen.getByRole('button', { name: 'src/utils' }));
 
       expect(editorSend).not.toHaveBeenCalled();
+      expect(openPanel).not.toHaveBeenCalled();
     });
 
     it('is a no-op on Enter and Space keypresses', async () => {
@@ -133,6 +139,7 @@ describe('DirectoryLink', () => {
       await user.keyboard(' ');
 
       expect(editorSend).not.toHaveBeenCalled();
+      expect(openPanel).not.toHaveBeenCalled();
     });
   });
 });

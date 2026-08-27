@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
@@ -25,8 +25,6 @@ import { isDesignPath, migrateHeadTurnId, resolveRestore } from '#lib/file-resto
 import { applyRestorePlan } from '#lib/restore-apply.js';
 import { revisionMachine } from '#machines/revision.machine.js';
 import type { ApplyPlanInput, ComputePlanInput, PlanComputedEvent } from '#machines/revision.machine.js';
-import { RevisionPaneContext } from '#routes/w.$workspace.$project/revision-pane-context.js';
-import type { RevisionPaneState } from '#routes/w.$workspace.$project/revision-pane-context.js';
 
 /**
  * Owns the per-project `revisionMachine` actor, supplies its real
@@ -81,18 +79,6 @@ export function RevisionProvider({ children }: { readonly children: ReactNode })
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only actor input
     [],
-  );
-
-  const [paneOpen, setPaneOpen] = useState(false);
-  const paneState = useMemo<RevisionPaneState>(
-    () => ({
-      isOpen: paneOpen,
-      setOpen: setPaneOpen,
-      toggle: () => {
-        setPaneOpen((open) => !open);
-      },
-    }),
-    [paneOpen],
   );
 
   // Deps ref: the actor is created once, so its actors must read the latest
@@ -218,10 +204,8 @@ export function RevisionProvider({ children }: { readonly children: ReactNode })
 
   return (
     <RevisionActorContext.Provider value={actor}>
-      <RevisionPaneContext.Provider value={paneState}>
-        {children}
-        <RestoreConfirmDialog actor={actor} />
-      </RevisionPaneContext.Provider>
+      {children}
+      <RestoreConfirmDialog actor={actor} />
     </RevisionActorContext.Provider>
   );
 }

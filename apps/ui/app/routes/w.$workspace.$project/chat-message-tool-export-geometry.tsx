@@ -29,6 +29,7 @@ import { useProject } from '#hooks/use-project.js';
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import { cn } from '#utils/ui.utils.js';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 /** Matches {@link chat-tool-file-operation.tsx} action buttons — label hidden until `@xs/code`. */
 const exportActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
@@ -78,7 +79,8 @@ function ExportGeometryDownloadSplitButton({
   readonly exportedFormat: FileExtension;
 }): React.JSX.Element {
   const fileManager = useFileManager();
-  const { editorRef, geometryUnits } = useProject();
+  const { geometryUnits } = useProject();
+  const { openPanel } = useProjectWorkspace();
   const filenameBase = useMemo(() => filenameBaseFromTargetFile(targetFile), [targetFile]);
   const { exportToDisk, isExporting } = useExportToDisk(filenameBase);
   const [isArtifactDownloadBusy, setIsArtifactDownloadBusy] = useState(false);
@@ -104,14 +106,8 @@ function ExportGeometryDownloadSplitButton({
   );
 
   const onOpenExporter = useCallback(() => {
-    editorRef.send({
-      type: 'setPanelState',
-      panelState: {
-        openPanels: { converter: true },
-        mobileActiveTab: 'converter',
-      },
-    });
-  }, [editorRef]);
+    openPanel('export');
+  }, [openPanel]);
 
   const onDownload = useCallback(async () => {
     if (selectedFormat !== exportedFormat) {

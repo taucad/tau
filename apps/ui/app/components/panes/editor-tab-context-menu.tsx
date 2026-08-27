@@ -17,13 +17,13 @@ type EditorPanelParameters = {
 };
 
 /**
- * Context menu content for editor tabs.
+ * Shared context menu content for workbench tabs.
  *
- * Provides close operations, path copying, split controls,
- * and cross-dock navigation (open in viewer, reveal in file tree).
+ * Every tab gets close, path, and split operations. File tabs also get
+ * file-specific navigation actions.
  */
-function EditorTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.Element {
-  const { api, containerApi } = properties;
+export function WorkbenchTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.Element {
+  const { api } = properties;
   const { editorRef, projectRef } = useProject();
 
   const filePath = (properties.params as EditorPanelParameters | undefined)?.filePath;
@@ -69,18 +69,12 @@ function EditorTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
 
   // ── Split actions ──
   const handleSplitRight = useCallback(() => {
-    containerApi.addGroup({
-      referenceGroup: api.group,
-      direction: 'right',
-    });
-  }, [api, containerApi]);
+    api.moveTo({ group: api.group, position: 'right' });
+  }, [api]);
 
   const handleSplitDown = useCallback(() => {
-    containerApi.addGroup({
-      referenceGroup: api.group,
-      direction: 'below',
-    });
-  }, [api, containerApi]);
+    api.moveTo({ group: api.group, position: 'bottom' });
+  }, [api]);
 
   // ── Navigation actions ──
   const handleOpenInViewer = useCallback(() => {
@@ -91,9 +85,13 @@ function EditorTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
 
   const handleRevealInFileTree = useCallback(() => {
     if (filePath) {
-      editorRef.send({ type: 'revealFileInTree', path: filePath });
+      api.updateParameters({ filesOpen: true });
+      api.setActive();
+      requestAnimationFrame(() => {
+        editorRef.send({ type: 'revealFileInTree', path: filePath });
+      });
     }
-  }, [editorRef, filePath]);
+  }, [api, editorRef, filePath]);
 
   return (
     <>
@@ -134,17 +132,21 @@ function EditorTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
         Split Down
       </ContextMenuItem>
 
-      <ContextMenuSeparator />
+      {filePath ? (
+        <>
+          <ContextMenuSeparator />
 
-      {/* ── Navigation group ── */}
-      <ContextMenuItem disabled={!filePath} onSelect={handleOpenInViewer}>
-        <Box />
-        Open in Viewer
-      </ContextMenuItem>
-      <ContextMenuItem disabled={!filePath} onSelect={handleRevealInFileTree}>
-        <FolderTree />
-        Reveal in File Tree
-      </ContextMenuItem>
+          {/* ── File navigation group ── */}
+          <ContextMenuItem onSelect={handleOpenInViewer}>
+            <Box />
+            Open in Viewer
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={handleRevealInFileTree}>
+            <FolderTree />
+            Reveal in File Tree
+          </ContextMenuItem>
+        </>
+      ) : null}
     </>
   );
 }
@@ -153,4 +155,4 @@ function EditorTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
  * Editor tab component with a right-click context menu.
  * Use as `defaultTabComponent` in the editor Dockview.
  */
-export const EditorDockviewTab = withTabContextMenu(EditorTabContextMenu);
+export const EditorDockviewTab = withTabContextMenu(WorkbenchTabContextMenu);

@@ -21,7 +21,7 @@ const stubEditorState: EditorState = {
   activePaneId: stubPaneIdMain,
   focusedChatId: 'chat-1',
   panelState: defaultPanelState,
-  editorLayout: undefined,
+  workbenchLayout: undefined,
   viewerLayout: undefined,
   viewSettings: {},
   updatedAt: Date.now(),
@@ -501,16 +501,38 @@ describe('editorMachine', () => {
   // State: ready – panel state
   // =========================================================================
   describe('ready – panel state', () => {
-    /* eslint-disable @typescript-eslint/naming-convention -- file path keys in paneview test fixtures */
     it('should update panel state with deep merge', async () => {
       const actor = await startAndLoad({ loadResult: undefined });
       actor.send({
         type: 'setPanelState',
-        panelState: { openPanels: { files: true } },
+        panelState: {
+          desktopLayout: { workbenchOpen: false, workbenchWidth: 512 },
+        },
       });
       const { context } = actor.getSnapshot();
-      expect(context.panelState.openPanels.files).toBe(true);
-      expect(context.panelState.openPanels.chat).toBe(true);
+      expect(context.panelState.desktopLayout.workbenchOpen).toBe(false);
+      expect(context.panelState.desktopLayout.workbenchWidth).toBe(512);
+      expect(context.panelState.desktopLayout.chatOpen).toBe(true);
+      actor.stop();
+    });
+
+    it('should strip obsolete global Files fields while loading persisted panel state', async () => {
+      const legacyState = {
+        ...stubEditorState,
+        panelState: {
+          ...defaultPanelState,
+          desktopLayout: {
+            ...defaultPanelState.desktopLayout,
+            workbenchFilesOpen: true,
+            workbenchFilesWidth: 312,
+          },
+        },
+      };
+      const actor = await startAndLoad({ loadResult: legacyState });
+
+      expect(actor.getSnapshot().context.panelState.desktopLayout).toEqual(defaultPanelState.desktopLayout);
+      expect(actor.getSnapshot().context.panelState.desktopLayout).not.toHaveProperty('workbenchFilesOpen');
+      expect(actor.getSnapshot().context.panelState.desktopLayout).not.toHaveProperty('workbenchFilesWidth');
       actor.stop();
     });
 
@@ -553,11 +575,54 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
+    it('should shallow-merge modelPaneview into panel state', async () => {
+      const actor = await startAndLoad({ loadResult: undefined });
+      actor.send({
+        type: 'setPanelState',
+        panelState: {
+          modelPaneview: { 'main.ts': { isExpanded: true, size: 200 } },
+        },
+      });
+      actor.send({
+        type: 'setPanelState',
+        panelState: {
+          modelPaneview: { 'helper.ts': { isExpanded: false, size: 80 } },
+        },
+      });
+      expect(actor.getSnapshot().context.panelState.modelPaneview).toEqual({
+        'main.ts': { isExpanded: true, size: 200 },
+        'helper.ts': { isExpanded: false, size: 80 },
+      });
+      expect(actor.getSnapshot().context.panelState.parametersPaneview).toEqual({});
+      actor.stop();
+    });
+
+    it('should shallow-merge consolePaneview into panel state', async () => {
+      const actor = await startAndLoad({ loadResult: undefined });
+      actor.send({
+        type: 'setPanelState',
+        panelState: {
+          consolePaneview: { 'main.ts': { isExpanded: true, size: 200 } },
+        },
+      });
+      actor.send({
+        type: 'setPanelState',
+        panelState: {
+          consolePaneview: { 'helper.ts': { isExpanded: false, size: 80 } },
+        },
+      });
+      expect(actor.getSnapshot().context.panelState.consolePaneview).toEqual({
+        'main.ts': { isExpanded: true, size: 200 },
+        'helper.ts': { isExpanded: false, size: 80 },
+      });
+      actor.stop();
+    });
+
     it('should preserve other panel state fields when merging paneview state', async () => {
       const actor = await startAndLoad({ loadResult: undefined });
       actor.send({
         type: 'setPanelState',
-        panelState: { openPanels: { files: true } },
+        panelState: { desktopLayout: { workbenchOpen: false } },
       });
       actor.send({
         type: 'setPanelState',
@@ -567,15 +632,14 @@ describe('editorMachine', () => {
       });
 
       const { panelState } = actor.getSnapshot().context;
-      expect(panelState.openPanels.files).toBe(true);
-      expect(panelState.openPanels.chat).toBe(true);
+      expect(panelState.desktopLayout.workbenchOpen).toBe(false);
+      expect(panelState.desktopLayout.chatOpen).toBe(true);
       expect(panelState.kernelPaneview).toEqual({
         'main.ts': { isExpanded: true, size: 200 },
       });
       expect(panelState.parametersPaneview).toEqual({});
       actor.stop();
     });
-    /* eslint-enable @typescript-eslint/naming-convention -- file path keys in paneview test fixtures */
   });
 
   // =========================================================================

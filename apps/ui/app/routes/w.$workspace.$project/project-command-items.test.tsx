@@ -6,9 +6,11 @@ import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 
 let exportableGeometryUnitPaths = new Set<string>();
 let registeredItems: CommandPaletteItem[] = [];
+let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
 let cameraState: Record<string, unknown> | undefined;
-const editorSend = vi.fn();
+const openPanel = vi.fn();
+const openShare = vi.fn();
 const captureCadImages = vi.fn<(options: unknown) => Promise<ExportFile[]>>();
 const downloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
 const runtimeFileSystem = {};
@@ -40,7 +42,6 @@ vi.mock('#hooks/use-project.js', () => ({
         },
       }),
     },
-    editorRef: { send: editorSend },
   }),
   useMainGraphics: () => graphicsActor,
 }));
@@ -100,8 +101,16 @@ vi.mock('#hooks/use-restore-to-point.js', () => ({
   useRestoreToPoint: () => ({ returnToLatest: vi.fn() }),
 }));
 
-vi.mock('#routes/w.$workspace.$project/revision-pane-context.js', () => ({
-  useRevisionPane: () => ({ setOpen: vi.fn() }),
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useProjectWorkspace: () => ({ openPanel }),
+}));
+
+vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
+  useProjectShare: () => ({ openShare }),
+}));
+
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: () => isTauDebugEnabled,
 }));
 
 vi.mock('#components/layout/command-palette.js', () => ({
@@ -125,9 +134,11 @@ describe('ProjectCommandPaletteItems', () => {
   beforeEach(() => {
     exportableGeometryUnitPaths = new Set<string>();
     registeredItems = [];
+    isTauDebugEnabled = false;
     geometryFormat = undefined;
     cameraState = undefined;
-    editorSend.mockClear();
+    openPanel.mockClear();
+    openShare.mockClear();
     captureCadImages.mockReset();
     downloadBlob.mockReset();
   });
@@ -146,13 +157,42 @@ describe('ProjectCommandPaletteItems', () => {
     const exportItem = registeredItems.find((item) => item.id === 'export');
     expect(exportItem?.disabled).toBe(false);
     exportItem?.action?.();
-    expect(editorSend).toHaveBeenCalledWith({
-      type: 'setPanelState',
-      panelState: {
-        openPanels: { converter: true },
-        mobileActiveTab: 'converter',
-      },
-    });
+    expect(openPanel).toHaveBeenCalledWith('export');
+  });
+
+  it('registers Share with the same dialog owner', () => {
+    render(<ProjectCommandPaletteItems match={match} />);
+    registeredItems.find((item) => item.id === 'share-project')?.action?.();
+    expect(openShare).toHaveBeenCalledOnce();
+  });
+
+  it('routes every Workbench command through the shared workspace owner', () => {
+    render(<ProjectCommandPaletteItems match={match} />);
+
+    const expectedPanels = new Map([
+      ['open-parameters', 'parameters'],
+      ['open-files', 'files'],
+      ['open-model', 'model'],
+      ['open-details', 'details'],
+      ['revision-history', 'revisions'],
+    ]);
+    for (const [commandId, panelId] of expectedPanels) {
+      registeredItems.find((item) => item.id === commandId)?.action?.();
+      expect(openPanel).toHaveBeenLastCalledWith(panelId);
+    }
+    expect(openPanel).toHaveBeenCalledTimes(expectedPanels.size);
+  });
+
+  it('keeps Kernel hidden unless tauDebug is enabled', () => {
+    const { rerender } = render(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'open-kernel')?.visible).toBe(false);
+
+    isTauDebugEnabled = true;
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    const kernel = registeredItems.find((item) => item.id === 'open-kernel');
+    expect(kernel?.visible).toBe(true);
+    kernel?.action?.();
+    expect(openPanel).toHaveBeenCalledWith('kernel');
   });
 
   it.each([

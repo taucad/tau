@@ -1,7 +1,8 @@
-import type { ComponentProps } from 'react';
+import type { ComponentProps, FunctionComponent } from 'react';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import type { DockviewApi, DockviewReadyEvent, DockviewTheme } from 'dockview-react';
+import type { DockviewApi, DockviewReadyEvent, DockviewTheme, IDockviewHeaderActionsProps } from 'dockview-react';
 import { DockviewReact } from 'dockview-react';
+import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overflow-picker.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { cn } from '#utils/ui.utils.js';
 
@@ -29,7 +30,7 @@ export const dockviewStyleOverrides = cn(
   // ═══════════════════════════════════════════════════════════════════════════
   // CSS VARIABLE DECLARATIONS
   // Map Dockview's --dv-* tokens to the app's design tokens.
-  // Set directly on the root element (same element as .dockview-theme-tau).
+  // Set on the common shell ancestor so Dockview-owned overlays inherit them.
   // ═══════════════════════════════════════════════════════════════════════════
 
   // ── Core layout ──
@@ -216,43 +217,13 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-pane-action]:transition-opacity',
   '[&_.dv-pane-action]:duration-150',
   '[&_.dv-pane-action]:ease-in-out',
-  '[&_.dv-tabs-overflow-dropdown-root]:opacity-0',
-  '[&_.dv-tabs-overflow-dropdown-root]:transition-opacity',
-  '[&_.dv-tabs-overflow-dropdown-root]:duration-150',
-  '[&_.dv-tabs-overflow-dropdown-root]:ease-in-out',
   // Show on group hover
   '[&_.dv-groupview:hover_.dv-pane-action]:opacity-100',
-  '[&_.dv-groupview:hover_.dv-tabs-overflow-dropdown-root]:opacity-100',
+  // Keep keyboard-focused and expanded actions visible without requiring hover.
+  '[&_.dv-groupview:focus-within_.dv-pane-action]:opacity-100',
+  '[&_.dv-pane-action[aria-expanded=true]]:opacity-100',
   // Always show when group has no tabs (empty / watermark state)
   '[&_.dv-groupview:not(:has(.dv-tab))_.dv-pane-action]:opacity-100',
-  '[&_.dv-groupview:not(:has(.dv-tab))_.dv-tabs-overflow-dropdown-root]:opacity-100',
-
-  // ── Tab overflow dropdown ──
-  // Dockview creates this as a vanilla DOM element with no React API.
-  // Root wrapper
-  '[&_.dv-tabs-overflow-dropdown-root]:m-0',
-  '[&_.dv-tabs-overflow-dropdown-root]:flex',
-  '[&_.dv-tabs-overflow-dropdown-root]:shrink-0',
-  '[&_.dv-tabs-overflow-dropdown-root]:items-center',
-  '[&_.dv-tabs-overflow-dropdown-root]:p-0',
-  // Button -- match PaneButton sizing and hover
-  '[&_.dv-tabs-overflow-dropdown-default]:flex',
-  '[&_.dv-tabs-overflow-dropdown-default]:!size-7',
-  '[&_.dv-tabs-overflow-dropdown-default]:items-center',
-  '[&_.dv-tabs-overflow-dropdown-default]:justify-center',
-  '[&_.dv-tabs-overflow-dropdown-default]:gap-0',
-  '[&_.dv-tabs-overflow-dropdown-default]:rounded-sm',
-  '[&_.dv-tabs-overflow-dropdown-default]:p-0',
-  '[&_.dv-tabs-overflow-dropdown-default]:text-muted-foreground',
-  '[&_.dv-tabs-overflow-dropdown-default]:transition-colors',
-  '[&_.dv-tabs-overflow-dropdown-default:hover]:bg-muted-foreground/15',
-  '[&_.dv-tabs-overflow-dropdown-default:hover]:text-foreground',
-  // Chevron SVG
-  '[&_.dv-tabs-overflow-dropdown-default_>_svg]:size-2.5',
-  '[&_.dv-tabs-overflow-dropdown-default_>_svg]:shrink-0',
-  '[&_.dv-tabs-overflow-dropdown-default_>_svg]:rotate-90',
-  // Hide tab count span (dropdown itself shows all overflow tabs)
-  '[&_.dv-tabs-overflow-dropdown-default_>_span]:hidden',
 
   // ── Content container background ──
   '[&_.dv-groupview_>_.dv-content-container]:bg-background',
@@ -322,7 +293,7 @@ export function scrollActiveTabIntoView(api: DockviewApi): void {
  *
  * Renders `DockviewReact` with the `tauDockviewTheme` applied automatically.
  * All theme styling -- CSS variable declarations, tab states, action button
- * visibility, overflow dropdown, containment overrides
+ * visibility, shell overlays, containment overrides
  * -- is expressed as Tailwind className selectors in `dockviewStyleOverrides`
  * above, keeping everything co-located with the component and in sync with the
  * Tailwind theme.
@@ -337,9 +308,24 @@ export function scrollActiveTabIntoView(api: DockviewApi): void {
  * fully visible after panel activation — working around Dockview's synchronous
  * scroll that fires before the browser reflows newly-added tab elements.
  */
-export function Dockview({ className, onReady, ...properties }: DockviewProperties): React.JSX.Element {
-  const mergedClassName = useMemo(() => cn(dockviewStyleOverrides, className), [className]);
+export function Dockview({
+  className,
+  onReady,
+  rightHeaderActionsComponent,
+  ...properties
+}: DockviewProperties): React.JSX.Element {
   const disposableRef = useRef<{ dispose(): void } | undefined>(undefined);
+  const RightHeaderActions = useMemo<FunctionComponent<IDockviewHeaderActionsProps>>(() => {
+    const CallerActions = rightHeaderActionsComponent;
+    const ComposedRightHeaderActions = (actionProperties: IDockviewHeaderActionsProps): React.JSX.Element => (
+      <div className='flex h-full items-center gap-1'>
+        <DockviewTabOverflowPicker {...actionProperties} />
+        {CallerActions ? <CallerActions {...actionProperties} /> : null}
+      </div>
+    );
+    ComposedRightHeaderActions.displayName = 'DockviewRightHeaderActions';
+    return ComposedRightHeaderActions;
+  }, [rightHeaderActionsComponent]);
 
   const handleReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -359,10 +345,12 @@ export function Dockview({ className, onReady, ...properties }: DockviewProperti
   }, []);
 
   return (
-    <OmniScroller className='size-full' viewportSelector='.dv-tabs-container'>
+    <OmniScroller className={cn('size-full', dockviewStyleOverrides)} viewportSelector='.dv-tabs-container'>
       <DockviewReact
         {...properties}
-        className={mergedClassName}
+        className={className}
+        disableTabsOverflowList
+        rightHeaderActionsComponent={RightHeaderActions}
         scrollbars='native'
         theme={tauDockviewTheme}
         onReady={handleReady}

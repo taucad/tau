@@ -77,7 +77,9 @@ export function NewProjectChatComposer({
           kernel,
           activeModel: modelId,
           initialMessage: { content, imageUrls },
-          editorState: { panelState: { openPanels: { chat: true } } },
+          editorState: {
+            panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' }, mobileActiveTab: 'chat' },
+          },
           location: location.value,
         });
         await navigate(projectUrl(created.slugs));

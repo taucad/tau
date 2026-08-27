@@ -1,4 +1,4 @@
-import { History, RotateCcw, XIcon } from 'lucide-react';
+import { RotateCcw, XIcon } from 'lucide-react';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -7,31 +7,11 @@ import {
   FloatingPanelContentHeader,
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
-  FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import { Button } from '#components/ui/button.js';
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
-
-/** Overlay-rail trigger for the Revisions pane (R13), mirroring `ChatDetailsTrigger`. */
-export function ChatRevisionsTrigger({
-  isOpen,
-  onToggle,
-}: {
-  readonly isOpen: boolean;
-  readonly onToggle: () => void;
-}): React.JSX.Element {
-  return (
-    <FloatingPanelTrigger
-      icon={History}
-      tooltipContent={<div className='flex items-center gap-2'>{isOpen ? 'Close' : 'Open'} Revisions</div>}
-      tooltipSide='left'
-      className={isOpen ? 'text-primary' : undefined}
-      onClick={onToggle}
-    />
-  );
-}
 
 /**
  * The Revisions pane (R13) — the primary, discoverable cross-chat time-travel
@@ -40,8 +20,7 @@ export function ChatRevisionsTrigger({
  * restores through the same confirm-if-risky path as the inline button; the
  * head row is highlighted and non-clickable. "Return to latest" pins the tip.
  *
- * A right-side `FloatingPanel` pane rendered inside the desktop `Allotment`
- * (`chat-interface-desktop.tsx`), following the `ChatDetails` pattern.
+ * A mobile `FloatingPanel` wrapper around the shared Workbench body.
  *
  * ponytail: baseline (Revision 0) restore and the expandable per-row DiffViewer
  * preview are deferred — the list + click-to-restore is the load-bearing R13
@@ -54,9 +33,8 @@ export function ChatRevisions({
   readonly isExpanded?: boolean;
   readonly setIsExpanded?: (value: boolean | ((current: boolean) => boolean)) => void;
 }): React.JSX.Element {
-  const { revisions, headRevision, isDirty, canReturnToLatest } = useVisibleRevisions();
-  const { restore, returnToLatest, isBusy } = useRestoreToPoint();
-
+  const { canReturnToLatest } = useVisibleRevisions();
+  const { returnToLatest, isBusy } = useRestoreToPoint();
   return (
     <FloatingPanel isOpen={isExpanded} side='right' onOpenChange={setIsExpanded}>
       <FloatingPanelContent>
@@ -78,31 +56,38 @@ export function ChatRevisions({
           </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
         <FloatingPanelContentBody className='px-2 py-2'>
-          {revisions.length === 0 ? (
-            <p className='p-2 text-sm text-muted-foreground'>No revisions yet — agent edits will appear here.</p>
-          ) : (
-            <div className='flex flex-col gap-2'>
-              {[...revisions].reverse().map((revision) => {
-                const isActive = headRevision?.n === revision.n;
-                const restoreThis = (): void => {
-                  restore({ messageId: revision.messageId, anchor: revision.anchor });
-                };
-                return (
-                  <RevisionMarker
-                    key={`${revision.chatId}:${revision.messageId}`}
-                    revision={revision}
-                    isActive={isActive}
-                    isModified={isActive && isDirty}
-                    isBusy={isBusy}
-                    onRestore={restoreThis}
-                    onDiscard={restoreThis}
-                  />
-                );
-              })}
-            </div>
-          )}
+          <RevisionsPanelBody />
         </FloatingPanelContentBody>
       </FloatingPanelContent>
     </FloatingPanel>
+  );
+}
+
+export function RevisionsPanelBody(): React.JSX.Element {
+  const { revisions, headRevision, isDirty } = useVisibleRevisions();
+  const { restore, isBusy } = useRestoreToPoint();
+  if (revisions.length === 0) {
+    return <p className='p-2 text-sm text-muted-foreground'>No revisions yet — agent edits will appear here.</p>;
+  }
+  return (
+    <div className='flex flex-col gap-2 p-2'>
+      {[...revisions].reverse().map((revision) => {
+        const isActive = headRevision?.n === revision.n;
+        const restoreThis = (): void => {
+          restore({ messageId: revision.messageId, anchor: revision.anchor });
+        };
+        return (
+          <RevisionMarker
+            key={`${revision.chatId}:${revision.messageId}`}
+            revision={revision}
+            isActive={isActive}
+            isModified={isActive && isDirty}
+            isBusy={isBusy}
+            onRestore={restoreThis}
+            onDiscard={restoreThis}
+          />
+        );
+      })}
+    </div>
   );
 }

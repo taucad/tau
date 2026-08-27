@@ -1,5 +1,5 @@
 import type { ClassValue } from 'clsx';
-import { XIcon, Code2 } from 'lucide-react';
+import { XIcon } from 'lucide-react';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   FloatingPanel,
@@ -8,41 +8,13 @@ import {
   FloatingPanelContentHeader,
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
-  FloatingPanelTrigger,
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import { EditorDockview } from '#routes/w.$workspace.$project/chat-editor-dockview.js';
-import type { KeyCombination } from '#utils/keys.utils.js';
-import { formatKeyCombination } from '#utils/keys.utils.js';
+import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import { cn } from '#utils/ui.utils.js';
+import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
-export const keyCombinationEditor = {
-  key: 'e',
-  ctrlKey: true,
-} as const satisfies KeyCombination;
-
-export function ChatEditorLayoutTrigger({
-  isOpen,
-  onToggle,
-}: {
-  readonly isOpen: boolean;
-  readonly onToggle: () => void;
-}): React.JSX.Element {
-  return (
-    <FloatingPanelTrigger
-      icon={Code2}
-      tooltipContent={
-        <div className='flex items-center gap-2'>
-          {isOpen ? 'Close' : 'Open'} Editor
-          <KeyShortcut variant='tooltip'>{formatKeyCombination(keyCombinationEditor)}</KeyShortcut>
-        </div>
-      }
-      tooltipSide='left'
-      className={isOpen ? 'text-primary' : undefined}
-      onClick={onToggle}
-    />
-  );
-}
+export const keyCombinationEditor = projectWorkspaceKeyCombinations.editor;
 
 export function ChatEditorLayout({
   className,
@@ -77,7 +49,7 @@ export function ChatEditorLayout({
           </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
         <div className={cn('h-full', className)}>
-          <EditorDockview />
+          <WorkbenchDockview />
         </div>
       </FloatingPanelContent>
     </FloatingPanel>

@@ -4,8 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '#components/ui/tooltip.js';
 
 let exportableGeometryUnitPaths = new Set<string>();
-let converterOpen = false;
-const editorSend = vi.fn();
+const openPanel = vi.fn();
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown }, selector: (state: unknown) => unknown) =>
@@ -17,11 +16,11 @@ vi.mock('#hooks/use-project.js', () => ({
     projectRef: {
       getSnapshot: () => ({ context: { exportableGeometryUnitPaths } }),
     },
-    editorRef: {
-      getSnapshot: () => ({ context: { panelState: { openPanels: { converter: converterOpen } } } }),
-      send: editorSend,
-    },
   }),
+}));
+
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useProjectWorkspace: () => ({ openPanel }),
 }));
 
 const { ProjectExportAction } = await import('./project-export-action.js');
@@ -29,8 +28,7 @@ const { ProjectExportAction } = await import('./project-export-action.js');
 describe('ProjectExportAction', () => {
   beforeEach(() => {
     exportableGeometryUnitPaths = new Set<string>();
-    converterOpen = false;
-    editorSend.mockClear();
+    openPanel.mockClear();
   });
 
   it('should disable export when no geometry unit is exportable', () => {
@@ -40,7 +38,7 @@ describe('ProjectExportAction', () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByRole('button', { name: /export/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /export/i })).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('should open the exporter when any geometry unit is exportable', async () => {
@@ -55,19 +53,12 @@ describe('ProjectExportAction', () => {
 
     await user.click(screen.getByRole('button', { name: /export/i }));
 
-    expect(editorSend).toHaveBeenCalledWith({
-      type: 'setPanelState',
-      panelState: {
-        openPanels: { converter: true },
-        mobileActiveTab: 'converter',
-      },
-    });
+    expect(openPanel).toHaveBeenCalledWith('export');
   });
 
-  it('should close the exporter when it is already open', async () => {
+  it('should keep export as a one-way workflow action', async () => {
     const user = userEvent.setup();
     exportableGeometryUnitPaths = new Set(['helper.ts']);
-    converterOpen = true;
 
     render(
       <TooltipProvider>
@@ -77,11 +68,7 @@ describe('ProjectExportAction', () => {
 
     await user.click(screen.getByRole('button', { name: /export/i }));
 
-    expect(editorSend).toHaveBeenCalledWith({
-      type: 'setPanelState',
-      panelState: {
-        openPanels: { converter: false },
-      },
-    });
+    expect(openPanel).toHaveBeenCalledOnce();
+    expect(openPanel).toHaveBeenCalledWith('export');
   });
 });

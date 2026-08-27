@@ -6,7 +6,6 @@ import {
   FilePlus,
   FolderPlus,
   MoreHorizontal,
-  Search,
   Box,
   Folder,
   FolderOpen,
@@ -49,7 +48,6 @@ import {
   FloatingPanelMenuButton,
   FloatingPanelButtonGroup,
   FloatingPanelContentTitle,
-  useFloatingPanel,
 } from '#components/ui/floating-panel.js';
 import {
   AlertDialog,
@@ -251,20 +249,25 @@ function addDeletedDescendantPaths(options: {
 }
 
 type ChatEditorFileTreeProps = {
-  readonly enableSearch?: boolean;
-  readonly onSearchChange?: (isOpen: boolean) => void;
   readonly closeButton?: React.ReactNode;
+  readonly showTitle?: boolean;
+  readonly borderless?: boolean;
+  readonly onRequestOpen?: () => void;
+  readonly onOpenFile?: (path: string, readOnly?: boolean) => void;
+  readonly shouldHandleReveal?: () => boolean;
 };
 
 export const ChatEditorFileTree = memo(function ({
-  enableSearch = false,
-  onSearchChange,
   closeButton,
+  showTitle = true,
+  borderless = false,
+  onRequestOpen,
+  onOpenFile,
+  shouldHandleReveal,
 }: ChatEditorFileTreeProps): React.JSX.Element {
   // It's necessary to opt out of React Compiler auto-memoization for this component due to:
   // https://headless-tree.lukasbach.com/guides/react-compiler/
   'use no memo'; // Opt out of React Compiler memoization
-  const { open: openPanel } = useFloatingPanel();
   const { projectRef, editorRef } = useProject();
   const fileManager = useFileManager();
   const {
@@ -283,8 +286,6 @@ export const ChatEditorFileTree = memo(function ({
     canCreate,
     canDelete,
   } = fileManager;
-  const project = useSelector(projectRef, (state) => state.context.project);
-  const isEditorReady = useSelector(editorRef, (state) => state.matches('ready'));
   const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
   const activeFilePath = useSelector(editorRef, (state) => {
     const id = state.context.activePaneId;
@@ -315,12 +316,16 @@ export const ChatEditorFileTree = memo(function ({
     };
   }, [projectRef, editorRef, contentService, readFile]);
 
-  useEffect(() => {
-    if (!project || !isEditorReady || activeFilePath) {
-      return;
-    }
-    editorRef.send({ type: 'openFile', path: project.assets.main.entryPath, source: 'machine' });
-  }, [activeFilePath, editorRef, isEditorReady, project]);
+  const requestOpenFile = useCallback(
+    (path: string, readOnly?: boolean) => {
+      if (onOpenFile) {
+        onOpenFile(path, readOnly);
+        return;
+      }
+      editorRef.send({ type: 'openFile', path, source: 'user', readOnly });
+    },
+    [editorRef, onOpenFile],
+  );
 
   const { treeService } = fileManager;
 
@@ -501,11 +506,7 @@ export const ChatEditorFileTree = memo(function ({
           }
         }
         await writeFile(filePath, encodeTextFile(content), { source: 'user' });
-        editorRef.send({
-          type: 'openFile',
-          path: filePath,
-          source: 'user',
-        });
+        requestOpenFile(filePath);
         setPendingFile(undefined);
         setFocusedItem(filePath);
         setSelectedItems([filePath]);
@@ -517,7 +518,7 @@ export const ChatEditorFileTree = memo(function ({
         toast.error(message);
       }
     },
-    [editorRef, mutationErrorMessage, preflightCreate, requestOverwriteConfirm, writeFile],
+    [mutationErrorMessage, preflightCreate, requestOpenFile, requestOverwriteConfirm, writeFile],
   );
 
   // Reveal active file by expanding all parent directories (VSCode-style)
@@ -753,12 +754,7 @@ export const ChatEditorFileTree = memo(function ({
       if (!item.isFolder()) {
         const path = item.getId();
         const readOnly = isBundledTypesWorkspacePath(path);
-        editorRef.send({
-          type: 'openFile',
-          path,
-          source: 'user',
-          readOnly,
-        });
+        requestOpenFile(path, readOnly);
       }
     },
     hotkeys: {
@@ -796,11 +792,11 @@ export const ChatEditorFileTree = memo(function ({
           // Don't close search - user must press Escape or click X
         },
       },
-      // Override closeSearch to use external callback
+      // Keep the always-visible filter open and let Escape clear it.
       closeSearch: {
         hotkey: 'Escape',
-        handler() {
-          onSearchChange?.(false);
+        handler(_event, treeInstance) {
+          treeInstance.setSearch('');
         },
       },
     },
@@ -901,15 +897,13 @@ export const ChatEditorFileTree = memo(function ({
     focusedItemRef.current = focusedItem;
   }, [focusedItem]);
 
-  // Sync tree search state with external enableSearch prop
+  // Search is a permanent part of the Files toolbar.
   useEffect(() => {
-    if (enableSearch && !tree.isSearchOpen()) {
+    if (!tree.isSearchOpen()) {
       tree.openSearch();
-    } else if (!enableSearch && tree.isSearchOpen()) {
-      tree.closeSearch();
     }
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- tree object is not stable, only sync when enableSearch changes
-  }, [enableSearch]);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- tree object is not stable; search opens once on mount
+  }, []);
 
   // Sync active file with tree focus when the active editor file changes.
   // Do not re-run this on tree focus changes; users need to focus folders before
@@ -936,10 +930,13 @@ export const ChatEditorFileTree = memo(function ({
   // Expands all parent directories, focuses the item, and scrolls it into view.
   useEffect(() => {
     const subscription = editorRef.on('fileRevealRequested', (event) => {
+      if (shouldHandleReveal && !shouldHandleReveal()) {
+        return;
+      }
       const targetPath = event.path;
 
       // Ensure the file-explorer panel is open before revealing the item
-      openPanel();
+      onRequestOpen?.();
 
       // Expand all parent directories
       const parts = targetPath.split('/');
@@ -985,7 +982,7 @@ export const ChatEditorFileTree = memo(function ({
     return () => {
       subscription.unsubscribe();
     };
-  }, [editorRef, openPanel, tree, setExpandedItems, setFocusedItem, setSelectedItems]);
+  }, [editorRef, onRequestOpen, shouldHandleReveal, tree, setExpandedItems, setFocusedItem, setSelectedItems]);
 
   const handleCreateFile = useCallback(
     (template: KernelConfiguration | undefined) => {
@@ -994,7 +991,8 @@ export const ChatEditorFileTree = memo(function ({
 
       // Determine parent path from the visible single selection first, then focused item.
       let parentPath = '';
-      const targetPath = selectedItems.length === 1 ? selectedItems[0] : focusedItem;
+      const selectedPath = selectedItems.length === 1 ? selectedItems[0] : undefined;
+      const targetPath = selectedPath !== undefined && allPaths.has(selectedPath) ? selectedPath : focusedItem;
       if (targetPath !== undefined) {
         const targetItem = tree.getItemInstance(targetPath);
         if (targetItem.isFolder()) {
@@ -1017,13 +1015,14 @@ export const ChatEditorFileTree = memo(function ({
         error: undefined,
       });
     },
-    [focusedItem, selectedItems, tree],
+    [allPaths, focusedItem, selectedItems, tree],
   );
 
   const handleCreateFolder = useCallback(() => {
     // Determine parent path from the visible single selection first, then focused item.
     let parentPath = '';
-    const targetPath = selectedItems.length === 1 ? selectedItems[0] : focusedItem;
+    const selectedPath = selectedItems.length === 1 ? selectedItems[0] : undefined;
+    const targetPath = selectedPath !== undefined && allPaths.has(selectedPath) ? selectedPath : focusedItem;
     if (targetPath !== undefined) {
       const targetItem = tree.getItemInstance(targetPath);
       if (targetItem.isFolder()) {
@@ -1039,7 +1038,7 @@ export const ChatEditorFileTree = memo(function ({
     }
 
     setPendingFolder({ parentPath, error: undefined });
-  }, [focusedItem, selectedItems, tree]);
+  }, [allPaths, focusedItem, selectedItems, tree]);
 
   const handleDelete = useCallback((items: Array<ItemInstance<TreeItemData>>) => {
     const candidatePaths = items.map((item) => item.getId()).filter((path) => path !== rootId);
@@ -1133,11 +1132,7 @@ export const ChatEditorFileTree = memo(function ({
         toast.promise(
           async () => {
             await duplicateFile(originalPath, finalPath);
-            editorRef.send({
-              type: 'openFile',
-              path: finalPath,
-              source: 'user',
-            });
+            requestOpenFile(finalPath);
           },
           {
             loading: `Duplicating ${fileName}...`,
@@ -1147,15 +1142,15 @@ export const ChatEditorFileTree = memo(function ({
         );
       }
     },
-    [allPaths, duplicateFile, editorRef],
+    [allPaths, duplicateFile, requestOpenFile],
   );
 
   const handleOpenInEditor = useCallback(
     (path: string) => {
       const readOnly = isBundledTypesWorkspacePath(path);
-      editorRef.send({ type: 'openFile', path, source: 'user', readOnly });
+      requestOpenFile(path, readOnly);
     },
-    [editorRef],
+    [requestOpenFile],
   );
 
   const handleOpenInViewer = useCallback(
@@ -1327,7 +1322,7 @@ export const ChatEditorFileTree = memo(function ({
           // oxlint-disable-next-line no-await-in-loop -- Files need to be written sequentially
           await writeFile(candidate.filePath, uint8Array, { source: 'user' });
 
-          editorRef.send({ type: 'openFile', path: candidate.filePath, source: 'user' });
+          requestOpenFile(candidate.filePath);
           uploadedCount++;
         } catch (error) {
           failures.push(`${candidate.relativePath}: ${error instanceof Error ? error.message : String(error)}`);
@@ -1350,9 +1345,9 @@ export const ChatEditorFileTree = memo(function ({
       allPaths,
       canCreate,
       createDirectory,
-      editorRef,
       fileTree,
       mutationErrorMessage,
+      requestOpenFile,
       requestOverwriteConfirm,
       writeFile,
     ],
@@ -1545,21 +1540,32 @@ export const ChatEditorFileTree = memo(function ({
         }}
       />
 
-      <FloatingPanelContent>
-        <FloatingPanelContentHeader>
-          <FloatingPanelContentTitle>Files</FloatingPanelContentTitle>
-          <FloatingPanelContentHeaderActions>
-            <FloatingPanelButtonGroup>
-              <FloatingPanelMenuButton
-                aria-label={enableSearch ? 'Hide search' : 'Search files'}
-                className={cn(enableSearch && 'text-primary')}
-                tooltip={enableSearch ? 'Hide search' : 'Search files'}
-                onClick={() => {
-                  onSearchChange?.(!enableSearch);
-                }}
-              >
-                <Search className='size-4' />
-              </FloatingPanelMenuButton>
+      <FloatingPanelContent className={cn(borderless && 'bg-background')}>
+        {showTitle || closeButton ? (
+          <FloatingPanelContentHeader className={cn(borderless && 'border-0 bg-transparent px-2')}>
+            {showTitle ? <FloatingPanelContentTitle>Files</FloatingPanelContentTitle> : <span />}
+            <FloatingPanelContentHeaderActions className={cn(borderless && 'ml-auto pl-0')}>
+              {closeButton}
+            </FloatingPanelContentHeaderActions>
+          </FloatingPanelContentHeader>
+        ) : null}
+        <FloatingPanelContentBody className='group/filetree flex min-h-0 flex-col'>
+          <div
+            className={cn(
+              'flex w-full shrink-0 items-center gap-1 border-b bg-sidebar p-2',
+              borderless && 'border-0 bg-transparent',
+            )}
+          >
+            <SearchInput
+              {...tree.getSearchInputElementProps()}
+              placeholder='Filter files...'
+              className='h-7 min-w-0 flex-1 bg-background'
+              onBlur={undefined}
+              onClear={() => {
+                tree.setSearch('');
+              }}
+            />
+            <FloatingPanelButtonGroup className='shrink-0'>
               <DropdownMenu modal={false}>
                 <FloatingPanelMenuButton asChild tooltip='Create new file' aria-label='Create new file'>
                   <DropdownMenuTrigger>
@@ -1620,33 +1626,17 @@ export const ChatEditorFileTree = memo(function ({
                 <CopyMinus className='size-4' />
               </FloatingPanelMenuButton>
             </FloatingPanelButtonGroup>
-            {closeButton}
-          </FloatingPanelContentHeaderActions>
-        </FloatingPanelContentHeader>
-        <FloatingPanelContentBody className='group/filetree flex min-h-0 flex-col'>
-          {enableSearch ? (
-            <div className='flex w-full shrink-0 flex-row gap-2 border-b bg-sidebar p-2'>
-              <SearchInput
-                {...tree.getSearchInputElementProps()}
-                placeholder='Search files...'
-                className='h-7 w-full bg-background'
-                // Override onBlur to prevent clearing search when clicking on tree items
-                onBlur={undefined}
-                onClear={() => {
-                  // Only clear the search text, don't close the search panel
-                  // Closing is handled by the search toggle button in the header
-                  tree.setSearch('');
-                }}
-              />
-            </div>
-          ) : null}
+          </div>
 
           {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
             <div
               data-tree-container
               {...tree.getContainerProps()}
               ref={setTreeContainerElement}
-              className='flex min-h-full flex-1 flex-col gap-0 outline-none'
+              className={cn(
+                'flex min-h-full flex-1 flex-col gap-0 outline-none',
+                borderless && 'gap-0.5 px-1.5 pb-1.5',
+              )}
             >
               <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
               {/* Pending folder at root level */}
@@ -1871,7 +1861,7 @@ function TreeItem({
               key={guideDepth}
               aria-hidden
               className={cn(
-                'pointer-events-none absolute top-0 h-full w-px',
+                'pointer-events-none absolute -top-0.5 -bottom-0.5 w-px',
                 isActiveGuide ? 'bg-border' : 'bg-border opacity-0 transition-opacity group-hover/filetree:opacity-100',
               )}
               style={{ left: `${guideDepth * 16}px` }}
@@ -1926,7 +1916,7 @@ function TreeItem({
           data-file-tree-path={item.getId()}
           data-file-tree-kind={isFolder ? 'directory' : 'file'}
           className={cn(
-            'group/file relative flex h-7 w-full cursor-pointer items-center justify-between py-1 pr-1 pl-2 text-sm text-sidebar-foreground',
+            'group/file relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground transition-colors',
             !isActive && 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
             isActive && !isSelected && 'bg-sidebar-accent',
             isSelected && 'bg-sidebar-accent/70 text-sidebar-accent-foreground',
@@ -1987,7 +1977,7 @@ function TreeItem({
                 key={guideDepth}
                 aria-hidden
                 className={cn(
-                  'pointer-events-none absolute top-0 h-full w-px',
+                  'pointer-events-none absolute -top-0.5 -bottom-0.5 w-px',
                   isActiveGuide
                     ? 'bg-border'
                     : 'bg-border opacity-0 transition-opacity group-hover/filetree:opacity-100',
@@ -2006,7 +1996,7 @@ function TreeItem({
             ) : (
               <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
             )}
-            <span className={cn('truncate', isOpen && 'font-medium', isActive && 'text-primary')}>
+            <span className={cn('truncate', isOpen && 'font-medium', isActive && 'text-sidebar-accent-foreground')}>
               <HighlightText text={item.getItemName()} searchTerm={searchQuery} />
             </span>
           </div>
@@ -2014,10 +2004,10 @@ function TreeItem({
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger asChild>
                 <Button
-                  variant='secondary'
+                  variant='ghost'
                   size='icon'
                   aria-label={`Actions for ${item.getItemName()}`}
-                  className='absolute top-1/2 right-1 size-5 -translate-y-1/2 opacity-0 group-hover/file:opacity-50 hover:bg-secondary hover:opacity-100'
+                  className='absolute top-1/2 right-1 size-4.5 -translate-y-1/2 rounded-[5px] bg-transparent p-0 text-muted-foreground opacity-0 group-hover/file:opacity-100 hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground data-[state=open]:opacity-100'
                   onClick={(event) => {
                     event.stopPropagation();
                   }}
@@ -2428,7 +2418,6 @@ function PendingFileInput({
           />
           <input
             ref={inputRef}
-            autoFocus
             value={value}
             className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus:ring-0 focus:ring-offset-0'
             placeholder='New File'

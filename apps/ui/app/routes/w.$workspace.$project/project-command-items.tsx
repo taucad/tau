@@ -1,4 +1,18 @@
-import { Clipboard, Download, GalleryThumbnails, History, ImageDown, RotateCcw } from 'lucide-react';
+import {
+  Activity,
+  Clipboard,
+  Download,
+  FileBox,
+  Files,
+  GalleryThumbnails,
+  History,
+  ImageDown,
+  Info,
+  RotateCcw,
+  Share2,
+  SlidersHorizontal,
+  Terminal,
+} from 'lucide-react';
 import { useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import type { UIMatch } from 'react-router';
@@ -12,14 +26,19 @@ import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
-import { useRevisionPane } from '#routes/w.$workspace.$project/revision-pane-context.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { useProjectShare } from '#routes/w.$workspace.$project/project-share-action.js';
+import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages } from '#services/headless-capture.js';
 import { useCameraRegistryVersion } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
-  const { projectRef, editorRef, geometryUnits, mainEntryPath } = useProject();
+  const { projectRef, geometryUnits, mainEntryPath } = useProject();
+  const { openPanel } = useProjectWorkspace();
+  const { openShare } = useProjectShare();
+  const isTauDebugEnabled = useFeature('tauDebug');
   const mainGraphicsRef = useMainGraphics();
   const { regenerate: regenerateThumbnail } = useThumbnailGenerator();
   const fileManager = useFileManager();
@@ -39,19 +58,12 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   const fileCount = fileTree.size;
 
   // Chat-restore time-travel (R13) — keyboard-first discovery of the pane + redo.
-  const { setOpen: setRevisionPaneOpen } = useRevisionPane();
   const { returnToLatest } = useRestoreToPoint();
   const { canReturnToLatest } = useVisibleRevisions();
 
   const handleOpenExporter = useCallback(() => {
-    editorRef.send({
-      type: 'setPanelState',
-      panelState: {
-        openPanels: { converter: true },
-        mobileActiveTab: 'converter',
-      },
-    });
-  }, [editorRef]);
+    openPanel('export');
+  }, [openPanel]);
 
   const handleDownloadZip = useCallback(async () => {
     if (!project) {
@@ -138,12 +150,75 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
     match.id,
     (): CommandPaletteItem[] => [
       {
+        id: 'share-project',
+        label: 'Share project',
+        group: 'Project',
+        icon: <Share2 />,
+        action: openShare,
+      },
+      {
+        id: 'open-parameters',
+        label: 'Open parameters',
+        group: 'Workbench',
+        icon: <SlidersHorizontal />,
+        action: () => {
+          openPanel('parameters');
+        },
+      },
+      {
+        id: 'open-files',
+        label: 'Open files',
+        group: 'Workbench',
+        icon: <Files />,
+        action: () => {
+          openPanel('files');
+        },
+      },
+      {
+        id: 'open-model',
+        label: 'Open model structure',
+        group: 'Workbench',
+        icon: <FileBox />,
+        action: () => {
+          openPanel('model');
+        },
+      },
+      {
+        id: 'open-details',
+        label: 'Open project details',
+        group: 'Workbench',
+        icon: <Info />,
+        action: () => {
+          openPanel('details');
+        },
+      },
+      {
+        id: 'open-kernel',
+        label: 'Open telemetry',
+        group: 'Workbench',
+        icon: <Activity />,
+        action: () => {
+          openPanel('kernel');
+        },
+        visible: isTauDebugEnabled,
+      },
+      {
+        id: 'open-console',
+        label: 'Open console',
+        group: 'Workbench',
+        icon: <Terminal />,
+        action: () => {
+          openPanel('console');
+        },
+        visible: isTauDebugEnabled,
+      },
+      {
         id: 'revision-history',
         label: 'Open revision history',
         group: 'Revisions',
         icon: <History />,
         action: () => {
-          setRevisionPaneOpen(true);
+          openPanel('revisions');
         },
       },
       {
@@ -198,6 +273,9 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
     ],
     [
       handleUpdateThumbnail,
+      openShare,
+      openPanel,
+      isTauDebugEnabled,
       mainCadRef,
       canCapturePng,
       handleCopyPngToClipboard,

@@ -127,7 +127,6 @@ vi.mock('#components/ui/sonner.js', () => ({
 
 vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanel: ({ children }: { children: React.ReactNode }) => <div data-testid='floating-panel'>{children}</div>,
-  FloatingPanelTrigger: () => null,
   FloatingPanelContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentBody: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

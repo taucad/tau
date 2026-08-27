@@ -6,17 +6,14 @@ import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import type { Handle } from '#types/matches.types.js';
 import { ProjectChatRpcBindings } from '#routes/w.$workspace.$project/project-chat-rpc-bindings.js';
-import { ProjectNameEditor } from '#routes/w.$workspace.$project/project-name-editor.js';
-import { ViewContextProvider } from '#routes/w.$workspace.$project/chat-interface-view-context.js';
+import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { ProjectShareProvider } from '#routes/w.$workspace.$project/project-share-action.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ProjectCommandPaletteItems } from '#routes/w.$workspace.$project/project-command-items.js';
-import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
-import { ProjectShareAction } from '#routes/w.$workspace.$project/project-share-action.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { ChatRpcSocketProvider } from '#hooks/use-chat-rpc-socket.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { RevisionProvider } from '#routes/w.$workspace.$project/revision-provider.js';
-import { RevisionChip } from '#routes/w.$workspace.$project/active-revision-indicator.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useBlockBrowserNavigation } from '#hooks/use-block-browser-navigation.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
@@ -75,7 +72,11 @@ function ProjectSession({
           >
             <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
             <MonacoModelServiceProvider>
-              <RevisionProvider>{children}</RevisionProvider>
+              <RevisionProvider>
+                <ProjectShareProvider>
+                  <ProjectWorkspaceProvider>{children}</ProjectWorkspaceProvider>
+                </ProjectShareProvider>
+              </RevisionProvider>
             </MonacoModelServiceProvider>
           </ProjectProvider>
         </WebglContextTrackerProvider>
@@ -336,27 +337,11 @@ export function ProjectRouteProviders({
 
 /** Chrome shared by every project route; each route module adds `providers`. */
 export const projectRouteHandle: Omit<Handle, 'providers'> = {
-  breadcrumb() {
-    return [
-      //
-      <ProjectNameEditor key='project-name-editor' />,
-      // Disabled until publishing is implemented
-      // <ChatModeSelector key={`${id}-chat-mode-selector`} />
-    ];
-  },
-  actions() {
-    return (
-      <>
-        <RevisionChip />
-        <ProjectShareAction />
-        <ProjectExportAction />
-      </>
-    );
-  },
   commandPalette(match) {
     return <ProjectCommandPaletteItems match={match} />;
   },
   enableFloatingSidebar: true,
+  enablePageHeader: false,
 };
 
 // Chat component - handles keyboard shortcuts. The Socket.IO RPC connection
@@ -380,15 +365,11 @@ function Chat(): React.JSX.Element {
 /**
  * Project route chat composition.
  *
- * - `<ChatInterface>` mounts the full editor layout (viewer, file tree,
- *   parameters, editor, kernel, explorer, details, converter, and the
- *   chat panel) unconditionally. The chat panel itself wraps its
- *   `<ChatHistory>` child in `<ChatHistoryGate>` (see
- *   [`focused-chat-gate.tsx`](./focused-chat-gate.tsx)), which is the
- *   sole owner of `<ActiveChatProvider>` mounting + the
- *   focused-chat skeleton/error UI. This keeps every non-chat pane
- *   independent of the editor machine's chat lifecycle, restoring the
- *   pre-fix elegant load behaviour (placeholder -> opacity fade-in).
+ * - `<ChatInterface>` mounts the stable Chat | Viewer | Workbench shell.
+ *   The desktop shell uses `<ChatInterfaceSessionGate>` as the single
+ *   `<ActiveChatProvider>` boundary so both the chat history and its
+ *   composer share the focused chat. `<ChatHistoryGate>` remains the
+ *   focused-chat skeleton/error boundary inside that session.
  * - `<ProjectChatRpcBindings>` reads chat ids from the app-shell
  *   `ChatSessionStore` directly (no `<ActiveChatProvider>` dependency),
  *   so RPC bindings persist across `focusedChatId` changes and across
@@ -407,13 +388,12 @@ function ChatWithProvider(): React.JSX.Element {
   const description = useSelector(projectRef, (state) => state.context.project?.description);
 
   return (
-    <ViewContextProvider>
+    <>
       {name ? <title>{name}</title> : null}
       {description ? <meta name='description' content={description} /> : null}
-      <FlushOnCloseGuard />
       <ProjectChatRpcBindings />
       <Chat />
-    </ViewContextProvider>
+    </>
   );
 }
 

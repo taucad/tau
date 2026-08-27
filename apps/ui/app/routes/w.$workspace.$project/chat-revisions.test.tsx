@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { ChatRevisions, ChatRevisionsTrigger } from '#routes/w.$workspace.$project/chat-revisions.js';
+import { ChatRevisions } from '#routes/w.$workspace.$project/chat-revisions.js';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import type { RevisionsView } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
@@ -16,11 +16,6 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelContentTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   FloatingPanelContentBody: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   FloatingPanelClose: () => <button type='button'>close</button>,
-  FloatingPanelTrigger: ({ onClick }: { onClick: () => void }) => (
-    <button type='button' onClick={onClick}>
-      trigger
-    </button>
-  ),
 }));
 vi.mock('#hooks/use-revisions.js', () => ({ useVisibleRevisions: vi.fn() }));
 vi.mock('#hooks/use-restore-to-point.js', () => ({ useRestoreToPoint: vi.fn() }));
@@ -108,14 +103,5 @@ describe('ChatRevisions', () => {
     render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Return to latest/ }));
     expect(returnToLatest).toHaveBeenCalledOnce();
-  });
-});
-
-describe('ChatRevisionsTrigger', () => {
-  it('fires onToggle when clicked', () => {
-    const onToggle = vi.fn();
-    render(<ChatRevisionsTrigger isOpen={false} onToggle={onToggle} />);
-    fireEvent.click(screen.getByRole('button', { name: 'trigger' }));
-    expect(onToggle).toHaveBeenCalledOnce();
   });
 });

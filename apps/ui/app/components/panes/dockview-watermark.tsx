@@ -24,7 +24,7 @@ export function DockviewWatermark({
   onClose,
 }: DockviewWatermarkProps): React.JSX.Element {
   return (
-    <div className='@container/watermark flex h-full flex-col items-center justify-center gap-2 p-2 text-muted-foreground @xs/watermark:gap-4'>
+    <div className='@container/watermark [container-type:size] flex h-full flex-col items-center justify-center gap-2 p-2 text-muted-foreground @xs/watermark:gap-4'>
       <Icon className='size-8 stroke-1 @xs/watermark:size-12' />
       <div className='flex flex-col items-center gap-1 text-center'>
         <p className='text-xs font-medium @xs/watermark:text-sm'>{title}</p>

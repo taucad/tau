@@ -110,7 +110,9 @@ describe('NewProjectChatComposer', () => {
       kernel: 'openscad',
       activeModel: 'gpt-test',
       initialMessage: { content: 'Build a bracket', imageUrls: ['data:image/png;base64,a'] },
-      editorState: { panelState: { openPanels: { chat: true } } },
+      editorState: {
+        panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' }, mobileActiveTab: 'chat' },
+      },
       location: { kind: 'workspace', workspaceId: 'wsp_workshop' },
     });
     expect(mockNavigate).toHaveBeenCalledWith('/w/workshop/bracket');

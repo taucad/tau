@@ -1,24 +1,19 @@
 import { DownloadIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
 export function ProjectExportAction(): React.JSX.Element {
-  const { projectRef, editorRef } = useProject();
+  const { projectRef } = useProject();
+  const { openPanel } = useProjectWorkspace();
   const hasExportableGeometry = useSelector(projectRef, (state) => state.context.exportableGeometryUnitPaths.size > 0);
-  const isConverterOpen = useSelector(editorRef, (state) => state.context.panelState.openPanels.converter);
 
   const handleClick = (): void => {
-    const nextOpen = !isConverterOpen;
-
-    editorRef.send({
-      type: 'setPanelState',
-      panelState: {
-        openPanels: { converter: nextOpen },
-        ...(nextOpen ? { mobileActiveTab: 'converter' } : {}),
-      },
-    });
+    if (hasExportableGeometry) {
+      openPanel('export');
+    }
   };
 
   return (
@@ -26,22 +21,17 @@ export function ProjectExportAction(): React.JSX.Element {
       <TooltipTrigger asChild>
         <Button
           variant='ghost'
-          size='sm'
-          className='max-md:size-8'
-          disabled={!hasExportableGeometry}
-          aria-pressed={isConverterOpen}
+          size='xs'
+          className='aria-disabled:cursor-not-allowed aria-disabled:opacity-50 max-md:size-8'
+          aria-disabled={!hasExportableGeometry}
           onClick={handleClick}
         >
-          <DownloadIcon className='size-3' aria-hidden />
-          <span className='sr-only sm:hidden'>Export</span>
-          <span className='hidden sm:inline'>Export</span>
+          <DownloadIcon className='size-3.5' aria-hidden />
+          <span className='sr-only @xl/viewer:hidden'>Export</span>
+          <span className='hidden @xl/viewer:inline'>Export</span>
         </Button>
       </TooltipTrigger>
-      <TooltipContent>
-        {hasExportableGeometry
-          ? `${isConverterOpen ? 'Close' : 'Open'} exporter`
-          : 'Generate exportable geometry first'}
-      </TooltipContent>
+      <TooltipContent>{hasExportableGeometry ? 'Open exporter' : 'Generate exportable geometry first'}</TooltipContent>
     </Tooltip>
   );
 }

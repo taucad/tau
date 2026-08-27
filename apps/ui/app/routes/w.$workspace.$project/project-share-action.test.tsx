@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ProjectShareAction } from '#routes/w.$workspace.$project/project-share-action.js';
+import { ProjectShareAction, ProjectShareProvider } from '#routes/w.$workspace.$project/project-share-action.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
 
 vi.mock('#machines/publish.machine.js', async () => {
@@ -12,6 +12,10 @@ vi.mock('#machines/publish.machine.js', async () => {
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ fileManagerRef: {} }),
+}));
+
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => ({ getProjectLibraryState: vi.fn(async () => ({ lastActivityAt: 1 })) }),
 }));
 
 vi.mock('#environment.config.js', () => ({
@@ -68,6 +72,7 @@ vi.mock('#hooks/use-project.js', async () => {
     useProject: () => ({
       geometryUnits: new Map([['main.ts', cadActor]]),
       mainEntryPath: 'main.ts',
+      parameterEntries: new Map(),
       projectId: 'proj_header',
       projectRef: projectActor,
     }),
@@ -92,7 +97,9 @@ describe('ProjectShareAction', () => {
     render(
       <MemoryRouter>
         <TooltipProvider>
-          <ProjectShareAction />
+          <ProjectShareProvider>
+            <ProjectShareAction />
+          </ProjectShareProvider>
         </TooltipProvider>
       </MemoryRouter>,
     );
@@ -106,7 +113,9 @@ describe('ProjectShareAction', () => {
     render(
       <MemoryRouter>
         <TooltipProvider>
-          <ProjectShareAction />
+          <ProjectShareProvider>
+            <ProjectShareAction />
+          </ProjectShareProvider>
         </TooltipProvider>
       </MemoryRouter>,
     );
@@ -122,7 +131,9 @@ describe('ProjectShareAction', () => {
     render(
       <MemoryRouter>
         <TooltipProvider>
-          <ProjectShareAction />
+          <ProjectShareProvider>
+            <ProjectShareAction />
+          </ProjectShareProvider>
         </TooltipProvider>
       </MemoryRouter>,
     );

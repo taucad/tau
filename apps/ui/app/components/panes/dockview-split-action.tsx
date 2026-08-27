@@ -1,4 +1,4 @@
-import type { IDockviewHeaderActionsProps } from 'dockview-react';
+import type { DockviewGroupPanel, IDockviewHeaderActionsProps } from 'dockview-react';
 import { Columns2 } from 'lucide-react';
 import { PiMouseLeftClick, PiMouseRightClick } from 'react-icons/pi';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
@@ -12,12 +12,16 @@ import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
  * down instead. The button is visible on hover via the `.dv-pane-action` CSS
  * (opacity transition on group hover).
  */
-export function DockviewSplitAction({ containerApi, group }: IDockviewHeaderActionsProps): React.JSX.Element {
+export function DockviewSplitAction({
+  containerApi,
+  group,
+  onDidSplit,
+}: IDockviewHeaderActionsProps & {
+  readonly onDidSplit?: (group: DockviewGroupPanel) => void;
+}): React.JSX.Element {
   const split = (direction: 'right' | 'below'): void => {
-    containerApi.addGroup({
-      referenceGroup: group,
-      direction,
-    });
+    const createdGroup = containerApi.addGroup({ referenceGroup: group, direction });
+    onDidSplit?.(createdGroup);
   };
 
   return (

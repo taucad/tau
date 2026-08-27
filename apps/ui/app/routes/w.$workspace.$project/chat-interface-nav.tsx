@@ -1,7 +1,7 @@
 import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal, Download, Files } from 'lucide-react';
 import { TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { cn } from '#utils/ui.utils.js';
-import type { PanelId } from '#constants/editor.constants.js';
+import type { MobilePanelId } from '#constants/editor.constants.js';
 
 export const chatTabs = [
   {
@@ -39,7 +39,7 @@ export const chatTabs = [
     label: 'Export',
     icon: <Download />,
   },
-] as const satisfies Array<{ id: PanelId; label: string; icon: React.ReactNode }>;
+] as const satisfies Array<{ id: MobilePanelId; label: string; icon: React.ReactNode }>;
 
 export function ChatInterfaceNav({ className }: { readonly className?: string }): React.ReactNode {
   return (

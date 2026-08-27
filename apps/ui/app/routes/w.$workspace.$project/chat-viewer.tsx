@@ -1,6 +1,6 @@
 import { memo, useEffect, useCallback, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
-import type { DockviewApi, DockviewPanelApi, IDockviewPanelHeaderProps } from 'dockview-react';
+import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
@@ -25,8 +25,6 @@ import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-stat
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 import { ChatInterfaceGraphics } from '#routes/w.$workspace.$project/chat-interface-graphics.js';
 import { ChatInterfaceStatus } from '#routes/w.$workspace.$project/chat-interface-status.js';
-import { useIsTopRightPanel } from '#components/panes/use-is-top-right-group.js';
-import { useIsMobile } from '#hooks/use-mobile.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cn } from '#utils/ui.utils.js';
 import { ArButton } from '#components/cad/ar-button.js';
@@ -99,16 +97,9 @@ type ChatViewerProps = {
   readonly entryPath: string | undefined;
   /** Dockview panel API for updating title, etc. */
   readonly panelApi: IDockviewPanelHeaderProps['api'];
-  /** Dockview container API for layout-aware positioning */
-  readonly containerApi: DockviewApi;
 };
 
-export const ChatViewer = memo(function ({
-  viewId,
-  entryPath,
-  panelApi,
-  containerApi,
-}: ChatViewerProps): React.JSX.Element {
+export const ChatViewer = memo(function ({ viewId, entryPath, panelApi }: ChatViewerProps): React.JSX.Element {
   const { projectRef, editorRef, viewGraphics, geometryUnits } = useProject();
   // Get the per-view graphics machine
   const graphicsActor = viewGraphics.get(viewId);
@@ -274,7 +265,7 @@ export const ChatViewer = memo(function ({
           cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
         }}
       >
-        <ViewerContent viewId={viewId} entryPath={entryPath} panelApi={panelApi} containerApi={containerApi} />
+        <ViewerContent viewId={viewId} entryPath={entryPath} />
       </GraphicsProvider>
     </CadProvider>
   );
@@ -289,13 +280,9 @@ export const ChatViewer = memo(function ({
 const ViewerContent = memo(function ({
   viewId,
   entryPath,
-  panelApi,
-  containerApi,
 }: {
   readonly viewId: string;
   readonly entryPath: string;
-  readonly panelApi: DockviewPanelApi;
-  readonly containerApi: DockviewApi;
 }): React.JSX.Element {
   const { editorRef, projectRef } = useProject();
   const cadRef = useCad();
@@ -358,14 +345,6 @@ const ViewerContent = memo(function ({
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-
-  // Shift the gizmo left when this panel's group is at the top-right corner
-  // of the dockview grid, so it doesn't overlap with the floating-panel
-  // trigger buttons positioned in the center pane.  On mobile the trigger
-  // buttons don't exist, so the shift is skipped.
-  const isMobile = useIsMobile();
-  const isTopRight = useIsTopRightPanel(panelApi, containerApi);
-  const shiftGizmo = isTopRight && !isMobile;
 
   const viewerLayoutRef = useRef<HTMLDivElement>(null);
   const canvasRegionRef = useRef<HTMLDivElement>(null);
@@ -522,20 +501,12 @@ const ViewerContent = memo(function ({
         <ChatViewerStatus />
       </div>
 
-      {/* Gizmo Container */}
-      <div
-        id={`viewport-gizmo-container-${viewId}`}
-        className={cn(
-          'absolute top-[calc(var(--header-height)+var(--spacing)*12)] z-10',
-          shiftGizmo ? 'right-10' : 'right-0',
-        )}
-      />
-
       {/* Geometry canvas */}
       <div
+        id={`viewport-gizmo-container-${viewId}`}
         ref={canvasRegionRef}
         data-testid='cad-viewer-canvas-region'
-        className='min-h-0 flex-1'
+        className='relative min-h-0 flex-1 overflow-hidden'
         onPointerDownCapture={handleCanvasRegionPointerDownCapture}
         onPointerMoveCapture={handleCanvasRegionPointerMoveCapture}
         onPointerUpCapture={handleCanvasRegionPointerUpCapture}

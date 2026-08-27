@@ -7,28 +7,28 @@ import type { DockviewApi, DockviewGroupPanel, DockviewPanelApi } from 'dockview
  */
 export const edgeTolerance = 2;
 
-/** CSS selector for an open floating panel. */
-const floatingPanelSelector = '[data-slot="floating-panel"][data-state="open"]';
+/** Prefer floating-panel bounds; bare Dockviews use their own root. */
+const dockviewContainerSelector = '[data-slot="floating-panel"][data-state="open"], .dockview-theme-tau';
 
 /**
  * Synchronously checks whether a Dockview group occupies the top-right
- * corner of its nearest ancestor floating panel.
+ * corner of its nearest open floating panel or bare Dockview root.
  *
  * Exported for unit testing.  The companion hook {@link useIsTopRightGroup}
  * calls this inside a `ResizeObserver` / `onDidLayoutChange` callback.
  *
  * A group is considered "top-right" when:
  * 1. It is in the grid (not floating / popout).
- * 2. It is inside an open floating panel (`data-state="open"`).
- * 3. Its right edge aligns with the floating panel's right edge.
- * 4. Its top edge aligns with the floating panel's top edge.
+ * 2. It is inside an open floating panel or `.dockview-theme-tau` root.
+ * 3. Its right edge aligns with that container's right edge.
+ * 4. Its top edge aligns with that container's top edge.
  */
 export function checkGroupIsTopRight(group: DockviewGroupPanel): boolean {
   if (group.api.location.type !== 'grid') {
     return false;
   }
 
-  const floatingPanel = group.element.closest(floatingPanelSelector);
+  const floatingPanel = group.element.closest(dockviewContainerSelector);
 
   if (!floatingPanel) {
     return false;
@@ -49,13 +49,11 @@ export function checkGroupIsTopRight(group: DockviewGroupPanel): boolean {
 
 /**
  * Determines whether a Dockview group occupies the top-right corner of its
- * nearest ancestor floating panel.
+ * nearest open floating panel or Dockview root.
  *
  * The check is re-evaluated whenever the group element resizes (via
- * `ResizeObserver`) or the Dockview layout changes.  Using `ResizeObserver`
- * ensures reliable timing: the parent Allotment pane uses a double-RAF
- * pattern to finalise layout, and a simple single-RAF would fire too early.
- * `ResizeObserver` fires after layout, so the group has its correct size.
+ * `ResizeObserver`) or the Dockview layout changes. `ResizeObserver` runs
+ * after layout, so the group has its settled size.
  */
 export function useIsTopRightGroup(group: DockviewGroupPanel, containerApi: DockviewApi): boolean {
   const [isTopRight, setIsTopRight] = useState(false);

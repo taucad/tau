@@ -1,25 +1,50 @@
 import { render, screen } from '@testing-library/react';
+import type { FunctionComponent } from 'react';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DockviewApi } from 'dockview-react';
+import type { DockviewApi, IDockviewHeaderActionsProps } from 'dockview-react';
 import { Dockview, dockviewStyleOverrides, scrollActiveTabIntoView } from '#components/panes/dockview.js';
 
 vi.mock('dockview-react', async () => {
   const { createElement } = await import('react');
-  const dockviewReact = ({ className, scrollbars }: { className?: string; scrollbars?: string }) =>
+  const dockviewReact = ({
+    className,
+    disableTabsOverflowList,
+    rightHeaderActionsComponent: RightHeaderActions,
+    scrollbars,
+  }: {
+    className?: string;
+    disableTabsOverflowList?: boolean;
+    rightHeaderActionsComponent?: FunctionComponent<IDockviewHeaderActionsProps>;
+    scrollbars?: string;
+  }) =>
     createElement(
       'div',
-      { className, 'data-scrollbars': scrollbars, 'data-testid': 'dockview-react' },
+      {
+        className,
+        'data-disable-tabs-overflow-list': String(disableTabsOverflowList),
+        'data-scrollbars': scrollbars,
+        'data-testid': 'dockview-react',
+      },
       createElement(
         'div',
         { className: 'dv-tabs-container', 'data-testid': 'dockview-tabs' },
         createElement('button', { type: 'button' }, 'Tab'),
       ),
+      RightHeaderActions ? createElement(RightHeaderActions, {} as IDockviewHeaderActionsProps) : null,
     );
 
   return {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock key mirrors the upstream export.
     DockviewReact: dockviewReact,
+  };
+});
+
+vi.mock('#components/panes/dockview-tab-overflow-picker.js', async () => {
+  const { createElement } = await import('react');
+  return {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock key mirrors the component export.
+    DockviewTabOverflowPicker: () => createElement('button', { type: 'button' }, 'Open tabs picker'),
   };
 });
 
@@ -375,7 +400,8 @@ describe('dockviewStyleOverrides', () => {
       );
     }
 
-    expect(dockviewStyleOverrides).toContain('[&_.dv-tabs-overflow-dropdown-default]:!size-7');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-groupview:focus-within_.dv-pane-action]:opacity-100');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-pane-action[aria-expanded=true]]:opacity-100');
     expect(dockviewStyleOverrides).toContain(
       '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
     );
@@ -460,9 +486,29 @@ describe('Dockview', () => {
 
     expect(wrapper).toHaveAttribute('data-slot', 'omni-scroller');
     expect(wrapper).toHaveClass('size-full');
+    expect(wrapper?.className).toContain('[--dv-tabs-and-actions-container-height:2.25rem]');
     expect(dockview).toHaveAttribute('data-scrollbars', 'native');
+    expect(dockview).toHaveAttribute('data-disable-tabs-overflow-list', 'true');
     expect(dockview).toHaveClass('caller-class');
+    expect(dockview.className).not.toContain('[--dv-tabs-and-actions-container-height:2.25rem]');
     expect(tabs.scrollLeft).toBe(60);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('composes the overflow picker before caller-owned right header actions', () => {
+    const callerActions = () => createElement('button', { type: 'button' }, 'Caller action');
+
+    render(
+      createElement(Dockview, {
+        components: {},
+        onReady: vi.fn(),
+        rightHeaderActionsComponent: callerActions,
+      }),
+    );
+
+    const picker = screen.getByRole('button', { name: 'Open tabs picker' });
+    const caller = screen.getByRole('button', { name: 'Caller action' });
+    expect(picker.parentElement).toBe(caller.parentElement);
+    expect(picker.compareDocumentPosition(caller)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });

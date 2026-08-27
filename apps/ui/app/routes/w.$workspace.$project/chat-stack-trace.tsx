@@ -20,6 +20,7 @@ import { cn } from '#utils/ui.utils.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -436,7 +437,8 @@ type ChatStackTraceProps = React.HTMLAttributes<HTMLDivElement> & {
 };
 
 export function ChatStackTrace({ entryPath, className, side, ...props }: ChatStackTraceProps): React.ReactNode {
-  const { getMainFilename, editorRef, projectId, setFocusedChatId } = useProject();
+  const { getMainFilename, projectId, setFocusedChatId } = useProject();
+  const { setChatOpen } = useProjectWorkspace();
   const fileManager = useFileManager();
   const { createChat } = useChats(projectId);
   const [isOpen, setIsOpen] = useState(true);
@@ -482,10 +484,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
         kernel: agent.kernel,
       });
 
-      editorRef.send({
-        type: 'setPanelState',
-        panelState: { openPanels: { chat: true } },
-      });
+      setChatOpen(true);
 
       if (createNewChat) {
         // Persist the pending user message with an explicit one-shot startup
@@ -516,7 +515,17 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
         cadChat.submit({ text: errorPrompt });
       }
     },
-    [errors, getMainFilename, fileManager, agent.kernel, agent.model, editorRef, createChat, setFocusedChatId, cadChat],
+    [
+      errors,
+      getMainFilename,
+      fileManager,
+      agent.kernel,
+      agent.model,
+      createChat,
+      setFocusedChatId,
+      cadChat,
+      setChatOpen,
+    ],
   );
 
   if (!errors || errors.length === 0) {

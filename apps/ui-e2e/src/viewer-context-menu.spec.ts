@@ -308,10 +308,7 @@ test.describe('Chat viewer model component context menu', () => {
     const sourcePath = await getBridgeSourcePath(0);
 
     await target.click(selectors.getByRole('button', { name: 'Split right' }).first());
-    const selectFile = selectors.getByRole('button', { name: /select file/i }).last();
-    await target.expectVisible(selectFile, 30_000);
-    await target.click(selectFile);
-    const matchingFile = selectors.getByText(sourcePath).last();
+    const matchingFile = selectors.getByCss(`[data-testid="viewer-empty-file-list"] button[title="${sourcePath}"]`);
     await target.expectVisible(matchingFile, 30_000);
     await target.click(matchingFile);
     await target.expectCount(selectors.getByTestId('cad-viewer-canvas-region'), 2, 60_000);

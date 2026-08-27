@@ -5,13 +5,16 @@ import type { KernelIssue } from '@taucad/runtime';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 
-const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockReadFile } = vi.hoisted(() => ({
-  mockCreateChat: vi.fn(),
-  mockSubmit: vi.fn(),
-  mockSetFocusedChatId: vi.fn(),
-  mockEditorSend: vi.fn(),
-  mockReadFile: vi.fn(),
-}));
+const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockReadFile, mockSetChatOpen } = vi.hoisted(
+  () => ({
+    mockCreateChat: vi.fn(),
+    mockSubmit: vi.fn(),
+    mockSetFocusedChatId: vi.fn(),
+    mockEditorSend: vi.fn(),
+    mockReadFile: vi.fn(),
+    mockSetChatOpen: vi.fn(),
+  }),
+);
 
 let mockKernelIssues = new Map<string, KernelIssue[]>();
 let mockAgent: CadAgentConfigInput = {
@@ -82,6 +85,10 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ readFile: mockReadFile }),
+}));
+
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useProjectWorkspace: () => ({ setChatOpen: mockSetChatOpen }),
 }));
 
 vi.mock('#components/files/file-link.js', () => ({
@@ -161,6 +168,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
     const callArgs = mockCreateChat.mock.calls[0]?.[0] as { activeModel?: string; activeKernel?: string };
     expect(callArgs.activeModel).toBe('cookie-model');
     expect(callArgs.activeKernel).toBe('openscad');
+    expect(mockSetChatOpen).toHaveBeenCalledWith(true);
   });
 
   it('focuses the newly created chat after seeding', async () => {

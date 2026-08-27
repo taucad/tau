@@ -9,6 +9,7 @@ import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
+import { logMachine } from '#machines/logs.machine.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
@@ -39,6 +40,7 @@ function createTestActor(options?: {
   connectError?: Error;
   shouldInitializeKernelOnStart?: boolean;
   parentRef?: CadContext['parentRef'];
+  logRef?: CadContext['logActorRef'];
 }) {
   const mockClient = createMockAppRuntimeClient();
   const cleanups: Array<() => void> = [];
@@ -67,6 +69,7 @@ function createTestActor(options?: {
     input: {
       shouldInitializeKernelOnStart: options?.shouldInitializeKernelOnStart ?? false,
       parentRef: options?.parentRef,
+      logRef: options?.logRef,
       kernelOptionsFactory,
       fileSystemRoot: '/projects/test',
     },
@@ -558,6 +561,59 @@ describe('cadMachine', () => {
       expect(parentRef.getSnapshot().context.events.at(-1)?.available).toBe(false);
       actor.stop();
       parentRef.stop();
+    });
+  });
+
+  describe('kernel logs', () => {
+    it.each([undefined, { component: 'Replicad', operation: 'render' }, { component: 'Replicad', file: '/main.ts' }])(
+      'should attribute %j origin to the current compilation unit',
+      async (origin) => {
+        vi.spyOn(console, 'debug').mockImplementation(noop);
+        const logRef = createActor(logMachine).start();
+        const { actor } = await startAndConnect({ logRef });
+        actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
+        await waitFor(actor, (snapshot) => snapshot.matches('idle'));
+
+        actor.send({
+          type: 'kernelLog',
+          level: 'info',
+          message: 'kernel ready',
+          origin,
+          data: { threads: 4 },
+        });
+        await waitFor(logRef, (snapshot) => snapshot.context.logBuffer.size === 1);
+
+        expect(logRef.getSnapshot().context.logBuffer.get(0)).toMatchObject({
+          level: 'info',
+          message: 'kernel ready',
+          origin: {
+            ...origin,
+            file: stubEntryPath,
+          },
+          data: { threads: 4 },
+        });
+
+        actor.stop();
+        logRef.stop();
+      },
+    );
+
+    it('should retain project logs when a compilation unit initializes', async () => {
+      const logRef = createActor(logMachine).start();
+      logRef.send({ type: 'addLog', message: 'existing project log' });
+      const { actor } = await startAndConnect({ logRef });
+
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
+
+      expect(
+        logRef
+          .getSnapshot()
+          .context.logBuffer.toArray()
+          .map(({ message }) => message),
+      ).toEqual(['existing project log']);
+
+      actor.stop();
+      logRef.stop();
     });
   });
 

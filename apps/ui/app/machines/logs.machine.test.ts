@@ -10,8 +10,6 @@ import { logMachine } from '#machines/logs.machine.js';
 function createTestActor() {
   const actor = createActor(logMachine);
   actor.start();
-  // Clear shared buffer from prior tests (static context shares the LogRingBuffer instance)
-  actor.send({ type: 'clearLogs' });
   return actor;
 }
 
@@ -29,6 +27,26 @@ describe('logMachine', () => {
       const actor = createTestActor();
       expect(actor.getSnapshot().value).toBe('ready');
       actor.stop();
+    });
+
+    it('should isolate mutable log buffers between actors', () => {
+      const first = createTestActor();
+      const second = createTestActor();
+
+      first.send({ type: 'addLog', message: 'first project' });
+      second.send({ type: 'addLog', message: 'second project' });
+      first.send({ type: 'clearLogs' });
+
+      expect(first.getSnapshot().context.logBuffer.size).toBe(0);
+      expect(
+        second
+          .getSnapshot()
+          .context.logBuffer.toArray()
+          .map(({ message }) => message),
+      ).toEqual(['second project']);
+
+      first.stop();
+      second.stop();
     });
   });
 

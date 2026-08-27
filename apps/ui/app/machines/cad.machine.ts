@@ -317,10 +317,11 @@ export const cadMachine = setup({
       const origin = typeof event.origin === 'string' ? event.origin : 'worker';
       logMethod(`[Kernel:${origin}]`, event.message, event.data ?? '');
       if (context.logActorRef) {
+        const storedOrigin = context.entryPath ? { ...event.origin, file: context.entryPath } : event.origin;
         enqueue.sendTo(context.logActorRef, {
           type: 'addLog',
           message: event.message,
-          options: { level: event.level, origin: event.origin, data: event.data },
+          options: { level: event.level, origin: storedOrigin, data: event.data },
         });
       }
     }),
@@ -430,11 +431,8 @@ export const cadMachine = setup({
         return event.jsonSchema;
       },
     }),
-    initializeModel: enqueueActions(({ enqueue, context, event }) => {
+    initializeModel: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'initializeModel');
-      if (context.logActorRef) {
-        enqueue.sendTo(context.logActorRef, { type: 'clearLogs' });
-      }
       enqueue.assign({
         entryPath: event.entryPath,
         parameters: event.parameters ?? {},

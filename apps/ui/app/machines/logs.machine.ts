@@ -29,10 +29,10 @@ export const logMachine = setup({
 }).createMachine({
   id: 'logs',
   initial: 'ready',
-  context: {
+  context: () => ({
     logBuffer: new LogRingBuffer<LogEntry>(defaultMaxLogs),
     logVersion: 0,
-  },
+  }),
 
   states: {
     ready: {

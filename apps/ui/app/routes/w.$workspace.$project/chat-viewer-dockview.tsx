@@ -1,27 +1,34 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type {
   DockviewApi,
   DockviewGroupPanel,
   DockviewReadyEvent,
   DockviewDidDropEvent,
+  IDockviewHeaderActionsProps,
   IDockviewPanelProps,
   IWatermarkPanelProps,
 } from 'dockview-react';
 import { positionToDirection } from 'dockview-react';
-import { Box, ChevronDown } from 'lucide-react';
-import { tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
+import { Box } from 'lucide-react';
+import type { CapabilitiesManifest } from '@taucad/runtime';
+import { sourcePathMatchesExtensions } from '@taucad/utils/file';
+import type { FileEntry } from '@taucad/types';
+import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import { FileSelector } from '#components/files/file-selector.js';
-import { Button } from '#components/ui/button.js';
+import { createStaticDataSource } from '#components/files/file-selector.js';
+import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { useProject } from '#hooks/use-project.js';
+import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { defaultGraphicsSettings, parseGraphicsViewSettings } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { DockviewWatermark } from '#components/panes/dockview-watermark.js';
+import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
 import { ViewerDockviewTab } from '#components/panes/viewer-tab-context-menu.js';
-import { DockviewOpenFileAction, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
+import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
+import { ProjectWorkspaceActions } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 
 /**
  * Params passed to each viewer panel via Dockview.
@@ -30,6 +37,11 @@ type ViewerPanelParameters = {
   viewId: string;
   entryPath: string | undefined;
 };
+
+type ViewerNewTabParameters = { mode: 'launcher' };
+
+const isViewerPanelParameters = (parameters: unknown): parameters is ViewerPanelParameters =>
+  typeof (parameters as Partial<ViewerPanelParameters> | undefined)?.viewId === 'string';
 
 function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | undefined {
   return 'dataTransfer' in event ? (event.dataTransfer ?? undefined) : undefined;
@@ -40,82 +52,322 @@ function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | un
  */
 function ViewerPanel(properties: IDockviewPanelProps<ViewerPanelParameters>): React.JSX.Element {
   const { viewId, entryPath } = properties.params;
-  return (
-    <ChatViewer
-      viewId={viewId}
-      entryPath={entryPath}
-      panelApi={properties.api}
-      containerApi={properties.containerApi}
-    />
-  );
+  return <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} />;
 }
 
-const components = {
-  viewer: ViewerPanel,
-};
+export function createViewerNewTab({
+  api,
+  group,
+  id = generatePrefixedId(idPrefix.pane),
+}: {
+  readonly api: DockviewApi;
+  readonly group?: DockviewGroupPanel;
+  readonly id?: string;
+}): void {
+  api.addPanel({
+    id,
+    component: 'newTab',
+    title: 'New tab',
+    params: { mode: 'launcher' },
+    ...(group ? { position: { direction: 'within', referenceGroup: group } } : {}),
+  });
+}
+
+export function replaceViewerNewTabWithFile({
+  api,
+  placeholderId,
+  path,
+  viewId = generatePrefixedId('view'),
+  onViewCreated,
+}: {
+  readonly api: DockviewApi;
+  readonly placeholderId: string;
+  readonly path: string;
+  readonly viewId?: string;
+  readonly onViewCreated: (viewId: string, path: string) => void;
+}): void {
+  const placeholder = api.panels.find((panel) => panel.id === placeholderId);
+  if (!placeholder) {
+    return;
+  }
+
+  const { group } = placeholder.api;
+  const index = group.panels.findIndex((panel) => panel.id === placeholderId);
+  api.addPanel({
+    id: viewId,
+    component: 'viewer',
+    title: path.split('/').pop() ?? path,
+    params: { viewId, entryPath: path },
+    position: { direction: 'within', referenceGroup: group, ...(index === -1 ? {} : { index }) },
+  });
+  onViewCreated(viewId, path);
+  placeholder.api.close();
+}
+
+export function ensureViewerGroup(api: DockviewApi): void {
+  if (api.groups.length === 0) {
+    api.addGroup();
+  }
+}
+
+export function handleViewerDrop({
+  event,
+  getInheritedSettings,
+  onViewCreated,
+}: {
+  readonly event: DockviewDidDropEvent;
+  readonly getInheritedSettings: () => GraphicsViewSettings;
+  readonly onViewCreated: (viewId: string, entryPath: string, settings: GraphicsViewSettings) => void;
+}): void {
+  const dataTransfer = getDragDataTransfer(event.nativeEvent);
+  const addViewer = (entryPath: string): void => {
+    const viewId = generatePrefixedId('view');
+    event.api.addPanel({
+      id: viewId,
+      component: 'viewer',
+      title: entryPath.split('/').pop() ?? entryPath,
+      params: { viewId, entryPath },
+      position: {
+        direction: positionToDirection(event.position),
+        referenceGroup: event.group ?? undefined,
+      },
+    });
+    onViewCreated(viewId, entryPath, getInheritedSettings());
+  };
+
+  const editorData = dataTransfer?.getData(tauEditorPanelDragMime);
+  if (editorData) {
+    try {
+      const { filePath } = JSON.parse(editorData) as { filePath?: string };
+      if (filePath) {
+        addViewer(filePath);
+      }
+    } catch {
+      // Ignore corrupt cross-dockview data.
+    }
+    return;
+  }
+
+  const fileData = dataTransfer?.getData(tauFileDragMime);
+  if (!fileData) {
+    return;
+  }
+
+  let paths: string[];
+  try {
+    paths = JSON.parse(fileData) as string[];
+  } catch {
+    return;
+  }
+  const filePath = paths[0];
+  if (!filePath) {
+    return;
+  }
+
+  const existing = event.group?.panels.find(
+    (panel) => (panel.params as ViewerPanelParameters | undefined)?.entryPath === filePath,
+  );
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+  addViewer(filePath);
+}
 
 /**
  * Empty state shown when all viewer panels have been closed.
  */
-function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.JSX.Element {
+export type ViewerSelectableFile = Pick<FileEntry, 'name' | 'path'> & { readonly size?: number };
+
+export const viewerExcludedSourceSuffixes = ['.geospec.ts', '.geospec.js'] as const;
+
+export const listViewerSelectableFiles = (
+  fileTree: ReadonlyMap<string, FileEntry>,
+  capabilities: Pick<CapabilitiesManifest, 'registrations'>,
+): ViewerSelectableFile[] =>
+  [...fileTree.values()]
+    .filter((entry) => entry.type === 'file')
+    .filter((entry) => {
+      const path = entry.path.toLowerCase();
+      return !viewerExcludedSourceSuffixes.some((suffix) => path.endsWith(suffix));
+    })
+    .filter((entry) =>
+      capabilities.registrations.some(
+        (registration) =>
+          registration.kind === 'kernel' && sourcePathMatchesExtensions(entry.path, registration.extensions),
+      ),
+    )
+    .map(({ name, path, size }) => ({ name, path, size }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+
+function useViewerSelectableFiles(): ViewerSelectableFile[] | undefined {
+  const { geometryUnits, mainEntryPath } = useProject();
+  const fileTree = useFileTreeMap();
+  const capabilities = useSelector(geometryUnits.get(mainEntryPath), (state) => state?.context.capabilities);
+
+  return useMemo(
+    () => (capabilities ? listViewerSelectableFiles(fileTree, capabilities) : undefined),
+    [fileTree, capabilities],
+  );
+}
+
+export function ViewerEmptyFilePicker({
+  files,
+  onSelect,
+  onClose,
+}: {
+  readonly files: readonly ViewerSelectableFile[] | undefined;
+  readonly onSelect: (path: string) => void;
+  readonly onClose: () => void;
+}): React.JSX.Element {
+  const isScrollable = (files?.length ?? 0) >= 10;
+
+  return (
+    <div className='flex w-full max-w-lg flex-col gap-2'>
+      {files === undefined ? (
+        <p className='px-3 py-2 text-center text-xs text-muted-foreground'>Loading runtime formats…</p>
+      ) : files.length === 0 ? (
+        <p className='px-3 py-2 text-center text-xs text-muted-foreground'>No runtime-supported viewer files found.</p>
+      ) : (
+        <div
+          data-testid='viewer-empty-file-list'
+          className={
+            isScrollable
+              ? 'flex max-h-[clamp(4rem,calc(100cqh-8rem),22rem)] flex-col gap-2 overflow-y-auto pr-1'
+              : 'flex flex-col gap-2'
+          }
+        >
+          {files.map((file) => (
+            <DockviewEmptyAction
+              key={file.path}
+              title={file.path}
+              onClick={() => {
+                onSelect(file.path);
+              }}
+            >
+              <FileExtensionIcon filename={file.name} className='size-3.5 shrink-0' />
+              <span className='truncate'>{file.name}</span>
+            </DockviewEmptyAction>
+          ))}
+        </div>
+      )}
+      <DockviewEmptyCloseAction onClick={onClose} />
+    </div>
+  );
+}
+
+function ViewerEmptyState({
+  containerApi,
+  group,
+  placeholderId,
+  onClose,
+}: {
+  readonly containerApi: DockviewApi;
+  readonly group?: DockviewGroupPanel;
+  readonly placeholderId?: string;
+  readonly onClose: () => void;
+}): React.JSX.Element {
   const { projectRef, editorRef } = useProject();
+  const files = useViewerSelectableFiles();
 
   const handleSelect = useCallback(
     (path: string) => {
-      const viewId = generatePrefixedId('view');
-      const fileName = path.split('/').pop() ?? path;
+      const onViewCreated = (viewId: string, entryPath: string): void => {
+        editorRef.send({
+          type: 'setViewSettings',
+          viewId,
+          viewState: {
+            entryPath,
+            graphicsSettings: { ...defaultGraphicsSettings },
+          },
+        });
+        projectRef.send({ type: 'createGeometryUnit', entryPath });
+      };
 
+      if (placeholderId) {
+        replaceViewerNewTabWithFile({ api: containerApi, placeholderId, path, onViewCreated });
+        return;
+      }
+
+      const viewId = generatePrefixedId('view');
       containerApi.addPanel({
         id: viewId,
         component: 'viewer',
-        title: fileName,
+        title: path.split('/').pop() ?? path,
         params: { viewId, entryPath: path },
+        ...(group ? { position: { direction: 'within', referenceGroup: group } } : {}),
       });
-
-      editorRef.send({
-        type: 'setViewSettings',
-        viewId,
-        viewState: {
-          entryPath: path,
-          graphicsSettings: { ...defaultGraphicsSettings },
-        },
-      });
-
-      projectRef.send({ type: 'createGeometryUnit', entryPath: path });
+      onViewCreated(viewId, path);
     },
-    [containerApi, projectRef, editorRef],
+    [containerApi, group, placeholderId, projectRef, editorRef],
   );
-
-  const handleClose = useCallback(() => {
-    if (group) {
-      containerApi.removeGroup(group);
-    }
-  }, [containerApi, group]);
 
   return (
     <DockviewWatermark
       icon={Box}
       title='No geometry selected'
       description='Drag a file from the file tree, or select one below'
-      onClose={handleClose}
     >
-      <FileSelector
-        selectedFile={undefined}
-        title='Viewport File'
-        description='Choose which file to render in the viewport'
-        searchPlaceholder='Search files...'
-        emptyMessage='No files found.'
-        onSelect={handleSelect}
-      >
-        <Button size='sm' variant='outline' className='justify-between'>
-          <span className='truncate text-muted-foreground'>
-            <span className='@xs/watermark:hidden'>Select file...</span>
-            <span className='hidden @xs/watermark:inline'>Select file to render...</span>
-          </span>
-          <ChevronDown className='size-4 shrink-0 text-muted-foreground' />
-        </Button>
-      </FileSelector>
+      <ViewerEmptyFilePicker files={files} onSelect={handleSelect} onClose={onClose} />
     </DockviewWatermark>
+  );
+}
+
+function ViewerWatermark({ containerApi, group }: IWatermarkPanelProps): React.JSX.Element {
+  return (
+    <ViewerEmptyState
+      containerApi={containerApi}
+      group={group as DockviewGroupPanel | undefined}
+      onClose={() => {
+        group?.api.close();
+      }}
+    />
+  );
+}
+
+function ViewerNewTabPanel(properties: IDockviewPanelProps<ViewerNewTabParameters>): React.JSX.Element {
+  return (
+    <ViewerEmptyState
+      containerApi={properties.containerApi}
+      group={properties.api.group}
+      placeholderId={properties.api.id}
+      onClose={() => {
+        properties.api.close();
+      }}
+    />
+  );
+}
+
+const components = {
+  viewer: ViewerPanel,
+  newTab: ViewerNewTabPanel,
+};
+
+export const createInheritedGraphicsSettings = (
+  activeSettings: GraphicsViewSettings | undefined,
+): GraphicsViewSettings => {
+  if (!activeSettings) {
+    return { ...defaultGraphicsSettings };
+  }
+  return {
+    ...parseGraphicsViewSettings(activeSettings),
+    cameraView: undefined,
+    pinnedMeasurements: undefined,
+  };
+};
+
+function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
+  const files = useViewerSelectableFiles();
+  const fileSelectorDataSource = useMemo(() => createStaticDataSource(files ?? []), [files]);
+
+  return (
+    <DockviewLeftActions
+      {...properties}
+      fileSelectorDataSource={fileSelectorDataSource}
+      onDidSplit={(group) => {
+        createViewerNewTab({ api: properties.containerApi, group });
+      }}
+    />
   );
 }
 
@@ -147,19 +399,9 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
    * environment preset, etc. as what the user was just looking at.
    */
   const getInheritedSettings = useCallback((): GraphicsViewSettings => {
-    if (activeViewerPanelId) {
-      const activeSettings = viewSettings[activeViewerPanelId]?.graphicsSettings;
-      if (activeSettings) {
-        // Validate persisted settings and clear geometry-dependent state
-        const validated = parseGraphicsViewSettings(activeSettings);
-        return {
-          ...validated,
-          pinnedMeasurements: undefined,
-        };
-      }
-    }
-
-    return { ...defaultGraphicsSettings };
+    return createInheritedGraphicsSettings(
+      activeViewerPanelId ? viewSettings[activeViewerPanelId]?.graphicsSettings : undefined,
+    );
   }, [activeViewerPanelId, viewSettings]);
 
   // Save layout to editor machine on layout changes
@@ -188,10 +430,9 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
       return;
     }
 
-    const disposable = api.onDidActivePanelChange((panel) => {
-      if (panel) {
-        setActiveViewerPanelId(panel.id);
-      }
+    const disposable = api.onDidActivePanelChange((event) => {
+      const panel = event.panel;
+      setActiveViewerPanelId(panel && isViewerPanelParameters(panel.params) ? panel.id : undefined);
     });
 
     return () => {
@@ -206,6 +447,9 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     }
 
     const addDisposable = api.onDidAddPanel((event) => {
+      if (!isViewerPanelParameters(event.params)) {
+        return;
+      }
       const viewId = event.id;
       const existingSettings = viewSettings[viewId];
       const settings = existingSettings?.graphicsSettings
@@ -219,9 +463,16 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     });
 
     const removeDisposable = api.onDidRemovePanel((event) => {
-      const viewId = event.id;
-      projectRef.send({ type: 'destroyViewGraphics', viewId });
-      editorRef.send({ type: 'removeViewSettings', viewId });
+      if (isViewerPanelParameters(event.params)) {
+        const viewId = event.id;
+        projectRef.send({ type: 'destroyViewGraphics', viewId });
+        editorRef.send({ type: 'removeViewSettings', viewId });
+      }
+      if (api.panels.length === 0) {
+        queueMicrotask(() => {
+          ensureViewerGroup(api);
+        });
+      }
     });
 
     return () => {
@@ -255,7 +506,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
       return;
     }
 
-    const disposable = api.onUnhandledDragOverEvent((event) => {
+    const disposable = api.onUnhandledDragOver((event) => {
       const types = getDragDataTransfer(event.nativeEvent)?.types;
 
       if (types?.includes(tauFileDragMime)) {
@@ -294,6 +545,9 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     hasReconciled.current = true;
 
     for (const panel of api.panels) {
+      if (!isViewerPanelParameters(panel.params)) {
+        continue;
+      }
       const panelViewId = panel.id;
       const settings = viewSettings[panelViewId];
 
@@ -434,6 +688,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
       } finally {
         isRestoringLayout.current = false;
       }
+      ensureViewerGroup(dockApi);
     },
     [viewerLayout, mainEntryPath, editorRef],
   );
@@ -441,105 +696,18 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
   // Handle external file drops and cross-dockview editor panel drops
   const onDidDrop = useCallback(
     (event: DockviewDidDropEvent) => {
-      const dataTransfer = getDragDataTransfer(event.nativeEvent);
-
-      // Handle editor panel drag → create a viewer for that file
-      const editorData = dataTransfer?.getData(tauEditorPanelDragMime);
-      if (editorData) {
-        try {
-          const { filePath: droppedFile } = JSON.parse(editorData) as {
-            filePath?: string;
-          };
-          if (droppedFile) {
-            const viewId = generatePrefixedId('view');
-            const fileName = droppedFile.split('/').pop() ?? droppedFile;
-
-            event.api.addPanel({
-              id: viewId,
-              component: 'viewer',
-              title: fileName,
-              params: { viewId, entryPath: droppedFile },
-              position: {
-                direction: positionToDirection(event.position),
-                referenceGroup: event.group ?? undefined,
-              },
-            });
-
-            editorRef.send({
-              type: 'setViewSettings',
-              viewId,
-              viewState: {
-                entryPath: droppedFile,
-                graphicsSettings: getInheritedSettings(),
-              },
-            });
-
-            projectRef.send({
-              type: 'createGeometryUnit',
-              entryPath: droppedFile,
-            });
-          }
-        } catch {
-          // Ignore corrupt data
-        }
-
-        return;
-      }
-
-      // Handle file tree drags
-      const data = dataTransfer?.getData(tauFileDragMime);
-      if (!data) {
-        return;
-      }
-
-      let paths: string[];
-      try {
-        paths = JSON.parse(data) as string[];
-      } catch {
-        return;
-      }
-
-      const filePath = paths[0];
-      if (!filePath) {
-        return;
-      }
-
-      // Dedup: if the target group already has a panel for this file, activate it
-      const targetGroup = event.group;
-      if (targetGroup) {
-        const existing = targetGroup.panels.find(
-          (p) => (p.params as ViewerPanelParameters | undefined)?.entryPath === filePath,
-        );
-        if (existing) {
-          existing.api.setActive();
-          return;
-        }
-      }
-
-      const viewId = generatePrefixedId('view');
-      const fileName = filePath.split('/').pop() ?? filePath;
-
-      event.api.addPanel({
-        id: viewId,
-        component: 'viewer',
-        title: fileName,
-        params: { viewId, entryPath: filePath },
-        position: {
-          direction: positionToDirection(event.position),
-          referenceGroup: event.group ?? undefined,
+      handleViewerDrop({
+        event,
+        getInheritedSettings,
+        onViewCreated: (viewId, entryPath, graphicsSettings) => {
+          editorRef.send({
+            type: 'setViewSettings',
+            viewId,
+            viewState: { entryPath, graphicsSettings },
+          });
+          projectRef.send({ type: 'createGeometryUnit', entryPath });
         },
       });
-
-      editorRef.send({
-        type: 'setViewSettings',
-        viewId,
-        viewState: {
-          entryPath: filePath,
-          graphicsSettings: getInheritedSettings(),
-        },
-      });
-
-      projectRef.send({ type: 'createGeometryUnit', entryPath: filePath });
     },
     [projectRef, editorRef, getInheritedSettings],
   );
@@ -584,7 +752,8 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
           noPanelsOverlay='emptyGroup'
           defaultTabComponent={ViewerDockviewTab}
           watermarkComponent={ViewerWatermark}
-          leftHeaderActionsComponent={DockviewOpenFileAction}
+          leftHeaderActionsComponent={ViewerLeftActions}
+          rightHeaderActionsComponent={ProjectWorkspaceActions}
           onReady={onReady}
           onDidDrop={onDidDrop}
         />

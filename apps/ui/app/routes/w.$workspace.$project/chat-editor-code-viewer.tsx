@@ -1,6 +1,5 @@
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { Loader } from '#components/ui/loader.js';
-import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { createMonacoPath } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 
@@ -18,18 +17,15 @@ export function ChatEditorCodeViewer({
   readOnly,
 }: ChatEditorViewerProps): React.JSX.Element {
   return (
-    <>
-      <ChatEditorBreadcrumbs filePath={filePath} />
-      <CodeEditor
-        loading={<Loader className='size-20 stroke-1 text-primary' />}
-        className='h-full bg-background'
-        defaultLanguage={language}
-        defaultValue={content}
-        path={createMonacoPath(filePath)}
-        onChange={onChange}
-        onValidate={onValidate}
-        options={readOnly === true ? { readOnly: true } : undefined}
-      />
-    </>
+    <CodeEditor
+      loading={<Loader className='size-20 stroke-1 text-primary' />}
+      className='h-full bg-background'
+      defaultLanguage={language}
+      defaultValue={content}
+      path={createMonacoPath(filePath)}
+      onChange={onChange}
+      onValidate={onValidate}
+      options={readOnly === true ? { readOnly: true } : undefined}
+    />
   );
 }

@@ -49,7 +49,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
   }
 
   return (
-    <div className='flex flex-row items-center justify-between px-2 py-1 text-muted-foreground'>
+    <div className='flex flex-row items-center justify-between py-1 pr-1 pl-2 text-muted-foreground'>
       <OmniScroller className='flex min-w-0 flex-1 [scrollbar-width:none] flex-row items-center gap-0.5 overscroll-x-none [&::-webkit-scrollbar]:hidden'>
         {breadcrumbs.length > 0 ? (
           breadcrumbs.map((crumb) => (

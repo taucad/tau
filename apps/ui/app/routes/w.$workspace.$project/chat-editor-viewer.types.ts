@@ -2,9 +2,8 @@ import type { editor } from 'monaco-editor';
 
 export type ChatEditorViewerProps = {
   /**
-   * Stable identity of the editor pane hosting this viewer. Use as the
-   * React `key` for any sub-component whose state must survive a
-   * rename (e.g. multi-tab markdown viewer's `<Tabs key={paneId}>`).
+   * Stable identity of the editor pane hosting this viewer. Use for any
+   * viewer-local state that must survive a file rename.
    */
   readonly paneId: string;
   readonly filePath: string;

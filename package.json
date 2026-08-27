@@ -170,7 +170,7 @@
     "deepagents": "catalog:",
     "deepmerge": "catalog:",
     "diff": "^8.0.4",
-    "dockview-react": "^6.6.1",
+    "dockview-react": "^8.2.0",
     "drizzle-orm": "^0.45.2",
     "embla-carousel-react": "^8.6.0",
     "error-stack-parser": "^2.1.4",

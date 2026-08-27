@@ -1,5 +1,4 @@
 import type { TelemetryEntry } from '@taucad/runtime';
-import { logLevels } from '@taucad/types/constants';
 
 export type SpanNode = {
   entry: TelemetryEntry;
@@ -65,14 +64,6 @@ export const phaseOrder = [
   'computingGeometry',
   'postProcessing',
 ] as const;
-
-export const logLevelColors: Record<string, string> = {
-  [logLevels.error]: 'text-destructive',
-  [logLevels.warn]: 'text-warning',
-  [logLevels.info]: 'text-primary',
-  [logLevels.debug]: 'text-muted-foreground',
-  [logLevels.trace]: 'text-muted-foreground/60',
-};
 
 export const categoryLabels: Record<SpanCategory, string> = {
   framework: 'Framework',

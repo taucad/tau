@@ -49,6 +49,7 @@ export type CameraMachineEvent =
       direction: CameraVector;
       up: CameraVector;
       verticalSpan: number;
+      perspectiveZoom?: number;
     }>
   | Readonly<{ type: 'frame'; bounds?: CameraBounds; margin?: number }>
   | Readonly<{ type: 'saveHome' }>
@@ -107,6 +108,7 @@ const defaultCameraDriver = fromCallback<CameraDriverEvent, CameraDriverInput>((
  *
  * const initialView = createCameraView({
  *   requestedVerticalFieldOfView: 60,
+ *   perspectiveZoom: 1,
  *   target: [0, 0, 0],
  *   direction: [1, -1, 0.7],
  *   up: [0, 0, 1],
@@ -189,6 +191,7 @@ export const cameraMachine = setup({
         direction: event.direction,
         up: event.up,
         verticalSpan: event.verticalSpan,
+        perspectiveZoom: event.perspectiveZoom ?? context.view.perspectiveZoom,
       });
       return {
         ...context,
@@ -215,17 +218,33 @@ export const cameraMachine = setup({
       ...context,
       initialView: context.view,
     })),
-    resetView: assign(({ context }) => ({
-      ...context,
-      view: context.initialView,
-      effectiveVerticalFieldOfView: context.initialView.requestedVerticalFieldOfView,
-      lastPerspectiveVerticalFieldOfView:
-        context.initialView.requestedVerticalFieldOfView > 0
-          ? context.initialView.requestedVerticalFieldOfView
-          : context.lastPerspectiveVerticalFieldOfView,
-      handoffVerticalFieldOfView: undefined,
-      revision: context.revision + 1,
-    })),
+    resetView: assign(({ context }) => {
+      const viewportChanged =
+        context.initialView.viewport.width !== context.view.viewport.width ||
+        context.initialView.viewport.height !== context.view.viewport.height ||
+        context.initialView.viewport.pixelRatio !== context.view.viewport.pixelRatio;
+      const boundsChanged =
+        context.initialView.bounds.min.some((value, index) => value !== context.view.bounds.min[index]) ||
+        context.initialView.bounds.max.some((value, index) => value !== context.view.bounds.max[index]);
+      const view =
+        viewportChanged || boundsChanged
+          ? frameCameraBounds({
+              view: { ...context.initialView, viewport: context.view.viewport, bounds: context.view.bounds },
+              bounds: context.view.bounds,
+            })
+          : context.initialView;
+      return {
+        ...context,
+        view,
+        effectiveVerticalFieldOfView: view.requestedVerticalFieldOfView,
+        lastPerspectiveVerticalFieldOfView:
+          view.requestedVerticalFieldOfView > 0
+            ? view.requestedVerticalFieldOfView
+            : context.lastPerspectiveVerticalFieldOfView,
+        handoffVerticalFieldOfView: undefined,
+        revision: context.revision + 1,
+      };
+    }),
   },
 }).createMachine({
   id: 'camera',

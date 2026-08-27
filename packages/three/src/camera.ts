@@ -132,7 +132,7 @@ const configurePerspectiveCamera = ({
   }
   camera.fov = frame.projection.verticalFieldOfView;
   camera.aspect = snapshot.view.viewport.width / snapshot.view.viewport.height;
-  camera.zoom = 1;
+  camera.zoom = frame.zoom;
   camera.near = frame.clipping.near;
   camera.far = frame.clipping.far;
   setPositionAndOrientation({ camera, snapshot, distance: frame.distance });
@@ -155,7 +155,7 @@ const configureOrthographicCamera = ({
   camera.right = frame.frustum.right;
   camera.top = frame.frustum.top;
   camera.bottom = frame.frustum.bottom;
-  camera.zoom = 1;
+  camera.zoom = frame.zoom;
   camera.near = frame.clipping.near;
   camera.far = frame.clipping.far;
   setPositionAndOrientation({ camera, snapshot, distance: frame.distance });
@@ -209,6 +209,7 @@ export const createThreeCameraDriver = (
  *
  * const initialView = createCameraView({
  *   requestedVerticalFieldOfView: 60,
+ *   perspectiveZoom: 1,
  *   target: [0, 0, 0],
  *   direction: [1, -1, 0.7],
  *   up: [0, 0, 1],

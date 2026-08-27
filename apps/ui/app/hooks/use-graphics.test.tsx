@@ -157,6 +157,7 @@ describe('GraphicsProvider camera rig ownership', () => {
       direction: [1, 0, 0],
       up: [0, 0, 1],
       verticalSpan: 12,
+      perspectiveZoom: 1,
     } as const;
     let begin: (() => CameraViewInitialization) | undefined;
     let rig: ThreeCameraRig | undefined;
@@ -217,12 +218,14 @@ describe('GraphicsProvider camera rig ownership', () => {
       direction: [1, 0, 0],
       up: [0, 0, 1],
       verticalSpan: 12,
+      perspectiveZoom: 1,
     } as const;
     const secondView = {
       target: [-3, -4, -5],
       direction: [0, 1, 0],
       up: [0, 0, 1],
       verticalSpan: 24,
+      perspectiveZoom: 1,
     } as const;
     const rigs = new Map<string, ThreeCameraRig>();
     const initializers = new Map<string, () => CameraViewInitialization>();

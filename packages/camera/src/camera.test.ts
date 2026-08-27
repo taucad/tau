@@ -18,9 +18,22 @@ const bounds = {
   max: [220, 180, 55],
 } as const;
 
+const volumetricBounds = { min: [0, 0, 0], max: [20, 14, 8] } as const;
+const volumetricCorners = [
+  [0, 0, 0],
+  [20, 0, 0],
+  [0, 14, 0],
+  [20, 14, 0],
+  [0, 0, 8],
+  [20, 0, 8],
+  [0, 14, 8],
+  [20, 14, 8],
+] as const;
+
 const createView = () =>
   createCameraView({
     requestedVerticalFieldOfView: 60,
+    perspectiveZoom: 1,
     target: [35, -20, 12],
     direction: [1, -1, 0.7],
     up: [0, 0, 1],
@@ -28,6 +41,42 @@ const createView = () =>
     viewport: { width: 1536, height: 900, pixelRatio: 2 },
     bounds,
   });
+
+const dot = (left: readonly number[], right: readonly number[]): number =>
+  left[0]! * right[0]! + left[1]! * right[1]! + left[2]! * right[2]!;
+
+const cross = (left: readonly number[], right: readonly number[]): [number, number, number] => [
+  left[1]! * right[2]! - left[2]! * right[1]!,
+  left[2]! * right[0]! - left[0]! * right[2]!,
+  left[0]! * right[1]! - left[1]! * right[0]!,
+];
+
+const normalize = (value: readonly number[]): [number, number, number] => {
+  const length = Math.hypot(...value);
+  return [value[0]! / length, value[1]! / length, value[2]! / length];
+};
+
+const projectedPoint = ({
+  point,
+  view,
+  distance,
+}: {
+  point: readonly [number, number, number];
+  view: ReturnType<typeof createCameraView>;
+  distance: number;
+}): readonly [number, number] => {
+  const forward = view.direction.map((coordinate) => -coordinate);
+  const right = normalize(cross(forward, view.up));
+  const screenUp = normalize(cross(right, forward));
+  const eye = view.target.map((coordinate, index) => coordinate + view.direction[index]! * distance);
+  const offset = point.map((coordinate, index) => coordinate - eye[index]!);
+  const tangent = Math.tan((view.requestedVerticalFieldOfView * Math.PI) / 360);
+  const depth = dot(offset, forward);
+  return [
+    (dot(offset, right) * view.perspectiveZoom) / (depth * tangent * (view.viewport.width / view.viewport.height)),
+    (dot(offset, screenUp) * view.perspectiveZoom) / (depth * tangent),
+  ];
+};
 
 describe('@taucad/camera', () => {
   it('copies and validates complete serializable camera state', () => {
@@ -83,6 +132,7 @@ describe('@taucad/camera', () => {
     expect(() => createCameraView({ ...view, direction: [0, 0, 0] })).toThrow(RangeError);
     expect(() => createCameraView({ ...view, up: view.direction })).toThrow(RangeError);
     expect(() => createCameraView({ ...view, viewport: { ...view.viewport, width: 0 } })).toThrow(RangeError);
+    expect(() => createCameraView({ ...view, perspectiveZoom: 0 })).toThrow(RangeError);
     expect(() => createCameraView({ ...view, bounds: { min: [1, 0, 0], max: [0, 1, 1] } })).toThrow(RangeError);
   });
 
@@ -123,6 +173,65 @@ describe('@taucad/camera', () => {
     expect(framed.direction).toEqual(view.direction);
     expect(framed.viewport).toEqual(view.viewport);
     expect(framed.verticalSpan).toBeGreaterThan(0);
+  });
+
+  it('should retain the established distance and projected-corner zoom for a volumetric fit', () => {
+    const framed = frameCameraBounds({
+      view: createCameraView({
+        ...createView(),
+        requestedVerticalFieldOfView: 45,
+        direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+        viewport: { width: 768, height: 576, pixelRatio: 1 },
+      }),
+      bounds: volumetricBounds,
+      margin: 0.1,
+    });
+    const frame = resolveCameraFrame({ view: framed });
+
+    expect(frame.distance).toBeCloseTo(35.808_573_937_594_36, 10);
+    expect(framed.perspectiveZoom).toBeCloseTo(1.078_034_861_982_213_3, 10);
+    expect(framed.verticalSpan).toBeCloseTo(27.517_471_831_882_276, 10);
+    expect(frame.zoom).toBe(framed.perspectiveZoom);
+
+    const coordinates = volumetricCorners.map((point) =>
+      projectedPoint({ point, view: framed, distance: frame.distance }),
+    );
+    expect(Math.max(...coordinates.flatMap(([x, y]) => [Math.abs(x), Math.abs(y)]))).toBeCloseTo(0.9, 12);
+    expect(coordinates.every(([x, y]) => Math.abs(x) <= 0.9 + 1e-12 && Math.abs(y) <= 0.9 + 1e-12)).toBe(true);
+    expect(projectedPoint({ point: [20, 14, 8], view: framed, distance: frame.distance })).toEqual([
+      expect.closeTo(0.733_907_379_246_009_8, 10),
+      expect.closeTo(0.195_649_892_264_690_48, 10),
+    ]);
+  });
+
+  it('should frame orthographic bounds from projected corners at the current aspect', () => {
+    const framed = frameCameraBounds({
+      view: createCameraView({
+        ...createView(),
+        requestedVerticalFieldOfView: 0,
+        perspectiveZoom: 1.75,
+        direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+        viewport: { width: 768, height: 576, pixelRatio: 1 },
+      }),
+      bounds: volumetricBounds,
+      margin: 0.1,
+    });
+    const frame = resolveCameraFrame({ view: framed });
+
+    expect(framed.perspectiveZoom).toBe(1.75);
+    expect(frame.zoom).toBe(1);
+    expect(frame.frustum).toBeDefined();
+    const halfWidth = frame.frustum!.right;
+    const halfHeight = frame.frustum!.top;
+    const center = framed.target;
+    const forward = framed.direction.map((coordinate) => -coordinate);
+    const right = normalize(cross(forward, framed.up));
+    const screenUp = normalize(cross(right, forward));
+    const coordinates = volumetricCorners.map((point) => {
+      const offset = point.map((coordinate, index) => coordinate - center[index]!);
+      return [dot(offset, right) / halfWidth, dot(offset, screenUp) / halfHeight] as const;
+    });
+    expect(Math.max(...coordinates.flatMap(([x, y]) => [Math.abs(x), Math.abs(y)]))).toBeCloseTo(0.9, 12);
   });
 
   it('derives a positive handoff from the physical-pixel budget', () => {

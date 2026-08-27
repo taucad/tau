@@ -15,7 +15,8 @@ const cameraViewEqual = (left: PersistedCameraView, right: PersistedCameraView):
   cameraVectorEqual(left.target, right.target) &&
   cameraVectorEqual(left.direction, right.direction) &&
   cameraVectorEqual(left.up, right.up) &&
-  left.verticalSpan === right.verticalSpan;
+  left.verticalSpan === right.verticalSpan &&
+  left.perspectiveZoom === right.perspectiveZoom;
 /**
  * Synchronises persistable graphics settings from the per-view GraphicsMachine
  * (and render timeout from the CadMachine) back to the EditorMachine's
@@ -67,6 +68,7 @@ export function useViewSettingsSync({
       direction: state.context.view.direction,
       up: state.context.view.up,
       verticalSpan: state.context.view.verticalSpan,
+      perspectiveZoom: state.context.view.perspectiveZoom,
     }),
     cameraViewEqual,
   );
@@ -110,7 +112,7 @@ export function useViewSettingsSync({
       graphicsBackend: graphicsBackendPreference,
       pinnedMeasurements,
       renderTimeout,
-      schemaVersion: 7,
+      schemaVersion: 9,
     };
 
     // Skip the first 3D emission to avoid overwriting restored state. A

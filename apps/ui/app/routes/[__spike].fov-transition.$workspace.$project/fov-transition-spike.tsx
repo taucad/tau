@@ -70,6 +70,7 @@ const createSpikeCameraRig = (onUpdate: SpikeCameraConnector): ThreeCameraRig =>
     onUpdate,
     initialView: createCameraView({
       requestedVerticalFieldOfView: initialFov,
+      perspectiveZoom: 1,
       target: [0, 0, 0],
       direction: toCameraVector(initialViewDirection),
       up: [0, 0, 1],
@@ -450,6 +451,7 @@ function ProjectionRig({
         direction: toCameraVector(offset.normalize()),
         up: toCameraVector(camera.up),
         verticalSpan,
+        ...(camera instanceof PerspectiveCamera ? { perspectiveZoom: camera.zoom } : {}),
       });
     };
 

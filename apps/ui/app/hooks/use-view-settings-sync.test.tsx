@@ -129,7 +129,7 @@ describe('useViewSettingsSync', () => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
         viewId: 'view-1',
-        settings: { schemaVersion: 7, enableGrid: false },
+        settings: { schemaVersion: 9, enableGrid: false },
       });
     });
     expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty('settings.componentDisplay');
@@ -165,6 +165,7 @@ describe('useViewSettingsSync', () => {
         direction: [1, 0, 0],
         up: [0, 0, 1],
         verticalSpan: 12,
+        perspectiveZoom: 1.75,
       });
     });
 
@@ -172,12 +173,13 @@ describe('useViewSettingsSync', () => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
         settings: {
-          schemaVersion: 7,
+          schemaVersion: 9,
           cameraView: {
             target: [3, 4, 5],
             direction: [1, 0, 0],
             up: [0, 0, 1],
             verticalSpan: 12,
+            perspectiveZoom: 1.75,
           },
         },
       });
@@ -216,7 +218,7 @@ describe('useViewSettingsSync', () => {
     await waitFor(() => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
-        settings: { schemaVersion: 7, cameraView: undefined },
+        settings: { schemaVersion: 9, cameraView: undefined },
       });
     });
     graphicsRef.stop();

@@ -1,6 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import CameraControlsImpl from 'camera-controls';
 import { OrthographicCamera, PerspectiveCamera } from 'three';
+import * as THREE from 'three';
 import type { Camera } from 'three';
 import { createCameraView } from '@taucad/camera';
 import type { CameraProjection } from '@taucad/camera';
@@ -23,6 +25,7 @@ const createDriverSnapshot = (projection: CameraProjection, revision: number): C
   projection,
   view: createCameraView({
     requestedVerticalFieldOfView: projection.kind === 'orthographic' ? 0 : projection.verticalFieldOfView,
+    perspectiveZoom: 1,
     target: [0, 0, 0],
     direction: [1, -1, 0.7],
     up: [0, 0, 1],
@@ -203,5 +206,43 @@ describe('ActorBridge', () => {
 
     expect(state.raycaster).toEqual({ near: 0.01, far: 1_000_000 });
     expect(invalidate).toHaveBeenCalledOnce();
+  });
+
+  it('round-trips observed perspective zoom from CameraControls', () => {
+    CameraControlsImpl.install({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- `camera-controls` requires this exact install shape.
+      THREE,
+    });
+    const camera = mockRig.perspectiveCamera;
+    camera.position.set(8, -6, 4);
+    camera.fov = 45;
+    camera.zoom = 1.75;
+    camera.updateProjectionMatrix();
+    const controls = new CameraControlsImpl(camera, document.createElement('div'));
+    void controls.setLookAt(8, -6, 4, 1, 2, 3, false);
+    const state = { camera, controls, raycaster: { near: 0, far: 0 } };
+    mockUseThree.mockReturnValue({
+      ...state,
+      get: () => state,
+      invalidate: vi.fn(),
+      set: vi.fn(),
+      size: { width: 800, height: 600 },
+    });
+
+    render(<ActorBridge />);
+    mockCameraSend.mockClear();
+    act(() => {
+      void controls.setLookAt(8, -6, 4, 1, 2, 3, false);
+      controls.dispatchEvent({ type: 'update' });
+    });
+
+    expect(mockCameraSend).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: 'setView',
+        perspectiveZoom: 1.75,
+        target: [1, 2, 3],
+      }),
+    );
+    controls.dispose();
   });
 });

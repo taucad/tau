@@ -516,6 +516,7 @@ export function SectionViewTestBridge(): React.ReactNode {
           direction: [direction.x, direction.y, direction.z],
           up: [up.x, up.y, up.z],
           verticalSpan,
+          ...(requestedFov > 0 ? { perspectiveZoom: nextCamera.zoom ?? 1 } : {}),
         });
         if (nextCamera.fov !== undefined) {
           setFovAngle(nextCamera.fov);

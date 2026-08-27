@@ -77,6 +77,7 @@ const createInitialCameraRig = ({
     direction: initialDirection,
     up,
     verticalSpan: 2,
+    perspectiveZoom: 1,
   };
 
   return createThreeCameraRig({

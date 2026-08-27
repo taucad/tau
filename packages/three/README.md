@@ -34,6 +34,7 @@ const rig = createThreeCameraRig({
     direction: [1, -1, 0.7],
     up: [0, 0, 1],
     verticalSpan: 10,
+    perspectiveZoom: 1,
     viewport: { width: 1280, height: 720, pixelRatio: 1 },
     bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
   }),
@@ -51,6 +52,6 @@ console.log(rig.activeCamera.isOrthographicCamera); // true
 rig.dispose();
 ```
 
-The rig derives tight model clip planes by default. Hosts with renderable scene helpers outside those bounds can call `setClipPlanes`; the policy keeps a configurable broad perspective far plane while multiplying the bounds-derived orthographic far plane to preserve linear depth precision. It survives subsequent actor updates. The package deliberately has no React, React Three Fiber, DOM, controls, gizmo, or post-processing dependency. Hosts retarget those resources from the rig's `onUpdate` callback and must call `dispose()` when the owning viewer is destroyed.
+The rig derives tight model clip planes by default and applies the fitted zoom from `@taucad/camera` to the native perspective camera. Orthographic frames encode the same visible span directly and use native zoom `1`. Hosts with renderable scene helpers outside those bounds can call `setClipPlanes`; the policy keeps a configurable broad perspective far plane while multiplying the bounds-derived orthographic far plane to preserve linear depth precision. It survives subsequent actor updates. The package deliberately has no React, React Three Fiber, DOM, controls, gizmo, or post-processing dependency. Hosts retarget those resources from the rig's `onUpdate` callback and must call `dispose()` when the owning viewer is destroyed.
 
 Runtime support: Node.js 24 or newer and modern browsers with Three.js 0.184 or compatible. `@taucad/camera`, `three`, and `xstate` 5 are peer dependencies. This package is Apache-2.0 licensed; it uses public Three.js APIs and does not redistribute Three.js source.

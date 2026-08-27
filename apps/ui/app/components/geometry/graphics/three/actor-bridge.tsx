@@ -128,6 +128,7 @@ export function ActorBridge(): ReactNode {
         direction: [offset.x / offset.length(), offset.y / offset.length(), offset.z / offset.length()],
         up: [camera.up.x, camera.up.y, camera.up.z],
         verticalSpan,
+        ...(camera instanceof OrthographicCamera ? {} : { perspectiveZoom: camera.zoom }),
       });
     };
 

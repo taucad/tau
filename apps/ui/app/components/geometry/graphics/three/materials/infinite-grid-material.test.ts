@@ -52,6 +52,7 @@ describe('createInfiniteGridGlMaterial', () => {
     const rig = createThreeCameraRig({
       initialView: createCameraView({
         requestedVerticalFieldOfView: 60,
+        perspectiveZoom: 1,
         target: [0, 0, 0],
         direction: [1, -1, 0.7],
         up: [0, 0, 1],

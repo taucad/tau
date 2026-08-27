@@ -240,6 +240,7 @@ describe('editorMachine', () => {
         direction: [1, 0, 0],
         up: [0, 0, 1],
         verticalSpan: 12,
+        perspectiveZoom: 1.25,
       } as const;
       const actor = await startAndLoad({
         loadResult: {
@@ -332,7 +333,7 @@ describe('editorMachine', () => {
       expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty(
         'componentDisplay',
       );
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(7);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(9);
       actor.stop();
     });
 

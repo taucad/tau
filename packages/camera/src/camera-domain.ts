@@ -47,6 +47,7 @@ export type CameraStateOptions = CameraState;
 /** Canonical renderer-neutral camera view. @public */
 export type CameraView = Readonly<{
   requestedVerticalFieldOfView: number;
+  perspectiveZoom: number;
   target: CameraVector;
   direction: CameraVector;
   up: CameraVector;
@@ -75,6 +76,7 @@ export type CameraClipPlanes = Readonly<{
 /** Fully resolved renderer-neutral native camera frame. @public */
 export type CameraFrame = Readonly<{
   projection: CameraProjection;
+  zoom: number;
   distance: number;
   clipping: CameraClipPlanes;
   frustum?: CameraFrustum;
@@ -199,6 +201,7 @@ export const createCameraView = (options: CameraViewOptions): CameraView => {
   cameraBasis({ direction, up });
   return {
     requestedVerticalFieldOfView: assertVerticalFieldOfView(options.requestedVerticalFieldOfView),
+    perspectiveZoom: assertPositive(options.perspectiveZoom, 'perspectiveZoom'),
     target: vector(options.target, 'target'),
     direction,
     up,
@@ -335,43 +338,6 @@ export const orthographicFrustumForVerticalSpan = ({
 };
 
 /**
- * Fits a spherical bounds envelope into a perspective or orthographic viewport.
- *
- * @param options - Bounds, viewport aspect, endpoint field of view, and fractional margin.
- * @returns Canonical target-plane vertical span.
- * @public
- */
-export const fitCameraVerticalSpan = ({
-  bounds,
-  aspect,
-  verticalFieldOfView,
-  margin = 0.65,
-}: {
-  bounds: CameraBounds;
-  aspect: number;
-  verticalFieldOfView: number;
-  margin?: number;
-}): number => {
-  const validBounds = validateBounds(bounds);
-  assertPositive(aspect, 'aspect');
-  assertVerticalFieldOfView(verticalFieldOfView);
-  assertFinite(margin, 'margin');
-  if (margin < 0) {
-    throw new RangeError('margin must not be negative.');
-  }
-  const radius = boundsDiagonal(validBounds) / 2;
-  const paddedRadius = Math.max(radius * (1 + margin), minimumPositiveValue);
-  if (verticalFieldOfView === 0) {
-    return (2 * paddedRadius) / Math.min(aspect, 1);
-  }
-  const verticalHalfAngle = (verticalFieldOfView * Math.PI) / 360;
-  const horizontalHalfAngle = Math.atan(Math.tan(verticalHalfAngle) * aspect);
-  const limitingHalfAngle = Math.min(verticalHalfAngle, horizontalHalfAngle);
-  const distance = paddedRadius / Math.sin(limitingHalfAngle);
-  return perspectiveVerticalSpan({ distance, verticalFieldOfView });
-};
-
-/**
  * Resolves a finite orthographic camera distance that keeps the bounds and target plane in front.
  *
  * @param options - Canonical view values.
@@ -449,10 +415,12 @@ export const resolveCameraFrame = ({
       ? perspectiveDistanceForVerticalSpan({
           verticalSpan: validView.verticalSpan,
           verticalFieldOfView: projection.verticalFieldOfView,
+          zoom: validView.perspectiveZoom,
         })
       : orthographicCameraDistance(validView);
   return {
     projection,
+    zoom: projection.kind === 'perspective' ? validView.perspectiveZoom : 1,
     distance,
     clipping: clipPlanesForCameraBounds({ ...validView, distance }),
     ...(projection.kind === 'orthographic'
@@ -471,7 +439,7 @@ export const resolveCameraFrame = ({
 export const frameCameraBounds = ({
   view,
   bounds,
-  margin = 0.65,
+  margin = 0.1,
 }: {
   view: CameraView;
   bounds: CameraBounds;
@@ -479,15 +447,80 @@ export const frameCameraBounds = ({
 }): CameraView => {
   const validView = createCameraView(view);
   const validBounds = validateBounds(bounds);
+  assertFinite(margin, 'margin');
+  if (margin < 0 || margin > 0.5) {
+    throw new RangeError('margin must be between 0 and 0.5.');
+  }
+  const aspect = validView.viewport.width / validView.viewport.height;
+  const padding = Math.max(1 - margin, 0.001);
+  const target = boundsCenter(validBounds);
+  const { direction, right, up } = cameraBasis(validView);
+  const corners = boundsCorners(validBounds);
+
+  if (validView.requestedVerticalFieldOfView === 0) {
+    let halfWidth = Math.max(
+      ...corners.map((corner) => Math.abs(dot(subtract(corner, target), right))),
+      minimumPositiveValue,
+    );
+    let halfHeight = Math.max(
+      ...corners.map((corner) => Math.abs(dot(subtract(corner, target), up))),
+      minimumPositiveValue,
+    );
+    halfWidth /= padding;
+    halfHeight /= padding;
+    if (halfWidth / halfHeight < aspect) {
+      halfWidth = halfHeight * aspect;
+    } else {
+      halfHeight = halfWidth / aspect;
+    }
+    return createCameraView({ ...validView, bounds: validBounds, target, verticalSpan: 2 * halfHeight });
+  }
+
+  const fieldOfViewRadians = (validView.requestedVerticalFieldOfView * Math.PI) / 180;
+  const radius = Math.max(boundsDiagonal(validBounds) / 2, minimumPositiveValue);
+  const modelDistance = radius * 2 * (Math.tan(Math.PI / 6) / Math.tan(fieldOfViewRadians / 2));
+  const verticalTangent = Math.tan(fieldOfViewRadians / 2) * padding;
+  const horizontalTangent = verticalTangent * aspect;
+  let fittedDistance = radius * 0.001;
+  for (const corner of corners) {
+    const offset = subtract(corner, target);
+    const axial = dot(offset, direction);
+    fittedDistance = Math.max(
+      fittedDistance,
+      axial + Math.abs(dot(offset, right)) / horizontalTangent,
+      axial + Math.abs(dot(offset, up)) / verticalTangent,
+      axial + radius * 0.001,
+    );
+  }
+  const distance = Math.max(modelDistance, fittedDistance);
+  const eye: CameraVector = [
+    target[0] + direction[0] * distance,
+    target[1] + direction[1] * distance,
+    target[2] + direction[2] * distance,
+  ];
+  let maximumRightTangent = 0;
+  let maximumUpTangent = 0;
+  for (const corner of corners) {
+    const offset = subtract(corner, eye);
+    const depth = -dot(offset, direction);
+    maximumRightTangent = Math.max(maximumRightTangent, Math.abs(dot(offset, right) / depth));
+    maximumUpTangent = Math.max(maximumUpTangent, Math.abs(dot(offset, up) / depth));
+  }
+  const tangent = Math.tan(fieldOfViewRadians / 2);
+  const verticalZoom = maximumUpTangent === 0 ? Number.POSITIVE_INFINITY : tangent / maximumUpTangent;
+  const horizontalZoom =
+    maximumRightTangent === 0 ? Number.POSITIVE_INFINITY : (aspect * tangent) / maximumRightTangent;
+  const perspectiveZoom =
+    maximumRightTangent === 0 && maximumUpTangent === 0 ? 1 : Math.min(verticalZoom, horizontalZoom) * padding;
   return createCameraView({
     ...validView,
     bounds: validBounds,
-    target: boundsCenter(validBounds),
-    verticalSpan: fitCameraVerticalSpan({
-      bounds: validBounds,
-      aspect: validView.viewport.width / validView.viewport.height,
+    target,
+    perspectiveZoom,
+    verticalSpan: perspectiveVerticalSpan({
+      distance,
       verticalFieldOfView: validView.requestedVerticalFieldOfView,
-      margin,
+      zoom: perspectiveZoom,
     }),
   });
 };
@@ -512,6 +545,7 @@ const projectPoint = ({
   const distance = perspectiveDistanceForVerticalSpan({
     verticalSpan: view.verticalSpan,
     verticalFieldOfView: perspectiveVerticalFieldOfView,
+    zoom: view.perspectiveZoom,
   });
   const depth = distance - dot(relative, direction);
   if (depth <= 0) {

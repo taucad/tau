@@ -4,7 +4,6 @@ export {
   createCameraState,
   createCameraView,
   findPerspectiveHandoffVerticalFieldOfView,
-  fitCameraVerticalSpan,
   frameCameraBounds,
   maximumProjectedPixelDelta,
   orthographicCameraDistance,

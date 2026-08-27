@@ -8,10 +8,11 @@ import {
   selectCameraView,
 } from '#camera.machine.js';
 import type { CameraDriverEvent, CameraDriverInput } from '#camera.machine.js';
-import { createCameraView, maximumProjectedPixelDelta } from '#camera-domain.js';
+import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta, resolveCameraFrame } from '#camera-domain.js';
 
 const initialView = createCameraView({
   requestedVerticalFieldOfView: 60,
+  perspectiveZoom: 1,
   target: [35, -20, 12],
   direction: [1, -1, 0.7],
   up: [0, 0, 1],
@@ -141,6 +142,49 @@ describe('cameraMachine', () => {
     expect(selectCameraView(snapshot)).toEqual(savedHome);
     expect(snapshot.matches('perspective')).toBe(true);
 
+    actor.stop();
+  });
+
+  it('should preserve fitted perspective zoom across endpoint changes and reset', () => {
+    const actor = createCameraActor().start();
+    actor.send({ type: 'frame', bounds: { min: [0, 0, 0], max: [20, 14, 8] }, margin: 0.1 });
+    const framedZoom = selectCameraView(actor.getSnapshot()).perspectiveZoom;
+    expect(framedZoom).not.toBe(1);
+    const framedSpan = selectCameraView(actor.getSnapshot()).verticalSpan;
+    const distanceAt60 = resolveCameraFrame({ view: selectCameraView(actor.getSnapshot()) }).distance;
+
+    actor.send({ type: 'saveHome' });
+    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
+    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 45 });
+    expect(selectCameraView(actor.getSnapshot())).toMatchObject({
+      perspectiveZoom: framedZoom,
+      verticalSpan: framedSpan,
+    });
+    expect(resolveCameraFrame({ view: selectCameraView(actor.getSnapshot()) }).distance).toBeGreaterThan(distanceAt60);
+    actor.send({ type: 'reset' });
+
+    expect(selectCameraView(actor.getSnapshot())).toMatchObject({
+      perspectiveZoom: framedZoom,
+      verticalSpan: framedSpan,
+    });
+    actor.stop();
+  });
+
+  it('retains the current viewport and refits the saved home after resize and reset', () => {
+    const actor = createCameraActor().start();
+    actor.send({ type: 'frame', margin: 0.1 });
+    actor.send({ type: 'saveHome' });
+    const savedHome = selectCameraView(actor.getSnapshot());
+    const viewport = { width: 720, height: 1000, pixelRatio: 2 } as const;
+
+    actor.send({ type: 'setViewport', viewport });
+    actor.send({ type: 'frame', margin: 0.1 });
+    actor.send({ type: 'setView', target: [9, 8, 7], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 10 });
+    actor.send({ type: 'reset' });
+
+    expect(selectCameraView(actor.getSnapshot())).toEqual(
+      frameCameraBounds({ view: { ...savedHome, viewport }, bounds: savedHome.bounds }),
+    );
     actor.stop();
   });
 

@@ -1,11 +1,12 @@
 import { OrthographicCamera, PerspectiveCamera, Raycaster, Vector2, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { createCameraView, maximumProjectedPixelDelta } from '@taucad/camera';
+import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta } from '@taucad/camera';
 import { selectCameraDriverSnapshot, selectCameraProjection } from '@taucad/camera/machine';
 import { createThreeCameraRig, readThreeCameraState } from '#camera.js';
 
 const initialView = createCameraView({
   requestedVerticalFieldOfView: 60,
+  perspectiveZoom: 1,
   target: [35, -20, 12],
   direction: [1, -1, 0.7],
   up: [0, 0, 1],
@@ -79,6 +80,45 @@ describe('createThreeCameraRig', () => {
     expect(rig.perspectiveCamera.uuid).toBe(perspectiveId);
     expect(rig.orthographicCamera.uuid).toBe(orthographicId);
 
+    rig.dispose();
+  });
+
+  it('projects a fitted volumetric box through the native matrix without losing distance or zoom', () => {
+    const fittedBounds = { min: [0, 0, 0], max: [20, 14, 8] } as const;
+    const fittedView = frameCameraBounds({
+      view: createCameraView({
+        ...initialView,
+        requestedVerticalFieldOfView: 45,
+        direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+        viewport: { width: 768, height: 576, pixelRatio: 1 },
+      }),
+      bounds: fittedBounds,
+      margin: 0.1,
+    });
+    const rig = createThreeCameraRig({ initialView: fittedView });
+    rig.actorRef.start();
+
+    expect(rig.perspectiveCamera.position.distanceTo(new Vector3(...fittedView.target))).toBeCloseTo(
+      35.808_573_937_594_36,
+      10,
+    );
+    expect(rig.perspectiveCamera.zoom).toBeCloseTo(1.078_034_861_982_213_3, 10);
+    expect(rig.orthographicCamera.zoom).toBe(1);
+    const projectedCorners = [
+      [0, 0, 0],
+      [20, 0, 0],
+      [0, 14, 0],
+      [20, 14, 0],
+      [0, 0, 8],
+      [20, 0, 8],
+      [0, 14, 8],
+      [20, 14, 8],
+    ].map((point) => new Vector3(...(point as [number, number, number])).project(rig.perspectiveCamera));
+    expect(projectedCorners[1]!.x).toBeCloseTo(0.151_130_912_782_328_93, 10);
+    expect(projectedCorners[1]!.y).toBeCloseTo(-0.9, 10);
+    expect(projectedCorners[7]!.x).toBeCloseTo(0.733_907_379_246_009_8, 10);
+    expect(projectedCorners[7]!.y).toBeCloseTo(0.195_649_892_264_690_48, 10);
+    expect(projectedCorners.every(({ x, y }) => Math.abs(x) <= 0.9 + 1e-12 && Math.abs(y) <= 0.9 + 1e-12)).toBe(true);
     rig.dispose();
   });
 

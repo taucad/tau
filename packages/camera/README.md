@@ -6,7 +6,7 @@ The package root contains data types and math. Importing `@taucad/camera` does n
 
 ## Camera view or camera state
 
-Use `CameraView` while a viewer frames bounds and moves between perspective and orthographic projections. It stores target, target-to-camera direction, screen-up, visible vertical span, viewport, and bounds.
+Use `CameraView` while a viewer frames bounds and moves between perspective and orthographic projections. It stores target, target-to-camera direction, screen-up, visible vertical span, perspective zoom, viewport, and bounds. `resolveCameraFrame` applies the same two-stage bounds fit used by Tau's thumbnails: an AABB-safe distance followed by a projected-corner zoom. The resulting visible span remains the projection-independent handoff invariant at 0° FOV.
 
 Use `CameraState` when another process must reproduce one frame. It stores position, target, screen-up, projection, zoom, clipping, and aspect as serializable values. `createCameraState` validates and copies those values before asynchronous work:
 
@@ -44,6 +44,7 @@ const initialView = createCameraView({
   direction: [1, -1, 0.7],
   up: [0, 0, 1],
   verticalSpan: 10,
+  perspectiveZoom: 1,
   viewport: { width: 1280, height: 720, pixelRatio: 1 },
   bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
 });

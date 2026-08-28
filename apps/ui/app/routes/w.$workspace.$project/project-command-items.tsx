@@ -44,7 +44,6 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
   const fileManager = useFileManager();
   const imageService = useHeadlessImageService();
   const fileTree = useFileTreeMap();
-  const hasExportableGeometry = useSelector(projectRef, (state) => state.context.exportableGeometryUnitPaths.size > 0);
   const project = useSelector(projectRef, (state) => state.context.project);
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'file';
 
@@ -235,7 +234,6 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
         group: 'Export',
         icon: <Download />,
         action: handleOpenExporter,
-        disabled: !hasExportableGeometry,
       },
       {
         id: 'download-zip',
@@ -282,7 +280,6 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
       handleDownloadPng,
       projectName,
       handleOpenExporter,
-      hasExportableGeometry,
       handleDownloadZip,
       fileCount,
     ],

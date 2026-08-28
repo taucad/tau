@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 
-let exportableGeometryUnitPaths = new Set<string>();
 let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
@@ -37,7 +36,6 @@ vi.mock('#hooks/use-project.js', () => ({
     projectRef: {
       getSnapshot: () => ({
         context: {
-          exportableGeometryUnitPaths,
           project: { id: 'test-project', name: 'test-project' },
         },
       }),
@@ -132,7 +130,6 @@ const match: UIMatch = {
 
 describe('ProjectCommandPaletteItems', () => {
   beforeEach(() => {
-    exportableGeometryUnitPaths = new Set<string>();
     registeredItems = [];
     isTauDebugEnabled = false;
     geometryFormat = undefined;
@@ -143,19 +140,11 @@ describe('ProjectCommandPaletteItems', () => {
     downloadBlob.mockReset();
   });
 
-  it('should disable the export command when no geometry unit is exportable', () => {
-    render(<ProjectCommandPaletteItems match={match} />);
-
-    expect(registeredItems.find((item) => item.id === 'export')?.disabled).toBe(true);
-  });
-
-  it('should enable the export command when any geometry unit is exportable', () => {
-    exportableGeometryUnitPaths = new Set(['helper.ts']);
-
+  it('keeps Export navigation available while geometry is pending', () => {
     render(<ProjectCommandPaletteItems match={match} />);
 
     const exportItem = registeredItems.find((item) => item.id === 'export');
-    expect(exportItem?.disabled).toBe(false);
+    expect(exportItem?.disabled).toBeUndefined();
     exportItem?.action?.();
     expect(openPanel).toHaveBeenCalledWith('export');
   });

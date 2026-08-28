@@ -95,6 +95,7 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
 // recoveries refocus the composer.
 const capturedTextarea: {
   onSubmit?: (payload: { content: string; imageUrls: string[] }) => Promise<void>;
+  className?: string;
   focus: ReturnType<typeof vi.fn<() => void>>;
 } = {
   focus: vi.fn<() => void>(),
@@ -103,8 +104,10 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   ChatTextarea: (properties: {
     readonly ref?: React.Ref<ChatTextareaHandle>;
     readonly onSubmit?: (payload: { content: string; imageUrls: string[] }) => Promise<void>;
+    readonly className?: string;
   }): React.JSX.Element => {
     capturedTextarea.onSubmit = properties.onSubmit;
+    capturedTextarea.className = properties.className;
     useImperativeHandle(properties.ref, () => ({ focus: capturedTextarea.focus }), []);
     return <div data-testid='chat-textarea' />;
   },
@@ -221,7 +224,15 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedTextarea.onSubmit = undefined;
+    capturedTextarea.className = undefined;
     setMockMessages([]);
+  });
+
+  it('leaves the surface styling with ChatTextarea and caps the composer width', () => {
+    render(<ChatHistory />);
+
+    expect(capturedTextarea.className).toBeUndefined();
+    expect(screen.getByTestId('chat-textarea').parentElement).toHaveClass('max-w-xl');
   });
 
   it('calls cadChat.submit with the text and imageUrls payload from the textarea', async () => {

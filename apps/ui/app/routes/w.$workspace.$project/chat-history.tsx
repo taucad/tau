@@ -298,14 +298,8 @@ export const ChatHistory = memo(function (props: {
         <ScrollDownButton hasContent={messageIds.length > 0} isVisible={!atBottom} onScrollToBottom={scrollToBottom} />
 
         {/* Chat input area */}
-        <div className='relative mx-2 mb-2 shrink-0'>
-          <ChatTextarea
-            ref={chatTextareaRef}
-            mode='main'
-            className='rounded-sm'
-            enableAutoFocus={false}
-            onSubmit={onSubmit}
-          />
+        <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+          <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
         </div>
       </FloatingPanelContent>
     </FloatingPanel>

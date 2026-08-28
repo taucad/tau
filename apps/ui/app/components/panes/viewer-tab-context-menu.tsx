@@ -11,6 +11,7 @@ import {
 } from '#components/panes/tab-context-menu-actions.js';
 import { useProject } from '#hooks/use-project.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
+import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type ViewerPanelParameters = {
@@ -153,10 +154,12 @@ function ViewerTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
  * Viewer tab component with a right-click context menu.
  * Use as `defaultTabComponent` in the viewer Dockview.
  */
+export const getViewerTabIcon: DockviewTabIconRenderer = (properties) =>
+  (properties.params as { mode?: unknown } | undefined)?.mode === 'launcher' ? (
+    <Plus aria-hidden className='size-3 shrink-0' />
+  ) : undefined;
+
 export const ViewerDockviewTab = withTabContextMenu(ViewerTabContextMenu, {
   leadingIcon: 'viewer',
-  getIcon: (properties) =>
-    (properties.params as { mode?: unknown } | undefined)?.mode === 'launcher' ? (
-      <Plus aria-hidden className='size-3 shrink-0' />
-    ) : undefined,
+  getIcon: getViewerTabIcon,
 });

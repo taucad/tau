@@ -26,7 +26,7 @@ import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { DockviewWatermark } from '#components/panes/dockview-watermark.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
-import { ViewerDockviewTab } from '#components/panes/viewer-tab-context-menu.js';
+import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-tab-context-menu.js';
 import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { ProjectWorkspaceActions } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 
@@ -763,6 +763,8 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
           components={components}
           noPanelsOverlay='emptyGroup'
           defaultTabComponent={ViewerDockviewTab}
+          getTabIcon={getViewerTabIcon}
+          tabLeadingIcon='viewer'
           watermarkComponent={ViewerWatermark}
           leftHeaderActionsComponent={ViewerLeftActions}
           rightHeaderActionsComponent={ProjectWorkspaceActions}

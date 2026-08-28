@@ -43,7 +43,7 @@ import { FileSelector } from '#components/files/file-selector.js';
 import { Loader } from '#components/ui/loader.js';
 import { useProject } from '#hooks/use-project.js';
 import { Dockview } from '#components/panes/dockview.js';
-import type { DockviewTab } from '#components/panes/dockview-tab.js';
+import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
 import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
@@ -602,7 +602,7 @@ export const workbenchPanels = {
   console: getWorkbenchSurface('console').panel!,
 } as const satisfies Record<WorkbenchUtilityPanelId, { id: string; component: string; title: string }>;
 
-const getWorkbenchTabIcon = (properties: ComponentProps<typeof DockviewTab>): React.ReactNode => {
+const getWorkbenchTabIcon: DockviewTabIconRenderer = (properties) => {
   const mode = getPlaceholderParameters(properties)?.mode;
   const surface = workbenchSurfaces.find((candidate) => candidate.panel?.id === properties.api.id);
   const Icon = mode === 'open-file' ? FolderOpen : mode === 'launcher' ? Plus : surface?.icon;
@@ -1653,6 +1653,7 @@ export const WorkbenchDockview = memo(function (): React.JSX.Element {
           watermarkComponent={WorkbenchEmptyGroupWatermark}
           noPanelsOverlay='emptyGroup'
           defaultTabComponent={WorkbenchDockviewTab}
+          getTabIcon={getWorkbenchTabIcon}
           leftHeaderActionsComponent={WorkbenchLeftActions}
           rightHeaderActionsComponent={WorkbenchRightHeaderActions}
           onReady={onReady}

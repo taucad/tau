@@ -14,6 +14,9 @@ export type DockviewTabProps = IDockviewPanelHeaderProps & {
   readonly icon?: React.ReactNode;
 };
 
+export type DockviewTabIconSource = Pick<IDockviewPanelHeaderProps, 'api' | 'params'>;
+export type DockviewTabIconRenderer = (properties: DockviewTabIconSource) => React.ReactNode;
+
 type DockviewTabParameters = {
   readonly entryPath?: unknown;
   readonly filePath?: unknown;
@@ -32,6 +35,26 @@ const resolveFullTitle = (properties: DockviewTabProps, title: string): string =
 
   return title;
 };
+
+export function DockviewTabIcon({
+  title,
+  leadingIcon = 'extension',
+  icon,
+}: {
+  readonly title: string;
+  readonly leadingIcon?: DockviewTabProps['leadingIcon'];
+  readonly icon?: React.ReactNode;
+}): React.ReactNode {
+  if (icon !== undefined && icon !== null) {
+    return icon;
+  }
+
+  return leadingIcon === 'viewer' ? (
+    <Box aria-hidden className='relative -bottom-px size-3 shrink-0' />
+  ) : (
+    <FileExtensionIcon filename={title} className='size-3 shrink-0' />
+  );
+}
 
 /**
  * Custom Dockview tab component that adds a leading icon before the title.
@@ -88,12 +111,7 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
           className='dv-default-tab group/default-tab relative size-full min-w-0 overflow-hidden py-1 pr-1 pl-2'
         >
           <span className='dv-default-tab-content mr-0! flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden'>
-            {icon ??
-              (leadingIcon === 'viewer' ? (
-                <Box aria-hidden className='relative -bottom-px size-3 shrink-0' />
-              ) : (
-                <FileExtensionIcon filename={title} className='size-3 shrink-0' />
-              ))}
+            <DockviewTabIcon title={title} leadingIcon={leadingIcon} icon={icon} />
             <span className='dockview-tab-title min-w-0 flex-1 overflow-hidden scroll-shadow-right whitespace-nowrap [--scroll-fade-size:24px] group-hover/default-tab:[--scroll-fade-size:42px]'>
               {title}
             </span>

@@ -1,11 +1,11 @@
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '#components/ui/context-menu.js';
 import { DockviewTab } from '#components/panes/dockview-tab.js';
-import type { DockviewTabProps } from '#components/panes/dockview-tab.js';
+import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 
 export type WithTabContextMenuOptions = {
   readonly leadingIcon?: DockviewTabProps['leadingIcon'];
-  readonly getIcon?: (properties: IDockviewPanelHeaderProps) => DockviewTabProps['icon'];
+  readonly getIcon?: DockviewTabIconRenderer;
 };
 
 /**

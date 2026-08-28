@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import type {
   DockviewApi,
@@ -66,7 +66,7 @@ const createPanel = ({
   readonly title?: string;
   readonly params?: Record<string, unknown>;
 }): IDockviewPanel => {
-  const api = mock<DockviewPanelApi>({ setActive: vi.fn() });
+  const api = mock<DockviewPanelApi>({ id, setActive: vi.fn() });
   Object.defineProperty(api, 'title', { value: title });
   const panel = mock<IDockviewPanel>({ id });
   Object.defineProperties(panel, {
@@ -115,7 +115,7 @@ const createProperties = ({
   };
 };
 
-const renderPicker = (properties: IDockviewHeaderActionsProps) =>
+const renderPicker = (properties: ComponentProps<typeof DockviewTabOverflowPicker>) =>
   render(
     <TooltipProvider>
       <DockviewTabOverflowPicker {...properties} />
@@ -210,6 +210,32 @@ describe('DockviewTabOverflowPicker', () => {
     render(<>{comboBox.renderLabel(viewer, viewer)}</>);
     expect(screen.getByText('models/assembly.step')).toBeInTheDocument();
     expect(screen.getByLabelText('Active tab')).toBeInTheDocument();
+  });
+
+  it('uses the same custom and fallback icons as the owning tab renderer', () => {
+    const utility = createPanel({ id: 'parameters', title: 'Parameters' });
+    const viewer = createPanel({ id: 'viewer', title: 'Model' });
+    const { properties } = createProperties({
+      panels: [utility, viewer],
+      activePanel: viewer,
+      clientWidth: 100,
+      scrollWidth: 300,
+    });
+
+    renderPicker({
+      ...properties,
+      leadingIcon: 'viewer',
+      getIcon: (panel) => (panel.api.id === utility.api.id ? <span data-testid='parameters-tab-icon' /> : undefined),
+    });
+    flushMeasurement();
+
+    const comboBox = getComboBoxProperties();
+    const utilityLabel = render(<>{comboBox.renderLabel(utility, viewer)}</>);
+    expect(screen.getByTestId('parameters-tab-icon')).toBeInTheDocument();
+    utilityLabel.unmount();
+
+    const viewerLabel = render(<>{comboBox.renderLabel(viewer, viewer)}</>);
+    expect(viewerLabel.container.querySelector('svg[aria-hidden=true]')).toHaveClass('size-3', 'shrink-0');
   });
 
   it('activates only the selected panel', () => {

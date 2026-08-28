@@ -2,8 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import type { IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react';
 import { Check, ChevronDown } from 'lucide-react';
 import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
+import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
+import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+
+export type DockviewTabOverflowPickerProperties = IDockviewHeaderActionsProps & {
+  readonly getIcon?: DockviewTabIconRenderer;
+  readonly leadingIcon?: DockviewTabProps['leadingIcon'];
+};
 
 const getPanelPath = (panel: IDockviewPanel): string | undefined => {
   const parameters = panel.params;
@@ -21,12 +28,17 @@ const getPanelTitle = (panel: IDockviewPanel): string => panel.api.title ?? pane
 const getPanelSearchValue = (panel: IDockviewPanel): string =>
   [getPanelTitle(panel), getPanelPath(panel), panel.id].filter(Boolean).join(' ');
 
-const renderPanelLabel = (panel: IDockviewPanel, activePanel: IDockviewPanel | undefined): React.ReactNode => {
+const renderPanelLabel = (
+  panel: IDockviewPanel,
+  activePanel: IDockviewPanel | undefined,
+  iconOptions: Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'>,
+): React.JSX.Element => {
   const title = getPanelTitle(panel);
   const path = getPanelPath(panel);
 
   return (
     <span className='flex min-w-0 flex-1 items-center gap-2'>
+      <DockviewTabIcon title={title} leadingIcon={iconOptions.leadingIcon} icon={iconOptions.getIcon?.(panel)} />
       <span className='flex min-w-0 flex-1 flex-col'>
         <span className='truncate'>{title}</span>
         {path && path !== title ? <span className='truncate text-xs text-muted-foreground'>{path}</span> : null}
@@ -78,8 +90,10 @@ const useTabsOverflow = ({
   return isOverflowing;
 };
 
-export function DockviewTabOverflowPicker(properties: IDockviewHeaderActionsProps): React.JSX.Element | undefined {
-  const { activePanel, panels } = properties;
+export function DockviewTabOverflowPicker(
+  properties: DockviewTabOverflowPickerProperties,
+): React.JSX.Element | undefined {
+  const { activePanel, getIcon, leadingIcon, panels } = properties;
   const isOverflowing = useTabsOverflow({ group: properties.group, panelCount: panels.length });
   const groupedItems = useMemo(() => [{ name: 'Open tabs', items: panels }], [panels]);
 
@@ -93,7 +107,7 @@ export function DockviewTabOverflowPicker(properties: IDockviewHeaderActionsProp
         groupedItems={groupedItems}
         value={activePanel}
         getValue={getPanelSearchValue}
-        renderLabel={renderPanelLabel}
+        renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
         className='w-72'
         popoverProperties={{ align: 'end' }}
         searchPlaceHolder='Search open tabs...'

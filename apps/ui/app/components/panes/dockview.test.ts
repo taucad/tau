@@ -44,7 +44,22 @@ vi.mock('#components/panes/dockview-tab-overflow-picker.js', async () => {
   const { createElement } = await import('react');
   return {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Mock key mirrors the component export.
-    DockviewTabOverflowPicker: () => createElement('button', { type: 'button' }, 'Open tabs picker'),
+    DockviewTabOverflowPicker: ({
+      getIcon,
+      leadingIcon,
+    }: {
+      readonly getIcon?: unknown;
+      readonly leadingIcon?: string;
+    }) =>
+      createElement(
+        'button',
+        {
+          type: 'button',
+          'data-has-icon-resolver': String(Boolean(getIcon)),
+          'data-leading-icon': leadingIcon,
+        },
+        'Open tabs picker',
+      ),
   };
 });
 
@@ -497,12 +512,15 @@ describe('Dockview', () => {
 
   it('composes the overflow picker before caller-owned right header actions', () => {
     const callerActions = () => createElement('button', { type: 'button' }, 'Caller action');
+    const getTabIcon = vi.fn();
 
     render(
       createElement(Dockview, {
         components: {},
+        getTabIcon,
         onReady: vi.fn(),
         rightHeaderActionsComponent: callerActions,
+        tabLeadingIcon: 'viewer',
       }),
     );
 
@@ -510,5 +528,7 @@ describe('Dockview', () => {
     const caller = screen.getByRole('button', { name: 'Caller action' });
     expect(picker.parentElement).toBe(caller.parentElement);
     expect(picker.compareDocumentPosition(caller)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(picker).toHaveAttribute('data-has-icon-resolver', 'true');
+    expect(picker).toHaveAttribute('data-leading-icon', 'viewer');
   });
 });

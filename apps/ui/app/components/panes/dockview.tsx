@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { DockviewApi, DockviewReadyEvent, DockviewTheme, IDockviewHeaderActionsProps } from 'dockview-react';
 import { DockviewReact } from 'dockview-react';
 import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overflow-picker.js';
+import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { cn } from '#utils/ui.utils.js';
 
@@ -16,7 +17,10 @@ const tauDockviewTheme: DockviewTheme = {
   className: 'dockview-theme-tau',
 };
 
-type DockviewProperties = Omit<ComponentProps<typeof DockviewReact>, 'scrollbars' | 'theme'>;
+type DockviewProperties = Omit<ComponentProps<typeof DockviewReact>, 'scrollbars' | 'theme'> & {
+  readonly getTabIcon?: DockviewTabIconRenderer;
+  readonly tabLeadingIcon?: DockviewTabProps['leadingIcon'];
+};
 
 /**
  * Complete Tailwind-based theme for Dockview.
@@ -310,8 +314,10 @@ export function scrollActiveTabIntoView(api: DockviewApi): void {
  */
 export function Dockview({
   className,
+  getTabIcon,
   onReady,
   rightHeaderActionsComponent,
+  tabLeadingIcon,
   ...properties
 }: DockviewProperties): React.JSX.Element {
   const disposableRef = useRef<{ dispose(): void } | undefined>(undefined);
@@ -319,13 +325,13 @@ export function Dockview({
     const CallerActions = rightHeaderActionsComponent;
     const ComposedRightHeaderActions = (actionProperties: IDockviewHeaderActionsProps): React.JSX.Element => (
       <div className='flex h-full items-center gap-1'>
-        <DockviewTabOverflowPicker {...actionProperties} />
+        <DockviewTabOverflowPicker {...actionProperties} getIcon={getTabIcon} leadingIcon={tabLeadingIcon} />
         {CallerActions ? <CallerActions {...actionProperties} /> : null}
       </div>
     );
     ComposedRightHeaderActions.displayName = 'DockviewRightHeaderActions';
     return ComposedRightHeaderActions;
-  }, [rightHeaderActionsComponent]);
+  }, [getTabIcon, rightHeaderActionsComponent, tabLeadingIcon]);
 
   const handleReady = useCallback(
     (event: DockviewReadyEvent) => {

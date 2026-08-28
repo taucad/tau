@@ -1,4 +1,10 @@
 export * from '#kernel-testing.utils.js';
+export { describeBundlerConformance } from '#bundler-testing.utils.js';
+export type {
+  BundlerConformanceFileSystem,
+  BundlerConformanceVm,
+  DescribeBundlerConformanceOptions,
+} from '#bundler-testing.utils.js';
 
 export {
   getBoundingBoxFromInspect,

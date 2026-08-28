@@ -76,6 +76,7 @@ The caller owns a client returned by `createTestRuntimeClient`. Always call `shu
 | Runtime mocks            | `createMockLogger`, `createMockFileSystem`, `createMockKernelRuntime`, `createMockRuntime`, `createMockRuntimeClient`, `createMockDependencies` |
 | Middleware fixtures      | `createMockInput`, `createMockCreateGeometryHandler`, `createMockGetParametersHandler`                                                          |
 | Direct-definition helper | `createGeometryFile`, types `TestKernelDefinition`, `TestRuntimeDefinition`, `MockFileSystem`, `MockFileSystemMocks`, `MockFileSystemOptions`   |
+| Bundler conformance      | `describeBundlerConformance`, types `BundlerConformanceFileSystem`, `BundlerConformanceVm`                                                      |
 | glTF inspection          | `glbToDocument`, `validateGlbData`, `getInspectReport`, `getGeometryStatsFromInspect`, `getBoundingBoxFromInspect`                              |
 | Geometry results         | `extractGltfFromResult`, `extractGltfFromExportResult`, `getSignedVolumeFromGlb`, `createGeometryVariant`, `createGeometryTestHelpers`          |
 | Material/color evidence  | `colorParityCases`, `expectLinearBaseColor`, `getAllMaterialBaseColors`, `getMaterialAlphaMode`, `getMaterialBaseColor`                         |

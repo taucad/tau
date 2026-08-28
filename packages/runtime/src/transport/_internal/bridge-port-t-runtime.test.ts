@@ -79,7 +79,7 @@ function createLinkedMemoryPorts(): readonly [Port<unknown>, Port<unknown>] {
 describe('bridge Port<T> round-trip', () => {
   it('readFile crosses a custom in-memory Port pair', async () => {
     type ReadService = { readFile(path: string, encoding: 'utf8'): Promise<string> };
-    const helloPath = '/hello.txt';
+    const helloPath = 'hello.txt';
     const fs = makeFs({ [helloPath]: 'from-port-bridge' });
     const [serverPort, clientPort] = createLinkedMemoryPorts();
 
@@ -98,7 +98,7 @@ describe('bridge Port<T> round-trip', () => {
    * (`filesystem-bridge.ts:457`) is deliberately left in place.
    */
   it('drives createTransferredFileSystemBridgeProxy over a structural port', async () => {
-    const helloPath = '/hello.txt';
+    const helloPath = 'hello.txt';
     const fs = makeFs({ [helloPath]: 'from-structural-port' });
     // Node global `MessageChannel`, standing in for the worker boundary.
     const boundary = new MessageChannel();

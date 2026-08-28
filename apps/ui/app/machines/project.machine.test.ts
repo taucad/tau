@@ -94,6 +94,7 @@ function createTestActor(options?: {
       projectId: options?.projectId ?? 'test-project',
       shouldLoadModelOnStart: options?.shouldLoadModelOnStart ?? false,
       fileManagerRef,
+      fileSystemRoot: '/previews/test-project',
       kernelOptionsFactory,
     },
   });
@@ -175,7 +176,7 @@ describe('projectMachine', () => {
       const fileManagerRef = mock<ProjectContext['fileManagerRef']>({ send: vi.fn() });
       const kernelOptionsFactory = createKernelOptionsFactory();
       const actor = createActor(machine, {
-        input: { projectId: 'b', fileManagerRef, kernelOptionsFactory },
+        input: { projectId: 'b', fileManagerRef, fileSystemRoot: '/projects/b', kernelOptionsFactory },
       });
       actor.start();
       expect(actor.getSnapshot().value).toBe('ssr');
@@ -407,6 +408,9 @@ describe('projectMachine', () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(true);
+      expect(actor.getSnapshot().context.geometryUnits.get('main.ts')?.getSnapshot().context.fileSystemRoot).toBe(
+        '/previews/test-project',
+      );
       actor.stop();
     });
 

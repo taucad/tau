@@ -11,7 +11,7 @@ describe('FileSystemManager', () => {
     const manager = new FileSystemManager(filesystem);
     const result = await manager.readFile('src/main.kcl');
 
-    expect(filesystem.mocks.readFile.mock.calls[0]![0]).toBe('/src/main.kcl');
+    expect(filesystem.mocks.readFile.mock.calls[0]![0]).toBe('src/main.kcl');
     expect(result).toBe(data);
   });
 
@@ -22,7 +22,7 @@ describe('FileSystemManager', () => {
     const manager = new FileSystemManager(filesystem);
     const result = await manager.exists('lib/utils.kcl');
 
-    expect(filesystem.mocks.exists.mock.calls[0]![0]).toBe('/lib/utils.kcl');
+    expect(filesystem.mocks.exists.mock.calls[0]![0]).toBe('lib/utils.kcl');
     expect(result).toBe(true);
   });
 
@@ -33,7 +33,7 @@ describe('FileSystemManager', () => {
     const manager = new FileSystemManager(filesystem);
     const result = await manager.getAllFiles('src');
 
-    expect(filesystem.mocks.readdir.mock.calls[0]![0]).toBe('/src');
+    expect(filesystem.mocks.readdir.mock.calls[0]![0]).toBe('src');
     expect(result).toBe(JSON.stringify(['a.kcl', 'b.kcl']));
   });
 

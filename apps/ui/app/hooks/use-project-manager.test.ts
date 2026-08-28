@@ -25,7 +25,7 @@ const fakeProject: ProjectManifest = projectToManifest({
 const fakeLocator: ProjectLocator = {
   backend: 'opfs',
   storageRootKey: 'opfs:origin',
-  relativeDirectory: '/test-project',
+  relativeDirectory: 'test-project',
 };
 const unrelatedProject: ProjectManifest = projectToManifest({
   id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
@@ -37,7 +37,7 @@ const unrelatedProject: ProjectManifest = projectToManifest({
 const unrelatedLocator: ProjectLocator = {
   backend: 'opfs',
   storageRootKey: 'opfs:origin',
-  relativeDirectory: '/unrelated-project',
+  relativeDirectory: 'unrelated-project',
 };
 const validProjectDiscovery: ProjectDiscoveryResult = {
   roots: [{ status: 'complete', root: { backend: 'opfs' } }],
@@ -57,7 +57,7 @@ const liveWorkspaceRoot = {
 const liveWorkspaceLocator: ProjectLocator = {
   backend: 'webaccess',
   storageRootKey: 'webaccess:wsp_live',
-  relativeDirectory: '/test-project',
+  relativeDirectory: 'test-project',
   workspaceId: 'wsp_live',
 };
 const liveWorkspaceDiscovery: ProjectDiscoveryResult = {
@@ -209,7 +209,7 @@ const pendingCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
   operationId,
   kind: 'create',
   backend: 'opfs',
-  providerBasePath: '/test-project',
+  providerBasePath: 'test-project',
   manifest: fakeProject,
   library: { projectId: fakeProject.id, lastActivityAt: 10 },
   files: { 'main.ts': { content: new Uint8Array([1, 2, 3]) } },
@@ -239,7 +239,7 @@ const pendingPermanentDelete: Extract<PendingProjectOperation, { kind: 'permanen
   projectId: fakeProject.id,
   storage: {
     backend: 'opfs',
-    providerBasePath: '/test-project',
+    providerBasePath: 'test-project',
   },
 };
 
@@ -466,7 +466,7 @@ describe('useProjectManager.createProject', () => {
   it('classifies duplicate project identities as conflicts', async () => {
     const duplicateLocator: ProjectLocator = {
       ...fakeLocator,
-      relativeDirectory: '/test-project-copy',
+      relativeDirectory: 'test-project-copy',
     };
     mockListProjectManifests.mockResolvedValue({
       roots: [],
@@ -492,7 +492,7 @@ describe('useProjectManager.createProject', () => {
     mockGetProjectFileSystemConfig.mockResolvedValue({
       projectId: fakeProject.id,
       backend: 'opfs',
-      providerBasePath: '/test-project',
+      providerBasePath: 'test-project',
     });
     mockListProjectManifests.mockResolvedValue({
       entries: [],
@@ -514,7 +514,7 @@ describe('useProjectManager.createProject', () => {
       projectId: fakeProject.id,
       backend: 'webaccess',
       workspaceId: 'wsp_unavailable',
-      providerBasePath: '/original',
+      providerBasePath: 'original',
     } as const;
     mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_unavailable' }]);
     mockGetProjectFileSystemConfig.mockResolvedValue(configured);
@@ -535,7 +535,7 @@ describe('useProjectManager.createProject', () => {
       projectId: fakeProject.id,
       backend: 'webaccess',
       workspaceId: 'wsp_live',
-      providerBasePath: '/original',
+      providerBasePath: 'original',
     } as const;
     mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_live' }]);
     mockGetProjectFileSystemConfig.mockResolvedValue(configured);
@@ -604,7 +604,7 @@ describe('useProjectManager.createProject', () => {
       projectId: unrelatedProject.id,
       backend: 'webaccess',
       workspaceId: 'wsp_unavailable',
-      providerBasePath: '/original-1',
+      providerBasePath: 'original-1',
     } as const;
     mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_unavailable' }]);
     mockGetAllProjectFileSystemConfigs.mockResolvedValue([configured]);
@@ -618,7 +618,7 @@ describe('useProjectManager.createProject', () => {
         {
           status: 'valid',
           manifest: fakeProject,
-          locator: { ...fakeLocator, relativeDirectory: '/copy' },
+          locator: { ...fakeLocator, relativeDirectory: 'copy' },
         },
         { status: 'valid', manifest: unrelatedProject, locator: unrelatedLocator },
       ],
@@ -1151,17 +1151,17 @@ describe('useProjectManager.createProject', () => {
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
       entries: [
-        { status: 'valid', manifest: fakeProject, locator: { ...fakeLocator, relativeDirectory: '/Test-Project' } },
+        { status: 'valid', manifest: fakeProject, locator: { ...fakeLocator, relativeDirectory: 'Test-Project' } },
         {
           status: 'valid',
           manifest: unrelatedProject,
-          locator: { ...fakeLocator, relativeDirectory: '/test-project-1' },
+          locator: { ...fakeLocator, relativeDirectory: 'test-project-1' },
         },
         // A directory in another storage root cannot collide.
         {
           status: 'valid',
           manifest: fakeProject,
-          locator: { ...liveWorkspaceLocator, relativeDirectory: '/test-project-2' },
+          locator: { ...liveWorkspaceLocator, relativeDirectory: 'test-project-2' },
         },
       ],
     });
@@ -1182,7 +1182,7 @@ describe('useProjectManager.createProject', () => {
 
     expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].storage).toMatchObject({
       backend: 'opfs',
-      providerBasePath: '/test-project-2',
+      providerBasePath: 'test-project-2',
     });
   });
 
@@ -1413,7 +1413,7 @@ describe('useProjectManager.createProject', () => {
   it('journals the freshly discovered locator instead of stale persisted configuration', async () => {
     const movedLocator: ProjectLocator = {
       ...fakeLocator,
-      relativeDirectory: '/moved-project',
+      relativeDirectory: 'moved-project',
     };
     const movedStorage: PendingProjectStorage = {
       backend: 'opfs',
@@ -1426,7 +1426,7 @@ describe('useProjectManager.createProject', () => {
     mockGetProjectFileSystemConfig.mockResolvedValue({
       projectId: fakeProject.id,
       backend: 'opfs',
-      providerBasePath: '/stale-location',
+      providerBasePath: 'stale-location',
     });
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
@@ -1466,7 +1466,7 @@ describe('useProjectManager.createProject', () => {
   it('refuses permanent-delete admission when the project identity is duplicated', async () => {
     const duplicateLocator: ProjectLocator = {
       ...fakeLocator,
-      relativeDirectory: '/duplicate',
+      relativeDirectory: 'duplicate',
     };
     mockGetProjectFileSystemConfig.mockResolvedValue({
       projectId: fakeProject.id,
@@ -1491,7 +1491,7 @@ describe('useProjectManager.createProject', () => {
   it('retains local state and the journal when an absent result reveals a moved occurrence', async () => {
     const movedLocator: ProjectLocator = {
       ...fakeLocator,
-      relativeDirectory: '/reappeared',
+      relativeDirectory: 'reappeared',
     };
     mockGetProjectFileSystemConfig.mockResolvedValue({
       projectId: fakeProject.id,
@@ -1522,7 +1522,7 @@ describe('useProjectManager.createProject', () => {
     mockBuildSuperseded = true;
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     mockGetAllProjectFileSystemConfigs.mockResolvedValue([
-      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: '/gone' },
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: 'gone' },
     ]);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -1537,7 +1537,7 @@ describe('useProjectManager.createProject', () => {
   it('reconciles and garbage-collects normally when this build is current', async () => {
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     mockGetAllProjectFileSystemConfigs.mockResolvedValue([
-      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: '/gone' },
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: 'gone' },
     ]);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 

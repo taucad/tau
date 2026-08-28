@@ -28,7 +28,7 @@ function createTestContext(options?: {
   return {
     runtime,
     input: createMockInput({
-      entryPath: '/main.ts',
+      entryPath: 'main.ts',
       parameters: {},
       ...options?.input,
     }),
@@ -296,25 +296,25 @@ describe('parameterFileResolverMiddleware', () => {
   describe('getDependencies', () => {
     it('should return the per-geometry-unit parameter file path', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(
-        { entryPath: '/main.ts' },
+        { entryPath: 'main.ts' },
         createDependencyRuntime({ parametersDir: parametersDirectory, watchDebounce: 200 }),
       );
 
-      expect(result).toEqual([{ path: `/${parametersDirectory}/main.ts.json`, watchDebounce: 200 }]);
+      expect(result).toEqual([{ path: `${parametersDirectory}/main.ts.json`, watchDebounce: 200 }]);
     });
 
     it('should use custom parametersDir option', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(
-        { entryPath: '/main.ts' },
+        { entryPath: 'main.ts' },
         createDependencyRuntime({ parametersDir: '.config/params', watchDebounce: 200 }),
       );
 
-      expect(result).toEqual([{ path: '/.config/params/main.ts.json', watchDebounce: 200 }]);
+      expect(result).toEqual([{ path: '.config/params/main.ts.json', watchDebounce: 200 }]);
     });
 
     it('should return synchronously (not a promise)', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(
-        { entryPath: '/main.ts' },
+        { entryPath: 'main.ts' },
         createDependencyRuntime({ parametersDir: parametersDirectory, watchDebounce: 200 }),
       );
 

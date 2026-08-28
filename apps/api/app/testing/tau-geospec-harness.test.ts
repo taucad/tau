@@ -91,7 +91,7 @@ describe('runTauGeoSpecTests', () => {
   it('should group all assertion results under the GeoSpec test file', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/main.geospec.ts',
+      'main.geospec.ts',
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
@@ -110,7 +110,7 @@ describe('runTauGeoSpecTests', () => {
 
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '/project',
+      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       renderer: async () => createGeometrySource(800, 600, 750),
     });
@@ -127,7 +127,7 @@ describe('runTauGeoSpecTests', () => {
   it('should filter Tau GeoSpec results by Vitest-style testNamePattern regex', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/main.geospec.ts',
+      'main.geospec.ts',
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
@@ -146,7 +146,7 @@ describe('runTauGeoSpecTests', () => {
 
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '/project',
+      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       testNamePattern: 'width$',
       renderer: async () => createGeometrySource(800, 600, 750),
@@ -160,7 +160,7 @@ describe('runTauGeoSpecTests', () => {
   it('should not execute Tau GeoSpec tests excluded by negative-lookahead testNamePattern', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/main.geospec.ts',
+      'main.geospec.ts',
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
@@ -180,7 +180,7 @@ describe('runTauGeoSpecTests', () => {
 
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '/project',
+      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       testNamePattern: '^(?!.*no meshing interference).*',
       renderer: async (input) => {
@@ -204,7 +204,7 @@ describe('runTauGeoSpecTests', () => {
   it('should fail when filters select no GeoSpec tests', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/main.geospec.ts',
+      'main.geospec.ts',
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
@@ -219,7 +219,7 @@ describe('runTauGeoSpecTests', () => {
 
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '/project',
+      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       testNamePattern: 'height',
       renderer: async () => createGeometrySource(800),
@@ -239,7 +239,7 @@ describe('runTauGeoSpecTests', () => {
   it('should keep concurrent Tau GeoSpec renderer bindings isolated per invocation', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/first.geospec.ts',
+      'first.geospec.ts',
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
@@ -252,7 +252,7 @@ describe('runTauGeoSpecTests', () => {
       ].join('\n'),
     );
     filesystem.setText(
-      '/project/second.geospec.ts',
+      'second.geospec.ts',
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
@@ -268,7 +268,7 @@ describe('runTauGeoSpecTests', () => {
     const [first, second] = await Promise.all([
       runTauGeoSpecTests({
         filesystem,
-        projectPath: '/project',
+        projectPath: '',
         entryPaths: ['first.geospec.ts'],
         renderer: async (input) => {
           await Promise.resolve();
@@ -278,7 +278,7 @@ describe('runTauGeoSpecTests', () => {
       }),
       runTauGeoSpecTests({
         filesystem,
-        projectPath: '/project',
+        projectPath: '',
         entryPaths: ['second.geospec.ts'],
         renderer: async (input) => {
           expect(input.parameters).toEqual({ width: 20 });
@@ -296,7 +296,7 @@ describe('runTauGeoSpecTests', () => {
   it('should run initial BRep feature matchers through the Tau GeoSpec harness', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/main.geospec.ts',
+      'main.geospec.ts',
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",
@@ -316,7 +316,7 @@ describe('runTauGeoSpecTests', () => {
     const rendererCalls: Array<{ file: string; format?: string }> = [];
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '/project',
+      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       renderer: async (input) => {
         rendererCalls.push(input);

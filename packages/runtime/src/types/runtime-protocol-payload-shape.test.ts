@@ -14,7 +14,7 @@ import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import { abortReason } from '#types/runtime-protocol.types.js';
 
 const renderId = '550e8400-e29b-41d4-a716-446655440000';
-const stagePath = '/main.ts';
+const stagePath = 'main.ts';
 
 describe('runtime-protocol payload-shape coverage (C18)', () => {
   it('accepts pooled-binary materialisation acknowledgements', () => {
@@ -227,10 +227,10 @@ describe('runtime-protocol payload-shape coverage (C18)', () => {
 
   describe('preview command identity', () => {
     it.each([
-      ['openFile', { file: { path: '/', filename: 'main.ts' }, parameters: {} }],
+      ['openFile', { file: { path: '', filename: 'main.ts' }, parameters: {} }],
       [
         'stage-and-render',
-        { stage: { [stagePath]: new Uint8Array([1]) }, file: { path: '/', filename: 'main.ts' }, parameters: {} },
+        { stage: { [stagePath]: new Uint8Array([1]) }, file: { path: '', filename: 'main.ts' }, parameters: {} },
       ],
       ['updateParameters', { parameters: {} }],
       ['setOptions', { options: {} }],

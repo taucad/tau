@@ -7,6 +7,7 @@ import {
   createTransferredFileSystemBridgeProxy,
   createFileSystemBridge,
   exposeFileSystem,
+  fileSystemBridgeProtocolVersion,
   filesystemBridgeConnectMessageType,
   waitForWorkerReady,
   workerReadyMessageType,
@@ -38,7 +39,7 @@ describe('filesystem high-level wrappers', () => {
 
     it('should serve a filesystem when receiving a bridge message', async () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- filesystem paths use non-camelCase names
-      const fs = makeFs({ '/hello.txt': 'world' });
+      const fs = makeFs({ 'hello.txt': 'world' });
 
       activeHandle = exposeFileSystem(fs);
 
@@ -47,7 +48,7 @@ describe('filesystem high-level wrappers', () => {
 
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -55,26 +56,26 @@ describe('filesystem high-level wrappers', () => {
         queueMicrotask(resolve);
       });
 
-      const content = await proxy.readFile('/hello.txt', 'utf8');
+      const content = await proxy.readFile('hello.txt', 'utf8');
       expect(content).toBe('world');
     });
 
     it('should buffer messages sent before server is wired (catchMessages)', async () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- filesystem paths use non-camelCase names
-      const fs = makeFs({ '/early.txt': 'buffered' });
+      const fs = makeFs({ 'early.txt': 'buffered' });
 
       const channel = new MessageChannel();
       const proxy = createTransferredFileSystemBridgeProxy(channel.port2);
 
       // Send a request BEFORE exposeFileSystem processes the connect message.
       // The proxy sends immediately on port2; port1 isn't served yet.
-      const resultPromise = proxy.readFile('/early.txt', 'utf8');
+      const resultPromise = proxy.readFile('early.txt', 'utf8');
 
       activeHandle = exposeFileSystem(fs);
 
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -88,7 +89,7 @@ describe('filesystem high-level wrappers', () => {
 
     it('should stop listening after cleanup is called', async () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- filesystem paths use non-camelCase names
-      const fs = makeFs({ '/test.txt': 'data' });
+      const fs = makeFs({ 'test.txt': 'data' });
       activeHandle = exposeFileSystem(fs);
       activeHandle.cleanup();
 
@@ -96,7 +97,7 @@ describe('filesystem high-level wrappers', () => {
       // Post a message after cleanup -- no server should be set up
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -111,7 +112,7 @@ describe('filesystem high-level wrappers', () => {
 
     it('should support custom messageType', async () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- filesystem paths use non-camelCase names
-      const fs = makeFs({ '/custom.txt': 'custom' });
+      const fs = makeFs({ 'custom.txt': 'custom' });
       activeHandle = exposeFileSystem(fs, { messageType: 'myBridge' });
 
       const channel = new MessageChannel();
@@ -119,7 +120,7 @@ describe('filesystem high-level wrappers', () => {
       // Default type should be ignored
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+          data: { v: fileSystemBridgeProtocolVersion, type: filesystemBridgeConnectMessageType, port: channel.port1 },
         }),
       );
 
@@ -135,7 +136,7 @@ describe('filesystem high-level wrappers', () => {
 
       self.dispatchEvent(
         new MessageEvent('message', {
-          data: { v: 1, type: 'myBridge', port: channel2.port1 },
+          data: { v: fileSystemBridgeProtocolVersion, type: 'myBridge', port: channel2.port1 },
         }),
       );
 
@@ -143,7 +144,7 @@ describe('filesystem high-level wrappers', () => {
         queueMicrotask(resolve);
       });
 
-      const content = await proxy2.readFile('/custom.txt', 'utf8');
+      const content = await proxy2.readFile('custom.txt', 'utf8');
       expect(content).toBe('custom');
     });
   });

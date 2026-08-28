@@ -68,13 +68,13 @@ export const calibrationFiles = defineMiddleware({
   id: 'calibration-files',
   name: 'Calibration files',
   optionsSchema: z.object({
-    directory: z.string().default('/.tau/calibration'),
+    directory: z.string().default('.tau/calibration'),
   }),
 
   async getDependencies({ entryPath }, { filesystem, options, signal }) {
     signal.throwIfAborted();
 
-    const path = `${options.directory}/${entryPath.slice(1)}.json`;
+    const path = `${options.directory}/${entryPath}.json`;
     await filesystem.stat(path);
 
     signal.throwIfAborted();

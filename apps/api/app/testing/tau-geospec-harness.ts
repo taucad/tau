@@ -170,7 +170,7 @@ export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Pr
   const failures: TestFailure[] = [];
   const passes: TestPass[] = [];
   for (const entry of [...options.entryPaths].sort()) {
-    const entryPath = entry.startsWith('/') ? entry : `${options.projectPath}/${entry}`;
+    const entryPath = entry;
     // oxlint-disable-next-line no-await-in-loop -- tests must run deterministically in filename order
     const result = await runGeoSpecModule({
       filesystem: options.filesystem,

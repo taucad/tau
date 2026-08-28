@@ -26,7 +26,7 @@ import type { FSWatcher } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { statSync, watch as watchDirectory } from 'node:fs';
 import path from 'node:path';
-import { resolveVirtualPath, VirtualPathError } from '@taucad/utils/path';
+import { assertRootedPath, VirtualPathError } from '@taucad/utils/path';
 
 /**
  * Internal: produce the discriminated `inline`-arm handle backing
@@ -35,9 +35,7 @@ import { resolveVirtualPath, VirtualPathError } from '@taucad/utils/path';
  * targeting the same host directory.
  *
  * @internal
- * @param basePath - Host directory mapped to VFS `/` — kernel paths beginning
- * with `/` resolve under here (POSIX `path.join` would ignore `basePath`
- * otherwise).
+ * @param basePath - Host directory mapped to the runtime filesystem root.
  * @returns Discriminated handle whose `create()` mints a fresh adapter
  * each invocation; the underlying disk is intentionally shared.
  */
@@ -99,17 +97,17 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
     }
   };
 
-  const resolve = async (virtualPath: string): Promise<string> => {
-    const canonicalPath = resolveVirtualPath(virtualPath);
-    const target = path.resolve(absoluteBase, `.${canonicalPath}`);
+  const resolve = async (rootedPath: string): Promise<string> => {
+    const canonicalPath = assertRootedPath(rootedPath);
+    const target = path.resolve(absoluteBase, canonicalPath);
     if (!isContained(absoluteBase, target)) {
-      throw new VirtualPathError('PATH_OUTSIDE_ROOT', virtualPath);
+      throw new VirtualPathError('PATH_OUTSIDE_ROOT', rootedPath);
     }
 
     const [realBase, existingPath] = await Promise.all([realBasePromise, nearestExistingPath(target)]);
     const realExistingPath = await fs.realpath(existingPath);
     if (!isContained(realBase, realExistingPath)) {
-      throw Object.assign(new Error(`ENOENT: no such file or directory: ${virtualPath}`), { code: 'ENOENT' });
+      throw Object.assign(new Error(`ENOENT: no such file or directory: ${rootedPath}`), { code: 'ENOENT' });
     }
     return target;
   };
@@ -218,7 +216,7 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
    * that watcher whose event concerns this entry.
    */
   type WatchEntry = {
-    readonly virtualPath: string;
+    readonly rootedPath: string;
     readonly realPath: string;
     readonly parentDirectory: string;
     watchDirectory: string;
@@ -230,17 +228,17 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
   const openSubscriptions = new Set<() => void>();
 
   /**
-   * The kernel sends exactly one pattern, `/.tau/cache/**`.
+   * The kernel sends exactly one pattern, `.tau/cache/**`.
    * ponytail: prefix-only exclude matching; export `libs/filesystem`'s private
    * `matchesGlob` (`watch-registry.ts:72`) if a caller ever sends a non-prefix glob.
    */
-  const isExcluded = (virtualPath: string, excludes: readonly string[]): boolean =>
+  const isExcluded = (rootedPath: string, excludes: readonly string[]): boolean =>
     excludes.some((pattern) => {
       if (!pattern.endsWith('/**')) {
-        return pattern === virtualPath;
+        return pattern === rootedPath;
       }
       const prefix = pattern.slice(0, -3);
-      return virtualPath === prefix || virtualPath.startsWith(`${prefix}/`);
+      return rootedPath === prefix || rootedPath.startsWith(`${prefix}/`);
     });
 
   /**
@@ -380,9 +378,9 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
           register(entry);
         }
         if (realPathExists(entry.realPath)) {
-          emit({ type: 'change', path: entry.virtualPath });
+          emit({ type: 'change', path: entry.rootedPath });
         } else if (!wasPending) {
-          emit({ type: 'delete', path: entry.virtualPath });
+          emit({ type: 'delete', path: entry.rootedPath });
         }
       }
     }
@@ -405,14 +403,14 @@ function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
       if (isExcluded(requestedPath, excludes)) {
         continue;
       }
-      const virtualPath = resolveVirtualPath(requestedPath);
-      const realPath = path.resolve(absoluteBase, `.${virtualPath}`);
+      const rootedPath = assertRootedPath(requestedPath);
+      const realPath = path.resolve(absoluteBase, rootedPath);
       if (!isContained(absoluteBase, realPath)) {
         throw new VirtualPathError('PATH_OUTSIDE_ROOT', requestedPath);
       }
-      if (!entries.has(virtualPath)) {
-        entries.set(virtualPath, {
-          virtualPath,
+      if (!entries.has(rootedPath)) {
+        entries.set(rootedPath, {
+          rootedPath,
           realPath,
           parentDirectory: path.dirname(realPath),
           watchDirectory: '',

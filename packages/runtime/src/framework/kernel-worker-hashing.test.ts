@@ -37,7 +37,7 @@ class NativeIdentityTestWorker extends MockKernelWorker {
     { entryPath }: GetDependenciesInput,
     _runtime: KernelRuntime,
   ): Promise<GetDependenciesResult> {
-    return { resolved: [entryPath, '/import.mock'], unresolved: [] };
+    return { resolved: [entryPath, 'import.mock'], unresolved: [] };
   }
 
   protected override getActiveKernelVersion(): string {
@@ -130,7 +130,7 @@ describe('kernel-worker hashing', () => {
           middleware,
           onLog: onLog as OnWorkerLog,
           filesystem: createMockFileSystem({
-            readFileResult: (path) => new TextEncoder().encode(path === '/observed.config' ? 'config' : 'source'),
+            readFileResult: (path) => new TextEncoder().encode(path === 'observed.config' ? 'config' : 'source'),
           }),
         });
       const base = createWorker([]);
@@ -164,7 +164,7 @@ describe('kernel-worker hashing', () => {
       }) => {
         const fileBytes = (path: string) =>
           new TextEncoder().encode(
-            path === '/import.mock' ? (options?.imported ?? 'import') : (options?.source ?? 'source'),
+            path === 'import.mock' ? (options?.imported ?? 'import') : (options?.source ?? 'source'),
           );
         const filesystem = createMockFileSystem({ readFileResult: fileBytes });
         filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>

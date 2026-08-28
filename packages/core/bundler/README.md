@@ -31,8 +31,8 @@ npm i @taucad/bundler-core @taucad/runtime
 import { createBundlerSourceHost } from '@taucad/bundler-core';
 
 const host = createBundlerSourceHost({ filesystem });
-const session = host.beginSession({ mode: 'bundle', signal, entryPath: '/main.ts' });
-const resolution = await session.resolve({ specifier: '/main.ts' });
+const session = host.beginSession({ mode: 'bundle', signal, entryPath: 'main.ts' });
+const resolution = await session.resolve({ specifier: 'main.ts' });
 const source = await session.load(resolution);
 const observation = session.complete();
 ```

@@ -19,7 +19,7 @@ describe('MountTable', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
       const result = mountTable.resolve('/some/file.ts');
       expect(result.provider).toBe(rootProvider);
-      expect(result.path).toBe('/some/file.ts');
+      expect(result.path).toBe('some/file.ts');
     });
 
     it('should unmount a provider', () => {
@@ -40,7 +40,7 @@ describe('MountTable', () => {
 
       const result = mountTable.resolve('/node_modules/lodash/index.js');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/lodash/index.js');
+      expect(result.path).toBe('lodash/index.js');
     });
 
     it('should route non-/node_modules/ paths to root provider', () => {
@@ -49,7 +49,7 @@ describe('MountTable', () => {
 
       const result = mountTable.resolve('/src/main.ts');
       expect(result.provider).toBe(rootProvider);
-      expect(result.path).toBe('/src/main.ts');
+      expect(result.path).toBe('src/main.ts');
     });
 
     it('should resolve exact mount prefix path', () => {
@@ -58,7 +58,7 @@ describe('MountTable', () => {
 
       const result = mountTable.resolve('/node_modules');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/');
+      expect(result.path).toBe('');
     });
 
     it('should prefer longer prefix over shorter', async () => {
@@ -69,7 +69,7 @@ describe('MountTable', () => {
 
       const result = mountTable.resolve('/node_modules/@scope/pkg/index.js');
       expect(result.provider).toBe(scopeProvider);
-      expect(result.path).toBe('/pkg/index.js');
+      expect(result.path).toBe('pkg/index.js');
     });
   });
 
@@ -115,14 +115,14 @@ describe('MountTable', () => {
 
       const result = mountTable.resolve('/node_modules/');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/');
+      expect(result.path).toBe('');
     });
 
     it('should handle root path resolution', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
       const result = mountTable.resolve('/');
       expect(result.provider).toBe(rootProvider);
-      expect(result.path).toBe('/');
+      expect(result.path).toBe('');
     });
 
     it('should maintain sorted order after multiple mount/unmount', async () => {
@@ -134,7 +134,7 @@ describe('MountTable', () => {
 
       const result = mountTable.resolve('/a/b/c/file.ts');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/file.ts');
+      expect(result.path).toBe('file.ts');
     });
   });
 
@@ -177,24 +177,24 @@ describe('MountTable', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
       mountTable.mount('/projects/proj_A', nodeModulesProvider, {
         backend: 'opfs',
-        providerBasePath: '/workspace/projects/proj_A',
+        providerBasePath: 'workspace/projects/proj_A',
       });
 
       const result = mountTable.resolve('/projects/proj_A/main.ts');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/workspace/projects/proj_A/main.ts');
+      expect(result.path).toBe('workspace/projects/proj_A/main.ts');
     });
 
     it('should preserve the full path for exact prefix match', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
       mountTable.mount('/projects/proj_A', nodeModulesProvider, {
         backend: 'memory',
-        providerBasePath: '/workspace/projects/proj_A',
+        providerBasePath: 'workspace/projects/proj_A',
       });
 
       const result = mountTable.resolve('/projects/proj_A');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/workspace/projects/proj_A');
+      expect(result.path).toBe('workspace/projects/proj_A');
     });
 
     it('should route relative to provider root by default', () => {
@@ -203,19 +203,19 @@ describe('MountTable', () => {
 
       const result = mountTable.resolve('/node_modules/lodash/index.js');
       expect(result.provider).toBe(nodeModulesProvider);
-      expect(result.path).toBe('/lodash/index.js');
+      expect(result.path).toBe('lodash/index.js');
     });
 
     it('should carry backend metadata with base-path mounts', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
       mountTable.mount('/projects/proj_B', nodeModulesProvider, {
         backend: 'indexeddb',
-        providerBasePath: '/projects/proj_B',
+        providerBasePath: 'projects/proj_B',
       });
 
       const result = mountTable.resolve('/projects/proj_B/src/app.ts');
       expect(result.backend).toBe('indexeddb');
-      expect(result.path).toBe('/projects/proj_B/src/app.ts');
+      expect(result.path).toBe('projects/proj_B/src/app.ts');
     });
   });
 

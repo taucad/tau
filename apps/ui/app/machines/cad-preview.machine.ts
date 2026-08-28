@@ -1,6 +1,5 @@
 import { assign, setup, enqueueActions, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { GeometryFile } from '@taucad/types';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 
@@ -91,14 +90,9 @@ export const cadPreviewMachine = setup({
   },
   actions: {
     initializeCadModel: enqueueActions(({ enqueue, context }) => {
-      const file: GeometryFile = {
-        path: `/projects/${context.projectId}`,
-        filename: context.mainFile,
-      };
-
       enqueue.sendTo(context.cadRef, {
         type: 'initializeModel',
-        file,
+        entryPath: context.mainFile,
         parameters: context.parameters,
       });
     }),

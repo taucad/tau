@@ -135,27 +135,25 @@ describe('FileTreeService workspace path canonicalization', () => {
   });
 
   describe('listDirectory path canonicalization', () => {
-    it('should call readDirectory with the workspace root for every root alias', async () => {
-      const aliases = ['', '.', '/', './', '/projects/abc', '/projects/abc/'];
+    it('should call readDirectory with the workspace root for the canonical root', async () => {
       vi.mocked(harness.proxy.readDirectory).mockResolvedValue([]);
-      for (const alias of aliases) {
-        vi.mocked(harness.proxy.readDirectory).mockClear();
-        harness.tree.reset(workspaceRoot);
-        vi.mocked(harness.proxy.readDirectory).mockResolvedValue([]);
-        // oxlint-disable-next-line no-await-in-loop -- sequential listDirectory avoids race on shared workspace root
-        await harness.tree.listDirectory(alias);
-        expect(harness.proxy.readDirectory).toHaveBeenCalledWith('/projects/abc');
-      }
+      await harness.tree.listDirectory('');
+      expect(harness.proxy.readDirectory).toHaveBeenCalledWith('/projects/abc');
     });
 
-    it('should resolve ./src and /src to the same absolute path under root', async () => {
+    it('should resolve canonical nested paths under the root', async () => {
       vi.mocked(harness.proxy.readDirectory).mockResolvedValue([]);
-      await harness.tree.listDirectory('./src');
+      await harness.tree.listDirectory('src');
       expect(harness.proxy.readDirectory).toHaveBeenLastCalledWith('/projects/abc/src');
-      harness.tree.reset(workspaceRoot);
-      vi.mocked(harness.proxy.readDirectory).mockResolvedValue([]);
-      await harness.tree.listDirectory('/src');
-      expect(harness.proxy.readDirectory).toHaveBeenLastCalledWith('/projects/abc/src');
+    });
+
+    it('should reject non-canonical aliases before calling the proxy', async () => {
+      for (const alias of ['.', '/', './', '/src', '/projects/abc']) {
+        vi.mocked(harness.proxy.readDirectory).mockClear();
+        // oxlint-disable-next-line no-await-in-loop -- each invalid boundary value is verified independently
+        await expect(harness.tree.listDirectory(alias)).rejects.toBeInstanceOf(DirectoryListingFailedError);
+        expect(harness.proxy.readDirectory).not.toHaveBeenCalled();
+      }
     });
 
     it('should reject before calling the proxy when the path escapes the workspace', async () => {
@@ -167,37 +165,37 @@ describe('FileTreeService workspace path canonicalization', () => {
     });
   });
 
-  describe('listDirectory (root aliases vs nested)', () => {
-    it('should call readDirectory with the workspace root for root alias path', async () => {
+  describe('listDirectory (root vs nested)', () => {
+    it('should call readDirectory with the workspace root for the empty root path', async () => {
       vi.mocked(harness.proxy.readDirectory).mockResolvedValue([]);
-      await harness.tree.listDirectory('.');
+      await harness.tree.listDirectory('');
       expect(harness.proxy.readDirectory).toHaveBeenCalledWith('/projects/abc');
     });
 
-    it('should resolve /src under the workspace root', async () => {
+    it('should resolve src under the workspace root', async () => {
       vi.mocked(harness.proxy.readDirectory).mockResolvedValue([]);
-      await harness.tree.listDirectory('/src');
+      await harness.tree.listDirectory('src');
       expect(harness.proxy.readDirectory).toHaveBeenCalledWith('/projects/abc/src');
     });
   });
 
   describe('stat', () => {
-    it('should call stat with the resolved absolute path for /src', async () => {
-      await harness.tree.stat('/src');
+    it('should call stat with the resolved authority path for src', async () => {
+      await harness.tree.stat('src');
       expect(harness.proxy.stat).toHaveBeenCalledWith('/projects/abc/src');
     });
   });
 
   describe('getDirectoryStat', () => {
-    it('should call getDirectoryStat with the workspace root for "."', async () => {
-      await harness.tree.getDirectoryStat('.');
+    it('should call getDirectoryStat with the workspace root for the empty root path', async () => {
+      await harness.tree.getDirectoryStat('');
       expect(harness.proxy.getDirectoryStat).toHaveBeenCalledWith('/projects/abc');
     });
   });
 
   describe('exists', () => {
-    it('should stat the workspace root when checking "."', async () => {
-      await harness.tree.exists('.');
+    it('should stat the workspace root when checking the empty root path', async () => {
+      await harness.tree.exists('');
       expect(harness.proxy.stat).toHaveBeenCalledWith('/projects/abc');
     });
   });
@@ -240,6 +238,8 @@ describe('FileTreeService rooted search and external polling', () => {
     });
 
     tree.startPolling();
+    tree.startPolling();
+    expect(unsubscribe).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(2000);
     expect(proxy.pollExternalChanges).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(10_000);

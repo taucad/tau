@@ -115,7 +115,7 @@ describe('createGeoSpecPoolRunner', () => {
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
     runner.on('forensic', (event) => events.push(event));
 
-    await runner.run({ files: ['/a.geospec.ts'], forensic: true });
+    await runner.run({ files: ['a.geospec.ts'], forensic: true });
     await runner.close();
 
     expect(events).toContainEqual({
@@ -140,10 +140,10 @@ describe('createGeoSpecPoolRunner', () => {
       runner.on(type, (event) => events.push(event));
     }
 
-    const result = await runner.run({ files: ['/b.geospec.ts', '/a.geospec.ts'] });
+    const result = await runner.run({ files: ['b.geospec.ts', 'a.geospec.ts'] });
     await runner.close();
 
-    expect(result.files.map((file) => file.file)).toStrictEqual(['/b.geospec.ts', '/a.geospec.ts']);
+    expect(result.files.map((file) => file.file)).toStrictEqual(['b.geospec.ts', 'a.geospec.ts']);
     expect({ success: result.success, passed: result.passed, selected: result.selectedTests }).toStrictEqual({
       success: true,
       passed: 2,
@@ -162,7 +162,7 @@ describe('createGeoSpecPoolRunner', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(shardMessages).toBe(1);
@@ -172,7 +172,7 @@ describe('createGeoSpecPoolRunner', () => {
 
   it('should split an over-threshold file per test and merge the shards back', async () => {
     const timings = openShardTimings(undefined);
-    timings.record('/slow.geospec.ts', { durationMs: 600_000, peakRssBytes: 0 });
+    timings.record('slow.geospec.ts', { durationMs: 600_000, peakRssBytes: 0 });
     const patterns: Array<string | undefined> = [];
     const worker = scriptedWorker({
       onList: () => ['s > one', 's > two'],
@@ -183,7 +183,7 @@ describe('createGeoSpecPoolRunner', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
 
-    const result = await runner.run({ files: ['/slow.geospec.ts'] });
+    const result = await runner.run({ files: ['slow.geospec.ts'] });
     await runner.close();
 
     expect(patterns).toStrictEqual(['^s > one$', '^s > two$']);
@@ -193,7 +193,7 @@ describe('createGeoSpecPoolRunner', () => {
 
   it('should run a file whole when its collection pass fails', async () => {
     const timings = openShardTimings(undefined);
-    timings.record('/slow.geospec.ts', { durationMs: 600_000, peakRssBytes: 0 });
+    timings.record('slow.geospec.ts', { durationMs: 600_000, peakRssBytes: 0 });
     const patterns: Array<string | undefined> = [];
     const worker = scriptedWorker({
       onList: () => [],
@@ -204,7 +204,7 @@ describe('createGeoSpecPoolRunner', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
 
-    await runner.run({ files: ['/slow.geospec.ts'] });
+    await runner.run({ files: ['slow.geospec.ts'] });
     await runner.close();
 
     expect(patterns).toStrictEqual([undefined]);
@@ -217,10 +217,10 @@ describe('createGeoSpecPoolRunner', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
 
-    await runner.run({ files: ['/a.geospec.ts'] });
+    await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
-    expect(timings.read('/a.geospec.ts')).toStrictEqual({ durationMs: 4321, peakRssBytes: 99 });
+    expect(timings.read('a.geospec.ts')).toStrictEqual({ durationMs: 4321, peakRssBytes: 99 });
   });
 
   it('should follow affinity: a warm worker gets the shard it already loaded', async () => {
@@ -234,10 +234,10 @@ describe('createGeoSpecPoolRunner', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
 
-    await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'] });
+    await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
     await runner.close();
 
-    expect(runs).toStrictEqual(['/a.geospec.ts', '/b.geospec.ts']);
+    expect(runs).toStrictEqual(['a.geospec.ts', 'b.geospec.ts']);
   });
 
   it('should fail the shard when the worker exits unexpectedly', async () => {
@@ -262,7 +262,7 @@ describe('createGeoSpecPoolRunner', () => {
     };
     const runner = createGeoSpecPoolRunner({ createWorker: () => handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(result.success).toBe(false);
@@ -273,7 +273,7 @@ describe('createGeoSpecPoolRunner', () => {
     const worker = scriptedWorker({ onShard: () => undefined });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, shardTimeout: 10 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(worker.terminated()).toBe(true);
@@ -290,10 +290,10 @@ describe('createGeoSpecPoolRunner', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'], bail: true });
+    await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'], bail: true });
     await runner.close();
 
-    expect(seen).toStrictEqual(['/a.geospec.ts']);
+    expect(seen).toStrictEqual(['a.geospec.ts']);
   });
 
   it('should report an abort requested mid-run', async () => {
@@ -307,7 +307,7 @@ describe('createGeoSpecPoolRunner', () => {
     });
     runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
     await runner.close();
 
     expect(result.issues?.[0]?.code).toBe('GEOSPEC_RUNNER_ABORTED');
@@ -320,7 +320,7 @@ describe('createGeoSpecPoolRunner', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(result.issues?.[0]?.code).toBe('NO_MATCHING_GEOSPEC_TESTS');
@@ -332,7 +332,7 @@ describe('createGeoSpecPoolRunner', () => {
     await runner.close();
     await runner.close();
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
 
     expect(result.issues?.[0]?.code).toBe('GEOSPEC_RUNNER_CLOSED');
   });
@@ -341,7 +341,7 @@ describe('createGeoSpecPoolRunner', () => {
     const worker = scriptedWorker({ onShard: (file) => complete({ id: 0, file }, passing(file)) });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    await runner.run({ files: ['/a.geospec.ts'], testNamePattern: /volume/u, testTimeout: 1234 });
+    await runner.run({ files: ['a.geospec.ts'], testNamePattern: /volume/u, testTimeout: 1234 });
     await runner.close();
 
     const dispatched = worker.sent.find((message) => message.type === 'run-shard');
@@ -429,7 +429,7 @@ describe('sanitizePoolResult', () => {
 describe('memory-class scheduling', () => {
   it('should never run two heavy shards at once', async () => {
     const timings = openShardTimings(undefined);
-    for (const file of ['/heavy-a.geospec.ts', '/heavy-b.geospec.ts']) {
+    for (const file of ['heavy-a.geospec.ts', 'heavy-b.geospec.ts']) {
       timings.record(file, { durationMs: 10, peakRssBytes: 4 * 1024 ** 3 });
     }
     let concurrent = 0;
@@ -469,7 +469,7 @@ describe('memory-class scheduling', () => {
     };
     const runner = createGeoSpecPoolRunner({ createWorker: makeWorker, workers: 2, timings });
 
-    const result = await runner.run({ files: ['/heavy-a.geospec.ts', '/heavy-b.geospec.ts'] });
+    const result = await runner.run({ files: ['heavy-a.geospec.ts', 'heavy-b.geospec.ts'] });
     await runner.close();
 
     expect(result.success).toBe(true);
@@ -484,7 +484,7 @@ describe('the remaining refusal legs', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(JSON.stringify(result.files[0]?.result)).toContain('answered a shard with a test list');
@@ -501,7 +501,7 @@ describe('the remaining refusal legs', () => {
     });
     runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
     await runner.close();
 
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted: requested');
@@ -518,7 +518,7 @@ describe('the remaining refusal legs', () => {
     });
     runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
     await runner.close();
 
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted.');
@@ -533,7 +533,7 @@ describe('the worker channel', () => {
     });
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(result.success).toBe(true);
@@ -561,7 +561,7 @@ describe('the worker channel', () => {
     };
     const runner = createGeoSpecPoolRunner({ createWorker: () => handle, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
     await runner.close();
 
     expect(result.files).toHaveLength(2);
@@ -570,7 +570,7 @@ describe('the worker channel', () => {
 
   it('should pass a run-wide test timeout to the collection pass and the shard', async () => {
     const timings = openShardTimings(undefined);
-    timings.record('/slow.geospec.ts', { durationMs: 600_000, peakRssBytes: 0 });
+    timings.record('slow.geospec.ts', { durationMs: 600_000, peakRssBytes: 0 });
     const worker = scriptedWorker({
       onList: () => ['s > one'],
       onShard: (file) => complete({ id: 0, file }, passing(file)),
@@ -578,7 +578,7 @@ describe('the worker channel', () => {
     const runner = createGeoSpecPoolRunner({ createWorker: () => worker.handle, workers: 1, timings });
 
     await runner.run({
-      files: ['/slow.geospec.ts'],
+      files: ['slow.geospec.ts'],
       testTimeout: 7000,
       matcherWallBackstop: 9000,
       forensic: true,

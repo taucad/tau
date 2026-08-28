@@ -96,8 +96,8 @@ describe('WorkspaceFileService', () => {
       directory: string,
       project: ProjectManifest,
     ): Promise<void> => {
-      await provider.mkdir(`/${directory}`);
-      await provider.writeFile(`/${directory}/tau.json`, serializeProjectManifest(projectToManifest(project)));
+      await provider.mkdir(directory);
+      await provider.writeFile(`${directory}/tau.json`, serializeProjectManifest(projectToManifest(project)));
     };
 
     it('discovers valid manifests and applies deterministic duplicate-id ordering', async () => {
@@ -112,8 +112,8 @@ describe('WorkspaceFileService', () => {
 
       const result = await service.listProjectManifests();
       expect(result.entries.map((entry) => [entry.locator.relativeDirectory, entry.status])).toEqual([
-        ['/a-original', 'duplicate-id'],
-        ['/b-copy', 'duplicate-id'],
+        ['a-original', 'duplicate-id'],
+        ['b-copy', 'duplicate-id'],
       ]);
       expect(result.roots).toEqual([{ status: 'complete', root: { backend: 'indexeddb' } }]);
     });
@@ -125,9 +125,9 @@ describe('WorkspaceFileService', () => {
         unknown
       >;
       source['id'] = 'copied-folder';
-      await provider.mkdir('/dropped');
+      await provider.mkdir('dropped');
       const bytes = encoder.encode(JSON.stringify(source));
-      await provider.writeFile('/dropped/tau.json', bytes);
+      await provider.writeFile('dropped/tau.json', bytes);
       await service.configureProjectRoots({
         projects: [],
         roots: [{ backend: 'indexeddb' }],
@@ -137,12 +137,12 @@ describe('WorkspaceFileService', () => {
         entries: [
           {
             status: 'adoption-required',
-            locator: { relativeDirectory: '/dropped' },
+            locator: { relativeDirectory: 'dropped' },
             manifest: { name: 'Dropped' },
           },
         ],
       });
-      expect(await provider.readFile('/dropped/tau.json')).toEqual(bytes);
+      expect(await provider.readFile('dropped/tau.json')).toEqual(bytes);
     });
 
     // R11 — `adoption-required` used to be a dead-end banner.
@@ -156,14 +156,14 @@ describe('WorkspaceFileService', () => {
       };
 
       const writeRaw = async (provider: FileSystemProvider, directory: string, value: unknown): Promise<void> => {
-        await provider.mkdir(`/${directory}`);
-        await provider.writeFile(`/${directory}/tau.json`, encoder.encode(JSON.stringify(value)));
+        await provider.mkdir(directory);
+        await provider.writeFile(`${directory}/tau.json`, encoder.encode(JSON.stringify(value)));
         await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
       };
 
       const locatorFor = async (directory: string) => {
         const { entries } = await service.listProjectManifests();
-        const entry = entries.find((candidate) => candidate.locator.relativeDirectory === `/${directory}`);
+        const entry = entries.find((candidate) => candidate.locator.relativeDirectory === directory);
         if (!entry) {
           throw new Error(`No discovery entry for /${directory}`);
         }
@@ -178,7 +178,7 @@ describe('WorkspaceFileService', () => {
 
         expect(adopted).toEqual({ ...adoptable, id: adopted.id });
         expect(adopted.id).toMatch(/^proj_[\dA-Za-z]{21}$/);
-        expect(await provider.readFile('/dropped/tau.json')).toEqual(serializeProjectManifest(adopted));
+        expect(await provider.readFile('dropped/tau.json')).toEqual(serializeProjectManifest(adopted));
         expect(await service.listProjectManifests()).toMatchObject({
           entries: [{ status: 'valid', manifest: { id: adopted.id, name: 'Dropped' } }],
         });
@@ -191,7 +191,7 @@ describe('WorkspaceFileService', () => {
         const locator = await locatorFor('identified');
 
         await expect(service.adoptProjectDirectory(locator)).rejects.toThrow(TypeError);
-        expect(decoder.decode(await provider.readFile('/identified/tau.json'))).toBe(JSON.stringify(identified));
+        expect(decoder.decode(await provider.readFile('identified/tau.json'))).toBe(JSON.stringify(identified));
       });
 
       it('refuses a manifest whose damage is not confined to its id', async () => {
@@ -201,7 +201,7 @@ describe('WorkspaceFileService', () => {
         const locator = await locatorFor('broken');
 
         await expect(service.adoptProjectDirectory(locator)).rejects.toThrow(TypeError);
-        expect(decoder.decode(await provider.readFile('/broken/tau.json'))).toBe(JSON.stringify(broken));
+        expect(decoder.decode(await provider.readFile('broken/tau.json'))).toBe(JSON.stringify(broken));
       });
     });
 
@@ -211,24 +211,24 @@ describe('WorkspaceFileService', () => {
         ...projectToManifest(manifestProject('proj_ccccccccccccccccccccc')),
         assets: { main: { entryPath: '../escape.ts' } },
       };
-      await provider.mkdir('/unsafe');
-      await provider.writeFile('/unsafe/tau.json', encoder.encode(JSON.stringify(unsafe)));
+      await provider.mkdir('unsafe');
+      await provider.writeFile('unsafe/tau.json', encoder.encode(JSON.stringify(unsafe)));
       const salvaged = {
         ...projectToManifest(manifestProject('proj_ddddddddddddddddddddd')),
         name: 42,
       };
-      await provider.mkdir('/salvaged');
-      await provider.writeFile('/salvaged/tau.json', encoder.encode(JSON.stringify(salvaged)));
+      await provider.mkdir('salvaged');
+      await provider.writeFile('salvaged/tau.json', encoder.encode(JSON.stringify(salvaged)));
       await service.configureProjectRoots({
         projects: [],
         roots: [{ backend: 'indexeddb' }],
       });
 
       const { entries } = await service.listProjectManifests();
-      expect(entries.find((entry) => entry.locator.relativeDirectory === '/unsafe')).toMatchObject({
+      expect(entries.find((entry) => entry.locator.relativeDirectory === 'unsafe')).toMatchObject({
         status: 'invalid',
       });
-      expect(entries.find((entry) => entry.locator.relativeDirectory === '/salvaged')).toMatchObject({
+      expect(entries.find((entry) => entry.locator.relativeDirectory === 'salvaged')).toMatchObject({
         status: 'invalid',
       });
     });
@@ -237,7 +237,7 @@ describe('WorkspaceFileService', () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       const readable = manifestProject('proj_rrrrrrrrrrrrrrrrrrrrr');
       await writeManifest(provider, 'b-readable', readable);
-      await provider.mkdir('/a-unreadable');
+      await provider.mkdir('a-unreadable');
       vi.spyOn(provider, 'readFile').mockRejectedValueOnce(new Error('storage unavailable'));
       await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
 
@@ -245,10 +245,10 @@ describe('WorkspaceFileService', () => {
         entries: [
           {
             status: 'invalid',
-            locator: { relativeDirectory: '/a-unreadable' },
+            locator: { relativeDirectory: 'a-unreadable' },
             issue: { code: 'manifest-unreadable', message: 'storage unavailable' },
           },
-          { status: 'valid', manifest: { id: readable.id }, locator: { relativeDirectory: '/b-readable' } },
+          { status: 'valid', manifest: { id: readable.id }, locator: { relativeDirectory: 'b-readable' } },
         ],
         roots: [{ status: 'complete', root: { backend: 'indexeddb' } }],
       });
@@ -271,9 +271,9 @@ describe('WorkspaceFileService', () => {
       await writeManifest(provider, 'alpha', manifestProject('proj_aaaaaaaaaaaaaaaaaaaaa'));
       await writeManifest(provider, 'beta', manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb'));
       await writeManifest(provider, '.tau', manifestProject('proj_ttttttttttttttttttttt'));
-      await provider.mkdir('/.tau/imports', { recursive: true });
-      await provider.mkdir('/no-manifest');
-      await provider.writeFile('/loose.txt', encoder.encode('loose'));
+      await provider.mkdir('.tau/imports', { recursive: true });
+      await provider.mkdir('no-manifest');
+      await provider.writeFile('loose.txt', encoder.encode('loose'));
       const stat = vi.spyOn(provider, 'stat');
       const readFile = vi.spyOn(provider, 'readFile');
       await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
@@ -281,13 +281,13 @@ describe('WorkspaceFileService', () => {
       const result = await service.listProjectManifests();
 
       expect(result.entries.map((entry) => [entry.locator.relativeDirectory, entry.status])).toEqual([
-        ['/alpha', 'valid'],
-        ['/beta', 'valid'],
+        ['alpha', 'valid'],
+        ['beta', 'valid'],
       ]);
       expect(readFile.mock.calls.map(([path]) => path)).toEqual([
-        '/alpha/tau.json',
-        '/beta/tau.json',
-        '/no-manifest/tau.json',
+        'alpha/tau.json',
+        'beta/tau.json',
+        'no-manifest/tau.json',
       ]);
       expect(stat).not.toHaveBeenCalled();
     });
@@ -318,7 +318,7 @@ describe('WorkspaceFileService', () => {
 
       const result = await service.listProjectManifests();
 
-      expect(result.entries.map((entry) => entry.locator.relativeDirectory)).toEqual(names.map((name) => `/${name}`));
+      expect(result.entries.map((entry) => entry.locator.relativeDirectory)).toEqual(names);
       expect(maxInFlight).toBe(16);
     });
 
@@ -340,7 +340,7 @@ describe('WorkspaceFileService', () => {
           path: '/',
           authority: {
             storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
-            providerBasePath: '/',
+            providerBasePath: '',
           },
         });
         await waitFor(() => refresh.mock.calls.length > 0);
@@ -351,7 +351,7 @@ describe('WorkspaceFileService', () => {
             {
               status: 'valid',
               manifest: { id: project.id },
-              locator: { relativeDirectory: '/out-of-band' },
+              locator: { relativeDirectory: 'out-of-band' },
             },
           ],
         });
@@ -365,7 +365,7 @@ describe('WorkspaceFileService', () => {
 
   describe('permanentlyDeleteProjectDirectory', () => {
     const projectId = 'proj_eeeeeeeeeeeeeeeeeeeee';
-    const directory = '/readable-project';
+    const directory = 'readable-project';
     const scope: StorageRootConfig = { backend: 'indexeddb' };
 
     beforeEach(async () => {
@@ -470,10 +470,11 @@ describe('WorkspaceFileService', () => {
 
     it.each([
       { name: 'an invalid project id', projectId: '../invalid', providerBasePath: directory },
-      { name: 'a non-canonical path', projectId, providerBasePath: '/readable-project/../readable-project' },
+      { name: 'a slash-prefixed path', projectId, providerBasePath: '/readable-project' },
+      { name: 'a non-canonical path', projectId, providerBasePath: 'readable-project/../readable-project' },
       { name: 'a nested project path', projectId, providerBasePath: `${directory}/nested` },
-      { name: 'a workspace-state directory', projectId, providerBasePath: '/.tau' },
-      { name: 'the workspace root itself', projectId, providerBasePath: '/' },
+      { name: 'a workspace-state directory', projectId, providerBasePath: '.tau' },
+      { name: 'the workspace root itself', projectId, providerBasePath: '' },
     ])('rejects $name before provider access', async ({ projectId: inputProjectId, providerBasePath }) => {
       const getProvider = vi.spyOn(providerRegistry, 'getProvider');
 
@@ -605,7 +606,7 @@ describe('WorkspaceFileService', () => {
 
   describe('commitPendingProjectDirectory', () => {
     const projectId = 'proj_ppppppppppppppppppppp';
-    const directory = '/pending-project';
+    const directory = 'pending-project';
     const scope: StorageRootConfig = { backend: 'indexeddb' };
     let commitProvider: FileSystemProvider;
     const mainFile = 'main.ts';
@@ -734,11 +735,15 @@ describe('WorkspaceFileService', () => {
       },
       {
         name: 'a nested target',
-        input: { providerBasePath: '/projects/pending-project' },
+        input: { providerBasePath: 'projects/pending-project' },
       },
       {
         name: 'a workspace-state target',
-        input: { providerBasePath: '/.tau' },
+        input: { providerBasePath: '.tau' },
+      },
+      {
+        name: 'a slash-prefixed target',
+        input: { providerBasePath: '/pending-project' },
       },
       {
         name: 'an absolute journal path',
@@ -1301,7 +1306,7 @@ describe('WorkspaceFileService', () => {
       context.eventBus.subscribe((event) => events.push(event));
       const originalMkdir = context.provider.mkdir.bind(context.provider);
       vi.spyOn(context.provider, 'mkdir').mockImplementationOnce(async () => {
-        await originalMkdir('/partial');
+        await originalMkdir('partial');
         throw new Error('injected recursive mkdir failure');
       });
 
@@ -1309,11 +1314,11 @@ describe('WorkspaceFileService', () => {
         await expect(context.service.mkdir('/partial/nested', { recursive: true })).rejects.toThrow(
           'injected recursive mkdir failure',
         );
-        await expect(context.provider.exists('/partial')).resolves.toBe(true);
+        await expect(context.provider.exists('partial')).resolves.toBe(true);
         expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
         expect(notifyDirectoryChange).toHaveBeenCalledWith('/', {
           storageRootKey: 'memory:0',
-          providerBasePath: '/',
+          providerBasePath: '',
         });
       } finally {
         context.service.dispose();
@@ -1743,13 +1748,11 @@ describe('WorkspaceFileService', () => {
         await expect(context.service.rmdir('/partial', { recursive: true })).rejects.toThrow(
           'injected recursive removal failure',
         );
-        expect(await context.provider.exists('/partial/a.txt')).not.toBe(
-          await context.provider.exists('/partial/b.txt'),
-        );
+        expect(await context.provider.exists('partial/a.txt')).not.toBe(await context.provider.exists('partial/b.txt'));
         expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
         expect(notifyDirectoryChange).toHaveBeenCalledWith('/', {
           storageRootKey: 'memory:0',
-          providerBasePath: '/',
+          providerBasePath: '',
         });
       } finally {
         context.service.dispose();
@@ -1891,13 +1894,13 @@ describe('WorkspaceFileService', () => {
 
         expect(withMutationLocks).toHaveBeenCalledTimes(2);
         expect(withMutationLocks).toHaveBeenCalledWith(
-          [pathA, '/batch', `memory:0:${pathA}`, 'memory:0:/batch'],
-          { type: 'write', path: pathA, authority: { storageRootKey: 'memory:0', providerBasePath: '/' } },
+          [pathA, '/batch', 'memory:0:batch/a.txt', 'memory:0:batch', 'memory:0:'],
+          { type: 'write', path: pathA, authority: { storageRootKey: 'memory:0', providerBasePath: '' } },
           expect.any(Function),
         );
         expect(withMutationLocks).toHaveBeenCalledWith(
-          [pathB, '/batch', `memory:0:${pathB}`, 'memory:0:/batch'],
-          { type: 'write', path: pathB, authority: { storageRootKey: 'memory:0', providerBasePath: '/' } },
+          [pathB, '/batch', 'memory:0:batch/b.txt', 'memory:0:batch', 'memory:0:'],
+          { type: 'write', path: pathB, authority: { storageRootKey: 'memory:0', providerBasePath: '' } },
           expect.any(Function),
         );
       } finally {
@@ -1913,16 +1916,18 @@ describe('WorkspaceFileService', () => {
       const originalWriteFile = context.provider.writeFile.bind(context.provider);
       const failedPath = '/batch/failed.txt';
       const delayedPath = '/batch/delayed.txt';
+      const failedProviderPath = 'batch/failed.txt';
+      const delayedProviderPath = 'batch/delayed.txt';
       let releaseDelayedWrite: (() => void) | undefined;
       const delayedWrite = new Promise<void>((resolve) => {
         releaseDelayedWrite = resolve;
       });
       let delayedWriteStarted = false;
       vi.spyOn(context.provider, 'writeFile').mockImplementation(async (path, data) => {
-        if (path === failedPath) {
+        if (path === failedProviderPath) {
           throw new Error('injected write failure');
         }
-        if (path === delayedPath) {
+        if (path === delayedProviderPath) {
           delayedWriteStarted = true;
           await delayedWrite;
         }
@@ -1956,11 +1961,11 @@ describe('WorkspaceFileService', () => {
         await expect(result).rejects.toThrow('injected write failure');
         await settlementObservation;
 
-        expect(await context.provider.readFile(delayedPath)).toEqual(encoder.encode('completed'));
+        expect(await context.provider.readFile(delayedProviderPath)).toEqual(encoder.encode('completed'));
         expect(events).toContainEqual({ type: 'backendChanged', backend: 'memory' });
         expect(notifyDirectoryChange).toHaveBeenCalledWith('/batch', {
           storageRootKey: 'memory:0',
-          providerBasePath: '/',
+          providerBasePath: '',
         });
       } finally {
         unsubscribe();
@@ -2894,8 +2899,9 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       const writeFile = provider.writeFile.bind(provider);
       const successfulPath = '/ok.txt';
       const failedPath = '/doomed.txt';
+      const failedProviderPath = 'doomed.txt';
       vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
-        if (path === failedPath) {
+        if (path === failedProviderPath) {
           throw new Error('write failed');
         }
         return writeFile(path, data);
@@ -3149,7 +3155,7 @@ describe('flat workspace layout locks', () => {
     context: Awaited<ReturnType<typeof createWorkspaceFileService>>,
   ): Promise<void> => {
     await context.service.configureProjectRoots({
-      projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:0', providerBasePath: '/cube-design' }],
+      projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:0', providerBasePath: 'cube-design' }],
       roots: [],
     });
   };

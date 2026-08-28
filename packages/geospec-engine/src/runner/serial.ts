@@ -24,6 +24,7 @@ import { runGeoSpecModule } from 'geospec/runner';
 import type { GeoSpecModuleBundleCache } from 'geospec/runner';
 import { getGeoSpecEngineProtocol } from 'geospec/engine';
 import { createNoMatchingGeoSpecTestsIssue } from 'geospec/runner/worker';
+import { assertRootedPath } from '@taucad/runtime/kernel';
 import type {
   GeoSpecRunner,
   GeoSpecRunnerOptions,
@@ -249,7 +250,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
       }
       delete state.aborted;
 
-      const files = [...runOptions.files];
+      const files = runOptions.files.map(assertRootedPath);
       const runStartedAt = performance.now();
       events.emit({ type: 'run-start', files });
 

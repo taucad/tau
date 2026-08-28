@@ -30,8 +30,8 @@ vi.mock('#machines/file-manager.worker.js?worker', () => ({
     public removeEventListener = vi.fn((type: string, handler: (event: Event) => void) => {
       this.listeners.get(type)?.delete(handler);
     });
-    private readonly listeners = new Map<string, Set<(event: Event) => void>>();
     public readonly options: { name?: string } | undefined;
+    private readonly listeners = new Map<string, Set<(event: Event) => void>>();
     public constructor(options?: { name?: string }) {
       this.options = options;
       workerTestState.instances.push(this);
@@ -93,6 +93,12 @@ const mockGetWorkspace =
       workspaceId: string,
     ) => Promise<{ workspace: { workspaceId: string; name: string }; handle: FileSystemDirectoryHandle } | undefined>
   >();
+const mockGetWorkspaceMetadata =
+  vi.fn<
+    (
+      workspaceId: string,
+    ) => Promise<{ workspaceId: string; name: string; lastConnectedAt: number; slug: string } | undefined>
+  >();
 const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
 const mockSetProjectFileSystemConfig =
   vi.fn<(config: { projectId: string; backend: 'webaccess'; workspaceId: string }) => Promise<void>>();
@@ -103,6 +109,7 @@ vi.mock('#filesystem/handle-store.js', () => ({
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),
+  getWorkspaceMetadata: async (...args: unknown[]) => mockGetWorkspaceMetadata(...(args as [string])),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
   checkHandlePermission: async () => mockCheckHandlePermission(),
   createWorkspace: vi.fn(),
@@ -118,6 +125,7 @@ describe('fileManagerMachine', () => {
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
     mockGetWorkspace.mockResolvedValue(undefined);
+    mockGetWorkspaceMetadata.mockResolvedValue(undefined);
     mockCheckHandlePermission.mockResolvedValue('granted');
     mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
@@ -553,7 +561,7 @@ describe('fileManagerMachine', () => {
           {
             projectId: 'test-id',
             backend: 'indexeddb',
-            providerBasePath: '/test-id',
+            providerBasePath: 'test-id',
           },
         ],
         roots: [{ backend: 'indexeddb' }],
@@ -803,6 +811,41 @@ describe('fileManagerMachine', () => {
       const snapshot = actor.getSnapshot();
       expect(snapshot.context.unavailableReason).toBe('missing');
       expect(snapshot.context.activeWorkspaceId).toBe('wsp_gone');
+      expect(mockMount).not.toHaveBeenCalled();
+      actor.stop();
+    });
+
+    it('retains known workspace identity when its handle is disconnected', async () => {
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-disconnected',
+        backend: 'webaccess',
+        workspaceId: 'wsp_disconnected',
+      });
+      mockGetWorkspace.mockResolvedValue(undefined);
+      mockGetWorkspaceMetadata.mockResolvedValue({
+        workspaceId: 'wsp_disconnected',
+        name: 'Disconnected Workspace',
+        lastConnectedAt: 1,
+        slug: 'disconnected-workspace',
+      });
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-disconnected',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-disconnected',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('webAccessUnavailable');
+      });
+
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.context.unavailableReason).toBe('disconnected');
+      expect(snapshot.context.activeWorkspaceId).toBe('wsp_disconnected');
+      expect(snapshot.context.activeWorkspaceName).toBe('Disconnected Workspace');
       expect(mockMount).not.toHaveBeenCalled();
       actor.stop();
     });

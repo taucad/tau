@@ -18,6 +18,7 @@ import { Queue } from '#lib/kcl-language/lsp/codec/queue.js';
 import { StreamDemuxer } from '#lib/kcl-language/lsp/codec/stream-demuxer.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
 import { lspWorkerEventType, kclWorkerType } from '#lib/kcl-language/lsp/kcl-lsp-types.js';
+import { kclUriToWorkspacePath } from '#lib/kcl-language/kcl-register-paths.js';
 import type {
   KclLspWorkerOptions,
   LspWorkerEvent,
@@ -170,9 +171,7 @@ function initLanguageFsBridge(init: KclLspWorkerOptions): void {
   languageFs = attachLanguageFsClient({
     filePoolBuffer: init.filePoolBuffer,
     absolutePathForUri(uri: string): string {
-      const fsPath = URI.parse(uri).path;
-      const relative = fsPath.startsWith('/') ? fsPath.slice(1) : fsPath;
-      return joinPath(workerFsState.workspaceRootPath, relative);
+      return joinPath(workerFsState.workspaceRootPath, kclUriToWorkspacePath(uri));
     },
     sendJsonRpc: async (payload) => {
       return new Promise<JSONRPCResponse>((resolve, reject) => {

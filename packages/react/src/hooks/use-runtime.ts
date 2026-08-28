@@ -456,7 +456,7 @@ const getRuntimeSourceInputError = (source: unknown): Error | undefined => {
  *
  * const { geometry, status, error } = useRuntime({
  *   clientOptions: { transport },
- *   source: { files: { '/main.ts': code } },
+ *   source: { files: { 'main.ts': code } },
  *   initialParameters: { height: 20 },
  * });
  *

@@ -107,11 +107,11 @@ export const createClientForFs = (alreadyConfinedVirtualFs: FsLike) => {
 };
 ```
 
-For a raw Node filesystem, use `fromNodeFs('/path/to/project')`; that adapter maps the selected host directory to virtual `/` and enforces lexical and symlink containment at the adapter boundary.
+For a raw Node filesystem, use `fromNodeFs('/path/to/project')`; that adapter maps root-relative runtime paths into the selected host directory and enforces lexical and symlink containment at the adapter boundary.
 
 ### 5. Use fromBrowserFs for a Browser Directory
 
-Use `fromBrowserFs` when the user grants a `FileSystemDirectoryHandle`. The selected handle becomes runtime `/`; runtime `/main.ts` refers to `main.ts` beneath that handle and never to the host operating system's root:
+Use `fromBrowserFs` when the user grants a `FileSystemDirectoryHandle`. The selected handle becomes the runtime root; runtime `main.ts` refers to `main.ts` beneath that handle and never to a host operating system path:
 
 ```typescript
 import { fromBrowserFs } from '@taucad/runtime/filesystem/browser';
@@ -141,13 +141,13 @@ The framework uses three related filesystem types:
 | `readdirStat`     | `(dirPath) => Promise<FileStatEntry[]>`            | `readdir` + `stat` per entry                 |
 | `ensureDir`       | `(path) => Promise<void>`                          | `mkdir(path, { recursive: true })`           |
 
-Every method accepts a [runtime path](../concepts/path-namespaces) within the supplied filesystem. For a project-rooted filesystem, `/main.ts`, `/.tau/cache`, and `/node_modules` are local to that project; the leading slash is not the host OS root. The worker owns the helper implementations so a backend cannot bypass path canonicalization with an override.
+Every method accepts a canonical root-relative [runtime path](../concepts/path-namespaces) within the supplied filesystem. For a project-rooted filesystem, `main.ts`, `.tau/cache`, and `node_modules` are local to that project; `''` represents the supplied root. The worker owns the helper implementations so a backend cannot bypass path validation with an override.
 
-The rooted filesystem preserves the exact local paths carried by concrete create, change, delete, and rename events, independent of backing-filesystem case behavior. Only explicit information-loss signals such as reset, overflow, stale-root detection, backend replacement, or an irreducibly summarized change trigger broad recovery. Runtime never invents lowercase or Unicode equivalence. Concrete `/.tau/cache/**` events are excluded, while `/node_modules/**` remains observable because package files may be live bundle inputs. A rare out-of-band case-only or Unicode-equivalent edit on a Web Access root may require a refresh or project reopen.
+The rooted filesystem preserves the exact local paths carried by concrete create, change, delete, and rename events, independent of backing-filesystem case behavior. Only explicit information-loss signals such as reset, overflow, stale-root detection, backend replacement, or an irreducibly summarized change trigger broad recovery. Runtime never invents lowercase or Unicode equivalence. Concrete `.tau/cache/**` events are excluded, while `node_modules/**` remains observable because package files may be live bundle inputs. A rare out-of-band case-only or Unicode-equivalent edit on a Web Access root may require a refresh or project reopen.
 
 `fromNodeFs` is watch-capable: it opens one non-recursive `fs.watch` on the parent directory of each path in the kernel's dependency set, filters events by filename against that set, and classifies each hit by `stat`. A Node- or Electron-hosted runtime therefore rerenders autonomously when something outside the runtime edits a dependency.
 
-Watcherless adapters (`fromMemoryFs`, `fromBrowserFs`, and arbitrary `fromFsLike`) do not fabricate subscriptions. Each explicit source-bearing render/export operation rereads its current filesystem snapshot while keeping kernel initialization and persistent `/.tau/cache` entries reusable. Autonomous rerendering requires a real watch-capable filesystem.
+Watcherless adapters (`fromMemoryFs`, `fromBrowserFs`, and arbitrary `fromFsLike`) do not fabricate subscriptions. Each explicit source-bearing render/export operation rereads its current filesystem snapshot while keeping kernel initialization and persistent `.tau/cache` entries reusable. Autonomous rerendering requires a real watch-capable filesystem.
 
 ### 7. Use Filesystem Bridges for Cross-Worker Communication
 
@@ -186,7 +186,7 @@ Call `dispose()` on either handle when the bridge is no longer needed.
 
 - [Use Middleware](./using-middleware) -- Caching middleware requires a writable filesystem
 - [Worker Model](../concepts/worker-model) -- How the filesystem is bridged to the worker
-- [Path Namespaces](../concepts/path-namespaces) -- What runtime `/` means for each adapter
+- [Path Namespaces](../concepts/path-namespaces) -- How each adapter establishes the runtime root
 - [API Reference: Filesystem](../api/filesystem) -- Full filesystem API reference
 - [API Reference: Client](../api/client) -- createRuntimeClient filesystem option
 - [RPC Wire Spec](https://github.com/taucad/tau/blob/main/docs/architecture/rpc-wire-spec.md) -- Low-level protocol reference for custom transport authors

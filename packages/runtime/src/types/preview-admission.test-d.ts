@@ -25,11 +25,11 @@ describe('preview admission type surface', () => {
      * three required parameters), so pin the admission parameter itself. */
     expectTypeOf<Parameters<RuntimeWorkerClient['openFile']>[2]>().toEqualTypeOf<RuntimePreviewIdentity>();
     // @ts-expect-error -- admission identity is mandatory
-    client.openFile({ path: '/', filename: 'main.ts' }, {}, undefined);
+    client.openFile({ path: '', filename: 'main.ts' }, {}, undefined);
     // @ts-expect-error -- admission identity is mandatory
-    client.openFile({ path: '/', filename: 'main.ts' });
+    client.openFile({ path: '', filename: 'main.ts' });
     // @ts-expect-error -- admission identity is mandatory
-    client.stageAndOpenFile({ stage: {}, file: { path: '/', filename: 'main.ts' } });
+    client.stageAndOpenFile({ stage: {}, file: { path: '', filename: 'main.ts' } });
     // @ts-expect-error -- admission identity is mandatory
     client.updateParameters({});
     // @ts-expect-error -- admission identity is mandatory

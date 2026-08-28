@@ -40,7 +40,7 @@ const TimeoutRuntimeHarness = (): ReactElement => {
       activeClient.current = client;
       try {
         try {
-          await client.render({ source: { path: '/blocking.block' } });
+          await client.render({ source: { path: 'blocking.block' } });
           throw new Error('The blocking render unexpectedly settled.');
         } catch (error) {
           if (!isRenderTimeoutError(error)) {
@@ -50,7 +50,7 @@ const TimeoutRuntimeHarness = (): ReactElement => {
 
         setPhase('render timed out');
         try {
-          await client.render({ source: { path: '/main.ts' } });
+          await client.render({ source: { path: 'main.ts' } });
           throw new Error('The timed-out runtime unexpectedly accepted another render.');
         } catch (error) {
           if (!isRuntimeTerminatedError(error) || error.causeKind !== 'render-timeout') {

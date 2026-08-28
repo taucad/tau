@@ -1,4 +1,4 @@
-export const mainFile = '/main.ts';
+export const mainFile = 'main.ts';
 
 export const cylinderSource = `
 import { makeCylinder } from 'replicad';

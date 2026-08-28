@@ -11,7 +11,7 @@ const encoder = new TextEncoder();
  */
 class TestProvider extends AbstractFileSystemProvider {
   private readonly _files = new Map<string, Uint8Array<ArrayBuffer>>();
-  private readonly _dirs = new Set<string>(['/']);
+  private readonly _dirs = new Set<string>(['']);
 
   public get id(): string {
     return 'test';
@@ -26,7 +26,7 @@ class TestProvider extends AbstractFileSystemProvider {
   }
 
   public async readdir(path: string): Promise<string[]> {
-    const prefix = path === '/' ? '/' : `${path}/`;
+    const prefix = path === '' ? '' : `${path}/`;
     const entries = new Set<string>();
 
     for (const filePath of this._files.keys()) {
@@ -104,7 +104,8 @@ class TestProvider extends AbstractFileSystemProvider {
       (error as NodeJS.ErrnoException).code = 'EEXIST';
       throw error;
     }
-    const parent = path.slice(0, path.lastIndexOf('/')) || '/';
+    const separator = path.lastIndexOf('/');
+    const parent = separator === -1 ? '' : path.slice(0, separator);
     if (!this._dirs.has(parent)) {
       const error = new Error(`ENOENT: parent '${parent}' does not exist`);
       (error as NodeJS.ErrnoException).code = 'ENOENT';
@@ -127,24 +128,24 @@ describe('AbstractFileSystemProvider', () => {
 
   describe('exists', () => {
     it('should return true for an existing file', async () => {
-      await provider.writeFile('/exists.txt', 'yes');
-      expect(await provider.exists('/exists.txt')).toBe(true);
+      await provider.writeFile('exists.txt', 'yes');
+      expect(await provider.exists('exists.txt')).toBe(true);
     });
 
     it('should return false for a non-existent path', async () => {
-      expect(await provider.exists('/nothing')).toBe(false);
+      expect(await provider.exists('nothing')).toBe(false);
     });
 
     it('should return true for an existing directory', async () => {
-      await provider.mkdir('/dir');
-      expect(await provider.exists('/dir')).toBe(true);
+      await provider.mkdir('dir');
+      expect(await provider.exists('dir')).toBe(true);
     });
 
     it('should propagate permission and I/O errors instead of reporting absence', async () => {
       vi.spyOn(provider, 'stat').mockRejectedValueOnce(
         Object.assign(new Error('permission denied'), { code: 'EACCES' }),
       );
-      await expect(provider.exists('/uncertain')).rejects.toMatchObject({ code: 'EACCES' });
+      await expect(provider.exists('uncertain')).rejects.toMatchObject({ code: 'EACCES' });
     });
   });
 
@@ -154,20 +155,20 @@ describe('AbstractFileSystemProvider', () => {
 
   describe('lstat', () => {
     it('should return file stats matching stat output', async () => {
-      await provider.writeFile('/lstat.txt', 'data');
-      const stats = await provider.lstat('/lstat.txt');
+      await provider.writeFile('lstat.txt', 'data');
+      const stats = await provider.lstat('lstat.txt');
       expect(stats.type).toBe('file');
       expect(stats.size).toBe(4);
     });
 
     it('should return directory stats matching stat output', async () => {
-      await provider.mkdir('/lstat-dir');
-      const stats = await provider.lstat('/lstat-dir');
+      await provider.mkdir('lstat-dir');
+      const stats = await provider.lstat('lstat-dir');
       expect(stats.type).toBe('dir');
     });
 
     it('should throw for non-existent path', async () => {
-      await expect(provider.lstat('/missing')).rejects.toThrow('ENOENT');
+      await expect(provider.lstat('missing')).rejects.toThrow('ENOENT');
     });
   });
 
@@ -177,24 +178,24 @@ describe('AbstractFileSystemProvider', () => {
 
   describe('readFile with encoding', () => {
     it('should decode raw bytes as utf8 when encoding is specified', async () => {
-      await provider.writeFile('/encoded.txt', encoder.encode('hello world'));
-      const text = await provider.readFile('/encoded.txt', 'utf8');
+      await provider.writeFile('encoded.txt', encoder.encode('hello world'));
+      const text = await provider.readFile('encoded.txt', 'utf8');
       expect(text).toBe('hello world');
     });
 
     it('should return raw Uint8Array when no encoding specified', async () => {
-      await provider.writeFile('/raw.txt', 'hello');
-      const result = await provider.readFile('/raw.txt');
+      await provider.writeFile('raw.txt', 'hello');
+      const result = await provider.readFile('raw.txt');
       expect(result).toBeInstanceOf(Uint8Array);
       expect(new TextDecoder().decode(result)).toBe('hello');
     });
 
     it('should throw for non-existent file', async () => {
-      await expect(provider.readFile('/missing.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.readFile('missing.txt')).rejects.toThrow('ENOENT');
     });
 
     it('should throw for non-existent file with encoding', async () => {
-      await expect(provider.readFile('/missing.txt', 'utf8')).rejects.toThrow('ENOENT');
+      await expect(provider.readFile('missing.txt', 'utf8')).rejects.toThrow('ENOENT');
     });
   });
 
@@ -204,29 +205,29 @@ describe('AbstractFileSystemProvider', () => {
 
   describe('mkdir', () => {
     it('should create a single directory', async () => {
-      await provider.mkdir('/newdir');
-      const stats = await provider.stat('/newdir');
+      await provider.mkdir('newdir');
+      const stats = await provider.stat('newdir');
       expect(stats.type).toBe('dir');
     });
 
     it('should create nested directories with recursive option', async () => {
-      await provider.mkdir('/a/b/c', { recursive: true });
-      expect(await provider.exists('/a')).toBe(true);
-      expect(await provider.exists('/a/b')).toBe(true);
-      expect(await provider.exists('/a/b/c')).toBe(true);
-      const stats = await provider.stat('/a/b/c');
+      await provider.mkdir('a/b/c', { recursive: true });
+      expect(await provider.exists('a')).toBe(true);
+      expect(await provider.exists('a/b')).toBe(true);
+      expect(await provider.exists('a/b/c')).toBe(true);
+      const stats = await provider.stat('a/b/c');
       expect(stats.type).toBe('dir');
     });
 
     it('should succeed when intermediate directories already exist', async () => {
-      await provider.mkdir('/x');
-      await provider.mkdir('/x/y/z', { recursive: true });
-      const stats = await provider.stat('/x/y/z');
+      await provider.mkdir('x');
+      await provider.mkdir('x/y/z', { recursive: true });
+      const stats = await provider.stat('x/y/z');
       expect(stats.type).toBe('dir');
     });
 
     it('should throw when parent does not exist without recursive', async () => {
-      await expect(provider.mkdir('/no/parent')).rejects.toThrow('ENOENT');
+      await expect(provider.mkdir('no/parent')).rejects.toThrow('ENOENT');
     });
   });
 
@@ -236,9 +237,9 @@ describe('AbstractFileSystemProvider', () => {
 
   describe('dispose', () => {
     it('should not throw and leave previously written data accessible', async () => {
-      await provider.writeFile('/lifecycle.txt', 'data');
+      await provider.writeFile('lifecycle.txt', 'data');
       provider.dispose();
-      const content = await provider.readFile('/lifecycle.txt', 'utf8');
+      const content = await provider.readFile('lifecycle.txt', 'utf8');
       expect(content).toBe('data');
     });
   });

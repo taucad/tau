@@ -14,27 +14,14 @@ export class VirtualPathError extends Error {
   }
 }
 
-/**
- * Resolve an untrusted absolute POSIX path inside a virtual filesystem root.
- *
- * Unlike the permissive display/path-formatting helpers below, this is a
- * filesystem authority boundary. It rejects host-platform path forms and any
- * traversal that would escape virtual `/`.
- *
- * @param input - Candidate absolute virtual path.
- * @returns One canonical absolute POSIX path.
- * @throws {@link VirtualPathError} When the path is invalid or escapes `/`.
- * @public
- */
-export function resolveVirtualPath(input: string): string {
+const uriSchemePattern = /^[A-Za-z][A-Za-z0-9+.-]*:/u;
+
+const assertPortablePathCharacters = (input: string, errorInput = input): void => {
   const invalid = (): never => {
-    throw new VirtualPathError('INVALID_PATH', input);
+    throw new VirtualPathError('INVALID_PATH', errorInput);
   };
 
-  if (input.length === 0 || !input.startsWith('/') || input.startsWith('//') || input.includes('\\')) {
-    return invalid();
-  }
-  if (input.slice(0, 5).toLowerCase() === 'file:' || /(?:^|\/)[A-Za-z]:(?:\/|$)/u.test(input)) {
+  if (input.includes('\\') || uriSchemePattern.test(input)) {
     return invalid();
   }
   for (const character of input) {
@@ -43,6 +30,77 @@ export function resolveVirtualPath(input: string): string {
       return invalid();
     }
   }
+};
+
+/**
+ * Resolve an untrusted path inside an already-selected filesystem capability.
+ *
+ * The capability supplies the root. Its root is represented by `''`; descendants
+ * are normalized POSIX segment sequences without a leading slash.
+ *
+ * @param input - Candidate capability-local path.
+ * @returns The canonical root-relative path.
+ * @throws {@link VirtualPathError} When the path is invalid or escapes the supplied root.
+ * @public
+ */
+export function resolveRootedPath(input: string): string {
+  if (input.startsWith('/')) {
+    throw new VirtualPathError('INVALID_PATH', input);
+  }
+  assertPortablePathCharacters(input);
+
+  const segments: string[] = [];
+  for (const segment of input.split('/')) {
+    if (segment.length === 0 || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      if (segments.pop() === undefined) {
+        throw new VirtualPathError('PATH_OUTSIDE_ROOT', input);
+      }
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.join('/');
+}
+
+/**
+ * Require a capability-local path to already use Tau's canonical rooted spelling.
+ *
+ * @param input - Candidate canonical rooted path.
+ * @returns `input` unchanged when canonical.
+ * @throws {@link VirtualPathError} When invalid, escaping, or noncanonical.
+ * @public
+ */
+export function assertRootedPath(input: string): string {
+  if (resolveRootedPath(input) !== input) {
+    throw new VirtualPathError('INVALID_PATH', input);
+  }
+  return input;
+}
+
+/**
+ * Resolve an untrusted absolute POSIX path in Tau's global filesystem authority.
+ *
+ * Unlike the permissive display/path-formatting helpers below, this is a
+ * authority-router boundary. It rejects host-platform path forms and any
+ * traversal that would escape authority root `/`.
+ *
+ * @param input - Candidate absolute virtual path.
+ * @returns One canonical absolute POSIX path.
+ * @throws {@link VirtualPathError} When the path is invalid or escapes `/`.
+ * @public
+ */
+export function resolveAuthorityPath(input: string): string {
+  const invalid = (): never => {
+    throw new VirtualPathError('INVALID_PATH', input);
+  };
+
+  if (input.length === 0 || !input.startsWith('/') || input.startsWith('//')) {
+    return invalid();
+  }
+  assertPortablePathCharacters(input.slice(1), input);
 
   const segments: string[] = [];
   for (const segment of input.split('/')) {

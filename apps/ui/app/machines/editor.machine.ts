@@ -2,6 +2,7 @@ import { assign, assertEvent, setup, enqueueActions, raise } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { assertRootedPath, resolveRootedPath } from '@taucad/utils/path';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { PartialDeep } from 'type-fest';
 import type { SerializedDockview } from 'dockview-react';
@@ -28,6 +29,23 @@ import { createSourceModelInteractionUnitId } from '#machines/model-interaction.
 import { mergePanelState } from '#utils/panel-state.utils.js';
 
 const maxOpenFiles = 200;
+
+const repairPersistedOpenFiles = (files: readonly OpenFile[], activePaneId: string | undefined): OpenFile[] => {
+  const byPath = new Map<string, OpenFile>();
+  for (const file of files) {
+    try {
+      const candidate = file.path.startsWith('/') && !file.path.startsWith('//') ? file.path.slice(1) : file.path;
+      const repaired = { ...file, path: resolveRootedPath(candidate) };
+      const existing = byPath.get(repaired.path);
+      if (!existing || repaired.paneId === activePaneId) {
+        byPath.set(repaired.path, repaired);
+      }
+    } catch {
+      // Ignore malformed persisted tabs; they cannot identify a project file.
+    }
+  }
+  return [...byPath.values()];
+};
 
 /**
  * Mint a fresh stable editor pane id.
@@ -427,9 +445,9 @@ export const editorMachine = setup({
         needsModelComponentDisplayMigration = false;
       }
 
-      const openFiles: OpenFile[] = [...(loadedState?.openFiles ?? [])];
-      const knownPaneIds = new Set<string>(openFiles.map((f) => f.paneId));
       const persistedActivePaneId = loadedState?.activePaneId;
+      const openFiles = repairPersistedOpenFiles(loadedState?.openFiles ?? [], persistedActivePaneId);
+      const knownPaneIds = new Set<string>(openFiles.map((f) => f.paneId));
       const resolvedActivePaneId =
         persistedActivePaneId !== undefined && knownPaneIds.has(persistedActivePaneId)
           ? persistedActivePaneId
@@ -471,6 +489,7 @@ export const editorMachine = setup({
 
     stashPendingOpenAndEmitOpening: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'openFile');
+      assertRootedPath(event.path);
       enqueue.assign({
         pendingOpenFile: {
           path: event.path,
@@ -537,6 +556,7 @@ export const editorMachine = setup({
     // ============================================================================
     openFile: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'openFile');
+      assertRootedPath(event.path);
 
       const now = Date.now();
       const existingFile = context.openFiles.find((f) => f.path === event.path);
@@ -850,6 +870,7 @@ export const editorMachine = setup({
     },
     shouldDeferOpenFile({ context, event }) {
       assertEvent(event, 'openFile');
+      assertRootedPath(event.path);
       if (context.pendingOpenFile !== undefined) {
         return false;
       }

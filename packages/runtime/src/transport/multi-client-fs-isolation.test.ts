@@ -37,7 +37,7 @@ describe('multi-client filesystem isolation (spec/instance harmonisation)', () =
      * one plugin instance to two materialisations — the realistic
      * shape consumers hit when they declare module-level options and
      * render multiple components against it. */
-    const mainPath = '/main.ts';
+    const mainPath = 'main.ts';
     const seedSource = 'export default () => "seed";';
     const seedFs = fromMemoryFs({ [mainPath]: seedSource });
     const plugin = inProcessTransport({ runtime, fileSystem: seedFs });

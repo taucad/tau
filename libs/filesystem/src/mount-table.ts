@@ -15,7 +15,7 @@ import type {
   ProjectManifestParseIssue,
 } from '@taucad/types';
 import type { FileSystemProvider } from '#types.js';
-import { resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 
 /**
  * Common option fields shared by every {@link MountConfig} variant.
@@ -23,8 +23,8 @@ import { resolveVirtualPath } from '@taucad/utils/path';
  */
 export type MountConfigCommon = {
   /**
-   * Absolute provider-relative directory represented by the mount prefix.
-   * Defaults to `/` for a provider rooted at the mount itself.
+   * Root-relative provider directory represented by the mount prefix.
+   * Defaults to `''` for a provider rooted at the mount itself.
    */
   readonly providerBasePath?: string;
 };
@@ -56,13 +56,30 @@ export type MountConfig =
 
 /**
  * Cloneable persisted route from a virtual project id to a physical root directory.
+ * WebAccess handles live once in {@link ProjectRootConfiguration.roots}; project
+ * routes reference that root by `workspaceId` instead of cloning the same native
+ * handle once per project.
  * @public
  */
-export type ProjectRootConfig = MountConfig & {
-  readonly projectId: string;
-  /** Physical project directory: an immediate, non-dot-prefixed child of the workspace root (`/<slug>`). */
-  readonly providerBasePath: string;
-};
+export type ProjectRootConfig =
+  | {
+      readonly projectId: string;
+      readonly backend: 'webaccess';
+      readonly workspaceId: string;
+      /** Physical project directory: an immediate, non-dot-prefixed child of the workspace root (`<slug>`). */
+      readonly providerBasePath: string;
+    }
+  | {
+      readonly projectId: string;
+      readonly backend: 'indexeddb' | 'opfs';
+      readonly providerBasePath: string;
+    }
+  | {
+      readonly projectId: string;
+      readonly backend: 'memory';
+      readonly storageRootKey: string;
+      readonly providerBasePath: string;
+    };
 
 /**
  * Physical root scanned for project manifests, independent of existing project routes.
@@ -86,7 +103,7 @@ export type ProjectRootConfiguration = {
 
 /**
  * Stable locator for a discovered project directory. `relativeDirectory` is the
- * physical directory relative to the workspace root (`/<slug>`), never the
+ * physical directory relative to the workspace root (`<slug>`), never the
  * logical `/projects/<projectId>` route.
  * @public
  */
@@ -230,7 +247,7 @@ export type MountEntry = {
  */
 export type MountResolution = {
   readonly provider: FileSystemProvider;
-  /** Path relative to the mount point (always starts with `/`). */
+  /** Root-relative path inside the selected provider. */
   readonly path: string;
   /** Backend type of the matching mount. */
   readonly backend: FileSystemBackend;
@@ -256,7 +273,7 @@ export type MountResolution = {
  * table.mount('/node_modules', opfsProvider, { backend: 'opfs' });
  *
  * const { provider, path } = table.resolve('/node_modules/lodash/index.js');
- * // provider === opfsProvider, path === '/lodash/index.js'
+ * // provider === opfsProvider, path === 'lodash/index.js'
  * ```
  */
 export class MountTable {
@@ -279,7 +296,7 @@ export class MountTable {
       this._mounts.splice(existingIndex, 1);
     }
 
-    const providerBasePath = this._normalizePrefix(config.providerBasePath ?? '/');
+    const providerBasePath = assertRootedPath(config.providerBasePath ?? '');
     this._mounts.push({
       prefix: normalized,
       provider,
@@ -311,13 +328,14 @@ export class MountTable {
    * @throws When no mount matches the path.
    */
   public resolve(absolutePath: string): MountResolution {
-    const normalized = resolveVirtualPath(absolutePath);
+    const normalized = resolveAuthorityPath(absolutePath);
 
     for (const entry of this._mounts) {
       if (entry.prefix === '/') {
+        const suffix = normalized === '/' ? '' : normalized.slice(1);
         return {
           provider: entry.provider,
-          path: this._resolveProviderPath(entry.providerBasePath, normalized),
+          path: this._resolveProviderPath(entry.providerBasePath, suffix),
           backend: entry.backend,
           entry,
         };
@@ -333,7 +351,7 @@ export class MountTable {
       }
 
       if (normalized.startsWith(entry.prefix + '/')) {
-        const suffix = normalized.slice(entry.prefix.length);
+        const suffix = normalized.slice(entry.prefix.length + 1);
         const resolvedPath = this._resolveProviderPath(entry.providerBasePath, suffix);
         return { provider: entry.provider, path: resolvedPath, backend: entry.backend, entry };
       }
@@ -395,16 +413,10 @@ export class MountTable {
   }
 
   private _resolveProviderPath(basePath: string, suffix: string): string {
-    if (basePath === '/') {
-      return suffix || '/';
-    }
-    if (!suffix || suffix === '/') {
-      return basePath;
-    }
-    return resolveVirtualPath(`${basePath}${suffix}`);
+    return assertRootedPath(joinRelativePath(basePath, suffix));
   }
 
   private _normalizePrefix(prefix: string): string {
-    return resolveVirtualPath(prefix);
+    return resolveAuthorityPath(prefix);
   }
 }

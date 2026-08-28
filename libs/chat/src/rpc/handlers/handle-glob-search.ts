@@ -1,7 +1,7 @@
 import type { GlobSearchRpcInput, GlobSearchRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
-import { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
+import { assertRootedPath } from '@taucad/utils/path';
 import type { FileContentMetadata } from '@taucad/types';
 import { joinRelativePath } from '@taucad/utils/path';
 
@@ -55,7 +55,7 @@ export async function handleGlobSearch(
   fileSystem: RpcFileSystem,
 ): Promise<GlobSearchRpcResult> {
   try {
-    const basePath = resolveRpcProjectPath(input.path ?? '');
+    const basePath = assertRootedPath(input.path ?? '');
     const allEntries = await collectFileEntries(fileSystem, basePath);
 
     const { minimatch } = await import('minimatch');

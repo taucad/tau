@@ -23,7 +23,9 @@ describe('file-manager.worker api-extractor import boundary', () => {
     expect(workerSource).not.toContain('FileSystemAccessProvider');
     expect(workerSource).not.toContain('navigator.storage.getDirectory');
     expect(workerSource).toContain('providerRegistry.getProvider(rootScope)');
-    expect(workerSource).toContain("fileService.mount('/node_modules', { backend: 'opfs'");
+    expect(workerSource).toContain(
+      "fileService.mount('/node_modules', { backend: 'opfs', providerBasePath: 'tau-node-modules' })",
+    );
   });
 
   // R3 — `/` is Home's root, so it must follow the profile's engine pin

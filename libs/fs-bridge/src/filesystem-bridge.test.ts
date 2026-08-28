@@ -193,7 +193,7 @@ describe('bindMutationContextForPort', () => {
       const wrapper = bindMutationContextForPort(handlers, mutationContext);
       const input: Parameters<typeof wrapper.commitPendingProjectDirectory>[0] = {
         projectId: 'proj_ppppppppppppppppppppp',
-        providerBasePath: '/pending',
+        providerBasePath: 'pending',
         scope: { backend: 'memory', storageRootKey: 'memory:0' },
         files: { 'main.ts': { content: new Uint8Array([1]) } },
         manifest: new Uint8Array([2]),
@@ -398,7 +398,7 @@ describe('createFileSystemBridgeProxy', () => {
       },
     });
 
-    await expect(proxy.writeFile('/main.ts', 42 as unknown as string)).rejects.toThrow(/server-call-args 'writeFile'/);
+    await expect(proxy.writeFile('main.ts', 42 as unknown as string)).rejects.toThrow(/server-call-args 'writeFile'/);
     expect(writeFile).not.toHaveBeenCalled();
     proxy.dispose();
   });
@@ -420,7 +420,7 @@ describe('createFileSystemBridgeProxy', () => {
       },
     });
 
-    await expect(proxy.exists('/main.ts')).rejects.toMatchObject({
+    await expect(proxy.exists('main.ts')).rejects.toMatchObject({
       name: 'WireValidationError',
       site: 'client-call-result',
       entry: 'exists',
@@ -476,7 +476,7 @@ describe('createFileSystemBridgeProxy', () => {
     await expect(
       proxy.permanentlyDeleteProjectDirectory({
         projectId: 'proj_000000000000000000000',
-        providerBasePath: '/project',
+        providerBasePath: 'project',
         scope: { backend: 'indexeddb' },
       }),
     ).rejects.toMatchObject({
@@ -529,7 +529,7 @@ describe('createFileSystemBridgeProxy', () => {
       },
     });
 
-    await expect(proxy.canDelete('/main.ts')).rejects.toMatchObject({
+    await expect(proxy.canDelete('main.ts')).rejects.toMatchObject({
       name: 'WireValidationError',
       site: 'client-call-result',
       entry: 'canDelete',
@@ -588,7 +588,7 @@ describe('createFileSystemBridgeProxy', () => {
     });
     const handler = vi.fn();
 
-    const subscription = proxy.watchReady({ paths: ['/main.ts'] }, handler);
+    const subscription = proxy.watchReady({ paths: ['main.ts'] }, handler);
     await subscription.ready;
     await expect(subscription.closed).rejects.toMatchObject({
       name: 'WireValidationError',
@@ -636,7 +636,7 @@ describe('createFileSystemBridgeProxy', () => {
 
     try {
       const pending = proxy.commitPendingProjectDirectory({
-        providerBasePath: '/pending',
+        providerBasePath: 'pending',
         scope: { backend: 'indexeddb' },
         files: { 'main.ts': { content } },
         manifest,
@@ -752,7 +752,7 @@ describe('exposeFileSystem coalesced delivery', () => {
       );
     }
     const client = createTransferredFileSystemBridgeProxy(channel.port2);
-    const watch = client.watchReady({ paths: ['/main.ts'] }, vi.fn());
+    const watch = client.watchReady({ paths: ['main.ts'] }, vi.fn());
     await watch.ready;
     expect(handle.activePorts.size).toBe(1);
 
@@ -1075,7 +1075,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
 
   it('declares read bytes on the response transfer list instead of cloning them', async () => {
     const provider = new MemoryProvider();
-    await provider.writeFile('/data.bin', new Uint8Array([4, 5, 6]));
+    await provider.writeFile('data.bin', new Uint8Array([4, 5, 6]));
     const channel = new MessageChannel();
     const posted: Array<{ frame: unknown; transfer: readonly Transferable[] | undefined }> = [];
     const postMessage = channel.port1.postMessage.bind(channel.port1);
@@ -1095,7 +1095,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     const client = createBridgeCall(fsBridgePort(channel.port2, 'fs-bridge-transfer-list-client'));
 
     try {
-      await expect(client.call('readFile', ['/data.bin'])).resolves.toEqual(new Uint8Array([4, 5, 6]));
+      await expect(client.call('readFile', ['data.bin'])).resolves.toEqual(new Uint8Array([4, 5, 6]));
 
       const responses = posted.filter(({ frame }) => (frame as { k?: string }).k === 'rs');
       expect(responses).toHaveLength(1);
@@ -1111,7 +1111,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
 
   it('transfers provider-owned reads without detaching authoritative bytes', async () => {
     const provider = new MemoryProvider();
-    await provider.writeFile('/data.bin', new Uint8Array([1, 2, 3]));
+    await provider.writeFile('data.bin', new Uint8Array([1, 2, 3]));
     const handle = exposeFileSystem({ readFile: provider.readFile.bind(provider) });
     const channel = new MessageChannel();
     messageHandlers[0]!(
@@ -1122,9 +1122,9 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     const client = createBridgeCall(fsBridgePort(channel.port2, 'fs-bridge-owned-read-client'));
 
     try {
-      await expect(client.call('readFile', ['/data.bin'])).resolves.toEqual(new Uint8Array([1, 2, 3]));
-      await expect(client.call('readFile', ['/data.bin'])).resolves.toEqual(new Uint8Array([1, 2, 3]));
-      await expect(provider.readFile('/data.bin')).resolves.toEqual(new Uint8Array([1, 2, 3]));
+      await expect(client.call('readFile', ['data.bin'])).resolves.toEqual(new Uint8Array([1, 2, 3]));
+      await expect(client.call('readFile', ['data.bin'])).resolves.toEqual(new Uint8Array([1, 2, 3]));
+      await expect(provider.readFile('data.bin')).resolves.toEqual(new Uint8Array([1, 2, 3]));
     } finally {
       client.dispose();
       handle.cleanup();
@@ -1205,7 +1205,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
         {
           projectId,
           ...oldScope,
-          providerBasePath: `/${projectId}`,
+          providerBasePath: projectId,
         },
       ],
       roots: [],
@@ -1220,7 +1220,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       await originalWrite(path, data);
     });
     const rooted = service.createRootedFileSystem(`/projects/${projectId}`);
-    const queuedWrite = rooted.writeFile('/queued.txt', 'old provider');
+    const queuedWrite = rooted.writeFile('queued.txt', 'old provider');
     await started.promise;
     await service.configureProjectRoots({
       projects: [
@@ -1228,7 +1228,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
           projectId,
           backend: 'memory',
           storageRootKey: 'memory:bridge-stale-new',
-          providerBasePath: `/${projectId}`,
+          providerBasePath: projectId,
         },
       ],
       roots: [],
@@ -1253,7 +1253,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
       });
 
       expect(received).toEqual([]);
-      await expect(oldProvider.readFile(`/${projectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
+      await expect(oldProvider.readFile(`${projectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
       await expect(service.exists(`/projects/${projectId}/queued.txt`)).resolves.toBe(false);
     } finally {
       release.resolve();
@@ -1289,13 +1289,13 @@ describe('exposeFileSystem skip-originator dispatch', () => {
           projectId: alphaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:bridge-alpha',
-          providerBasePath: `/${alphaProjectId}`,
+          providerBasePath: alphaProjectId,
         },
         {
           projectId: betaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:bridge-beta',
-          providerBasePath: `/${betaProjectId}`,
+          providerBasePath: betaProjectId,
         },
       ],
       roots: [],
@@ -1320,19 +1320,19 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     const globalEvents: unknown[] = [];
     const stopBroadcast = alpha.listen('fileChanged', (event) => globalEvents.push(event));
     const watchEvents: WatchEvent[] = [];
-    const stopWatch = alpha.watch({ paths: ['/'], recursive: true }, (event) => watchEvents.push(event));
+    const stopWatch = alpha.watch({ paths: [''], recursive: true }, (event) => watchEvents.push(event));
 
     try {
-      await alpha.writeFile('/same.ts', 'alpha');
-      await beta.writeFile('/same.ts', 'beta');
+      await alpha.writeFile('same.ts', 'alpha');
+      await beta.writeFile('same.ts', 'beta');
       await service.writeFile(`/projects/${alphaProjectId}/external.ts`, 'external');
 
-      await expect(alpha.readFile('/same.ts', 'utf8')).resolves.toBe('alpha');
-      await expect(beta.readFile('/same.ts', 'utf8')).resolves.toBe('beta');
+      await expect(alpha.readFile('same.ts', 'utf8')).resolves.toBe('alpha');
+      await expect(beta.readFile('same.ts', 'utf8')).resolves.toBe('beta');
       await vi.waitFor(() => {
-        expect(watchEvents).toContainEqual({ type: 'change', path: '/external.ts' });
+        expect(watchEvents).toContainEqual({ type: 'change', path: 'external.ts' });
       });
-      expect(watchEvents).not.toContainEqual({ type: 'change', path: '/same.ts' });
+      expect(watchEvents).not.toContainEqual({ type: 'change', path: 'same.ts' });
       expect(globalEvents).toEqual([]);
       expect(handlerForRoot).toHaveBeenCalledTimes(2);
       expect(handlerForRoot.mock.calls[0]?.[0]).toBe(`/projects/${alphaProjectId}`);
@@ -1369,7 +1369,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
         watchable: false,
         error: { code: 'ROOT_UNAVAILABLE' },
       });
-      await expect(proxy.readFile('/main.ts')).rejects.toMatchObject({
+      await expect(proxy.readFile('main.ts')).rejects.toMatchObject({
         code: 'ROOT_UNAVAILABLE',
         message: 'The requested filesystem root is unavailable.',
       });

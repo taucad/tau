@@ -38,15 +38,14 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 
 ## API
 
-| Export                    | Kind               | Use                                                                                |
-| ------------------------- | ------------------ | ---------------------------------------------------------------------------------- |
-| `middleware`              | toolkit factory    | package-named authoring factory; presets select capabilities                       |
-| `plugin`                  | toolkit factory    | the same factory under its mechanical name, for loaders that read a fixed key      |
-| `parameterFileResolver`   | middleware factory | loads `<parameters>/<entry>.json` beside a model and merges it into the parameters |
-| `parameterCache`          | middleware factory | caches `getParameters` on the runtime's dependency hash                            |
-| `geometryCache`           | middleware factory | content-addressable cache over `createGeometry` results                            |
-| `gltfCoordinateTransform` | middleware factory | Y-up/metres to Z-up/millimetres, vertices and node TRS alike                       |
-| `gltfEdgeDetection`       | middleware factory | adds CAD edge overlay primitives to triangle meshes                                |
+| Export                  | Kind               | Use                                                                                |
+| ----------------------- | ------------------ | ---------------------------------------------------------------------------------- |
+| `middleware`            | toolkit factory    | package-named authoring factory; presets select capabilities                       |
+| `plugin`                | toolkit factory    | the same factory under its mechanical name, for loaders that read a fixed key      |
+| `parameterFileResolver` | middleware factory | loads `<parameters>/<entry>.json` beside a model and merges it into the parameters |
+| `parameterCache`        | middleware factory | caches `getParameters` on the runtime's dependency hash                            |
+| `geometryCache`         | middleware factory | content-addressable cache over `createGeometry` results                            |
+| `gltfEdgeDetection`     | middleware factory | adds CAD edge overlay primitives to triangle meshes                                |
 
 Two presets: `default` selects all five in that order; `cache` selects `parameterCache` followed by
 `geometryCache`.

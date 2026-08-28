@@ -1,5 +1,6 @@
 import { transformMesh } from '@gltf-transform/functions';
 import type { mat4, vec4, Document } from '@gltf-transform/core';
+import { resolveCoordinateTransform } from '@taucad/spatial';
 
 /**
  * Shared gltf-transform utilities for applying coordinate system and scaling transformations.
@@ -59,7 +60,11 @@ function conjugateQuaternionBy(r: Quat, q: Quat): Quat {
  * gltf-transform matrix for Y-up to Z-up coordinate transformation
  * Matrix layout: column-major format (gltf-transform standard)
  */
-const gltfCoordinateTransformMatrix: mat4 = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1];
+const gltfWorld = { up: '+y', forward: '+z', metersPerUnit: 1 } as const;
+const tauWorld = { up: '+z', forward: '-y', metersPerUnit: 1 } as const;
+const gltfCoordinateTransformMatrix: mat4 = [
+  ...resolveCoordinateTransform({ source: gltfWorld, target: tauWorld }).matrix,
+];
 
 /** Quaternion for +90° rotation around X (Y-up → Z-up) */
 const coordinateQuat: Quat = [Math.SQRT2 / 2, 0, 0, Math.SQRT2 / 2];
@@ -73,7 +78,9 @@ const gltfScalingMatrix: mat4 = [1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1000, 0, 0,
  * Gltf-transform matrix for Z-up to Y-up coordinate transformation (reverse of Y-up to Z-up)
  * Matrix layout: column-major format (gltf-transform standard)
  */
-const gltfReverseCoordinateTransformMatrix: mat4 = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
+const gltfReverseCoordinateTransformMatrix: mat4 = [
+  ...resolveCoordinateTransform({ source: tauWorld, target: gltfWorld }).matrix,
+];
 
 /** Quaternion for −90° rotation around X (Z-up → Y-up) */
 const reverseCoordinateQuat: Quat = invertUnitQuaternion(coordinateQuat);

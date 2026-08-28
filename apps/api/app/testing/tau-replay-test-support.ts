@@ -103,18 +103,18 @@ export const imagesStub: RpcImageClient = {
   },
 };
 
-/** Seed the initial (empty) project the recorded chat started from. Paths are project-root-absolute. */
+/** Seed the initial (empty) project the recorded chat started from using rooted paths. */
 export const seedCubeProject = async (testApp: TestApp): Promise<void> => {
-  await testApp.memFs.writeFile('/tau.json', JSON.stringify({ name: 'Cube Cylinder Cutout' }));
-  await testApp.memFs.writeFile('/package.json', '{ "type": "module" }\n');
-  await testApp.memFs.writeFile('/main.scad', '');
+  await testApp.memFs.writeFile('tau.json', JSON.stringify({ name: 'Cube Cylinder Cutout' }));
+  await testApp.memFs.writeFile('package.json', '{ "type": "module" }\n');
+  await testApp.memFs.writeFile('main.scad', '');
 };
 
 /** Seed the empty ESM JSCAD project used by the composite replay. */
 export const seedCompositeProject = async (testApp: TestApp): Promise<void> => {
-  await testApp.memFs.writeFile('/tau.json', JSON.stringify({ name: 'Planetary Gear System' }));
-  await testApp.memFs.writeFile('/package.json', '{ "type": "module" }\n');
-  await testApp.memFs.writeFile('/main.ts', '');
+  await testApp.memFs.writeFile('tau.json', JSON.stringify({ name: 'Planetary Gear System' }));
+  await testApp.memFs.writeFile('package.json', '{ "type": "module" }\n');
+  await testApp.memFs.writeFile('main.ts', '');
 };
 
 export const postCubeChat = async (testApp: TestApp, chatId: string): Promise<Response> =>

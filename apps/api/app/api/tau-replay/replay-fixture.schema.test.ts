@@ -11,12 +11,12 @@ describe('replayFixtureSchema', () => {
   it('should accept the bundled composite planetary-gear fixture', () => {
     expect(() => replayFixtureSchema.parse(planetaryGearCompositeFixture)).not.toThrow();
     expect(planetaryGearCompositeFixture.turns[2]?.toolCalls).toEqual([
-      { name: 'get_kernel_result', args: { targetFile: '/main.ts' } },
-      { name: 'get_kernel_result', args: { targetFile: '/lib/planetaryGear.ts' } },
+      { name: 'get_kernel_result', args: { targetFile: 'main.ts' } },
+      { name: 'get_kernel_result', args: { targetFile: 'lib/planetaryGear.ts' } },
     ]);
     expect(planetaryGearCompositeFixture.turns[3]?.toolCalls).toEqual([{ name: 'test_model', args: {} }]);
     expect(planetaryGearCompositeFixture.turns[4]?.toolCalls).toEqual([
-      { name: 'screenshot', args: { mode: 'multi_angle', targetFile: '/main.ts' } },
+      { name: 'screenshot', args: { mode: 'multi_angle', targetFile: 'main.ts' } },
     ]);
   });
 

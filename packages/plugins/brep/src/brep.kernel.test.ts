@@ -26,7 +26,7 @@ describe('brepKernel', () => {
     runtime.filesystem.mocks.stat.mockResolvedValueOnce({ type: 'file', size: bytes.length, mtimeMs: 0 });
     runtime.filesystem.mocks.readFile.mockResolvedValue(bytes);
 
-    const result = await definition.createGeometry({ entryPath: `/${name}`, parameters: {} }, runtime, context);
+    const result = await definition.createGeometry({ entryPath: name, parameters: {} }, runtime, context);
     expect(result.geometry?.format).toBe('gltf');
     if (result.geometry?.format === 'gltf') {
       validateGlbData(result.geometry.content);

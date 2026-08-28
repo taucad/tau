@@ -29,7 +29,7 @@ describe('lsp-fs-sync-host', () => {
     expect(init?.filePoolBuffer).toBe(filePoolBuffer);
     expect(postMessage).toHaveBeenCalledOnce();
     const [payload, transfer] = postMessage.mock.calls[0] as [unknown, Transferable[]];
-    expect(payload).toMatchObject({ type: 'languageFsSyncAttach' });
+    expect(payload).toMatchObject({ type: 'languageFsSyncAttach', rootDirectory: '/projects/abc' });
     expect(transfer).toHaveLength(1);
   });
 

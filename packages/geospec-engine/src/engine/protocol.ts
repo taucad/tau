@@ -362,7 +362,7 @@ const initializeResult = (engineVersion: string): GeoSpecInitializeResult => ({
     'analyzeMeshOverlap',
   ].map((name) => ({ name, registryVersion: geoSpecMatcherRegistryVersion })),
   provenance: {
-    license: 'FSL-1.1-Apache-2.0',
+    license: 'FSL-1.1-ALv2',
     licenseConversionDate: '2028-08-10',
   },
 });

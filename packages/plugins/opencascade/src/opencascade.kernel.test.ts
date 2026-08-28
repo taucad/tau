@@ -152,8 +152,7 @@ const runtime = defineRuntime({
 
 type GeometryFile = ReturnType<typeof createGeometryFile>;
 
-const sourcePath = (file: GeometryFile): string =>
-  file.path === '/' ? file.filename : `${file.path}/${file.filename}`;
+const sourcePath = (file: GeometryFile): string => (file.path === '' ? file.filename : `${file.path}/${file.filename}`);
 
 // =============================================================================
 // All tests share a single worker to avoid Embind type registry conflicts

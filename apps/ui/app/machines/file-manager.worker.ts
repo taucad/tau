@@ -110,7 +110,7 @@ self.addEventListener('unhandledrejection', (event) => {
 
 async function createNodeModulesMount(): Promise<void> {
   try {
-    await fileService.mount('/node_modules', { backend: 'opfs', providerBasePath: '/tau-node-modules' });
+    await fileService.mount('/node_modules', { backend: 'opfs', providerBasePath: 'tau-node-modules' });
     console.debug('[FM-Worker] /node_modules mounted on OPFS');
   } catch (error) {
     console.warn('[FM-Worker] Failed to mount OPFS /node_modules, falling through to root', error);
@@ -203,6 +203,7 @@ self.addEventListener(
       port?: MessagePort;
       slotSab?: SharedArrayBuffer;
       arenaSab?: SharedArrayBuffer;
+      rootDirectory?: string;
     }>,
   ) => {
     const { data } = event;
@@ -216,22 +217,24 @@ self.addEventListener(
       data.type === 'languageFsSyncAttach' &&
       data.port instanceof MessagePort &&
       data.slotSab instanceof SharedArrayBuffer &&
-      data.arenaSab instanceof SharedArrayBuffer
+      data.arenaSab instanceof SharedArrayBuffer &&
+      typeof data.rootDirectory === 'string'
     ) {
       languageFsSyncDispose?.dispose();
+      const rootedFileSystem = fileService.createRootedFileSystem(data.rootDirectory);
       const workspace: SyncFsWorkspaceAdapter = {
         readFileBytes: async (path) => {
-          const bytes = await fileService.readFile(path);
+          const bytes = await rootedFileSystem.readFile(path);
           if (typeof bytes === 'string') {
             return new TextEncoder().encode(bytes);
           }
           return bytes;
         },
         stat: async (path) => {
-          const stat = await fileService.stat(path);
+          const stat = await rootedFileSystem.stat(path);
           return { mtimeMs: stat.mtimeMs, isDirectory: stat.type === 'dir' };
         },
-        listDirectories: async (path) => listWorkspaceDirectories(fileService, path),
+        listDirectories: async (path) => listWorkspaceDirectories(rootedFileSystem, path),
       };
       languageFsSyncDispose = attachSyncFsServer({
         port: data.port,

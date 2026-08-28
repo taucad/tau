@@ -54,28 +54,26 @@ describe('createSyncFsClient', () => {
 
   it('round-trips readFile, listDirectories, and statMtimeVersion via Tier 2 (worker + Atomics.wait)', async () => {
     const root = '/root';
-    const nestedDeepAbs = joinPath(root, 'nested/deep.ts');
-
     const { port1, port2 } = new MessageChannel();
     const slotSab = new SharedArrayBuffer(16);
     const arenaSab = new SharedArrayBuffer(512);
 
     const workspace = {
       readFileBytes: async (path: string) => {
-        expect(path).toBe(nestedDeepAbs);
+        expect(path).toBe('nested/deep.ts');
         return new TextEncoder().encode('export const ok = true;');
       },
       stat: async (path: string) => {
-        if (path === nestedDeepAbs) {
+        if (path === 'nested/deep.ts') {
           return { mtimeMs: 4242, isDirectory: false };
         }
-        if (path === joinPath(root, 'nested')) {
+        if (path === 'nested') {
           return { mtimeMs: 1, isDirectory: true };
         }
         throw Object.assign(new Error('missing'), { code: 'ENOENT' });
       },
       listDirectories: async (path: string) => {
-        expect(path).toBe(joinPath(root, 'nested'));
+        expect(path).toBe('nested');
         return ['deep.ts', 'other.ts'];
       },
     };
@@ -116,29 +114,26 @@ describe('createSyncFsClient', () => {
 
   it('decodes slot-tier payloads from SharedArrayBuffer arena without probe exception', async () => {
     const root = '/root';
-    const fileAbs = joinPath(root, 'lib/a.ts');
-    const directoryAbs = joinPath(root, 'lib');
-
     const { port1, port2 } = new MessageChannel();
     const slotSab = new SharedArrayBuffer(16);
     const arenaSab = new SharedArrayBuffer(512);
 
     const workspace = {
       readFileBytes: async (path: string) => {
-        expect(path).toBe(fileAbs);
+        expect(path).toBe('lib/a.ts');
         return new TextEncoder().encode('export const x = 1;');
       },
       stat: async (path: string) => {
-        if (path === fileAbs) {
+        if (path === 'lib/a.ts') {
           return { mtimeMs: 99, isDirectory: false };
         }
-        if (path === directoryAbs) {
+        if (path === 'lib') {
           return { mtimeMs: 1, isDirectory: true };
         }
         throw Object.assign(new Error('missing'), { code: 'ENOENT' });
       },
       listDirectories: async (path: string) => {
-        expect(path).toBe(directoryAbs);
+        expect(path).toBe('lib');
         return ['a.ts'];
       },
     };

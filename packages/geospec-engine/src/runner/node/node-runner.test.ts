@@ -48,10 +48,10 @@ describe('createGeoSpecNodeRunner', () => {
   it('should execute a file serially', async () => {
     const runner = createGeoSpecNodeRunner({
       projectPath: '/project',
-      filesystem: memoryFileSystem({ '/a.geospec.ts': passingSpec('node') }),
+      filesystem: memoryFileSystem({ 'a.geospec.ts': passingSpec('node') }),
     });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(result.success).toBe(true);
@@ -163,7 +163,7 @@ describe('createGeoSpecNodePoolRunner', () => {
       },
       { timeout: 30_000 },
     );
-    handle.postMessage({ type: 'run-shard', shard: { id: 1, file: '/a.geospec.ts' } });
+    handle.postMessage({ type: 'run-shard', shard: { id: 1, file: 'a.geospec.ts' } });
     await vi.waitFor(
       () => {
         expect(messages).toHaveLength(2);
@@ -172,7 +172,7 @@ describe('createGeoSpecNodePoolRunner', () => {
     );
     await handle.terminate();
 
-    expect(messages[1]).toMatchObject({ type: 'shard-complete', shardId: 1, file: '/a.geospec.ts' });
+    expect(messages[1]).toMatchObject({ type: 'shard-complete', shardId: 1, file: 'a.geospec.ts' });
   });
 
   it('should run STEP-backed GeoSpec files in four real worker isolates', async () => {
@@ -265,7 +265,7 @@ describe('createGeoSpecNodePoolRunner', () => {
     try {
       const { createGeoSpecNodePoolRunner: createMockedRunner } = await import('#runner/node/node-runner.js');
       const runner = createMockedRunner({ projectPath: '/project', workers: 4, cache: false });
-      const result = await runner.run({ files: ['/a.ts', '/b.ts', '/c.ts', '/d.ts'] });
+      const result = await runner.run({ files: ['a.ts', 'b.ts', 'c.ts', 'd.ts'] });
       await runner.close();
 
       expect(result.success).toBe(true);
@@ -340,7 +340,7 @@ describe('createGeoSpecNodePoolRunner', () => {
         cache: false,
         cacheDirectory: undefined,
       });
-      const result = await runner.run({ files: ['/a.geospec.ts'] });
+      const result = await runner.run({ files: ['a.geospec.ts'] });
       expect(result.success).toBe(true);
       await runner.close();
       const cached = createMockedRunner({
@@ -348,7 +348,7 @@ describe('createGeoSpecNodePoolRunner', () => {
         workers: 1,
         cacheDirectory: '/tmp/geospec-node-runner-cache',
       });
-      const cachedResult = await cached.run({ files: ['/b.geospec.ts'] });
+      const cachedResult = await cached.run({ files: ['b.geospec.ts'] });
       expect(cachedResult.success).toBe(true);
       await cached.close();
       expect(received).toHaveLength(2);

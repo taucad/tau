@@ -9,7 +9,7 @@
  */
 
 import { parsePackage, CDN_URLS } from 'cdn-resolve';
-import { parentDirectory, resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath, resolveRootedPath, resolveAuthorityPath } from '@taucad/utils/path';
 
 // =============================================================================
 // Types
@@ -27,9 +27,8 @@ export type PackageInfo = {
 // =============================================================================
 
 /**
- * Root directory for the CDN module cache in the virtual filesystem.
- * Lives at the root of the project-local filesystem capability. Persistence and
- * sharing are properties of the filesystem supplied by the host.
+ * Authority-global root for the CDN module cache mount.
+ * Rooted project capabilities project this mount as `node_modules/...`.
  */
 const nodeModulesRoot = '/node_modules';
 
@@ -249,18 +248,19 @@ export function parsePackageSpecifier(specifier: string): PackageInfo {
  * Resolve a relative import path against the importing file's directory.
  *
  * @param specifier - The relative import (e.g., './utils.ts', '../helpers.ts')
- * @param fromPath - Absolute path of the importing file
- * @returns Resolved absolute path
+ * @param fromPath - Canonical rooted path of the importing file.
+ * @returns Resolved root-relative path.
  * @public
  */
 export function resolveImportPath(specifier: string, fromPath: string): string {
-  const importer = resolveVirtualPath(fromPath);
+  const importer = assertRootedPath(fromPath);
   if (specifier.startsWith('/')) {
-    return resolveVirtualPath(specifier);
+    return resolveRootedPath(specifier.slice(1));
   }
   if (specifier.startsWith('./') || specifier.startsWith('../')) {
-    const directory = parentDirectory(importer);
-    return resolveVirtualPath(`${directory === '/' ? '' : directory}/${specifier}`);
+    const separator = importer.lastIndexOf('/');
+    const directory = separator === -1 ? '' : importer.slice(0, separator);
+    return resolveRootedPath(`${directory ? `${directory}/` : ''}${specifier}`);
   }
   return specifier;
 }
@@ -273,7 +273,7 @@ export function resolveImportPath(specifier: string, fromPath: string): string {
  * Get the root-level node_modules directory path for a package.
  *
  * @param packageName - Package name (e.g., 'lodash', '@jscad/modeling')
- * @returns Absolute path (e.g., '/node_modules/lodash')
+ * @returns Authority-global path (for example, `/node_modules/lodash`).
  * @public
  */
 export function getNodeModulesPath(packageName: string): string {
@@ -282,21 +282,22 @@ export function getNodeModulesPath(packageName: string): string {
 }
 
 /**
- * Whether a virtual-filesystem path points into the CDN module cache (the
- * root-level `/node_modules/` mount populated by {@link getCdnCachePath}).
+ * Whether an authority-global filesystem path points into the CDN module cache
+ * (`/node_modules/`, populated by {@link getCdnCachePath}).
  *
  * Callers use this to separate externally-sourced modules — tracked via asset
  * hashes — from genuine project files, without hard-coding the mount path. A
  * project file may still be an absolute path (when imported from outside its
- * project root), so an absolute path alone does not imply an external module.
+ * project root), so authority membership—not the slash alone—identifies an
+ * external module.
  *
- * @param path - Absolute virtual-filesystem path to classify.
+ * @param path - Authority-global filesystem path to classify.
  * @returns `true` when the path lives under the CDN cache root.
  * @public
  */
 export function isNodeModulesPath(path: string): boolean {
   try {
-    const canonical = resolveVirtualPath(path);
+    const canonical = resolveAuthorityPath(path);
     return canonical === nodeModulesRoot || canonical.startsWith(`${nodeModulesRoot}/`);
   } catch {
     return false;
@@ -308,7 +309,7 @@ export function isNodeModulesPath(path: string): boolean {
  *
  * @param packageName - Package name (e.g., 'lodash')
  * @param subpath - Optional subpath (e.g., 'debounce')
- * @returns Absolute file path:
+ * @returns Authority-global file path:
  *   - No subpath: '/node_modules/lodash/index.js'
  *   - With subpath: '/node_modules/lodash/debounce.js'
  * @public
@@ -366,7 +367,7 @@ const validatePackageSubpath = (subpath: string): void => {
 };
 
 const assertNodeModulesPath = (path: string): string => {
-  const canonical = resolveVirtualPath(path);
+  const canonical = resolveAuthorityPath(path);
   if (!isNodeModulesPath(canonical)) {
     throw new TypeError(`Package cache path escaped ${nodeModulesRoot}: ${JSON.stringify(path)}`);
   }

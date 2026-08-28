@@ -25,7 +25,7 @@ import { traceCacheOperation } from '#_internal/cache-span.js';
  * @returns The full path to the cache file
  */
 function getCachePath(cacheKey: string): string {
-  return `/.tau/cache/parameters/${cacheKey}.json`;
+  return `.tau/cache/parameters/${cacheKey}.json`;
 }
 
 /**
@@ -33,7 +33,7 @@ function getCachePath(cacheKey: string): string {
  *
  * @returns The full path to the cache directory
  */
-const cacheDirectory = '/.tau/cache/parameters';
+const cacheDirectory = '.tau/cache/parameters';
 const parameterCacheOptionsSchema = z.object({
   maxEntries: z.number().default(100),
   /** Maximum age for cache entries. Milliseconds. */

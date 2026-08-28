@@ -16,7 +16,7 @@ import type { CompilationIssue as CompilationError } from '@taucad/kcl-wasm-lib/
 import type { System } from '@taucad/kcl-wasm-lib/bindings/ModelingCmd';
 import {
   asBuffer,
-  resolveVirtualPath,
+  assertRootedPath,
   defineKernel,
   createKernelError,
   createKernelSuccess,
@@ -114,7 +114,7 @@ const mapCoordinateSystemToKclCoords = (coordinateSystem: 'y-up' | 'z-up' | unde
   };
 };
 
-const toKclEnginePath = (filePath: string): string => resolveVirtualPath(filePath).slice(1);
+const toKclEnginePath = (filePath: string): string => assertRootedPath(filePath);
 
 // =============================================================================
 // Error helpers
@@ -242,7 +242,7 @@ export const zooKernel = defineKernel({
     ensureFileSystemManager(context, filesystem);
     const utilities = await getKclUtils(context);
     return discoverKclDependencies(
-      resolveVirtualPath(entryPath),
+      assertRootedPath(entryPath),
       async (path) => filesystem.readFile(path, 'utf8'),
       async (code) => utilities.parseKcl(code),
     );

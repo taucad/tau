@@ -17,13 +17,15 @@ const storeName = 'files';
 const dbVersion = 1;
 const directoryKeyPrefix = '\0directory:';
 
-const directoryStorageKey = (path: string): string => `${directoryKeyPrefix}${path}`;
+const toStoragePath = (path: string): string => `/${path}`;
+const fromStoragePath = (path: string): string => (path.startsWith('/') ? path.slice(1) : path);
+const directoryStorageKey = (path: string): string => `${directoryKeyPrefix}${toStoragePath(path)}`;
 const directoryPathFromKey = (key: string): string | undefined =>
-  key.startsWith(directoryKeyPrefix) ? key.slice(directoryKeyPrefix.length) : undefined;
+  key.startsWith(directoryKeyPrefix) ? fromStoragePath(key.slice(directoryKeyPrefix.length)) : undefined;
 
 function parentDirectory(path: string): string {
   const lastSlash = path.lastIndexOf('/');
-  return lastSlash <= 0 ? '/' : path.slice(0, lastSlash);
+  return lastSlash === -1 ? '' : path.slice(0, lastSlash);
 }
 
 /**
@@ -50,7 +52,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   /** In-memory path index: tracks all file paths for O(1) existence/readdir. */
   private _paths = new Set<string>();
   /** In-memory directory set: derived from file paths. */
-  private _dirs = new Set<string>(['/']);
+  private _dirs = new Set<string>(['']);
   /**
    * Metadata for rows this provider has written or read, so `stat` does not
    * fetch the whole blob again.
@@ -125,6 +127,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
     this._ensureOpen();
+    this._assertRootedPath(path);
     this._assertWritablePath(path);
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
     const deferred = Promise.withResolvers<void>();
@@ -161,15 +164,15 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
     this._ensureOpen();
-    const normalizedPath = path === '/' ? '/' : path;
-    if (this._paths.has(normalizedPath)) {
+    this._assertRootedPath(path);
+    if (this._paths.has(path)) {
       throw this._enotdir(path);
     }
-    if (!this._dirs.has(normalizedPath)) {
+    if (!this._dirs.has(path)) {
       throw this._enoent(path);
     }
 
-    const prefix = normalizedPath === '/' ? '/' : `${normalizedPath}/`;
+    const prefix = path === '' ? '' : `${path}/`;
     return indexDirectoryEntries(prefix, this._paths, this._dirs);
   }
 
@@ -180,8 +183,9 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * @returns Each entry's name paired with its stat metadata.
    */
   public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
+    this._assertRootedPath(path);
     const names = await this.readdir(path);
-    const prefix = path === '/' ? '/' : `${path}/`;
+    const prefix = path === '' ? '' : `${path}/`;
     const result: Array<{ name: string } & FileStat> = [];
     const fileMetadataPaths: Array<{
       index: number;
@@ -252,7 +256,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
         };
         for (const { index, fullPath, cached } of fileMetadataPaths) {
           // Cached rows only need an existence probe; uncached rows need the bytes.
-          bindRequest(cached ? store.getKey(fullPath) : store.get(fullPath), {
+          const storagePath = toStoragePath(fullPath);
+          bindRequest(cached ? store.getKey(storagePath) : store.get(storagePath), {
             entryFullPath: fullPath,
             entryIndex: index,
             cached: cached !== undefined,
@@ -272,6 +277,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async stat(path: string): Promise<FileStat> {
     this._ensureOpen();
+    this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       return { type: 'dir', size: 0, mtimeMs: 0 };
     }
@@ -309,13 +315,14 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async unlink(path: string): Promise<void> {
     this._ensureOpen();
+    this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       throw this._eisdir(path);
     }
     if (!this._paths.has(path)) {
       throw this._enoent(path);
     }
-    await this._idbDelete(path);
+    await this._idbDelete(toStoragePath(path));
     this._purgeFileProjection(path);
   }
 
@@ -326,10 +333,11 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async rmdir(path: string): Promise<void> {
     this._ensureOpen();
+    this._assertRootedPath(path);
     if (this._paths.has(path)) {
       throw this._enotdir(path);
     }
-    if (!this._dirs.has(path) || path === '/') {
+    if (!this._dirs.has(path) || path === '') {
       throw this._enoent(path);
     }
     const prefix = `${path}/`;
@@ -351,6 +359,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   public async rename(from: string, to: string): Promise<void> {
     this._ensureOpen();
+    this._assertRootedPath(from);
+    this._assertRootedPath(to);
     if (from === to) {
       if (!this._dirs.has(from) && !this._paths.has(from)) {
         throw this._enoent(from);
@@ -359,7 +369,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     }
 
     if (this._dirs.has(from) && !this._paths.has(from)) {
-      if (from === '/' || to.startsWith(`${from}/`)) {
+      if (from === '' || to.startsWith(`${from}/`)) {
         throw this._einval(to);
       }
       if (this._dirs.has(to) || this._paths.has(to)) {
@@ -385,8 +395,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     await new Promise<void>((resolve, reject) => {
       const tx = this._db!.transaction(storeName, 'readwrite');
       const store = tx.objectStore(storeName);
-      store.put(data, to);
-      store.delete(from);
+      store.put(data, toStoragePath(to));
+      store.delete(toStoragePath(from));
       this._putParentDirectoryRows(store, to);
       tx.addEventListener('complete', () => {
         resolve();
@@ -436,8 +446,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       const store = tx.objectStore(storeName);
       for (const [oldPath, data] of fileData) {
         const newPath = to + oldPath.slice(from.length);
-        store.delete(oldPath);
-        store.put(data, newPath);
+        store.delete(toStoragePath(oldPath));
+        store.put(data, toStoragePath(newPath));
       }
       for (const directory of directoriesToMove) {
         const newDirectory = to + directory.slice(from.length);
@@ -484,6 +494,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
     this._ensureOpen();
+    this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       throw this._eisdir(path);
     }
@@ -500,6 +511,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   protected async mkdirSingle(path: string): Promise<void> {
     this._ensureOpen();
+    this._assertRootedPath(path);
     if (this._dirs.has(path) || this._paths.has(path) || this._pendingWritePaths.has(path)) {
       throw this._eexist(path);
     }
@@ -507,7 +519,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     if (this._paths.has(parent) || this._pendingWritePaths.has(parent)) {
       throw this._enotdir(parent);
     }
-    if (parent !== '/' && !this._dirs.has(parent)) {
+    if (!this._dirs.has(parent)) {
       throw this._enoent(parent);
     }
     await new Promise<void>((resolve, reject) => {
@@ -566,7 +578,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       const store = tx.objectStore(storeName);
       for (const { path, data } of batch) {
         this._putParentDirectoryRows(store, path);
-        store.put(data, path);
+        store.put(data, toStoragePath(path));
       }
       tx.addEventListener('complete', () => {
         resolve();
@@ -631,16 +643,17 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     });
 
     const paths = new Set<string>();
-    const directories = new Set<string>(['/']);
+    const directories = new Set<string>(['']);
 
     for (const key of keys) {
-      const path = typeof key === 'string' ? key : JSON.stringify(key);
-      const directoryPath = directoryPathFromKey(path);
+      const storagePath = typeof key === 'string' ? key : JSON.stringify(key);
+      const directoryPath = directoryPathFromKey(storagePath);
       if (directoryPath !== undefined) {
         directories.add(directoryPath);
         this._addParentDirs(directoryPath, directories);
         continue;
       }
+      const path = fromStoragePath(storagePath);
       paths.add(path);
       this._addParentDirs(path, directories);
     }
@@ -660,7 +673,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   private _addParentDirs(path: string, directories = this._dirs): void {
     let directory = parentDirectory(path);
-    while (directory !== '/' && !directories.has(directory)) {
+    while (directory !== '' && !directories.has(directory)) {
       directories.add(directory);
       directory = parentDirectory(directory);
     }
@@ -703,7 +716,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   private _assertNoFileAncestor(path: string): void {
     let parent = parentDirectory(path);
-    while (parent !== '/') {
+    while (parent !== '') {
       if (this._paths.has(parent) || this._pendingWritePaths.has(parent)) {
         throw this._enotdir(parent);
       }
@@ -713,7 +726,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   private _putParentDirectoryRows(store: IDBObjectStore, path: string): void {
     let parent = parentDirectory(path);
-    while (parent !== '/') {
+    while (parent !== '') {
       store.put(true, directoryStorageKey(parent));
       parent = parentDirectory(parent);
     }
@@ -729,7 +742,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     return new Promise((resolve, reject) => {
       const tx = this._db!.transaction(storeName, 'readonly');
       const store = tx.objectStore(storeName);
-      const request = store.get(key);
+      const request = store.get(toStoragePath(key));
 
       request.addEventListener('success', () => {
         resolve(request.result as Uint8Array<ArrayBuffer> | undefined);
@@ -749,7 +762,7 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   private async _idbHasKey(key: string): Promise<boolean> {
     return new Promise((resolve, reject) => {
       const tx = this._db!.transaction(storeName, 'readonly');
-      const request = tx.objectStore(storeName).getKey(key);
+      const request = tx.objectStore(storeName).getKey(toStoragePath(key));
 
       request.addEventListener('success', () => {
         resolve(request.result !== undefined);

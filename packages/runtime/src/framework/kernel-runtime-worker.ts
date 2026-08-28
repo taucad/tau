@@ -46,6 +46,7 @@ import { resolveRuntimeDefinition } from '#worker/runtime-definition.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
 import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
+import { sourcePathMatchesExtensions } from '@taucad/utils/file';
 
 /**
  * Configuration for a kernel plugin within the runtime worker.
@@ -556,7 +557,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       kind,
       file: {
         filename: input.entryPath.slice(lastSlash + 1),
-        path: input.entryPath.slice(0, lastSlash) || '/',
+        path: input.entryPath.slice(0, lastSlash),
       },
       binding,
     };
@@ -685,9 +686,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       }
     }
 
-    const dotIndex = entryPath.lastIndexOf('.');
-    const extension =
-      dotIndex > 0 && dotIndex < entryPath.length - 1 ? entryPath.slice(dotIndex + 1).toLowerCase() : '';
     let catchAllEntry: KernelPluginEntry | undefined;
     const hasBundlerKernels = this.kernelPlugins.some((c) => c.builtinModuleNames && c.builtinModuleNames.length > 0);
 
@@ -696,7 +694,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     // Pass 1: Extension + regex fast path
     for (const config of this.kernelPlugins) {
       const isCatchAll = config.extensions.includes('*');
-      const extensionMatch = config.extensions.includes(extension) || isCatchAll;
+      const extensionMatch = sourcePathMatchesExtensions(entryPath, config.extensions);
       if (!extensionMatch) {
         continue;
       }

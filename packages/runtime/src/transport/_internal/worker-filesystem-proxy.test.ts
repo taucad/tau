@@ -61,7 +61,7 @@ const createPortPair = (): readonly [Port<unknown>, Port<unknown>] => {
 
 describe('createWorkerFileSystemProxy', () => {
   it('connects to the production inline filesystem bridge', async () => {
-    const mainPath = '/main.scad';
+    const mainPath = 'main.scad';
     const bridge = buildFileSystemBridge(fromMemoryFs({ [mainPath]: 'cube(1);' }));
     expect(bridge).toBeDefined();
     if (!bridge) {
@@ -78,7 +78,7 @@ describe('createWorkerFileSystemProxy', () => {
   });
 
   it('drives a real bridge over a FileSystemBridge whose port is not a MessagePort', async () => {
-    const mainPath = '/main.scad';
+    const mainPath = 'main.scad';
     const authority = extractInlineFileSystem(fromMemoryFs({ [mainPath]: 'cube(1);' }))!;
     const [serverPort, clientPort] = createPortPair();
     const server = createBridgeServer(authority, serverPort, {
@@ -94,8 +94,8 @@ describe('createWorkerFileSystemProxy', () => {
       const fileSystem = await createWorkerFileSystemProxy({ port: clientPort, dispose: () => undefined });
       await expect(fileSystem.readFile(mainPath, 'utf8')).resolves.toBe('cube(1);');
       // The void-result path: msgpack turns the `undefined` response into nil.
-      await expect(fileSystem.writeFile('/next.scad', 'sphere(1);')).resolves.toBeUndefined();
-      await expect(fileSystem.readFile('/next.scad', 'utf8')).resolves.toBe('sphere(1);');
+      await expect(fileSystem.writeFile('next.scad', 'sphere(1);')).resolves.toBeUndefined();
+      await expect(fileSystem.readFile('next.scad', 'utf8')).resolves.toBe('sphere(1);');
       fileSystem.dispose();
     } finally {
       server.dispose();
@@ -114,7 +114,7 @@ describe('createWorkerFileSystemProxy', () => {
     await expect(createWorkerFileSystemProxy(channel.port2)).rejects.toMatchObject({
       name: 'FileSystemBridgeProtocolVersionError',
       code: 'FILESYSTEM_BRIDGE_PROTOCOL_VERSION_MISMATCH',
-      expected: 1,
+      expected: 2,
       received: undefined,
     });
 
@@ -125,7 +125,7 @@ describe('createWorkerFileSystemProxy', () => {
     const channel = new MessageChannel();
     const server = createBridgeServer({}, wrapMessagePort(channel.port1), {
       hello: {
-        v: 2,
+        v: 1,
         capabilities: { persistent: false, writable: true, quotaBased: false },
         watchable: false,
       },
@@ -134,8 +134,8 @@ describe('createWorkerFileSystemProxy', () => {
     await expect(createWorkerFileSystemProxy(channel.port2)).rejects.toMatchObject({
       name: 'FileSystemBridgeProtocolVersionError',
       code: 'FILESYSTEM_BRIDGE_PROTOCOL_VERSION_MISMATCH',
-      expected: 1,
-      received: 2,
+      expected: 2,
+      received: 1,
     });
 
     server.dispose();

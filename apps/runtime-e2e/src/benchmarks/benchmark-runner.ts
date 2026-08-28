@@ -249,7 +249,6 @@ function extractLibrarySummary(telemetryBatches: TelemetryEntry[][]): TraceSumma
 // Runner
 // =============================================================================
 
-const projectRoot = '/';
 const steadyStateWarmups = 8;
 
 const sha256 = (value: string | Uint8Array<ArrayBuffer>): string => createHash('sha256').update(value).digest('hex');
@@ -332,11 +331,6 @@ export async function runBenchmarks(
     /** Milliseconds. */
     let firstRender = 0;
 
-    const absoluteFiles: Record<string, string> = {};
-    for (const [filename, content] of Object.entries(benchCase.files)) {
-      absoluteFiles[`${projectRoot}${filename}`] = content;
-    }
-
     const kernelOptions = {
       ocTracing,
       libraryTracing,
@@ -346,7 +340,7 @@ export async function runBenchmarks(
     const renderOptions = tessellation ? { tessellation } : undefined;
     const caseOperation = benchCase.operation ?? operation;
 
-    const fileSystem = fromMemoryFs(absoluteFiles);
+    const fileSystem = fromMemoryFs(benchCase.files);
     const runtime = defineRuntime({
       plugins: [esbuild()],
       kernels: [kernelForCase(benchCase.kernel, kernelOptions)],
@@ -401,7 +395,7 @@ export async function runBenchmarks(
       let failureMessage: string | undefined;
       if (caseOperation === 'render') {
         const renderResult = await client.render({
-          source: { path: `${projectRoot}${benchCase.mainFile}` },
+          source: { path: benchCase.mainFile },
           parameters,
           content: { includeEdges },
           renderOptions,
@@ -418,7 +412,7 @@ export async function runBenchmarks(
         }
       } else {
         const exportResult = await client.export('glb', {
-          source: { path: `${projectRoot}${benchCase.mainFile}` },
+          source: { path: benchCase.mainFile },
           parameters,
           content: { includeEdges },
           ...(renderOptions === undefined ? {} : { exportOptions: renderOptions }),

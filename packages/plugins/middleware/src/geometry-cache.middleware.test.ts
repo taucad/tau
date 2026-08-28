@@ -37,7 +37,7 @@ import {
 } from '@taucad/runtime-testing';
 
 const nativeBuildInput: NativeBuildInput = {
-  entryPath: '/test.kcl',
+  entryPath: 'test.kcl',
   parameters: {},
   options: {},
 };
@@ -549,7 +549,7 @@ describe('geometryCacheMiddleware', () => {
 
         runtime.filesystem.mocks.readdirStat.mockResolvedValue([
           {
-            path: '/.tau/cache/geometry/old-cache.bin',
+            path: '.tau/cache/geometry/old-cache.bin',
             name: 'old-cache.bin',
             type: 'file',
             size: 100,
@@ -574,7 +574,7 @@ describe('geometryCacheMiddleware', () => {
         });
 
         // Create 102 files (2 over the 100 max), stagger mtimeMs oldest first
-        const cacheDirectory = '/.tau/cache/geometry';
+        const cacheDirectory = '.tau/cache/geometry';
         const entries = Array.from({ length: 102 }, (_, index) => ({
           path: `${cacheDirectory}/cache-${index}.bin`,
           name: `cache-${index}.bin`,
@@ -825,7 +825,7 @@ describe('geometryCacheMiddleware', () => {
   describe('serializedNativeHandle storage', () => {
     it('preserves exact replay input through result spread and L1/L2 round-trips', async () => {
       const replayInput: NativeBuildInput = {
-        entryPath: '/generated/model.scad',
+        entryPath: 'generated/model.scad',
         parameters: { dimensions: { width: 12, depths: [3, 5] } },
         options: { tessellation: { segments: 64 } },
       };
@@ -943,8 +943,8 @@ describe('geometryCacheMiddleware', () => {
     });
 
     it.each([
-      ['array parameters', { entryPath: '/test.kcl', parameters: [] }],
-      ['array options', { entryPath: '/test.kcl', parameters: {}, options: [] }],
+      ['array parameters', { entryPath: 'test.kcl', parameters: [] }],
+      ['array options', { entryPath: 'test.kcl', parameters: {}, options: [] }],
     ])('should ignore v7 build entries with malformed replay %s', async (_label, malformedInput) => {
       const cacheData = msgpackEncode({
         version: 7,

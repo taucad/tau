@@ -53,7 +53,15 @@ import type {
   WorkspaceScope,
 } from '#mount-table.js';
 import { getEventOrigin, tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
-import { isSafeRelativePath, parentDirectory, joinPath, normalizePath, resolveVirtualPath } from '@taucad/utils/path';
+import {
+  assertRootedPath,
+  isSafeRelativePath,
+  joinPath,
+  joinRelativePath,
+  normalizePath,
+  parentDirectory,
+  resolveAuthorityPath,
+} from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields, getFileContentMetadata } from '#content-metadata.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
@@ -174,7 +182,7 @@ function readAdoptableManifest(bytes: Uint8Array<ArrayBuffer>): AdoptableProject
  * @returns Whether the path lives under a dot-prefixed root child.
  */
 function isWorkspaceStatePath(physicalPath: string): boolean {
-  return physicalPath.split('/')[1]?.startsWith('.') === true;
+  return physicalPath.split('/')[0]?.startsWith('.') === true;
 }
 
 function isUnderBundledTypesMount(absolutePath: string): boolean {
@@ -241,7 +249,7 @@ function causeToMutationError(cause: unknown, source: string, target: string): W
  */
 function isStructurallyValidWorkspacePath(path: string): boolean {
   try {
-    return resolveVirtualPath(path) === path;
+    return resolveAuthorityPath(path) === path;
   } catch {
     return false;
   }
@@ -358,14 +366,14 @@ export class WorkspaceFileService {
 
   /**
    * Capture one exact mount selected by trusted composition as a fully
-   * writable filesystem whose entire visible namespace is local `/`.
+   * writable filesystem whose entire visible namespace has root `''`.
    *
    * @param authorityRoot - Exact authority-global mount path to capture.
    * @param mutationContext - Optional origin metadata for echo suppression.
    * @returns A writable filesystem whose root is the captured mount.
    */
   public createRootedFileSystem(authorityRoot: string, mutationContext?: WorkspaceMutationContext): RootedFileSystem {
-    const root = resolveVirtualPath(authorityRoot);
+    const root = resolveAuthorityPath(authorityRoot);
     const captured = this._mountTable.getExactMount(root);
     if (captured === undefined) {
       throw new RootedFileSystemError('ROOT_UNAVAILABLE');
@@ -377,20 +385,22 @@ export class WorkspaceFileService {
       }
     };
     const assertMutableRoot = (localPath: string): void => {
-      if (localPath === '/') {
+      if (localPath === '') {
         throw new Error('Cannot remove or rename the rooted filesystem root.');
       }
     };
     const resolveLocal = (
       localPath: string,
     ): { authorityPath: string; resolution: MountResolution; localPath: string } => {
-      const canonicalLocalPath = resolveVirtualPath(localPath);
+      const canonicalLocalPath = assertRootedPath(localPath);
       assertCurrent();
-      const authorityPath = root === '/' ? canonicalLocalPath : resolveVirtualPath(`${root}${canonicalLocalPath}`);
-      const providerPath =
-        captured.providerBasePath === '/'
-          ? canonicalLocalPath
-          : resolveVirtualPath(`${captured.providerBasePath}${canonicalLocalPath}`);
+      const authorityPath =
+        canonicalLocalPath === ''
+          ? root
+          : root === '/'
+            ? resolveAuthorityPath(`/${canonicalLocalPath}`)
+            : resolveAuthorityPath(`${root}/${canonicalLocalPath}`);
+      const providerPath = assertRootedPath(joinRelativePath(captured.providerBasePath, canonicalLocalPath));
       return {
         authorityPath,
         localPath: canonicalLocalPath,
@@ -399,19 +409,24 @@ export class WorkspaceFileService {
     };
     const toLocalPath = (authorityPath: string): string | undefined => {
       if (root === '/') {
-        return authorityPath.startsWith('/') ? authorityPath : undefined;
+        return authorityPath === '/' ? '' : authorityPath.startsWith('/') ? authorityPath.slice(1) : undefined;
       }
       if (authorityPath === root) {
-        return '/';
+        return '';
       }
       if (!authorityPath.startsWith(`${root}/`)) {
         return undefined;
       }
-      return authorityPath.slice(root.length);
+      return authorityPath.slice(root.length + 1);
     };
     const prefixGlob = (pattern: string): string => {
-      const rootPrefix = root === '/' ? '' : root;
-      return pattern.startsWith('/') ? `${rootPrefix}${pattern}` : pattern;
+      if (pattern.startsWith('/')) {
+        throw new TypeError('A rooted watch glob must not begin with a slash.');
+      }
+      if (pattern === '') {
+        return root;
+      }
+      return root === '/' ? `/${pattern}` : `${root}/${pattern}`;
     };
 
     function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
@@ -579,7 +594,7 @@ export class WorkspaceFileService {
       throw new DOMException('The operation was aborted.', 'AbortError');
     }
 
-    const canonicalPath = resolveVirtualPath(filepath);
+    const canonicalPath = resolveAuthorityPath(filepath);
     const { provider, path: resolvedPath } = await this._resolve(canonicalPath, { scope: optionsObject?.scope });
     const encoding = options === 'utf8' || optionsObject?.encoding === 'utf8' ? 'utf8' : undefined;
 
@@ -608,7 +623,7 @@ export class WorkspaceFileService {
       throw new DOMException('The operation was aborted.', 'AbortError');
     }
 
-    const { provider, path: resolvedPath } = this._resolveProvider(resolveVirtualPath(filepath));
+    const { provider, path: resolvedPath } = this._resolveProvider(resolveAuthorityPath(filepath));
 
     if (provider.readFileStream) {
       return provider.readFileStream(resolvedPath, options);
@@ -688,7 +703,7 @@ export class WorkspaceFileService {
     data: Uint8Array<ArrayBuffer> | string,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    const canonicalPath = resolveVirtualPath(path);
+    const canonicalPath = resolveAuthorityPath(path);
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
     const ownedData = typeof data === 'string' ? data : new Uint8Array(data);
@@ -707,7 +722,7 @@ export class WorkspaceFileService {
     context?: WorkspaceMutationContext,
   ): Promise<void> {
     const ownedFiles = Object.entries(files).map(([path, file]) => {
-      const canonicalPath = resolveVirtualPath(path);
+      const canonicalPath = resolveAuthorityPath(path);
       this._assertGenericMutationPath(canonicalPath);
       return {
         path: canonicalPath,
@@ -767,7 +782,7 @@ export class WorkspaceFileService {
    * @returns Resolves when the directory is created.
    */
   public async mkdir(path: string, options?: MkdirOptions, context?: WorkspaceMutationContext): Promise<void> {
-    const canonicalPath = resolveVirtualPath(path);
+    const canonicalPath = resolveAuthorityPath(path);
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
     return this._mkdirResolved({ path: canonicalPath, resolution, options, context });
@@ -789,8 +804,8 @@ export class WorkspaceFileService {
    * @returns The {@link FileStat} of the resulting entry at `target`.
    */
   public async move(source: string, target: string, context?: WorkspaceMutationContext): Promise<FileStat> {
-    const canonicalSource = resolveVirtualPath(source);
-    const canonicalTarget = resolveVirtualPath(target);
+    const canonicalSource = resolveAuthorityPath(source);
+    const canonicalTarget = resolveAuthorityPath(target);
     this._assertGenericMutationPath(canonicalSource, canonicalTarget);
     this._assertGenericMutationPath(canonicalTarget, canonicalSource);
     const sourceResolution = this._resolveProvider(canonicalSource);
@@ -812,7 +827,7 @@ export class WorkspaceFileService {
    * @returns Resolves when the file is deleted.
    */
   public async unlink(path: string, context?: WorkspaceMutationContext): Promise<void> {
-    const canonicalPath = resolveVirtualPath(path);
+    const canonicalPath = resolveAuthorityPath(path);
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
     return this._unlinkResolved({
@@ -838,7 +853,7 @@ export class WorkspaceFileService {
     options?: { recursive?: boolean },
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    const canonicalPath = resolveVirtualPath(path);
+    const canonicalPath = resolveAuthorityPath(path);
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
     return this._rmdirResolved({
@@ -1078,8 +1093,8 @@ export class WorkspaceFileService {
     destinationPath: string,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    const destination = resolveVirtualPath(destinationPath);
-    this._assertGenericMutationPath(destination, resolveVirtualPath(sourcePath));
+    const destination = resolveAuthorityPath(destinationPath);
+    this._assertGenericMutationPath(destination, resolveAuthorityPath(sourcePath));
     const data = await this.readFile(sourcePath);
     await this.writeFile(destination, data, context);
   }
@@ -1097,8 +1112,8 @@ export class WorkspaceFileService {
     destinationPath: string,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    const source = resolveVirtualPath(sourcePath);
-    const destination = resolveVirtualPath(destinationPath);
+    const source = resolveAuthorityPath(sourcePath);
+    const destination = resolveAuthorityPath(destinationPath);
     this._assertGenericMutationPath(destination, source);
     const sourceResolution = this._resolveProvider(source);
     const destinationResolution = this._resolveProvider(destination);
@@ -1117,7 +1132,9 @@ export class WorkspaceFileService {
           const destinationEntries = ['', ...snapshot.directories].map((relativePath) => {
             const path = relativePath === '' ? destination : joinPath(destination, relativePath);
             const resolvedPath =
-              relativePath === '' ? destinationResolution.path : joinPath(destinationResolution.path, relativePath);
+              relativePath === ''
+                ? destinationResolution.path
+                : joinRelativePath(destinationResolution.path, relativePath);
             return { path, resolution: { ...destinationResolution, path: resolvedPath } };
           });
           for (const { path, resolution } of destinationEntries) {
@@ -1137,7 +1154,7 @@ export class WorkspaceFileService {
           }
           const destinationFiles = Object.entries(snapshot.files).map(([relativePath, content]) => {
             const path = joinPath(destination, relativePath);
-            const resolvedPath = joinPath(destinationResolution.path, relativePath);
+            const resolvedPath = joinRelativePath(destinationResolution.path, relativePath);
             return { path, content, resolution: { ...destinationResolution, path: resolvedPath } };
           });
           for (const { path, content, resolution } of destinationFiles) {
@@ -1199,7 +1216,7 @@ export class WorkspaceFileService {
       files: Array<{ path: string; content: string; resolution: MountResolution }>;
     }> = [];
     for (const replacement of packages) {
-      const packageDirectory = resolveVirtualPath(replacement.packageDirectory);
+      const packageDirectory = resolveAuthorityPath(replacement.packageDirectory);
       if (
         packageDirectory !== replacement.packageDirectory ||
         !packageDirectory.startsWith(`${bundledTypesAbsolutePrefix}/`) ||
@@ -1211,7 +1228,7 @@ export class WorkspaceFileService {
       const packageResolution = this._resolveProvider(packageDirectory);
       const seenFiles = new Set<string>();
       const files = replacement.files.map(({ path: rawPath, content }) => {
-        const path = resolveVirtualPath(rawPath);
+        const path = resolveAuthorityPath(rawPath);
         if (
           path !== rawPath ||
           !path.startsWith(`${packageDirectory}/`) ||
@@ -1360,7 +1377,7 @@ export class WorkspaceFileService {
     } else {
       const entries = await provider.readdir(resolvedPath);
       for (const entry of entries) {
-        const fullPath = joinPath(resolvedPath, entry);
+        const fullPath = joinRelativePath(resolvedPath, entry);
         try {
           // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for tree building
           const stat = await provider.stat(fullPath);
@@ -1405,7 +1422,7 @@ export class WorkspaceFileService {
    * @returns Flat array of file stat entries with relative paths.
    */
   public async getDirectoryStat(path: string, options?: { signal?: AbortSignal }): Promise<FileStatEntry[]> {
-    const normalizedPath = resolveVirtualPath(path);
+    const normalizedPath = resolveAuthorityPath(path);
 
     if (this._inMemoryTree.isBuilt && this._directoryStatRoot !== undefined) {
       const treeRelativePath = this._toTreeRelative(normalizedPath);
@@ -1441,7 +1458,7 @@ export class WorkspaceFileService {
     query: string,
     options?: { maxResults?: number; includeDirectories?: boolean },
   ): Promise<FileStatEntry[]> {
-    const normalizedRoot = resolveVirtualPath(root);
+    const normalizedRoot = resolveAuthorityPath(root);
     if (this._inMemoryTree.isBuilt && this._directoryStatRoot === normalizedRoot) {
       return this._inMemoryTree.searchFiles(query, options);
     }
@@ -1618,7 +1635,7 @@ export class WorkspaceFileService {
         // The workspace root exists by definition; a project is any immediate
         // child directory carrying `tau.json`. Entry kinds come from the listing
         // so files never cost a `stat`, and dotdirs are excluded by name alone.
-        const entries = await readDirectoryEntries(provider, '/');
+        const entries = await readDirectoryEntries(provider, '');
         directories = entries
           .filter((entry) => entry.kind === 'dir' && !entry.name.startsWith('.'))
           .map((entry) => entry.name)
@@ -1628,7 +1645,7 @@ export class WorkspaceFileService {
         continue;
       }
       const probe = async (directory: string): Promise<ProjectDiscoveryEntry | undefined> => {
-        const relativeDirectory = `/${directory}`;
+        const relativeDirectory = assertRootedPath(directory);
         const locator: ProjectLocator =
           root.backend === 'webaccess'
             ? {
@@ -1640,7 +1657,7 @@ export class WorkspaceFileService {
             : { backend: root.backend, storageRootKey, relativeDirectory };
         let bytes: Uint8Array<ArrayBuffer>;
         try {
-          bytes = await provider.readFile(`${relativeDirectory}/tau.json`);
+          bytes = await provider.readFile(joinRelativePath(relativeDirectory, 'tau.json'));
         } catch (error) {
           if (isNotFoundError(error)) {
             return undefined;
@@ -1717,7 +1734,7 @@ export class WorkspaceFileService {
    * @returns The manifest now on disk, identity included.
    */
   public async adoptProjectDirectory(locator: ProjectLocator): Promise<ProjectManifest> {
-    const path = resolveVirtualPath(locator.relativeDirectory);
+    const path = assertRootedPath(locator.relativeDirectory);
     if (path !== locator.relativeDirectory || !isProjectDirectoryPath(path)) {
       throw new TypeError(`Adoption target must be a canonical project directory: ${locator.relativeDirectory}`);
     }
@@ -1759,7 +1776,7 @@ export class WorkspaceFileService {
     if (!projectIdSchema.safeParse(projectId).success) {
       throw new TypeError(`Invalid project id: ${JSON.stringify(projectId)}`);
     }
-    const path = resolveVirtualPath(input.providerBasePath);
+    const path = assertRootedPath(input.providerBasePath);
     if (path !== input.providerBasePath) {
       throw new TypeError('Permanent delete target must already be canonical.');
     }
@@ -1796,7 +1813,9 @@ export class WorkspaceFileService {
         }
 
         this._revokeProjectRoute(logicalRoot, true);
-        const physicalParent = parentDirectory(path);
+        const separator = path.lastIndexOf('/');
+        const physicalParent = separator === -1 ? '' : path.slice(0, separator);
+        const authorityParent = physicalParent === '' ? '/' : `/${physicalParent}`;
         const parentAuthority = this._scopedPhysicalAuthority(scope, physicalParent);
         try {
           await this._deleteProjectDirectory(provider, path, manifest);
@@ -1804,8 +1823,8 @@ export class WorkspaceFileService {
           this._filePool?.clear();
           this._inMemoryTree.clear();
           this._directoryStatRoot = undefined;
-          this._emitChangeEvent({ type: 'directoryChanged', path: physicalParent, backend: scope.backend });
-          this._crossTabCoordinator.notifyDirectoryChange(physicalParent, parentAuthority);
+          this._emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
+          this._crossTabCoordinator.notifyDirectoryChange(authorityParent, parentAuthority);
         }
         if (await provider.exists(path)) {
           throw new Error(`Permanent delete did not remove ${path}`);
@@ -1910,7 +1929,7 @@ export class WorkspaceFileService {
    * @param config - Discriminated mount configuration.
    */
   public async mount(prefix: string, config: MountConfig): Promise<void> {
-    const canonicalPrefix = resolveVirtualPath(prefix);
+    const canonicalPrefix = resolveAuthorityPath(prefix);
     if (canonicalPrefix !== prefix) {
       throw new TypeError(`Dynamic mount prefix must already be canonical: ${prefix}`);
     }
@@ -1925,8 +1944,8 @@ export class WorkspaceFileService {
     ) {
       throw new TypeError(`Dynamic mount configuration does not match its protected prefix: ${prefix}`);
     }
-    const providerBasePath = resolveVirtualPath(config.providerBasePath ?? '/');
-    if (providerBasePath !== (config.providerBasePath ?? '/')) {
+    const providerBasePath = assertRootedPath(config.providerBasePath ?? '');
+    if (providerBasePath !== (config.providerBasePath ?? '')) {
       throw new TypeError(`Dynamic provider path must already be canonical: ${config.providerBasePath}`);
     }
     const scope = this._toScope(config);
@@ -1955,7 +1974,7 @@ export class WorkspaceFileService {
    * @param prefix - The mount prefix to remove.
    */
   public unmount(prefix: string): void {
-    const canonicalPrefix = resolveVirtualPath(prefix);
+    const canonicalPrefix = resolveAuthorityPath(prefix);
     if (
       canonicalPrefix !== prefix ||
       (this._previewInstance(canonicalPrefix) === undefined && canonicalPrefix !== '/node_modules')
@@ -2024,6 +2043,21 @@ export class WorkspaceFileService {
   }
 
   private async _configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void> {
+    const physicalRoots = new Set<string>();
+    const webAccessRoots = new Map<string, Extract<(typeof configuration.roots)[number], { backend: 'webaccess' }>>();
+    const stagedRoots = configuration.roots.map((root) => {
+      const scope = this._toScope(root);
+      const storageRootKey = this._registry.resolveStorageRootKey(scope);
+      if (physicalRoots.has(storageRootKey)) {
+        throw new Error(`Duplicate project discovery root: ${storageRootKey}`);
+      }
+      physicalRoots.add(storageRootKey);
+      if (root.backend === 'webaccess') {
+        webAccessRoots.set(root.workspaceId, root);
+      }
+      return { root, scope, storageRootKey };
+    });
+
     const stagedPrefixes = new Set<string>();
     const physicalRoutes = new Set<string>();
     const stagedInputs = configuration.projects.map((config) => {
@@ -2031,11 +2065,11 @@ export class WorkspaceFileService {
         throw new TypeError(`Invalid project id: ${JSON.stringify(config.projectId)}`);
       }
       const prefix = `/projects/${config.projectId}`;
-      if (resolveVirtualPath(prefix) !== prefix || stagedPrefixes.has(prefix)) {
+      if (resolveAuthorityPath(prefix) !== prefix || stagedPrefixes.has(prefix)) {
         throw new Error(`Duplicate project route: ${prefix}`);
       }
       stagedPrefixes.add(prefix);
-      const providerBasePath = resolveVirtualPath(config.providerBasePath);
+      const providerBasePath = assertRootedPath(config.providerBasePath);
       if (providerBasePath !== config.providerBasePath) {
         throw new TypeError(`Project provider path must already be canonical: ${config.providerBasePath}`);
       }
@@ -2044,7 +2078,19 @@ export class WorkspaceFileService {
           `Project provider path must be an immediate child of the workspace root: ${providerBasePath}`,
         );
       }
-      const scope = this._toScope(config);
+      let scope: WorkspaceScope;
+      if (config.backend === 'webaccess') {
+        const root = webAccessRoots.get(config.workspaceId);
+        if (root === undefined) {
+          throw new MissingWorkspaceHandleError({ workspaceId: config.workspaceId });
+        }
+        scope = this._toScope(root);
+      } else {
+        scope =
+          config.backend === 'memory'
+            ? this._toScope({ backend: 'memory', storageRootKey: config.storageRootKey })
+            : this._toScope({ backend: config.backend });
+      }
       const storageRootKey = this._registry.resolveStorageRootKey(scope);
       const physicalRoute = `${storageRootKey}\0${providerBasePath}`;
       if (physicalRoutes.has(physicalRoute)) {
@@ -2053,42 +2099,6 @@ export class WorkspaceFileService {
       physicalRoutes.add(physicalRoute);
       return { prefix, config, scope, storageRootKey, providerBasePath };
     });
-
-    const physicalRoots = new Set<string>();
-    const stagedRoots = configuration.roots.map((root) => {
-      const scope = this._toScope(root);
-      const storageRootKey = this._registry.resolveStorageRootKey(scope);
-      if (physicalRoots.has(storageRootKey)) {
-        throw new Error(`Duplicate project discovery root: ${storageRootKey}`);
-      }
-      physicalRoots.add(storageRootKey);
-      return { root, scope, storageRootKey };
-    });
-
-    const canonicalWebAccessHandles = new Map<string, FileSystemDirectoryHandle>();
-    for (const staged of [...stagedRoots, ...stagedInputs]) {
-      if (staged.scope.backend !== 'webaccess') {
-        continue;
-      }
-      const canonical = canonicalWebAccessHandles.get(staged.storageRootKey);
-      if (canonical === undefined) {
-        canonicalWebAccessHandles.set(staged.storageRootKey, staged.scope.directoryHandle);
-        continue;
-      }
-      if (canonical === staged.scope.directoryHandle) {
-        continue;
-      }
-      let sameEntry = false;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- One workspace id must resolve to one physical directory.
-        sameEntry = await canonical.isSameEntry(staged.scope.directoryHandle);
-      } catch {
-        throw new TypeError(`WebAccess workspace ${staged.scope.workspaceId} handle identity could not be verified`);
-      }
-      if (!sameEntry) {
-        throw new TypeError(`WebAccess workspace ${staged.scope.workspaceId} resolves to different directories`);
-      }
-    }
 
     for (const staged of stagedRoots) {
       if (staged.root.backend !== 'webaccess') {
@@ -2206,40 +2216,56 @@ export class WorkspaceFileService {
       }
     }
 
-    for (const { root, scope, storageRootKey } of webRoots) {
-      const existing = this._observedWebAccessRoots.get(storageRootKey);
-      if (existing !== undefined) {
+    const additions = await Promise.all(
+      webRoots
+        .filter(({ storageRootKey }) => !this._observedWebAccessRoots.has(storageRootKey))
+        .map(async ({ root, scope, storageRootKey }) => {
+          try {
+            return { root, storageRootKey, provider: await this._registry.getProvider(scope) };
+          } catch {
+            return undefined;
+          }
+        }),
+    );
+    for (const addition of additions) {
+      if (addition === undefined) {
         continue;
       }
-      this._disconnectExternalRoot(storageRootKey);
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- Root observation is installed in configuration order.
-        const provider = await this._registry.getProvider(scope);
-        const state: ObservedWebAccessRoot = {
-          storageRootKey,
-          directoryHandle: root.directoryHandle,
-          provider,
-          nativeActive: false,
-          pollSnapshots: new Map(),
-          tail: Promise.resolve(),
-        };
-        this._observedWebAccessRoots.set(storageRootKey, state);
-        // oxlint-disable-next-line no-await-in-loop -- Root observation is installed in configuration order.
-        await this._queueExternalRootOperation(state, async () => {
+      const { root, storageRootKey, provider } = addition;
+      const state: ObservedWebAccessRoot = {
+        storageRootKey,
+        directoryHandle: root.directoryHandle,
+        provider,
+        nativeActive: false,
+        pollSnapshots: new Map(),
+        tail: Promise.resolve(),
+      };
+      this._observedWebAccessRoots.set(storageRootKey, state);
+      const pendingRecords: NativeFileSystemChangeRecord[] = [];
+      const observer = this._createNativeFileSystemObserver((records) => {
+        if (this._observedWebAccessRoots.get(storageRootKey) !== state) {
+          return;
+        }
+        if (!state.nativeActive) {
+          pendingRecords.push(...records);
+          return;
+        }
+        const activeObserver = state.observer;
+        if (activeObserver === undefined) {
+          return;
+        }
+        // async-iife: Browser observer callbacks cannot await their handler.
+        void this._handleNativeExternalRecords(state, activeObserver, records);
+      });
+      if (observer === undefined) {
+        continue;
+      }
+      state.observer = observer;
+      const observation = async (): Promise<void> => {
+        try {
           if (this._observedWebAccessRoots.get(storageRootKey) !== state) {
             return;
           }
-          const observer = this._createNativeFileSystemObserver((records) => {
-            if (observer === undefined || this._observedWebAccessRoots.get(storageRootKey) !== state) {
-              return;
-            }
-            // async-iife: Browser observer callbacks cannot await their handler.
-            void this._handleNativeExternalRecords(state, observer, records);
-          });
-          if (observer === undefined) {
-            return;
-          }
-          state.observer = observer;
           try {
             await observer.observe(root.directoryHandle, { recursive: true });
           } catch {
@@ -2247,15 +2273,23 @@ export class WorkspaceFileService {
             state.observer = undefined;
             return;
           }
-          if (this._observedWebAccessRoots.get(storageRootKey) !== state) {
-            observer.disconnect();
-            return;
-          }
-          state.nativeActive = true;
-        });
-      } catch {
-        // Provider/observer setup is progressive enhancement; normal reads surface permission failures.
-      }
+          await this._queueExternalRootOperation(state, async () => {
+            if (this._observedWebAccessRoots.get(storageRootKey) !== state) {
+              observer.disconnect();
+              return;
+            }
+            state.nativeActive = true;
+            if (pendingRecords.length > 0) {
+              await this._applyNativeExternalRecords(state, pendingRecords.splice(0));
+            }
+          });
+          await this._pollExternalRoot(state);
+        } catch {
+          this._disableNativeObservation(state);
+        }
+      };
+      // async-iife: Browser observers are started after async provider discovery.
+      void observation();
     }
   }
 
@@ -2343,7 +2377,7 @@ export class WorkspaceFileService {
       return;
     }
     if (admittedRecords.some(({ type }) => type === 'unknown')) {
-      await this._reconcileExternalSnapshot(state);
+      await this._reconcileUnknownExternalRecords(state, admittedRecords);
       return;
     }
 
@@ -2434,7 +2468,7 @@ export class WorkspaceFileService {
   }
 
   private _physicalPath(components: readonly string[]): string {
-    return resolveVirtualPath(`/${components.join('/')}`);
+    return assertRootedPath(components.join('/'));
   }
 
   private _isChromiumSwapOnlyRecord(record: NativeFileSystemChangeRecord): boolean {
@@ -2462,15 +2496,16 @@ export class WorkspaceFileService {
         continue;
       }
       const base = entry.providerBasePath;
-      if (
-        physicalPath !== base &&
-        !(base === '/' ? physicalPath.startsWith('/') : physicalPath.startsWith(`${base}/`))
-      ) {
+      if (physicalPath !== base && !(base === '' ? physicalPath !== '' : physicalPath.startsWith(`${base}/`))) {
         continue;
       }
-      const suffix = base === '/' ? physicalPath : physicalPath.slice(base.length) || '/';
+      const suffix = base === '' ? physicalPath : physicalPath === base ? '' : physicalPath.slice(base.length + 1);
       const path =
-        entry.prefix === '/' ? suffix : suffix === '/' ? entry.prefix : resolveVirtualPath(`${entry.prefix}${suffix}`);
+        suffix === ''
+          ? entry.prefix
+          : entry.prefix === '/'
+            ? resolveAuthorityPath(`/${suffix}`)
+            : resolveAuthorityPath(`${entry.prefix}/${suffix}`);
       mappings.push({
         path,
         resolution: { provider: state.provider, path: physicalPath, backend: entry.backend, entry },
@@ -2527,8 +2562,13 @@ export class WorkspaceFileService {
   }
 
   private _emitExternalDirectorySummary(mapping: ExternalLogicalMapping, logicalPath: string): void {
+    const separator = mapping.resolution.path.lastIndexOf('/');
     const physicalPath =
-      logicalPath === mapping.path ? mapping.resolution.path : parentDirectory(mapping.resolution.path);
+      logicalPath === mapping.path
+        ? mapping.resolution.path
+        : separator === -1
+          ? ''
+          : mapping.resolution.path.slice(0, separator);
     const resolution = { ...mapping.resolution, path: physicalPath };
     this._emitChangeEvent(
       { type: 'directoryChanged', path: logicalPath, backend: mapping.resolution.backend },
@@ -2634,12 +2674,12 @@ export class WorkspaceFileService {
     const changed: string[] = [];
     for (const [relative, row] of previousRows) {
       if (nextRows.get(relative) !== row) {
-        changed.push(`/${relative}`);
+        changed.push(relative);
       }
     }
     for (const relative of nextRows.keys()) {
       if (!previousRows.has(relative)) {
-        changed.push(`/${relative}`);
+        changed.push(relative);
       }
     }
     return changed.length > maxLocalizedExternalChanges ? undefined : changed;
@@ -2649,7 +2689,7 @@ export class WorkspaceFileService {
     this._emitChangeEvent({ type: 'directoryChanged', path: '/', backend: 'webaccess' });
     this._crossTabCoordinator.notifyDirectoryChange('/', {
       storageRootKey: state.storageRootKey,
-      providerBasePath: '/',
+      providerBasePath: '',
     });
   }
 
@@ -2716,14 +2756,6 @@ export class WorkspaceFileService {
         }
       }
     };
-    const mountedProjectDirectories = new Set(
-      this._mountTable
-        .listMounts()
-        .filter((entry) => entry.provider === state.provider && entry.storageRootKey === state.storageRootKey)
-        .map(({ providerBasePath }) => providerBasePath)
-        .filter((providerPath) => isProjectDirectoryPath(providerPath))
-        .map((providerPath) => providerPath.slice(1)),
-    );
     try {
       if (providerBasePath !== undefined) {
         const parts = providerBasePath.split('/').filter(Boolean);
@@ -2741,9 +2773,6 @@ export class WorkspaceFileService {
       const topLevelRows = await resolveRows(entries, async ([name, child]) => {
         if (child.kind === 'file') {
           return fileRow(name, name, child);
-        }
-        if (mountedProjectDirectories.has(name)) {
-          return [name, undefined];
         }
         try {
           // Project discovery only depends on the immediate directory and its manifest.
@@ -2763,11 +2792,6 @@ export class WorkspaceFileService {
           continue;
         }
         rows.push([name, 'dir', 0, 0].join('\0'));
-        if (mountedProjectDirectories.has(name)) {
-          // oxlint-disable-next-line no-await-in-loop -- Recursive fallback polling is intentionally sequential.
-          await walk(child, name);
-          continue;
-        }
         const manifestRow = topLevelRows.get(name);
         if (manifestRow !== undefined) {
           rows.push(manifestRow);
@@ -2782,9 +2806,28 @@ export class WorkspaceFileService {
     return rows.join('\n');
   }
 
-  private async _reconcileExternalSnapshot(state: ObservedWebAccessRoot): Promise<void> {
-    const next = await this._createExternalSnapshot(state);
-    await this._applyExternalSnapshot(state, '*', next);
+  private async _reconcileUnknownExternalRecords(
+    state: ObservedWebAccessRoot,
+    records: readonly NativeFileSystemChangeRecord[],
+  ): Promise<void> {
+    const providerBasePaths = new Set<string>();
+    for (const record of records) {
+      const mappings = this._logicalMappingsForPhysicalPath(state, this._physicalPath(record.relativePathComponents));
+      for (const { resolution } of mappings) {
+        const providerBasePath = resolution.entry?.providerBasePath;
+        if (providerBasePath) {
+          providerBasePaths.add(providerBasePath);
+        }
+      }
+    }
+    if (providerBasePaths.size !== 1) {
+      const next = await this._createExternalSnapshot(state);
+      await this._applyExternalSnapshot(state, '*', next);
+      return;
+    }
+    const providerBasePath = [...providerBasePaths][0]!;
+    const next = await this._createExternalSnapshot(state, providerBasePath);
+    await this._applyExternalSnapshot(state, providerBasePath, next);
   }
 
   private async _applyExternalSnapshot(state: ObservedWebAccessRoot, scope: string, next: string): Promise<void> {
@@ -3134,9 +3177,9 @@ export class WorkspaceFileService {
             throw new DOMException('The operation was aborted.', 'AbortError');
           }
 
-          const fullPath = joinPath(currentPath, entry.name);
+          const fullPath = joinRelativePath(currentPath, entry.name);
           if (entry.type === 'file') {
-            const relativePath = innerBasePath === '/' ? fullPath.slice(1) : fullPath.slice(innerBasePath.length + 1);
+            const relativePath = innerBasePath === '' ? fullPath : fullPath.slice(innerBasePath.length + 1);
             const segments = relativePath.split('/');
             const filename = segments.at(-1) ?? relativePath;
             fileStats.push({
@@ -3159,11 +3202,11 @@ export class WorkspaceFileService {
             throw new DOMException('The operation was aborted.', 'AbortError');
           }
 
-          const fullPath = joinPath(currentPath, entry);
+          const fullPath = joinRelativePath(currentPath, entry);
           // oxlint-disable-next-line no-await-in-loop -- Sequential stat required for recursive tree walk
           const stat = await provider.stat(fullPath);
           if (stat.type === 'file') {
-            const relativePath = innerBasePath === '/' ? fullPath.slice(1) : fullPath.slice(innerBasePath.length + 1);
+            const relativePath = innerBasePath === '' ? fullPath : fullPath.slice(innerBasePath.length + 1);
             const segments = relativePath.split('/');
             const filename = segments.at(-1) ?? relativePath;
             fileStats.push({
@@ -3584,7 +3627,7 @@ export class WorkspaceFileService {
   /**
    * Resolve the provider for an FS operation. When `options.scope` is
    * supplied the standalone provider for that scope is returned and the
-   * absolute path is passed through verbatim (no mount-prefix stripping).
+   * authority path is translated to the selected provider's rooted namespace.
    * Otherwise the mount table is consulted as in {@link _resolveProvider}.
    *
    * @param path - Absolute virtual path inside the (possibly scoped) workspace.
@@ -3597,7 +3640,12 @@ export class WorkspaceFileService {
   ): Promise<{ provider: FileSystemProvider; path: string; backend: FileSystemBackend }> {
     if (options?.scope !== undefined) {
       const provider = await this._registry.getProvider(options.scope);
-      return { provider, path: resolveVirtualPath(path), backend: options.scope.backend };
+      const authorityPath = resolveAuthorityPath(path);
+      return {
+        provider,
+        path: authorityPath === '/' ? '' : assertRootedPath(authorityPath.slice(1)),
+        backend: options.scope.backend,
+      };
     }
     this._assertBoundProjectRoute(path);
     const resolution = this._mountTable.resolve(path);
@@ -3629,7 +3677,7 @@ export class WorkspaceFileService {
     const scope: StorageRootConfig = { ...input.scope };
     const storageRootKey = this._registry.resolveStorageRootKey(scope);
 
-    const path = resolveVirtualPath(input.providerBasePath);
+    const path = assertRootedPath(input.providerBasePath);
     if (path !== input.providerBasePath) {
       throw new TypeError('Pending project target must already be canonical');
     }
@@ -3650,7 +3698,7 @@ export class WorkspaceFileService {
       if (!isSafeRelativePath(relativePath)) {
         throw new TypeError(`Pending project file path is unsafe: ${relativePath}`);
       }
-      const canonicalPath = resolveVirtualPath(`/${relativePath}`).slice(1);
+      const canonicalPath = assertRootedPath(relativePath);
       if (canonicalPath !== relativePath || canonicalPaths.has(canonicalPath)) {
         throw new TypeError(`Pending project file path is not unique and canonical: ${relativePath}`);
       }
@@ -3692,7 +3740,7 @@ export class WorkspaceFileService {
   }
 
   private _assertBoundProjectRoute(path: string): void {
-    const normalized = resolveVirtualPath(path);
+    const normalized = resolveAuthorityPath(path);
     const segments = normalized.split('/');
     if (segments[1] !== 'projects' || !segments[2]) {
       return;
@@ -3722,7 +3770,7 @@ export class WorkspaceFileService {
     if (storageRootKey === undefined) {
       return undefined;
     }
-    const physicalPath = resolveVirtualPath(resolution.path);
+    const physicalPath = assertRootedPath(resolution.path);
     // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
     // ponytail: linear over mounts, which is one entry per open project. Index
     // by storage root if a workspace ever mounts projects by the hundred.
@@ -3745,9 +3793,9 @@ export class WorkspaceFileService {
 
   private _mutationLockPaths(operations: ReadonlyArray<{ path: string; resolution: MountResolution }>): string[] {
     const locks = new Set<string>();
-    const addHierarchy = (path: string, boundary: string, format: (value: string) => string): void => {
-      let current = resolveVirtualPath(path);
-      const root = resolveVirtualPath(boundary);
+    const addAuthorityHierarchy = (path: string, boundary: string, format: (value: string) => string): void => {
+      let current = resolveAuthorityPath(path);
+      const root = resolveAuthorityPath(boundary);
       if (current !== root && !current.startsWith(`${root === '/' ? '' : root}/`)) {
         throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
       }
@@ -3759,17 +3807,32 @@ export class WorkspaceFileService {
         current = parentDirectory(current);
       }
     };
+    const addRootedHierarchy = (path: string, boundary: string, format: (value: string) => string): void => {
+      let current = assertRootedPath(path);
+      const root = assertRootedPath(boundary);
+      if (current !== root && !(root === '' ? current !== '' : current.startsWith(`${root}/`))) {
+        throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
+      }
+      for (;;) {
+        locks.add(format(current));
+        if (current === root) {
+          return;
+        }
+        const separator = current.lastIndexOf('/');
+        current = separator === -1 ? '' : current.slice(0, separator);
+      }
+    };
 
     for (const { path, resolution } of operations) {
-      const normalized = resolveVirtualPath(path);
-      addHierarchy(normalized, resolution.entry?.prefix ?? normalized, (value) => value);
+      const normalized = resolveAuthorityPath(path);
+      addAuthorityHierarchy(normalized, resolution.entry?.prefix ?? normalized, (value) => value);
       const projectId = this._projectLockOwner(normalized, resolution);
       if (projectId !== undefined) {
         locks.add(`project:${projectId}`);
       }
       const { entry } = resolution;
       if (entry?.storageRootKey !== undefined) {
-        addHierarchy(resolution.path, entry.providerBasePath, (value) => `${entry.storageRootKey}:${value}`);
+        addRootedHierarchy(resolution.path, entry.providerBasePath, (value) => `${entry.storageRootKey}:${value}`);
       }
     }
     return [...locks];
@@ -3788,7 +3851,7 @@ export class WorkspaceFileService {
   private _scopedPhysicalAuthority(scope: WorkspaceScope, providerBasePath: string): PhysicalAuthority {
     return {
       storageRootKey: this._registry.resolveStorageRootKey(scope),
-      providerBasePath: resolveVirtualPath(providerBasePath),
+      providerBasePath: assertRootedPath(providerBasePath),
     };
   }
 
@@ -3862,7 +3925,7 @@ export class WorkspaceFileService {
   private async _rmdirRecursive(provider: FileSystemProvider, directoryPath: string): Promise<void> {
     const entries = await readDirectoryEntries(provider, directoryPath);
     for (const entry of entries) {
-      const fullPath = joinPath(directoryPath, entry.name);
+      const fullPath = joinRelativePath(directoryPath, entry.name);
       // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive deletion
       await (entry.kind === 'dir' ? this._rmdirRecursive(provider, fullPath) : provider.unlink(fullPath));
     }
@@ -3874,13 +3937,13 @@ export class WorkspaceFileService {
     directoryPath: string,
     manifest: Uint8Array<ArrayBuffer>,
   ): Promise<void> {
-    const manifestPath = joinPath(directoryPath, 'tau.json');
+    const manifestPath = joinRelativePath(directoryPath, 'tau.json');
     const entries = await provider.readdir(directoryPath);
     for (const entry of entries) {
       if (entry === 'tau.json') {
         continue;
       }
-      const fullPath = joinPath(directoryPath, entry);
+      const fullPath = joinRelativePath(directoryPath, entry);
       // oxlint-disable-next-line no-await-in-loop -- Preserve the manifest until every sibling is gone.
       await this._removeRecursive(provider, fullPath);
     }
@@ -3938,8 +4001,8 @@ export class WorkspaceFileService {
     await targetProvider.mkdir(targetPath, { recursive: true });
     const entries = await readDirectoryEntries(sourceProvider, sourcePath);
     for (const entry of entries) {
-      const sourceEntry = joinPath(sourcePath, entry.name);
-      const targetEntry = joinPath(targetPath, entry.name);
+      const sourceEntry = joinRelativePath(sourcePath, entry.name);
+      const targetEntry = joinRelativePath(targetPath, entry.name);
       if (entry.kind === 'dir') {
         // oxlint-disable-next-line no-await-in-loop -- Sequential recursion required
         await this._copyDirectoryAcrossProviders(sourceProvider, sourceEntry, targetProvider, targetEntry);
@@ -3970,13 +4033,13 @@ export class WorkspaceFileService {
     const collect = async (currentPath: string, basePath: string): Promise<void> => {
       const entries = await readDirectoryEntries(provider, currentPath);
       for (const entry of entries) {
-        const fullPath = joinPath(currentPath, entry.name);
+        const fullPath = joinRelativePath(currentPath, entry.name);
         if (entry.kind === 'file') {
-          const relativePath = basePath === '/' ? fullPath.slice(1) : fullPath.slice(basePath.length + 1);
+          const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
           // oxlint-disable-next-line no-await-in-loop -- Sequential reads required for recursive collection
           files[relativePath] = await provider.readFile(fullPath);
         } else {
-          directories.push(basePath === '/' ? fullPath.slice(1) : fullPath.slice(basePath.length + 1));
+          directories.push(basePath === '' ? fullPath : fullPath.slice(basePath.length + 1));
           // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive collection
           await collect(fullPath, basePath);
         }

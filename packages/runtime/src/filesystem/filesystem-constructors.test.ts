@@ -28,73 +28,73 @@ describe('filesystem constructors', () => {
     it('should mkdir and create all parent directories', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/a/b/c', { recursive: true });
+      await fileSystem.mkdir('a/b/c', { recursive: true });
 
-      expect(await fileSystem.exists('/a/b/c')).toBe(true);
-      expect(await fileSystem.exists('/a/b')).toBe(true);
-      expect(await fileSystem.exists('/a')).toBe(true);
+      expect(await fileSystem.exists('a/b/c')).toBe(true);
+      expect(await fileSystem.exists('a/b')).toBe(true);
+      expect(await fileSystem.exists('a')).toBe(true);
     });
 
     it('should make parent directories visible via stat', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/x/y/z', { recursive: true });
+      await fileSystem.mkdir('x/y/z', { recursive: true });
 
-      const statX = await fileSystem.stat('/x');
+      const statX = await fileSystem.stat('x');
       expect(statX.type).toBe('dir');
 
-      const statXy = await fileSystem.stat('/x/y');
+      const statXy = await fileSystem.stat('x/y');
       expect(statXy.type).toBe('dir');
     });
 
     it('should list children created by mkdir in readdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/parent/child', { recursive: true });
+      await fileSystem.mkdir('parent/child', { recursive: true });
 
-      const entries = await fileSystem.readdir('/parent');
+      const entries = await fileSystem.readdir('parent');
       expect(entries).toContain('child');
     });
 
     it('should list deeply nested mkdir directories via readdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/a/b/c/d', { recursive: true });
+      await fileSystem.mkdir('a/b/c/d', { recursive: true });
 
-      expect(await fileSystem.readdir('/a')).toContain('b');
-      expect(await fileSystem.readdir('/a/b')).toContain('c');
-      expect(await fileSystem.readdir('/a/b/c')).toContain('d');
+      expect(await fileSystem.readdir('a')).toContain('b');
+      expect(await fileSystem.readdir('a/b')).toContain('c');
+      expect(await fileSystem.readdir('a/b/c')).toContain('d');
     });
 
     it('should read and write files in directories created by mkdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/project/src', { recursive: true });
-      await fileSystem.writeFile('/project/src/index.ts', 'export {}');
+      await fileSystem.mkdir('project/src', { recursive: true });
+      await fileSystem.writeFile('project/src/index.ts', 'export {}');
 
-      const content = await fileSystem.readFile('/project/src/index.ts', 'utf8');
+      const content = await fileSystem.readFile('project/src/index.ts', 'utf8');
       expect(content).toBe('export {}');
     });
 
     it('should read a file as utf8', async () => {
       const fileSystem = makeFs();
-      await fileSystem.writeFile('/test.txt', 'hello world');
+      await fileSystem.writeFile('test.txt', 'hello world');
 
-      const content = await fileSystem.readFile('/test.txt', 'utf8');
+      const content = await fileSystem.readFile('test.txt', 'utf8');
       expect(content).toBe('hello world');
     });
 
     it('should read a file as Uint8Array', async () => {
       const fileSystem = makeFs();
-      await fileSystem.writeFile('/bin.txt', 'binary');
+      await fileSystem.writeFile('bin.txt', 'binary');
 
-      const content = await fileSystem.readFile('/bin.txt');
+      const content = await fileSystem.readFile('bin.txt');
       expect(content).toBeInstanceOf(Uint8Array);
       expect(new TextDecoder().decode(content)).toBe('binary');
     });
 
     it('should preserve Uint8Array seed bytes', async () => {
-      const binaryPath = '/binary.step';
+      const binaryPath = 'binary.step';
       const fileSystem = makeFs({ [binaryPath]: new Uint8Array([0, 255, 1]) });
 
       await expect(fileSystem.readFile(binaryPath)).resolves.toEqual(new Uint8Array([0, 255, 1]));
@@ -103,55 +103,55 @@ describe('filesystem constructors', () => {
     it('should remove a directory via rmdir', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/rmdir-test');
-      expect(await fileSystem.exists('/rmdir-test')).toBe(true);
-      await fileSystem.rmdir('/rmdir-test');
-      expect(await fileSystem.exists('/rmdir-test')).toBe(false);
+      await fileSystem.mkdir('rmdir-test');
+      expect(await fileSystem.exists('rmdir-test')).toBe(true);
+      await fileSystem.rmdir('rmdir-test');
+      expect(await fileSystem.exists('rmdir-test')).toBe(false);
     });
 
     it('should rename a file', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.writeFile('/old.txt', 'rename me');
-      await fileSystem.rename('/old.txt', '/new.txt');
+      await fileSystem.writeFile('old.txt', 'rename me');
+      await fileSystem.rename('old.txt', 'new.txt');
 
-      expect(await fileSystem.exists('/old.txt')).toBe(false);
-      const content = await fileSystem.readFile('/new.txt', 'utf8');
+      expect(await fileSystem.exists('old.txt')).toBe(false);
+      const content = await fileSystem.readFile('new.txt', 'utf8');
       expect(content).toBe('rename me');
     });
 
     it('should rename a directory', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.mkdir('/old-dir/nested', { recursive: true });
-      await fileSystem.writeFile('/old-dir/nested/child.txt', 'child');
-      await fileSystem.rename('/old-dir', '/new-dir');
+      await fileSystem.mkdir('old-dir/nested', { recursive: true });
+      await fileSystem.writeFile('old-dir/nested/child.txt', 'child');
+      await fileSystem.rename('old-dir', 'new-dir');
 
-      expect(await fileSystem.exists('/old-dir')).toBe(false);
-      expect(await fileSystem.exists('/new-dir')).toBe(true);
-      expect(await fileSystem.exists('/old-dir/nested/child.txt')).toBe(false);
-      await expect(fileSystem.readFile('/new-dir/nested/child.txt', 'utf8')).resolves.toBe('child');
+      expect(await fileSystem.exists('old-dir')).toBe(false);
+      expect(await fileSystem.exists('new-dir')).toBe(true);
+      expect(await fileSystem.exists('old-dir/nested/child.txt')).toBe(false);
+      await expect(fileSystem.readFile('new-dir/nested/child.txt', 'utf8')).resolves.toBe('child');
     });
 
     it('should throw ENOENT when renaming nonexistent path', async () => {
       const fileSystem = makeFs();
 
-      await expect(fileSystem.rename('/nope', '/also-nope')).rejects.toThrow('ENOENT');
+      await expect(fileSystem.rename('nope', 'also-nope')).rejects.toThrow('ENOENT');
     });
 
     it('should delete a file', async () => {
       const fileSystem = makeFs();
-      await fileSystem.writeFile('/del.txt', 'gone');
+      await fileSystem.writeFile('del.txt', 'gone');
 
-      await fileSystem.unlink('/del.txt');
-      expect(await fileSystem.exists('/del.txt')).toBe(false);
+      await fileSystem.unlink('del.txt');
+      expect(await fileSystem.exists('del.txt')).toBe(false);
     });
 
     it('should stat a file with correct metadata', async () => {
       const fileSystem = makeFs();
-      await fileSystem.writeFile('/stat.txt', 'abcde');
+      await fileSystem.writeFile('stat.txt', 'abcde');
 
-      const stat = await fileSystem.stat('/stat.txt');
+      const stat = await fileSystem.stat('stat.txt');
       expect(stat.type).toBe('file');
       expect(stat.size).toBe(5);
       expect(stat.mtimeMs).toBeTypeOf('number');
@@ -159,25 +159,25 @@ describe('filesystem constructors', () => {
 
     it('should stat a directory', async () => {
       const fileSystem = makeFs();
-      await fileSystem.mkdir('/statdir');
+      await fileSystem.mkdir('statdir');
 
-      const stat = await fileSystem.stat('/statdir');
+      const stat = await fileSystem.stat('statdir');
       expect(stat.type).toBe('dir');
     });
 
     it('should check file existence', async () => {
       const fileSystem = makeFs();
-      await fileSystem.writeFile('/exists.txt', 'yes');
+      await fileSystem.writeFile('exists.txt', 'yes');
 
-      expect(await fileSystem.exists('/exists.txt')).toBe(true);
-      expect(await fileSystem.exists('/nope.txt')).toBe(false);
+      expect(await fileSystem.exists('exists.txt')).toBe(true);
+      expect(await fileSystem.exists('nope.txt')).toBe(false);
     });
 
     it('should lstat a file (delegates to stat, no symlinks)', async () => {
       const fileSystem = makeFs();
 
-      await fileSystem.writeFile('/lstat.txt', 'abc');
-      const stat = await fileSystem.lstat('/lstat.txt');
+      await fileSystem.writeFile('lstat.txt', 'abc');
+      const stat = await fileSystem.lstat('lstat.txt');
       expect(stat.type).toBe('file');
       expect(stat.size).toBe(3);
       expect(stat.mtimeMs).toBeTypeOf('number');
@@ -185,20 +185,20 @@ describe('filesystem constructors', () => {
 
     it('should throw ENOENT from stat for nonexistent path', async () => {
       const fileSystem = makeFs();
-      await expect(fileSystem.stat('/does-not-exist')).rejects.toThrow('ENOENT');
+      await expect(fileSystem.stat('does-not-exist')).rejects.toThrow('ENOENT');
     });
 
     it('should return directory stat from lstat', async () => {
       const fileSystem = makeFs();
-      await fileSystem.mkdir('/my-dir');
+      await fileSystem.mkdir('my-dir');
 
-      const stat = await fileSystem.lstat('/my-dir');
+      const stat = await fileSystem.lstat('my-dir');
       expect(stat.type).toBe('dir');
     });
 
     it('should throw ENOENT from lstat for nonexistent path', async () => {
       const fileSystem = makeFs();
-      await expect(fileSystem.lstat('/missing')).rejects.toThrow('ENOENT');
+      await expect(fileSystem.lstat('missing')).rejects.toThrow('ENOENT');
     });
   });
 });

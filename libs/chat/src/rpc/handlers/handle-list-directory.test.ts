@@ -52,12 +52,12 @@ describe('handleListDirectory', () => {
 
     expect(result).toEqual({
       success: true,
-      path: '/',
+      path: '',
       entries: [{ name: 'readme.md', type: 'file', size: 500, contentKind: 'text', lineCount: 8 }],
     });
   });
 
-  it.each(['', '.', './', '/'] as const)('should resolve root alias %j to the project root', async (rootAlias) => {
+  it('should resolve the canonical empty path to the project root', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readdir.mockImplementation(async (path) => {
       if (path === '') {
@@ -66,13 +66,22 @@ describe('handleListDirectory', () => {
       throw new Error(`Unexpected non-canonical project path: ${path}`);
     });
 
-    const result = await handleListDirectory({ path: rootAlias }, fileSystem);
+    const result = await handleListDirectory({ path: '' }, fileSystem);
 
     expect(result).toEqual({
       success: true,
-      path: '/',
+      path: '',
       entries: [{ name: 'checks', type: 'dir', size: 0 }],
     });
+  });
+
+  it.each(['.', './', '/'] as const)('should reject noncanonical root alias %j', async (path) => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleListDirectory({ path }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.readdir).not.toHaveBeenCalled();
   });
 
   it('should list the project root when path is omitted', async () => {
@@ -89,7 +98,7 @@ describe('handleListDirectory', () => {
     expect(fileSystem.readdir).toHaveBeenCalledWith('');
     expect(result).toEqual({
       success: true,
-      path: '/',
+      path: '',
       entries: [{ name: 'checks', type: 'dir', size: 0 }],
     });
   });

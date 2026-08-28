@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-08-21'
+updated: '2026-08-28'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/runtime-api-policy.md
@@ -15,6 +15,8 @@ related:
   - docs/research/pending-project-import-recovery-bootstrap-isolation.md
   - docs/research/filesystem-post-implementation-congruency-audit.md
   - docs/research/workspace-naming-and-storage-backend-abstraction.md
+  - docs/research/workspace-immediate-disconnect-undo-blueprint.md
+  - docs/research/rooted-filesystem-root-relative-path-unification.md
 ---
 
 # Filesystem Authority Policy
@@ -46,13 +48,13 @@ The invariant that satisfies them: **one provider instance per storage root, sha
 
 ### 1. Single filesystem authority per host
 
-All filesystem I/O runs in one place per host — the file-manager worker in the browser, or the caller-supplied rooted filesystem in CLI/Node environments. Trusted administration uses the authority-global namespace to select and configure project routes. Runtime, GeoSpec, preview, chat, and headless consumers receive only an opaque, fully writable rooted filesystem whose virtual `/` is one selected project. No feature worker may instantiate providers, open backing stores, inspect global routes, or receive the authority-global shared file pool. The main thread remains the writer of asset thumbnail files declared by `tau.json`.
+All filesystem I/O runs in one place per host — the file-manager worker in the browser, or the caller-supplied rooted filesystem in CLI/Node environments. Trusted administration uses the authority-global namespace to select and configure project routes. Runtime, GeoSpec, preview, chat, and headless consumers receive only an opaque, fully writable rooted filesystem for one selected project; that capability's root is `''`. No feature worker may instantiate providers, open backing stores, inspect global routes, or receive the authority-global shared file pool. The main thread remains the writer of asset thumbnail files declared by `tau.json`.
 
 **Why**: Requirement C is unenforceable with more than one writer topology; every coherence mechanism in this policy assumes a single chokepoint.
 
 ### 2. One provider instance per storage root
 
-A storage root is one IndexedDB database, the origin's OPFS root, one webaccess directory entry, or an explicitly named memory root. Exactly one provider instance exists per `storageRootKey`: `indexeddb:<database-prefix>`, `opfs:origin`, `webaccess:<workspaceId>`, or a caller-supplied `memory:<nonempty-scope>`. Reject missing, malformed, or cross-backend memory keys before provider lookup; never mint an implicit counter key. Mount resolution and scoped reads reuse that instance — per-mount fresh instances are forbidden. Webaccess workspace creation uses `FileSystemDirectoryHandle.isSameEntry()` to preserve the existing `workspaceId` when the user selects the same physical directory again; folder names are never identity.
+A storage root is one IndexedDB database, the origin's OPFS root, one webaccess directory entry, or an explicitly named memory root. Exactly one provider instance exists per `storageRootKey`: `indexeddb:<database-prefix>`, `opfs:origin`, `webaccess:<workspaceId>`, or a caller-supplied `memory:<nonempty-scope>`. Reject missing, malformed, or cross-backend memory keys before provider lookup; never mint an implicit counter key. Mount resolution and scoped reads reuse that instance — per-mount fresh instances are forbidden. Webaccess workspace creation uses `FileSystemDirectoryHandle.isSameEntry()` to preserve the existing `workspaceId` when the user selects the same physical directory again; folder names are never identity. The store must reject an exact reconnect that would attach one physical directory under a second connected workspace id.
 
 **Why**: Providers hydrate in-memory indexes once per instance (`DirectIdbProvider._paths`); two instances over one database means one instance's writes are invisible to the other's index — the ENOENT-despite-row-exists class.
 
@@ -83,7 +85,7 @@ Serialize complete project-root configuration calls in invocation order. Disposa
 
 ### 4. Use the namespace owned by each boundary
 
-Trusted authority and administration APIs take canonical authority-global virtual paths such as `/projects/<id>/…`. A rooted runtime filesystem takes normalized runtime paths such as `/src/main.ts`; its `/` is the already-selected filesystem root, not the authority-global or host OS root. Neither boundary accepts relative paths, backslashes, URLs, drive-letter paths, control characters, or traversal above its own `/`. Do not infer a project root from a filename or ambient "current project" state.
+Trusted authority and administration APIs take canonical authority-global paths such as `/projects/<id>/…`. A rooted runtime filesystem takes canonical root-relative paths such as `src/main.ts`, with `''` representing its already-selected root. Authority APIs require the leading slash; rooted APIs reject it. Both boundaries reject backslashes, URLs, drive-letter paths, control characters, noncanonical spellings, and traversal above their own root. Do not infer a project root from a filename or ambient "current project" state.
 
 **Why**: Global paths select authority routes; local paths operate inside an already-selected filesystem. Mixing those namespaces leaks routing and authorization concerns into runtime code.
 
@@ -122,7 +124,9 @@ Before journaling permanent deletion, run a fresh uniqueness-aware discovery and
 The `webaccess` backend is multi-workspace: every `FileSystemDirectoryHandle` lives behind a first-class `workspaceId` (plain `string`, `wsp_*` prefix) and is owned by the multi-store `tau-fs-handles` IndexedDB schema (`workspaces`, `handles`, `configs`, `meta`). The legacy single-`'root'` handle pattern is forbidden.
 
 - Hand-off to the worker uses structured clone (handles are not transferable). The FM machine resolves the project's bound `workspaceId` from `configs[projectId]`, reads its handle from `handles[workspaceId]`, then mounts the webaccess prefix in a single discriminated call: `proxy.mount(prefix, { backend: 'webaccess', directoryHandle, workspaceId, preservePath: true })`. The worker is stateless w.r.t. webaccess identity — no `setDirectoryHandle` knob, no ambient "active handle" between RPCs.
-- Permission must be re-requested from a user gesture after page reload. The FM machine surfaces a structured `unavailableReason` (`'missing' | 'permission'`) — silent downgrade to IndexedDB is forbidden (Rule 10).
+- Permission must be re-requested from a user gesture after page reload. The FM machine surfaces a structured `unavailableReason` (`'missing' | 'disconnected' | 'permission'`) — silent downgrade to IndexedDB is forbidden (Rule 10).
+- Disconnect removes only `handles[workspaceId]`; it MUST preserve workspace metadata, project configs, creation-location preference, and the on-disk marker. Undo conditionally restores the captured handle only while no newer handle exists. A known row without a handle is reported as `disconnected` telemetry, not a missing-handle warning.
+- Generic connection resolves a matching live handle first and normalizes its marker to that id. Otherwise, a marker naming a known handle-less row reconnects that row with `minted: false`; a marker naming a row with a different live handle denotes a copy and receives a fresh id. Exact-id reconnect validates both live-handle ownership and the marker before writing and returns a typed `WorkspaceIdentityConflictError` on collision.
 - Cross-workspace project access is forbidden. If a project's bound `workspaceId` does not match the currently active workspace, the FM machine must refuse to open and route through the `webAccessUnavailable` state (no implicit re-binding).
 
 ### 10. Product location selection never silently downgrades
@@ -146,9 +150,11 @@ Workspace identifiers must be minted via `generatePrefixedId(idPrefix.workspace)
 
 `ProjectFileSystemConfig.workspaceId` is the **single source of truth** for the project ↔ workspace binding. The `fileManagerMachine` MUST NOT carry that identity as ambient context; the machine's `activeWorkspaceId` / `activeWorkspaceName` fields are per-init _outputs_ populated by `initializeServicesActor` and cleared on every `setRoot` transition. The machine MUST NOT mutate `ProjectFileSystemConfig` directly — there is no actor-side self-persist branch.
 
-Any user-driven workspace change MUST go through the binding-transaction helper `bindProjectToWorkspace` on `useFileManager`. The helper performs three steps in order: (1) write `ProjectFileSystemConfig` with the new `{ projectId, backend: 'webaccess', workspaceId }`, (2) emit the `workspaceSwap` telemetry event, (3) dispatch `reloadWorkspace` (no payload) on the FM machine. The machine then re-runs `initializeServicesActor`, which reads the fresh persistent record. Subsequent project loads are silent because the persistent record already has the right binding.
+Any user-driven project binding change MUST go through the binding-transaction helper `bindProjectToWorkspace` on `useFileManager`. The helper performs three steps in order: (1) write `ProjectFileSystemConfig` with the new `{ projectId, backend: 'webaccess', workspaceId }`, (2) emit the `workspaceSwap` telemetry event, (3) dispatch `reloadWorkspace` (no payload) on the FM machine. Reconnecting a disconnected workspace is not a binding change: replace its handle under the existing id and dispatch `reloadWorkspace` without rewriting the config. The machine then re-runs `initializeServicesActor`, which reads the persistent record. Subsequent project loads are silent because that record already has the right binding.
 
-Missing or stale bindings surface `WorkspaceDirectoryRequiredError('missing')` via the recovery overlay; legacy projects without an explicit `workspaceId` are prompted on first load. The v2 → v3 IDB migration only promotes the legacy `'root'` handle to a regular workspace row — it does not auto-bind projects.
+Missing or stale bindings surface `WorkspaceDirectoryRequiredError('missing')` via the recovery overlay; a known workspace row without a handle surfaces `disconnected` and retains its id/name for exact-id recovery. Legacy projects without an explicit `workspaceId` are prompted on first load. The v2 → v3 IDB migration only promotes the legacy `'root'` handle to a regular workspace row — it does not auto-bind projects.
+
+Ordinary discovery MUST NOT rebind a project away from a known incomplete workspace root. Historical duplicate identities may be repaired only by an explicit user-confirmed transaction after a fresh complete canonical-root scan proves one unique matching project id and provider path, the source row has no handle, and the config is unchanged. That transaction may update configs, creation preference, and now-unreferenced source rows; it must not write project files.
 
 ### 12. Project creation is journal → authority commit → local resources
 
@@ -170,7 +176,7 @@ The authority worker's private `/` fallback remains IndexedDB; it is infrastruct
 
 ### 14. Provider disposal is keyed by canonical `storageRootKey`
 
-`ProviderRegistry` caches one provider per canonical `storageRootKey`. Webaccess entries MUST NOT be keyed by `handle.name` — two folders can share a name and one physical directory may be renamed. The filesystem client exposes `disposeStorageRoot(storageRootKey)`, which disposes exactly that provider. Changing or forgetting a workspace disposes `webaccess:<workspaceId>` before the next route sync/read; whole-authority teardown uses `disposeAll()`.
+`ProviderRegistry` caches one provider per canonical `storageRootKey`. Webaccess entries MUST NOT be keyed by `handle.name` — two folders can share a name and one physical directory may be renamed. The filesystem client exposes `disposeStorageRoot(storageRootKey)`, which disposes exactly that provider. Changing, disconnecting, restoring, reconnecting, or repairing a workspace disposes each affected `webaccess:<workspaceId>` before the next route sync/read; a successful multi-binding repair performs one root synchronization after its durable commit. Whole-authority teardown uses `disposeAll()`.
 
 Failure to dispose after replacing a handle is a bug — the registry would otherwise continue serving the previous provider instance under the stable root key.
 
@@ -178,11 +184,11 @@ After provider initialization settles, `getProvider()` must verify that the prom
 
 ### 15. Rooted views are the runtime reachability boundary
 
-`WorkspaceFileService.createRootedFileSystem(authorityRoot)` must resolve `authorityRoot` once to an exact project mount and return the ordinary full read/write/watch filesystem surface rebased to local `/`. Reads, writes, directory operations, rename operands, existence checks, and watches all resolve segment-by-segment inside that captured subtree. `..` may collapse local segments but may never ascend above `/`; a mount replacement invalidates the captured view instead of retargeting it.
+`WorkspaceFileService.createRootedFileSystem(authorityRoot)` must resolve `authorityRoot` once to an exact project mount and return the ordinary full read/write/watch filesystem surface rebased to the root-relative namespace. Reads, writes, directory operations, rename operands, existence checks, and watches all resolve segment-by-segment inside that captured subtree. Public rooted operations accept only canonical paths (`''`, `main.ts`, `lib/part.ts`), so dot segments never reach provider I/O; a mount replacement invalidates the captured view instead of retargeting it.
 
 The captured mount entry also owns every post-I/O side effect. An admitted old-provider operation may complete against that provider, but it must not update a replacement route's pool, tree, or watches. Qualify remote facts with the existing physical pair `{ storageRootKey, providerBasePath }`; apply them only to matching projections after provider refresh completes.
 
-The view is not read-only. Source files, generated files, `/.tau/cache`, and project-local `/node_modules` are all writable and persist through the underlying provider. No rights matrix, write allowlist, grant lifecycle, route generation, receipt, or service worker participates in this boundary. Runtime and headless code receive the opaque filesystem and local path only; project selection and authority-global routing remain in trusted composition code.
+The view is not read-only. Source files, generated files, `.tau/cache`, and project-local `node_modules` are all writable and persist through the underlying provider. No rights matrix, write allowlist, grant lifecycle, route generation, receipt, or service worker participates in this boundary. Runtime and headless code receive the opaque filesystem and local path only; project selection and authority-global routing remain in trusted composition code.
 
 **Why**: Reachability is enforced once, before provider I/O, without asking every runtime layer to reproduce authorization logic.
 

@@ -12,7 +12,7 @@ import type { KernelRuntime } from '#types/runtime-kernel.types.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
-import { resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 
 /** @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- protocol global key mirrors its host name
@@ -187,11 +187,11 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
 }
 
 /**
- * Convert a canonical project-local file path to the leading-slash-free entry
- * spelling required by the JavaScript VM adapter.
+ * Validate and return the canonical project-local entry path required by the
+ * JavaScript VM adapter.
  * @public
  */
-export const toVmEntryPath = (absolutePath: string): string => resolveVirtualPath(absolutePath).slice(1);
+export const toVmEntryPath = (rootedPath: string): string => assertRootedPath(rootedPath);
 
 /**
  * Convert raw build issues (from bundler/execute) to `KernelIssue` objects

@@ -14,7 +14,6 @@ export type {
 } from '#rpc/rpc-dependencies.js';
 export { createRpcDispatcher, type RpcDispatcher } from '#rpc/rpc-dispatcher.js';
 export { toRpcError, getErrorCode, getErrorMessage } from '#rpc/rpc-error.js';
-export { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
 export { handleReadFile } from '#rpc/handlers/handle-read-file.js';
 export { handleCreateFile } from '#rpc/handlers/handle-create-file.js';
 export { handleDeleteFile } from '#rpc/handlers/handle-delete-file.js';

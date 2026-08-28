@@ -14,7 +14,7 @@ describe('extractInlineFileSystem (R2)', () => {
   });
 
   it('should return the underlying RuntimeFileSystemBase for inline fs created via fromMemoryFs', async () => {
-    const pathA = '/a.txt';
+    const pathA = 'a.txt';
     const opaque = fromMemoryFs({ [pathA]: 'x' });
     const base = extractInlineFileSystem(opaque);
     expect(base).toBeDefined();
@@ -53,7 +53,7 @@ describe('extractInlineFileSystem (R2)', () => {
  */
 describe('extractInlineFileSystem — per-binding-fresh contract', () => {
   it('should produce isolated RuntimeFileSystemBase instances seeded from the same fromMemoryFs() value', async () => {
-    const seedPath = '/seed.ts';
+    const seedPath = 'seed.ts';
     const opaque = fromMemoryFs({ [seedPath]: 'export default 1;' });
 
     const fsA = extractInlineFileSystem(opaque);
@@ -72,7 +72,7 @@ describe('extractInlineFileSystem — per-binding-fresh contract', () => {
 
     /* Mutations on A are invisible to B and vice versa — the structural
      * fix that closes the docs Replicad-reference cross-contamination. */
-    const sharedKey = '/main.ts';
+    const sharedKey = 'main.ts';
     await fsA!.writeFile(sharedKey, 'A');
     await fsB!.writeFile(sharedKey, 'B');
     await expect(fsA!.readFile(sharedKey, 'utf8')).resolves.toBe('A');
@@ -80,8 +80,8 @@ describe('extractInlineFileSystem — per-binding-fresh contract', () => {
   });
 
   it('should defensively snapshot seed files at fromMemoryFs() call time, not at create() call time', async () => {
-    const seedKey = '/seed.ts';
-    const extraKey = '/extra.ts';
+    const seedKey = 'seed.ts';
+    const extraKey = 'extra.ts';
     const seeds: Record<string, string> = { [seedKey]: 'initial' };
     const opaque = fromMemoryFs(seeds);
 
@@ -96,7 +96,7 @@ describe('extractInlineFileSystem — per-binding-fresh contract', () => {
   });
 
   it('should defensively copy Uint8Array seed contents at fromMemoryFs() call time', async () => {
-    const seedKey = '/seed.bin';
+    const seedKey = 'seed.bin';
     const bytes = new Uint8Array([1, 2, 3]);
     const opaque = fromMemoryFs({ [seedKey]: bytes });
 
@@ -112,7 +112,7 @@ describe('extractInlineFileSystem — per-binding-fresh contract', () => {
     const fsA = extractInlineFileSystem(opaque)!;
     const fsB = extractInlineFileSystem(opaque)!;
 
-    await fsA.writeFile('/a.ts', 'A');
-    await expect(fsB.exists('/a.ts')).resolves.toBe(false);
+    await fsA.writeFile('a.ts', 'A');
+    await expect(fsB.exists('a.ts')).resolves.toBe(false);
   });
 });

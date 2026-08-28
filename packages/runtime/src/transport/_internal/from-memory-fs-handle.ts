@@ -22,7 +22,7 @@
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
 import { fileStatFromBytes } from '@taucad/filesystem';
-import { resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 
 function errno(code: string, message: string): Error {
   const error = new Error(message);
@@ -76,7 +76,7 @@ function buildMemoryFsBase(
 
   if (seedFiles) {
     for (const [filePath, content] of Object.entries(seedFiles)) {
-      const canonicalPath = resolveVirtualPath(filePath);
+      const canonicalPath = assertRootedPath(filePath);
       store.set(canonicalPath, content);
       const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
@@ -85,7 +85,7 @@ function buildMemoryFsBase(
     }
   }
 
-  directories.add('/');
+  directories.add('');
 
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -93,7 +93,7 @@ function buildMemoryFsBase(
   function readFile(path: string, encoding: 'utf8'): Promise<string>;
   function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   async function readFile(filePath: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    const canonicalPath = resolveVirtualPath(filePath);
+    const canonicalPath = assertRootedPath(filePath);
     const content = store.get(canonicalPath);
     if (content === undefined) {
       throw enoent(`ENOENT: no such file: ${canonicalPath}`);
@@ -118,7 +118,7 @@ function buildMemoryFsBase(
     },
     readFile,
     async writeFile(filePath, data) {
-      const canonicalPath = resolveVirtualPath(filePath);
+      const canonicalPath = assertRootedPath(filePath);
       store.set(canonicalPath, data);
       const parts = canonicalPath.split('/');
       for (let i = 1; i < parts.length; i++) {
@@ -126,7 +126,7 @@ function buildMemoryFsBase(
       }
     },
     async mkdir(directoryPath, options) {
-      const canonicalPath = resolveVirtualPath(directoryPath);
+      const canonicalPath = assertRootedPath(directoryPath);
       /* `options.recursive` was previously ignored, so `mkdir` never reported
        * EEXIST or a missing parent and diverged from every other adapter. */
       if (store.has(canonicalPath) || directories.has(canonicalPath)) {
@@ -137,7 +137,7 @@ function buildMemoryFsBase(
       }
       const parts = canonicalPath.split('/');
       if (options?.recursive !== true) {
-        const parent = parts.slice(0, -1).join('/') || '/';
+        const parent = parts.slice(0, -1).join('/');
         if (!directories.has(parent)) {
           throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
         }
@@ -148,8 +148,8 @@ function buildMemoryFsBase(
       }
     },
     async readdir(directoryPath) {
-      const canonicalPath = resolveVirtualPath(directoryPath);
-      const prefix = canonicalPath === '/' ? '/' : `${canonicalPath}/`;
+      const canonicalPath = assertRootedPath(directoryPath);
+      const prefix = canonicalPath === '' ? '' : `${canonicalPath}/`;
       const entries = new Set<string>();
       for (const key of store.keys()) {
         if (key.startsWith(prefix)) {
@@ -170,14 +170,14 @@ function buildMemoryFsBase(
       return [...entries].filter(Boolean);
     },
     async unlink(filePath) {
-      const canonicalPath = resolveVirtualPath(filePath);
+      const canonicalPath = assertRootedPath(filePath);
       if (!store.has(canonicalPath) && directories.has(canonicalPath)) {
         throw errno('EISDIR', `EISDIR: illegal operation on a directory: ${canonicalPath}`);
       }
       store.delete(canonicalPath);
     },
     async stat(filePath) {
-      const canonicalPath = resolveVirtualPath(filePath);
+      const canonicalPath = assertRootedPath(filePath);
       if (store.has(canonicalPath)) {
         const content = store.get(canonicalPath)!;
         const bytes = typeof content === 'string' ? encoder.encode(content) : content;
@@ -193,14 +193,14 @@ function buildMemoryFsBase(
     async rmdir(directoryPath) {
       /* Previously an unconditional delete: it removed files, removed
        * non-empty directories, and silently succeeded on missing paths. */
-      const canonicalPath = resolveVirtualPath(directoryPath);
+      const canonicalPath = assertRootedPath(directoryPath);
       if (store.has(canonicalPath)) {
         throw errno('ENOTDIR', `ENOTDIR: not a directory: ${canonicalPath}`);
       }
       if (!directories.has(canonicalPath)) {
         throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
       }
-      const prefix = canonicalPath === '/' ? '/' : `${canonicalPath}/`;
+      const prefix = canonicalPath === '' ? '' : `${canonicalPath}/`;
       const hasChild = [...store.keys(), ...directories].some((key) => key !== canonicalPath && key.startsWith(prefix));
       if (hasChild) {
         throw errno('ENOTEMPTY', `ENOTEMPTY: directory not empty: ${canonicalPath}`);
@@ -208,8 +208,8 @@ function buildMemoryFsBase(
       directories.delete(canonicalPath);
     },
     async rename(oldPath, newPath) {
-      const canonicalOldPath = resolveVirtualPath(oldPath);
-      const canonicalNewPath = resolveVirtualPath(newPath);
+      const canonicalOldPath = assertRootedPath(oldPath);
+      const canonicalNewPath = assertRootedPath(newPath);
       const content = store.get(canonicalOldPath);
       if (content !== undefined) {
         store.set(canonicalNewPath, content);
@@ -238,7 +238,7 @@ function buildMemoryFsBase(
       }
     },
     async lstat(filePath) {
-      const canonicalPath = resolveVirtualPath(filePath);
+      const canonicalPath = assertRootedPath(filePath);
       if (store.has(canonicalPath)) {
         const content = store.get(canonicalPath)!;
         const bytes = typeof content === 'string' ? encoder.encode(content) : content;
@@ -252,7 +252,7 @@ function buildMemoryFsBase(
       throw enoent(`ENOENT: no such file or directory: ${canonicalPath}`);
     },
     async exists(filePath) {
-      const canonicalPath = resolveVirtualPath(filePath);
+      const canonicalPath = assertRootedPath(filePath);
       return store.has(canonicalPath) || directories.has(canonicalPath);
     },
   };

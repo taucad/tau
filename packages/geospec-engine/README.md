@@ -110,7 +110,7 @@ controls are explicit: `cache` and `cacheDirectory` belong to Node runner constr
 
 ## License
 
-Fair source: **[FSL-1.1-Apache-2.0](./LICENSE)** (Functional Source License 1.1, Apache 2.0 Future License) — free for
+Fair source: **[FSL-1.1-ALv2](./LICENSE)** (Functional Source License 1.1, Apache 2.0 Future License) — free for
 every purpose except a competing commercial offering, including internal and commercial use, CI, education, and
 research. It is source-available, not open source; the perimeter packages around it are.
 

@@ -15,16 +15,15 @@ const exportFixture = async (
   bundler: ReturnType<typeof esbuild> | ReturnType<typeof rolldown>,
   fixture: ReturnType<typeof loadFixture>,
 ): Promise<{ bytes: number; sha256: string }> => {
-  const files = Object.fromEntries(Object.entries(fixture.files).map(([path, source]) => [`/${path}`, source]));
   const runtime = defineRuntime({
     plugins: [bundler],
     kernels: [replicadKernel({ wasm: 'multi' })],
   });
   const client = createRuntimeClient({
-    transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(files) }),
+    transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(fixture.files) }),
   });
   try {
-    const result = await client.export('glb', { source: { path: `/${fixture.mainFile}` } });
+    const result = await client.export('glb', { source: { path: fixture.mainFile } });
     if (!result.success) {
       throw new Error(result.issues.map(({ message }) => message).join('; '));
     }

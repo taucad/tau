@@ -67,8 +67,7 @@ const createClient = (
   return client;
 };
 
-const sourcePath = (file: GeometryFile): string =>
-  file.path === '/' ? file.filename : `${file.path}/${file.filename}`;
+const sourcePath = (file: GeometryFile): string => (file.path === '' ? file.filename : `${file.path}/${file.filename}`);
 
 const renderGeometry = async (
   client: TestClient,

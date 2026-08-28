@@ -43,7 +43,7 @@ export type BundlerRuntime = {
  * @public
  */
 export type BundleInput = {
-  /** Path of the entry within the runtime filesystem. The normalized path begins with `/`. */
+  /** Canonical root-relative path of the entry within the runtime filesystem. */
   entryPath: string;
 };
 

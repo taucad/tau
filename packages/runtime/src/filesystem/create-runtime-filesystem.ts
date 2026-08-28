@@ -7,7 +7,7 @@
  */
 
 import type { FileStat, FileStatEntry } from '@taucad/types';
-import { resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 import type { KernelFileSystem, RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 
@@ -32,22 +32,22 @@ export function createRuntimeFileSystem(base: RuntimeFileSystemBase): KernelFile
   function readFile(path: string, encoding: 'utf8'): Promise<string>;
   function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    const canonicalPath = resolveVirtualPath(path);
+    const canonicalPath = assertRootedPath(path);
     return encoding === 'utf8' ? base.readFile(canonicalPath, 'utf8') : base.readFile(canonicalPath);
   }
 
   const writeFile = async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> =>
-    base.writeFile(resolveVirtualPath(path), data);
-  const readdir = async (path: string): Promise<string[]> => base.readdir(resolveVirtualPath(path));
-  const stat = async (path: string): Promise<FileStat> => base.stat(resolveVirtualPath(path));
+    base.writeFile(assertRootedPath(path), data);
+  const readdir = async (path: string): Promise<string[]> => base.readdir(assertRootedPath(path));
+  const stat = async (path: string): Promise<FileStat> => base.stat(assertRootedPath(path));
   const mkdir = async (path: string, options?: { recursive?: boolean }): Promise<void> =>
-    base.mkdir(resolveVirtualPath(path), options);
-  const unlink = async (path: string): Promise<void> => base.unlink(resolveVirtualPath(path));
-  const rmdir = async (path: string): Promise<void> => base.rmdir(resolveVirtualPath(path));
+    base.mkdir(assertRootedPath(path), options);
+  const unlink = async (path: string): Promise<void> => base.unlink(assertRootedPath(path));
+  const rmdir = async (path: string): Promise<void> => base.rmdir(assertRootedPath(path));
   const rename = async (from: string, to: string): Promise<void> =>
-    base.rename(resolveVirtualPath(from), resolveVirtualPath(to));
-  const exists = async (path: string): Promise<boolean> => base.exists(resolveVirtualPath(path));
-  const lstat = async (path: string): Promise<FileStat> => base.lstat(resolveVirtualPath(path));
+    base.rename(assertRootedPath(from), assertRootedPath(to));
+  const exists = async (path: string): Promise<boolean> => base.exists(assertRootedPath(path));
+  const lstat = async (path: string): Promise<FileStat> => base.lstat(assertRootedPath(path));
 
   const readFiles = async (paths: string[]): Promise<Record<string, Uint8Array<ArrayBuffer>>> => {
     const entries = await Promise.all(paths.map(async (path) => [path, await readFile(path)] as const));
@@ -55,11 +55,11 @@ export function createRuntimeFileSystem(base: RuntimeFileSystemBase): KernelFile
   };
 
   const readdirContents = async (directoryPath: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> => {
-    const directory = resolveVirtualPath(directoryPath);
+    const directory = assertRootedPath(directoryPath);
     const names = await readdir(directory);
     const entries = await Promise.all(
       names.map(async (name) => {
-        const path = resolveVirtualPath(`${directory === '/' ? '' : directory}/${name}`);
+        const path = joinRelativePath(directory, name);
         const fileStat = await stat(path);
         return fileStat.type === 'dir' ? undefined : ([name, await readFile(path)] as const);
       }),
@@ -70,18 +70,18 @@ export function createRuntimeFileSystem(base: RuntimeFileSystemBase): KernelFile
   };
 
   const readdirStat = async (directoryPath: string): Promise<FileStatEntry[]> => {
-    const directory = resolveVirtualPath(directoryPath);
+    const directory = assertRootedPath(directoryPath);
     const names = await readdir(directory);
     return Promise.all(
       names.map(async (name) => {
-        const path = resolveVirtualPath(`${directory === '/' ? '' : directory}/${name}`);
+        const path = joinRelativePath(directory, name);
         return { ...(await stat(path)), name, path };
       }),
     );
   };
 
   const ensureDirectory = async (path: string): Promise<void> => {
-    const canonicalPath = resolveVirtualPath(path);
+    const canonicalPath = assertRootedPath(path);
     try {
       const existing = await stat(canonicalPath);
       if (existing.type === 'dir') {

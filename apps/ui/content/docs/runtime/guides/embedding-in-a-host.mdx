@@ -40,7 +40,7 @@ The **`fileSystem`** field on `webWorkerTransport({ ... })`, `inProcessTransport
 
 ### Worker-hosted filesystems
 
-When the host owns a File Manager Worker (the canonical editor pattern), trusted composition selects an authority-global project route. Pass a connection factory to `fromFileSystemBridge(...)`; every runtime binding or initialize retry receives a fresh bridge whose virtual `/` is that project:
+When the host owns a File Manager Worker (the canonical editor pattern), trusted composition selects an authority-global project route. Pass a connection factory to `fromFileSystemBridge(...)`; every runtime binding or initialize retry receives a fresh bridge rooted at that project:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
@@ -56,7 +56,7 @@ const clientOptions = createWebWorkerClientOptions({
 const client = createRuntimeClient(clientOptions);
 await client.connect();
 
-const result = await client.export('glb', { source: { path: '/main.ts' } });
+const result = await client.export('glb', { source: { path: 'main.ts' } });
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
 
 client.terminate();
@@ -66,7 +66,7 @@ The runtime worker entry owns `defineRuntime(...)`; the client imports only the 
 
 The transport owns and disposes each connection returned by the factory. Runtime does not know whether the filesystem authority is a Worker, iframe, Electron utility process, or another port broker. It also receives no project id, authority-global path, rights object, or mount table; it simply renders local paths exposed by the filesystem.
 
-In the example, the host-owned authority path `/projects/widget/main.ts` becomes runtime `/main.ts`. Kernels and bundlers receive only the latter. See [Path Namespaces](../concepts/path-namespaces) for the equivalent Node, browser-handle, memory, and inline-source mappings.
+In the example, the host-owned authority path `/projects/widget/main.ts` becomes runtime `main.ts`. Kernels and bundlers receive only the latter. See [Path Namespaces](../concepts/path-namespaces) for the equivalent Node, browser-handle, memory, and inline-source mappings.
 
 ### In-process filesystems
 

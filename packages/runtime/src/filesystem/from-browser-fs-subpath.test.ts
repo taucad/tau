@@ -64,7 +64,7 @@ describe('filesystem/browser subpath (R20)', () => {
       throw new Error('fromBrowserFs must produce an inline filesystem handle.');
     }
 
-    await expect(handle.create().stat('/locked/file.ts')).rejects.toBe(denied);
+    await expect(handle.create().stat('locked/file.ts')).rejects.toBe(denied);
   });
 
   it('stats files without reading bytes, reports stable directory mtimes, and rejects directory rename', async () => {
@@ -96,16 +96,16 @@ describe('filesystem/browser subpath (R20)', () => {
     }
     const fileSystem = handle.create();
 
-    await expect(fileSystem.stat('/')).resolves.toEqual({ type: 'dir', size: 0, mtimeMs: 0 });
-    await expect(fileSystem.stat('/file.ts')).resolves.toEqual({
+    await expect(fileSystem.stat('')).resolves.toEqual({ type: 'dir', size: 0, mtimeMs: 0 });
+    await expect(fileSystem.stat('file.ts')).resolves.toEqual({
       type: 'file',
       size: 8,
       mtimeMs: 1234,
       contentKind: 'binary',
     });
-    await expect(fileSystem.stat('/directory')).resolves.toEqual({ type: 'dir', size: 0, mtimeMs: 0 });
+    await expect(fileSystem.stat('directory')).resolves.toEqual({ type: 'dir', size: 0, mtimeMs: 0 });
     expect(arrayBuffer).not.toHaveBeenCalled();
-    await expect(fileSystem.rename('/directory', '/renamed')).rejects.toMatchObject({ code: 'EISDIR' });
+    await expect(fileSystem.rename('directory', 'renamed')).rejects.toMatchObject({ code: 'EISDIR' });
     expect(root.removeEntry).not.toHaveBeenCalled();
   });
 });

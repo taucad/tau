@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
+import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 const firstGeometryExportExtension = fileExtensions[0];
 if (firstGeometryExportExtension === undefined) {
@@ -14,11 +15,9 @@ export const exportGeometryFormatSchema = z.enum([firstGeometryExportExtension, 
 
 /** @public */
 export const exportGeometryInputSchema = z.object({
-  targetFile: z
-    .string()
-    .describe(
-      'Project-relative path to the geometry unit source file to export (same convention as read_file and get_kernel_result).',
-    ),
+  targetFile: rootedFilePathSchema.describe(
+    'Project-relative path to the geometry unit source file to export (same convention as read_file and get_kernel_result).',
+  ),
   format: exportGeometryFormatSchema.describe(
     'Output file extension without a leading dot (e.g. glb, stl, step, stp, 3mf). Must be a format the active kernel can export.',
   ),
@@ -31,7 +30,9 @@ export const exportGeometryOutputSchema = z.object({
     .array(
       z.object({
         name: z.string().describe('Producer-authored relative file name.'),
-        artifactPath: z.string().describe('Project-relative path to the written artifact under .tau/artifacts/.'),
+        artifactPath: rootedFilePathSchema.describe(
+          'Project-relative path to the written artifact under .tau/artifacts/.',
+        ),
         mimeType: z.string().describe('MIME type of the exported file.'),
         byteLength: z.number().int().nonnegative().describe('Exported file size in bytes.'),
       }),

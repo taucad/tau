@@ -348,7 +348,7 @@ const allocateProjectBasePath = async (
       .filter((entry) => entry.locator.storageRootKey === storageRootKey)
       .flatMap((entry) => entry.locator.relativeDirectory.split('/').filter(Boolean).slice(-1)),
   );
-  return `/${allocateProjectDirectorySlug(name, taken)}`;
+  return allocateProjectDirectorySlug(name, taken);
 };
 
 const pendingStorageLocatorKey = (storage: PendingProjectStorage): string =>

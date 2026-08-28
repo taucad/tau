@@ -19,17 +19,17 @@ const stage = (files: Readonly<Record<string, Uint8Array<ArrayBuffer>>>) => {
   runtime.filesystem.mocks.readdir.mockResolvedValueOnce(Object.keys(files));
   runtime.filesystem.mocks.stat.mockImplementation(async (path) => ({
     type: 'file',
-    size: files[String(path).slice(1)]?.length ?? 0,
+    size: files[String(path)]?.length ?? 0,
     mtimeMs: 0,
   }));
-  runtime.filesystem.mocks.readFile.mockImplementation(async (path) => files[String(path).slice(1)]!);
+  runtime.filesystem.mocks.readFile.mockImplementation(async (path) => files[String(path)]!);
 };
 
 describe('gltfKernel', () => {
   it.each(['cube.glb', 'cube-draco.glb'])('imports %s', async (name) => {
     const bytes = new Uint8Array(readFileSync(new URL(`fixtures/${name}`, import.meta.url)));
     stage({ [name]: bytes });
-    const result = await definition.createGeometry({ entryPath: `/${name}`, parameters: {} }, runtime, context);
+    const result = await definition.createGeometry({ entryPath: name, parameters: {} }, runtime, context);
     expect(result.geometry?.format).toBe('gltf');
     if (result.geometry?.format === 'gltf') {
       validateGlbData(result.geometry.content);
@@ -47,7 +47,7 @@ describe('gltfKernel', () => {
       ]),
     );
     stage(files);
-    const result = await definition.createGeometry({ entryPath: `/${name}`, parameters: {} }, runtime, context);
+    const result = await definition.createGeometry({ entryPath: name, parameters: {} }, runtime, context);
     expect(result.geometry?.format).toBe('gltf');
     if (result.geometry?.format === 'gltf') {
       validateGlbData(result.geometry.content);

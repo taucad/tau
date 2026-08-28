@@ -41,27 +41,27 @@ describe('DirectIdbProvider', () => {
 
   describe('writeFile + readFile round-trip', () => {
     it('should round-trip a string via utf8 encoding', async () => {
-      await provider.writeFile('/hello.txt', 'world');
-      const content = await provider.readFile('/hello.txt', 'utf8');
+      await provider.writeFile('hello.txt', 'world');
+      const content = await provider.readFile('hello.txt', 'utf8');
       expect(content).toBe('world');
     });
 
     it('should round-trip binary data', async () => {
       const data = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
-      await provider.writeFile('/bin.dat', data);
-      const result = await provider.readFile('/bin.dat');
+      await provider.writeFile('bin.dat', data);
+      const result = await provider.readFile('bin.dat');
       expect(result).toEqual(data);
     });
 
     it('should own queued input and returned byte snapshots', async () => {
       const input = new Uint8Array([1, 2, 3]);
-      const pending = provider.writeFile('/owned.bin', input);
+      const pending = provider.writeFile('owned.bin', input);
       input.fill(9);
       await pending;
 
-      const first = await provider.readFile('/owned.bin');
+      const first = await provider.readFile('owned.bin');
       first.fill(8);
-      const second = await provider.readFile('/owned.bin');
+      const second = await provider.readFile('owned.bin');
 
       expect(second).toEqual(new Uint8Array([1, 2, 3]));
       expect(second).not.toBe(first);
@@ -69,35 +69,35 @@ describe('DirectIdbProvider', () => {
 
     it('should write a Uint8Array and read as utf8', async () => {
       const bytes = encoder.encode('encoded');
-      await provider.writeFile('/encoded.txt', bytes);
-      const text = await provider.readFile('/encoded.txt', 'utf8');
+      await provider.writeFile('encoded.txt', bytes);
+      const text = await provider.readFile('encoded.txt', 'utf8');
       expect(text).toBe('encoded');
     });
 
     it('should overwrite existing file content', async () => {
-      await provider.writeFile('/file.txt', 'first');
-      await provider.writeFile('/file.txt', 'second');
-      const content = await provider.readFile('/file.txt', 'utf8');
+      await provider.writeFile('file.txt', 'first');
+      await provider.writeFile('file.txt', 'second');
+      const content = await provider.readFile('file.txt', 'utf8');
       expect(content).toBe('second');
     });
 
     it('should handle empty string writes', async () => {
-      await provider.writeFile('/empty.txt', '');
-      const content = await provider.readFile('/empty.txt', 'utf8');
+      await provider.writeFile('empty.txt', '');
+      const content = await provider.readFile('empty.txt', 'utf8');
       expect(content).toBe('');
     });
 
     it('should handle empty Uint8Array writes', async () => {
-      await provider.writeFile('/empty.bin', new Uint8Array(0));
-      const result = await provider.readFile('/empty.bin');
+      await provider.writeFile('empty.bin', new Uint8Array(0));
+      const result = await provider.readFile('empty.bin');
       expect(result.byteLength).toBe(0);
     });
 
     it('should auto-create parent directories for nested paths', async () => {
-      await provider.writeFile('/a/b/c/file.txt', 'nested');
-      const result = await provider.readFile('/a/b/c/file.txt', 'utf8');
+      await provider.writeFile('a/b/c/file.txt', 'nested');
+      const result = await provider.readFile('a/b/c/file.txt', 'utf8');
       expect(result).toBe('nested');
-      const parentStat = await provider.stat('/a/b');
+      const parentStat = await provider.stat('a/b');
       expect(parentStat.type).toBe('dir');
     });
 
@@ -116,15 +116,15 @@ describe('DirectIdbProvider', () => {
         await originalFlushBatch(batch);
       };
 
-      const failed = provider.writeFile('/failed.txt', 'failed');
-      const second = provider.writeFile('/second.txt', 'second');
-      const third = provider.writeFile('/third.txt', 'third');
+      const failed = provider.writeFile('failed.txt', 'failed');
+      const second = provider.writeFile('second.txt', 'second');
+      const third = provider.writeFile('third.txt', 'third');
       releaseFailure.resolve();
 
       await expect(failed).rejects.toThrow(new Error('flush failed'));
       await expect(Promise.all([second, third])).resolves.toEqual([undefined, undefined]);
-      await expect(provider.readFile('/second.txt', 'utf8')).resolves.toBe('second');
-      await expect(provider.readFile('/third.txt', 'utf8')).resolves.toBe('third');
+      await expect(provider.readFile('second.txt', 'utf8')).resolves.toBe('second');
+      await expect(provider.readFile('third.txt', 'utf8')).resolves.toBe('third');
     });
   });
 
@@ -134,11 +134,11 @@ describe('DirectIdbProvider', () => {
 
   describe('readFile errors', () => {
     it('should throw ENOENT for non-existent file', async () => {
-      await expect(provider.readFile('/missing.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.readFile('missing.txt')).rejects.toThrow('ENOENT');
     });
 
     it('should throw ENOENT for non-existent file with encoding', async () => {
-      await expect(provider.readFile('/missing.txt', 'utf8')).rejects.toThrow('ENOENT');
+      await expect(provider.readFile('missing.txt', 'utf8')).rejects.toThrow('ENOENT');
     });
   });
 
@@ -151,10 +151,10 @@ describe('DirectIdbProvider', () => {
       vi.spyOn(target as unknown as { _idbGet: (key: string) => Promise<unknown> }, '_idbGet');
 
     it('should stat a written file without fetching its row', async () => {
-      await provider.writeFile('/big.bin', new Uint8Array([1, 2, 0, 4, 5]));
+      await provider.writeFile('big.bin', new Uint8Array([1, 2, 0, 4, 5]));
       const spy = rowReads(provider);
 
-      await expect(provider.stat('/big.bin')).resolves.toEqual({
+      await expect(provider.stat('big.bin')).resolves.toEqual({
         type: 'file',
         size: 5,
         mtimeMs: 0,
@@ -164,12 +164,12 @@ describe('DirectIdbProvider', () => {
     });
 
     it('should stat a read file without a second row fetch', async () => {
-      await provider.writeFile('/notes.txt', 'a\nb');
+      await provider.writeFile('notes.txt', 'a\nb');
       await provider.refresh();
-      await provider.readFile('/notes.txt');
+      await provider.readFile('notes.txt');
       const spy = rowReads(provider);
 
-      await expect(provider.stat('/notes.txt')).resolves.toEqual({
+      await expect(provider.stat('notes.txt')).resolves.toEqual({
         type: 'file',
         size: 3,
         mtimeMs: 0,
@@ -180,11 +180,11 @@ describe('DirectIdbProvider', () => {
     });
 
     it('should fall back to the row when no metadata is cached', async () => {
-      await provider.writeFile('/cold.txt', 'a\nb\nc');
+      await provider.writeFile('cold.txt', 'a\nb\nc');
       await provider.refresh();
       const spy = rowReads(provider);
 
-      await expect(provider.stat('/cold.txt')).resolves.toEqual({
+      await expect(provider.stat('cold.txt')).resolves.toEqual({
         type: 'file',
         size: 5,
         mtimeMs: 0,
@@ -195,38 +195,38 @@ describe('DirectIdbProvider', () => {
     });
 
     it('should reflect an overwrite in cached metadata', async () => {
-      await provider.writeFile('/file.txt', 'a');
-      await provider.stat('/file.txt');
-      await provider.writeFile('/file.txt', 'a\nb\nc');
+      await provider.writeFile('file.txt', 'a');
+      await provider.stat('file.txt');
+      await provider.writeFile('file.txt', 'a\nb\nc');
 
-      await expect(provider.stat('/file.txt')).resolves.toMatchObject({ size: 5, lineCount: 3 });
+      await expect(provider.stat('file.txt')).resolves.toMatchObject({ size: 5, lineCount: 3 });
     });
 
     it('should drop cached metadata for a deleted path', async () => {
-      await provider.writeFile('/gone.txt', 'a');
-      await provider.stat('/gone.txt');
-      await provider.unlink('/gone.txt');
+      await provider.writeFile('gone.txt', 'a');
+      await provider.stat('gone.txt');
+      await provider.unlink('gone.txt');
 
-      await expect(provider.stat('/gone.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.stat('gone.txt')).rejects.toThrow('ENOENT');
     });
 
     it('should follow a renamed file to its new path', async () => {
-      await provider.writeFile('/from.txt', 'a\nb');
-      await provider.stat('/from.txt');
-      await provider.rename('/from.txt', '/to.txt');
+      await provider.writeFile('from.txt', 'a\nb');
+      await provider.stat('from.txt');
+      await provider.rename('from.txt', 'to.txt');
 
-      await expect(provider.stat('/from.txt')).rejects.toThrow('ENOENT');
-      await expect(provider.stat('/to.txt')).resolves.toMatchObject({ size: 3, lineCount: 2 });
+      await expect(provider.stat('from.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.stat('to.txt')).resolves.toMatchObject({ size: 3, lineCount: 2 });
     });
   });
 
   describe('readdirEntries', () => {
     it('should return each entry name with its kind', async () => {
-      await provider.writeFile('/dir/a.txt', 'a');
-      await provider.writeFile('/dir/sub/b.txt', 'b');
-      await provider.mkdir('/dir/empty');
+      await provider.writeFile('dir/a.txt', 'a');
+      await provider.writeFile('dir/sub/b.txt', 'b');
+      await provider.mkdir('dir/empty');
 
-      const entries = await provider.readdirEntries('/dir');
+      const entries = await provider.readdirEntries('dir');
 
       expect([...entries].sort((left, right) => left.name.localeCompare(right.name))).toEqual([
         { name: 'a.txt', kind: 'file' },
@@ -236,39 +236,39 @@ describe('DirectIdbProvider', () => {
     });
 
     it('should throw for a non-existent directory', async () => {
-      await expect(provider.readdirEntries('/nonexistent')).rejects.toThrow('ENOENT');
+      await expect(provider.readdirEntries('nonexistent')).rejects.toThrow('ENOENT');
     });
   });
 
   describe('readdir', () => {
     it('should list files in root directory', async () => {
-      await provider.writeFile('/a.txt', 'a');
-      await provider.writeFile('/b.txt', 'b');
-      const entries = await provider.readdir('/');
+      await provider.writeFile('a.txt', 'a');
+      await provider.writeFile('b.txt', 'b');
+      const entries = await provider.readdir('');
       expect(entries.sort()).toEqual(['a.txt', 'b.txt']);
     });
 
     it('should list files in a subdirectory', async () => {
-      await provider.writeFile('/sub/x.txt', 'x');
-      await provider.writeFile('/sub/y.txt', 'y');
-      const entries = await provider.readdir('/sub');
+      await provider.writeFile('sub/x.txt', 'x');
+      await provider.writeFile('sub/y.txt', 'y');
+      const entries = await provider.readdir('sub');
       expect(entries.sort()).toEqual(['x.txt', 'y.txt']);
     });
 
     it('should return empty array for empty directory', async () => {
-      await provider.mkdir('/empty');
-      const entries = await provider.readdir('/empty');
+      await provider.mkdir('empty');
+      const entries = await provider.readdir('empty');
       expect(entries).toEqual([]);
     });
 
     it('should throw for non-existent directory', async () => {
-      await expect(provider.readdir('/nonexistent')).rejects.toThrow('ENOENT');
+      await expect(provider.readdir('nonexistent')).rejects.toThrow('ENOENT');
     });
 
     it('should not include entries from deeper subdirectories', async () => {
-      await provider.writeFile('/dir/a.txt', 'a');
-      await provider.writeFile('/dir/sub/b.txt', 'b');
-      const entries = await provider.readdir('/dir');
+      await provider.writeFile('dir/a.txt', 'a');
+      await provider.writeFile('dir/sub/b.txt', 'b');
+      const entries = await provider.readdir('dir');
       expect(entries.sort()).toEqual(['a.txt', 'sub']);
     });
   });
@@ -279,26 +279,26 @@ describe('DirectIdbProvider', () => {
 
   describe('stat', () => {
     it('should return correct size for a file', async () => {
-      await provider.writeFile('/sized.txt', 'hello');
-      const stats = await provider.stat('/sized.txt');
+      await provider.writeFile('sized.txt', 'hello');
+      const stats = await provider.stat('sized.txt');
       expect(stats.size).toBe(5);
       expect(stats.type).toBe('file');
     });
 
     it('should return correct stats for a directory', async () => {
-      await provider.mkdir('/statdir');
-      const stats = await provider.stat('/statdir');
+      await provider.mkdir('statdir');
+      const stats = await provider.stat('statdir');
       expect(stats.type).toBe('dir');
     });
 
     it('should use the stable unknown mtime for newly written files', async () => {
-      await provider.writeFile('/timed.txt', 'data');
-      const stats = await provider.stat('/timed.txt');
+      await provider.writeFile('timed.txt', 'data');
+      const stats = await provider.stat('timed.txt');
       expect(stats.mtimeMs).toBe(0);
     });
 
     it('should throw for non-existent path', async () => {
-      await expect(provider.stat('/nope')).rejects.toThrow('ENOENT');
+      await expect(provider.stat('nope')).rejects.toThrow('ENOENT');
     });
   });
 
@@ -308,26 +308,26 @@ describe('DirectIdbProvider', () => {
 
   describe('mkdir', () => {
     it('should create a directory', async () => {
-      await provider.mkdir('/newdir');
-      const stats = await provider.stat('/newdir');
+      await provider.mkdir('newdir');
+      const stats = await provider.stat('newdir');
       expect(stats.type).toBe('dir');
     });
 
     it('should create nested directories with recursive option', async () => {
-      await provider.mkdir('/a/b/c', { recursive: true });
-      const stats = await provider.stat('/a/b/c');
+      await provider.mkdir('a/b/c', { recursive: true });
+      const stats = await provider.stat('a/b/c');
       expect(stats.type).toBe('dir');
     });
 
     it('should succeed when recursive mkdir with existing intermediate dirs', async () => {
-      await provider.mkdir('/x');
-      await provider.mkdir('/x/y/z', { recursive: true });
-      const stats = await provider.stat('/x/y/z');
+      await provider.mkdir('x');
+      await provider.mkdir('x/y/z', { recursive: true });
+      const stats = await provider.stat('x/y/z');
       expect(stats.type).toBe('dir');
     });
 
     it('should throw when parent does not exist without recursive', async () => {
-      await expect(provider.mkdir('/no/parent')).rejects.toThrow('ENOENT');
+      await expect(provider.mkdir('no/parent')).rejects.toThrow('ENOENT');
     });
   });
 
@@ -337,17 +337,17 @@ describe('DirectIdbProvider', () => {
 
   describe('unlink', () => {
     it('should delete a file', async () => {
-      await provider.writeFile('/delete-me.txt', 'gone');
-      await provider.unlink('/delete-me.txt');
-      expect(await provider.exists('/delete-me.txt')).toBe(false);
+      await provider.writeFile('delete-me.txt', 'gone');
+      await provider.unlink('delete-me.txt');
+      expect(await provider.exists('delete-me.txt')).toBe(false);
     });
 
     it('should throw for non-existent file', async () => {
-      await expect(provider.unlink('/not-here.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.unlink('not-here.txt')).rejects.toThrow('ENOENT');
     });
 
     it('should preserve the indexed entry when the delete transaction aborts', async () => {
-      await provider.writeFile('/preserved.txt', 'keep');
+      await provider.writeFile('preserved.txt', 'keep');
       const database = (provider as unknown as { _db: IDBDatabase })._db;
       const transaction = new EventTarget() as IDBTransaction;
       Object.defineProperties(transaction, {
@@ -362,8 +362,8 @@ describe('DirectIdbProvider', () => {
       });
       vi.spyOn(database, 'transaction').mockReturnValueOnce(transaction);
 
-      await expect(provider.unlink('/preserved.txt')).rejects.toThrow('delete aborted');
-      await expect(provider.readFile('/preserved.txt', 'utf8')).resolves.toBe('keep');
+      await expect(provider.unlink('preserved.txt')).rejects.toThrow('delete aborted');
+      await expect(provider.readFile('preserved.txt', 'utf8')).resolves.toBe('keep');
     });
   });
 
@@ -373,20 +373,20 @@ describe('DirectIdbProvider', () => {
 
   describe('rmdir', () => {
     it('should remove an empty directory', async () => {
-      await provider.mkdir('/removable');
-      await provider.rmdir('/removable');
-      expect(await provider.exists('/removable')).toBe(false);
+      await provider.mkdir('removable');
+      await provider.rmdir('removable');
+      expect(await provider.exists('removable')).toBe(false);
     });
 
     it('should throw for non-existent directory', async () => {
-      await expect(provider.rmdir('/ghost')).rejects.toThrow('ENOENT');
+      await expect(provider.rmdir('ghost')).rejects.toThrow('ENOENT');
     });
 
     it('should preserve a non-empty directory', async () => {
-      await provider.writeFile('/occupied/file.txt', 'keep');
+      await provider.writeFile('occupied/file.txt', 'keep');
 
-      await expect(provider.rmdir('/occupied')).rejects.toThrow('ENOTEMPTY');
-      await expect(provider.readFile('/occupied/file.txt', 'utf8')).resolves.toBe('keep');
+      await expect(provider.rmdir('occupied')).rejects.toThrow('ENOTEMPTY');
+      await expect(provider.readFile('occupied/file.txt', 'utf8')).resolves.toBe('keep');
     });
   });
 
@@ -396,38 +396,38 @@ describe('DirectIdbProvider', () => {
 
   describe('rename', () => {
     it('should rename a file and preserve content', async () => {
-      await provider.writeFile('/old.txt', 'content');
-      await provider.rename('/old.txt', '/new.txt');
-      expect(await provider.exists('/old.txt')).toBe(false);
-      const content = await provider.readFile('/new.txt', 'utf8');
+      await provider.writeFile('old.txt', 'content');
+      await provider.rename('old.txt', 'new.txt');
+      expect(await provider.exists('old.txt')).toBe(false);
+      const content = await provider.readFile('new.txt', 'utf8');
       expect(content).toBe('content');
     });
 
     it('should rename a directory and move every contained file under the new prefix', async () => {
-      await provider.mkdir('/src/utils', { recursive: true });
-      await provider.writeFile('/src/index.ts', 'export {}');
-      await provider.writeFile('/src/utils/helpers.ts', 'export {}');
-      await provider.writeFile('/src/utils/strings.ts', 'export {}');
+      await provider.mkdir('src/utils', { recursive: true });
+      await provider.writeFile('src/index.ts', 'export {}');
+      await provider.writeFile('src/utils/helpers.ts', 'export {}');
+      await provider.writeFile('src/utils/strings.ts', 'export {}');
 
-      await provider.rename('/src', '/lib');
+      await provider.rename('src', 'lib');
 
-      expect(await provider.exists('/src')).toBe(false);
-      expect(await provider.exists('/src/index.ts')).toBe(false);
-      expect(await provider.exists('/lib')).toBe(true);
-      expect(await provider.exists('/lib/index.ts')).toBe(true);
-      expect(await provider.exists('/lib/utils/helpers.ts')).toBe(true);
-      expect(await provider.exists('/lib/utils/strings.ts')).toBe(true);
+      expect(await provider.exists('src')).toBe(false);
+      expect(await provider.exists('src/index.ts')).toBe(false);
+      expect(await provider.exists('lib')).toBe(true);
+      expect(await provider.exists('lib/index.ts')).toBe(true);
+      expect(await provider.exists('lib/utils/helpers.ts')).toBe(true);
+      expect(await provider.exists('lib/utils/strings.ts')).toBe(true);
     });
 
     it('should rename an empty directory and keep the directory entry under the new prefix', async () => {
-      await provider.mkdir('/scratch');
-      await provider.rename('/scratch', '/temp');
-      expect(await provider.exists('/scratch')).toBe(false);
-      expect(await provider.exists('/temp')).toBe(true);
+      await provider.mkdir('scratch');
+      await provider.rename('scratch', 'temp');
+      expect(await provider.exists('scratch')).toBe(false);
+      expect(await provider.exists('temp')).toBe(true);
     });
 
     it('should reject a directory rename on transaction abort without mutating its projection', async () => {
-      await provider.mkdir('/preserved');
+      await provider.mkdir('preserved');
       const database = (provider as unknown as { _db: IDBDatabase })._db;
       const transaction = new EventTarget() as IDBTransaction;
       let abortQueued = false;
@@ -448,13 +448,13 @@ describe('DirectIdbProvider', () => {
       });
       vi.spyOn(database, 'transaction').mockReturnValueOnce(transaction);
 
-      await expect(provider.rename('/preserved', '/lost')).rejects.toThrow('rename aborted');
-      await expect(provider.exists('/preserved')).resolves.toBe(true);
-      await expect(provider.exists('/lost')).resolves.toBe(false);
+      await expect(provider.rename('preserved', 'lost')).rejects.toThrow('rename aborted');
+      await expect(provider.exists('preserved')).resolves.toBe(true);
+      await expect(provider.exists('lost')).resolves.toBe(false);
     });
 
     it('should throw when source does not exist', async () => {
-      await expect(provider.rename('/missing.txt', '/target.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.rename('missing.txt', 'target.txt')).rejects.toThrow('ENOENT');
     });
   });
 
@@ -464,17 +464,17 @@ describe('DirectIdbProvider', () => {
 
   describe('exists', () => {
     it('should return true for existing file', async () => {
-      await provider.writeFile('/exists.txt', 'yes');
-      expect(await provider.exists('/exists.txt')).toBe(true);
+      await provider.writeFile('exists.txt', 'yes');
+      expect(await provider.exists('exists.txt')).toBe(true);
     });
 
     it('should return true for existing directory', async () => {
-      await provider.mkdir('/exists-dir');
-      expect(await provider.exists('/exists-dir')).toBe(true);
+      await provider.mkdir('exists-dir');
+      expect(await provider.exists('exists-dir')).toBe(true);
     });
 
     it('should return false for non-existent path', async () => {
-      expect(await provider.exists('/nothing')).toBe(false);
+      expect(await provider.exists('nothing')).toBe(false);
     });
   });
 
@@ -484,19 +484,19 @@ describe('DirectIdbProvider', () => {
 
   describe('lstat', () => {
     it('should return file stats', async () => {
-      await provider.writeFile('/lstat.txt', 'data');
-      const stats = await provider.lstat('/lstat.txt');
+      await provider.writeFile('lstat.txt', 'data');
+      const stats = await provider.lstat('lstat.txt');
       expect(stats.type).toBe('file');
     });
 
     it('should return directory stats', async () => {
-      await provider.mkdir('/lstat-dir');
-      const stats = await provider.lstat('/lstat-dir');
+      await provider.mkdir('lstat-dir');
+      const stats = await provider.lstat('lstat-dir');
       expect(stats.type).toBe('dir');
     });
 
     it('should throw for non-existent path', async () => {
-      await expect(provider.lstat('/missing')).rejects.toThrow('ENOENT');
+      await expect(provider.lstat('missing')).rejects.toThrow('ENOENT');
     });
   });
 
@@ -506,8 +506,8 @@ describe('DirectIdbProvider', () => {
 
   describe('initialize', () => {
     it('should hydrate in-memory path set from getAllKeys on re-init', async () => {
-      await provider.writeFile('/persist.txt', 'hello');
-      await provider.writeFile('/deep/nested/file.txt', 'nested');
+      await provider.writeFile('persist.txt', 'hello');
+      await provider.writeFile('deep/nested/file.txt', 'nested');
 
       const dbName = (provider as unknown as { _dbName: string })._dbName;
       provider.dispose();
@@ -516,19 +516,19 @@ describe('DirectIdbProvider', () => {
       (provider2 as unknown as { _dbName: string })._dbName = dbName;
       await provider2.initialize();
 
-      expect(await provider2.exists('/persist.txt')).toBe(true);
-      expect(await provider2.exists('/deep/nested/file.txt')).toBe(true);
-      expect(await provider2.exists('/deep')).toBe(true);
-      expect(await provider2.exists('/deep/nested')).toBe(true);
+      expect(await provider2.exists('persist.txt')).toBe(true);
+      expect(await provider2.exists('deep/nested/file.txt')).toBe(true);
+      expect(await provider2.exists('deep')).toBe(true);
+      expect(await provider2.exists('deep/nested')).toBe(true);
 
-      const content = await provider2.readFile('/persist.txt', 'utf8');
+      const content = await provider2.readFile('persist.txt', 'utf8');
       expect(content).toBe('hello');
 
       provider2.dispose();
     });
 
     it('should preserve an explicitly created empty directory across reopen', async () => {
-      await provider.mkdir('/empty');
+      await provider.mkdir('empty');
 
       const dbName = (provider as unknown as { _dbName: string })._dbName;
       provider.dispose();
@@ -537,24 +537,24 @@ describe('DirectIdbProvider', () => {
       (provider2 as unknown as { _dbName: string })._dbName = dbName;
       await provider2.initialize();
 
-      await expect(provider2.stat('/empty')).resolves.toMatchObject({ type: 'dir' });
-      await expect(provider2.readdir('/empty')).resolves.toEqual([]);
+      await expect(provider2.stat('empty')).resolves.toMatchObject({ type: 'dir' });
+      await expect(provider2.readdir('empty')).resolves.toEqual([]);
       provider2.dispose();
     });
 
     it('reads current durable metadata after reopening the same provider', async () => {
-      await provider.writeFile('/metadata.txt', 'before');
+      await provider.writeFile('metadata.txt', 'before');
       const dbName = (provider as unknown as { _dbName: string })._dbName;
       const peer = new DirectIdbProvider('unused');
       (peer as unknown as { _dbName: string })._dbName = dbName;
       await peer.initialize();
-      await peer.writeFile('/metadata.txt', 'x');
+      await peer.writeFile('metadata.txt', 'x');
       peer.dispose();
 
       provider.dispose();
       await provider.initialize();
 
-      await expect(provider.stat('/metadata.txt')).resolves.toMatchObject({ type: 'file', size: 1 });
+      await expect(provider.stat('metadata.txt')).resolves.toMatchObject({ type: 'file', size: 1 });
     });
 
     it('should reject a persisted file/directory collision without retaining an open provider', async () => {
@@ -562,8 +562,8 @@ describe('DirectIdbProvider', () => {
       const database = (provider as unknown as { _db: IDBDatabase })._db;
       await new Promise<void>((resolve, reject) => {
         const transaction = database.transaction('files', 'readwrite');
-        transaction.objectStore('files').put(encoder.encode('file'), '/entry');
-        transaction.objectStore('files').put(encoder.encode('child'), '/entry/child.txt');
+        transaction.objectStore('files').put(encoder.encode('file'), 'entry');
+        transaction.objectStore('files').put(encoder.encode('child'), 'entry/child.txt');
         transaction.addEventListener('complete', () => {
           resolve();
         });
@@ -581,15 +581,15 @@ describe('DirectIdbProvider', () => {
 
       await expect(provider2.initialize()).rejects.toMatchObject({ code: 'EIO' });
       expect((provider2 as unknown as { _db?: IDBDatabase })._db).toBeUndefined();
-      await expect(provider2.stat('/entry')).rejects.toThrow(/not initialized|disposed/);
+      await expect(provider2.stat('entry')).rejects.toThrow(/not initialized|disposed/);
     });
 
     it('keeps the prior metadata projection readable until refresh swaps a complete snapshot', async () => {
-      await provider.writeFile('/visible.txt', 'visible');
+      await provider.writeFile('visible.txt', 'visible');
       const database = (provider as unknown as { _db: IDBDatabase })._db;
       const request = new EventTarget() as IDBRequest<IDBValidKey[]>;
       Object.defineProperties(request, {
-        result: { value: ['/visible.txt'] },
+        result: { value: ['visible.txt'] },
         error: { value: null },
       });
       const transaction = {
@@ -599,11 +599,11 @@ describe('DirectIdbProvider', () => {
 
       const refresh = provider.refresh();
       await Promise.resolve();
-      await expect(provider.readdir('/')).resolves.toContain('visible.txt');
+      await expect(provider.readdir('')).resolves.toContain('visible.txt');
 
       request.dispatchEvent(new Event('success'));
       await refresh;
-      await expect(provider.readdir('/')).resolves.toContain('visible.txt');
+      await expect(provider.readdir('')).resolves.toContain('visible.txt');
     });
   });
 
@@ -613,26 +613,26 @@ describe('DirectIdbProvider', () => {
 
   describe('dispose', () => {
     it('should reject operations after dispose', async () => {
-      await provider.writeFile('/before-dispose.txt', 'data');
+      await provider.writeFile('before-dispose.txt', 'data');
       provider.dispose();
-      await expect(provider.readFile('/before-dispose.txt')).rejects.toThrow();
+      await expect(provider.readFile('before-dispose.txt')).rejects.toThrow();
     });
 
     const operations: ReadonlyArray<{
       name: string;
       run: (candidate: DirectIdbProvider) => Promise<unknown>;
     }> = [
-      { name: 'writeFile', run: async (candidate) => candidate.writeFile('/file', 'x') },
-      { name: 'readFile', run: async (candidate) => candidate.readFile('/file') },
-      { name: 'readdir', run: async (candidate) => candidate.readdir('/') },
-      { name: 'readdirWithStats', run: async (candidate) => candidate.readdirWithStats('/') },
-      { name: 'stat', run: async (candidate) => candidate.stat('/') },
-      { name: 'lstat', run: async (candidate) => candidate.lstat('/') },
-      { name: 'exists', run: async (candidate) => candidate.exists('/') },
-      { name: 'mkdir', run: async (candidate) => candidate.mkdir('/directory') },
-      { name: 'unlink', run: async (candidate) => candidate.unlink('/file') },
-      { name: 'rmdir', run: async (candidate) => candidate.rmdir('/directory') },
-      { name: 'rename', run: async (candidate) => candidate.rename('/source', '/target') },
+      { name: 'writeFile', run: async (candidate) => candidate.writeFile('file', 'x') },
+      { name: 'readFile', run: async (candidate) => candidate.readFile('file') },
+      { name: 'readdir', run: async (candidate) => candidate.readdir('') },
+      { name: 'readdirWithStats', run: async (candidate) => candidate.readdirWithStats('') },
+      { name: 'stat', run: async (candidate) => candidate.stat('') },
+      { name: 'lstat', run: async (candidate) => candidate.lstat('') },
+      { name: 'exists', run: async (candidate) => candidate.exists('') },
+      { name: 'mkdir', run: async (candidate) => candidate.mkdir('directory') },
+      { name: 'unlink', run: async (candidate) => candidate.unlink('file') },
+      { name: 'rmdir', run: async (candidate) => candidate.rmdir('directory') },
+      { name: 'rename', run: async (candidate) => candidate.rename('source', 'target') },
     ];
 
     it.each(['before initialization', 'after disposal'] as const)(
@@ -655,11 +655,11 @@ describe('DirectIdbProvider', () => {
 
   describe('readdirWithStats', () => {
     it('should return entries with type, size, and mtime', async () => {
-      await provider.writeFile('/src/index.ts', 'export {}');
-      await provider.mkdir('/src/utils');
-      await provider.writeFile('/src/utils/helpers.ts', 'export const x = 1');
+      await provider.writeFile('src/index.ts', 'export {}');
+      await provider.mkdir('src/utils');
+      await provider.writeFile('src/utils/helpers.ts', 'export const x = 1');
 
-      const entries = await provider.readdirWithStats('/src');
+      const entries = await provider.readdirWithStats('src');
       expect(entries).toHaveLength(2);
 
       const file = entries.find((entry) => entry.name === 'index.ts');
@@ -674,24 +674,24 @@ describe('DirectIdbProvider', () => {
     });
 
     it('should report the durable size after writeFile', async () => {
-      await provider.writeFile('/cached.txt', 'hello');
-      const entries = await provider.readdirWithStats('/');
+      await provider.writeFile('cached.txt', 'hello');
+      const entries = await provider.readdirWithStats('');
       const entry = entries.find((entryItem) => entryItem.name === 'cached.txt');
       expect(entry!.size).toBe(5);
     });
 
     it('should report mtimeMs 0 (stable) for a hydrated file with no mtime entry', async () => {
-      await provider.writeFile('/hydrated.txt', 'hello');
+      await provider.writeFile('hydrated.txt', 'hello');
       const dbName = (provider as unknown as { _dbName: string })._dbName;
       provider.dispose();
 
       const provider2 = new DirectIdbProvider('unused');
       (provider2 as unknown as { _dbName: string })._dbName = dbName;
       await provider2.initialize();
-      await provider2.readFile('/hydrated.txt');
+      await provider2.readFile('hydrated.txt');
 
-      const first = await provider2.readdirWithStats('/');
-      const second = await provider2.readdirWithStats('/');
+      const first = await provider2.readdirWithStats('');
+      const second = await provider2.readdirWithStats('');
       const firstEntry = first.find((entry) => entry.name === 'hydrated.txt');
       const secondEntry = second.find((entry) => entry.name === 'hydrated.txt');
 
@@ -702,41 +702,41 @@ describe('DirectIdbProvider', () => {
     });
 
     it('purges projected files whose durable rows were removed by a peer', async () => {
-      await provider.writeFile('/stat-ghost.txt', 'stat');
-      await provider.writeFile('/read-ghost.txt', 'read');
-      await provider.writeFile('/list-ghost.txt', 'list');
+      await provider.writeFile('stat-ghost.txt', 'stat');
+      await provider.writeFile('read-ghost.txt', 'read');
+      await provider.writeFile('list-ghost.txt', 'list');
       const dbName = (provider as unknown as { _dbName: string })._dbName;
       const peer = new DirectIdbProvider('unused');
       (peer as unknown as { _dbName: string })._dbName = dbName;
       await peer.initialize();
-      await peer.unlink('/stat-ghost.txt');
-      await peer.unlink('/read-ghost.txt');
-      await peer.unlink('/list-ghost.txt');
+      await peer.unlink('stat-ghost.txt');
+      await peer.unlink('read-ghost.txt');
+      await peer.unlink('list-ghost.txt');
 
-      await expect(provider.stat('/stat-ghost.txt')).rejects.toThrow('ENOENT');
-      await expect(provider.readFile('/read-ghost.txt')).rejects.toThrow('ENOENT');
-      await expect(provider.readdirWithStats('/')).resolves.not.toContainEqual(
+      await expect(provider.stat('stat-ghost.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.readFile('read-ghost.txt')).rejects.toThrow('ENOENT');
+      await expect(provider.readdirWithStats('')).resolves.not.toContainEqual(
         expect.objectContaining({ name: 'list-ghost.txt' }),
       );
-      await expect(provider.exists('/stat-ghost.txt')).resolves.toBe(false);
-      await expect(provider.exists('/read-ghost.txt')).resolves.toBe(false);
-      await expect(provider.exists('/list-ghost.txt')).resolves.toBe(false);
+      await expect(provider.exists('stat-ghost.txt')).resolves.toBe(false);
+      await expect(provider.exists('read-ghost.txt')).resolves.toBe(false);
+      await expect(provider.exists('list-ghost.txt')).resolves.toBe(false);
       peer.dispose();
     });
 
     it('does not recreate a peer-deleted child during a stale directory rename', async () => {
-      await provider.writeFile('/source/live.txt', 'live');
-      await provider.writeFile('/source/deleted.txt', 'deleted');
+      await provider.writeFile('source/live.txt', 'live');
+      await provider.writeFile('source/deleted.txt', 'deleted');
       const dbName = (provider as unknown as { _dbName: string })._dbName;
       const peer = new DirectIdbProvider('unused');
       (peer as unknown as { _dbName: string })._dbName = dbName;
       await peer.initialize();
-      await peer.unlink('/source/deleted.txt');
+      await peer.unlink('source/deleted.txt');
 
-      await provider.rename('/source', '/target');
+      await provider.rename('source', 'target');
 
-      await expect(provider.readFile('/target/live.txt', 'utf8')).resolves.toBe('live');
-      await expect(provider.exists('/target/deleted.txt')).resolves.toBe(false);
+      await expect(provider.readFile('target/live.txt', 'utf8')).resolves.toBe('live');
+      await expect(provider.exists('target/deleted.txt')).resolves.toBe(false);
       peer.dispose();
     });
   });

@@ -35,6 +35,7 @@
 
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { assertRootedPath } from '@taucad/utils/path';
 import type { ProjectRootConfig, ProjectRootConfiguration, StorageRootConfig } from '@taucad/filesystem';
 import type { WorkspaceMarker } from '@taucad/types';
 import {
@@ -56,7 +57,7 @@ const handlesStoreName = 'handles';
 const configsStoreName = 'configs';
 const workspacesStoreName = 'workspaces';
 const metaStoreName = 'meta';
-const dbVersion = 3;
+const dbVersion = 4;
 const projectRootConfigurationChannelName = `${metaConfig.databasePrefix}project-root-configuration`;
 const homeBackendMetaKey = 'home-storage-backend';
 const projectCreationLocationMetaKey = 'project-creation-location';
@@ -216,7 +217,7 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
     // Pure bootstrap: create whatever the current schema needs and nothing
     // else. The v2 -> v3 legacy-handle promotion was deleted at L6 — the
     // `handles['root']` slot has been dead since v3 shipped.
-    request.addEventListener('upgradeneeded', () => {
+    request.addEventListener('upgradeneeded', (event) => {
       const db = request.result;
 
       if (!db.objectStoreNames.contains(handlesStoreName)) {
@@ -230,6 +231,28 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(metaStoreName)) {
         db.createObjectStore(metaStoreName, { keyPath: 'key' });
+      }
+      if (event.oldVersion < 4) {
+        const { transaction } = request;
+        if (!transaction) {
+          throw new Error('IndexedDB upgrade transaction is unavailable');
+        }
+        const cursorRequest = transaction.objectStore(configsStoreName).openCursor();
+        cursorRequest.addEventListener('success', () => {
+          const cursor = cursorRequest.result;
+          if (!cursor) {
+            return;
+          }
+          const config = cursor.value as Record<string, unknown>;
+          const { providerBasePath } = config;
+          if (typeof providerBasePath === 'string' && providerBasePath.startsWith('/')) {
+            const migrated = providerBasePath.slice(1);
+            if (isFlatProjectBasePath(migrated)) {
+              cursor.update({ ...config, providerBasePath: migrated });
+            }
+          }
+          cursor.continue();
+        });
       }
     });
 
@@ -932,8 +955,16 @@ export async function getAllProjectFileSystemConfigs(): Promise<ProjectFileSyste
  * `WorkspaceFileService._configureProjectRoots`.
  */
 function isFlatProjectBasePath(providerBasePath: string): boolean {
-  const segments = providerBasePath.split('/').filter(Boolean);
-  return segments.length === 1 && !segments[0]!.startsWith('.');
+  try {
+    return (
+      providerBasePath !== '' &&
+      assertRootedPath(providerBasePath) === providerBasePath &&
+      !providerBasePath.includes('/') &&
+      !providerBasePath.startsWith('.')
+    );
+  } catch {
+    return false;
+  }
 }
 
 // Profiles that connected their workspace before R1 landed never re-run
@@ -1040,7 +1071,11 @@ function isProjectFileSystemConfig(value: unknown): value is ProjectFileSystemCo
     return false;
   }
   const config = value as Record<string, unknown>;
-  if (typeof config['projectId'] !== 'string' || typeof config['providerBasePath'] !== 'string') {
+  if (
+    typeof config['projectId'] !== 'string' ||
+    typeof config['providerBasePath'] !== 'string' ||
+    !isFlatProjectBasePath(config['providerBasePath'])
+  ) {
     return false;
   }
   return config['backend'] === 'indexeddb' || config['backend'] === 'opfs'

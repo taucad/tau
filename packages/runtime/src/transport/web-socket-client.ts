@@ -16,12 +16,9 @@
  * @public
  */
 
-import { createChannelClient, wrapWebSocket } from '@taucad/rpc';
+import { createChannelClient, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
 import type { Channel, Port, WebSocketLike } from '@taucad/rpc';
-import { createBridgeServer } from '@taucad/rpc/bridge';
-import type { BridgeServerHandle } from '@taucad/rpc/bridge';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
-import { createFileSystemBridgeHello, fileSystemBridgeSchemas } from '@taucad/fs-bridge';
 import type { Geometry } from '@taucad/types';
 
 import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
@@ -39,8 +36,7 @@ import type {
   TransportClientReady,
 } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
-import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
-import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
 import { materialiseExportResult } from '#transport/_internal/export-materialiser.js';
 import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
@@ -111,15 +107,12 @@ export const webSocketClientDescribe = (options: WebSocketTransportOptions): Tra
 export const webSocketClient = (
   options: WebSocketTransportOptions,
 ): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, WebSocketId> => {
-  /* Minted once per materialisation, so every `RuntimeClient` built from the
-   * same plugin owns an isolated filesystem instance. */
-  const inlineFileSystem: RuntimeFileSystemBase | undefined = extractInlineFileSystem(options.fileSystem);
-
   let openPromise: Promise<TransportClientReady> | undefined;
   let channel: Channel<RuntimeProtocol> | undefined;
   let runtimePort: Port<unknown> | undefined;
   let fileSystemPort: Port<unknown> | undefined;
-  let fileSystemServer: BridgeServerHandle | undefined;
+  let fileSystemBridge: ReturnType<typeof buildFileSystemBridge>;
+  let disposeFileSystemRelay: (() => void) | undefined;
   let isClosed = false;
 
   let resolveClosed: ((result: RuntimeTransportCloseResult) => void) | undefined;
@@ -137,11 +130,8 @@ export const webSocketClient = (
     } catch {
       /* Best-effort */
     }
-    try {
-      fileSystemServer?.dispose();
-    } catch {
-      /* Best-effort */
-    }
+    disposeFileSystemRelay?.();
+    disposeFileSystemRelay = undefined;
     /* The `/fs` socket dies with the runtime socket; the reverse is not true
      * — a lone `/fs` failure leaves `closed` unsettled and surfaces as
      * rejected filesystem calls inside the remote kernel. */
@@ -182,6 +172,8 @@ export const webSocketClient = (
    */
   const watchFileSystemSocket = (socket: WebSocketLike): void => {
     socket.addEventListener('close', (event: { readonly code?: number; readonly reason?: string }) => {
+      disposeFileSystemRelay?.();
+      disposeFileSystemRelay = undefined;
       if (event.code !== webSocketCloseCode.policyViolation) {
         return;
       }
@@ -193,6 +185,8 @@ export const webSocketClient = (
       });
     });
     socket.addEventListener('error', () => {
+      disposeFileSystemRelay?.();
+      disposeFileSystemRelay = undefined;
       try {
         fileSystemPort?.close();
       } catch {
@@ -222,21 +216,30 @@ export const webSocketClient = (
       runtimePort = wrapWebSocket<unknown>(runtimeSocket, msgpackCodec);
       watchRuntimeSocket(runtimeSocket);
 
-      if (inlineFileSystem) {
+      fileSystemBridge = buildFileSystemBridge(options.fileSystem);
+      if (fileSystemBridge) {
         const fileSystemSocket = createSocket(buildSocketUrl(options.url, 'fs', session));
         fileSystemPort = wrapWebSocket<unknown>(fileSystemSocket, msgpackCodec);
         watchFileSystemSocket(fileSystemSocket);
-        /* Inverted roles: this side dialled, and this side is the bridge
-         * *server* — the remote kernel consumes it with
-         * `createFileSystemBridgeProxy({ port })`. */
-        fileSystemServer = createBridgeServer(inlineFileSystem, fileSystemPort, {
-          hello: createFileSystemBridgeHello({
-            state: 'ready',
-            capabilities: inlineFileSystem.capabilities,
-            watchable: typeof inlineFileSystem.watch === 'function',
-          }),
-          protocolSchemas: fileSystemBridgeSchemas,
+        const bridgePort = wrapMessagePort<unknown>(fileSystemBridge.port, { label: 'web-socket:filesystem' });
+        const stopBridgeToSocket = bridgePort.onMessage((message) => {
+          fileSystemPort?.postMessage(message);
         });
+        const stopSocketToBridge = fileSystemPort.onMessage((message) => {
+          bridgePort.postMessage(message);
+        });
+        bridgePort.start?.();
+        let isRelayDisposed = false;
+        disposeFileSystemRelay = () => {
+          if (isRelayDisposed) {
+            return;
+          }
+          isRelayDisposed = true;
+          stopBridgeToSocket();
+          stopSocketToBridge();
+          fileSystemBridge?.dispose();
+          fileSystemBridge = undefined;
+        };
       }
 
       channel = createChannelClient<RuntimeProtocol>({

@@ -80,7 +80,6 @@ const baseline: Record<string, { wasm: number; native: number }> = {
 
 const iterations = 15;
 const warmups = 8;
-const projectRoot = '/project/';
 const gateAbsolute = process.env['TAU_BENCHMARK_GATE'] === '1' || process.env['TAU_BENCH_GATE'] === '1';
 
 const median = (values: readonly number[]) => {
@@ -89,17 +88,13 @@ const median = (values: readonly number[]) => {
 };
 
 const createClient = (kernel: typeof openrscadKernel, files: Record<string, string>) => {
-  const absolute: Record<string, string> = {};
-  for (const [name, content] of Object.entries(files)) {
-    absolute[`${projectRoot}${name}`] = content;
-  }
   const runtime = defineRuntime({ kernels: [kernel()] });
-  return createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(absolute) }) });
+  return createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(files) }) });
 };
 
 const exportGlb = async (client: ReturnType<typeof createClient>, mainFile: string) => {
   const result = await client.export('glb', {
-    source: { path: `${projectRoot}${mainFile}` },
+    source: { path: mainFile },
     parameters: {},
   });
   if (!result.success) {

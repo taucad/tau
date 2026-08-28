@@ -12,6 +12,7 @@ import { isCommand } from '@langchain/langgraph';
 import type { Command } from '@langchain/langgraph';
 import { toolName as chatToolName } from '@taucad/chat/constants';
 import { normalizeGeoSpecRunFilterInputAliases } from '@taucad/chat/schemas/tools/test-model-input-normalizer';
+import { normalizeProjectPathToolInputAliases } from '@taucad/chat/schemas/tools/project-path-input-normalizer';
 import type { EagerToolEntry } from '#api/chat/eager-dispatch/state.js';
 import type { WriterAttachableCallbackHandler } from '#api/chat/eager-dispatch/writer-capable-handler.js';
 
@@ -42,28 +43,20 @@ function toolResultToWireOutput(toolName: string, result: ToolMessage | Command)
   return `[Command:${toolName}]`;
 }
 
-type ToolInputNormalizer = typeof normalizeGeoSpecRunFilterInputAliases;
-
-const toolInputNormalizers: Partial<Record<string, ToolInputNormalizer>> = {
-  [chatToolName.testModel]: normalizeGeoSpecRunFilterInputAliases,
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function normalizeToolInput(toolName: string, args: Record<string, unknown>): Record<string, unknown> {
-  const normalizer = toolInputNormalizers[toolName];
-  if (!normalizer) {
-    return args;
+  let input: unknown = args;
+  if (toolName === chatToolName.testModel) {
+    const normalized = normalizeGeoSpecRunFilterInputAliases(input);
+    input = normalized.changed ? normalized.input : input;
   }
 
-  const normalized = normalizer(args);
-  if (!normalized.changed || !isRecord(normalized.input)) {
-    return args;
-  }
-
-  return normalized.input;
+  const normalized = normalizeProjectPathToolInputAliases(toolName, input);
+  input = normalized.changed ? normalized.input : input;
+  return isRecord(input) ? input : args;
 }
 
 const hasDuplicateToolCallId = (toolCalls: readonly ToolCall[]): boolean => {

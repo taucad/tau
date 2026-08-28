@@ -80,8 +80,8 @@ export type RuntimeLogger = {
  * authored for the runtime (e.g. `fromFsLike`, `fromMemoryFs`, `fromNodeFs`)
  * implement this shape; the runtime upgrades it into a {@link KernelFileSystem}
  * at the worker boundary via the runtime's internal decorator.
- * Paths identify locations within the supplied runtime filesystem. A leading
- * `/` refers to that filesystem's root, not the host operating system's root.
+ * Paths are canonical and root-relative within the supplied runtime filesystem;
+ * `''` refers to that filesystem's root.
  *
  * @public
  */
@@ -146,7 +146,7 @@ export type KernelRuntime = {
    * to cancellable platform APIs and do not retain it for later work.
    */
   readonly signal: AbortSignal;
-  /** Filesystem capability exposed as runtime `/`; all paths are within this filesystem. */
+  /** Rooted filesystem capability; all paths are canonical and relative to its root. */
   filesystem: KernelFileSystem;
   /** Logger with kernel name pre-configured */
   logger: RuntimeLogger;
@@ -183,7 +183,7 @@ export type RuntimeImplementationAsset = {
  * @public
  */
 export type GetParametersInput = {
-  /** Path of the active entry within the runtime filesystem. The normalized path begins with `/`. */
+  /** Canonical root-relative path of the active entry within the runtime filesystem. */
   entryPath: string;
 };
 
@@ -224,7 +224,7 @@ type RenderOptionsInput<Render extends KernelRenderDefinition | undefined> =
 export type CreateGeometryInput<
   CreateSchema extends z.ZodObject<z.ZodRawShape> | undefined = z.ZodObject<z.ZodRawShape> | undefined,
 > = {
-  /** Path of the active entry within the runtime filesystem. The normalized path begins with `/`. */
+  /** Canonical root-relative path of the active entry within the runtime filesystem. */
   entryPath: string;
   /** User-provided parameters */
   parameters: Record<string, unknown>;
@@ -241,7 +241,7 @@ export type CreateGeometryInput<
  * @public
  */
 export type GetDependenciesInput = {
-  /** Path of the active entry within the runtime filesystem. The normalized path begins with `/`. */
+  /** Canonical root-relative path of the active entry within the runtime filesystem. */
   entryPath: string;
 };
 

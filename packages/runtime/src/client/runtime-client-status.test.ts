@@ -253,8 +253,8 @@ describe('RuntimeClient renderStatus', () => {
     const config = vi.fn(async () => configGate.promise);
     const { client, handlers, handlersReady, notify, initialize } = createStatusClientFixture({ config });
 
-    const first = client.render({ source: { path: '/first.ts' } });
-    const second = client.render({ source: { path: '/second.ts' } });
+    const first = client.render({ source: { path: 'first.ts' } });
+    const second = client.render({ source: { path: 'second.ts' } });
     configGate.resolve({ endpoint: 'test' });
     await handlersReady;
 
@@ -263,7 +263,7 @@ describe('RuntimeClient renderStatus', () => {
     expect(initialize).toHaveBeenCalledOnce();
     expect(notify).toHaveBeenCalledOnce();
     expect(notify.mock.calls[0]?.[0]).toBe('openFile');
-    expect(notify.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ file: { path: '/', filename: 'second.ts' } }));
+    expect(notify.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ file: { path: '', filename: 'second.ts' } }));
 
     const secondRenderId = renderIdFromNotify(notify, 0);
     handlers.geometryComputed?.({ ...successGeometry('second'), renderId: secondRenderId });
@@ -320,7 +320,7 @@ describe('RuntimeClient renderStatus', () => {
     await client.connect();
     await handlersReady;
 
-    const valid = client.render({ source: { path: '/valid.ts' } });
+    const valid = client.render({ source: { path: 'valid.ts' } });
     await Promise.resolve();
     const validRenderId = renderIdFromNotify(notify, 0);
     await expect(client.render({ source: { path: '../invalid.ts' } })).rejects.toThrow();
@@ -357,10 +357,10 @@ describe('RuntimeClient renderStatus', () => {
     await client.connect();
     await handlersReady;
 
-    const first = client.render({ source: { path: '/first.ts' } });
+    const first = client.render({ source: { path: 'first.ts' } });
     await Promise.resolve();
     const firstRenderId = renderIdFromNotify(notify, 0);
-    await expect(client.render({ source: { path: '/second.ts' } })).rejects.toThrow('reservation failed');
+    await expect(client.render({ source: { path: 'second.ts' } })).rejects.toThrow('reservation failed');
 
     handlers.stateChanged?.({ renderId: firstRenderId, abortGeneration: 1, state: 'rendering' });
     handlers.geometryComputed?.({ ...successGeometry('first'), renderId: firstRenderId });
@@ -370,12 +370,12 @@ describe('RuntimeClient renderStatus', () => {
     client.terminate();
   });
 
-  it('canonicalizes inline source keys and stages one canonical entry identity', async () => {
+  it('stages one canonical inline entry identity', async () => {
     const { client, handlers, notify } = createStatusClientFixture();
     const settlement = client.render({
       source: {
-        files: { 'src/./main.ts': 'export const main = () => null;' },
-        entry: 'src/./main.ts',
+        files: { 'src/main.ts': 'export const main = () => null;' },
+        entry: 'src/main.ts',
       },
     });
     await waitForRuntimeNotifyHandlers(handlers);
@@ -387,11 +387,11 @@ describe('RuntimeClient renderStatus', () => {
       throw new TypeError('Expected a stage-and-render payload');
     }
     const { stage, file } = payload as { stage?: unknown; file?: unknown };
-    expect(file).toEqual({ path: '/src', filename: 'main.ts' });
+    expect(file).toEqual({ path: 'src', filename: 'main.ts' });
     if (stage === null || typeof stage !== 'object') {
       throw new TypeError('Expected a stage map');
     }
-    expect((stage as Record<string, unknown>)['/src/main.ts']).toBeInstanceOf(Uint8Array);
+    expect((stage as Record<string, unknown>)['src/main.ts']).toBeInstanceOf(Uint8Array);
 
     handlers.geometryComputed?.({ ...successGeometry('canonical'), renderId: renderIdFromNotify(notify, 0) });
     await settlement;
@@ -406,7 +406,7 @@ describe('RuntimeClient renderStatus', () => {
     expect(notify).toHaveBeenCalledWith(
       'openFile',
       expect.objectContaining({
-        file: { path: '/lib', filename: 'cube.ts' },
+        file: { path: 'lib', filename: 'cube.ts' },
         parameters: {},
       }),
     );
@@ -424,13 +424,13 @@ describe('RuntimeClient renderStatus', () => {
       client.render({
         source: {
           files: {
-            '/main.ts': 'first',
-            '/src/../main.ts': 'second',
+            'main.ts': 'first',
+            'src/../main.ts': 'second',
           },
-          entry: '/main.ts',
+          entry: 'main.ts',
         },
       }),
-    ).rejects.toThrow(/resolve to \/main\.ts/u);
+    ).rejects.toThrow('Invalid virtual path');
     expect(notify).not.toHaveBeenCalled();
     client.terminate();
   });
@@ -452,7 +452,7 @@ describe('RuntimeClient renderStatus', () => {
       statuses.push(status);
     });
 
-    const settlement = client.render({ source: { path: '/main.ts' } });
+    const settlement = client.render({ source: { path: 'main.ts' } });
     await waitForRuntimeNotifyHandlers(handlers);
     const renderId = renderIdFromNotify(notify, 0);
     handlers.stateChanged?.({ renderId, abortGeneration: 1, state: 'buffering' });
@@ -473,14 +473,14 @@ describe('RuntimeClient renderStatus', () => {
       statuses.push(status);
     });
 
-    const failed = client.render({ source: { path: '/main.ts' } });
+    const failed = client.render({ source: { path: 'main.ts' } });
     await waitForRuntimeNotifyHandlers(handlers);
     const failedRenderId = renderIdFromNotify(notify, 0);
     handlers.geometryComputed?.({ ...failureGeometry(), renderId: failedRenderId });
     await expect(failed).resolves.toMatchObject({ superseded: false });
     expect(client.renderStatus).toBe('error');
 
-    const recovered = client.render({ source: { path: '/main.ts' } });
+    const recovered = client.render({ source: { path: 'main.ts' } });
     await waitForRuntimeNotifyHandlers(handlers);
     const recoveredRenderId = renderIdFromNotify(notify, 1);
     handlers.stateChanged?.({ renderId: recoveredRenderId, abortGeneration: 2, state: 'rendering' });
@@ -501,7 +501,7 @@ describe('RuntimeClient renderStatus', () => {
       statuses.push(status);
     });
 
-    const settlement = client.render({ source: { path: '/main.ts' } });
+    const settlement = client.render({ source: { path: 'main.ts' } });
     await waitForRuntimeNotifyHandlers(handlers);
     const renderId = renderIdFromNotify(notify, 0);
     handlers.stateChanged?.({ renderId, abortGeneration: 1, state: 'buffering' });
@@ -531,11 +531,11 @@ describe('RuntimeClient renderStatus', () => {
 
   it('closes admission, drains accepted work, acknowledges cleanup, then closes transport', async () => {
     const { client, handlers, notify, call, close } = createStatusClientFixture();
-    const render = client.render({ source: { path: '/main.ts' } });
+    const render = client.render({ source: { path: 'main.ts' } });
     await waitForRuntimeNotifyHandlers(handlers);
 
     const shutdown = client.shutdown({ drain: true });
-    await expect(client.render({ source: { path: '/other.ts' } })).rejects.toMatchObject({
+    await expect(client.render({ source: { path: 'other.ts' } })).rejects.toMatchObject({
       code: 'RUNTIME_TERMINATED',
     });
     expect(call).not.toHaveBeenCalledWith('cleanup', undefined);
@@ -584,7 +584,7 @@ describe('RuntimeClient render timeout control plane', () => {
     const { client, notify, abort } = createStatusClientFixture({ renderTimeout: 50 });
     vi.useFakeTimers();
 
-    const render = client.render({ source: { path: '/first.ts' } });
+    const render = client.render({ source: { path: 'first.ts' } });
     const renderTimeoutSettlement = expect(render).rejects.toEqual(new RenderTimeoutError(50));
     for (let attempt = 0; attempt < 20 && notify.mock.calls.length === 0; attempt++) {
       // oxlint-disable-next-line no-await-in-loop -- drains the lazy connection promise chain without advancing timers
@@ -636,7 +636,7 @@ describe('RuntimeClient render timeout control plane', () => {
     client.setRenderTimeout(500);
     vi.useFakeTimers();
 
-    const first = client.render({ source: { path: '/main.ts' } });
+    const first = client.render({ source: { path: 'main.ts' } });
     const firstTimeout = expect(first).rejects.toEqual(new RenderTimeoutError(500));
     await Promise.resolve();
     const firstRenderId = renderIdFromNotify(notify, 0);
@@ -658,7 +658,7 @@ describe('RuntimeClient render timeout control plane', () => {
     handlers.stateChanged?.({ renderId: firstRenderId, abortGeneration: 1, state: 'error' });
 
     abort.mockClear();
-    const second = client.render({ source: { path: '/main.ts' } });
+    const second = client.render({ source: { path: 'main.ts' } });
     const secondTimeout = expect(second).rejects.toEqual(new RenderTimeoutError(1000));
     await Promise.resolve();
     const secondRenderId = renderIdFromNotify(notify, 1);
@@ -679,13 +679,13 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     vi.useFakeTimers();
 
-    const first = client.render({ source: { path: '/first.ts' } });
+    const first = client.render({ source: { path: 'first.ts' } });
     await Promise.resolve();
     const firstRenderId = renderIdFromNotify(notify, 0);
     handlers.stateChanged?.({ renderId: firstRenderId, abortGeneration: 1, state: 'rendering' });
     await vi.advanceTimersByTimeAsync(99);
 
-    const second = client.render({ source: { path: '/second.ts' } });
+    const second = client.render({ source: { path: 'second.ts' } });
     await Promise.resolve();
     const secondRenderId = renderIdFromNotify(notify, 1);
     await expect(first).resolves.toEqual({ superseded: true });
@@ -708,7 +708,7 @@ describe('RuntimeClient render timeout control plane', () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
 
-    const render = client.render({ source: { path: '/main.ts' } });
+    const render = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const renderId = renderIdFromNotify(notify, 0);
     const timeoutCallback = setTimeoutSpy.mock.calls.find(([, delay]) => delay === 100)?.[0];
@@ -735,7 +735,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     vi.useFakeTimers();
 
-    const first = client.render({ source: { path: '/first.ts' } });
+    const first = client.render({ source: { path: 'first.ts' } });
     const firstTimeout = expect(first).rejects.toEqual(new RenderTimeoutError(100));
     await Promise.resolve();
     const firstRenderId = renderIdFromNotify(notify, 0);
@@ -744,7 +744,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await firstTimeout;
     expect(abort).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ renderId: firstRenderId }));
 
-    const second = client.render({ source: { path: '/second.ts' } });
+    const second = client.render({ source: { path: 'second.ts' } });
     await Promise.resolve();
     expect(notify).toHaveBeenCalledTimes(1);
 
@@ -768,7 +768,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     vi.useFakeTimers();
 
-    const render = client.render({ source: { path: '/blocked.ts' } });
+    const render = client.render({ source: { path: 'blocked.ts' } });
     const renderTimeoutSettlement = expect(render).rejects.toEqual(new RenderTimeoutError(75));
     await Promise.resolve();
     const renderId = renderIdFromNotify(notify, 0);
@@ -795,7 +795,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     vi.useFakeTimers();
 
-    const blocked = client.render({ source: { path: '/blocked.ts' } });
+    const blocked = client.render({ source: { path: 'blocked.ts' } });
     const blockedTimeout = expect(blocked).rejects.toEqual(new RenderTimeoutError(50));
     await Promise.resolve();
     const blockedRenderId = renderIdFromNotify(notify, 0);
@@ -803,7 +803,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await vi.advanceTimersByTimeAsync(50);
     await blockedTimeout;
 
-    const queued = client.render({ source: { path: '/queued.ts' } });
+    const queued = client.render({ source: { path: 'queued.ts' } });
     const queuedTermination = expect(queued).rejects.toMatchObject({
       name: 'RuntimeTerminatedError',
       causeKind: 'render-timeout',
@@ -825,7 +825,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     vi.useFakeTimers();
 
-    const blocked = client.render({ source: { path: '/blocked.ts' } });
+    const blocked = client.render({ source: { path: 'blocked.ts' } });
     const blockedTimeout = expect(blocked).rejects.toEqual(new RenderTimeoutError(50));
     await Promise.resolve();
     const blockedRenderId = renderIdFromNotify(notify, 0);
@@ -848,7 +848,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await handlersReady;
     vi.useFakeTimers();
 
-    const render = client.render({ source: { path: '/invalid-stage.ts' } });
+    const render = client.render({ source: { path: 'invalid-stage.ts' } });
     await Promise.resolve();
     const renderId = renderIdFromNotify(notify, 0);
     handlers.errorEvent?.({
@@ -878,7 +878,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     await handlersReady;
 
-    const render = client.render({ source: { path: '/main.ts' } });
+    const render = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const renderId = renderIdFromNotify(notify, 0);
     handlers.geometryComputed?.({ ...successGeometry('missing'), renderId });
@@ -908,12 +908,12 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     await handlersReady;
 
-    const first = client.render({ source: { path: '/first.ts' } });
+    const first = client.render({ source: { path: 'first.ts' } });
     await Promise.resolve();
     const firstRenderId = renderIdFromNotify(notify, 0);
     handlers.geometryComputed?.({ ...successGeometry('stale-failure'), renderId: firstRenderId });
 
-    const second = client.render({ source: { path: '/second.ts' } });
+    const second = client.render({ source: { path: 'second.ts' } });
     await Promise.resolve();
     const secondRenderId = renderIdFromNotify(notify, 1);
     await expect(first).resolves.toEqual({ superseded: true });
@@ -930,7 +930,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     await handlersReady;
 
-    const render = client.render({ source: { path: '/main.ts' } });
+    const render = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const renderId = renderIdFromNotify(notify, 0);
     handlers.stateChanged?.({ renderId, abortGeneration: 1, state: 'error' });
@@ -953,11 +953,11 @@ describe('RuntimeClient render timeout control plane', () => {
      * the deterministic stand-in for that interleaving. */
     const superseding: Array<Promise<unknown>> = [];
     notify.mockImplementationOnce(() => {
-      superseding.push(client.render({ source: { path: '/live.ts' } }));
+      superseding.push(client.render({ source: { path: 'live.ts' } }));
       throw new Error('wire dispatch failed');
     });
 
-    const superseded = client.render({ source: { path: '/superseded.ts' } });
+    const superseded = client.render({ source: { path: 'superseded.ts' } });
     await expect(superseded).resolves.toEqual({ superseded: true });
     expect(client.renderStatus).toBe('rendering');
 
@@ -974,7 +974,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     await handlersReady;
 
-    const render = client.render({ source: { path: '/main.ts' } });
+    const render = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const renderId = renderIdFromNotify(notify, 0);
     handlers.errorEvent?.({ issues: [{ message: 'watch routing failed', code: 'RUNTIME', severity: 'error' }] });
@@ -997,7 +997,7 @@ describe('RuntimeClient render timeout control plane', () => {
   it('maps unexpected non-timeout transport closure to transport-closed', async () => {
     const { client, closeTransport } = createStatusClientFixture();
     await client.connect();
-    const render = client.render({ source: { path: '/pending.ts' } });
+    const render = client.render({ source: { path: 'pending.ts' } });
     const termination = expect(render).rejects.toMatchObject({
       name: 'RuntimeTerminatedError',
       causeKind: 'transport-closed',
@@ -1044,10 +1044,10 @@ describe('RuntimeClient render timeout control plane', () => {
     });
     await client.connect();
 
-    const first = client.render({ source: { path: '/first.ts' } });
+    const first = client.render({ source: { path: 'first.ts' } });
     await Promise.resolve();
     const firstRenderId = renderIdFromNotify(notify, 0);
-    const second = client.render({ source: { path: '/second.ts' } });
+    const second = client.render({ source: { path: 'second.ts' } });
     await Promise.resolve();
     const secondRenderId = renderIdFromNotify(notify, 1);
     await expect(first).resolves.toEqual({ superseded: true });
@@ -1106,7 +1106,7 @@ describe('RuntimeClient render timeout control plane', () => {
     });
     await client.connect();
 
-    const initialRender = client.render({ source: { path: '/main.ts' } });
+    const initialRender = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const initialRenderId = renderIdFromNotify(notify, 0);
     const watcherRenderId = '550e8400-e29b-41d4-a716-446655440098';
@@ -1138,7 +1138,7 @@ describe('RuntimeClient render timeout control plane', () => {
     });
     await client.connect();
 
-    const initialRender = client.render({ source: { path: '/main.scad' } });
+    const initialRender = client.render({ source: { path: 'main.scad' } });
     await Promise.resolve();
     const initialRenderId = renderIdFromNotify(notify, 0);
     const watcherRenderId = '550e8400-e29b-41d4-a716-446655440099';
@@ -1179,7 +1179,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     await handlersReady;
 
-    const delayedRender = client.render({ source: { path: '/main.ts' } });
+    const delayedRender = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const staleRenderId = renderIdFromNotify(notify, 0);
     const successorRenderId = '550e8400-e29b-41d4-a716-446655440030';
@@ -1207,24 +1207,24 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     await handlersReady;
 
-    const valid = client.render({ source: { path: '/valid.ts' } });
+    const valid = client.render({ source: { path: 'valid.ts' } });
     await Promise.resolve();
     const validRenderId = renderIdFromNotify(notify, 0);
     reservePreview.mockClear();
 
     await expect(
       // @ts-expect-error -- deliberately exercises the runtime guard against a non-record parameters input
-      client.render({ source: { path: '/main.ts' }, parameters: 'nope' }),
+      client.render({ source: { path: 'main.ts' }, parameters: 'nope' }),
     ).rejects.toThrow(TypeError);
     await expect(
       client.render({
-        source: { path: '/main.ts' },
+        source: { path: 'main.ts' },
         renderOptions: 'nope' as unknown as Record<string, unknown>,
       }),
     ).rejects.toThrow(TypeError);
     await expect(
       // @ts-expect-error -- deliberately exercises the runtime guard against a non-record content input
-      client.render({ source: { path: '/main.ts' }, content: 'nope' }),
+      client.render({ source: { path: 'main.ts' }, content: 'nope' }),
     ).rejects.toThrow(TypeError);
     await expect(client.setOptions('nope' as unknown as Record<string, unknown>)).rejects.toThrow(TypeError);
 
@@ -1252,7 +1252,7 @@ describe('RuntimeClient render timeout control plane', () => {
     notify.mockImplementationOnce(() => {
       throw new Error('wire dispatch failed');
     });
-    await expect(client.render({ source: { path: '/main.ts' } })).rejects.toThrow('wire dispatch failed');
+    await expect(client.render({ source: { path: 'main.ts' } })).rejects.toThrow('wire dispatch failed');
 
     const autonomousRenderId = '550e8400-e29b-41d4-a716-446655440033';
     handlers.stateChanged?.({ renderId: autonomousRenderId, abortGeneration: 2, state: 'buffering' });
@@ -1282,7 +1282,7 @@ describe('RuntimeClient render timeout control plane', () => {
       }
     });
 
-    await expect(client.render({ source: { path: '/main.ts' } })).rejects.toThrow('transport initialize failed');
+    await expect(client.render({ source: { path: 'main.ts' } })).rejects.toThrow('transport initialize failed');
     expect(notify).not.toHaveBeenCalled();
     await client.connect();
 
@@ -1306,7 +1306,7 @@ describe('RuntimeClient render timeout control plane', () => {
     });
     await client.connect();
 
-    const delayedRender = client.render({ source: { path: '/main.ts' } });
+    const delayedRender = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const delayedRenderId = renderIdFromNotify(notify, 0);
     const autonomousRenderId = '550e8400-e29b-41d4-a716-446655440098';
@@ -1334,7 +1334,7 @@ describe('RuntimeClient render timeout control plane', () => {
     await client.connect();
     vi.useFakeTimers();
 
-    const initialRender = client.render({ source: { path: '/main.ts' } });
+    const initialRender = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const initialRenderId = renderIdFromNotify(notify, 0);
     const watcherRenderId = '550e8400-e29b-41d4-a716-446655440097';
@@ -1369,7 +1369,7 @@ describe('RuntimeClient render timeout control plane', () => {
     client.setRenderTimeout(0);
     vi.useFakeTimers();
 
-    const settlement = client.render({ source: { path: '/main.ts' } });
+    const settlement = client.render({ source: { path: 'main.ts' } });
     await Promise.resolve();
     const renderId = renderIdFromNotify(notify, 0);
     abort.mockClear();

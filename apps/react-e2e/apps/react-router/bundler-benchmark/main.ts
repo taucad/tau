@@ -24,12 +24,12 @@ const fixtureModules = import.meta.glob(
 
 const loadFixture = (name: FixtureName) => {
   const directory = name === 'feature-matrix' ? 'bundler-feature-matrix' : 'birdhouse';
-  const entry = '/main.ts';
+  const entry = 'main.ts';
   const marker = `/replicad/${directory}/`;
   const files = Object.fromEntries(
     Object.entries(fixtureModules)
       .filter(([path]) => path.includes(marker))
-      .map(([path, source]) => [`/${path.slice(path.indexOf(marker) + marker.length)}`, source]),
+      .map(([path, source]) => [path.slice(path.indexOf(marker) + marker.length), source]),
   );
   return { files, entry };
 };

@@ -49,15 +49,15 @@ describe('Tau replay provider (hermetic)', () => {
       expect(chunks.find((chunk) => chunk.type === 'error')).toBeUndefined();
 
       const message = await collectFinalMessage(chunks);
-      expect(await testApp.memFs.readFile('/main.ts', 'utf8')).toBe(planetaryGearMain);
-      expect(await testApp.memFs.readFile('/lib/planetaryGear.ts', 'utf8')).toBe(planetaryGearLibrary);
-      expect(await testApp.memFs.readFile('/main.geospec.ts', 'utf8')).toBe(planetaryGearGeoSpec);
+      expect(await testApp.memFs.readFile('main.ts', 'utf8')).toBe(planetaryGearMain);
+      expect(await testApp.memFs.readFile('lib/planetaryGear.ts', 'utf8')).toBe(planetaryGearLibrary);
+      expect(await testApp.memFs.readFile('main.geospec.ts', 'utf8')).toBe(planetaryGearGeoSpec);
 
       const compilationUnits = extractToolCallParts(message, 'get_kernel_result');
       expect(compilationUnits).toHaveLength(2);
       expect(compilationUnits.map(({ input }) => input)).toEqual([
-        { targetFile: '/main.ts' },
-        { targetFile: '/lib/planetaryGear.ts' },
+        { targetFile: 'main.ts' },
+        { targetFile: 'lib/planetaryGear.ts' },
       ]);
       expect(compilationUnits.map(({ state, output }) => ({ state, output }))).toEqual([
         { state: 'output-available', output: { status: 'ready', kernelIssues: [] } },
@@ -70,7 +70,7 @@ describe('Tau replay provider (hermetic)', () => {
       expect(screenshots).toHaveLength(1);
       expect(screenshots[0]).toMatchObject({
         state: 'output-available',
-        input: { mode: 'multi_angle', targetFile: '/main.ts' },
+        input: { mode: 'multi_angle', targetFile: 'main.ts' },
       });
       expect((screenshots[0]!.output as { images: Array<{ view: string }> }).images.map(({ view }) => view)).toEqual([
         'front',
@@ -98,8 +98,8 @@ describe('Tau replay provider (hermetic)', () => {
 
     try {
       await seedCubeProject(testApp);
-      await testApp.memFs.mkdir('/checks', { recursive: true });
-      await testApp.memFs.writeFile('/checks/existing.geospec.ts', "it('should preserve an existing check');\n");
+      await testApp.memFs.mkdir('checks', { recursive: true });
+      await testApp.memFs.writeFile('checks/existing.geospec.ts', "it('should preserve an existing check');\n");
 
       const response = await postCubeChat(testApp, chatId);
       expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
@@ -119,7 +119,7 @@ describe('Tau replay provider (hermetic)', () => {
         const listOutput = output as Omit<ListDirectoryRpcSuccess, 'success'>;
         expect(listOutput.entries.every((entry) => typeof entry.modifiedAt === 'string')).toBe(true);
         expect(listOutput).toEqual({
-          path: '/',
+          path: '',
           entries: [
             {
               name: 'tau.json',
@@ -170,8 +170,8 @@ describe('Tau replay provider (hermetic)', () => {
       });
 
       // The scripted file tools executed for real against memFs.
-      expect(await testApp.memFs.readFile('/main.geospec.ts', 'utf8')).toContain('toBeWatertight');
-      expect(await testApp.memFs.readFile('/main.scad', 'utf8')).toContain('cylinder_radius = 5');
+      expect(await testApp.memFs.readFile('main.geospec.ts', 'utf8')).toContain('toBeWatertight');
+      expect(await testApp.memFs.readFile('main.scad', 'utf8')).toContain('cylinder_radius = 5');
 
       // Per-turn usage summed to the recorded totals, and cost metered > 0.
       const usage = usageParts(message);

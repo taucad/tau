@@ -142,31 +142,31 @@ describe('createSerialRunContext', () => {
 
 describe('executeGeoSpecFile', () => {
   it('should treat the entry path as VM-rooted', async () => {
-    const runner = runnerOptions({ '/spec.geospec.ts': passingSpec('vm rooted') });
+    const runner = runnerOptions({ 'spec.geospec.ts': passingSpec('vm rooted') });
     const context = createSerialRunContext(runner);
 
-    const result = await executeGeoSpecFile({ runner, context, file: '/spec.geospec.ts' });
+    const result = await executeGeoSpecFile({ runner, context, file: 'spec.geospec.ts' });
 
     expect(result.success).toBe(true);
   });
 
   it('should register tests without running bodies under collectOnly', async () => {
-    const runner = runnerOptions({ '/spec.geospec.ts': failingSpec('collect only') });
+    const runner = runnerOptions({ 'spec.geospec.ts': failingSpec('collect only') });
     const context = createSerialRunContext(runner);
 
-    const result = await executeGeoSpecFile({ runner, context, file: '/spec.geospec.ts', collectOnly: true });
+    const result = await executeGeoSpecFile({ runner, context, file: 'spec.geospec.ts', collectOnly: true });
 
     expect(result.success && result.tests.every((test) => test.status === 'skipped')).toBe(true);
   });
 
   it('should thread the test filters through', async () => {
-    const runner = runnerOptions({ '/spec.geospec.ts': passingSpec('filtered') });
+    const runner = runnerOptions({ 'spec.geospec.ts': passingSpec('filtered') });
     const context = createSerialRunContext(runner);
 
     const result = await executeGeoSpecFile({
       runner,
       context,
-      file: '/spec.geospec.ts',
+      file: 'spec.geospec.ts',
       testNamePattern: 'nothing matches',
       testTimeout: 5000,
     });
@@ -177,8 +177,8 @@ describe('executeGeoSpecFile', () => {
 
 describe('createSerialGeoSpecRunner', () => {
   const twoFiles = {
-    '/first.geospec.ts': passingSpec('first'),
-    '/second.geospec.ts': passingSpec('second'),
+    'first.geospec.ts': passingSpec('first'),
+    'second.geospec.ts': passingSpec('second'),
   };
 
   it('should run every file and emit the lifecycle in order', async () => {
@@ -216,7 +216,7 @@ describe('createSerialGeoSpecRunner', () => {
     const runner = createSerialGeoSpecRunner(runnerOptions(twoFiles));
     await runner.close();
 
-    const result = await runner.run({ files: ['/first.geospec.ts'] });
+    const result = await runner.run({ files: ['first.geospec.ts'] });
 
     expect(result.issues?.[0]?.code).toBe('GEOSPEC_RUNNER_CLOSED');
   });
@@ -232,12 +232,12 @@ describe('createSerialGeoSpecRunner', () => {
 
   it('should stop at the first failure under bail', async () => {
     const runner = createSerialGeoSpecRunner(
-      runnerOptions({ '/a.geospec.ts': failingSpec('a'), '/b.geospec.ts': passingSpec('b') }),
+      runnerOptions({ 'a.geospec.ts': failingSpec('a'), 'b.geospec.ts': passingSpec('b') }),
     );
 
-    const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'], bail: true });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'], bail: true });
 
-    expect(result.files.map((file) => file.file)).toStrictEqual(['/a.geospec.ts']);
+    expect(result.files.map((file) => file.file)).toStrictEqual(['a.geospec.ts']);
     expect(result.issues?.[0]?.code).toBe('GEOSPEC_RUNNER_BAILED');
   });
 
@@ -275,7 +275,7 @@ describe('createSerialGeoSpecRunner', () => {
   it('should report a file that failed to execute', async () => {
     const runner = createSerialGeoSpecRunner(runnerOptions({}));
 
-    const result = await runner.run({ files: ['/missing.geospec.ts'] });
+    const result = await runner.run({ files: ['missing.geospec.ts'] });
 
     expect(result.success).toBe(false);
     expect(result.failed).toBe(1);
@@ -287,7 +287,7 @@ describe('the optional runner dependencies', () => {
     const events: string[] = [];
     const runner = createSerialGeoSpecRunner({
       filesystem: memoryFileSystem({
-        '/a.geospec.ts': `
+        'a.geospec.ts': `
           import { describe, it } from 'geospec';
           import { note } from 'project/extra';
           describe('deps', () => { it('sees the builtin', () => { if (note !== 'ok') throw new Error(note); }); });
@@ -299,7 +299,7 @@ describe('the optional runner dependencies', () => {
     });
     runner.on('file-complete', (event) => events.push(event.type));
 
-    const result = await runner.run({ files: ['/a.geospec.ts'], testTimeout: 5000, testNamePattern: 'builtin' });
+    const result = await runner.run({ files: ['a.geospec.ts'], testTimeout: 5000, testNamePattern: 'builtin' });
     await runner.close();
 
     expect(result.success).toBe(true);
@@ -313,7 +313,7 @@ describe('the remaining serial legs', () => {
     const events: GeoSpecRunnerEvent[] = [];
     const runner = createSerialGeoSpecRunner({
       filesystem: memoryFileSystem({
-        '/forensic.geospec.ts': `
+        'forensic.geospec.ts': `
           import { describe, expectGeo, it } from 'geospec';
           import { loadModel } from 'geospec/model';
           describe('forensic', () => {
@@ -329,7 +329,7 @@ describe('the remaining serial legs', () => {
     runner.on('forensic', (event) => events.push(event));
 
     const result = await runner.run({
-      files: ['/forensic.geospec.ts'],
+      files: ['forensic.geospec.ts'],
       forensic: true,
       matcherWallBackstop: 1000,
     });
@@ -344,10 +344,10 @@ describe('the remaining serial legs', () => {
     clearGeoSpecEngine();
     try {
       const events: GeoSpecRunnerEvent[] = [];
-      const runner = createSerialGeoSpecRunner(runnerOptions({ '/a.geospec.ts': passingSpec('a') }));
+      const runner = createSerialGeoSpecRunner(runnerOptions({ 'a.geospec.ts': passingSpec('a') }));
       runner.on('forensic', (event) => events.push(event));
 
-      const result = await runner.run({ files: ['/a.geospec.ts'], forensic: true });
+      const result = await runner.run({ files: ['a.geospec.ts'], forensic: true });
       expect(result.success).toBe(true);
       await runner.close();
       expect(events.some((event) => event.type === 'forensic' && event.name === 'runner.file')).toBe(true);
@@ -360,13 +360,13 @@ describe('the remaining serial legs', () => {
     // oxlint-disable-next-line eslint/prefer-const -- the handler closes over the runner it creates.
     let runner: ReturnType<typeof createSerialGeoSpecRunner>;
     runner = createSerialGeoSpecRunner(
-      runnerOptions({ '/a.geospec.ts': passingSpec('a'), '/b.geospec.ts': passingSpec('b') }),
+      runnerOptions({ 'a.geospec.ts': passingSpec('a'), 'b.geospec.ts': passingSpec('b') }),
     );
     runner.on('file-complete', () => {
       runner.abort('');
     });
 
-    const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
 
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted.');
   });
@@ -375,7 +375,7 @@ describe('the remaining serial legs', () => {
     const subject = await loadedSubject();
     const runner = createSerialGeoSpecRunner({
       filesystem: memoryFileSystem({
-        '/a.geospec.ts': `
+        'a.geospec.ts': `
           import { describe, it } from 'geospec';
           import { loadModel } from 'geospec/model';
           describe('affinity', () => { it('loads', async () => { await loadModel({ file: 'main.ts' }); }); });
@@ -384,7 +384,7 @@ describe('the remaining serial legs', () => {
       modelLoader: async () => exposed(subject),
     });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(typeof result.files[0]?.primaryLoadKey).toBe('string');

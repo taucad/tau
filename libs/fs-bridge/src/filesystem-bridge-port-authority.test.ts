@@ -119,7 +119,7 @@ const createAuthority = (
 
 describe('filesystem bridge authority over a Port pair (dialler = client, dialee = server)', () => {
   it('completes hello, reads, a void write and a live watch event', async () => {
-    const { handlers, capabilities } = createAuthority({ '/main.ts': 'export default 1;\n' });
+    const { handlers, capabilities } = createAuthority({ 'main.ts': 'export default 1;\n' });
     const [dialeePort, diallerPort] = createCodecPortPair();
     const server = createBridgeServer(handlers, dialeePort, {
       hello: createFileSystemBridgeHello({ state: 'ready', capabilities, watchable: true }),
@@ -131,11 +131,11 @@ describe('filesystem bridge authority over a Port pair (dialler = client, dialee
       await proxy.ready;
       expect(proxy.hello.payload).toEqual({ v: 1, state: 'ready', capabilities, watchable: true });
 
-      await expect(proxy.readFile('/main.ts', 'utf8')).resolves.toBe('export default 1;\n');
-      await expect(proxy.readFile('/main.ts')).resolves.toEqual(encoder.encode('export default 1;\n'));
+      await expect(proxy.readFile('main.ts', 'utf8')).resolves.toBe('export default 1;\n');
+      await expect(proxy.readFile('main.ts')).resolves.toEqual(encoder.encode('export default 1;\n'));
 
       const events: WatchEvent[] = [];
-      const subscription = proxy.watchReady({ paths: ['/dep.ts'] }, (event) => {
+      const subscription = proxy.watchReady({ paths: ['dep.ts'] }, (event) => {
         events.push(event);
       });
       await subscription.ready;
@@ -144,11 +144,11 @@ describe('filesystem bridge authority over a Port pair (dialler = client, dialee
        * `null`. Before `voidResult` was widened this rejected with
        * "Expected no result" and the mutation never settled; the validator
        * normalises the nil back to `undefined` so every transport agrees. */
-      await expect(proxy.writeFile('/dep.ts', 'export default 2;\n')).resolves.toBeUndefined();
-      await expect(proxy.readFile('/dep.ts', 'utf8')).resolves.toBe('export default 2;\n');
+      await expect(proxy.writeFile('dep.ts', 'export default 2;\n')).resolves.toBeUndefined();
+      await expect(proxy.readFile('dep.ts', 'utf8')).resolves.toBe('export default 2;\n');
 
       await vi.waitFor(() => {
-        expect(events).toEqual([{ type: 'change', path: '/dep.ts' }]);
+        expect(events).toEqual([{ type: 'change', path: 'dep.ts' }]);
       });
 
       subscription.unsubscribe();

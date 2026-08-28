@@ -1,4 +1,4 @@
-import { resolveVirtualPath } from '@taucad/runtime/kernel';
+import { resolveRootedPath } from '@taucad/runtime/kernel';
 import type { KernelFileSystem } from '@taucad/runtime/kernel';
 
 /**
@@ -17,7 +17,7 @@ export class FileSystemManager {
    * Called from WASM.
    * Reads a file using a project-local virtual path.
    *
-   * @param path - the file path to resolve within virtual `/`
+   * @param path - Engine-local file path to resolve within the selected root.
    * @returns the file contents as a byte array
    */
   public async readFile(path: string): Promise<Uint8Array<ArrayBuffer>> {
@@ -29,7 +29,7 @@ export class FileSystemManager {
    * Called from WASM.
    * Checks if a project-local virtual file exists.
    *
-   * @param path - the file path to resolve within virtual `/`
+   * @param path - Engine-local file path to resolve within the selected root.
    * @returns whether the file exists
    */
   public async exists(path: string): Promise<boolean> {
@@ -41,7 +41,7 @@ export class FileSystemManager {
    * Called from WASM.
    * Lists all files in a project-local virtual directory.
    *
-   * @param path - the directory path to resolve within virtual `/`
+   * @param path - Engine-local directory path to resolve within the selected root.
    * @returns JSON array string of file names — matches kcl-lib WASM `getAllFiles` (`value.as_string` + `serde_json::from_str`)
    */
   public async getAllFiles(path: string): Promise<string> {
@@ -59,12 +59,12 @@ export class FileSystemManager {
   }
 
   /**
-   * Resolve a path against canonical virtual `/`.
+   * Translate the KCL engine's optional leading slash to a Tau rooted path.
    *
-   * @param relativePath - the path to resolve within virtual `/`
-   * @returns the absolute path
+   * @param relativePath - Engine-local path.
+   * @returns Canonical root-relative Tau path.
    */
   private resolvePath(relativePath: string): string {
-    return resolveVirtualPath(relativePath.startsWith('/') ? relativePath : `/${relativePath}`);
+    return resolveRootedPath(relativePath.startsWith('/') ? relativePath.slice(1) : relativePath);
   }
 }

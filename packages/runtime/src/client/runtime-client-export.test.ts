@@ -143,7 +143,7 @@ describe('RuntimeClient request-scoped export', () => {
     expect(render).not.toHaveBeenCalled();
     expect(exportCall).not.toHaveBeenCalled();
     expect(exportModelCall).toHaveBeenCalledWith({
-      file: { path: '/lib', filename: 'cube.ts' },
+      file: { path: 'lib', filename: 'cube.ts' },
       parameters: { height: 10 },
       format: 'glb',
       exportOptions: { binary: true },
@@ -179,10 +179,10 @@ describe('RuntimeClient request-scoped export', () => {
     }
     expect(exportModelCall).toHaveBeenCalledOnce();
     const request = exportModelCall.mock.calls.at(0)?.[0];
-    expect(request?.stage?.['/main.ts']).toBeInstanceOf(Uint8Array);
-    expect(request?.stage?.['/lib/part.ts']).toBeInstanceOf(Uint8Array);
+    expect(request?.stage?.['main.ts']).toBeInstanceOf(Uint8Array);
+    expect(request?.stage?.['lib/part.ts']).toBeInstanceOf(Uint8Array);
     expect(request).toMatchObject({
-      file: { path: '/', filename: 'main.ts' },
+      file: { path: '', filename: 'main.ts' },
       parameters: { radius: 4 },
       format: 'step',
       exportOptions: { unit: 'mm' },

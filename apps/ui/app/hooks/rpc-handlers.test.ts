@@ -512,7 +512,7 @@ describe('rpc-handlers', () => {
         const browserFileSystem = buildDeps({ fileManager: mockFm, treeService }).fileSystem;
 
         const result = await actualChatRpc.handleGlobSearch(
-          { pattern: '**/*.geospec.ts', path: '/' },
+          { pattern: '**/*.geospec.ts', path: '' },
           browserFileSystem,
         );
 
@@ -719,6 +719,7 @@ describe('rpc-handlers', () => {
         const route = {
           kernelId: 'replicad',
           sourceFormat: 'glb',
+          geometryHash: 'geometry-hash',
           targetFormat: 'step',
           fidelity: 'brep',
           exportOptions: { schema: {}, defaults: {} },
@@ -785,6 +786,7 @@ describe('rpc-handlers', () => {
         const route = {
           kernelId: 'replicad',
           sourceFormat: 'glb',
+          geometryHash: 'geometry-hash',
           targetFormat: 'stl',
           fidelity: 'mesh',
           exportOptions: { schema: {}, defaults: {} },
@@ -882,15 +884,18 @@ describe('rpc-handlers', () => {
           success: true,
           images: [{ view: 'isometric', dataUrl: captureDataUrl() }],
         });
-        expect(exportImage).toHaveBeenCalledWith({
+        expect(exportImage).toHaveBeenCalledOnce();
+        const job = exportImage.mock.calls[0]![0];
+        if (job.sourceFormat !== 'glb' || job.kind !== 'capture') {
+          throw new Error('Expected a GLB capture job');
+        }
+        expect(job).toMatchObject({
           kind: 'capture',
           identity: 'capture:src/pen.ts:geometry-hash:agent:isometric',
-          sourceFormat: 'gltf',
-          fileSystem: fileManager.runtimeFileSystem,
+          sourceFormat: 'glb',
           format: 'webp',
-          source: { path: entryPath },
-          parameters: { width: 42 },
-          includeEdges: true,
+          sourcePath: entryPath,
+          content: gltfGeometry.content,
           exportOptions: {
             mode: 'single',
             width: 1600,
@@ -910,12 +915,6 @@ describe('rpc-handlers', () => {
             quality: 1,
           },
         });
-        const job = exportImage.mock.calls[0]![0];
-        if (job.sourceFormat !== 'gltf') {
-          throw new Error('Expected a GLTF image job');
-        }
-        expect(job.source.path).toBe(entryPath);
-        expect(job.exportOptions).toHaveProperty('quality', 1);
       });
 
       it('should reuse matching viewer presentation state for agent capture', async () => {
@@ -941,7 +940,7 @@ describe('rpc-handlers', () => {
               isSectionViewActive: true,
               availableSectionViews: [{ id: 'yz', normal: [1, 0, 0] }],
               selectedSectionViewId: 'yz',
-              sectionViewPivot: [1000, 0, 0],
+              sectionViewPivot: [1, 0, 0],
               sectionViewRotation: [0, 0, 0],
               sectionViewDirection: -1,
               enableClippingMesh: true,
@@ -1015,12 +1014,11 @@ describe('rpc-handlers', () => {
         expect(exportImage).toHaveBeenCalledWith({
           kind: 'capture',
           identity: 'capture:pen.ts:geometry-hash:agent:orthographic',
-          sourceFormat: 'gltf',
-          fileSystem: fileManager.runtimeFileSystem,
+          sourceFormat: 'glb',
+          geometryHash: 'geometry-hash',
+          sourcePath: entryPath,
+          content: gltfGeometry.content,
           format: 'webp',
-          source: { path: entryPath },
-          parameters: {},
-          includeEdges: false,
           exportOptions: {
             mode: 'batch',
             width: 1600,
@@ -1029,6 +1027,8 @@ describe('rpc-handlers', () => {
             background: '#242424',
             axes: true,
             scaleBar: true,
+            lines: false,
+            world: { up: '+z', forward: '-y', unit: 'meter' },
             views: [
               {
                 id: 'front',
@@ -1392,7 +1392,7 @@ describe('rpc-handlers', () => {
 
       await handlers.executeRpcCall({
         rpcName: rpcName.createFile,
-        args: { targetFile: '/a.scad', content: '// x' },
+        args: { targetFile: 'a.scad', content: '// x' },
         toolCallId: 'tool_call_cf_1',
       } as RpcCallInput);
 
@@ -1419,7 +1419,7 @@ describe('rpc-handlers', () => {
       await expect(
         handlers.executeRpcCall({
           rpcName: rpcName.editFile,
-          args: { targetFile: '/a.scad', oldString: 'a', newString: 'b' },
+          args: { targetFile: 'a.scad', oldString: 'a', newString: 'b' },
           toolCallId: 'tool_call_ef_1',
         } as RpcCallInput),
       ).rejects.toThrow('boom');
@@ -1450,7 +1450,7 @@ describe('rpc-handlers', () => {
       await expect(
         handlers.executeRpcCall({
           rpcName: rpcName.createFile,
-          args: { targetFile: '/x.scad', content: '//' },
+          args: { targetFile: 'x.scad', content: '//' },
           toolCallId: 'tool_call_num_1',
         } as RpcCallInput),
       ).rejects.toThrow('numeric');
@@ -1479,7 +1479,7 @@ describe('rpc-handlers', () => {
       await expect(
         handlers.executeRpcCall({
           rpcName: rpcName.deleteFile,
-          args: { targetFile: '/y.scad' },
+          args: { targetFile: 'y.scad' },
           toolCallId: 'tool_call_plain_1',
         } as RpcCallInput),
       ).rejects.toThrow('plain');
@@ -1510,7 +1510,7 @@ describe('rpc-handlers', () => {
       await expect(
         handlers.executeRpcCall({
           rpcName: rpcName.appendFile,
-          args: { targetFile: '/y.scad', content: '//' },
+          args: { targetFile: 'y.scad', content: '//' },
           toolCallId: 'tool_call_estr_1',
         } as RpcCallInput),
       ).rejects.toThrow('unknown-str');
@@ -1540,7 +1540,7 @@ describe('rpc-handlers', () => {
 
       await handlers.executeRpcCall({
         rpcName: rpcName.readFile,
-        args: { targetFile: '/a.scad' },
+        args: { targetFile: 'a.scad' },
         toolCallId: 'tool_call_rf_1',
       } as RpcCallInput);
 

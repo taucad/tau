@@ -197,7 +197,7 @@ const seedReadFiles = async (options: { testApp: TestApp; count: number }): Prom
     Array.from({ length: count }, async (_, index) => {
       const fileNumber = index + 1;
       await testApp.memFs.writeFile(
-        `/checkpoint-fixture-${fileNumber}.ts`,
+        `checkpoint-fixture-${fileNumber}.ts`,
         `export const checkpointFixture${fileNumber} = ${fileNumber};\n`,
       );
     }),

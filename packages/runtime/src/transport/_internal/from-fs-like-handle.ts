@@ -21,7 +21,7 @@ import type { NativeStats } from '@taucad/types';
 import { toFileStat } from '@taucad/types/constants';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystemHandle } from '#transport/_internal/runtime-filesystem-handle.js';
-import { resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 
 /**
  * Minimal interface for any fs-compatible object with a `promises` namespace.
@@ -69,7 +69,7 @@ export function _fromFsLikeHandle(fsLike: FsLike): RuntimeFileSystemHandle {
  * `fsLike` is shared by reference (the user owns its lifecycle).
  */
 function buildFsLikeBase(fsLike: FsLike): RuntimeFileSystemBase {
-  const resolve = (path: string): string => resolveVirtualPath(path);
+  const resolve = (path: string): string => assertRootedPath(path);
 
   function readFile(path: string, encoding: 'utf8'): Promise<string>;
   function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;

@@ -1,4 +1,5 @@
 import { extractReferencedGltfUris } from '#gltf.dependencies.js';
+import { assertRootedPath, resolveRootedPath } from '@taucad/runtime/kernel';
 
 type ImportFileSystem = {
   readdir(path: string): Promise<readonly string[]>;
@@ -17,28 +18,11 @@ export type ImportFileInventory = {
   };
 };
 
-const resolveVirtualPath = (input: string): string => {
-  if (input.length === 0 || !input.startsWith('/') || input.startsWith('//') || input.includes('\\')) {
-    throw new TypeError(`Invalid virtual path: ${JSON.stringify(input)}`);
-  }
-  const segments: string[] = [];
-  for (const segment of input.split('/')) {
-    if (!segment || segment === '.') {
-      continue;
-    }
-    if (segment === '..') {
-      if (segments.pop() === undefined) {
-        throw new TypeError(`Virtual path escapes the filesystem root: ${JSON.stringify(input)}`);
-      }
-      continue;
-    }
-    segments.push(segment);
-  }
-  return `/${segments.join('/')}`;
-};
-
 const basename = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
-const parentDirectory = (path: string): string => path.slice(0, path.lastIndexOf('/')) || '/';
+const parentDirectory = (path: string): string => {
+  const separator = path.lastIndexOf('/');
+  return separator < 0 ? '' : path.slice(0, separator);
+};
 const extension = (path: string): string => basename(path).split('.').pop()?.toLowerCase() ?? '';
 const isNotFound = (error: unknown): boolean => {
   if (typeof error !== 'object' || error === null || !('code' in error)) {
@@ -65,15 +49,15 @@ const resolveGltfUri = (uri: string, entryPath: string): string => {
     throw new TypeError(`Malformed glTF filesystem URI: ${JSON.stringify(uri)}`, { cause: error });
   }
   const parent = parentDirectory(entryPath);
-  const candidate = decoded.startsWith('/') ? decoded : `${parent === '/' ? '' : parent}/${decoded}`;
-  return resolveVirtualPath(candidate);
+  const candidate = decoded.startsWith('/') ? decoded.slice(1) : `${parent ? `${parent}/` : ''}${decoded}`;
+  return resolveRootedPath(candidate);
 };
 
 /**
  * Inventory an import entry, sibling files, and referenced glTF sidecars.
  *
  * @param filesystem - Runtime filesystem capability.
- * @param rawEntryPath - Absolute virtual entry path.
+ * @param rawEntryPath - Canonical root-relative entry path.
  * @returns Deterministic import inventory and sidecar resolver.
  * @public
  */
@@ -81,14 +65,14 @@ export const createImportFileInventory = async (
   filesystem: ImportFileSystem,
   rawEntryPath: string,
 ): Promise<ImportFileInventory> => {
-  const entryPath = resolveVirtualPath(rawEntryPath);
+  const entryPath = assertRootedPath(rawEntryPath);
   const directory = parentDirectory(entryPath);
   const names = [...(await filesystem.readdir(directory))].sort();
   const bytesByPath = new Map<string, Uint8Array<ArrayBuffer>>();
   const resolverBytes = new Map<string, Uint8Array<ArrayBuffer>>();
 
   for (const name of names) {
-    const path = resolveVirtualPath(`${directory === '/' ? '' : directory}/${name}`);
+    const path = assertRootedPath(`${directory ? `${directory}/` : ''}${name}`);
     try {
       // oxlint-disable-next-line no-await-in-loop -- deterministic provider inventory
       const stat = await filesystem.stat(path);

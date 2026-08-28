@@ -127,6 +127,33 @@ describe('createToolInputCompatibilityMiddleware', () => {
     });
   });
 
+  it('should repair project paths in both tool calls and provider content before persistence', () => {
+    const metricsService = createMetricsService();
+    const middleware = createToolInputCompatibilityMiddleware(metricsService);
+    const afterModel = resolveMiddlewareHook(middleware.afterModel);
+    const aiMessage = new AIMessage({
+      id: 'msg-path',
+      content: [
+        { type: 'tool_use', id: 'call_path', name: toolName.getKernelResult, input: { targetFile: '/main.ts' } },
+      ],
+      tool_calls: [{ id: 'call_path', name: toolName.getKernelResult, args: { targetFile: '/main.ts' } }],
+    });
+
+    const update = afterModel({ messages: [aiMessage] }, createRuntime()) as { messages: AIMessage[] };
+
+    expect(update.messages[0]?.tool_calls?.[0]?.args).toEqual({ targetFile: 'main.ts' });
+    expect(update.messages[0]?.content).toEqual([
+      { type: 'tool_use', id: 'call_path', name: toolName.getKernelResult, input: { targetFile: 'main.ts' } },
+    ]);
+    expect(metricsService.genAiToolInputRepairs.add).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        [AttributeKey.GEN_AI_TOOL_NAME]: toolName.getKernelResult,
+        [AttributeKey.GEN_AI_TOOL_INPUT_REPAIR_KIND]: 'project_path_alias',
+      }),
+    );
+  });
+
   it('should pass blocked collisions through unchanged so strict schema validation owns the error', async () => {
     const metricsService = createMetricsService();
     const middleware = createToolInputCompatibilityMiddleware(metricsService);

@@ -94,7 +94,7 @@ describe('RuntimeSource inline source', () => {
 
 describe('RuntimeSource filesystem source', () => {
   it('should accept string paths', () => {
-    const stringSource: RuntimeSource = { path: '/project/main.ts' };
+    const stringSource: RuntimeSource = { path: 'project/main.ts' };
 
     expectTypeOf(stringSource.path).toEqualTypeOf<string>();
   });
@@ -102,14 +102,14 @@ describe('RuntimeSource filesystem source', () => {
   it('should reject files and entry on filesystem sources', () => {
     // @ts-expect-error -- filesystem source cannot also use files
     const mixed: RuntimeSource = {
-      path: '/project/main.ts',
+      path: 'project/main.ts',
       files: { 'main.ts': code },
     };
     void mixed;
 
     // @ts-expect-error -- filesystem source cannot use entry
     const withEntry: RuntimeSource = {
-      path: '/project/main.ts',
+      path: 'project/main.ts',
       entry: 'main.ts',
     };
     void withEntry;

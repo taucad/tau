@@ -6,18 +6,25 @@ import { rpcClientErrorCode, rpcSchemasRegistry } from '#schemas/rpc.schema.js';
 import { handleDeleteFile } from '#rpc/handlers/handle-delete-file.js';
 
 describe('handleDeleteFile', () => {
-  it.each(['/src/a.ts', './src/a.ts'])(
-    'should normalize agent path %j before every filesystem call',
-    async (targetFile) => {
-      const fileSystem = mock<RpcFileSystem>();
-      fileSystem.readFile.mockResolvedValue('x');
+  it('should pass a canonical rooted path through unchanged', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readFile.mockResolvedValue('x');
 
-      await handleDeleteFile({ targetFile }, fileSystem);
+    await handleDeleteFile({ targetFile: 'src/a.ts' }, fileSystem);
 
-      expect(fileSystem.readFile).toHaveBeenCalledWith('src/a.ts');
-      expect(fileSystem.deleteFile).toHaveBeenCalledWith('src/a.ts');
-    },
-  );
+    expect(fileSystem.readFile).toHaveBeenCalledWith('src/a.ts');
+    expect(fileSystem.deleteFile).toHaveBeenCalledWith('src/a.ts');
+  });
+
+  it.each(['/src/a.ts', './src/a.ts'])('should reject noncanonical rooted path %j', async (targetFile) => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleDeleteFile({ targetFile }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.readFile).not.toHaveBeenCalled();
+    expect(fileSystem.deleteFile).not.toHaveBeenCalled();
+  });
 
   it('should reject paths outside the project before filesystem access', async () => {
     const fileSystem = mock<RpcFileSystem>();

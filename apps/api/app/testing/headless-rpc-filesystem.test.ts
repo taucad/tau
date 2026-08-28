@@ -19,10 +19,8 @@ const createStrictFileSystem = async (files: Record<string, string> = {}) => {
 describe('createHeadlessRpcFileSystem', () => {
   it('should list the project root with correct file and directory metadata', async () => {
     const { fileSystem } = await createStrictFileSystem({
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Absolute runtime fixture path.
-      '/main.ts': 'export const main = true;\n',
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Absolute runtime fixture path.
-      '/checks/existing.geospec.ts': "it('should exist');\n",
+      'main.ts': 'export const main = true;\n',
+      'checks/existing.geospec.ts': "it('should exist');\n",
     });
 
     const entries = await fileSystem.readdir('');
@@ -37,8 +35,7 @@ describe('createHeadlessRpcFileSystem', () => {
 
   it('should map project-relative reads, stats, and existence checks to the strict runtime namespace', async () => {
     const { fileSystem } = await createStrictFileSystem({
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Absolute runtime fixture path.
-      '/main.ts': 'export const main = true;\n',
+      'main.ts': 'export const main = true;\n',
     });
 
     await expect(fileSystem.readFile('main.ts')).resolves.toBe('export const main = true;\n');
@@ -55,10 +52,10 @@ describe('createHeadlessRpcFileSystem', () => {
 
     await fileSystem.writeFile('draft.ts', 'const value = 1;\n');
     await fileSystem.appendFile('draft.ts', 'const retained = true;\n');
-    await expect(base.readFile('/draft.ts', 'utf8')).resolves.toBe('const value = 1;\nconst retained = true;\n');
+    await expect(base.readFile('draft.ts', 'utf8')).resolves.toBe('const value = 1;\nconst retained = true;\n');
 
     await fileSystem.deleteFile('draft.ts');
-    await expect(base.exists('/draft.ts')).resolves.toBe(false);
+    await expect(base.exists('draft.ts')).resolves.toBe(false);
   });
 
   it('should map project-relative binary writes to the strict runtime namespace', async () => {
@@ -68,7 +65,7 @@ describe('createHeadlessRpcFileSystem', () => {
 
     await fileSystem.writeBinaryFile('model.glb', bytes);
 
-    await expect(base.readFile('/model.glb')).resolves.toEqual(new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
+    await expect(base.readFile('model.glb')).resolves.toEqual(new Uint8Array([0x67, 0x6c, 0x54, 0x46]));
   });
 
   it('should propagate append read errors other than a missing file', async () => {
@@ -88,7 +85,7 @@ describe('createHeadlessRpcFileSystem', () => {
 
     await fileSystem.appendFile('events.jsonl', '{"event":"test"}\n');
 
-    expect(runtimeFileSystem.writeFile).toHaveBeenCalledWith('/events.jsonl', '{"event":"test"}\n');
+    expect(runtimeFileSystem.writeFile).toHaveBeenCalledWith('events.jsonl', '{"event":"test"}\n');
   });
 
   it('should propagate child stat errors instead of fabricating binary file metadata', async () => {
@@ -131,8 +128,7 @@ describe('createHeadlessRpcFileSystem', () => {
 
   it('should preserve strict rejection of malformed virtual paths', async () => {
     const { fileSystem } = await createStrictFileSystem({
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Absolute runtime fixture path.
-      '/main.ts': 'export {};',
+      'main.ts': 'export {};',
     });
 
     await expect(fileSystem.readFile('//main.ts')).rejects.toMatchObject({

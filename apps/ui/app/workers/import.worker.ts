@@ -1,4 +1,5 @@
-import JSZip from 'jszip';
+import { extractRepositoryArchiveFiles } from '@taucad/share/repository-archive';
+import { shareArtifactLimits } from '@taucad/share/artifact';
 
 /**
  * Messages sent TO the import worker.
@@ -42,6 +43,9 @@ async function handleDownloadAndExtract(url: string, headers?: Record<string, st
     }
 
     const contentLength = Number(response.headers.get('content-length') ?? 0);
+    if (contentLength > shareArtifactLimits.maxArchiveBytes) {
+      throw new Error('Repository archive exceeds the import limit');
+    }
     const reader = response.body?.getReader();
     if (!reader) {
       throw new Error('Response body is not readable');
@@ -69,6 +73,11 @@ async function handleDownloadAndExtract(url: string, headers?: Record<string, st
 
         chunks.push(value);
         receivedLength += value.length;
+        if (receivedLength > shareArtifactLimits.maxArchiveBytes) {
+          // oxlint-disable-next-line no-await-in-loop -- need to cancel the oversized stream before failing
+          await reader.cancel();
+          throw new Error('Repository archive exceeds the import limit');
+        }
 
         const now = Date.now();
         if (now - lastProgressUpdate >= progressInterval || lastProgressUpdate === 0) {
@@ -89,22 +98,14 @@ async function handleDownloadAndExtract(url: string, headers?: Record<string, st
       position += chunk.length;
     }
 
-    const zip = await JSZip.loadAsync(zipData);
-
-    const fileEntries = Object.entries(zip.files).filter(([, file]) => !file.dir);
-    const totalFiles = fileEntries.length;
+    const files = await extractRepositoryArchiveFiles(zipData, { root: '', requireManifest: false });
+    const totalFiles = files.length;
     let processedFiles = 0;
 
     extractedFiles = new Map();
 
-    for (const [path, file] of fileEntries) {
-      const normalizedPath = path.split('/').slice(1).join('/');
-      if (normalizedPath) {
-        // oxlint-disable-next-line no-await-in-loop -- sequential file extraction for progress tracking
-        const content = await file.async('uint8array');
-        extractedFiles.set(normalizedPath, content as Uint8Array<ArrayBuffer>);
-      }
-
+    for (const file of files) {
+      extractedFiles.set(file.path, file.content);
       processedFiles++;
       postResponse({ type: 'extractProgress', processed: processedFiles, total: totalFiles });
     }

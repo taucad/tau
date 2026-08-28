@@ -202,7 +202,7 @@ describe('createWorkerDispatcher', () => {
       fixture = await buildFixture(worker);
 
       const result = await fixture.client.call('exportModel', {
-        file: { path: '/', filename: 'main.ts' },
+        file: { path: '', filename: 'main.ts' },
         parameters: { height: 10 },
         options: { quality: 'fine' },
         format: 'glb',
@@ -211,7 +211,7 @@ describe('createWorkerDispatcher', () => {
 
       expect(exportModel).toHaveBeenCalledWith(
         {
-          file: { path: '/', filename: 'main.ts' },
+          file: { path: '', filename: 'main.ts' },
           parameters: { height: 10 },
           options: { quality: 'fine' },
           format: 'glb',
@@ -301,7 +301,7 @@ describe('createWorkerDispatcher', () => {
       const controller = new AbortController();
       const call = fixture.client.call(
         'exportModel',
-        { file: { path: '/', filename: 'main.ts' }, parameters: {}, format: 'glb' },
+        { file: { path: '', filename: 'main.ts' }, parameters: {}, format: 'glb' },
         controller.signal,
       );
       await flushMicrotasks();
@@ -352,7 +352,7 @@ describe('createWorkerDispatcher', () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
 
-      const file = { path: '/', filename: 'main.ts' };
+      const file = { path: '', filename: 'main.ts' };
       fixture.client.notify('openFile', {
         renderId,
         file,
@@ -373,8 +373,8 @@ describe('createWorkerDispatcher', () => {
       const worker = createMockWorker();
       fixture = await buildFixture(worker);
 
-      const stage = { '/main.ts': new Uint8Array([1, 2, 3]) };
-      const file = { path: '/', filename: 'main.ts' };
+      const stage = { 'main.ts': new Uint8Array([1, 2, 3]) };
+      const file = { path: '', filename: 'main.ts' };
       fixture.client.notify('stage-and-render', { renderId, stage, file, parameters: { foo: 'bar' } });
       await flushMicrotasks();
 
@@ -399,8 +399,8 @@ describe('createWorkerDispatcher', () => {
 
       fixture.client.notify('stage-and-render', {
         renderId,
-        stage: { '/main.ts': new Uint8Array([1]) },
-        file: { path: '/', filename: 'main.ts' },
+        stage: { 'main.ts': new Uint8Array([1]) },
+        file: { path: '', filename: 'main.ts' },
         parameters: {},
       });
       await flushMicrotasks();

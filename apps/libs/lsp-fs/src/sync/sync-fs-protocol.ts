@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import { assertRootedPath } from '@taucad/utils/path';
 import {
   defaultSyncArenaBytes,
   syncChannelError,
@@ -63,7 +64,13 @@ export const tauSyncFsWireMessageSchema = z.object({
   tau: z.literal('sync-fs'),
   op: syncFsOpSchema,
   requestId: z.number(),
-  path: z.string(),
+  path: z.string().superRefine((path, context) => {
+    try {
+      assertRootedPath(path);
+    } catch (error) {
+      context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid rooted path' });
+    }
+  }),
 });
 
 /** @public */

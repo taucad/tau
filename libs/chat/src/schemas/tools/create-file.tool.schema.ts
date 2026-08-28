@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
+import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 /** @public */
 export const createFileInputSchema = z.object({
-  targetFile: z.string().describe('The path of the file to create, relative to the project root.'),
+  targetFile: rootedFilePathSchema.describe('The path of the file to create, relative to the project root.'),
   content: z.string().describe('The content to write to the new file.'),
 });
 

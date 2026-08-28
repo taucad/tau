@@ -65,10 +65,10 @@ const stubWebWorker = (): { worker: WebWorkerLike; posted: unknown[]; terminated
 describe('createGeoSpecWebRunner', () => {
   it('should execute a file serially, exactly like the Node host', async () => {
     const runner = createGeoSpecWebRunner({
-      filesystem: memoryFileSystem({ '/a.geospec.ts': passingSpec('web') }),
+      filesystem: memoryFileSystem({ 'a.geospec.ts': passingSpec('web') }),
     });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(result.success).toBe(true);
@@ -133,7 +133,7 @@ describe('createGeoSpecWebPoolRunner', () => {
     const stub = stubWebWorker();
     const runner = createGeoSpecWebPoolRunner({ createWorker: () => stub.worker, workers: 1 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(result.success).toBe(true);
@@ -146,7 +146,7 @@ describe('createGeoSpecWebPoolRunner', () => {
     const stub = stubWebWorker();
     const runner = createGeoSpecWebPoolRunner({ createWorker: async () => stub.worker, shardTimeout: 5000 });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(result.success).toBe(true);
@@ -165,7 +165,7 @@ describe('the web pool event hook', () => {
       runner.on(type, (event) => types.push(event.type));
     }
 
-    await runner.run({ files: ['/a.geospec.ts'] });
+    await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
     expect(types).toStrictEqual(['run-start', 'file-start', 'file-complete', 'run-complete', 'close']);

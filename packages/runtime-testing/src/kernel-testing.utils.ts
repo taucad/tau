@@ -3,7 +3,7 @@ import { createRuntimeClient } from '@taucad/runtime/client';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import type { AnyKernelDefinition, KernelFileSystem, KernelRuntime, RuntimeLogger } from '@taucad/runtime/kernel';
-import { joinPath, resolveVirtualPath } from '@taucad/runtime/kernel';
+import { assertRootedPath } from '@taucad/runtime/kernel';
 import type {
   CreateGeometryHandler,
   KernelMiddlewareRuntime,
@@ -46,12 +46,7 @@ export type CreateTestRuntimeClientOptions<Runtime extends RuntimeDefinition = R
 const normalizeInitialFiles = (
   files: Record<string, string | Uint8Array<ArrayBuffer>>,
 ): Record<string, string | Uint8Array<ArrayBuffer>> =>
-  Object.fromEntries(
-    Object.entries(files).map(([path, content]) => [
-      resolveVirtualPath(path.startsWith('/') ? path : `/${path}`),
-      content,
-    ]),
-  );
+  Object.fromEntries(Object.entries(files).map(([path, content]) => [assertRootedPath(path), content]));
 
 /**
  * Creates a real runtime client over the production in-process transport and
@@ -345,12 +340,13 @@ export function assertFailure<T>(result: KernelResult<T>, context?: string): ass
 /** Creates a middleware render request. @public */
 export const createMockInput = (
   overrides?: Partial<MiddlewareCreateGeometryRequest>,
-): MiddlewareCreateGeometryRequest => ({ entryPath: '/test.kcl', parameters: {}, options: {}, ...overrides });
+): MiddlewareCreateGeometryRequest => ({ entryPath: 'test.kcl', parameters: {}, options: {}, ...overrides });
 
 /** Creates a normalized worker-level file locator. @public */
 export const createGeometryFile = (filename: string): { filename: string; path: string } => {
-  const path = resolveVirtualPath(joinPath('/', filename));
-  return { filename: path.slice(path.lastIndexOf('/') + 1), path: path.slice(0, path.lastIndexOf('/')) || '/' };
+  const path = assertRootedPath(filename);
+  const separator = path.lastIndexOf('/');
+  return { filename: path.slice(separator + 1), path: separator === -1 ? '' : path.slice(0, separator) };
 };
 
 /** Creates a mocked kernel runtime. @public */

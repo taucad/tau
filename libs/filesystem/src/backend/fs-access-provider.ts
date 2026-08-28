@@ -89,6 +89,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
     this._assertReady();
+    this._assertRootedPath(path);
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
     const created = await this._createFileHandle(path);
     try {
@@ -119,6 +120,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
     this._assertReady();
+    this._assertRootedPath(path);
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const entries: DirectoryEntry[] = [];
     for await (const [name, handle] of directoryEntries(directoryHandle)) {
@@ -137,6 +139,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
     this._assertReady();
+    this._assertRootedPath(path);
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const handles: Array<[string, FileSystemDirectoryEntryHandle]> = [];
     for await (const entry of directoryEntries(directoryHandle)) {
@@ -168,13 +171,14 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public async stat(path: string): Promise<FileStat> {
     this._assertReady();
+    this._assertRootedPath(path);
     const segments = this._splitPath(path);
 
     if (segments.length === 0) {
       return { type: 'dir', size: 0, mtimeMs: 0 };
     }
 
-    const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
+    const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
 
     let fileError: unknown;
@@ -205,12 +209,13 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public async unlink(path: string): Promise<void> {
     this._assertReady();
+    this._assertRootedPath(path);
     const segments = this._splitPath(path);
     if (segments.length === 0) {
       throw this._eisdir(path);
     }
 
-    const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
+    const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
     const entry = await this.stat(path);
     if (entry.type === 'dir') {
@@ -226,12 +231,13 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public async rmdir(path: string): Promise<void> {
     this._assertReady();
+    this._assertRootedPath(path);
     const segments = this._splitPath(path);
     if (segments.length === 0) {
       throw this._enoent(path);
     }
 
-    const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
+    const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
     const entry = await this.stat(path);
     if (entry.type !== 'dir') {
@@ -258,11 +264,13 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public async rename(from: string, to: string): Promise<void> {
     this._assertReady();
+    this._assertRootedPath(from);
+    this._assertRootedPath(to);
     if (from === to) {
       await this.stat(from);
       return;
     }
-    if (from === '/') {
+    if (from === '') {
       throw this._einval(from);
     }
     const sourceStat = await this.stat(from);
@@ -299,6 +307,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       return;
     }
     for (const prefix of prefixes) {
+      this._assertRootedPath(prefix);
       this._invalidateHandleCachePrefix(prefix);
     }
   }
@@ -312,6 +321,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    */
   public readFileStream(path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> {
     this._assertReady();
+    this._assertRootedPath(path);
     validateFileReadStreamOptions(options);
     let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
     let initialize: Promise<void>;
@@ -450,6 +460,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
     this._assertReady();
+    this._assertRootedPath(path);
     const fileHandle = await this._resolveFileHandle(path);
     const file = await fileHandle.getFile();
     return new Uint8Array(await file.arrayBuffer());
@@ -457,13 +468,14 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
   protected async mkdirSingle(path: string): Promise<void> {
     this._assertReady();
+    this._assertRootedPath(path);
     this._invalidateHandleCachePrefix(path);
     const segments = this._splitPath(path);
     if (segments.length === 0) {
       throw this._eexist(path);
     }
 
-    const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
+    const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
     const name = segments.at(-1)!;
 
     try {
@@ -486,6 +498,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
   protected async _resolveDirectoryHandle(path: string): Promise<FileSystemDirectoryHandle> {
     this._assertReady();
+    this._assertRootedPath(path);
     const cached = this._handleCache.get(path);
     if (cached) {
       this._touchHandleCache(path);
@@ -497,7 +510,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     let resolvedPath = '';
 
     for (const segment of segments) {
-      resolvedPath += '/' + segment;
+      resolvedPath = resolvedPath === '' ? segment : `${resolvedPath}/${segment}`;
       const cachedSegment = this._handleCache.get(resolvedPath);
       if (cachedSegment) {
         this._touchHandleCache(resolvedPath);
@@ -524,6 +537,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
   protected async _resolveFileHandle(path: string): Promise<FileSystemFileHandle> {
     this._assertReady();
+    this._assertRootedPath(path);
     const segments = this._splitPath(path);
     if (segments.length === 0) {
       throw this._eisdir(path);
@@ -531,7 +545,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
     const fileName = segments.pop()!;
 
-    const parentHandle = await this._resolveDirectoryHandle('/' + segments.join('/'));
+    const parentHandle = await this._resolveDirectoryHandle(segments.join('/'));
 
     try {
       return await parentHandle.getFileHandle(fileName);
@@ -547,6 +561,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   protected _splitPath(path: string): string[] {
+    this._assertRootedPath(path);
     return path.split('/').filter(Boolean);
   }
 
@@ -574,7 +589,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
     try {
       for (const segment of segments) {
-        directoryPath += `/${segment}`;
+        directoryPath = directoryPath === '' ? segment : `${directoryPath}/${segment}`;
         try {
           // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal is required by the handle API.
           directoryHandle = await directoryHandle.getDirectoryHandle(segment);
@@ -647,7 +662,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       return;
     }
     const name = segments.pop()!;
-    const parent = await this._resolveDirectoryHandle(`/${segments.join('/')}`);
+    const parent = await this._resolveDirectoryHandle(segments.join('/'));
     await parent.removeEntry(name, { recursive });
     this._invalidateHandleCachePrefix(path);
   }
@@ -657,7 +672,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     let current = '';
     let ancestorMissing = false;
     for (const segment of this._splitPath(path)) {
-      current += `/${segment}`;
+      current = current === '' ? segment : `${current}/${segment}`;
       if (ancestorMissing) {
         missing.push(current);
         continue;
@@ -725,7 +740,7 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
       if (segments.length === 0) {
         throw new Error(`Cannot rename the filesystem root`);
       }
-      const parentHandle = await this._resolveDirectoryHandle('/' + segments.slice(0, -1).join('/'));
+      const parentHandle = await this._resolveDirectoryHandle(segments.slice(0, -1).join('/'));
       const name = segments.at(-1)!;
       await parentHandle.removeEntry(name, { recursive: true });
       this._invalidateHandleCachePrefix(from);

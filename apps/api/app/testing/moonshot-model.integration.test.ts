@@ -95,7 +95,7 @@ describe.skipIf(requiresEnv('MOONSHOT_API_KEY'))('Moonshot Kimi K3 live integrat
     expectChunkTypesInclude(chunks, 'reasoning-delta');
     expectMultipleSteps(chunks, 2);
     expectToolCallSucceeded(await collectFinalMessage(chunks), 'create_file');
-    expect(await testApp.memFs.readFile('/main.ts', 'utf8')).toContain('export const answer = 42;');
+    expect(await testApp.memFs.readFile('main.ts', 'utf8')).toContain('export const answer = 42;');
   }, 180_000);
 
   it('should expose repeated-prefix cache reads through Tau billing usage', async () => {
@@ -158,7 +158,7 @@ describe.skipIf(requiresEnv('MOONSHOT_API_KEY'))('Moonshot Kimi K3 live integrat
   }, 180_000);
 
   it('should ground a Tau screenshot tool result sent as a base64 image', async () => {
-    await testApp.memFs.writeFile('/main.ts', 'export const screenshotFixture = true;');
+    await testApp.memFs.writeFile('main.ts', 'export const screenshotFixture = true;');
     const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

@@ -22,12 +22,12 @@ describe('createRuntimeFileSystem', () => {
   describe('readdirContents', () => {
     it('should return file contents from a flat directory', async () => {
       const base = makeFs({
-        '/project/a.ts': 'const a = 1;',
-        '/project/b.ts': 'const b = 2;',
+        'project/a.ts': 'const a = 1;',
+        'project/b.ts': 'const b = 2;',
       });
       const fs = createRuntimeFileSystem(base);
 
-      const contents = await fs.readdirContents('/project');
+      const contents = await fs.readdirContents('project');
       expect(Object.keys(contents)).toHaveLength(2);
       expect(new TextDecoder().decode(contents['a.ts'])).toBe('const a = 1;');
       expect(new TextDecoder().decode(contents['b.ts'])).toBe('const b = 2;');
@@ -35,45 +35,45 @@ describe('createRuntimeFileSystem', () => {
 
     it('should skip subdirectories and only return files', async () => {
       const base = makeFs({
-        '/root/file.txt': 'hello',
-        '/root/sub/nested.txt': 'nested',
+        'root/file.txt': 'hello',
+        'root/sub/nested.txt': 'nested',
       });
       const fs = createRuntimeFileSystem(base);
 
-      const contents = await fs.readdirContents('/root');
+      const contents = await fs.readdirContents('root');
       expect(Object.keys(contents)).toEqual(['file.txt']);
       expect(new TextDecoder().decode(contents['file.txt'])).toBe('hello');
     });
 
     it('should handle directories created by mkdir alongside files', async () => {
       const base = makeFs({
-        '/dir/readme.md': '# Hello',
+        'dir/readme.md': '# Hello',
       });
-      await base.mkdir('/dir/subdir');
+      await base.mkdir('dir/subdir');
       const fs = createRuntimeFileSystem(base);
 
-      const contents = await fs.readdirContents('/dir');
+      const contents = await fs.readdirContents('dir');
       expect(Object.keys(contents)).toEqual(['readme.md']);
       expect(new TextDecoder().decode(contents['readme.md'])).toBe('# Hello');
     });
 
     it('should return an empty object for an empty directory', async () => {
       const base = makeFs();
-      await base.mkdir('/empty');
+      await base.mkdir('empty');
       const fs = createRuntimeFileSystem(base);
 
-      const contents = await fs.readdirContents('/empty');
+      const contents = await fs.readdirContents('empty');
       expect(Object.keys(contents)).toHaveLength(0);
     });
 
     it('should not include deeply nested files', async () => {
       const base = makeFs({
-        '/root/top.txt': 'top',
-        '/root/a/b/deep.txt': 'deep',
+        'root/top.txt': 'top',
+        'root/a/b/deep.txt': 'deep',
       });
       const fs = createRuntimeFileSystem(base);
 
-      const contents = await fs.readdirContents('/root');
+      const contents = await fs.readdirContents('root');
       expect(Object.keys(contents)).toEqual(['top.txt']);
     });
   });
@@ -81,41 +81,41 @@ describe('createRuntimeFileSystem', () => {
   describe('readFiles', () => {
     it('should read multiple files concurrently', async () => {
       const base = makeFs({
-        '/a.txt': 'alpha',
-        '/b.txt': 'beta',
+        'a.txt': 'alpha',
+        'b.txt': 'beta',
       });
       const fs = createRuntimeFileSystem(base);
 
-      const result = await fs.readFiles(['/a.txt', '/b.txt']);
-      expect(new TextDecoder().decode(result['/a.txt'])).toBe('alpha');
-      expect(new TextDecoder().decode(result['/b.txt'])).toBe('beta');
+      const result = await fs.readFiles(['a.txt', 'b.txt']);
+      expect(new TextDecoder().decode(result['a.txt'])).toBe('alpha');
+      expect(new TextDecoder().decode(result['b.txt'])).toBe('beta');
     });
   });
 
   describe('readdirStat', () => {
     it('should return stat entries for all directory contents', async () => {
       const base = makeFs({
-        '/dir/a.txt': 'hello',
-        '/dir/b.txt': 'world',
+        'dir/a.txt': 'hello',
+        'dir/b.txt': 'world',
       });
       const fs = createRuntimeFileSystem(base);
 
-      const entries = await fs.readdirStat('/dir');
+      const entries = await fs.readdirStat('dir');
       expect(entries).toHaveLength(2);
       expect(entries[0]?.name).toBe('a.txt');
       expect(entries[0]?.type).toBe('file');
-      expect(entries[0]?.path).toBe('/dir/a.txt');
+      expect(entries[0]?.path).toBe('dir/a.txt');
       expect(entries[1]?.name).toBe('b.txt');
     });
 
     it('should include subdirectories in stat results', async () => {
       const base = makeFs({
-        '/root/file.txt': 'hi',
-        '/root/sub/nested.txt': 'nested',
+        'root/file.txt': 'hi',
+        'root/sub/nested.txt': 'nested',
       });
       const fs = createRuntimeFileSystem(base);
 
-      const entries = await fs.readdirStat('/root');
+      const entries = await fs.readdirStat('root');
       const types = entries.map((entry) => entry.type);
       expect(types).toContain('file');
       expect(types).toContain('dir');
@@ -127,8 +127,8 @@ describe('createRuntimeFileSystem', () => {
       const base = makeFs();
       const fs = createRuntimeFileSystem(base);
 
-      await fs.ensureDir('/a/b/c');
-      const exists = await fs.exists('/a/b/c');
+      await fs.ensureDir('a/b/c');
+      const exists = await fs.exists('a/b/c');
       expect(exists).toBe(true);
     });
 
@@ -139,49 +139,48 @@ describe('createRuntimeFileSystem', () => {
       const mkdirSpy = vi.spyOn(base, 'mkdir');
       const fs = createRuntimeFileSystem(base);
 
-      await expect(fs.ensureDir('/denied')).rejects.toBe(denied);
+      await expect(fs.ensureDir('denied')).rejects.toBe(denied);
       expect(mkdirSpy).not.toHaveBeenCalled();
     });
 
     it('rejects a file-kind conflict without attempting mkdir', async () => {
-      const base = makeFs({ '/occupied': 'file' });
+      const base = makeFs({ occupied: 'file' });
       const mkdirSpy = vi.spyOn(base, 'mkdir');
       const fs = createRuntimeFileSystem(base);
 
-      await expect(fs.ensureDir('/occupied')).rejects.toMatchObject({ code: 'EEXIST' });
+      await expect(fs.ensureDir('occupied')).rejects.toMatchObject({ code: 'EEXIST' });
       expect(mkdirSpy).not.toHaveBeenCalled();
     });
   });
 
   describe('base passthrough', () => {
     it('should pass through all base filesystem methods', async () => {
-      const base = makeFs({ '/test.txt': 'hello' });
+      const base = makeFs({ 'test.txt': 'hello' });
       const fs = createRuntimeFileSystem(base);
 
-      const content = await fs.readFile('/test.txt', 'utf8');
+      const content = await fs.readFile('test.txt', 'utf8');
       expect(content).toBe('hello');
 
-      await fs.writeFile('/new.txt', 'world');
-      const written = await fs.readFile('/new.txt', 'utf8');
+      await fs.writeFile('new.txt', 'world');
+      const written = await fs.readFile('new.txt', 'utf8');
       expect(written).toBe('world');
 
-      expect(await fs.exists('/test.txt')).toBe(true);
-      expect(await fs.exists('/nope.txt')).toBe(false);
+      expect(await fs.exists('test.txt')).toBe(true);
+      expect(await fs.exists('nope.txt')).toBe(false);
     });
   });
 
   describe('canonical primitive decoration', () => {
-    it('canonicalizes paths before delegating to the base provider', async () => {
-      const base = makeFs({ '/seed.txt': 'seeded' });
+    it('rejects noncanonical paths before delegating to the base provider', async () => {
+      const base = makeFs({ 'seed.txt': 'seeded' });
       const readSpy = vi.spyOn(base, 'readFile');
       const writeSpy = vi.spyOn(base, 'writeFile');
       const fs = createRuntimeFileSystem(base);
 
-      await fs.writeFile('/nested/../created.txt', 'value');
-      expect(writeSpy).toHaveBeenCalledWith('/created.txt', 'value');
-
-      expect(await fs.readFile('/nested/../seed.txt', 'utf8')).toBe('seeded');
-      expect(readSpy).toHaveBeenCalledWith('/seed.txt', 'utf8');
+      await expect(fs.writeFile('nested/../created.txt', 'value')).rejects.toMatchObject({ code: 'INVALID_PATH' });
+      await expect(fs.readFile('nested/../seed.txt', 'utf8')).rejects.toMatchObject({ code: 'INVALID_PATH' });
+      expect(writeSpy).not.toHaveBeenCalled();
+      expect(readSpy).not.toHaveBeenCalled();
     });
 
     it('preserves the base provider identity and capabilities on the facade', () => {

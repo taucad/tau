@@ -82,38 +82,44 @@ describe('handleGlobSearch', () => {
     });
   });
 
-  it.each(['', '.', './', '/'] as const)(
-    'should resolve root alias %j before recursively walking project-relative paths',
-    async (rootAlias) => {
-      const fileSystem = mock<RpcFileSystem>();
-      fileSystem.readdir.mockImplementation(async (path) => {
-        if (path === '') {
-          return [{ name: 'checks', type: 'dir', size: 0 }];
-        }
-        if (path === 'checks') {
-          return [textEntry('existing.geospec.ts', 120, { lineCount: 4 })];
-        }
-        throw new Error(`Unexpected non-canonical project path: ${path}`);
-      });
+  it('should recursively walk the canonical project root', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockImplementation(async (path) => {
+      if (path === '') {
+        return [{ name: 'checks', type: 'dir', size: 0 }];
+      }
+      if (path === 'checks') {
+        return [textEntry('existing.geospec.ts', 120, { lineCount: 4 })];
+      }
+      throw new Error(`Unexpected non-canonical project path: ${path}`);
+    });
 
-      const result = await handleGlobSearch({ pattern: '**/*.geospec.ts', path: rootAlias }, fileSystem);
+    const result = await handleGlobSearch({ pattern: '**/*.geospec.ts', path: '' }, fileSystem);
 
-      expect(result).toEqual({
-        success: true,
-        files: ['checks/existing.geospec.ts'],
-        entries: [
-          {
-            path: 'checks/existing.geospec.ts',
-            isDirectory: false,
-            size: 120,
-            contentKind: 'text',
-            lineCount: 4,
-          },
-        ],
-        totalFiles: 1,
-      });
-    },
-  );
+    expect(result).toEqual({
+      success: true,
+      files: ['checks/existing.geospec.ts'],
+      entries: [
+        {
+          path: 'checks/existing.geospec.ts',
+          isDirectory: false,
+          size: 120,
+          contentKind: 'text',
+          lineCount: 4,
+        },
+      ],
+      totalFiles: 1,
+    });
+  });
+
+  it.each(['.', './', '/'] as const)('should reject noncanonical root alias %j', async (path) => {
+    const fileSystem = mock<RpcFileSystem>();
+
+    const result = await handleGlobSearch({ pattern: '**/*.ts', path }, fileSystem);
+
+    expect(result).toMatchObject({ success: false, errorCode: rpcClientErrorCode.validationError });
+    expect(fileSystem.readdir).not.toHaveBeenCalled();
+  });
 
   it('should reject paths outside the project before filesystem access', async () => {
     const fileSystem = mock<RpcFileSystem>();

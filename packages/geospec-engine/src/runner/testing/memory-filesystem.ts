@@ -13,7 +13,7 @@ import type { VmFileSystem } from '#runner/node/node-vm-filesystem.js';
 /**
  * Build a filesystem over a path → source map.
  *
- * @param files - Absolute VM paths and their contents.
+ * @param files - Root-relative VM paths and their contents.
  * @returns The filesystem.
  * @public
  */

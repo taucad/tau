@@ -69,6 +69,7 @@ export function openTauLanguageHostPort(fileManagerRef: TauLanguageFileManagerRe
       port: channel.port2,
       slotSab,
       arenaSab,
+      rootDirectory: workspaceRootAbsolute,
     },
     [channel.port2],
   );

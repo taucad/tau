@@ -60,7 +60,7 @@ const workerMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('@taucad/runtime', () => ({
+vi.mock('@taucad/runtime/client', () => ({
   createRuntimeClient: workerMocks.createRuntimeClient,
 }));
 
@@ -132,7 +132,7 @@ const mockProjectTree = (localRootPath: string, files: readonly string[]): void 
     const parts = file.split('/').filter(Boolean);
     let currentDirectory = localRootPath;
     for (const directory of parts.slice(0, -1)) {
-      const nextDirectory = currentDirectory === '/' ? `/${directory}` : `${currentDirectory}/${directory}`;
+      const nextDirectory = currentDirectory === '' ? directory : `${currentDirectory}/${directory}`;
       directories.get(currentDirectory)?.add(directory);
       if (!directories.has(nextDirectory)) {
         directories.set(nextDirectory, new Set());
@@ -144,7 +144,7 @@ const mockProjectTree = (localRootPath: string, files: readonly string[]): void 
       continue;
     }
     directories.get(currentDirectory)?.add(fileName);
-    filePaths.add(currentDirectory === '/' ? `/${fileName}` : `${currentDirectory}/${fileName}`);
+    filePaths.add(currentDirectory === '' ? fileName : `${currentDirectory}/${fileName}`);
   }
 
   workerMocks.fsProxy.readdir.mockImplementation(async (path: string) => {
@@ -273,7 +273,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue(runtimeFileSystem);
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['main.geospec.ts']);
+    mockProjectTree('', ['main.geospec.ts']);
     workerMocks.loadModel.mockResolvedValue({ provenance: { source: { kind: 'runtime' } } });
     workerMocks.runner.run.mockImplementation(async () => {
       const runnerOptions = workerMocks.createGeoSpecWebRunner.mock.calls[0]?.[0] as {
@@ -333,9 +333,9 @@ describe('geospec-runner.worker', () => {
       testTimeout: undefined,
     });
     expect(workerMocks.loadModel).toHaveBeenCalledWith({
-      file: '/main.ts',
+      file: 'main.ts',
       parameters: { height: 42 },
-      projectPath: '/',
+      projectPath: '',
       runtime: workerMocks.runtimeClient,
     });
     expect(workerMocks.runtimeClient.terminate).not.toHaveBeenCalled();
@@ -362,7 +362,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue(runtimeFileSystem);
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['vase.geospec.ts']);
+    mockProjectTree('', ['vase.geospec.ts']);
     workerMocks.loadModel.mockResolvedValue({ provenance: { source: { kind: 'runtime' } } });
     workerMocks.runner.run.mockImplementation(async () => {
       const runnerOptions = workerMocks.createGeoSpecWebRunner.mock.calls[0]?.[0] as {
@@ -374,7 +374,7 @@ describe('geospec-runner.worker', () => {
         files: [
           {
             ...successfulRunnerResult().files[0]!,
-            file: '/vase.geospec.ts',
+            file: 'vase.geospec.ts',
           },
         ],
       };
@@ -403,8 +403,8 @@ describe('geospec-runner.worker', () => {
         }),
       );
     });
-    expect(workerMocks.fsProxy.readdir).toHaveBeenCalledWith('/');
-    expect(workerMocks.fsProxy.stat).toHaveBeenCalledWith('/vase.geospec.ts');
+    expect(workerMocks.fsProxy.readdir).toHaveBeenCalledWith('');
+    expect(workerMocks.fsProxy.stat).toHaveBeenCalledWith('vase.geospec.ts');
     const runnerOptions = workerMocks.createGeoSpecWebRunner.mock.calls[0]?.[0] as {
       filesystem: { readFile: unknown; writeFile: unknown };
       modelLoader: unknown;
@@ -418,8 +418,8 @@ describe('geospec-runner.worker', () => {
       testTimeout: undefined,
     });
     expect(workerMocks.loadModel).toHaveBeenCalledWith({
-      file: '/main.scad',
-      projectPath: '/',
+      file: 'main.scad',
+      projectPath: '',
       runtime: workerMocks.runtimeClient,
     });
   });
@@ -442,7 +442,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['vase.geospec.ts', 'main.scad', 'lib/vase_variant.geospec.ts', 'lib/vase_variant.scad']);
+    mockProjectTree('', ['vase.geospec.ts', 'main.scad', 'lib/vase_variant.geospec.ts', 'lib/vase_variant.scad']);
     workerMocks.runner.run.mockResolvedValue({
       success: true,
       passed: 2,
@@ -556,7 +556,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['vase.geospec.ts', 'lib/vase_variant.geospec.ts']);
+    mockProjectTree('', ['vase.geospec.ts', 'lib/vase_variant.geospec.ts']);
     workerMocks.runner.run.mockResolvedValue(successfulRunnerResult());
     workerMocks.runner.close.mockResolvedValue(undefined);
     workerMocks.createGeoSpecWebRunner.mockReturnValue(workerMocks.runner);
@@ -602,7 +602,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['root.geospec.ts', 'lib/vase_variant.geospec.ts', 'lib/vase_variant.slow.geospec.ts']);
+    mockProjectTree('', ['root.geospec.ts', 'lib/vase_variant.geospec.ts', 'lib/vase_variant.slow.geospec.ts']);
     workerMocks.runner.run.mockResolvedValue(successfulRunnerResult());
     workerMocks.runner.close.mockResolvedValue(undefined);
     workerMocks.createGeoSpecWebRunner.mockReturnValue(workerMocks.runner);
@@ -653,7 +653,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue(runtimeFileSystem);
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['main.geospec.ts']);
+    mockProjectTree('', ['main.geospec.ts']);
     workerMocks.runner.run.mockResolvedValue(successfulRunnerResult());
     workerMocks.runner.close.mockResolvedValue(undefined);
     workerMocks.createGeoSpecWebRunner.mockReturnValue(workerMocks.runner);
@@ -687,7 +687,7 @@ describe('geospec-runner.worker', () => {
     expect(fsLike.promises['writeFile']).toBeTypeOf('function');
     expect(fsLike.promises['readdir']).toBeTypeOf('function');
     expect(workerMocks.createFileSystemBridgeProxy).toHaveBeenCalledTimes(1);
-    expect(workerMocks.fsProxy.readdir).toHaveBeenCalledWith('/');
+    expect(workerMocks.fsProxy.readdir).toHaveBeenCalledWith('');
     const runtimeClientOptions = workerMocks.createRuntimeClient.mock.calls[0]?.[0] as {
       options: { fileSystem: unknown };
     };
@@ -764,7 +764,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['main.geospec.ts']);
+    mockProjectTree('', ['main.geospec.ts']);
     const fatalError = workerMocks.createGeoSpecModelLoadError([
       { code: 'RUNTIME_UNAVAILABLE', message: 'runtime boot failed' },
     ]);
@@ -853,7 +853,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
     workerMocks.runner.run.mockResolvedValue(successfulRunnerResult());
     workerMocks.createGeoSpecWebRunner.mockReturnValue(workerMocks.runner);
-    mockProjectTree('/', ['main.geospec.ts']);
+    mockProjectTree('', ['main.geospec.ts']);
 
     await import('#workers/geospec-runner.worker.js');
     const sessionId = await initializeWorkerSession({
@@ -876,7 +876,7 @@ describe('geospec-runner.worker', () => {
       testTimeout: undefined,
     });
 
-    mockProjectTree('/', ['main.geospec.ts', 'lib/variant.geospec.ts']);
+    mockProjectTree('', ['main.geospec.ts', 'lib/variant.geospec.ts']);
     sendRunRequest({
       messageListener,
       requestId: 'request-second-fresh',
@@ -917,7 +917,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['first.geospec.ts', 'second.geospec.ts']);
+    mockProjectTree('', ['first.geospec.ts', 'second.geospec.ts']);
     const resolvers: Array<(result: GeoSpecRunnerResult) => void> = [];
     workerMocks.runner.run.mockImplementation(async () => {
       const result = await new Promise<GeoSpecRunnerResult>((resolve) => {
@@ -988,7 +988,7 @@ describe('geospec-runner.worker', () => {
     workerMocks.fromFsLike.mockReturnValue({ kind: 'runtime-fs' });
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
-    mockProjectTree('/', ['main.geospec.ts']);
+    mockProjectTree('', ['main.geospec.ts']);
     const fatalError = workerMocks.createGeoSpecModelLoadError([
       { code: 'RUNTIME_UNAVAILABLE', message: 'runtime boot failed' },
     ]);

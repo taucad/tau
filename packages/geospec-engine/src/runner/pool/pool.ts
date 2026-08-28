@@ -34,6 +34,7 @@ import type {
   GeoSpecRunnerRunOptions,
 } from 'geospec/runner/worker';
 import { createNoMatchingGeoSpecTestsIssue } from 'geospec/runner/worker';
+import { assertRootedPath } from '@taucad/runtime/kernel';
 import type { ShardTimings } from '#cache/timings.js';
 import type { GeoSpecRunResult } from '#runner/types.js';
 import { accumulateFileResult } from '#runner/serial.js';
@@ -255,7 +256,7 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
       }
       delete state.aborted;
 
-      const files = [...runOptions.files];
+      const files = runOptions.files.map(assertRootedPath);
       const runStartedAt = performance.now();
       events.emit({ type: 'run-start', files });
 

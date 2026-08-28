@@ -54,7 +54,7 @@ Dependencies represent what a kernel's geometry depends on. The `Dependency` uni
 
 `Dependency` is the union: `FileDependency | MiddlewareDependency | FrameworkDependency | OptionDependency | ParameterDependency | AssetDependency`.
 
-`FileDependency.path` is a normalized [runtime path](../concepts/path-namespaces) such as `/src/main.ts`. It is the same spelling used for filesystem calls, cache keys, render identity, change events, and watch ownership. Its leading slash names the supplied filesystem's root, not the host operating system's root. Authority paths such as `/projects/<id>/src/main.ts` and build-relative spellings never enter runtime dependency identity.
+`FileDependency.path` is a canonical root-relative [runtime path](../concepts/path-namespaces) such as `src/main.ts`. It is the same spelling used for filesystem calls, cache keys, render identity, change events, and watch ownership. Authority paths such as `/projects/<id>/src/main.ts` and host paths never enter runtime dependency identity.
 
 ## Filesystem Types
 

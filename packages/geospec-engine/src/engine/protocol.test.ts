@@ -153,7 +153,7 @@ describe('Contract-B engine implementation', () => {
     expect(initialized.engine).toStrictEqual({ name: '@taucad/geospec-engine', version: '7.8.9' });
     expect(initialized.capabilities).toHaveLength(26);
     expect(initialized.capabilities).toContainEqual({ name: 'analyzeBrep', registryVersion: 2 });
-    expect(initialized.provenance).toMatchObject({ license: 'FSL-1.1-Apache-2.0' });
+    expect(initialized.provenance).toMatchObject({ license: 'FSL-1.1-ALv2' });
   });
 
   it('ingests bytes, evaluates canonical claims, and refuses released references', async () => {

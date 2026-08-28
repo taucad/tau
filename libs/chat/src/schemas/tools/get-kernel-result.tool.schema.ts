@@ -1,10 +1,11 @@
 import type { KernelIssue } from '@taucad/runtime';
 import { z } from 'zod';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
+import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 /** @public */
 export const getKernelResultInputSchema = z.object({
-  targetFile: z.string().describe('The file to check kernel results for, relative to the project root.'),
+  targetFile: rootedFilePathSchema.describe('The file to check kernel results for, relative to the project root.'),
 });
 
 /** @public */

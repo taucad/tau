@@ -25,9 +25,9 @@ describe('@taucad/runtime-testing', () => {
   it('preserves the kernel filesystem text and byte read overloads', async () => {
     const filesystem = entry.createMockFileSystem({ readFileResult: 'fixture', readdirResult: ['main.ts'] });
 
-    await expect(filesystem.readFile('/main.ts', 'utf8')).resolves.toBe('fixture');
-    await expect(filesystem.readFile('/main.ts')).resolves.toEqual(new TextEncoder().encode('fixture'));
-    await expect(filesystem.readdir('/')).resolves.toEqual(['main.ts']);
+    await expect(filesystem.readFile('main.ts', 'utf8')).resolves.toBe('fixture');
+    await expect(filesystem.readFile('main.ts')).resolves.toEqual(new TextEncoder().encode('fixture'));
+    await expect(filesystem.readdir('')).resolves.toEqual(['main.ts']);
   });
 
   it('keeps private runtime and host-only payloads out of browser source', () => {
@@ -58,8 +58,8 @@ describe('@taucad/runtime-testing', () => {
             (specifier) =>
               nodeBuiltins.has(specifier) ||
               nodeOnlyPackages.has(specifier) ||
-              specifier.includes('/_internal') ||
-              specifier.includes('/test/support') ||
+              specifier.includes('_internal') ||
+              specifier.includes('test/support') ||
               specifier.includes('-native') ||
               specifier.includes('-python'),
           )

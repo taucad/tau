@@ -22,13 +22,12 @@ describe('webSocketClientOptionsSchema', () => {
     ).toBe(true);
   });
 
-  it('should reject a bridged filesystem handle with a message naming the add-when', () => {
+  it('should accept a bridged filesystem handle without opening it during validation', () => {
     const bridged = fromFileSystemBridge(() => {
       throw new Error('never connected in this test');
     });
     const result = webSocketClientOptionsSchema.safeParse({ url: 'ws://127.0.0.1:8080', fileSystem: bridged });
-    expect(result.success).toBe(false);
-    expect(JSON.stringify(result.error?.issues)).toContain('fromFileSystemBridge');
+    expect(result.success).toBe(true);
   });
 
   it('should accept a createSocket factory', () => {

@@ -8,37 +8,32 @@ import {
 const projectRoot = '/projects/abc';
 
 describe('WorkspacePathResolver.toAbsoluteWorkspacePath', () => {
-  it('should map root aliases to the normalized workspace root', () => {
+  it('should map the canonical empty root to the normalized workspace root', () => {
     const paths = new WorkspacePathResolver(projectRoot);
     const expected = '/projects/abc';
     expect(paths.toAbsoluteWorkspacePath('')).toBe(expected);
-    expect(paths.toAbsoluteWorkspacePath('.')).toBe(expected);
-    expect(paths.toAbsoluteWorkspacePath('./')).toBe(expected);
-    expect(paths.toAbsoluteWorkspacePath('/')).toBe(expected);
+    for (const alias of ['.', './', '/']) {
+      expect(() => paths.toAbsoluteWorkspacePath(alias)).toThrow(WorkspacePathEscapeError);
+    }
   });
 
-  it('should map the workspace root path with or without trailing slash to the root', () => {
+  it('should reject authority-global workspace paths on the rooted ingress', () => {
     const paths = new WorkspacePathResolver(projectRoot);
-    expect(paths.toAbsoluteWorkspacePath('/projects/abc')).toBe('/projects/abc');
-    expect(paths.toAbsoluteWorkspacePath('/projects/abc/')).toBe('/projects/abc');
+    expect(() => paths.toAbsoluteWorkspacePath('/projects/abc')).toThrow(WorkspacePathEscapeError);
+    expect(() => paths.toAbsoluteWorkspacePath('/projects/abc/')).toThrow(WorkspacePathEscapeError);
   });
 
-  it('should resolve simple and dot-prefixed segments under the root', () => {
+  it('should resolve canonical rooted segments under the root', () => {
     const paths = new WorkspacePathResolver(projectRoot);
     expect(paths.toAbsoluteWorkspacePath('src')).toBe('/projects/abc/src');
     expect(paths.toAbsoluteWorkspacePath('src/a.ts')).toBe('/projects/abc/src/a.ts');
-    expect(paths.toAbsoluteWorkspacePath('./src')).toBe('/projects/abc/src');
+    expect(() => paths.toAbsoluteWorkspacePath('./src')).toThrow(WorkspacePathEscapeError);
     expect(paths.toAbsoluteWorkspacePath('.tau/cache')).toBe('/projects/abc/.tau/cache');
   });
 
-  it('should treat a single leading-slash segment as workspace-root-relative', () => {
+  it('should reject a single leading-slash segment', () => {
     const paths = new WorkspacePathResolver(projectRoot);
-    expect(paths.toAbsoluteWorkspacePath('/src')).toBe('/projects/abc/src');
-  });
-
-  it('should preserve absolute paths already under the workspace', () => {
-    const paths = new WorkspacePathResolver(projectRoot);
-    expect(paths.toAbsoluteWorkspacePath('/projects/abc/src')).toBe('/projects/abc/src');
+    expect(() => paths.toAbsoluteWorkspacePath('/src')).toThrow(WorkspacePathEscapeError);
   });
 
   it('should throw when a multi-segment absolute path is outside the workspace', () => {
@@ -61,7 +56,7 @@ describe('WorkspacePathResolver.toAbsoluteWorkspacePath', () => {
   it('should normalize a trailing-slash root before resolving children', () => {
     const paths = new WorkspacePathResolver('/project/');
     expect(paths.toAbsoluteWorkspacePath('src')).toBe('/project/src');
-    expect(paths.toAbsoluteWorkspacePath('.')).toBe('/project');
+    expect(paths.toAbsoluteWorkspacePath('')).toBe('/project');
   });
 });
 
@@ -121,9 +116,7 @@ describe('WorkspacePathResolver global node_modules', () => {
   it('resolves node_modules segments in toAbsoluteWorkspacePath', () => {
     const paths = new WorkspacePathResolver(projectRoot);
     expect(paths.toAbsoluteWorkspacePath('node_modules/replicad/index.d.ts')).toBe('/node_modules/replicad/index.d.ts');
-    expect(paths.toAbsoluteWorkspacePath('/node_modules/replicad/index.d.ts')).toBe(
-      '/node_modules/replicad/index.d.ts',
-    );
+    expect(() => paths.toAbsoluteWorkspacePath('/node_modules/replicad/index.d.ts')).toThrow(WorkspacePathEscapeError);
   });
 });
 
@@ -134,10 +127,14 @@ describe('WorkspacePathResolver.toWorkspaceRelativeKey', () => {
     expect(paths.toWorkspaceRelativeKey('write', 'lib/util.ts')).toBe('lib/util.ts');
   });
 
-  it('normalizes absolute-but-in-scope inputs to their workspace-relative form', () => {
+  it('rejects absolute-but-in-scope aliases', () => {
     const paths = new WorkspacePathResolver(projectRoot);
-    expect(paths.toWorkspaceRelativeKey('writeFiles', '/projects/abc/main.ts')).toBe('main.ts');
-    expect(paths.toWorkspaceRelativeKey('writeFiles', '/projects/abc/lib/util.ts')).toBe('lib/util.ts');
+    expect(() => paths.toWorkspaceRelativeKey('writeFiles', '/projects/abc/main.ts')).toThrow(
+      WorkspaceScopeViolationError,
+    );
+    expect(() => paths.toWorkspaceRelativeKey('writeFiles', '/projects/abc/lib/util.ts')).toThrow(
+      WorkspaceScopeViolationError,
+    );
   });
 
   it('throws WorkspaceScopeViolationError for absolute multi-segment paths foreign to root "/"', () => {
@@ -172,13 +169,13 @@ describe('WorkspacePathResolver.toWorkspaceRelativeKey', () => {
   it('returns single-segment relative form for root-relative keys at root "/"', () => {
     const paths = new WorkspacePathResolver('/');
     expect(paths.toWorkspaceRelativeKey('write', 'a.ts')).toBe('a.ts');
-    expect(paths.toWorkspaceRelativeKey('write', '/a.ts')).toBe('a.ts');
+    expect(() => paths.toWorkspaceRelativeKey('write', '/a.ts')).toThrow(WorkspaceScopeViolationError);
   });
 
   it('returns empty string for the workspace root itself', () => {
     const paths = new WorkspacePathResolver(projectRoot);
     expect(paths.toWorkspaceRelativeKey('write', '')).toBe('');
-    expect(paths.toWorkspaceRelativeKey('write', '/')).toBe('');
-    expect(paths.toWorkspaceRelativeKey('write', '.')).toBe('');
+    expect(() => paths.toWorkspaceRelativeKey('write', '/')).toThrow(WorkspaceScopeViolationError);
+    expect(() => paths.toWorkspaceRelativeKey('write', '.')).toThrow(WorkspaceScopeViolationError);
   });
 });

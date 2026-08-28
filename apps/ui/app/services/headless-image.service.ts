@@ -2,6 +2,7 @@ import type { FilesystemRuntimeSource } from '@taucad/runtime/client';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import type { ExportFile } from '@taucad/types';
 import type { SvgPngOptions } from '@taucad/image/svg';
+import { assertRootedPath } from '@taucad/utils/path';
 import type { AppRuntimeClient, AppRuntimeExportFormat, AppRuntimeExportOptions } from '#types/runtime-client.alias.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
@@ -143,6 +144,7 @@ export class HeadlessImageService {
   }
 
   public async export(job: HeadlessImageJob): Promise<ExportFile[] | undefined> {
+    assertRootedPath(job.sourcePath);
     if (this.disposed) {
       throw new Error('HeadlessImageService is disposed');
     }

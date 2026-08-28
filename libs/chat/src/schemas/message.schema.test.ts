@@ -736,3 +736,42 @@ describe('uiMessagesSchema reasoning part narrowing', () => {
     });
   });
 });
+
+describe('uiMessagesSchema historical project paths', () => {
+  it('repairs a slash-prefixed tool input before strict UI validation', () => {
+    const result = uiMessagesSchema.parse([
+      {
+        id: 'm-path',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-get_kernel_result',
+            toolCallId: 'call-path',
+            state: 'output-available',
+            input: { targetFile: '/main.ts' },
+            output: {
+              status: 'error',
+              kernelIssues: [
+                {
+                  message: 'broken',
+                  code: 'RUNTIME',
+                  severity: 'error',
+                  location: {
+                    fileName: '/main.ts',
+                    startLineNumber: 1,
+                    startColumn: 1,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(result[0]?.parts[0]).toMatchObject({
+      input: { targetFile: 'main.ts' },
+      output: { kernelIssues: [{ location: { fileName: 'main.ts' } }] },
+    });
+  });
+});

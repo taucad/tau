@@ -59,7 +59,7 @@ class MemoryGeoSpecFileSystem implements TestVmFileSystem {
   }
 
   public async readdir(path: string): Promise<readonly string[]> {
-    const prefix = path.endsWith('/') ? path : `${path}/`;
+    const prefix = path === '' ? '' : path.endsWith('/') ? path : `${path}/`;
     const entries = new Set<string>();
     for (const file of this.files.keys()) {
       if (!file.startsWith(prefix)) {
@@ -81,7 +81,7 @@ class MemoryGeoSpecFileSystem implements TestVmFileSystem {
     if (this.files.has(path)) {
       return { kind: 'file' };
     }
-    const prefix = path.endsWith('/') ? path : `${path}/`;
+    const prefix = path === '' ? '' : path.endsWith('/') ? path : `${path}/`;
     if ([...this.files.keys()].some((file) => file.startsWith(prefix))) {
       return { kind: 'directory' };
     }
@@ -141,7 +141,7 @@ const createParameterizedBoundsSource = (size: number): TauModelRendererOutput =
 
 const setBrepGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): void => {
   filesystem.setText(
-    '/project/main.geospec.ts',
+    'main.geospec.ts',
     [
       "import { describe, expectGeo, it } from 'geospec';",
       "import { loadModel } from 'geospec/model';",
@@ -165,7 +165,7 @@ const setBrepGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): void => {
 
 const setComponentOverlapGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): void => {
   filesystem.setText(
-    '/project/main.geospec.ts',
+    'main.geospec.ts',
     [
       "import { describe, expectGeo, it } from 'geospec';",
       "import { loadModel } from 'geospec/model';",
@@ -181,7 +181,7 @@ const setComponentOverlapGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): vo
 
 const setParameterizedBoundsGeoSpecTest = (filesystem: MemoryGeoSpecFileSystem): void => {
   filesystem.setText(
-    '/project/main.geospec.ts',
+    'main.geospec.ts',
     [
       "import { describe, expectGeo, it } from 'geospec';",
       "import { loadModel } from 'geospec/model';",
@@ -208,7 +208,7 @@ const createHarnessGeoSpecClient = (
   async runTests(args) {
     const discovery = await discoverGeoSpecFiles({
       filesystem,
-      projectPath: '/project',
+      projectPath: '',
       files: args.files,
       include: args.include,
       exclude: args.exclude,
@@ -216,7 +216,7 @@ const createHarnessGeoSpecClient = (
 
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '/project',
+      projectPath: '',
       entryPaths: discovery.files,
       renderer: async (input) => {
         renderCalls.push(input);
@@ -438,7 +438,7 @@ describe('GeoSpec headless API harness integration', () => {
     const filesystem = new MemoryGeoSpecFileSystem();
     setBrepGeoSpecTest(filesystem);
     filesystem.setText(
-      '/project/secondary.geospec.ts',
+      'secondary.geospec.ts',
       [
         "import { describe, expectGeo, it } from 'geospec';",
         "import { loadModel } from 'geospec/model';",

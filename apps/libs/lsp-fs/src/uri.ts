@@ -1,4 +1,5 @@
 import { URI } from 'vscode-uri';
+import { assertRootedPath } from '@taucad/utils/path';
 
 /**
  * Convert a Tau/Monaco `file://` model URI to the workspace-relative key used
@@ -12,6 +13,5 @@ export function monacoFileUriToWorkspaceRelative(uri: string): string {
     throw new TypeError(`lsp-fs: expected file URI, got ${uri}`);
   }
 
-  const path = parsed.path.startsWith('/') ? parsed.path.slice(1) : parsed.path;
-  return path;
+  return assertRootedPath(parsed.path.startsWith('/') ? parsed.path.slice(1) : parsed.path);
 }

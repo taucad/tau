@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
+import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 /** @public */
 export const editFileInputSchema = z.object({
-  targetFile: z.string().describe('The target file to modify.'),
+  targetFile: rootedFilePathSchema.describe('The target file to modify.'),
   codeEdit: z.string().describe('Specify ONLY the precise lines of code that you wish to edit'),
 });
 

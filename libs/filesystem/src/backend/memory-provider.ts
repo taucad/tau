@@ -31,7 +31,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
   };
 
   private readonly _files = new Map<string, Uint8Array<ArrayBuffer>>();
-  private readonly _dirs = new Set<string>(['/']);
+  private readonly _dirs = new Set<string>(['']);
   private readonly _mtimes = new Map<string, number>();
 
   // ---------------------------------------------------------------------------
@@ -45,6 +45,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param data - Bytes or UTF-8 string to store.
    */
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
+    this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       throw this._eisdir(path);
     }
@@ -72,15 +73,15 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @returns Each entry's name paired with its kind.
    */
   public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
-    const normalizedPath = path === '/' ? '/' : path;
-    if (this._files.has(normalizedPath)) {
+    this._assertRootedPath(path);
+    if (this._files.has(path)) {
       throw this._enotdir(path);
     }
-    if (!this._dirs.has(normalizedPath)) {
+    if (!this._dirs.has(path)) {
       throw this._enoent(path);
     }
 
-    const prefix = normalizedPath === '/' ? '/' : `${normalizedPath}/`;
+    const prefix = path === '' ? '' : `${path}/`;
     return indexDirectoryEntries(prefix, this._files.keys(), this._dirs);
   }
 
@@ -91,8 +92,9 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @returns Each entry's name paired with its stat metadata.
    */
   public async readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>> {
+    this._assertRootedPath(path);
     const names = await this.readdir(path);
-    const prefix = path === '/' ? '/' : `${path}/`;
+    const prefix = path === '' ? '' : `${path}/`;
     const result: Array<{ name: string } & FileStat> = [];
     for (const name of names) {
       const fullPath = `${prefix}${name}`;
@@ -118,6 +120,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @returns Type/size/mtime for the entry at `path`.
    */
   public async stat(path: string): Promise<FileStat> {
+    this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       return { type: 'dir', size: 0, mtimeMs: this._mtimes.get(path) ?? 0 };
     }
@@ -134,6 +137,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param path - Absolute file path to remove.
    */
   public async unlink(path: string): Promise<void> {
+    this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       throw this._eisdir(path);
     }
@@ -150,10 +154,11 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param path - Absolute directory path to remove.
    */
   public async rmdir(path: string): Promise<void> {
+    this._assertRootedPath(path);
     if (this._files.has(path)) {
       throw this._enotdir(path);
     }
-    if (!this._dirs.has(path) || path === '/') {
+    if (!this._dirs.has(path) || path === '') {
       throw this._enoent(path);
     }
     const prefix = `${path}/`;
@@ -171,6 +176,8 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param to - Destination absolute path.
    */
   public async rename(from: string, to: string): Promise<void> {
+    this._assertRootedPath(from);
+    this._assertRootedPath(to);
     if (from === to) {
       if (!this._dirs.has(from) && !this._files.has(from)) {
         throw this._enoent(from);
@@ -178,7 +185,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
       return;
     }
 
-    if (from === '/') {
+    if (from === '') {
       throw this._einval(from);
     }
 
@@ -255,6 +262,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
   // ---------------------------------------------------------------------------
 
   protected async readFileRaw(path: string): Promise<Uint8Array<ArrayBuffer>> {
+    this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       throw this._eisdir(path);
     }
@@ -266,14 +274,16 @@ export class MemoryProvider extends AbstractFileSystemProvider {
   }
 
   protected async mkdirSingle(path: string): Promise<void> {
+    this._assertRootedPath(path);
     if (this._dirs.has(path) || this._files.has(path)) {
       throw this._eexist(path);
     }
-    const parent = path.slice(0, path.lastIndexOf('/')) || '/';
+    const separator = path.lastIndexOf('/');
+    const parent = separator === -1 ? '' : path.slice(0, separator);
     if (this._files.has(parent)) {
       throw this._enotdir(parent);
     }
-    if (parent !== '/' && !this._dirs.has(parent)) {
+    if (!this._dirs.has(parent)) {
       throw this._enoent(parent);
     }
     this._dirs.add(path);
@@ -285,16 +295,18 @@ export class MemoryProvider extends AbstractFileSystemProvider {
   // ---------------------------------------------------------------------------
 
   private _ensureParentDirs(path: string): void {
-    let directory = path.slice(0, path.lastIndexOf('/')) || '/';
+    const separator = path.lastIndexOf('/');
+    let directory = separator === -1 ? '' : path.slice(0, separator);
     const missing: string[] = [];
-    while (directory !== '/') {
+    while (directory !== '') {
       if (this._files.has(directory)) {
         throw this._enotdir(directory);
       }
       if (!this._dirs.has(directory)) {
         missing.push(directory);
       }
-      directory = directory.slice(0, directory.lastIndexOf('/')) || '/';
+      const parentSeparator = directory.lastIndexOf('/');
+      directory = parentSeparator === -1 ? '' : directory.slice(0, parentSeparator);
     }
     for (const missingDirectory of missing) {
       this._dirs.add(missingDirectory);
@@ -313,7 +325,7 @@ export class MemoryProvider extends AbstractFileSystemProvider {
  * import { createMemoryProvider } from '@taucad/filesystem/backend';
  *
  * const provider = await createMemoryProvider();
- * await provider.writeFile('/hello.txt', 'world');
+ * await provider.writeFile('hello.txt', 'world');
  * ```
  */
 export const createMemoryProvider = async (): Promise<MemoryProvider> => new MemoryProvider();

@@ -6,7 +6,7 @@ import type {
   OutcomeChangeEvent,
 } from '@taucad/fs-client/file-content-service';
 import { isNodeModulesPath } from '@taucad/utils/import';
-import { resolveVirtualPath, VirtualPathError } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 import { getMonacoLanguage } from '#lib/monaco.constants.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { debugCmdClick } from '#lib/monaco-workspace-fs/cmd-click-diagnostic.js';
@@ -26,16 +26,7 @@ export type WorkspaceFileSystemProviderOptions = Readonly<{
   ) => Promise<readonly FileStatEntry[]> | readonly FileStatEntry[];
 }>;
 
-export const canonicalWorkspacePath = (uriPath: string): string => {
-  try {
-    return workspaceRelativePathFromFileUri(resolveVirtualPath(uriPath));
-  } catch (error) {
-    if (!(error instanceof VirtualPathError)) {
-      throw error;
-    }
-    return workspaceRelativePathFromFileUri(uriPath);
-  }
-};
+export const canonicalWorkspacePath = (uriPath: string): string => workspaceRelativePathFromFileUri(uriPath);
 
 /**
  * `file://` workspace provider: Tau workspace-relative paths under a root `file:///` URI.
@@ -122,7 +113,7 @@ export function createWorkspaceFileSystemProvider(
             break;
           }
 
-          pushUri(monaco.Uri.file(entry.path.startsWith('/') ? entry.path : `/${entry.path}`));
+          pushUri(monaco.Uri.file(`/${assertRootedPath(entry.path)}`));
         }
 
         return out;

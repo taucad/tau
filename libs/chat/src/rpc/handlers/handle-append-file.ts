@@ -1,7 +1,7 @@
 import type { AppendFileRpcInput, AppendFileRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
-import { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
+import { assertRootedPath } from '@taucad/utils/path';
 
 const textEncoder = new TextEncoder();
 
@@ -11,7 +11,7 @@ export async function handleAppendFile(
   fileSystem: RpcFileSystem,
 ): Promise<AppendFileRpcResult> {
   try {
-    const targetFile = resolveRpcProjectPath(input.targetFile);
+    const targetFile = assertRootedPath(input.targetFile);
     await fileSystem.appendFile(targetFile, input.content);
 
     const bytesWritten = textEncoder.encode(input.content).byteLength;

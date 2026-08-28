@@ -12,20 +12,13 @@ import type * as Monaco from 'monaco-editor';
 import type { AnyActorRef, Subscription } from 'xstate';
 import { debugCmdClick } from '#lib/monaco-workspace-fs/cmd-click-diagnostic.js';
 import type { MonacoWorkspaceFs } from '#lib/monaco-workspace-fs/monaco-workspace-fs.types.js';
+import { workspaceRelativePathFromFileUri } from '#lib/monaco-workspace-fs/workspace-path-from-uri.js';
 
 type PendingNavigation = {
   path: string;
   lineNumber: number;
   column: number;
 };
-
-/**
- * Extract the relative path from a root-level Monaco URI path.
- * Strips the leading slash from paths like /main.ts -> main.ts
- */
-function extractPathFromUri(uriPath: string): string {
-  return uriPath.startsWith('/') ? uriPath.slice(1) : uriPath;
-}
 
 /**
  * Register a global editor opener using Monaco's public API.
@@ -103,7 +96,16 @@ export function registerMonacoNavigation(options: {
         return false;
       }
 
-      const relativePath = extractPathFromUri(resource.path);
+      let relativePath: string;
+      try {
+        relativePath = workspaceRelativePathFromFileUri(resource.path);
+      } catch (error) {
+        debugCmdClick('registerMonacoNavigation.openCodeEditor:reject-invalid-path', {
+          uri: resourceString,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
       if (!relativePath) {
         debugCmdClick('registerMonacoNavigation.openCodeEditor:reject-empty-path', { uri: resourceString });
         return false;

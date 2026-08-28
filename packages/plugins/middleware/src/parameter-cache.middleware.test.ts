@@ -420,7 +420,7 @@ describe('parameterCacheMiddleware', () => {
         await wrapGetParameters!(input, handler, runtime);
 
         expect(runtime.filesystem.mocks.readFile).toHaveBeenCalledWith(
-          `/.tau/cache/parameters/${dependencyHash}.json`,
+          `.tau/cache/parameters/${dependencyHash}.json`,
           'utf8',
         );
       });
@@ -496,7 +496,7 @@ describe('parameterCacheMiddleware', () => {
         const { wrapGetParameters } = parameterCacheMiddleware;
         await wrapGetParameters!(input, handler, runtime);
 
-        expect(runtime.filesystem.mocks.readdirStat).toHaveBeenCalledWith('/.tau/cache/parameters');
+        expect(runtime.filesystem.mocks.readdirStat).toHaveBeenCalledWith('.tau/cache/parameters');
       });
 
       it('should coalesce retention scans below the configured entry limit', async () => {
@@ -514,7 +514,7 @@ describe('parameterCacheMiddleware', () => {
 
       it('should rescan before a new write would exceed maxEntries', async () => {
         const firstName = `${'a'.repeat(64)}.json`;
-        const firstPath = `/.tau/cache/parameters/${firstName}`;
+        const firstPath = `.tau/cache/parameters/${firstName}`;
         const { input, runtime } = createCacheContext({
           cacheExists: false,
           cacheOptions: { maxEntries: 1, maxAge: 7 * 24 * 60 * 60 * 1000 },
@@ -535,7 +535,7 @@ describe('parameterCacheMiddleware', () => {
         vi.useFakeTimers();
         try {
           const firstName = `${'a'.repeat(64)}.json`;
-          const firstPath = `/.tau/cache/parameters/${firstName}`;
+          const firstPath = `.tau/cache/parameters/${firstName}`;
           const { input, runtime } = createCacheContext({
             cacheExists: false,
             cacheOptions: { maxEntries: 100, maxAge: 0 },
@@ -561,7 +561,7 @@ describe('parameterCacheMiddleware', () => {
 
         runtime.filesystem.mocks.readdirStat.mockResolvedValue([
           {
-            path: '/.tau/cache/parameters/old-cache.json',
+            path: '.tau/cache/parameters/old-cache.json',
             name: 'old-cache.json',
             type: 'file',
             size: 100,
@@ -574,7 +574,7 @@ describe('parameterCacheMiddleware', () => {
         const { wrapGetParameters } = parameterCacheMiddleware;
         await wrapGetParameters!(input, handler, runtime);
 
-        expect(runtime.filesystem.mocks.unlink).toHaveBeenCalledWith('/.tau/cache/parameters/old-cache.json');
+        expect(runtime.filesystem.mocks.unlink).toHaveBeenCalledWith('.tau/cache/parameters/old-cache.json');
       });
 
       it('should delete excess entries when over maxEntries', async () => {
@@ -583,7 +583,7 @@ describe('parameterCacheMiddleware', () => {
 
         // 102 files (2 over the 100 max), staggered mtimeMs newest first.
         const entries = Array.from({ length: 102 }, (_, index) => ({
-          path: `/.tau/cache/parameters/cache-${index}.json`,
+          path: `.tau/cache/parameters/cache-${index}.json`,
           name: `cache-${index}.json`,
           type: 'file',
           size: 100,
@@ -598,8 +598,8 @@ describe('parameterCacheMiddleware', () => {
 
         expect(runtime.filesystem.mocks.unlink).toHaveBeenCalledTimes(2);
         expect(runtime.filesystem.mocks.unlink.mock.calls.map(([path]) => path as string)).toEqual([
-          '/.tau/cache/parameters/cache-101.json',
-          '/.tau/cache/parameters/cache-100.json',
+          '.tau/cache/parameters/cache-101.json',
+          '.tau/cache/parameters/cache-100.json',
         ]);
       });
 
@@ -609,7 +609,7 @@ describe('parameterCacheMiddleware', () => {
 
         runtime.filesystem.mocks.readdirStat.mockResolvedValue([
           {
-            path: '/.tau/cache/parameters/stray.bin',
+            path: '.tau/cache/parameters/stray.bin',
             name: 'stray.bin',
             type: 'file',
             size: 100,

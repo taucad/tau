@@ -1,23 +1,87 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertRootedPath,
   canonicalizePath,
   isSafeRelativePath,
   joinPath,
   joinRelativePath,
   normalizePath,
   parentDirectory,
-  resolveVirtualPath,
+  resolveRootedPath,
+  resolveAuthorityPath,
 } from '#path.utils.js';
 import type { VirtualPathError } from '#path.utils.js';
 
-describe('resolveVirtualPath', () => {
+describe('resolveRootedPath', () => {
+  it.each([
+    ['', ''],
+    ['.', ''],
+    ['./', ''],
+    ['main.ts', 'main.ts'],
+    ['./src/main.ts', 'src/main.ts'],
+    ['src/../main.ts', 'main.ts'],
+    ['src//nested/./part.ts', 'src/nested/part.ts'],
+    ['προσχέδιο/部品.ts', 'προσχέδιο/部品.ts'],
+  ])('should resolve %j to %j', (input, expected) => {
+    expect(resolveRootedPath(input)).toBe(expected);
+  });
+
+  it.each([
+    '/main.ts',
+    '//server/share',
+    'C:/model.ts',
+    String.raw`C:\model.ts`,
+    String.raw`\\server\share`,
+    'file:///model.ts',
+    'https://example.com/model.ts',
+    'bad\0path',
+  ])('should reject invalid host or absolute path %j', (input) => {
+    expect(() => resolveRootedPath(input)).toThrow(
+      expect.objectContaining<Partial<VirtualPathError>>({ code: 'INVALID_PATH', metadata: { input } }),
+    );
+  });
+
+  it.each(['../secret', 'src/../../secret'])('should reject traversal above root for %j', (input) => {
+    expect(() => resolveRootedPath(input)).toThrow(
+      expect.objectContaining<Partial<VirtualPathError>>({ code: 'PATH_OUTSIDE_ROOT', metadata: { input } }),
+    );
+  });
+
+  it.each(['', 'main.ts', 'lib/gear.ts', '.tau/AGENTS.md', 'προσχέδιο/部品.ts'])(
+    'should leave canonical rooted path %j unchanged',
+    (input) => {
+      expect(resolveRootedPath(input)).toBe(input);
+    },
+  );
+
+  it.each(['.', './main.ts', 'lib//gear.ts', 'lib/gear.ts/'])('should expose noncanonical rooted path %j', (input) => {
+    expect(resolveRootedPath(input)).not.toBe(input);
+  });
+});
+
+describe('assertRootedPath', () => {
+  it.each(['', 'main.ts', 'lib/gear.ts'])('should return canonical rooted path %j unchanged', (input) => {
+    expect(assertRootedPath(input)).toBe(input);
+  });
+
+  it.each(['/main.ts', '.', './main.ts', 'lib//gear.ts', 'lib/gear.ts/'])(
+    'should reject noncanonical rooted path %j',
+    (input) => {
+      expect(() => assertRootedPath(input)).toThrow(
+        expect.objectContaining<Partial<VirtualPathError>>({ code: 'INVALID_PATH', metadata: { input } }),
+      );
+    },
+  );
+});
+
+describe('resolveAuthorityPath', () => {
   it.each([
     ['/', '/'],
     ['/src//./model.ts', '/src/model.ts'],
     ['/src/lib/../model.ts', '/src/model.ts'],
     ['/προσχέδιο/部品.ts', '/προσχέδιο/部品.ts'],
   ])('should resolve %j to %j', (input, expected) => {
-    expect(resolveVirtualPath(input)).toBe(expected);
+    expect(resolveAuthorityPath(input)).toBe(expected);
   });
 
   it.each([
@@ -29,13 +93,13 @@ describe('resolveVirtualPath', () => {
     String.raw`/src\model.ts`,
     '/a\0b',
   ])('should reject invalid host path %j', (input) => {
-    expect(() => resolveVirtualPath(input)).toThrow(
+    expect(() => resolveAuthorityPath(input)).toThrow(
       expect.objectContaining<Partial<VirtualPathError>>({ code: 'INVALID_PATH', metadata: { input } }),
     );
   });
 
   it.each(['/../secret', '/src/../../secret'])('should reject traversal above root for %j', (input) => {
-    expect(() => resolveVirtualPath(input)).toThrow(
+    expect(() => resolveAuthorityPath(input)).toThrow(
       expect.objectContaining<Partial<VirtualPathError>>({ code: 'PATH_OUTSIDE_ROOT', metadata: { input } }),
     );
   });

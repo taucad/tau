@@ -19,6 +19,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createChannelServer, wrapMessagePort, wrapWebSocket } from '@taucad/rpc';
 import type { Channel, ChannelServerHandle, Port, WebSocketLike } from '@taucad/rpc';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
+import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { Geometry } from '@taucad/types';
 
 import { fromFileSystemBridge, fromMemoryFs } from '#filesystem/runtime-filesystem.js';
@@ -34,6 +35,7 @@ import { webSocketClient } from '#transport/web-socket-client.js';
 import { webSocketTransport } from '#transport/web-socket-transport.js';
 import { webSocketClientOptionsSchema } from '#transport/web-socket-transport.schemas.js';
 import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
+import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
@@ -94,7 +96,7 @@ describe('transport conformance — in-process (C2)', () => {
   });
 
   it('materialise() returns the v6 fat client handle surface', () => {
-    const mainEntry = '/main.ts';
+    const mainEntry = 'main.ts';
     const plugin = inProcessTransport({
       runtime,
       fileSystem: fromMemoryFs({ [mainEntry]: 'export default () => true;' }),
@@ -256,7 +258,7 @@ describe('transport conformance — web-worker (C2)', () => {
       const options = createWebWorkerClientOptions({
         url: 'about:blank',
         workerCtor,
-        files: { '/main.ts': 'export default () => true;' },
+        files: { 'main.ts': 'export default () => true;' },
         renderTimeout: 4567,
       });
 
@@ -280,7 +282,7 @@ describe('transport conformance — web-worker (C2)', () => {
     expect(() =>
       createWebWorkerClientOptions({
         createWorker,
-        files: { '/main.ts': 'export default () => true;' },
+        files: { 'main.ts': 'export default () => true;' },
         fileSystem: fromMemoryFs(),
       }),
     ).toThrow(/either `files` or `fileSystem`/);
@@ -796,9 +798,14 @@ describe('transport conformance — web-socket (C2)', () => {
   });
 
   it.each([
-    ['without watch', fromMemoryFs(), false],
+    ['inline without watch', fromMemoryFs(), false],
+    [
+      'channel without watch',
+      fromFileSystemBridge(() => createFileSystemBridgePort(extractInlineFileSystem(fromMemoryFs())!)),
+      false,
+    ],
     /* Never read — only `typeof fs.watch === 'function'` is under test. */
-    ['with watch', fromNodeFs(import.meta.dirname), true],
+    ['inline with watch', fromNodeFs(import.meta.dirname), true],
   ] as const)(
     'serves the consumer filesystem over a second socket %s',
     async (_label, fileSystem: RuntimeFileSystem, watchable: boolean) => {
@@ -812,8 +819,7 @@ describe('transport conformance — web-socket (C2)', () => {
         const sessions = bed.dialled.map((entry) => new URL(entry.url).searchParams.get('session'));
         expect(sessions[0]).toBe(sessions[1]);
 
-        /* The bridge server posts its hello during construction, so the far
-         * end of the `/fs` socket already holds it. */
+        await bed.firstFileSystemFrame;
         expect(bed.fileSystemFrames).toHaveLength(1);
         expect(bed.fileSystemFrames[0]).toMatchObject({
           v: 1,
@@ -896,13 +902,12 @@ describe('transport conformance — web-socket (C2)', () => {
     }
   });
 
-  it('rejects a bridged filesystem handle in the option schema', () => {
+  it('accepts a bridged filesystem handle in the option schema without opening it', () => {
     const bridged = fromFileSystemBridge(() => {
       throw new Error('never connected in conformance');
     });
     const parsed = webSocketClientOptionsSchema.safeParse({ url, fileSystem: bridged });
-    expect(parsed.success).toBe(false);
-    expect(JSON.stringify(parsed.error?.issues)).toContain('fromFileSystemBridge');
+    expect(parsed.success).toBe(true);
   });
 });
 
@@ -1191,11 +1196,13 @@ function createWebSocketTestBed(): {
   createSocket: (url: string) => WebSocketLike;
   dialled: readonly DialledSocket[];
   fileSystemFrames: readonly unknown[];
+  firstFileSystemFrame: Promise<void>;
   dispose: () => void;
 } {
   const dialled: DialledSocket[] = [];
   const dispatchers: Array<ChannelServerHandle<RuntimeProtocol>> = [];
   const fileSystemFrames: unknown[] = [];
+  const firstFileSystemFrame = Promise.withResolvers<void>();
 
   return {
     createSocket(url: string): WebSocketLike {
@@ -1212,12 +1219,14 @@ function createWebSocketTestBed(): {
       } else {
         host.addEventListener('message', (event) => {
           fileSystemFrames.push(msgpackCodec.decode((event as { data: Uint8Array<ArrayBuffer> }).data));
+          firstFileSystemFrame.resolve();
         });
       }
       return client;
     },
     dialled,
     fileSystemFrames,
+    firstFileSystemFrame: firstFileSystemFrame.promise,
     dispose() {
       for (const dispatcher of dispatchers) {
         dispatcher.dispose('conformance teardown');

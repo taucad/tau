@@ -61,7 +61,7 @@ import type {
 } from '#worker/runtime-definition.js';
 import type { ContentRequestFor, RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
-import { resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 
 export type { RuntimeConfigInput, RuntimeConfigOutput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
 
@@ -129,7 +129,7 @@ export type InlineRuntimeSource<Files extends RuntimeSourceFiles = RuntimeSource
  * @public
  */
 export type FilesystemRuntimeSource = {
-  /** Path within the runtime filesystem. May be relative or begin with `/`; RuntimeClient normalizes it before dispatch. */
+  /** Canonical root-relative path within the runtime filesystem. */
   readonly path: string;
   readonly files?: never;
   readonly entry?: never;
@@ -475,9 +475,9 @@ export function isRuntimeTerminatedError(error: unknown): error is RuntimeTermin
 /**
  * Split a canonical runtime entry path into its worker-protocol locator.
  *
- * - `'main.ts'` --> `{ path: '/', filename: 'main.ts' }`
- * - `'/src/model.ts'` --> `{ path: '/src', filename: 'model.ts' }`
- * - `'/examples/bench.ts'` --> `{ path: '/examples', filename: 'bench.ts' }`
+ * - `'main.ts'` --> `{ path: '', filename: 'main.ts' }`
+ * - `'src/model.ts'` --> `{ path: 'src', filename: 'model.ts' }`
+ * - `'examples/bench.ts'` --> `{ path: 'examples', filename: 'bench.ts' }`
  *
  * @param file - file path string to resolve
  * @returns geometry file with separated path and filename
@@ -485,22 +485,19 @@ export function isRuntimeTerminatedError(error: unknown): error is RuntimeTermin
 function resolveFileString(file: string): RuntimeFileLocator {
   const lastSlash = file.lastIndexOf('/');
   if (lastSlash === -1) {
-    return { path: '/', filename: file };
+    return { path: '', filename: file };
   }
 
-  const path = file.slice(0, lastSlash) || '/';
+  const path = file.slice(0, lastSlash);
   return {
-    path: path.startsWith('/') ? path : `/${path}`,
+    path,
     filename: file.slice(lastSlash + 1),
   };
 }
 
-const canonicalRuntimePath = (path: string): string => {
-  if (/^[A-Za-z][A-Za-z\d+.-]*:/u.test(path)) {
-    throw new TypeError(`Runtime source path must not be a URL: ${JSON.stringify(path)}`);
-  }
-  const canonical = resolveVirtualPath(path.startsWith('/') ? path : `/${path}`);
-  if (canonical === '/' || canonical.endsWith('/')) {
+const assertRuntimeFilePath = (path: string): string => {
+  const canonical = assertRootedPath(path);
+  if (canonical === '') {
     throw new TypeError(`Runtime source path must identify a file: ${JSON.stringify(path)}`);
   }
   return canonical;
@@ -551,7 +548,7 @@ const normalizeRuntimeSource = (source: RuntimeSource | unknown): NormalizedRunt
     const stage: Record<string, Uint8Array<ArrayBuffer>> = {};
     const rawPathByCanonical = new Map<string, string>();
     for (const [filename, content] of entries) {
-      const canonicalPath = canonicalRuntimePath(filename);
+      const canonicalPath = assertRuntimeFilePath(filename);
       const collision = rawPathByCanonical.get(canonicalPath);
       if (collision !== undefined) {
         throw new TypeError(
@@ -561,7 +558,7 @@ const normalizeRuntimeSource = (source: RuntimeSource | unknown): NormalizedRunt
       rawPathByCanonical.set(canonicalPath, filename);
       stage[canonicalPath] = toStagedBytes(filename, content);
     }
-    const canonicalEntry = canonicalRuntimePath(entry);
+    const canonicalEntry = assertRuntimeFilePath(entry);
     if (!rawPathByCanonical.has(canonicalEntry)) {
       throw new TypeError(`Runtime source entry "${entry}" must resolve to one of the files keys.`);
     }
@@ -570,7 +567,7 @@ const normalizeRuntimeSource = (source: RuntimeSource | unknown): NormalizedRunt
   if ('path' in source) {
     const { path } = source;
     if (typeof path === 'string') {
-      return { file: resolveFileString(canonicalRuntimePath(path)) };
+      return { file: resolveFileString(assertRuntimeFilePath(path)) };
     }
     throw new TypeError('Runtime source `path` must be a string.');
   }

@@ -1,7 +1,7 @@
 /* oxlint-disable no-await-in-loop -- fixture seeding is intentionally sequential */
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { FileExtension, FileStat, FileStatEntry, GeometryResponse, OnWorkerLog } from '@taucad/types';
-import { parentDirectory, joinPath, resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 import { vi } from 'vitest';
 import { z } from 'zod';
 import type { NativeBuildInput } from '#framework/render-artifact.js';
@@ -49,9 +49,10 @@ export const seedTestFileSystem = async (files: Record<string, string | Uint8Arr
   testFileSystemBase = undefined;
   const fileSystem = materializeTestFileSystem();
   for (const [path, content] of Object.entries(files)) {
-    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-    const directory = parentDirectory(normalizedPath);
-    if (directory && directory !== '/') {
+    const normalizedPath = assertRootedPath(path);
+    const separator = normalizedPath.lastIndexOf('/');
+    const directory = separator < 0 ? '' : normalizedPath.slice(0, separator);
+    if (directory) {
       await fileSystem.mkdir(directory, { recursive: true });
     }
     await fileSystem.writeFile(normalizedPath, content);
@@ -188,10 +189,11 @@ export const createMockFileSystem = (options?: MockFileSystemOptions): MockFileS
 
 /** Creates a normalized locator for white-box worker calls. */
 export const createGeometryFile = (filename: string): RuntimeFileLocator => {
-  const filePath = resolveVirtualPath(joinPath('/', filename));
+  const filePath = assertRootedPath(filename);
+  const separator = filePath.lastIndexOf('/');
   return {
-    filename: filePath.slice(filePath.lastIndexOf('/') + 1),
-    path: parentDirectory(filePath),
+    filename: filePath.slice(separator + 1),
+    path: separator < 0 ? '' : filePath.slice(0, separator),
   };
 };
 

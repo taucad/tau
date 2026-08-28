@@ -19,7 +19,7 @@ import { defineRuntime } from '#worker/runtime-definition.js';
 
 describe('RuntimeClient TransportPlugin materialization', () => {
   it('materializes distinct transport handles across sequential clients that share one plugin reference', async () => {
-    const mainPath = '/main.ts';
+    const mainPath = 'main.ts';
     const fs = fromMemoryFs({ [mainPath]: `export default () => true;\n` });
     const runtime = defineRuntime({});
     const plugin = inProcessTransport({ runtime, fileSystem: fs });

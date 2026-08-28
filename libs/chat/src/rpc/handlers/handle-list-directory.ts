@@ -1,7 +1,7 @@
 import type { ListDirectoryRpcInput, ListDirectoryRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
-import { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
+import { assertRootedPath } from '@taucad/utils/path';
 
 type ListDirectoryEntry = Extract<ListDirectoryRpcResult, { success: true }>['entries'][number];
 
@@ -11,7 +11,7 @@ export async function handleListDirectory(
   fileSystem: RpcFileSystem,
 ): Promise<ListDirectoryRpcResult> {
   try {
-    const path = resolveRpcProjectPath(input.path ?? '');
+    const path = assertRootedPath(input.path ?? '');
     const rawEntries = await fileSystem.readdir(path);
     const entries: ListDirectoryEntry[] = rawEntries.map((entry) => {
       if (entry.type === 'dir') {
@@ -33,7 +33,7 @@ export async function handleListDirectory(
       };
     });
 
-    return { success: true, entries, path: path || '/' };
+    return { success: true, entries, path };
   } catch (error) {
     return toRpcError(error);
   }

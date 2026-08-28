@@ -40,8 +40,7 @@ export const isRuntimeFileSystem = (value: unknown): value is RuntimeFileSystem 
  * Create an opaque {@link RuntimeFileSystem} backed by an in-memory
  * `Map`. Suitable for tests, fixtures, and lightweight playgrounds.
  *
- * @param files - Optional runtime-path-to-content map. Relative keys and keys
- * beginning with `/` are normalized within the in-memory filesystem.
+ * @param files - Optional canonical root-relative path-to-content map.
  * @public
  *
  * @example <caption>Seed a runtime client with an in-memory FS</caption>
@@ -49,7 +48,7 @@ export const isRuntimeFileSystem = (value: unknown): value is RuntimeFileSystem 
  * import { createRuntimeClient, fromMemoryFs } from '@taucad/runtime';
  *
  * const fs = fromMemoryFs({
- *   '/main.ts': 'export default () => "hello";',
+ *   'main.ts': 'export default () => "hello";',
  * });
  * ```
  */
@@ -59,13 +58,13 @@ export const fromMemoryFs = (files?: Record<string, string | Uint8Array<ArrayBuf
 /**
  * Create an opaque {@link RuntimeFileSystem} from an already-confined
  * `fs.promises`-shaped object such as BrowserFS or memfs. Use `fromNodeFs`
- * for an unconfined Node.js filesystem so the adapter can establish runtime `/`.
+ * for an unconfined Node.js filesystem so the adapter can establish the runtime root.
  *
  * Renamed from `fromFsLikeOpaque` (R7) per v6 Appendix A — public `fromX`
  * factories are always opaque, no `Opaque` suffix.
  *
  * @param fsLike - Already-confined object exposing the {@link FsLike} surface.
- * Runtime paths are resolved within that object; `/` is its root.
+ * Runtime paths are resolved within that object; `''` is its root.
  * @public
  */
 export const fromFsLike = (fsLike: FsLike): RuntimeFileSystem => wrapAsRuntimeFileSystem(_fromFsLikeHandle(fsLike));
@@ -74,7 +73,7 @@ export const fromFsLike = (fsLike: FsLike): RuntimeFileSystem => wrapAsRuntimeFi
  * Create an opaque {@link RuntimeFileSystem} bridged to a remote filesystem
  * authority through a filesystem bridge connection.
  * The connection must already be rooted; its selected root is exposed to the
- * runtime as `/` without exposing any authority-global or host path.
+ * runtime as `''` without exposing any authority-global or host path.
  *
  * @param openConnection - Opens a fresh filesystem bridge connection for each
  * runtime binding or initialize retry.

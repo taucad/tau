@@ -1,7 +1,7 @@
 import type { GrepRpcInput, GrepRpcResult } from '#schemas/rpc.schema.js';
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
 import { toRpcError } from '#rpc/rpc-error.js';
-import { resolveRpcProjectPath } from '#rpc/rpc-project-path.js';
+import { assertRootedPath } from '@taucad/utils/path';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
 import { joinRelativePath } from '@taucad/utils/path';
 
@@ -61,7 +61,7 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
 
   try {
     const regex = new RegExp(input.pattern, input.caseSensitive === false ? 'gi' : 'g');
-    const basePath = resolveRpcProjectPath(input.path ?? '');
+    const basePath = assertRootedPath(input.path ?? '');
 
     let filesToSearch: string[];
     try {

@@ -1,5 +1,6 @@
 import safeRegex from 'safe-regex';
 import { z } from 'zod';
+import { rootedFilePathSchema, rootedPathSchema } from '#schemas/rooted-path.schema.js';
 
 /** @public */
 export const grepInputSchema = z.object({
@@ -10,7 +11,7 @@ export const grepInputSchema = z.object({
         'The regex pattern is potentially unsafe (may cause catastrophic backtracking). Please simplify the pattern by reducing nested quantifiers or alternations.',
     })
     .describe('The regular expression pattern to search for in file contents.'),
-  path: z.string().optional().describe('The file or directory path to search in. Defaults to project root.'),
+  path: rootedPathSchema.optional().describe('The file or directory path to search in. Defaults to project root.'),
   glob: z
     .string()
     .optional()
@@ -32,7 +33,7 @@ export const grepInputSchema = z.object({
 });
 
 const grepMatchSchema = z.object({
-  file: z.string().describe('The file path where the match was found.'),
+  file: rootedFilePathSchema.describe('The file path where the match was found.'),
   line: z.number().describe('The line number of the match (1-based).'),
   content: z.string().describe('The content of the matching line.'),
 });

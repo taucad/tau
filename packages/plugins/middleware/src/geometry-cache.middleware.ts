@@ -261,7 +261,7 @@ function cloneExportSuccessResult(result: KernelSuccessResult<ExportFile[]>): Ke
  * @returns The full path to the cache file
  */
 function getCachePath(cacheKey: string): string {
-  return `/.tau/cache/geometry/${cacheKey}.bin`;
+  return `.tau/cache/geometry/${cacheKey}.bin`;
 }
 
 /**
@@ -271,11 +271,11 @@ function getCachePath(cacheKey: string): string {
  * @returns The full path to the mesh cache file
  */
 function getMeshCachePath(cacheKey: string): string {
-  return `/.tau/cache/geometry/mesh-${cacheKey}.bin`;
+  return `.tau/cache/geometry/mesh-${cacheKey}.bin`;
 }
 
 function getExportCachePath(cacheKey: string): string {
-  return `/.tau/cache/geometry/export-${cacheKey}.bin`;
+  return `.tau/cache/geometry/export-${cacheKey}.bin`;
 }
 
 /**
@@ -283,7 +283,7 @@ function getExportCachePath(cacheKey: string): string {
  *
  * @returns The full path to the cache directory
  */
-const cacheDirectory = '/.tau/cache/geometry';
+const cacheDirectory = '.tau/cache/geometry';
 const geometryCacheOptionsSchema = z.object({
   maxEntries: z.number().default(100),
   /** Maximum age for cache entries. Milliseconds. */

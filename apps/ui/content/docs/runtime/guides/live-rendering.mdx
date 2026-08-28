@@ -96,7 +96,7 @@ if (settlement.superseded) {
 }
 ```
 
-Inline `source.files` input is staged into the transport-owned filesystem, and `source.entry` selects a key from that map (including keys with directory segments). Filesystem-backed `source.path` accepts either a relative path or one beginning with `/`; both normalize to the same [runtime path](../concepts/path-namespaces). Raw transports need an explicit `fileSystem`; high-level helpers such as `createNodeClient()` and `createWebWorkerClientOptions(...)` provide one automatically. For hosted filesystem mappings, see [Embedding in a Host](./embedding-in-a-host).
+Inline `source.files` input is staged into the transport-owned filesystem, and `source.entry` selects a key from that map (including keys with directory segments). Filesystem-backed `source.path` is a canonical root-relative [runtime path](../concepts/path-namespaces). Raw transports need an explicit `fileSystem`; high-level helpers such as `createNodeClient()` and `createWebWorkerClientOptions(...)` provide one automatically. For hosted filesystem mappings, see [Embedding in a Host](./embedding-in-a-host).
 
 ## Live Parameter Updates
 

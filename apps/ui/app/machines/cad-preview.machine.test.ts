@@ -49,6 +49,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
+        fileSystemRoot: '/projects/test',
         kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
@@ -82,8 +83,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     });
 
     expect(mockClient.render).toHaveBeenCalledWith({
-      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
+      source: { path: 'main.ts' },
       parameters: { width: 42 },
+      content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
@@ -113,6 +115,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
+        fileSystemRoot: '/projects/test',
         kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
@@ -164,10 +167,11 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     const cadSnapshot = cadRef.getSnapshot();
     expect(cadSnapshot.value).toBe('idle');
-    expect(cadSnapshot.context.file).toEqual({ path: '/projects/proj_test', filename: 'main.ts' });
+    expect(cadSnapshot.context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
-      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
+      source: { path: 'main.ts' },
       parameters: { width: 42 },
+      content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
@@ -193,6 +197,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
+        fileSystemRoot: '/projects/test',
         kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
@@ -238,7 +243,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     // CadRef connects first (fast mock)
     await waitFor(cadRef, (s) => s.value === 'idle', { timeout: 5000 });
-    expect(cadRef.getSnapshot().context.file).toBeUndefined();
+    expect(cadRef.getSnapshot().context.entryPath).toBeUndefined();
 
     // Then prepareFiles completes
     resolvePrepareFiles();
@@ -246,8 +251,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     // InitializeModel should have been sent to cadRef (now in idle)
     expect(mockClient.render).toHaveBeenCalledWith({
-      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
+      source: { path: 'main.ts' },
       parameters: {},
+      content: { includeEdges: true },
     });
 
     cadRef.stop();
@@ -276,6 +282,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
+        fileSystemRoot: '/projects/test',
         kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
@@ -338,10 +345,11 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     const cadSnapshot = cadRef.getSnapshot();
     expect(cadSnapshot.value).toBe('idle');
-    expect(cadSnapshot.context.file).toEqual({ path: '/projects/proj_test', filename: 'main.ts' });
+    expect(cadSnapshot.context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
-      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
+      source: { path: 'main.ts' },
       parameters: { width: 42 },
+      content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
@@ -371,6 +379,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
+        fileSystemRoot: '/projects/test',
         kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
@@ -468,10 +477,11 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(previewRef.getSnapshot().context.initError).toBeUndefined();
 
     // CadRef should have the file and parameters sent directly to kernel
-    expect(cadRef.getSnapshot().context.file).toEqual({ path: '/projects/proj_test', filename: 'main.ts' });
+    expect(cadRef.getSnapshot().context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
-      source: { path: { path: '/projects/proj_test', filename: 'main.ts' } },
+      source: { path: 'main.ts' },
       parameters: { width: 42 },
+      content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
@@ -497,6 +507,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(providedCadMachine, {
       input: {
         shouldInitializeKernelOnStart: false,
+        fileSystemRoot: '/projects/test',
         kernelOptionsFactory: createKernelOptionsFactory(),
       },
     });
@@ -560,7 +571,7 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     // After Strict Mode, cadRef should have the file (from the re-mounted prepareFiles)
     await waitFor(previewRef, (s) => s.value === 'active', { timeout: 5000 });
-    expect(cadRef.getSnapshot().context.file).toEqual({ path: '/projects/proj_test', filename: 'main.ts' });
+    expect(cadRef.getSnapshot().context.entryPath).toBe('main.ts');
 
     cadRef.stop();
     previewRef.stop();

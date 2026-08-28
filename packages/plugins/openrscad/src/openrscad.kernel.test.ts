@@ -222,11 +222,11 @@ describe('OpenRSCADKernel', () => {
 
   it('preserves tessellation authored in the model unless Tau explicitly overrides it', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/model.scad': '$fn = 64; sphere(10);' });
+    const runtime = createRuntime({ 'project/model.scad': '$fn = 64; sphere(10);' });
     const context = await definition.initialize({}, runtime);
     const render = async (tessellation: Record<string, number>) =>
       definition.createGeometry(
-        { entryPath: '/project/model.scad', parameters: {}, options: { tessellation } },
+        { entryPath: 'project/model.scad', parameters: {}, options: { tessellation } },
         runtime,
         context,
       );
@@ -264,9 +264,9 @@ describe('OpenRSCADKernel', () => {
     expect(plugin.extensions).toEqual(['scad']);
 
     const definition = await resolveRuntimePluginDefinition('kernel', plugin);
-    const runtime = createRuntime({ '/project/model.scad': 'cube(10);' });
+    const runtime = createRuntime({ 'project/model.scad': 'cube(10);' });
     const context = await definition.initialize({}, runtime);
-    const result = await renderModel({ definition, runtime, context, entryPath: '/project/model.scad' });
+    const result = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
 
     expect(result.nativeHandle.stats).toMatchObject({ triangleCount: 12, vertexCount: 8, volume: 1000 });
     expect(result.geometry.format).toBe('gltf');
@@ -288,14 +288,14 @@ describe('OpenRSCADKernel', () => {
   it('preserves authored colors in preview and exported GLB materials', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': `
+      'project/model.scad': `
 color("red") cube(2);
 translate([4, 0, 0]) color("#808080") cube(2);
 translate([8, 0, 0]) color("blue", 0.5) cube(2);
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const created = await renderModel({ definition, runtime, context, entryPath: '/project/model.scad' });
+    const created = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
     if (created.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
@@ -372,13 +372,13 @@ translate([8, 0, 0]) color("blue", 0.5) cube(2);
   it('keeps overlapping authored siblings complete while retaining exact aggregate statistics', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': `
+      'project/model.scad': `
 color("red") cube(2);
 translate([1, 0, 0]) color("blue") cube(2);
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const created = await renderModel({ definition, runtime, context, entryPath: '/project/model.scad' });
+    const created = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
     if (created.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
@@ -409,7 +409,7 @@ translate([1, 0, 0]) color("blue") cube(2);
   it('keeps boolean differences exact instead of reconstructing provenance operands', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': `
+      'project/model.scad': `
 color("red") difference() {
   cube(2);
   translate([1, 0, 0]) cube(2);
@@ -417,7 +417,7 @@ color("red") difference() {
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const created = await renderModel({ definition, runtime, context, entryPath: '/project/model.scad' });
+    const created = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
     if (created.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
@@ -434,14 +434,14 @@ color("red") difference() {
   it('keeps preview modifiers factual while omitting background geometry from exact export', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': `
+      'project/model.scad': `
 # color("red") translate([0, 0, 12]) cube(10);
 % color("blue") translate([0, 0, -12]) cube(10);
 color("green") cube(10);
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const preview = await renderModel({ definition, runtime, context, entryPath: '/project/model.scad' });
+    const preview = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
     if (preview.geometry.format !== 'gltf') {
       throw new Error('Expected GLB preview geometry');
     }
@@ -481,7 +481,7 @@ color("green") cube(10);
   it('emits spatially distinct authored occurrences as selectable provenance nodes', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': `
+      'project/model.scad': `
 module part() cube(2);
 color("red") {
   part();
@@ -490,7 +490,7 @@ color("red") {
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const created = await renderModel({ definition, runtime, context, entryPath: '/project/model.scad' });
+    const created = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
     if (created.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
@@ -548,20 +548,20 @@ color("red") {
 
   it('emits optional native owner-local edges without adding Explorer nodes', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/model.scad': 'color("red") cube(2);' });
+    const runtime = createRuntime({ 'project/model.scad': 'color("red") cube(2);' });
     const context = await definition.initialize({}, runtime);
     const plain = await renderModel({
       definition,
       runtime,
       context,
-      entryPath: '/project/model.scad',
+      entryPath: 'project/model.scad',
       content: { includeEdges: false },
     });
     const edged = await renderModel({
       definition,
       runtime,
       context,
-      entryPath: '/project/model.scad',
+      entryPath: 'project/model.scad',
       content: { includeEdges: true },
     });
     if (plain.geometry.format !== 'gltf' || edged.geometry.format !== 'gltf') {
@@ -625,14 +625,14 @@ color("red") {
   it('exports native object-aware 3MF with one object and build item per spatial solid', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': `
+      'project/model.scad': `
 color("red") cube(2);
 translate([0, 0, 4]) color("blue") cube(2);
 `,
     });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: '/project/model.scad', parameters: {}, options: renderOptions },
+      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
       runtime,
       context,
     );
@@ -679,15 +679,15 @@ translate([0, 0, 4]) color("blue") cube(2);
     expect(repeated.data[0]!.bytes).toEqual(exported.data[0]!.bytes);
 
     const roundtripRuntime = createRuntime({
-      '/project/roundtrip.scad': 'import("model.3mf");',
-      '/project/model.3mf': exported.data[0]!.bytes,
+      'project/roundtrip.scad': 'import("model.3mf");',
+      'project/model.3mf': exported.data[0]!.bytes,
     });
     const roundtripContext = await definition.initialize({}, roundtripRuntime);
     const roundtrip = await renderModel({
       definition,
       runtime: roundtripRuntime,
       context: roundtripContext,
-      entryPath: '/project/roundtrip.scad',
+      entryPath: 'project/roundtrip.scad',
     });
     expect(roundtrip.nativeHandle.stats).toMatchObject({ triangleCount: 24, volume: 16 });
     if (roundtrip.geometry.format !== 'gltf') {
@@ -703,7 +703,7 @@ translate([0, 0, 4]) color("blue") cube(2);
   it('names unchanged 3MF physical solids from authored provenance', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': `
+      'project/model.scad': `
 module roof_frame() {
   cube(2);
   translate([0, 0, 4]) cube(2);
@@ -713,7 +713,7 @@ roof_frame();
     });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: '/project/model.scad', parameters: {}, options: renderOptions },
+      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
       runtime,
       context,
     );
@@ -754,10 +754,10 @@ roof_frame();
     const fixtureUrl = new URL('fixtures/greenhouse/', import.meta.url);
     const source = await readFile(new URL('main.scad', fixtureUrl), 'utf8');
     const expected = JSON.parse(await readFile(new URL('manifest.json', fixtureUrl), 'utf8')) as unknown[];
-    const runtime = createRuntime({ '/project/main.scad': source });
+    const runtime = createRuntime({ 'project/main.scad': source });
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const context = await definition.initialize({}, runtime);
-    const rendered = await renderModel({ definition, runtime, context, entryPath: '/project/main.scad' });
+    const rendered = await renderModel({ definition, runtime, context, entryPath: 'project/main.scad' });
     if (rendered.geometry.format !== 'gltf') {
       throw new Error('Expected greenhouse GLB');
     }
@@ -850,13 +850,13 @@ roof_frame();
     for (const { fixture } of expected) {
       /* oxlint-disable no-await-in-loop -- One Wasm engine renders the fixtures serially; running them concurrently would interleave engine state for no gain on eight small models. */
       const source = await readFile(new URL(fixture, fixtureUrl), 'utf8');
-      const runtime = createRuntime({ '/project/main.scad': source });
+      const runtime = createRuntime({ 'project/main.scad': source });
       const context = await definition.initialize({}, runtime);
       const rendered = await renderModel({
         definition,
         runtime,
         context,
-        entryPath: '/project/main.scad',
+        entryPath: 'project/main.scad',
         content: { includeEdges: true },
       });
       if (rendered.geometry.format !== 'gltf') {
@@ -878,13 +878,13 @@ roof_frame();
 
   it('gives feature edges the opaque black material the thumbnail path renders', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/main.scad': 'cube(10);' });
+    const runtime = createRuntime({ 'project/main.scad': 'cube(10);' });
     const context = await definition.initialize({}, runtime);
     const rendered = await renderModel({
       definition,
       runtime,
       context,
-      entryPath: '/project/main.scad',
+      entryPath: 'project/main.scad',
       content: { includeEdges: true },
     });
     if (rendered.geometry.format !== 'gltf') {
@@ -921,10 +921,10 @@ roof_frame();
       fixtureFiles.map(async (name) => [name, await readFile(new URL(name, fixtureUrl), 'utf8')] as const),
     );
     const expected = JSON.parse(await readFile(new URL('manifest.json', fixtureUrl), 'utf8')) as unknown[];
-    const runtime = createRuntime(Object.fromEntries(loaded.map(([name, source]) => [`/project/${name}`, source])));
+    const runtime = createRuntime(Object.fromEntries(loaded.map(([name, source]) => [`project/${name}`, source])));
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const context = await definition.initialize({}, runtime);
-    const rendered = await renderModel({ definition, runtime, context, entryPath: '/project/main.scad' });
+    const rendered = await renderModel({ definition, runtime, context, entryPath: 'project/main.scad' });
     if (rendered.geometry.format !== 'gltf') {
       throw new Error('Expected gearbox GLB');
     }
@@ -939,10 +939,10 @@ roof_frame();
 
   it('preserves one deduplicated engine warning through render, mesh, GLB, and 3MF results', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/model.scad': 'color("not-a-color") cube(1);' });
+    const runtime = createRuntime({ 'project/model.scad': 'color("not-a-color") cube(1);' });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: '/project/model.scad', parameters: {}, options: renderOptions },
+      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
       runtime,
       context,
     );
@@ -979,11 +979,11 @@ roof_frame();
   it('returns structured geometry diagnostics from successful GLB and failed 3MF exports', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': 'union() { cube(10); polyhedron(points=[[0,0,0],[1,0,0],[0,1,0]], faces=[[0,1,2]]); }',
+      'project/model.scad': 'union() { cube(10); polyhedron(points=[[0,0,0],[1,0,0],[0,1,0]], faces=[[0,1,2]]); }',
     });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: '/project/model.scad', parameters: {}, options: renderOptions },
+      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
       runtime,
       context,
     );
@@ -1017,12 +1017,12 @@ roof_frame();
 
   it('surfaces invalid source as a render failure', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/model.scad': 'cube(;' });
+    const runtime = createRuntime({ 'project/model.scad': 'cube(;' });
     const context = await definition.initialize({}, runtime);
 
     await expect(
       definition.createGeometry(
-        { entryPath: '/project/model.scad', parameters: {}, options: renderOptions },
+        { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
         runtime,
         context,
       ),
@@ -1032,19 +1032,19 @@ roof_frame();
   it('resolves nested include files and reports the dependency closure', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': 'include <lib/part.scad>\ninclude </shared.scad>\npart(); shared();',
-      '/project/lib/part.scad': 'include <dimensions.scad>\nmodule part() cube(size);',
-      '/project/lib/dimensions.scad': 'size = 4;',
-      '/shared.scad': 'module shared() translate([10, 0, 0]) cube(2);',
+      'project/model.scad': 'include <lib/part.scad>\ninclude </shared.scad>\npart(); shared();',
+      'project/lib/part.scad': 'include <dimensions.scad>\nmodule part() cube(size);',
+      'project/lib/dimensions.scad': 'size = 4;',
+      'shared.scad': 'module shared() translate([10, 0, 0]) cube(2);',
     });
     const context = await definition.initialize({}, runtime);
 
-    await expect(definition.getDependencies({ entryPath: '/project/model.scad' }, runtime, context)).resolves.toEqual({
-      resolved: ['/project/model.scad', '/project/lib/part.scad', '/project/lib/dimensions.scad', '/shared.scad'],
+    await expect(definition.getDependencies({ entryPath: 'project/model.scad' }, runtime, context)).resolves.toEqual({
+      resolved: ['project/model.scad', 'project/lib/part.scad', 'project/lib/dimensions.scad', 'shared.scad'],
       unresolved: [],
     });
     const result = await definition.createGeometry(
-      { entryPath: '/project/model.scad', parameters: {}, options: renderOptions },
+      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
       runtime,
       context,
     );
@@ -1084,26 +1084,26 @@ endfacet
 endsolid tetrahedron`);
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': 'import("tetrahedron.stl");',
-      '/project/tetrahedron.stl': tetrahedron,
+      'project/model.scad': 'import("tetrahedron.stl");',
+      'project/tetrahedron.stl': tetrahedron,
     });
     const context = await definition.initialize({}, runtime);
 
-    await expect(definition.getDependencies({ entryPath: '/project/model.scad' }, runtime, context)).resolves.toEqual({
-      resolved: ['/project/model.scad', '/project/tetrahedron.stl'],
+    await expect(definition.getDependencies({ entryPath: 'project/model.scad' }, runtime, context)).resolves.toEqual({
+      resolved: ['project/model.scad', 'project/tetrahedron.stl'],
       unresolved: [],
     });
-    const rendered = await renderModel({ definition, runtime, context, entryPath: '/project/model.scad' });
+    const rendered = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
     expect(rendered.nativeHandle.stats).toMatchObject({ triangleCount: 4 });
     expect(rendered.nativeHandle.stats.volume).toBeCloseTo(1 / 6, 6);
   });
 
   it('applies parameter overrides and exports deterministic z-up millimeter GLB', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/model.scad': 'size = 1; cube(size);' });
+    const runtime = createRuntime({ 'project/model.scad': 'size = 1; cube(size);' });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: '/project/model.scad', parameters: { size: 7 }, options: renderOptions },
+      { entryPath: 'project/model.scad', parameters: { size: 7 }, options: renderOptions },
       runtime,
       context,
     );
@@ -1131,10 +1131,10 @@ endsolid tetrahedron`);
   it('maps OpenRSCAD customizer controls into Tau parameter schema', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({
-      '/project/model.scad': '/* [Body] */\nsize = 5; // [1:1:10]\nlabel = "A"; // [A:Alpha,B:Beta]\ncube(size);',
+      'project/model.scad': '/* [Body] */\nsize = 5; // [1:1:10]\nlabel = "A"; // [A:Alpha,B:Beta]\ncube(size);',
     });
     const context = await definition.initialize({}, runtime);
-    const result = await definition.getParameters({ entryPath: '/project/model.scad' }, runtime, context);
+    const result = await definition.getParameters({ entryPath: 'project/model.scad' }, runtime, context);
     expect(result).toEqual({
       success: true,
       data: {
@@ -1169,9 +1169,9 @@ endsolid tetrahedron`);
 
   it('returns a valid empty GLB for an empty source', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/empty.scad': '  \n' });
+    const runtime = createRuntime({ 'project/empty.scad': '  \n' });
     const context = await definition.initialize({}, runtime);
-    const result = await renderModel({ definition, runtime, context, entryPath: '/project/empty.scad' });
+    const result = await renderModel({ definition, runtime, context, entryPath: 'project/empty.scad' });
     expect(result.nativeHandle.stats.triangleCount).toBe(0);
     if (result.geometry.format !== 'gltf') {
       throw new Error('Expected empty GLB render geometry');
@@ -1181,10 +1181,10 @@ endsolid tetrahedron`);
 
   it('names OpenSCAD, not the engine, in the unsupported-export-format issue', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/model.scad': 'cube(1);' });
+    const runtime = createRuntime({ 'project/model.scad': 'cube(1);' });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: '/project/model.scad', parameters: {}, options: renderOptions },
+      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
       runtime,
       context,
     );
@@ -1203,13 +1203,13 @@ endsolid tetrahedron`);
 
   it('names OpenSCAD, not the engine, when the native export fails', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ '/project/model.scad': 'cube(1);' });
+    const runtime = createRuntime({ 'project/model.scad': 'cube(1);' });
     const context = await definition.initialize({}, runtime);
     const failedNativeExport = { ok: false } as unknown as ExportShape3DOutput;
     context.backend = { ...context.backend, renderToGlb: async () => failedNativeExport };
     await expect(
       definition.createGeometry(
-        { entryPath: '/project/model.scad', parameters: {}, options: renderOptions },
+        { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
         runtime,
         context,
       ),
@@ -1221,14 +1221,14 @@ endsolid tetrahedron`);
     const depth = 52;
     const files = Object.fromEntries(
       Array.from({ length: depth }, (_unused, index) => [
-        `/project/include-${String(index)}.scad`,
+        `project/include-${String(index)}.scad`,
         index === depth - 1 ? '// leaf' : `include <include-${String(index + 1)}.scad>`,
       ]),
     );
     const runtime = createRuntime(files);
     const context = await definition.initialize({}, runtime);
 
-    await definition.getDependencies({ entryPath: '/project/include-0.scad' }, runtime, context);
+    await definition.getDependencies({ entryPath: 'project/include-0.scad' }, runtime, context);
 
     expect(runtime.logger.warn).toHaveBeenCalledWith(expect.stringContaining('OpenSCAD include depth exceeded 50'));
     expect(runtime.logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('OpenRSCAD'));

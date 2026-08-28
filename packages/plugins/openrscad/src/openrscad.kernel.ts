@@ -13,15 +13,14 @@ import type { GeometryGltf, JSONSchema7, JSONSchema7Definition } from '@taucad/r
 
 import {
   asBuffer,
-  coordinateSystemSchema,
+  assertRootedPath,
   createKernelError,
   createKernelSuccess,
   defineKernel,
   finalizeMeshOutput,
+  gltfExportConventionSchema,
   isRecordObject,
   resolveImportPath,
-  resolveVirtualPath,
-  unitSchema,
 } from '@taucad/runtime/kernel';
 import type { KernelFileSystem, KernelIssue, RuntimeLogger } from '@taucad/runtime/kernel';
 
@@ -56,7 +55,7 @@ const exportTessellationSchema = z.object({
 
 /** Native OpenRSCAD 3D export options. @public */
 export const openrscadExportSchemas = {
-  glb: exportTessellationSchema.extend(coordinateSystemSchema.shape).extend(unitSchema.shape),
+  glb: exportTessellationSchema.extend(gltfExportConventionSchema.shape),
   '3mf': exportTessellationSchema,
 } as const satisfies Record<string, z.ZodType>;
 
@@ -134,7 +133,7 @@ const collectSourceBundle = async (options: {
   filesystem: KernelFileSystem;
   logger: RuntimeLogger;
 }): Promise<SourceBundle> => {
-  const entryPath = resolveVirtualPath(options.entryPath);
+  const entryPath = assertRootedPath(options.entryPath);
   const source = await options.filesystem.readFile(entryPath, 'utf8');
   const resolved = new Set([entryPath]);
   const unresolved = new Set<string>();
@@ -365,7 +364,7 @@ const collectIssues = (result: ExportShape3DOutput, source: string, entryPath: s
       message: diagnostic.message,
       severity: diagnostic.severity,
       type: 'compilation',
-      location: byteOffsetLocation(source, entryPath.slice(1), diagnostic.start),
+      location: byteOffsetLocation(source, entryPath, diagnostic.start),
     });
   }
   for (const [message, severity] of [
@@ -467,7 +466,7 @@ export const createOpenrscadKernel = ({
     },
 
     async createGeometry({ entryPath, parameters, options }, { filesystem, logger, tracer }, context) {
-      const normalizedEntryPath = resolveVirtualPath(entryPath);
+      const normalizedEntryPath = assertRootedPath(entryPath);
       if (context.entryPath !== normalizedEntryPath) {
         await context.backend.clearCache();
         context.entryPath = normalizedEntryPath;

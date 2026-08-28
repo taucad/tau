@@ -17,6 +17,7 @@ import type { ChangeEvent, FileStat, FileStatEntry, ProjectManifestParseIssue } 
 import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import type { BridgeProtocolSchemas } from '@taucad/rpc/bridge';
 import type { WireValidationResult, WireValidator } from '@taucad/rpc';
+import { assertRootedPath } from '@taucad/utils/path';
 
 /** Current filesystem bridge protocol version. @public */
 export const fileSystemBridgeProtocolVersion = 1;
@@ -159,6 +160,18 @@ const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => isString(item));
 const isOptionalBoolean = (value: unknown): boolean => value === undefined || isBoolean(value);
 const isOptionalString = (value: unknown): boolean => value === undefined || isString(value);
+const isRootedPath = (value: unknown): value is string => {
+  if (!isString(value)) {
+    return false;
+  }
+  try {
+    return assertRootedPath(value) === value;
+  } catch {
+    return false;
+  }
+};
+const isProjectDirectoryPath = (value: unknown): value is string =>
+  isRootedPath(value) && value !== '' && !value.includes('/') && !value.startsWith('.');
 const isProjectId = (value: unknown): value is string => projectManifestSchema.shape.id.safeParse(value).success;
 const hasOnlyKnownTypedFields = (
   value: unknown,
@@ -227,13 +240,13 @@ const isProjectRootConfig = (value: unknown): value is ProjectRootConfig => {
   if (
     !isRecord(value) ||
     !isProjectId(value['projectId']) ||
-    !isString(value['providerBasePath']) ||
+    !isProjectDirectoryPath(value['providerBasePath']) ||
     !isString(value['backend'])
   ) {
     return false;
   }
   if (value['backend'] === 'webaccess') {
-    return isWebAccessRoot(value);
+    return isString(value['workspaceId']) && value['directoryHandle'] === undefined;
   }
   if (value['backend'] === 'memory') {
     return isString(value['storageRootKey']);
@@ -246,7 +259,7 @@ const isProjectLocator = (value: unknown): value is ProjectLocator => {
     !isRecord(value) ||
     !isString(value['backend']) ||
     !isString(value['storageRootKey']) ||
-    !isString(value['relativeDirectory'])
+    !isProjectDirectoryPath(value['relativeDirectory'])
   ) {
     return false;
   }
@@ -659,9 +672,10 @@ const callSchemas = {
       (items) =>
         items.length === 1 &&
         isRecord(items[0]) &&
-        isString(items[0]['providerBasePath']) &&
+        isProjectDirectoryPath(items[0]['providerBasePath']) &&
         isStorageRootConfig(items[0]['scope']) &&
         isRecord(items[0]['files']) &&
+        Object.keys(items[0]['files']).every((path) => path !== '' && isRootedPath(path)) &&
         Object.values(items[0]['files']).every((entry) => isRecord(entry) && isBytes(entry['content'])) &&
         isBytes(items[0]['manifest']),
       'Expected a pending-project commit input',
@@ -692,7 +706,7 @@ const callSchemas = {
         items.length === 1 &&
         isRecord(items[0]) &&
         isProjectId(items[0]['projectId']) &&
-        isString(items[0]['providerBasePath']) &&
+        isProjectDirectoryPath(items[0]['providerBasePath']) &&
         isStorageRootConfig(items[0]['scope']),
       'Expected a permanent-delete input',
     ),

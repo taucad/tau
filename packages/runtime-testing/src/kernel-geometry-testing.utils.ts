@@ -145,13 +145,13 @@ export function extractGltfFromResult(result: RuntimeResult): Uint8Array<ArrayBu
  * declare const client: {
  *   export: (
  *     format: 'glb',
- *     input: { source: { files: { '/main.ts': string } } },
+ *     input: { source: { files: { 'main.ts': string } } },
  *   ) => Promise<ExportResult>;
  * };
  * declare const expect: (value: unknown) => { toBeInstanceOf: (ctor: unknown) => void };
  * declare const source: string;
  *
- * const result = await client.export('glb', { source: { files: { '/main.ts': source } } });
+ * const result = await client.export('glb', { source: { files: { 'main.ts': source } } });
  * const glb = extractGltfFromExportResult(result);
  * expect(glb).toBeInstanceOf(Uint8Array);
  * ```

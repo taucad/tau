@@ -6,12 +6,11 @@ import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
 import { z } from 'zod';
 import { toolName } from '@taucad/chat/constants';
 import { normalizeGeoSpecRunFilterInputAliases } from '@taucad/chat/schemas/tools/test-model-input-normalizer';
+import { normalizeProjectPathToolInputAliases } from '@taucad/chat/schemas/tools/project-path-input-normalizer';
 import { AttributeKey } from '@taucad/telemetry';
 import type { ModelService } from '#api/models/model.service.js';
 import { cloneAiMessage } from '#api/chat/utils/ai-message-clone.js';
 import type { MetricsService } from '#telemetry/metrics.js';
-
-const repairKind = 'bracket_array_alias';
 
 const compatibilityContextSchema = z.looseObject({
   modelId: z.string().optional(),
@@ -28,57 +27,61 @@ type ToolCallLike = {
 
 type NormalizedToolCall = {
   toolCall: ToolCallLike;
-  healed: boolean;
+  repairKinds: readonly string[];
 };
-
-type ToolInputNormalizer = typeof normalizeGeoSpecRunFilterInputAliases;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-const toolInputNormalizers: Partial<Record<string, ToolInputNormalizer>> = {
-  [toolName.testModel]: normalizeGeoSpecRunFilterInputAliases,
-};
-
 function normalizeToolCall(toolCall: ToolCallLike): NormalizedToolCall {
-  const normalizer = toolInputNormalizers[toolCall.name];
-  if (!normalizer) {
-    return { toolCall, healed: false };
+  let input = toolCall.args;
+  const repairKinds: string[] = [];
+
+  if (toolCall.name === toolName.testModel) {
+    const normalized = normalizeGeoSpecRunFilterInputAliases(input);
+    if (normalized.changed) {
+      input = normalized.input;
+      repairKinds.push('bracket_array_alias');
+    }
   }
 
-  const normalized = normalizer(toolCall.args);
-  if (!normalized.changed || !isRecord(normalized.input)) {
-    return { toolCall, healed: false };
+  const pathNormalized = normalizeProjectPathToolInputAliases(toolCall.name, input);
+  if (pathNormalized.changed) {
+    input = pathNormalized.input;
+    repairKinds.push(...pathNormalized.healedKeys.map(() => 'project_path_alias'));
   }
 
+  if (repairKinds.length === 0 || !isRecord(input)) {
+    return { toolCall, repairKinds: [] };
+  }
   return {
     toolCall: {
       ...toolCall,
-      args: normalized.input,
+      args: input,
     },
-    healed: true,
+    repairKinds,
   };
 }
 
 function normalizeToolCalls(toolCalls: readonly ToolCallLike[] | undefined): {
   toolCalls: readonly ToolCallLike[];
-  healedToolCalls: readonly ToolCallLike[];
+  repairedToolCalls: readonly NormalizedToolCall[];
 } {
   if (!toolCalls || toolCalls.length === 0) {
-    return { toolCalls: toolCalls ?? [], healedToolCalls: [] };
+    return { toolCalls: toolCalls ?? [], repairedToolCalls: [] };
   }
 
-  const healedToolCalls: ToolCallLike[] = [];
+  const repairedToolCalls: NormalizedToolCall[] = [];
   const nextToolCalls = toolCalls.map((toolCall) => {
     const normalized = normalizeToolCall(toolCall);
-    if (normalized.healed) {
-      healedToolCalls.push(normalized.toolCall);
+    if (normalized.repairKinds.length > 0) {
+      repairedToolCalls.push(normalized);
     }
     return normalized.toolCall;
   });
 
-  return { toolCalls: healedToolCalls.length === 0 ? toolCalls : nextToolCalls, healedToolCalls };
+  return { toolCalls: repairedToolCalls.length === 0 ? toolCalls : nextToolCalls, repairedToolCalls };
 }
 
 function matchingNormalizedToolCall(
@@ -139,6 +142,7 @@ function recordRepair(
   metricsService: MetricsService,
   context: z.infer<typeof compatibilityContextSchema>,
   tool: string,
+  repairKind: string,
 ): void {
   const { modelId, modelService } = context;
   const providerName = modelId ? modelService?.getOtelProviderName(modelId) : undefined;
@@ -154,14 +158,16 @@ function recordRepair(
 function recordRepairs(
   metricsService: MetricsService,
   context: z.infer<typeof compatibilityContextSchema>,
-  healedToolCalls: readonly ToolCallLike[],
+  repairedToolCalls: readonly NormalizedToolCall[],
 ): void {
-  if (healedToolCalls.length === 0) {
+  if (repairedToolCalls.length === 0) {
     return;
   }
 
-  for (const toolCall of healedToolCalls) {
-    recordRepair(metricsService, context, toolCall.name);
+  for (const repair of repairedToolCalls) {
+    for (const repairKind of repair.repairKinds) {
+      recordRepair(metricsService, context, repair.toolCall.name, repairKind);
+    }
   }
 }
 
@@ -181,14 +187,14 @@ export const createToolInputCompatibilityMiddleware = (metricsService: MetricsSe
         return undefined;
       }
 
-      const { toolCalls, healedToolCalls } = normalizeToolCalls(
+      const { toolCalls, repairedToolCalls } = normalizeToolCalls(
         lastMessage.tool_calls as readonly ToolCallLike[] | undefined,
       );
-      if (healedToolCalls.length === 0) {
+      if (repairedToolCalls.length === 0) {
         return undefined;
       }
 
-      recordRepairs(metricsService, runtime.context, healedToolCalls);
+      recordRepairs(metricsService, runtime.context, repairedToolCalls);
       const healedMessage = rebuildAiMessage(lastMessage, toolCalls);
       if (lastMessage.id) {
         return { messages: [healedMessage] };
@@ -201,11 +207,13 @@ export const createToolInputCompatibilityMiddleware = (metricsService: MetricsSe
 
     async wrapToolCall(request, handler) {
       const normalized = normalizeToolCall(request.toolCall as ToolCallLike);
-      if (!normalized.healed) {
+      if (normalized.repairKinds.length === 0) {
         return handler(request);
       }
 
-      recordRepair(metricsService, request.runtime.context, normalized.toolCall.name);
+      for (const repairKind of normalized.repairKinds) {
+        recordRepair(metricsService, request.runtime.context, normalized.toolCall.name, repairKind);
+      }
       return handler({
         ...request,
         toolCall: normalized.toolCall as typeof request.toolCall,

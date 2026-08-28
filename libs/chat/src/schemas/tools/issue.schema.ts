@@ -6,6 +6,7 @@ import type { CodeIssue } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 import { kernelIssueCodeValues } from '@taucad/runtime/types';
 import { z } from 'zod';
+import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 export const codeIssueSchema: z.ZodType<CodeIssue> = z
   .object({
@@ -18,7 +19,7 @@ export const codeIssueSchema: z.ZodType<CodeIssue> = z
   .meta({ id: 'CodeIssue' });
 
 export const errorLocationSchema = z.object({
-  fileName: z.string(),
+  fileName: rootedFilePathSchema,
   startLineNumber: z.number(),
   startColumn: z.number(),
   endLineNumber: z.number().optional(),

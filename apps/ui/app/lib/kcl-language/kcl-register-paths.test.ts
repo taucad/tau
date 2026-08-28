@@ -17,6 +17,12 @@ describe('kcl-register-paths', () => {
     expect(kclUriToWorkspacePath(importUri)).toBe('public/kcl-samples/axial-fan/fan-housing.kcl');
   });
 
+  it('rejects non-file, authority-bearing, and escaping URIs', () => {
+    expect(() => kclUriToWorkspacePath('https://example.com/main.kcl')).toThrow('Invalid virtual path.');
+    expect(() => kclUriToWorkspacePath('file://server/main.kcl')).toThrow('Invalid virtual path.');
+    expect(() => kclUriToWorkspacePath('file:///../main.kcl')).toThrow('escapes the filesystem root');
+  });
+
   describe('parentDirectoryOfWorkspacePath', () => {
     it('returns the parent segment for nested paths', () => {
       expect(parentDirectoryOfWorkspacePath('public/kcl-samples/axial-fan/main.kcl')).toBe(

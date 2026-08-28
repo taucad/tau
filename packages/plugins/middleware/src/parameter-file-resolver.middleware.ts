@@ -1,19 +1,20 @@
 import deepmerge from 'deepmerge';
 import { z } from 'zod';
 import { fileParameterEntrySchema, getActiveGroupValues, parametersDirectory } from '@taucad/runtime/types';
-import { resolveVirtualPath, isNotFoundError } from '@taucad/runtime/kernel';
+import { assertRootedPath, isNotFoundError } from '@taucad/runtime/kernel';
 import { defineMiddleware } from '@taucad/runtime/middleware';
 
 const resolveParameterFilePath = (entryPath: string, parametersDirectoryPath: string): string => {
-  const localEntryPath = resolveVirtualPath(entryPath).slice(1);
-  return resolveVirtualPath(`/${parametersDirectoryPath}/${localEntryPath}.json`);
+  const localEntryPath = assertRootedPath(entryPath);
+  const directory = assertRootedPath(parametersDirectoryPath);
+  return assertRootedPath(`${directory ? `${directory}/` : ''}${localEntryPath}.json`);
 };
 
 /**
  * Middleware that applies persisted parameter-group values during geometry creation.
  *
  * Each normalized runtime entry path maps to a runtime path beneath `parametersDir`. For example,
- * `/src/box.ts` maps to `/.tau/parameters/src/box.ts.json` by default. The active
+ * `src/box.ts` maps to `.tau/parameters/src/box.ts.json` by default. The active
  * group's values are deep-merged over the request parameters, with arrays replaced
  * rather than concatenated.
  *

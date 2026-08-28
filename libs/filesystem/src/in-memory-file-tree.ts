@@ -93,7 +93,7 @@ export class InMemoryFileTree {
   /**
    * Stat a single path.
    *
-   * @param path - Absolute path (e.g. `/src/main.ts`).
+   * @param path - Tree-relative path (for example, `src/main.ts`).
    * @returns Node metadata or `undefined` if not found.
    */
   public stat(path: string): TreeNode | undefined {
@@ -107,7 +107,7 @@ export class InMemoryFileTree {
   /**
    * List entries in a directory.
    *
-   * @param path - Absolute directory path.
+   * @param path - Tree-relative directory path (`''` for the root).
    * @returns Array of entry names, or empty array if not found.
    */
   public readdir(path: string): string[] {

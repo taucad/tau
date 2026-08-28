@@ -11,7 +11,7 @@ import { useRuntime } from '@taucad/react';
 import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
 import type { runtime } from './runtime-definition';
 
-const mainFile = '/main.ts';
+const mainFile = 'main.ts';
 const initialSource = 'export default () => makeCylinder(10, 24);';
 
 const clientOptions = createWebWorkerClientOptions<typeof runtime>({

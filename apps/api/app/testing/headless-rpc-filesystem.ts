@@ -2,9 +2,7 @@ import type { RuntimeFileSystemBase } from '@taucad/runtime';
 import { ResourceQueue } from '@taucad/filesystem';
 import type { RpcDirectoryEntry, RpcFileSystem, RpcFileStat } from '@taucad/chat/rpc';
 import { getErrno } from '@taucad/utils/error';
-import { joinRelativePath, resolveVirtualPath } from '@taucad/utils/path';
-
-const toRuntimePath = (path: string): string => resolveVirtualPath(path === '' ? '/' : `/${path}`);
+import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 
 /**
  * Adapts a primitive `RuntimeFileSystemBase` to the `RpcFileSystem`
@@ -15,26 +13,26 @@ export function createHeadlessRpcFileSystem(fs: RuntimeFileSystemBase): RpcFileS
 
   return {
     async readFile(path: string): Promise<string> {
-      return fs.readFile(toRuntimePath(path), 'utf8');
+      return fs.readFile(assertRootedPath(path), 'utf8');
     },
     async writeFile(path: string, content: string): Promise<void> {
-      const runtimePath = toRuntimePath(path);
+      const runtimePath = assertRootedPath(path);
       await mutationQueue.queueFor(runtimePath, async () => fs.writeFile(runtimePath, content));
     },
     async writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
-      const runtimePath = toRuntimePath(path);
+      const runtimePath = assertRootedPath(path);
       const ownedData = new Uint8Array(data);
       await mutationQueue.queueFor(runtimePath, async () => fs.writeFile(runtimePath, ownedData));
     },
     async deleteFile(path: string): Promise<void> {
-      const runtimePath = toRuntimePath(path);
+      const runtimePath = assertRootedPath(path);
       await mutationQueue.queueFor(runtimePath, async () => fs.unlink(runtimePath));
     },
     async readdir(path: string): Promise<RpcDirectoryEntry[]> {
-      const names = await fs.readdir(toRuntimePath(path));
+      const names = await fs.readdir(assertRootedPath(path));
       const entries = await Promise.all(
         names.map(async (name): Promise<RpcDirectoryEntry | undefined> => {
-          const childPath = toRuntimePath(joinRelativePath(path, name));
+          const childPath = assertRootedPath(joinRelativePath(path, name));
           try {
             const info = await fs.stat(childPath);
             if (info.type === 'dir') {
@@ -74,10 +72,10 @@ export function createHeadlessRpcFileSystem(fs: RuntimeFileSystemBase): RpcFileS
       return entries.filter((entry): entry is RpcDirectoryEntry => entry !== undefined);
     },
     async exists(path: string): Promise<boolean> {
-      return fs.exists(toRuntimePath(path));
+      return fs.exists(assertRootedPath(path));
     },
     async appendFile(path: string, content: string): Promise<void> {
-      const runtimePath = toRuntimePath(path);
+      const runtimePath = assertRootedPath(path);
       await mutationQueue.queueFor(runtimePath, async () => {
         let existing = '';
         try {
@@ -97,7 +95,7 @@ export function createHeadlessRpcFileSystem(fs: RuntimeFileSystemBase): RpcFileS
       newString: string,
       replaceAll?: boolean,
     ): Promise<{ occurrences: number }> {
-      const runtimePath = toRuntimePath(path);
+      const runtimePath = assertRootedPath(path);
       return mutationQueue.queueFor(runtimePath, async () => {
         const content = await fs.readFile(runtimePath, 'utf8');
         const occurrences = replaceAll ? content.split(oldString).length - 1 : content.includes(oldString) ? 1 : 0;
@@ -112,7 +110,7 @@ export function createHeadlessRpcFileSystem(fs: RuntimeFileSystemBase): RpcFileS
       });
     },
     async stat(path: string): Promise<RpcFileStat> {
-      const runtimePath = toRuntimePath(path);
+      const runtimePath = assertRootedPath(path);
       const info = await fs.stat(runtimePath);
       const isoDate = new Date(info.mtimeMs).toISOString();
       if (info.type === 'dir') {

@@ -113,11 +113,11 @@ describe('extractDefaultParameters', () => {
 
 describe('toVmEntryPath', () => {
   it('converts a canonical local path to the VM entry spelling', () => {
-    expect(toVmEntryPath('/src/main.ts')).toBe('src/main.ts');
+    expect(toVmEntryPath('src/main.ts')).toBe('src/main.ts');
   });
 
   it('rejects traversal above the virtual root', () => {
-    expect(() => toVmEntryPath('/../secret.ts')).toThrow('escapes');
+    expect(() => toVmEntryPath('../secret.ts')).toThrow('escapes');
   });
 });
 

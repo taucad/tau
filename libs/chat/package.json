@@ -40,6 +40,11 @@
       "types": "./src/schemas/tools/test-model-input-normalizer.ts",
       "import": "./src/schemas/tools/test-model-input-normalizer.ts",
       "default": "./src/schemas/tools/test-model-input-normalizer.ts"
+    },
+    "./schemas/tools/project-path-input-normalizer": {
+      "types": "./src/schemas/tools/project-path-input-normalizer.ts",
+      "import": "./src/schemas/tools/project-path-input-normalizer.ts",
+      "default": "./src/schemas/tools/project-path-input-normalizer.ts"
     }
   },
   "dependencies": {

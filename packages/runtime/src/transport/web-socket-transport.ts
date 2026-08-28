@@ -42,7 +42,7 @@
  * const client = createRuntimeClient({
  *   transport: webSocketTransport({
  *     url: 'ws://127.0.0.1:8080',
- *     fileSystem: fromMemoryFs({ '/main.ts': 'export default () => true;' }),
+ *     fileSystem: fromMemoryFs({ 'main.ts': 'export default () => true;' }),
  *   }),
  * });
  * ```

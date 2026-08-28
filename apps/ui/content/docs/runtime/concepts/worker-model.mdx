@@ -90,7 +90,7 @@ This dual-bridge design means editor writes (Bridge A) trigger watch events to t
 
 For environments without a separate filesystem worker (e.g., Node.js or testing), the inline arms wire `createFileSystemBridgePort(fileSystem)` internally and use the same protocol — `watch` is auto-propagated when the inlined object exposes a `watch` method.
 
-A [runtime path](./path-namespaces) identifies a file within the filesystem supplied to the client. Normalized worker-side paths begin with `/`, but that slash names the supplied filesystem's root rather than the host operating system's root. The filesystem decides reachability, preserves concrete exact-path events, and emits explicit reset/overflow signals when path information is lost; runtime neither receives authority-global `/projects/<id>` paths nor makes authorization or filename-equivalence decisions. Scoped writes preserve an internal origin tag so the originating runtime port does not receive its own watch echo, while peer writes remain visible.
+A [runtime path](./path-namespaces) identifies a file within the filesystem supplied to the client. Worker-side paths are canonical and root-relative, with `''` naming the supplied root. The filesystem decides reachability, preserves concrete exact-path events, and emits explicit reset/overflow signals when path information is lost; runtime neither receives authority-global `/projects/<id>` paths nor makes authorization or filename-equivalence decisions. Scoped writes preserve an internal origin tag so the originating runtime port does not receive its own watch echo, while peer writes remain visible.
 
 ### Transport Abort Channel
 

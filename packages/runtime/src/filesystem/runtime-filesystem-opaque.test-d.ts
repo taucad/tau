@@ -37,8 +37,8 @@ describe('RuntimeFileSystem opacity (C9)', () => {
   });
 
   it('every bundled fromX factory returns RuntimeFileSystem', () => {
-    const pathA = '/a.ts';
-    const binaryPath = '/binary.step';
+    const pathA = 'a.ts';
+    const binaryPath = 'binary.step';
     assertType<RuntimeFileSystem>(fromMemoryFs());
     assertType<RuntimeFileSystem>(fromMemoryFs({ [pathA]: 'x' }));
     assertType<RuntimeFileSystem>(fromMemoryFs({ [binaryPath]: new Uint8Array([1, 2, 3]) }));

@@ -152,6 +152,25 @@ describe('editorMachine', () => {
       actor.stop();
     });
 
+    it('should repair and deduplicate legacy slash-prefixed persisted tabs', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          openFiles: [
+            { paneId: 'pane-relative', path: 'main.ts', name: 'main.ts', lastAccessedAt: 1000 },
+            { paneId: 'pane-legacy', path: '/main.ts', name: 'main.ts', lastAccessedAt: 2000 },
+          ],
+          activePaneId: 'pane-legacy',
+        },
+      });
+
+      expect(actor.getSnapshot().context.openFiles).toEqual([
+        expect.objectContaining({ paneId: 'pane-legacy', path: 'main.ts' }),
+      ]);
+      expect(actor.getSnapshot().context.activePaneId).toBe('pane-legacy');
+      actor.stop();
+    });
+
     it('should handle load with undefined state', async () => {
       const actor = await startAndLoad({ loadResult: undefined });
       const { context } = actor.getSnapshot();
@@ -236,6 +255,7 @@ describe('editorMachine', () => {
       const newMainUnitId = 'file:src/index.ts';
       const otherUnitId = 'file:src/other.ts';
       const cameraView = {
+        frameId: 'tau:root',
         target: [3, 4, 5],
         direction: [1, 0, 0],
         up: [0, 0, 1],

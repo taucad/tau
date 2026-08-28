@@ -82,7 +82,7 @@ describe('createWorkspaceFileSystemProvider', () => {
 
     expect(uri.path).toBe('/../outside.ts');
     expect(workspaceFs.peekModel(uri)).toBeUndefined();
-    expect(contentService.peekOutcome).toHaveBeenCalledWith('../outside.ts');
+    expect(contentService.peekOutcome).not.toHaveBeenCalled();
     workspaceFs.dispose();
   });
 
@@ -110,7 +110,7 @@ describe('createWorkspaceFileSystemProvider', () => {
 
   it('findFiles delegates to searchFiles and maps stat paths to file URIs', async () => {
     const searchFiles = vi.fn(
-      async (): Promise<readonly FileStatEntry[]> => [textFileStatEntry('a.ts'), textFileStatEntry('/b.ts')],
+      async (): Promise<readonly FileStatEntry[]> => [textFileStatEntry('a.ts'), textFileStatEntry('b.ts')],
     );
     const contentService = {
       resolve: vi.fn(),
@@ -124,6 +124,20 @@ describe('createWorkspaceFileSystemProvider', () => {
     const uris = await provider.findFiles?.('.ts', { maxResults: 10 });
     expect(searchFiles).toHaveBeenCalledWith('.ts', { maxResults: 10, includeDirectories: false });
     expect(uris?.map((u) => u.path)).toEqual(['/a.ts', '/b.ts']);
+  });
+
+  it('findFiles rejects noncanonical workspace paths', async () => {
+    const contentService = {
+      resolve: vi.fn(),
+      peekOutcome: vi.fn(),
+    } as unknown as FileContentService;
+    const provider = createWorkspaceFileSystemProvider({
+      monaco,
+      contentService,
+      searchFiles: async () => [textFileStatEntry('/legacy.ts')],
+    });
+
+    await expect(provider.findFiles?.('.ts')).rejects.toMatchObject({ code: 'INVALID_PATH' });
   });
 
   it('readText prefers workspace text from content service when present', async () => {

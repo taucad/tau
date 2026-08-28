@@ -46,7 +46,7 @@ const createWorkspace = async (): Promise<Workspace> => {
         projectId,
         backend: 'memory',
         storageRootKey: `memory:node-host-project-${Math.random().toString(36).slice(2)}`,
-        providerBasePath: `/${projectId}`,
+        providerBasePath: projectId,
       },
     ],
     roots: [],
@@ -106,9 +106,9 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
     try {
       await client.proxy.ready;
       expect(client.proxy.hello.payload).toMatchObject({ v: 1, state: 'ready' });
-      await expect(client.proxy.readFile('/main.ts', 'utf8')).resolves.toBe('export default 1;\n');
+      await expect(client.proxy.readFile('main.ts', 'utf8')).resolves.toBe('export default 1;\n');
 
-      await client.proxy.writeFile('/written.ts', 'export default 2;\n');
+      await client.proxy.writeFile('written.ts', 'export default 2;\n');
       await expect(workspace.service.readFile(`${projectRoot}/written.ts`, 'utf8')).resolves.toBe(
         'export default 2;\n',
       );
@@ -117,7 +117,7 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
       client.dispose();
       // The proxy's `get` trap throws before the call, so nothing is left pending.
       expect(() => {
-        void client.proxy.readFile('/main.ts', 'utf8');
+        void client.proxy.readFile('main.ts', 'utf8');
       }).toThrow(/disposed/u);
     } finally {
       host.dispose();
@@ -133,11 +133,11 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
 
     try {
       await client.proxy.ready;
-      await expect(client.proxy.readFile('/inside.ts', 'utf8')).resolves.toBe('visible');
+      await expect(client.proxy.readFile('inside.ts', 'utf8')).resolves.toBe('visible');
       // The scoped handler resolves `/` to the project root, so the authority's
       // own `/outside.ts` is simply not addressable from this port.
-      await expect(client.proxy.readFile('/outside.ts', 'utf8')).rejects.toThrow();
-      await expect(client.proxy.readFile('/../outside.ts', 'utf8')).rejects.toThrow();
+      await expect(client.proxy.readFile('outside.ts', 'utf8')).rejects.toThrow();
+      await expect(client.proxy.readFile('../outside.ts', 'utf8')).rejects.toThrow();
     } finally {
       client.dispose();
       host.dispose();

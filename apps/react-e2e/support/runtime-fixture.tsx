@@ -6,7 +6,7 @@ import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { getIsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 import { summarizeGlb } from './glb-bounds';
 
-type InlineSourceFiles = { readonly '/main.ts': string };
+type InlineSourceFiles = { readonly 'main.ts': string };
 export type RuntimeFixtureOptions<Runtime extends AnyRuntimeDefinition> = UseRuntimeOptions<
   Runtime,
   UseRuntimeTransportPlugin,

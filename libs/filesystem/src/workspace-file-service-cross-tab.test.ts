@@ -62,7 +62,7 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
     await expect(stale.service.writeFile('/collision', 'invalid file')).rejects.toMatchObject({ code: 'EISDIR' });
     await stale.service.writeFile('/source.txt', 'source');
     await writer.provider.refresh?.();
-    await writer.provider.mkdir('/target');
+    await writer.provider.mkdir('target');
     await expect(stale.service.move('/source.txt', '/target')).rejects.toMatchObject({ code: 'EEXIST' });
     await expect(stale.service.readFile('/source.txt', 'utf8')).resolves.toBe('source');
 
@@ -81,7 +81,7 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
       sender.postMessage({
         type: 'write',
         path: '/foreign.txt',
-        authority: { storageRootKey: 'indexeddb:not-owned', providerBasePath: '/' },
+        authority: { storageRootKey: 'indexeddb:not-owned', providerBasePath: '' },
       });
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
@@ -169,7 +169,7 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
     const writer = await createAuthority(databasePrefix);
     const projectId = 'proj_zzzzzzzzzzzzzzzzzzzzz';
     const directoryName = 'delete-me';
-    const directory = `/${directoryName}`;
+    const directory = directoryName;
     await writer.provider.mkdir(directory, { recursive: true });
     await writer.provider.writeFile(
       `${directory}/tau.json`,

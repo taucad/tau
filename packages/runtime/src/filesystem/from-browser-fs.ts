@@ -16,7 +16,7 @@
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import { resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 
 const enoent = (path: string): Error => {
   const error = new Error(`ENOENT: no such file or directory: ${path}`);
@@ -39,7 +39,7 @@ const isMissingEntryError = (error: unknown): boolean => {
 };
 
 const splitPath = (path: string): string[] =>
-  resolveVirtualPath(path)
+  assertRootedPath(path)
     .split('/')
     .filter((segment) => segment.length > 0);
 
@@ -67,7 +67,7 @@ const getDirectory = async (
  * opaque {@link RuntimeFileSystem} value passed to
  * `createRuntimeClient({ fileSystem })`.
  *
- * @param root - Browser directory capability exposed as runtime `/`, returned by
+ * @param root - Browser directory capability used as the runtime filesystem root, returned by
  *   `window.showDirectoryPicker()` or
  *   `navigator.storage.getDirectory()`. Runtime paths are resolved through
  *   this handle and do not imply that a portable host OS path exists.
@@ -213,8 +213,8 @@ function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemB
       await directory.removeEntry(last, { recursive: true });
     },
     async rename(oldPath, newPath) {
-      const canonicalOldPath = resolveVirtualPath(oldPath);
-      const canonicalNewPath = resolveVirtualPath(newPath);
+      const canonicalOldPath = assertRootedPath(oldPath);
+      const canonicalNewPath = assertRootedPath(newPath);
       const sourceStat = await this.stat(canonicalOldPath);
       if (sourceStat.type === 'dir') {
         throw eisdir(canonicalOldPath);
@@ -227,7 +227,7 @@ function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemB
       return this.stat(filePath);
     },
     async exists(filePath) {
-      const canonicalPath = resolveVirtualPath(filePath);
+      const canonicalPath = assertRootedPath(filePath);
       try {
         await this.stat(canonicalPath);
         return true;

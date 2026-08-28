@@ -374,7 +374,7 @@ describe('wrap hook behavior', () => {
     const definition = await resolveRuntimePluginDefinition('middleware', middleware());
     const result = await definition.wrapCreateGeometry!(
       {
-        entryPath: '/test.kcl',
+        entryPath: 'test.kcl',
         parameters: {},
         options: {},
       },
@@ -415,7 +415,7 @@ describe('wrap hook behavior', () => {
     const mockHandler = vi.fn();
 
     const input = {
-      entryPath: '/test.kcl',
+      entryPath: 'test.kcl',
       parameters: {},
       options: {},
     } as const;
@@ -487,7 +487,7 @@ describe('wrap hook behavior', () => {
     const definition = await resolveRuntimePluginDefinition('middleware', middleware());
     await definition.wrapCreateGeometry!(
       {
-        entryPath: '/test.kcl',
+        entryPath: 'test.kcl',
         parameters: {},
         options: {},
       },

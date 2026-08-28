@@ -8,7 +8,7 @@
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
 import type { BodyItem } from '@taucad/kcl-wasm-lib/bindings/BodyItem';
-import { resolveImportPath, resolveVirtualPath, isNotFoundError } from '@taucad/runtime/kernel';
+import { assertRootedPath, resolveImportPath, isNotFoundError } from '@taucad/runtime/kernel';
 
 /**
  * Parse function interface - matches KclUtils.parseKcl signature
@@ -90,7 +90,7 @@ const resolveKclImportPath = (currentFilePath: string, importPath: string): stri
  * Recursively discover all file dependencies for a KCL program.
  * Reads imported files and traverses their imports.
  *
- * @param entryPath - Normalized runtime path of the KCL entry. Begins with `/`.
+ * @param entryPath - Canonical root-relative path of the KCL entry.
  * @param readFile - Function to read file contents
  * @param parseKcl - Function to parse KCL code into AST
  * @returns Array of file paths that are dependencies (including the entry path)
@@ -113,7 +113,7 @@ export async function discoverKclDependencies(
   const maxDepth = 50;
 
   const resolveFile = async (filePath: string, depth: number): Promise<void> => {
-    const normalizedPath = resolveVirtualPath(filePath);
+    const normalizedPath = assertRootedPath(filePath);
 
     // Check depth limit
     if (depth >= maxDepth) {

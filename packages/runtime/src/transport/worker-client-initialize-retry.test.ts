@@ -94,7 +94,7 @@ const createChannelBackedFileSystem = () => {
 const initializePayload = {
   config: {},
 } satisfies RuntimeInitializePayload;
-const mainFilePath = '/main.ts';
+const mainFilePath = 'main.ts';
 const mainFileSource = 'export default 1;';
 
 const expectTransferredFileSystem = async (payload: InitializeCallPayload): Promise<void> => {

@@ -81,11 +81,10 @@ export type CreateSyncFsClientOptions = Readonly<{
   onProbe?: (probe: SyncFsProbe) => void;
 }>;
 
-type ResolvedTarget = Readonly<{
-  relativePath: string | undefined;
-  absolutePath: string | undefined;
-  translationError: string | undefined;
-}>;
+type ResolvedTarget = Readonly<
+  | { relativePath: string; absolutePath: string; translationError: undefined }
+  | { relativePath: undefined; absolutePath: undefined; translationError: string }
+>;
 
 /**
  * Worker-side sync client: Tier 0 `SharedPool.resolveCopy` then Tier 2 slot round-trip.
@@ -118,9 +117,9 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
     }
   };
 
-  const perform = (op: SyncFsOp, absolutePath: string): void => {
+  const perform = (op: SyncFsOp, rootedPath: string): void => {
     syncClient.perform((requestId) => {
-      const message: TauSyncFsWireMessage = { tau: 'sync-fs', op, requestId, path: absolutePath };
+      const message: TauSyncFsWireMessage = { tau: 'sync-fs', op, requestId, path: rootedPath };
       return message;
     });
   };
@@ -176,7 +175,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
       }
 
       try {
-        perform('readFile', target.absolutePath);
+        perform('readFile', target.relativePath);
         const errorCode = Atomics.load(int32, slotIndex.errorCode);
         const payloadByteLength = Atomics.load(int32, slotIndex.payloadLength);
         const outcome = slotOutcomeFor(errorCode, payloadByteLength);
@@ -232,7 +231,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
       }
 
       try {
-        perform('fileExists', target.absolutePath);
+        perform('fileExists', target.relativePath);
         const errorCode = Atomics.load(int32, slotIndex.errorCode);
         const payloadByteLength = Atomics.load(int32, slotIndex.payloadLength);
         const exists = errorCode === syncError.ok && payloadByteLength > 0;
@@ -277,7 +276,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
       }
 
       try {
-        perform('directoryExists', target.absolutePath);
+        perform('directoryExists', target.relativePath);
         const errorCode = Atomics.load(int32, slotIndex.errorCode);
         const payloadByteLength = Atomics.load(int32, slotIndex.payloadLength);
         const exists = errorCode === syncError.ok && payloadByteLength > 0;
@@ -322,7 +321,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
       }
 
       try {
-        perform('listDirectories', target.absolutePath);
+        perform('listDirectories', target.relativePath);
         const errorCode = Atomics.load(int32, slotIndex.errorCode);
         const payloadByteLength = Atomics.load(int32, slotIndex.payloadLength);
         if (errorCode !== syncError.ok) {
@@ -402,7 +401,7 @@ export function createSyncFsClient(options: CreateSyncFsClientOptions): SyncFsCl
       }
 
       try {
-        perform('statMtimeVersion', target.absolutePath);
+        perform('statMtimeVersion', target.relativePath);
         const errorCode = Atomics.load(int32, slotIndex.errorCode);
         const payloadByteLength = Atomics.load(int32, slotIndex.payloadLength);
         if (errorCode !== syncError.ok) {

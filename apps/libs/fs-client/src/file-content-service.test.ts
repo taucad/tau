@@ -509,7 +509,7 @@ describe('FileContentService', () => {
       events.push(event);
     });
 
-    await service.copyDirectory('/src', '/dest');
+    await service.copyDirectory('src', 'dest');
 
     expect(proxy.copyDirectory).toHaveBeenCalledWith('/project/src', '/project/dest');
     expect(events).toContainEqual({ type: 'directoryCopied', sourcePath: 'src', targetPath: 'dest' });
@@ -539,7 +539,7 @@ describe('FileContentService', () => {
     const blob = new Blob(['zip']);
     vi.mocked(proxy.getZippedDirectory).mockResolvedValue(blob);
 
-    const result = await service.getZippedDirectory('/project');
+    const result = await service.getZippedDirectory('');
 
     expect(proxy.getZippedDirectory).toHaveBeenCalledWith('/project');
     expect(result).toBe(blob);
@@ -1623,18 +1623,18 @@ describe('FileContentService', () => {
       harness.disposeChannel();
     });
 
-    it('writeFiles normalizes absolute-but-in-scope keys to workspace-relative paths in batchWritten', async () => {
+    it('writeFiles preserves canonical rooted keys in batchWritten', async () => {
       const harness = createHarness({ workspaceRoot: '/projects/abc' });
       const events: ContentChangeEvent[] = [];
       harness.service.onDidContentChange((event) => {
         events.push(event);
       });
 
-      const absoluteKey = '/projects/abc/main.ts';
+      const rootFileKey = 'main.ts';
       const relativeKey = 'lib/util.ts';
       await harness.service.writeFiles(
         {
-          [absoluteKey]: { content: new Uint8Array([1, 2, 3]) },
+          [rootFileKey]: { content: new Uint8Array([1, 2, 3]) },
           [relativeKey]: { content: new Uint8Array([4, 5, 6]) },
         },
         'machine',
@@ -1648,34 +1648,33 @@ describe('FileContentService', () => {
       harness.disposeChannel();
     });
 
-    it('write normalizes absolute-but-in-scope keys to workspace-relative paths in written events', async () => {
+    it('write preserves canonical rooted keys in written events', async () => {
       const harness = createHarness({ workspaceRoot: '/projects/abc' });
       const events: ContentChangeEvent[] = [];
       harness.service.onDidContentChange((event) => {
         events.push(event);
       });
 
-      await harness.service.write('/projects/abc/main.ts', new Uint8Array([1, 2, 3]), 'machine');
+      await harness.service.write('main.ts', new Uint8Array([1, 2, 3]), 'machine');
 
       const written = events.find((event) => event.type === 'written');
       expect(written).toBeDefined();
       if (written?.type === 'written') {
         expect(written.path).toBe('main.ts');
       }
-      // Cache is keyed by the normalized workspace-relative form.
       expect(harness.service.has('main.ts')).toBe(true);
       expect(harness.service.has('/projects/abc/main.ts')).toBe(false);
       harness.disposeChannel();
     });
 
-    it('createDirectory normalizes absolute-but-in-scope keys to workspace-relative directoryCreated events', async () => {
+    it('createDirectory preserves canonical rooted keys in directoryCreated events', async () => {
       const harness = createHarness({ workspaceRoot: '/projects/abc' });
       const events: ContentChangeEvent[] = [];
       harness.service.onDidContentChange((event) => {
         events.push(event);
       });
 
-      await harness.service.createDirectory('/projects/abc/src/new-dir', { recursive: true });
+      await harness.service.createDirectory('src/new-dir', { recursive: true });
 
       expect(harness.proxy.mkdir).toHaveBeenCalledWith('/projects/abc/src/new-dir', { recursive: true });
       const created = events.find((event) => event.type === 'directoryCreated');
@@ -1683,14 +1682,14 @@ describe('FileContentService', () => {
       harness.disposeChannel();
     });
 
-    it('deleteDirectory normalizes absolute-but-in-scope keys to workspace-relative directoryDeleted events', async () => {
+    it('deleteDirectory preserves canonical rooted keys in directoryDeleted events', async () => {
       const harness = createHarness({ workspaceRoot: '/projects/abc' });
       const events: ContentChangeEvent[] = [];
       harness.service.onDidContentChange((event) => {
         events.push(event);
       });
 
-      await harness.service.deleteDirectory('/projects/abc/src/old-dir', { recursive: true });
+      await harness.service.deleteDirectory('src/old-dir', { recursive: true });
 
       expect(harness.proxy.rmdir).toHaveBeenCalledWith('/projects/abc/src/old-dir', { recursive: true });
       const deleted = events.find((event) => event.type === 'directoryDeleted');
@@ -1710,14 +1709,14 @@ describe('FileContentService', () => {
       harness.disposeChannel();
     });
 
-    it('delete normalizes absolute-but-in-scope keys to workspace-relative paths in deleted events', async () => {
+    it('delete preserves canonical rooted keys in deleted events', async () => {
       const harness = createHarness({ workspaceRoot: '/projects/abc' });
       const events: ContentChangeEvent[] = [];
       harness.service.onDidContentChange((event) => {
         events.push(event);
       });
 
-      await harness.service.delete('/projects/abc/main.ts', 'machine');
+      await harness.service.delete('main.ts', 'machine');
 
       const deleted = events.find((event) => event.type === 'deleted');
       expect(deleted).toBeDefined();
@@ -1727,14 +1726,14 @@ describe('FileContentService', () => {
       harness.disposeChannel();
     });
 
-    it('rename normalizes absolute-but-in-scope keys to workspace-relative paths in renamed events', async () => {
+    it('rename preserves canonical rooted keys in renamed events', async () => {
       const harness = createHarness({ workspaceRoot: '/projects/abc' });
       const events: ContentChangeEvent[] = [];
       harness.service.onDidContentChange((event) => {
         events.push(event);
       });
 
-      await harness.service.move('/projects/abc/old.ts', '/projects/abc/new.ts');
+      await harness.service.move('old.ts', 'new.ts');
 
       const renamed = events.find((event) => event.type === 'renamed');
       expect(renamed).toBeDefined();

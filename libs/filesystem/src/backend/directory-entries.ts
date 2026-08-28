@@ -9,7 +9,7 @@ import type { DirectoryEntry, FileStat } from '#types.js';
  * Derive immediate children with their kinds from a path-keyed index.
  * A file path with a deeper segment identifies its first segment as a directory.
  *
- * @param prefix - Directory prefix ending in `/`.
+ * @param prefix - Root-relative directory prefix ending in `/`, or `''` for root.
  * @param filePaths - Every known file path.
  * @param directoryPaths - Every known directory path.
  * @returns Immediate children with kinds, in file-then-directory discovery order.
@@ -50,7 +50,7 @@ export function indexDirectoryEntries(
  * `stat` per child for providers that do not implement `readdirEntries`.
  *
  * @param provider - Provider to enumerate.
- * @param path - Absolute directory path.
+ * @param path - Root-relative directory path.
  * @returns Immediate children with kinds.
  * @public
  */
@@ -66,10 +66,10 @@ export async function readDirectoryEntries(
     return provider.readdirEntries(path);
   }
   const names = await provider.readdir(path);
-  const base = path === '/' ? '' : path;
+  const base = path === '' ? '' : `${path}/`;
   return Promise.all(
     names.map(async (name) => {
-      const stat = await provider.stat(`${base}/${name}`);
+      const stat = await provider.stat(`${base}${name}`);
       return { name, kind: stat.type === 'dir' ? 'dir' : 'file' } satisfies DirectoryEntry;
     }),
   );

@@ -77,7 +77,7 @@ export type WebSocketHostOptions = {
    */
   readonly worker: () => KernelWorker;
   /**
-   * Filesystem this host owns and exposes as runtime `/`. Its handle's
+   * Rooted filesystem this host owns and exposes to runtime. Its handle's
    * `create()` runs once **per connection**, so every client gets a fresh
    * adapter instance (`fromNodeFs` clients still share the one directory,
    * `fromMemoryFs` clients do not share stores). Omit to let each client serve

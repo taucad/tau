@@ -12,6 +12,7 @@ import type { BodyItem } from '@taucad/kcl-wasm-lib/bindings/BodyItem';
 import type { Parameter } from '@taucad/kcl-wasm-lib/bindings/Parameter';
 import type { LspFileManager } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
+import { kclUriToWorkspacePath } from '#lib/kcl-language/kcl-register-paths.js';
 
 const log = createKclLogger('Symbol Service');
 
@@ -464,7 +465,7 @@ export class KclSymbolService {
 
     // Resolve the import path relative to the current file
     const importUri = resolveImportPath(uri, importInfo.importPath);
-    const importFilePath = uriToPath(importUri);
+    const importFilePath = kclUriToWorkspacePath(importUri);
 
     log.debug('Resolving imported symbol:', symbolName, 'from:', importFilePath);
 
@@ -526,7 +527,7 @@ export class KclSymbolService {
         try {
           // Resolve the import path relative to the current file
           const importUri = resolveImportPath(uri, importSymbol.importPath!);
-          const importFilePath = uriToPath(importUri);
+          const importFilePath = kclUriToWorkspacePath(importUri);
 
           // Read and parse the imported file
           const content = await fileManager.readFile(importFilePath);
@@ -630,7 +631,7 @@ export class KclSymbolService {
     }
 
     try {
-      const execResult = await this.mockExecuteFunction(program, uriToPath(uri));
+      const execResult = await this.mockExecuteFunction(program, kclUriToWorkspacePath(uri));
       variables = execResult.variables;
       log.debug('Mock execution returned', Object.keys(variables).length, 'variables');
     } catch (error) {
@@ -727,27 +728,6 @@ function offsetToPosition(lineOffsets: number[], offset: number): { line: number
 function positionToOffset(lineOffsets: number[], line: number, column: number): number {
   const lineStart = lineOffsets[line - 1] ?? 0;
   return lineStart + column - 1;
-}
-
-/**
- * Convert URI to file path.
- * The file manager expects paths without leading slashes (e.g., "public/...")
- * but Monaco URIs use "file:///public/..." format.
- */
-function uriToPath(uri: string): string {
-  let path = uri;
-
-  // Remove "file://" scheme
-  if (path.startsWith('file://')) {
-    path = path.slice(7);
-  }
-
-  // Remove leading slash - file manager expects "public/..." not "/public/..."
-  if (path.startsWith('/')) {
-    path = path.slice(1);
-  }
-
-  return path;
 }
 
 /**

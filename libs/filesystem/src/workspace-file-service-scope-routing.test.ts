@@ -74,7 +74,7 @@ describe('WorkspaceFileService — unified scope routing', () => {
 
     const data = await service.readFile('/scope/data.bin', { scope });
 
-    expect(standaloneReadFile).toHaveBeenCalledWith('/scope/data.bin');
+    expect(standaloneReadFile).toHaveBeenCalledWith('scope/data.bin');
     expect(mountReadFileSpy).not.toHaveBeenCalled();
     expect(data).toEqual(new Uint8Array([1, 2, 3]));
   });
@@ -155,7 +155,7 @@ describe('WorkspaceFileService — unified scope routing', () => {
     const blob = await service.getZippedDirectory('/scope/dir', { scope });
 
     expect(standaloneExists).not.toHaveBeenCalled();
-    expect(standaloneReaddir).toHaveBeenCalledWith('/scope/dir');
+    expect(standaloneReaddir).toHaveBeenCalledWith('scope/dir');
     expect(blob).toBeInstanceOf(Blob);
   });
 
@@ -185,7 +185,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
           projectId,
           backend: 'memory',
           storageRootKey,
-          providerBasePath: `/${projectId}`,
+          providerBasePath: projectId,
         }),
       ),
       roots: [],
@@ -200,13 +200,13 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
           projectId: alphaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:duplicate',
-          providerBasePath: '/duplicate',
+          providerBasePath: 'duplicate',
         },
         {
           projectId: betaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:duplicate',
-          providerBasePath: '/duplicate',
+          providerBasePath: 'duplicate',
         },
       ],
     },
@@ -217,13 +217,13 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
           projectId: betaProjectId,
           backend: 'memory',
           storageRootKey: 'memory:valid-before-invalid',
-          providerBasePath: `/${betaProjectId}`,
+          providerBasePath: betaProjectId,
         },
         {
           projectId: '../invalid',
           backend: 'memory',
           storageRootKey: 'memory:invalid',
-          providerBasePath: '/invalid',
+          providerBasePath: 'invalid',
         },
       ],
     },
@@ -242,7 +242,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
         path: `/projects/${alphaProjectId}`,
         authority: {
           storageRootKey: 'memory:authority-a',
-          providerBasePath: `/${alphaProjectId}`,
+          providerBasePath: alphaProjectId,
         },
       });
       await new Promise((resolve) => {
@@ -255,7 +255,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
         path: `/projects/${alphaProjectId}`,
         authority: {
           storageRootKey: 'memory:authority-b',
-          providerBasePath: `/${alphaProjectId}`,
+          providerBasePath: alphaProjectId,
         },
       });
       await vi.waitFor(async () => {
@@ -277,21 +277,21 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const alpha = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
     const beta = service.createRootedFileSystem(`/projects/${betaProjectId}`);
 
-    await alpha.mkdir('/src', { recursive: true });
-    await alpha.writeFile('/src/main.ts', 'alpha');
-    await beta.mkdir('/src', { recursive: true });
-    await beta.writeFile('/src/main.ts', 'beta');
-    await alpha.rename('/src/main.ts', '/src/renamed.ts');
+    await alpha.mkdir('src', { recursive: true });
+    await alpha.writeFile('src/main.ts', 'alpha');
+    await beta.mkdir('src', { recursive: true });
+    await beta.writeFile('src/main.ts', 'beta');
+    await alpha.rename('src/main.ts', 'src/renamed.ts');
 
-    await expect(alpha.readFile('/src/renamed.ts', 'utf8')).resolves.toBe('alpha');
-    await expect(beta.readFile('/src/main.ts', 'utf8')).resolves.toBe('beta');
+    await expect(alpha.readFile('src/renamed.ts', 'utf8')).resolves.toBe('alpha');
+    await expect(beta.readFile('src/main.ts', 'utf8')).resolves.toBe('beta');
     await expect(service.readFile(`/projects/${alphaProjectId}/src/renamed.ts`, 'utf8')).resolves.toBe('alpha');
     await expect(service.readFile(`/projects/${betaProjectId}/src/main.ts`, 'utf8')).resolves.toBe('beta');
 
-    await alpha.unlink('/src/renamed.ts');
-    await alpha.rmdir('/src');
-    await expect(alpha.exists('/src')).resolves.toBe(false);
-    await expect(beta.exists('/src/main.ts')).resolves.toBe(true);
+    await alpha.unlink('src/renamed.ts');
+    await alpha.rmdir('src');
+    await expect(alpha.exists('src')).resolves.toBe(false);
+    await expect(beta.exists('src/main.ts')).resolves.toBe(true);
   });
 
   it('keeps cache and project-local module files writable after reopening the same project root', async () => {
@@ -300,15 +300,15 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await configureProjects(service, configuration);
     const first = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
 
-    await first.mkdir('/.tau/cache/geometry', { recursive: true });
-    await first.writeFile('/.tau/cache/geometry/result.bin', new Uint8Array([1, 2, 3]));
-    await first.mkdir('/node_modules/local-package', { recursive: true });
-    await first.writeFile('/node_modules/local-package/index.js', 'export const cached = true;');
+    await first.mkdir('.tau/cache/geometry', { recursive: true });
+    await first.writeFile('.tau/cache/geometry/result.bin', new Uint8Array([1, 2, 3]));
+    await first.mkdir('node_modules/local-package', { recursive: true });
+    await first.writeFile('node_modules/local-package/index.js', 'export const cached = true;');
     await configureProjects(service, configuration);
 
     const reopened = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
-    await expect(reopened.readFile('/.tau/cache/geometry/result.bin')).resolves.toEqual(new Uint8Array([1, 2, 3]));
-    await expect(reopened.readFile('/node_modules/local-package/index.js', 'utf8')).resolves.toBe(
+    await expect(reopened.readFile('.tau/cache/geometry/result.bin')).resolves.toEqual(new Uint8Array([1, 2, 3]));
+    await expect(reopened.readFile('node_modules/local-package/index.js', 'utf8')).resolves.toBe(
       'export const cached = true;',
     );
   });
@@ -321,9 +321,9 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     });
 
     const preview = service.createRootedFileSystem('/previews/preview');
-    await preview.writeFile('/main.ts', 'preview');
+    await preview.writeFile('main.ts', 'preview');
 
-    await expect(preview.readFile('/main.ts', 'utf8')).resolves.toBe('preview');
+    await expect(preview.readFile('main.ts', 'utf8')).resolves.toBe('preview');
     await expect(service.readFile('/previews/preview/main.ts', 'utf8')).resolves.toBe('preview');
   });
 
@@ -335,10 +335,10 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     ]);
     const alpha = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
 
-    await expect(alpha.writeFile('/../beta/escaped.txt', 'no')).rejects.toMatchObject({
+    await expect(alpha.writeFile('../beta/escaped.txt', 'no')).rejects.toMatchObject({
       code: 'PATH_OUTSIDE_ROOT',
     });
-    await alpha.writeFile('/projects/beta/local.txt', 'inside alpha');
+    await alpha.writeFile('projects/beta/local.txt', 'inside alpha');
 
     await expect(service.readFile(`/projects/${alphaProjectId}/projects/beta/local.txt`, 'utf8')).resolves.toBe(
       'inside alpha',
@@ -350,12 +350,12 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const { service } = await createService();
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:alpha-rename' }]);
     const alpha = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
-    await alpha.writeFile('/source.txt', 'preserved');
+    await alpha.writeFile('source.txt', 'preserved');
 
-    await expect(alpha.rename('/source.txt', '/../outside.txt')).rejects.toMatchObject({
+    await expect(alpha.rename('source.txt', '../outside.txt')).rejects.toMatchObject({
       code: 'PATH_OUTSIDE_ROOT',
     });
-    await expect(alpha.readFile('/source.txt', 'utf8')).resolves.toBe('preserved');
+    await expect(alpha.readFile('source.txt', 'utf8')).resolves.toBe('preserved');
   });
 
   it('preserves a rooted view across an unchanged route and invalidates it on replacement', async () => {
@@ -365,23 +365,23 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
 
     await configureProjects(service, firstConfiguration);
-    await rooted.writeFile('/still-current.txt', 'yes');
+    await rooted.writeFile('still-current.txt', 'yes');
 
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:alpha-replaced' }]);
-    await expect(rooted.readFile('/still-current.txt', 'utf8')).rejects.toMatchObject({ code: 'ESTALE' });
+    await expect(rooted.readFile('still-current.txt', 'utf8')).rejects.toMatchObject({ code: 'ESTALE' });
     const replacement = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
-    await expect(replacement.exists('/still-current.txt')).resolves.toBe(false);
+    await expect(replacement.exists('still-current.txt')).resolves.toBe(false);
   });
 
   it.each(invalidTopologyCases)('preflights $name without replacing the active topology', async ({ projects }) => {
     const { service } = await createService();
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:active' }]);
     const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
-    await rooted.writeFile('/preserved.txt', 'preserved');
+    await rooted.writeFile('preserved.txt', 'preserved');
 
     await expect(service.configureProjectRoots({ projects, roots: [] })).rejects.toThrow();
 
-    await expect(rooted.readFile('/preserved.txt', 'utf8')).resolves.toBe('preserved');
+    await expect(rooted.readFile('preserved.txt', 'utf8')).resolves.toBe('preserved');
   });
 
   it('applies concurrent project configurations in invocation order', async () => {
@@ -455,10 +455,10 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
 
     service.disposeStorageRoot(storageRootKey);
 
-    await expect(rooted.exists('/')).rejects.toMatchObject({ code: 'ESTALE' });
+    await expect(rooted.exists('')).rejects.toMatchObject({ code: 'ESTALE' });
   });
 
-  it.each(['/', '/.tau', '/projects/nested/child', '/other/project'])(
+  it.each(['', '.tau', 'projects/nested/child', 'other/project', '/slash-prefixed'])(
     'rejects invalid configured provider base %s before provider lookup',
     async (providerBasePath) => {
       const { service, providerRegistry } = await createService();
@@ -475,7 +475,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
           ],
           roots: [],
         }),
-      ).rejects.toThrow('immediate child');
+      ).rejects.toThrow();
       expect(getProvider).not.toHaveBeenCalled();
     },
   );
@@ -487,7 +487,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
 
     service.dispose();
 
-    await expect(rooted.exists('/')).rejects.toMatchObject({ code: 'ESTALE' });
+    await expect(rooted.exists('')).rejects.toMatchObject({ code: 'ESTALE' });
   });
 
   it('does not retarget an operation whose provider was captured before route replacement', async () => {
@@ -508,17 +508,17 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     });
     const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
 
-    const queuedWrite = rooted.writeFile('/queued.txt', 'old provider');
+    const queuedWrite = rooted.writeFile('queued.txt', 'old provider');
     await started.promise;
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:alpha-queued-new' }]);
     const replacementProvider = await providerRegistry.getProvider({
       backend: 'memory',
       storageRootKey: 'memory:alpha-queued-new',
     });
-    await replacementProvider.mkdir(`/${alphaProjectId}`, { recursive: true });
+    await replacementProvider.mkdir(alphaProjectId, { recursive: true });
     const replacement = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
     const replacementEvents: WatchEvent[] = [];
-    const stopReplacement = replacement.watch({ paths: ['/queued.txt'] }, (event) => replacementEvents.push(event));
+    const stopReplacement = replacement.watch({ paths: ['queued.txt'] }, (event) => replacementEvents.push(event));
     await service.getDirectoryStat(`/projects/${alphaProjectId}`);
     release.resolve();
     await queuedWrite;
@@ -526,8 +526,8 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
       setTimeout(resolve, 100);
     });
 
-    await expect(oldProvider.readFile(`/${alphaProjectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
-    await expect(replacement.exists('/queued.txt')).resolves.toBe(false);
+    await expect(oldProvider.readFile(`${alphaProjectId}/queued.txt`, 'utf8')).resolves.toBe('old provider');
+    await expect(replacement.exists('queued.txt')).resolves.toBe(false);
     expect(replacementEvents).toEqual([]);
     expect(await service.getDirectoryStat(`/projects/${alphaProjectId}`)).toEqual([]);
     stopReplacement();
@@ -538,7 +538,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:parent-overlay' }]);
     const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
     const events: WatchEvent[] = [];
-    const stop = rooted.watch({ paths: ['/nested'], recursive: true }, (event) => events.push(event));
+    const stop = rooted.watch({ paths: ['nested'], recursive: true }, (event) => events.push(event));
     const nestedProvider = await providerRegistry.getProvider({
       backend: 'memory',
       storageRootKey: 'memory:nested-overlay',
@@ -554,11 +554,11 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     });
     expect(events).toEqual([]);
 
-    await rooted.writeFile('/nested/parent.txt', 'parent provider');
+    await rooted.writeFile('nested/parent.txt', 'parent provider');
     await vi.waitFor(() => {
-      expect(events).toEqual([{ type: 'change', path: '/nested/parent.txt' }]);
+      expect(events).toEqual([{ type: 'change', path: 'nested/parent.txt' }]);
     });
-    await expect(nestedProvider.exists('/parent.txt')).resolves.toBe(false);
+    await expect(nestedProvider.exists('parent.txt')).resolves.toBe(false);
     stop();
   });
 
@@ -581,17 +581,17 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const beta = service.createRootedFileSystem(`/projects/${betaProjectId}`);
     const alphaEvents: unknown[] = [];
     const betaEvents: unknown[] = [];
-    const stopAlpha = alpha.watch({ paths: ['/'], recursive: true }, (event) => alphaEvents.push(event));
-    const stopBeta = beta.watch({ paths: ['/'], recursive: true }, (event) => betaEvents.push(event));
+    const stopAlpha = alpha.watch({ paths: [''], recursive: true }, (event) => alphaEvents.push(event));
+    const stopBeta = beta.watch({ paths: [''], recursive: true }, (event) => betaEvents.push(event));
     const rawAuthorities: Array<readonly WeakKey[] | undefined> = [];
     const stopRaw = eventBus.subscribe((event) => rawAuthorities.push(getEventAuthorities(event)));
 
-    await alpha.writeFile('/main.ts', 'alpha');
+    await alpha.writeFile('main.ts', 'alpha');
     expect(rawAuthorities.at(-1)).toContain(mountTable.getExactMount(`/projects/${alphaProjectId}`));
     await new Promise((resolve) => {
       setTimeout(resolve, 100);
     });
-    expect(alphaEvents).toContainEqual({ type: 'change', path: '/main.ts' });
+    expect(alphaEvents).toContainEqual({ type: 'change', path: 'main.ts' });
     expect(betaEvents).toEqual([]);
 
     stopAlpha();
@@ -604,16 +604,16 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:alpha-rename-watch' }]);
     const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
     const events: WatchEvent[] = [];
-    const stop = rooted.watch({ paths: ['/'], recursive: true }, (event) => events.push(event));
-    await rooted.writeFile('/before.ts', 'source');
+    const stop = rooted.watch({ paths: [''], recursive: true }, (event) => events.push(event));
+    await rooted.writeFile('before.ts', 'source');
     await vi.waitFor(() => {
-      expect(events).toContainEqual({ type: 'change', path: '/before.ts' });
+      expect(events).toContainEqual({ type: 'change', path: 'before.ts' });
     });
     events.length = 0;
 
-    await rooted.rename('/before.ts', '/after.ts');
+    await rooted.rename('before.ts', 'after.ts');
     await vi.waitFor(() => {
-      expect(events).toEqual([{ type: 'rename', oldPath: '/before.ts', newPath: '/after.ts' }]);
+      expect(events).toEqual([{ type: 'rename', oldPath: 'before.ts', newPath: 'after.ts' }]);
     });
     stop();
   });
@@ -622,11 +622,11 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const { service } = await createService();
     const rooted = service.createRootedFileSystem('/');
     const events: WatchEvent[] = [];
-    const stop = rooted.watch({ paths: ['/src/main.ts'] }, (event) => events.push(event));
+    const stop = rooted.watch({ paths: ['src/main.ts'] }, (event) => events.push(event));
 
     await service.writeFile('/src/main.ts', 'root');
     await vi.waitFor(() => {
-      expect(events).toContainEqual({ type: 'change', path: '/src/main.ts' });
+      expect(events).toContainEqual({ type: 'change', path: 'src/main.ts' });
     });
     stop();
   });
@@ -637,17 +637,17 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
     const events: WatchEvent[] = [];
     const stop = rooted.watch(
-      { paths: ['/'], recursive: true, includes: ['**/*.ts'], excludes: ['/.tau/cache/**'] },
+      { paths: [''], recursive: true, includes: ['**/*.ts'], excludes: ['.tau/cache/**'] },
       (event) => events.push(event),
     );
 
-    await rooted.writeFile('/.tau/cache/generated.ts', 'cache');
-    await rooted.writeFile('/src/main.js', 'javascript');
-    await rooted.writeFile('/Src/Main.ts', 'typescript');
+    await rooted.writeFile('.tau/cache/generated.ts', 'cache');
+    await rooted.writeFile('src/main.js', 'javascript');
+    await rooted.writeFile('Src/Main.ts', 'typescript');
     await vi.waitFor(() => {
-      expect(events).toContainEqual({ type: 'change', path: '/Src/Main.ts' });
+      expect(events).toContainEqual({ type: 'change', path: 'Src/Main.ts' });
     });
-    expect(events).toEqual([{ type: 'change', path: '/Src/Main.ts' }]);
+    expect(events).toEqual([{ type: 'change', path: 'Src/Main.ts' }]);
     stop();
   });
 
@@ -656,7 +656,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:alpha-watch-old' }]);
     const rooted = service.createRootedFileSystem(`/projects/${alphaProjectId}`);
     const events: WatchEvent[] = [];
-    const stop = rooted.watch({ paths: ['/main.ts'] }, (event) => events.push(event));
+    const stop = rooted.watch({ paths: ['main.ts'] }, (event) => events.push(event));
 
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:alpha-watch-new' }]);
     expect(events).toEqual([{ type: 'reset' }]);
@@ -681,7 +681,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const handler = vi.fn(() => {
       throw new Error('reset handler failed');
     });
-    const stop = rooted.watch({ paths: ['/main.ts'] }, handler);
+    const stop = rooted.watch({ paths: ['main.ts'] }, handler);
 
     await configureProjects(service, [{ projectId: alphaProjectId, storageRootKey: 'memory:throwing-watch-new' }]);
     expect(handler).toHaveBeenCalledOnce();
@@ -701,9 +701,9 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     const { service } = await createService();
     const rooted = service.createRootedFileSystem('/', { originClientId: 'runtime' });
     const events: WatchEvent[] = [];
-    const stop = rooted.watch({ paths: ['/main.ts'] }, (event) => events.push(event));
+    const stop = rooted.watch({ paths: ['main.ts'] }, (event) => events.push(event));
 
-    await rooted.writeFile('/main.ts', 'self');
+    await rooted.writeFile('main.ts', 'self');
     await new Promise((resolve) => {
       setTimeout(resolve, 100);
     });
@@ -711,7 +711,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
 
     await service.writeFile('/main.ts', 'external');
     await vi.waitFor(() => {
-      expect(events).toContainEqual({ type: 'change', path: '/main.ts' });
+      expect(events).toContainEqual({ type: 'change', path: 'main.ts' });
     });
     stop();
   });

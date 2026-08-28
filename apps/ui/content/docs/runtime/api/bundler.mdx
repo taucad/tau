@@ -30,7 +30,7 @@ Use the bundler API when configuring how JS/TS kernel inputs are bundled and exe
 
 `defineBundler` creates a bundler definition from a configuration object. Required methods: `initialize`, `detectImports`, `bundle`, `execute`, `registerModule`. Optional: `resolveDependencies`, `cleanup`.
 
-Bundler operation methods use `(input, runtime, context)`. The runtime contains a fresh operation-scoped `AbortSignal`; the persistent context is the value returned by `initialize`. Methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces) beginning with `/`. Returned dependency paths use the same namespace. The leading slash refers to the supplied runtime filesystem, not the host operating system.
+Bundler operation methods use `(input, runtime, context)`. The runtime contains a fresh operation-scoped `AbortSignal`; the persistent context is the value returned by `initialize`. Methods receive `entryPath` as a canonical root-relative [runtime path](../concepts/path-namespaces). Returned dependency paths use the same namespace.
 
 ## Usage
 

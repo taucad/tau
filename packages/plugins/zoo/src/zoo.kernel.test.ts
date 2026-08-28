@@ -19,9 +19,7 @@ import type { GlbPrimitive } from '@taucad/geometry-core';
 
 const getParameterResult = async (files: Record<string, string>, mainFile: string) => {
   const definition = await resolveRuntimePluginDefinition('kernel', zooKernel());
-  const normalizedFiles = Object.fromEntries(
-    Object.entries(files).map(([path, content]) => [path.startsWith('/') ? path : `/${path}`, content]),
-  );
+  const normalizedFiles = { ...files };
   const runtime = createMockKernelRuntime({
     filesystemOverrides: {
       existsResult: (path) => normalizedFiles[path] !== undefined,
@@ -33,7 +31,7 @@ const getParameterResult = async (files: Record<string, string>, mainFile: strin
         return content;
       },
       readdirResult: (directory) => {
-        const prefix = directory === '/' ? '/' : `${directory}/`;
+        const prefix = directory === '' ? '' : `${directory}/`;
         return Object.keys(normalizedFiles)
           .filter((path) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
           .map((path) => path.slice(prefix.length));
@@ -41,11 +39,7 @@ const getParameterResult = async (files: Record<string, string>, mainFile: strin
     },
   });
   const context = await definition.initialize({ baseUrl: 'https://api.zoo.dev' }, runtime);
-  return definition.getParameters(
-    { entryPath: mainFile.startsWith('/') ? mainFile : `/${mainFile}` },
-    runtime,
-    context,
-  );
+  return definition.getParameters({ entryPath: mainFile }, runtime, context);
 };
 
 const createTrianglePrimitive = (materialName?: string): GlbPrimitive => ({
@@ -962,7 +956,7 @@ cone = startSketchOn(XZ)
         .mockImplementation((program) => program);
       try {
         const operation = zooDefinition.createGeometry(
-          { entryPath: '/main.kcl', parameters: {} },
+          { entryPath: 'main.kcl', parameters: {} },
           createMockKernelRuntime({
             signal: controller.signal,
             filesystemOverrides: { readFileResult: 'cube = startSketchOn(XY)' },
@@ -1000,7 +994,7 @@ cone = startSketchOn(XZ)
       };
       const result = await zooDefinition.createGeometry(
         {
-          entryPath: '/main.kcl',
+          entryPath: 'main.kcl',
           parameters: {},
         },
         createMockKernelRuntime({ filesystemOverrides: { readFileResult: '' } }),

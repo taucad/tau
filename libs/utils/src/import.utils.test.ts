@@ -3,16 +3,16 @@ import { getCdnCachePath, getNodeModulesPath, isNodeModulesPath, resolveImportPa
 
 describe('resolveImportPath', () => {
   it.each([
-    ['./helper.ts', '/main.ts', '/helper.ts'],
-    ['./helper.ts', '/src/main.ts', '/src/helper.ts'],
-    ['../shared/helper.ts', '/src/nested/main.ts', '/src/shared/helper.ts'],
-    ['/shared/helper.ts', '/src/main.ts', '/shared/helper.ts'],
+    ['./helper.ts', 'main.ts', 'helper.ts'],
+    ['./helper.ts', 'src/main.ts', 'src/helper.ts'],
+    ['../shared/helper.ts', 'src/nested/main.ts', 'src/shared/helper.ts'],
+    ['/shared/helper.ts', 'src/main.ts', 'shared/helper.ts'],
   ])('resolves %s from %s', (specifier, importer, expected) => {
     expect(resolveImportPath(specifier, importer)).toBe(expected);
   });
 
   it('rejects traversal above the virtual root', () => {
-    expect(() => resolveImportPath('../../secret.ts', '/src/main.ts')).toThrow('escapes');
+    expect(() => resolveImportPath('../../secret.ts', 'src/main.ts')).toThrow('escapes');
   });
 });
 

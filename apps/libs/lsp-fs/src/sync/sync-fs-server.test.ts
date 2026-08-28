@@ -18,7 +18,7 @@ describe('createSyncFsServerHandler', () => {
     Atomics.store(int32, slotIndex.requestId, 1);
     Atomics.store(int32, slotIndex.state, syncState.pending);
 
-    await run({ tau: 'sync-fs', op: 'readFile', requestId: 1, path: '/a.txt' });
+    await run({ tau: 'sync-fs', op: 'readFile', requestId: 1, path: 'a.txt' });
 
     expect(Atomics.load(int32, slotIndex.state)).toBe(syncState.ready);
     expect(Atomics.load(int32, slotIndex.errorCode)).toBe(syncError.ok);
@@ -44,7 +44,7 @@ describe('createSyncFsServerHandler', () => {
     Atomics.store(int32, slotIndex.requestId, 2);
     Atomics.store(int32, slotIndex.state, syncState.pending);
 
-    await run({ tau: 'sync-fs', op: 'statMtimeVersion', requestId: 2, path: '/missing.ts' });
+    await run({ tau: 'sync-fs', op: 'statMtimeVersion', requestId: 2, path: 'missing.ts' });
 
     expect(Atomics.load(int32, slotIndex.errorCode)).toBe(syncError.notFound);
   });
@@ -63,7 +63,7 @@ describe('createSyncFsServerHandler', () => {
     Atomics.store(int32, slotIndex.requestId, 3);
     Atomics.store(int32, slotIndex.state, syncState.pending);
 
-    await run({ tau: 'sync-fs', op: 'readFile', requestId: 3, path: '/big.bin' });
+    await run({ tau: 'sync-fs', op: 'readFile', requestId: 3, path: 'big.bin' });
 
     expect(Atomics.load(int32, slotIndex.errorCode)).toBe(syncError.tooLarge);
   });
@@ -81,7 +81,7 @@ describe('createSyncFsServerHandler', () => {
     const run = createSyncFsServerHandler({ workspace, int32, arena });
     Atomics.store(int32, slotIndex.requestId, 10);
 
-    await run({ tau: 'sync-fs', op: 'readFile', requestId: 99, path: '/x' });
+    await run({ tau: 'sync-fs', op: 'readFile', requestId: 99, path: 'x' });
 
     expect(Atomics.load(int32, slotIndex.errorCode)).toBe(syncError.ok);
     expect(Atomics.load(int32, slotIndex.state)).toBe(syncState.idle);
@@ -106,7 +106,7 @@ describe('createSyncFsServerHandler', () => {
     Atomics.store(int32, slotIndex.requestId, 1);
     Atomics.store(int32, slotIndex.state, syncState.pending);
 
-    const staleRun = run({ tau: 'sync-fs', op: 'readFile', requestId: 1, path: '/old.ts' });
+    const staleRun = run({ tau: 'sync-fs', op: 'readFile', requestId: 1, path: 'old.ts' });
     await vi.waitFor(() => {
       expect(readFileBytes).toHaveBeenCalledOnce();
     });
@@ -120,7 +120,7 @@ describe('createSyncFsServerHandler', () => {
     expect(Atomics.load(int32, slotIndex.state)).toBe(syncState.pending);
     expect(arena[0]).toBe(7);
 
-    await run({ tau: 'sync-fs', op: 'readFile', requestId: 2, path: '/new.ts' });
+    await run({ tau: 'sync-fs', op: 'readFile', requestId: 2, path: 'new.ts' });
     expect(Atomics.load(int32, slotIndex.state)).toBe(syncState.ready);
     expect(arena[0]).toBe(2);
   });
@@ -142,7 +142,7 @@ describe('createSyncFsServerHandler', () => {
     Atomics.store(int32, slotIndex.requestId, 11);
     Atomics.store(int32, slotIndex.state, syncState.pending);
 
-    await run({ tau: 'sync-fs', op: 'fileExists', requestId: 11, path: '/missing.ts' });
+    await run({ tau: 'sync-fs', op: 'fileExists', requestId: 11, path: 'missing.ts' });
 
     expect(Atomics.load(int32, slotIndex.errorCode)).toBe(syncError.absent);
     expect(Atomics.load(int32, slotIndex.payloadLength)).toBe(0);
@@ -162,7 +162,7 @@ describe('createSyncFsServerHandler', () => {
     Atomics.store(int32, slotIndex.requestId, 12);
     Atomics.store(int32, slotIndex.state, syncState.pending);
 
-    await run({ tau: 'sync-fs', op: 'fileExists', requestId: 12, path: '/dir' });
+    await run({ tau: 'sync-fs', op: 'fileExists', requestId: 12, path: 'dir' });
 
     expect(Atomics.load(int32, slotIndex.errorCode)).toBe(syncError.absent);
   });
@@ -181,7 +181,7 @@ describe('createSyncFsServerHandler', () => {
     Atomics.store(int32, slotIndex.requestId, 13);
     Atomics.store(int32, slotIndex.state, syncState.pending);
 
-    await run({ tau: 'sync-fs', op: 'readFile', requestId: 13, path: '/empty.txt' });
+    await run({ tau: 'sync-fs', op: 'readFile', requestId: 13, path: 'empty.txt' });
 
     expect(Atomics.load(int32, slotIndex.errorCode)).toBe(syncError.ok);
     expect(Atomics.load(int32, slotIndex.payloadLength)).toBe(0);

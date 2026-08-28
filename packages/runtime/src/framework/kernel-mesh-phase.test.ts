@@ -95,7 +95,7 @@ const modelFile = () => createGeometryFile('model.mock');
 
 describe('mesh/build/export phase separation', () => {
   beforeEach(async () => {
-    await seedTestFileSystem({ '/model.mock': 'mock-model' });
+    await seedTestFileSystem({ 'model.mock': 'mock-model' });
   });
 
   it('display render defers to meshGeometry and publishes its artifact', async () => {
@@ -226,7 +226,7 @@ describe('mesh/build/export phase separation', () => {
       });
       expect(exported.success).toBe(true);
       expect(createInputs[0]).toEqual({
-        entryPath: '/model.mock',
+        entryPath: 'model.mock',
         parameters: {},
         options: {
           tessellation: { segments: 64, samples: [9] },
@@ -239,7 +239,7 @@ describe('mesh/build/export phase separation', () => {
       const displayed = await worker.createGeometry({ file: modelFile(), parameters: {} });
       expect(displayed.success).toBe(true);
       expect(createInputs[1]).toEqual({
-        entryPath: '/model.mock',
+        entryPath: 'model.mock',
         parameters: {},
         options: {
           tessellation: { segments: 8, samples: [1, 2] },

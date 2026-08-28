@@ -56,7 +56,7 @@ export type CreateWebWorkerClientOptionsOptions<Runtime extends AnyRuntimeDefini
    * Pass `fileSystem` for custom FS authority.
    */
   readonly files?: Record<string, string>;
-  /** Explicit transport-owned filesystem exposed to plugins as runtime `/`. Mutually exclusive with `files`. */
+  /** Explicit rooted filesystem exposed to plugins by this transport. Mutually exclusive with `files`. */
   readonly fileSystem?: RuntimeFileSystem;
   /**
    * Wall-clock deadline applied independently to each preview. Milliseconds.

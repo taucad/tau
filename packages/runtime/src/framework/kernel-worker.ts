@@ -3,7 +3,7 @@
 import deepmerge from 'deepmerge';
 import { logLevels, lookupExportFidelity } from '@taucad/types/constants';
 import { randomUuid } from '@taucad/utils/id';
-import { joinPath, parentDirectory, resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
 import type { FileExtension, OnWorkerLog } from '@taucad/types';
@@ -631,7 +631,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Provides three path resolution contexts:
    * - Relative to the current file's project-local directory
    * - Relative to project root (for dependency resolution)
-   * - Absolute paths (for cache/middleware operations)
+   * - Canonical rooted paths (for cache/middleware operations)
    *
    * @returns the kernel filesystem interface
    * @throws Error if accessed before initialize() completes with fileSystemPort
@@ -890,7 +890,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.setActiveFile(canonicalFile);
     const entryCandidate = {
       generation: record.generation,
-      paths: new Map([[this.activeFileAbsolutePath, fileChangeDebounce]]),
+      paths: new Map([[this.activeFilePath, fileChangeDebounce]]),
       middlewarePaths: new Map<string, number>(),
       coherent: true,
     };
@@ -903,22 +903,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private canonicalGeometryFile(file: RuntimeFileLocator): RuntimeFileLocator {
-    if (
-      !file.path.startsWith('/') ||
-      file.filename.length === 0 ||
-      file.filename.includes('/') ||
-      file.filename.includes('\\')
-    ) {
-      throw new TypeError('Runtime geometry files require an absolute path and basename filename');
+    assertRootedPath(file.path);
+    if (file.filename.length === 0 || file.filename.includes('/') || file.filename.includes('\\')) {
+      throw new TypeError('Runtime geometry files require a rooted directory path and basename filename');
     }
-    const filePath = resolveVirtualPath(joinPath(file.path, file.filename));
-    return { path: parentDirectory(filePath), filename: KernelWorker.getBasename(filePath) };
+    const filePath = assertRootedPath(joinRelativePath(file.path, file.filename));
+    const separator = filePath.lastIndexOf('/');
+    return { path: separator < 0 ? '' : filePath.slice(0, separator), filename: KernelWorker.getBasename(filePath) };
   }
 
   private canonicalStage(stage: Record<string, Uint8Array<ArrayBuffer>>): Record<string, Uint8Array<ArrayBuffer>> {
     const canonical: Record<string, Uint8Array<ArrayBuffer>> = {};
     for (const [path, bytes] of Object.entries(stage)) {
-      const resolved = resolveVirtualPath(path);
+      const resolved = assertRootedPath(path);
       if (resolved in canonical) {
         throw new TypeError('Staged runtime paths must be unique after canonicalization');
       }
@@ -1214,7 +1211,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     owner?: OperationOwner,
   ): Promise<GetParametersResult> {
     const operationOwner = owner ?? (await this.createOperationOwner(file, 'request'));
-    const entryPath = resolveVirtualPath(joinPath(operationOwner.file.path, operationOwner.file.filename));
+    const entryPath = assertRootedPath(joinRelativePath(operationOwner.file.path, operationOwner.file.filename));
     const start = performance.now();
 
     const input: GetParametersInput = {
@@ -1681,7 +1678,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param changedPaths - Paths within the runtime filesystem that changed.
    */
   public async notifyFileChanged(changedPaths: readonly string[]): Promise<void> {
-    const paths = [...new Set(changedPaths.map((path) => resolveVirtualPath(path)))];
+    const paths = [...new Set(changedPaths.map((path) => assertRootedPath(path)))];
     const record = this.shouldScheduleExactPreview(paths) ? this.createAutonomousPreviewRecord() : undefined;
     try {
       await this.enqueueOperation(async () => this.routeExactChangedPaths(paths, record), record?.controller.signal);
@@ -1717,7 +1714,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     candidate?: typeof this.previewWatchCandidate,
   ): Promise<boolean> {
     const desired = new Map(
-      [...desiredPaths].filter(([path]) => path !== '/.tau/cache' && !path.startsWith('/.tau/cache/')),
+      [...desiredPaths].filter(([path]) => path !== '.tau/cache' && !path.startsWith('.tau/cache/')),
     );
     const desiredSet = new Set(desired.keys());
     if (setsEqual(this.watchedPaths, desiredSet)) {
@@ -1753,10 +1750,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       void this.routeWatchEvent(event);
     };
     const replacement = this.fileSystem.watchReady
-      ? this.fileSystem.watchReady({ paths: [...desiredSet], recursive: false, excludes: ['/.tau/cache/**'] }, handler)
+      ? this.fileSystem.watchReady({ paths: [...desiredSet], recursive: false, excludes: ['.tau/cache/**'] }, handler)
       : {
           unsubscribe: this.fileSystem.watch(
-            { paths: [...desiredSet], recursive: false, excludes: ['/.tau/cache/**'] },
+            { paths: [...desiredSet], recursive: false, excludes: ['.tau/cache/**'] },
             handler,
           ),
           ready: Promise.resolve(),
@@ -1862,7 +1859,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (options.publish) {
       this.setActiveFile(owner.file);
     }
-    const ownerFilePath = resolveVirtualPath(joinPath(owner.file.path, owner.file.filename));
+    const ownerFilePath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
     const start = performance.now();
 
     const renderOptionsResult = this.validateRenderOptions(entry.options, owner);
@@ -2289,8 +2286,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return;
     }
     if (this.currentFile) {
-      const currentPath = resolveVirtualPath(joinPath(this.currentFile.path, this.currentFile.filename));
-      const artifactPath = resolveVirtualPath(joinPath(artifact.identity.file.path, artifact.identity.file.filename));
+      const currentPath = assertRootedPath(joinRelativePath(this.currentFile.path, this.currentFile.filename));
+      const artifactPath = assertRootedPath(
+        joinRelativePath(artifact.identity.file.path, artifact.identity.file.filename),
+      );
       if (currentPath !== artifactPath) {
         return;
       }
@@ -2699,7 +2698,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @param input - Input containing file path and project root
    * @param runtime - Runtime services (filesystem, logger)
-   * @returns Array of absolute file paths that are dependencies (including the entry path)
+   * @returns Root-relative dependencies, including the entry path.
    */
   protected abstract onGetDependencies(
     input: GetDependenciesInput,
@@ -2867,7 +2866,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private async createOperationOwner(file: RuntimeFileLocator, kind: OperationOwner['kind']): Promise<OperationOwner> {
     const canonicalFile = this.canonicalGeometryFile(file);
-    const entryPath = resolveVirtualPath(joinPath(canonicalFile.path, canonicalFile.filename));
+    const entryPath = assertRootedPath(joinRelativePath(canonicalFile.path, canonicalFile.filename));
     const binding = await this.resolveKernelBinding({ entryPath }, this.createRuntime());
     return {
       kind,
@@ -2877,7 +2876,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private async writeFilesAndInvalidate(stage: Record<string, Uint8Array<ArrayBuffer>>): Promise<void> {
-    const entries = Object.entries(stage).map(([path, bytes]) => [resolveVirtualPath(path), bytes] as const);
+    const entries = Object.entries(stage).map(([path, bytes]) => [assertRootedPath(path), bytes] as const);
     if (new Set(entries.map(([path]) => path)).size !== entries.length) {
       throw new TypeError('Staged runtime paths must be unique after canonicalization');
     }
@@ -2892,19 +2891,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const revisions = new Map<string, ObservedFileRevision>();
     const createdDirectories = new Set<string>();
     try {
-      for (const [absolutePath, bytes] of entries) {
-        const directory = parentDirectory(absolutePath);
-        if (directory && directory !== '/' && !createdDirectories.has(directory)) {
+      for (const [rootedPath, bytes] of entries) {
+        const separator = rootedPath.lastIndexOf('/');
+        const directory = separator < 0 ? '' : rootedPath.slice(0, separator);
+        if (directory && !createdDirectories.has(directory)) {
           // oxlint-disable-next-line no-await-in-loop -- staging must preserve filesystem order for deterministic tests
           await this.filesystem.mkdir(directory, { recursive: true });
           createdDirectories.add(directory);
         }
         // oxlint-disable-next-line no-await-in-loop -- staging must complete before dependency resolution
-        await this.filesystem.writeFile(absolutePath, bytes);
-        changedPaths.push(absolutePath);
-        if (this.fileHashCache.has(absolutePath) || this.watchedPaths.has(absolutePath)) {
+        await this.filesystem.writeFile(rootedPath, bytes);
+        changedPaths.push(rootedPath);
+        if (this.fileHashCache.has(rootedPath) || this.watchedPaths.has(rootedPath)) {
           // oxlint-disable-next-line no-await-in-loop -- staging order and cache publication stay deterministic
-          revisions.set(absolutePath, { hash: await this.hashContent(bytes), content: bytes });
+          revisions.set(rootedPath, { hash: await this.hashContent(bytes), content: bytes });
         }
       }
       if (changedPaths.length > 0) {
@@ -3542,16 +3542,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Get the absolute path of the active file.
-   * Combines project root with activeFilePath.
-   *
-   * @returns the fully resolved absolute file path
-   */
-  private get activeFileAbsolutePath(): string {
-    return this.activeFilePath;
-  }
-
-  /**
    * Emit a worker state transition to the main thread via the single
    * ordered `postMessage` channel. Deduplicates repeated emissions so
    * consumers observe one event per logical transition.
@@ -3669,7 +3659,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         middlewarePaths: new Map(this.currentPreviewMiddlewarePaths),
         coherent: false,
       };
-      this.previewWatchCandidate.paths.set(this.activeFileAbsolutePath, fileChangeDebounce);
+      this.previewWatchCandidate.paths.set(this.activeFilePath, fileChangeDebounce);
       const owner = await this.createOperationOwner(this.currentFile, 'render-artifact');
 
       if (this.isAborted(record)) {
@@ -3773,7 +3763,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /**
    * Invalidate file-level caches for the given changed paths.
    * Shared by both `notifyFileChanged` (command-driven) and the watch handler (autonomous).
-   * @param changedPaths - Absolute paths of files that changed.
+   * @param changedPaths - Root-relative paths of files that changed.
    */
   private _invalidateCachesForPaths(changedPaths: readonly string[]): void {
     this.commonDependencyCache.clear();
@@ -3837,10 +3827,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private exactWatchEventPaths(event: Exclude<WatchEvent, { type: 'reset' }>): string[] {
     const paths: string[] = [];
     if ('path' in event) {
-      paths.push(resolveVirtualPath(event.path));
+      paths.push(assertRootedPath(event.path));
     }
     if (event.type === 'rename') {
-      paths.push(resolveVirtualPath(event.oldPath), resolveVirtualPath(event.newPath));
+      paths.push(assertRootedPath(event.oldPath), assertRootedPath(event.newPath));
     }
     return [...new Set(paths)];
   }
@@ -3989,14 +3979,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const allDeps = new Map(previewPaths);
     for (const result of this.bundleResultCache.values()) {
       for (const dep of result.dependencies) {
-        allDeps.set(resolveVirtualPath(dep), fileChangeDebounce);
+        allDeps.set(assertRootedPath(dep), fileChangeDebounce);
       }
       for (const path of result.unresolvedPaths) {
-        allDeps.set(resolveVirtualPath(path), fileChangeDebounce);
+        allDeps.set(assertRootedPath(path), fileChangeDebounce);
       }
     }
     for (const path of this.fileHashCache.keys()) {
-      allDeps.set(resolveVirtualPath(path), previewPaths.get(path) ?? fileChangeDebounce);
+      allDeps.set(assertRootedPath(path), previewPaths.get(path) ?? fileChangeDebounce);
     }
     return this.reconcileWatchSet(allDeps, candidate);
   }
@@ -4753,7 +4743,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     readonly fileDependencies: Dependency[];
     readonly trailingDependencies: Dependency[];
   }> {
-    const ownerFilePath = resolveVirtualPath(joinPath(owner.file.path, owner.file.filename));
+    const ownerFilePath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
 
     // 1. Discover file dependencies from kernel module
     const discoverSpan = this.tracer.startSpan('deps.discover');
@@ -4761,13 +4751,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       entryPath: ownerFilePath,
     };
     const depsResult = await this.onGetDependenciesForOwner(owner, discoverInput, this.createRuntime());
-    const unresolvedPaths = [...new Set(depsResult.unresolved.map((path) => resolveVirtualPath(path)))];
-    const absolutePaths = [...new Set(depsResult.resolved.map((path) => resolveVirtualPath(path)))];
+    const unresolvedPaths = [...new Set(depsResult.unresolved.map((path) => assertRootedPath(path)))];
+    const rootedPaths = [...new Set(depsResult.resolved.map((path) => assertRootedPath(path)))];
     const previewCandidate = owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
     // Every render observes the paths its entry needs, including the ones that are missing;
     // only an admitted preview also carries them in its watch candidate.
     if (owner.kind === 'render-artifact') {
-      for (const path of absolutePaths) {
+      for (const path of rootedPaths) {
         previewCandidate?.paths.set(path, fileChangeDebounce);
       }
       for (const path of unresolvedPaths) {
@@ -4778,7 +4768,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     discoverSpan.end();
 
     // 2. Read uncached files
-    const uncachedPaths = absolutePaths.filter((p) => !this.fileHashCache.has(p));
+    const uncachedPaths = rootedPaths.filter((p) => !this.fileHashCache.has(p));
     if (uncachedPaths.length > 0) {
       const readSpan = this.tracer.startSpan('deps.read', {
         fileCount: uncachedPaths.length,
@@ -4803,10 +4793,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     // Contract: getDependencies() must return paths in deterministic order.
-    const fileDeps: FileDependency[] = absolutePaths.map((absolutePath) => ({
+    const fileDeps: FileDependency[] = rootedPaths.map((rootedPath) => ({
       type: 'file',
-      path: absolutePath,
-      contentHash: this.fileHashCache.get(absolutePath)!,
+      path: rootedPath,
+      contentHash: this.fileHashCache.get(rootedPath)!,
     }));
 
     // 4. Framework dependency
@@ -4851,7 +4841,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     middleware: ResolvedMiddleware[],
   ): Promise<Dependency[]> {
     const discoverInput: GetDependenciesInput = {
-      entryPath: resolveVirtualPath(joinPath(owner.file.path, owner.file.filename)),
+      entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
     };
     const previewCandidate = owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
     const declarations: MiddlewareDependencyDeclaration[] = [];
@@ -4872,7 +4862,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           options,
         });
         declarations.push(
-          ...resolved.map((declaration) => ({ ...declaration, path: resolveVirtualPath(declaration.path) })),
+          ...resolved.map((declaration) => ({ ...declaration, path: assertRootedPath(declaration.path) })),
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -5164,7 +5154,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param file - The geometry file being processed
    */
   private setActiveFile(file: RuntimeFileLocator): void {
-    const localFilePath = resolveVirtualPath(joinPath(file.path, file.filename));
+    const localFilePath = assertRootedPath(joinRelativePath(file.path, file.filename));
     if (this.activeFilePath === localFilePath) {
       return;
     }

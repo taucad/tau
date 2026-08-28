@@ -2,7 +2,7 @@ import { assign, assertEvent, setup, emit, enqueueActions } from 'xstate';
 import type { ActorRefFrom, AnyStateMachine } from 'xstate';
 import { produce } from 'immer';
 import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
-import { normalizePath } from '@taucad/utils/path';
+import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { isBrowser } from '#constants/browser.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { PersistedRevisionState } from '#types/project.types.js';
@@ -35,6 +35,7 @@ export type ProjectContext = {
   shouldLoadModelOnStart: boolean;
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
+  fileSystemRoot: string;
   /** Per-viewer-panel graphics machines, keyed by Dockview panel ID */
   viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   /** Project-scoped model appearance shared by every viewer of the same geometry unit. */
@@ -59,6 +60,7 @@ type ProjectInput = {
   projectId: string;
   shouldLoadModelOnStart?: boolean;
   fileManagerRef: ActorRefFrom<typeof fileManagerMachine>;
+  fileSystemRoot: string;
   kernelOptionsFactory: LazyKernelOptionsFactory;
 };
 
@@ -448,7 +450,7 @@ export const projectMachine = setup({
               logRef: context.logRef,
               fileManagerRef: context.fileManagerRef,
               kernelOptionsFactory: context.kernelOptionsFactory,
-              fileSystemRoot: `/projects/${context.projectId}`,
+              fileSystemRoot: context.fileSystemRoot,
             },
           });
 
@@ -487,7 +489,7 @@ export const projectMachine = setup({
               logRef: context.logRef,
               fileManagerRef: context.fileManagerRef,
               kernelOptionsFactory: context.kernelOptionsFactory,
-              fileSystemRoot: `/projects/${context.projectId}`,
+              fileSystemRoot: context.fileSystemRoot,
             },
           });
 
@@ -504,6 +506,7 @@ export const projectMachine = setup({
     }),
     createGeometryUnit: enqueueActions(({ enqueue, context, event, self }) => {
       assertEvent(event, 'createGeometryUnit');
+      assertRootedPath(event.entryPath);
 
       // No-op if a geometry unit already exists for this entry path
       if (context.geometryUnits.has(event.entryPath)) {
@@ -520,7 +523,7 @@ export const projectMachine = setup({
             logRef: context.logRef,
             fileManagerRef: context.fileManagerRef,
             kernelOptionsFactory: context.kernelOptionsFactory,
-            fileSystemRoot: `/projects/${context.projectId}`,
+            fileSystemRoot: context.fileSystemRoot,
           },
         });
 
@@ -539,6 +542,7 @@ export const projectMachine = setup({
     }),
     openInViewer: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'openInViewer');
+      assertRootedPath(event.entryPath);
       enqueue.raise({
         type: 'createGeometryUnit',
         entryPath: event.entryPath,
@@ -823,7 +827,7 @@ export const projectMachine = setup({
 }).createMachine({
   id: 'project',
   context({ input, spawn }) {
-    const { projectId, shouldLoadModelOnStart = true, fileManagerRef, kernelOptionsFactory } = input;
+    const { projectId, shouldLoadModelOnStart = true, fileManagerRef, fileSystemRoot, kernelOptionsFactory } = input;
 
     const logRef = spawn('logs', {
       id: `log-${projectId}`,
@@ -850,6 +854,7 @@ export const projectMachine = setup({
       shouldLoadModelOnStart,
       kernelOptionsFactory,
       fileManagerRef,
+      fileSystemRoot,
       viewGraphics,
       modelInteractionRef,
       geometryUnits,

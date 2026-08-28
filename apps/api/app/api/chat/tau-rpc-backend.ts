@@ -5,7 +5,7 @@ import { Injectable } from '@nestjs/common';
 import type { BackendProtocol, WriteResult, EditResult, FileInfo, GrepMatch, FileData } from 'deepagents';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcExecutionError, RpcValidationError } from '@taucad/chat';
-import { joinRelativePath, resolveVirtualPath, VirtualPathError } from '@taucad/utils/path';
+import { joinRelativePath, resolveAuthorityPath, VirtualPathError } from '@taucad/utils/path';
 // oxlint-disable-next-line typescript/consistent-type-imports -- NestJS DI class
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 
@@ -29,12 +29,12 @@ function unwrapRpcResult<T extends { success: boolean }>(
 }
 
 const toTauRpcPath = (path: string): string => {
-  const absolutePath = resolveVirtualPath(path);
+  const absolutePath = resolveAuthorityPath(path);
   return absolutePath === '/' ? '' : absolutePath.slice(1);
 };
 
 const toDeepAgentsPath = (path: string, isDirectory = false): string => {
-  const absolutePath = resolveVirtualPath(path === '' ? '/' : `/${path}`);
+  const absolutePath = resolveAuthorityPath(path === '' ? '/' : `/${path}`);
   const roundTripPath = absolutePath === '/' ? '' : absolutePath.slice(1);
   if (roundTripPath !== path) {
     throw new VirtualPathError('INVALID_PATH', path);

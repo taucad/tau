@@ -25,6 +25,7 @@ import { isMessagePortLike } from '#transport/_internal/wire-transferables.js';
 import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { kernelIssueCodeValues } from '#types/kernel-issue-codes.js';
+import { assertRootedPath } from '@taucad/utils/path';
 
 // ---------- Primitives ----------
 
@@ -35,10 +36,28 @@ const fileExtensionSchema = z.enum(
   fileExtensions as unknown as readonly [FileExtension, ...FileExtension[]],
 );
 
+const rootedPathSchema = z.string().superRefine((value, context) => {
+  try {
+    assertRootedPath(value);
+  } catch {
+    context.addIssue({ code: 'custom', message: 'Expected a canonical root-relative path.' });
+  }
+});
+
+const rootedFilePathSchema = rootedPathSchema.refine((value) => value.length > 0, {
+  message: 'Expected a root-relative file path.',
+});
+
+const rootedFilenameSchema = rootedFilePathSchema.refine((value) => !value.includes('/'), {
+  message: 'Expected a basename filename.',
+});
+
+const stageSchema = z.record(rootedFilePathSchema, z.instanceof(Uint8Array));
+
 const geometryFileSchema = z
   .object({
-    path: z.string(),
-    filename: z.string(),
+    path: rootedPathSchema,
+    filename: rootedFilenameSchema,
   })
   .catchall(z.unknown());
 
@@ -300,7 +319,7 @@ export const runtimeExportResultSchema = exportGeometryResultSchema;
 
 export const runtimeExportModelArgsSchema = z
   .object({
-    stage: z.record(z.string(), z.instanceof(Uint8Array)).optional(),
+    stage: stageSchema.optional(),
     file: geometryFileSchema,
     parameters: z.record(z.string(), z.unknown()),
     options: z.record(z.string(), z.unknown()).optional(),
@@ -325,7 +344,7 @@ export const runtimeOpenFileArgsSchema = z
 export const runtimeStageAndRenderArgsSchema = z
   .object({
     ...previewCommandIdentityShape,
-    stage: z.record(z.string(), z.instanceof(Uint8Array)),
+    stage: stageSchema,
     file: geometryFileSchema,
     parameters: z.record(z.string(), z.unknown()),
     options: z.record(z.string(), z.unknown()).optional(),

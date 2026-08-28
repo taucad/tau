@@ -1,6 +1,6 @@
 import type { WorkspaceFileService } from '#workspace-file-service.js';
 import { getNodeModulesPath } from '@taucad/utils/import';
-import { isSafeRelativePath, resolveVirtualPath } from '@taucad/utils/path';
+import { isSafeRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 
 /**
  * One package-shaped declaration bundle mirrored under `/node_modules/<packageName>/`.
@@ -65,7 +65,7 @@ export async function populateBundledTypesMount(
       if (!isSafeRelativePath(relativePath)) {
         throw new TypeError(`Invalid bundled type path: ${JSON.stringify(relativePath)}`);
       }
-      const path = resolveVirtualPath(`${packageDirectory}/${relativePath}`);
+      const path = resolveAuthorityPath(`${packageDirectory}/${relativePath}`);
       reserve(path);
       return { path, content };
     });

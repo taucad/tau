@@ -57,12 +57,11 @@ export const cubeCylinderCutoutFixture: ReplayFixture = {
   sourceModel: 'google-gemini-3.5-flash',
   turns: [
     {
-      // Discovery: inspect the empty project. Paths are project-root-absolute
-      // (the virtual filesystem root is the project root).
+      // Discovery: inspect the empty project through its rooted filesystem.
       toolCalls: [
-        { name: 'list_directory', args: { path: '/' } },
-        { name: 'read_file', args: { targetFile: '/main.scad' } },
-        { name: 'glob_search', args: { pattern: '**/*.geospec.ts', path: '/' } },
+        { name: 'list_directory', args: { path: '' } },
+        { name: 'read_file', args: { targetFile: 'main.scad' } },
+        { name: 'glob_search', args: { pattern: '**/*.geospec.ts', path: '' } },
       ],
       usage: { inputTokens: 2000, outputTokens: 60 },
     },
@@ -70,13 +69,13 @@ export const cubeCylinderCutoutFixture: ReplayFixture = {
       reasoning:
         "**Designing geometric primitives**\n\nI'm focusing on defining the core geometric elements first. My immediate plan is to construct the basic cube shape. Once that's established, I'll proceed to design the cylinder, which is necessary for the subsequent cutout operation.",
       toolCalls: [
-        { name: 'create_file', args: { targetFile: '/main.geospec.ts', content: mainGeospec } },
-        { name: 'create_file', args: { targetFile: '/main.scad', content: mainScad } },
+        { name: 'create_file', args: { targetFile: 'main.geospec.ts', content: mainGeospec } },
+        { name: 'create_file', args: { targetFile: 'main.scad', content: mainScad } },
       ],
       usage: { inputTokens: 3500, outputTokens: 400 },
     },
     {
-      toolCalls: [{ name: 'get_kernel_result', args: { targetFile: '/main.scad' } }],
+      toolCalls: [{ name: 'get_kernel_result', args: { targetFile: 'main.scad' } }],
       usage: { inputTokens: 3000, outputTokens: 20 },
     },
     {
@@ -85,8 +84,8 @@ export const cubeCylinderCutoutFixture: ReplayFixture = {
     },
     {
       toolCalls: [
-        { name: 'screenshot', args: { mode: 'multi_angle', targetFile: '/main.scad' } },
-        { name: 'screenshot', args: { mode: 'single', targetFile: '/main.scad' } },
+        { name: 'screenshot', args: { mode: 'multi_angle', targetFile: 'main.scad' } },
+        { name: 'screenshot', args: { mode: 'single', targetFile: 'main.scad' } },
       ],
       usage: { inputTokens: 3400, outputTokens: 40 },
     },

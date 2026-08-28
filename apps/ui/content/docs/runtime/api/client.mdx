@@ -130,7 +130,7 @@ Invalid config fails during `connect()` with `RuntimeConnectionError.causeKind =
 
 <auto-type-table path='./props/client.ts' name='ExportResult' />
 
-For filesystem sources, `source.path` accepts a relative path such as `models/main.ts` or a path beginning with `/`, such as `/models/main.ts`. Both identify a file within the supplied filesystem and normalize to the same [runtime path](../concepts/path-namespaces). For inline sources, `source.entry` is a key in `source.files` and may include directory segments.
+For filesystem sources, `source.path` accepts a canonical root-relative path such as `models/main.ts`. Leading slashes and noncanonical spellings are rejected. For inline sources, `source.entry` is a key in `source.files` and may include directory segments.
 
 ## Content Requirements and Route Capabilities
 
@@ -150,7 +150,7 @@ const client = createRuntimeClient({
 });
 
 const renderedImage = await client.export('webp', {
-  source: { path: '/main.ts' },
+  source: { path: 'main.ts' },
   content: { includeEdges: true },
   exportOptions: {
     width: 1920,
@@ -230,7 +230,7 @@ const client = createRuntimeClient({
 
 `fromMemoryFs`, `fromNodeFs`, `fromFsLike`, `fromBrowserFs`, and `fromFileSystemBridge` all return an opaque `RuntimeFileSystem` value. Pass it into the wired transport callable (`webWorkerTransport({ fileSystem })`, `inProcessTransport({ runtime, fileSystem })`, …); the transport constructs the kernel-side bridge primitives internally. `fromFileSystemBridge` takes a connection factory so each client binding or initialize retry receives a fresh port. Consumers cannot inspect or branch on the handle's kind.
 
-A runtime path identifies a file inside the supplied filesystem. When a host exposes one project as runtime `/`, render `/main.ts` rather than an authority-global path such as `/projects/widget/main.ts`. The leading slash does not mean the host operating system's root. The filesystem implementation—not runtime—defines what is reachable and writable. See [Path Namespaces](../concepts/path-namespaces).
+A runtime path identifies a file inside the supplied filesystem capability. Render `main.ts`, never an authority-global path such as `/projects/widget/main.ts` or a host path. The filesystem implementation—not runtime—defines what is reachable and writable. See [Path Namespaces](../concepts/path-namespaces).
 
 ### Transport plugins vs materialized handles
 

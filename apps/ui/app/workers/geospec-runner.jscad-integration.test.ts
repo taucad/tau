@@ -31,7 +31,7 @@ const workerMocks = vi.hoisted(() => ({
   createDefaultKernelOptions: vi.fn(),
 }));
 
-vi.mock('@taucad/runtime', () => ({
+vi.mock('@taucad/runtime/client', () => ({
   createRuntimeClient: workerMocks.createRuntimeClient,
 }));
 
@@ -52,14 +52,14 @@ const runtimeNodeModuleUrl = pathToFileURL(join(repoRootPath, 'packages/runtime/
 
 const normalizePath = (path: string): string => {
   const normalized = path.replaceAll('\\', '/').replaceAll(/\/+/gu, '/');
-  return normalized === '/' ? normalized : normalized.replace(/\/$/u, '');
+  return normalized.replace(/^\//u, '').replace(/\/$/u, '');
 };
 
 const dirname = (path: string): string => {
   const normalized = normalizePath(path);
   const index = normalized.lastIndexOf('/');
-  if (index <= 0) {
-    return '/';
+  if (index < 0) {
+    return '';
   }
   return normalized.slice(0, index);
 };
@@ -78,7 +78,7 @@ const cloneBytes = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => 
 
 const createInMemoryProjectFileSystem = (files: Record<string, string>): ProjectFileSystemBridge => {
   const storedFiles = new Map<string, Uint8Array<ArrayBuffer>>();
-  const directories = new Set<string>(['/']);
+  const directories = new Set<string>(['']);
 
   const ensureDirectory = (path: string): void => {
     const normalized = normalizePath(path);
@@ -296,7 +296,7 @@ const writeProjectFiles = async (options: {
   files: Record<string, string>;
 }): Promise<void> => {
   for (const [path, content] of Object.entries(options.files)) {
-    const relativePath = relative(options.localRootPath, path);
+    const relativePath = options.localRootPath === '' ? path : relative(options.localRootPath, path);
     const targetPath = join(options.projectPath, relativePath);
     // oxlint-disable-next-line no-await-in-loop -- writes are tiny fixture files and ordering keeps diagnostics simple.
     await mkdir(nodeDirname(targetPath), { recursive: true });
@@ -338,9 +338,10 @@ const exportProjectWithNodeRuntime = async (options: {
         ? (options.input as { source?: { path?: unknown }; parameters?: Record<string, unknown> })
         : {};
     const sourcePath = typeof input.source?.path === 'string' ? input.source.path : 'main.ts';
-    const file = sourcePath.startsWith(options.localRootPath)
-      ? relative(options.localRootPath, sourcePath)
-      : sourcePath;
+    const file =
+      options.localRootPath !== '' && sourcePath.startsWith(options.localRootPath)
+        ? relative(options.localRootPath, sourcePath)
+        : sourcePath;
     const script = `
       import { createNodeClient } from ${JSON.stringify(runtimeNodeModuleUrl)};
       import { defineRuntime } from '@taucad/runtime/worker';
@@ -423,14 +424,12 @@ describe('geospec-runner.worker JSCAD integration', () => {
   });
 
   it('should run JSCAD GeoSpec tests through the worker with real loadModel and request-scoped runtime export', async () => {
-    const localRootPath = '/';
-    /* eslint-disable @typescript-eslint/naming-convention -- fixture keys are absolute filesystem paths. */
+    const localRootPath = '';
     const projectFiles = {
-      '/main.ts': jscadCubeCutoutSource,
-      '/main.geospec.ts': geospecSource,
-      '/package.json': '{"type":"module"}\n',
+      'main.ts': jscadCubeCutoutSource,
+      'main.geospec.ts': geospecSource,
+      'package.json': '{"type":"module"}\n',
     };
-    /* eslint-enable @typescript-eslint/naming-convention -- fixture keys are absolute filesystem paths. */
     const projectFileSystem = createInMemoryProjectFileSystem(projectFiles);
     const exportCalls: Array<{ format: string; input: unknown; bytes: number }> = [];
     workerMocks.createFileSystemBridgeProxy.mockReturnValue(projectFileSystem);
@@ -520,11 +519,11 @@ describe('geospec-runner.worker JSCAD integration', () => {
     }
     expect(defaultExport.format).toBe('glb');
     expect(defaultExport.input).toMatchObject({
-      source: { path: '/main.ts' },
+      source: { path: 'main.ts' },
     });
     expect((defaultExport.input as { parameters?: unknown }).parameters).toBeUndefined();
     expect(parameterizedExport.input).toMatchObject({
-      source: { path: '/main.ts' },
+      source: { path: 'main.ts' },
       parameters: { cubeSize: 80, cylinderRadius: 10, cylinderHeight: 90 },
     });
     expect(defaultExport.bytes).toBeGreaterThan(1000);

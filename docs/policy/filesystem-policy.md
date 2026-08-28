@@ -3,7 +3,7 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-07-22'
+updated: '2026-08-28'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -19,6 +19,7 @@ related:
   - docs/research/revision-restore-runtime-watcher-gap.md
   - docs/research/pending-project-import-recovery-bootstrap-isolation.md
   - docs/research/filesystem-post-implementation-congruency-audit.md
+  - docs/research/rooted-filesystem-root-relative-path-unification.md
 ---
 
 # Filesystem Policy
@@ -73,7 +74,7 @@ Main Thread                       File Manager Worker              Kernel Worker
 All browser filesystem I/O runs on the file manager worker. The main thread and kernel workers access it via the **same bridge mechanism** (`createFileSystemBridge` → `MessageChannel` → `createBridgeProxy`), but not through the same namespace:
 
 - **Main thread**: `createBridgeProxy<FileManagerProtocol>` — full API including root configuration (`configureProjectRoots`), discovery (`listProjectManifests`), canonical-root disposal (`disposeStorageRoot`), workspace-scoped operations via the `{ scope }` options bag, diagnostics, and higher-level copy/move operations
-- **Kernel worker**: `createBridgeProxy<RuntimeFileSystemBase>` over a `WorkspaceFileService.createRootedFileSystem('/projects/<id>')` handler — full primitive read/write/watch access, with `/` rebased to that project and no global file-pool shortcut
+- **Kernel worker**: `createBridgeProxy<RuntimeFileSystemBase>` over a `WorkspaceFileService.createRootedFileSystem('/projects/<id>')` handler — full primitive read/write/watch access, with capability-local paths rebased to that project and no global file-pool shortcut
 
 This is both interface segregation and reachability confinement: kernels receive the narrow API surface they need, and every path they can express resolves only inside the captured project mount. Both proxies talk to the same worker and provider authority, but scoped connections dispatch to a rooted handler instead of the global `fileManager`. No thread may instantiate providers or touch backing stores outside the worker (`docs/policy/filesystem-authority-policy.md` Rules 1 and 15).
 
@@ -81,7 +82,7 @@ This is both interface segregation and reachability confinement: kernels receive
 
 ### Rule 0a: Canonicalize before routing or provider I/O
 
-Use `resolveVirtualPath` as the single virtual-path boundary. Require an absolute POSIX path; reject URLs, backslashes, drive-like paths, control characters, and traversal above `/`. Apply the same contract in `MountTable`, WFS, fs-bridge root selection, browser adapters, Node adapters, and fs-client path resolution.
+Use the path grammar owned by the boundary. Authority routing uses `resolveAuthorityPath` and canonical absolute POSIX paths such as `/projects/<id>/main.ts`. An already-rooted filesystem capability uses `assertRootedPath` for canonical inputs and `resolveRootedPath` when normalization is explicitly part of the API; its root is `''`, and descendants such as `main.ts` never have a leading slash. Both grammars reject URLs, backslashes, drive-like paths, control characters, and traversal above their root. Host adapters translate rooted paths to native paths privately after validation.
 
 ### Rule 0b: Capture one exact mount for each rooted view
 
@@ -89,7 +90,7 @@ Use `resolveVirtualPath` as the single virtual-path boundary. Require an absolut
 
 ### Rule 0c: Preserve full write and watch semantics inside the view
 
-A rooted view supports the same writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or path allowlists. Rebase watch requests and emitted events to local `/`, and never deliver sibling-project events. Scoped runtime bridges use transfer/copy delivery and must not receive the authority-global shared file pool, because a pool hit would bypass rooted RPC dispatch.
+A rooted view supports the same writes, queues, cache invalidation, persistence, and events as global WFS operations. Do not add cache-only writes, read-only source trees, or path allowlists. Rebase watch requests and emitted events to the capability-local namespace (`''`, `main.ts`, `lib/part.ts`), and never deliver sibling-project events. Scoped runtime bridges use transfer/copy delivery and must not receive the authority-global shared file pool, because a pool hit would bypass rooted RPC dispatch.
 
 A rooted view preserves the exact canonical virtual paths carried by concrete create, change, delete, and rename events regardless of backing-filesystem naming semantics. It must not lowercase, normalize Unicode, infer aliases, or widen a concrete event to `reset`. Only explicit information-loss signals—such as overflow, observer `unknown`/`errored`, stale-root detection, backend replacement, or an irreducibly summarized change—use reset recovery. Preserve the hidden mutation origin through rooted writes and suppress only the originating scoped port's echo.
 
@@ -356,13 +357,13 @@ Apply remote facts in arrival order. Resolve only an already registry-owned prov
 
 Runtime dependency watchers must exclude only the runtime cache namespace:
 
-- `/.tau/cache/**`
+- `.tau/cache/**`
 
-The exclusion applies to concrete cache-path events, including peer writes. It must not suppress genuine reset or overflow signals because those signals no longer contain a complete path set. Do not treat `/src/.tau/cache/**` as cache. Do not exclude `/node_modules/**`; installed or vendored package files may be live bundle inputs.
+The exclusion applies to concrete cache-path events, including peer writes. It must not suppress genuine reset or overflow signals because those signals no longer contain a complete path set. Do not treat `src/.tau/cache/**` as cache. Do not exclude `node_modules/**`; installed or vendored package files may be live bundle inputs.
 
 ### Rule 27: Concrete paths remain exact
 
-All watch matching must use normalized paths in the namespace owned by the watched filesystem. Runtime watches therefore use runtime paths beginning with `/`; authority-global watches use explicitly qualified authority-global paths:
+All watch matching must use canonical paths in the namespace owned by the watched filesystem. Runtime watches use root-relative runtime paths; authority-global watches use absolute authority-global paths:
 
 - normalize separators and duplicate slashes
 - preserve the exact spelling carried by every concrete provider event

@@ -186,7 +186,7 @@ export function ProjectProvider({
   readonly provide?: Parameters<typeof projectMachine.provide>[0];
   readonly input?: Omit<
     Parameters<typeof useActorRef<typeof projectMachine>>[1]['input'],
-    'projectId' | 'fileManagerRef' | 'kernelOptionsFactory'
+    'projectId' | 'fileManagerRef' | 'fileSystemRoot' | 'kernelOptionsFactory'
   >;
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
 }): React.JSX.Element {
@@ -274,6 +274,7 @@ export function ProjectProvider({
       input: {
         projectId,
         fileManagerRef: fileManager.fileManagerRef,
+        fileSystemRoot: fileManager.fileManagerRef.getSnapshot().context.rootDirectory,
         kernelOptionsFactory,
         ...input,
       },

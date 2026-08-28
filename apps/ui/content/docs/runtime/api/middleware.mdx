@@ -43,7 +43,7 @@ export const settingsFiles = defineMiddleware({
   id: 'settings',
   name: 'settings',
   getDependencies({ entryPath }) {
-    return [{ path: `/.tau/settings/${entryPath.slice(1)}.json`, watchDebounce: 0 }];
+    return [{ path: `.tau/settings/${entryPath}.json`, watchDebounce: 0 }];
   },
 });
 ```
@@ -54,12 +54,11 @@ Every wrap hook receives a fresh operation-scoped `signal` on `KernelMiddlewareR
 
 ## Factories
 
-| Factory                     | Purpose                                           |
-| --------------------------- | ------------------------------------------------- |
-| `parameterCache()`          | Cache parameter definitions by dependency hash    |
-| `geometryCache()`           | Cache geometry output by dependency hash          |
-| `gltfCoordinateTransform()` | Apply coordinate system transforms to glTF output |
-| `gltfEdgeDetection()`       | Add requested edge geometry to glTF meshes        |
+| Factory               | Purpose                                        |
+| --------------------- | ---------------------------------------------- |
+| `parameterCache()`    | Cache parameter definitions by dependency hash |
+| `geometryCache()`     | Cache geometry output by dependency hash       |
+| `gltfEdgeDetection()` | Add requested edge geometry to glTF meshes     |
 
 ## Usage
 

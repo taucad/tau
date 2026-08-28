@@ -55,6 +55,7 @@ function makeProjectActor(revisionState: PersistedRevisionState): ActorRefFrom<t
       projectId: 'p1',
       shouldLoadModelOnStart: false,
       fileManagerRef: mock<ProjectContext['fileManagerRef']>({ send: vi.fn() }),
+      fileSystemRoot: '/projects/p1',
       kernelOptionsFactory,
     },
   });

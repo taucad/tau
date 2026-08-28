@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 /**
  * Input schema for screenshot tool.
@@ -9,9 +10,9 @@ export const screenshotInputSchema = z
     mode: z
       .enum(['single', 'multi_angle'])
       .describe('single: deterministic perspective isometric view. multi_angle: all 6 orthographic views'),
-    targetFile: z
-      .string()
-      .describe('Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad").'),
+    targetFile: rootedFilePathSchema.describe(
+      'Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad").',
+    ),
   })
   .strict();
 /** @public */

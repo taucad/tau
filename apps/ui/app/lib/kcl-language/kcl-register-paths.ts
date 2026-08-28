@@ -3,14 +3,19 @@
  */
 
 import { URI, Utils } from 'vscode-uri';
+import { VirtualPathError } from '@taucad/utils/path';
+import { workspaceRelativePathFromFileUri } from '#lib/monaco-workspace-fs/workspace-path-from-uri.js';
 
 /**
  * Convert URI to workspace-relative path key (no leading slash), matching
  * virtual Monaco `file:///public/...` paths and the file manager layout.
  */
 export function kclUriToWorkspacePath(uri: string): string {
-  const { path } = URI.parse(uri);
-  return path.startsWith('/') ? path.slice(1) : path;
+  const parsed = URI.parse(uri);
+  if (parsed.scheme !== 'file' || parsed.authority !== '') {
+    throw new VirtualPathError('INVALID_PATH', uri);
+  }
+  return workspaceRelativePathFromFileUri(parsed.path);
 }
 
 /**
@@ -29,8 +34,10 @@ export function resolveKclImportToUri(currentFileUri: string, importPath: string
 /**
  * Parent directory of a workspace-relative file path (no `file://` prefix).
  *
- * @example `public/kcl-samples/axial-fan/main.kcl` → `public/kcl-samples/axial-fan`
- * @example `main.kcl` → `''` (file at virtual workspace root)
+ * @example <caption>Nested workspace path</caption>
+ * parentDirectoryOfWorkspacePath('public/kcl-samples/axial-fan/main.kcl'); // 'public/kcl-samples/axial-fan'
+ * @example <caption>Workspace-root file</caption>
+ * parentDirectoryOfWorkspacePath('main.kcl'); // ''
  */
 export function parentDirectoryOfWorkspacePath(workspacePath: string): string {
   const normalized = workspacePath.replace(/\/$/, '');

@@ -321,7 +321,7 @@ describe('IndexedDbStorageProvider', () => {
         operationId: 'req_pending_create',
         kind: 'duplicate',
         backend: 'opfs',
-        providerBasePath: '/test',
+        providerBasePath: 'test',
         sourceProjectId: project.projectId,
         manifest,
         library: { projectId: manifest.id, lastActivityAt: 3 },
@@ -379,7 +379,7 @@ describe('IndexedDbStorageProvider', () => {
         operationId: 'req_permanent_delete',
         kind: 'permanent-delete',
         projectId: project.projectId,
-        storage: { backend: 'indexeddb', providerBasePath: '/delete' },
+        storage: { backend: 'indexeddb', providerBasePath: 'delete' },
       } as const;
 
       await expect(provider.beginPermanentDeleteProject(operation)).rejects.toThrow(
@@ -405,7 +405,7 @@ describe('IndexedDbStorageProvider', () => {
         operationId: 'req_permanent_delete_race',
         kind: 'permanent-delete',
         projectId: project.projectId,
-        storage: { backend: 'opfs', providerBasePath: '/delete' },
+        storage: { backend: 'opfs', providerBasePath: 'delete' },
       } as const;
 
       const [begin, restore] = await Promise.allSettled([
@@ -623,7 +623,7 @@ describe('IndexedDbStorageProvider', () => {
         await provider.patchChat(chat.id, 'startupRequest', request);
 
         await Promise.all([
-          provider.patchChat(chat.id, 'activeModel', `model-${i}`),
+          provider.patchChat(chat.id, 'activeExecution', { kind: 'tau', model: `model-${i}` }),
           provider.commitCancelledDraftRestore(chat.id, {
             messages: [],
             draft,
@@ -632,7 +632,7 @@ describe('IndexedDbStorageProvider', () => {
         ]);
 
         const final = await provider.getChat(chat.id);
-        expect(final?.activeModel).toBe(`model-${i}`);
+        expect(final?.activeExecution).toEqual({ kind: 'tau', model: `model-${i}` });
         expect(final?.messages).toEqual([]);
         expect(final?.draft).toEqual(draft);
         expect(final?.startupRequest).toBeUndefined();
@@ -666,6 +666,22 @@ describe('IndexedDbStorageProvider', () => {
   });
 
   describe('project library state', () => {
+    it('creates missing library rows in one idempotent batch', async () => {
+      const provider = new IndexedDbStorageProvider();
+      await provider.createProjectLibraryState({ projectId: projectOneId, lastActivityAt: 1 });
+
+      const states = await provider.createProjectLibraryStates([
+        { projectId: projectOneId, lastActivityAt: 999 },
+        { projectId: projectTwoId, lastActivityAt: 2 },
+      ]);
+
+      expect(states).toEqual([
+        { projectId: projectOneId, lastActivityAt: 1 },
+        { projectId: projectTwoId, lastActivityAt: 2 },
+      ]);
+      await expect(provider.getProjectLibraryStates([projectOneId, projectTwoId])).resolves.toHaveLength(2);
+    });
+
     it('creates idempotently without overwriting an existing row', async () => {
       const provider = new IndexedDbStorageProvider();
       const state = await freshProject(provider);
@@ -961,19 +977,20 @@ describe('IndexedDbStorageProvider', () => {
   });
 
   // =========================================================================
-  // Chat.activeModel + Chat.activeKernel are first-class fields
+  // Chat.activeExecution + Chat.activeKernel are first-class fields
   // and patchChat round-trips them just like every other top-level field.
   // =========================================================================
-  describe('activeModel + activeKernel are top-level Chat fields', () => {
-    it('should round-trip activeModel through patchChat', async () => {
+  describe('activeExecution + activeKernel are top-level Chat fields', () => {
+    it('should round-trip activeExecution through patchChat', async () => {
       const provider = new IndexedDbStorageProvider();
       const chat = await freshChat(provider);
 
-      const result = await provider.patchChat(chat.id, 'activeModel', 'gpt-5.4-medium');
+      const execution = { kind: 'tau', model: 'gpt-5.4-medium' } as const;
+      const result = await provider.patchChat(chat.id, 'activeExecution', execution);
 
-      expect(result?.activeModel).toBe('gpt-5.4-medium');
+      expect(result?.activeExecution).toEqual(execution);
       const stored = await provider.getChat(chat.id);
-      expect(stored?.activeModel).toBe('gpt-5.4-medium');
+      expect(stored?.activeExecution).toEqual(execution);
     });
 
     it('should round-trip activeKernel through patchChat', async () => {
@@ -987,55 +1004,55 @@ describe('IndexedDbStorageProvider', () => {
       expect(stored?.activeKernel).toBe('manifold');
     });
 
-    it('should clear activeModel when patched with undefined', async () => {
+    it('should clear activeExecution when patched with undefined', async () => {
       const provider = new IndexedDbStorageProvider();
       const chat = await provider.createChat('resource_test', {
         name: 'WithModel',
         messages: [],
-        activeModel: 'seed-model',
+        activeExecution: { kind: 'tau', model: 'seed-model' },
       });
-      expect(chat.activeModel).toBe('seed-model');
+      expect(chat.activeExecution).toEqual({ kind: 'tau', model: 'seed-model' });
 
-      await provider.patchChat(chat.id, 'activeModel', undefined);
+      await provider.patchChat(chat.id, 'activeExecution', undefined);
 
       const stored = await provider.getChat(chat.id);
-      expect(stored?.activeModel).toBeUndefined();
+      expect(stored?.activeExecution).toBeUndefined();
     });
 
-    it('should preserve activeModel when patching an unrelated field', async () => {
+    it('should preserve activeExecution when patching an unrelated field', async () => {
       const provider = new IndexedDbStorageProvider();
       const chat = await provider.createChat('resource_test', {
         name: 'WithModel',
         messages: [],
-        activeModel: 'gpt-5.4-medium',
+        activeExecution: { kind: 'paseo', connectionId: 'connection-1', agentId: 'claude' },
         activeKernel: 'manifold',
       });
 
       await provider.patchChat(chat.id, 'name', 'Renamed');
 
       const stored = await provider.getChat(chat.id);
-      expect(stored?.activeModel).toBe('gpt-5.4-medium');
+      expect(stored?.activeExecution).toEqual({ kind: 'paseo', connectionId: 'connection-1', agentId: 'claude' });
       expect(stored?.activeKernel).toBe('manifold');
     });
   });
 
   // =========================================================================
-  // duplicateChat carries activeModel + activeKernel onto the copy.
+  // duplicateChat carries activeExecution + activeKernel onto the copy.
   // =========================================================================
-  describe('duplicateChat carries activeModel + activeKernel', () => {
-    it('should copy activeModel and activeKernel into the duplicated chat', async () => {
+  describe('duplicateChat carries activeExecution + activeKernel', () => {
+    it('should copy activeExecution and activeKernel into the duplicated chat', async () => {
       const provider = new IndexedDbStorageProvider();
       const original = await provider.createChat('resource_test', {
         name: 'Original',
         messages: [],
-        activeModel: 'gpt-5.4-medium',
+        activeExecution: { kind: 'tau', model: 'gpt-5.4-medium' },
         activeKernel: 'manifold',
       });
 
       const copy = await provider.duplicateChat(original.id);
 
       expect(copy.id).not.toBe(original.id);
-      expect(copy.activeModel).toBe('gpt-5.4-medium');
+      expect(copy.activeExecution).toEqual({ kind: 'tau', model: 'gpt-5.4-medium' });
       expect(copy.activeKernel).toBe('manifold');
     });
 
@@ -1048,7 +1065,7 @@ describe('IndexedDbStorageProvider', () => {
 
       const copy = await provider.duplicateChat(original.id);
 
-      expect(copy.activeModel).toBeUndefined();
+      expect(copy.activeExecution).toBeUndefined();
       expect(copy.activeKernel).toBeUndefined();
     });
 

@@ -23,7 +23,7 @@ export function createHeadlessRuntimeClient(worker: RuntimeWorkerLike): RpcRunti
     async getKernelResult(targetFile: string): Promise<GetKernelResultRpcResult> {
       try {
         const result = await worker.createGeometry({
-          file: { path: targetFile, basePath: '/' },
+          file: { path: targetFile, basePath: '' },
           parameters: {},
         });
 

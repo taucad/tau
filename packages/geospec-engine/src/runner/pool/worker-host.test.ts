@@ -83,31 +83,31 @@ describe('startGeoSpecPoolWorkerHost', () => {
   });
 
   it('should run a shard and report its result, duration and load key', async () => {
-    const host = startHost({ '/a.geospec.ts': passingSpec('a') }, { measureMemoryBytes: () => 4096 });
+    const host = startHost({ 'a.geospec.ts': passingSpec('a') }, { measureMemoryBytes: () => 4096 });
 
-    const replies = await host.send({ type: 'run-shard', shard: { id: 7, file: '/a.geospec.ts' } });
+    const replies = await host.send({ type: 'run-shard', shard: { id: 7, file: 'a.geospec.ts' } });
 
-    expect(replies[0]).toStrictEqual({ type: 'file-start', shardId: 7, file: '/a.geospec.ts' });
+    expect(replies[0]).toStrictEqual({ type: 'file-start', shardId: 7, file: 'a.geospec.ts' });
     const done = replies.find((message) => message.type === 'shard-complete');
-    expect(done).toMatchObject({ shardId: 7, file: '/a.geospec.ts', workerMemoryBytes: 4096 });
+    expect(done).toMatchObject({ shardId: 7, file: 'a.geospec.ts', workerMemoryBytes: 4096 });
     expect(done?.type === 'shard-complete' && done.result.success).toBe(true);
   });
 
   it('should elide the compiled module before posting a result', async () => {
-    const host = startHost({ '/a.geospec.ts': passingSpec('a') });
+    const host = startHost({ 'a.geospec.ts': passingSpec('a') });
 
-    const replies = await host.send({ type: 'run-shard', shard: { id: 0, file: '/a.geospec.ts' } });
+    const replies = await host.send({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
     const done = replies.find((message) => message.type === 'shard-complete');
 
     expect(done?.type === 'shard-complete' && done.result.bundle?.code).toBe('');
   });
 
   it('should honour a split shard pattern over the run-wide one', async () => {
-    const host = startHost({ '/a.geospec.ts': twoTests });
+    const host = startHost({ 'a.geospec.ts': twoTests });
 
     const replies = await host.send({
       type: 'run-shard',
-      shard: { id: 0, file: '/a.geospec.ts', testNamePattern: '^suite > two$' },
+      shard: { id: 0, file: 'a.geospec.ts', testNamePattern: '^suite > two$' },
       testNamePattern: '^suite > one$',
     });
     const done = replies.find((message) => message.type === 'shard-complete');
@@ -118,11 +118,11 @@ describe('startGeoSpecPoolWorkerHost', () => {
   });
 
   it('should apply the run-wide pattern when a shard names none', async () => {
-    const host = startHost({ '/a.geospec.ts': twoTests });
+    const host = startHost({ 'a.geospec.ts': twoTests });
 
     const replies = await host.send({
       type: 'run-shard',
-      shard: { id: 0, file: '/a.geospec.ts' },
+      shard: { id: 0, file: 'a.geospec.ts' },
       testNamePattern: '^suite > one$',
       testTimeout: 5000,
     });
@@ -134,25 +134,25 @@ describe('startGeoSpecPoolWorkerHost', () => {
   });
 
   it('should list a file without running any body', async () => {
-    const host = startHost({ '/a.geospec.ts': failingSpec('never runs') });
+    const host = startHost({ 'a.geospec.ts': failingSpec('never runs') });
 
-    const replies = await host.send({ type: 'list-tests', shardId: 3, file: '/a.geospec.ts', testTimeout: 100 });
+    const replies = await host.send({ type: 'list-tests', shardId: 3, file: 'a.geospec.ts', testTimeout: 100 });
 
     expect(replies[0]).toStrictEqual({
       type: 'tests-listed',
       shardId: 3,
-      file: '/a.geospec.ts',
+      file: 'a.geospec.ts',
       names: ['never runs > fails'],
     });
   });
 
   it('should apply resolved forensic and matcher limits to a collection pass', async () => {
-    const host = startHost({ '/a.geospec.ts': passingSpec('listed') });
+    const host = startHost({ 'a.geospec.ts': passingSpec('listed') });
 
     const replies = await host.send({
       type: 'list-tests',
       shardId: 4,
-      file: '/a.geospec.ts',
+      file: 'a.geospec.ts',
       matcherWallBackstop: 1000,
       forensic: true,
     });
@@ -163,16 +163,16 @@ describe('startGeoSpecPoolWorkerHost', () => {
   it('should list nothing for a file that could not be collected', async () => {
     const host = startHost({});
 
-    const replies = await host.send({ type: 'list-tests', shardId: 1, file: '/missing.geospec.ts' });
+    const replies = await host.send({ type: 'list-tests', shardId: 1, file: 'missing.geospec.ts' });
 
     expect(replies[0]).toMatchObject({ type: 'tests-listed', names: [] });
   });
 
   it('should dispose the run-wide scope exactly once, on shutdown', async () => {
     const onShutdown = vi.fn(async () => undefined);
-    const host = startHost({ '/a.geospec.ts': passingSpec('a') }, { onShutdown });
+    const host = startHost({ 'a.geospec.ts': passingSpec('a') }, { onShutdown });
 
-    await host.send({ type: 'run-shard', shard: { id: 0, file: '/a.geospec.ts' } });
+    await host.send({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
     expect(onShutdown).not.toHaveBeenCalled();
 
     host.deliver({ type: 'shutdown' });
@@ -191,7 +191,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
     const posted: GeoSpecPoolWorkerMessage[] = [];
     let deliver: ((message: GeoSpecPoolHostMessage) => void) | undefined;
     startGeoSpecPoolWorkerHost({
-      filesystem: memoryFileSystem({ '/a.geospec.ts': passingSpec('a') }),
+      filesystem: memoryFileSystem({ 'a.geospec.ts': passingSpec('a') }),
       postMessage: (message) => {
         if (message.type === 'shard-complete') {
           throw new Error('could not be cloned');
@@ -203,7 +203,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
       },
     });
 
-    deliver?.({ type: 'run-shard', shard: { id: 5, file: '/a.geospec.ts' } });
+    deliver?.({ type: 'run-shard', shard: { id: 5, file: 'a.geospec.ts' } });
     await vi.waitFor(
       () => {
         expect(posted.some((message) => message.type === 'shard-error')).toBe(true);
@@ -214,7 +214,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
     expect(posted.at(-1)).toStrictEqual({
       type: 'shard-error',
       shardId: 5,
-      file: '/a.geospec.ts',
+      file: 'a.geospec.ts',
       message: 'could not be cloned',
     });
   });
@@ -223,7 +223,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
     const posted: GeoSpecPoolWorkerMessage[] = [];
     let deliver: ((message: GeoSpecPoolHostMessage) => void) | undefined;
     startGeoSpecPoolWorkerHost({
-      filesystem: memoryFileSystem({ '/a.geospec.ts': passingSpec('a') }),
+      filesystem: memoryFileSystem({ 'a.geospec.ts': passingSpec('a') }),
       postMessage: (message) => {
         if (message.type === 'tests-listed') {
           // A non-Error throw: the host must still name it.
@@ -238,7 +238,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
       },
     });
 
-    deliver?.({ type: 'list-tests', shardId: 2, file: '/a.geospec.ts' });
+    deliver?.({ type: 'list-tests', shardId: 2, file: 'a.geospec.ts' });
     await vi.waitFor(
       () => {
         expect(posted.some((message) => message.type === 'list-error')).toBe(true);
@@ -253,7 +253,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
     const subject = await loadedSubject();
     const host = startHost(
       {
-        '/a.geospec.ts': `
+        'a.geospec.ts': `
           import { describe, it } from 'geospec';
           import { loadModel } from 'geospec/model';
           import { tag } from 'project/extra';
@@ -269,7 +269,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
       },
     );
 
-    const replies = await host.send({ type: 'run-shard', shard: { id: 0, file: '/a.geospec.ts' } });
+    const replies = await host.send({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
     const done = replies.find((message) => message.type === 'shard-complete');
 
     expect(done?.type === 'shard-complete' && done.result.success && done.result.passed).toBe(true);
@@ -287,10 +287,10 @@ describe('startGeoSpecPoolWorkerHost', () => {
     `;
     const subject = await loadedSubject();
     const modelLoader = vi.fn(async () => exposeEngineSubject(subject));
-    const host = startHost({ '/a.geospec.ts': source, '/b.geospec.ts': source }, { modelLoader });
+    const host = startHost({ 'a.geospec.ts': source, 'b.geospec.ts': source }, { modelLoader });
 
-    await host.send({ type: 'run-shard', shard: { id: 0, file: '/a.geospec.ts' } });
-    await host.send({ type: 'run-shard', shard: { id: 1, file: '/b.geospec.ts' } });
+    await host.send({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
+    await host.send({ type: 'run-shard', shard: { id: 1, file: 'b.geospec.ts' } });
 
     expect(modelLoader).toHaveBeenCalledTimes(1);
   });
@@ -299,7 +299,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
     const model = await loadedSubject();
     const host = startHost(
       {
-        '/forensic.geospec.ts': `
+        'forensic.geospec.ts': `
           import { describe, expectGeo, it } from 'geospec';
           import { loadModel } from 'geospec/model';
           describe('forensic', () => {
@@ -315,7 +315,7 @@ describe('startGeoSpecPoolWorkerHost', () => {
 
     const replies = await host.send({
       type: 'run-shard',
-      shard: { id: 9, file: '/forensic.geospec.ts' },
+      shard: { id: 9, file: 'forensic.geospec.ts' },
       testTimeout: 5000,
       matcherWallBackstop: 1000,
       forensic: true,

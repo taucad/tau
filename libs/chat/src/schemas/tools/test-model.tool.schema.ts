@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
 // =============================================================================
 // View and Observation Schemas (internal use for capturing screenshots)
@@ -41,7 +42,7 @@ export type Observation = z.infer<typeof observationSchema>;
 export const geoSpecRunFilterInputSchema = z
   .object({
     files: z
-      .array(z.string().min(1).max(512))
+      .array(rootedFilePathSchema.max(512))
       .max(50)
       .optional()
       .describe('JSON array of GeoSpec files or directory roots, e.g. ["main.geospec.ts"] or ["lib"].'),
@@ -111,7 +112,7 @@ const testFailureSchema = z.object({
   requirement: z.string().describe('Description of the requirement that failed'),
   reason: z.string().describe('Why the test failed'),
   suggestion: z.string().describe('Actionable suggestion to fix the issue'),
-  targetFile: z.string().describe('Source file whose geometry produced this failure'),
+  targetFile: rootedFilePathSchema.describe('Source file whose geometry produced this failure'),
   diagnostics: z
     .array(geometryDiagnosticSchema)
     .optional()
@@ -129,7 +130,7 @@ export type TestFailure = z.infer<typeof testFailureSchema>;
 const testPassSchema = z.object({
   id: z.string().describe('ID of the passed requirement'),
   requirement: z.string().describe('Description of the requirement that passed'),
-  targetFile: z.string().describe('Source file whose geometry satisfied this requirement'),
+  targetFile: rootedFilePathSchema.describe('Source file whose geometry satisfied this requirement'),
 });
 /**
  * Inferred passing-test row for summarising satisfied requirements.

@@ -265,22 +265,22 @@ export const planetaryGearCompositeFixture: ReplayFixture = {
       toolCalls: [
         {
           name: 'create_file',
-          args: { targetFile: '/lib/planetaryGear.ts', content: planetaryGearLibrary },
+          args: { targetFile: 'lib/planetaryGear.ts', content: planetaryGearLibrary },
         },
       ],
       usage: { inputTokens: 1200, outputTokens: 320, reasoningTokens: 100 },
     },
     {
       toolCalls: [
-        { name: 'create_file', args: { targetFile: '/main.ts', content: planetaryGearMain } },
-        { name: 'create_file', args: { targetFile: '/main.geospec.ts', content: planetaryGearGeoSpec } },
+        { name: 'create_file', args: { targetFile: 'main.ts', content: planetaryGearMain } },
+        { name: 'create_file', args: { targetFile: 'main.geospec.ts', content: planetaryGearGeoSpec } },
       ],
       usage: { inputTokens: 1600, outputTokens: 180 },
     },
     {
       toolCalls: [
-        { name: 'get_kernel_result', args: { targetFile: '/main.ts' } },
-        { name: 'get_kernel_result', args: { targetFile: '/lib/planetaryGear.ts' } },
+        { name: 'get_kernel_result', args: { targetFile: 'main.ts' } },
+        { name: 'get_kernel_result', args: { targetFile: 'lib/planetaryGear.ts' } },
       ],
       usage: { inputTokens: 2100, outputTokens: 70 },
     },
@@ -291,7 +291,7 @@ export const planetaryGearCompositeFixture: ReplayFixture = {
     {
       reasoning:
         'Before visual inspection I expect roughly 5,000–80,000 rendered vertices, bounds near X/Y ±44 mm and Z −10 to 33 mm, and an orthographic silhouette with four mounting ears, an outer ring, a central sun, four cardinal planet gears, and the carrier plate and pins. I will use one multi-angle capture because it already provides all six orthographic views.',
-      toolCalls: [{ name: 'screenshot', args: { mode: 'multi_angle', targetFile: '/main.ts' } }],
+      toolCalls: [{ name: 'screenshot', args: { mode: 'multi_angle', targetFile: 'main.ts' } }],
       usage: { inputTokens: 2500, outputTokens: 90, reasoningTokens: 40 },
     },
     {

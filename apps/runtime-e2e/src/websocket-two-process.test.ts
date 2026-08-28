@@ -26,7 +26,9 @@ import { decode } from '@msgpack/msgpack';
 import { WebSocket } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createRuntimeClient } from '@taucad/runtime';
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import { exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
+import { createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { createGeometryTestHelpers, extractGltfFromExportResult } from '@taucad/runtime-testing';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
@@ -83,6 +85,55 @@ const hostLocalDescriptor = {
 
 const children: ChildProcess[] = [];
 const roots: string[] = [];
+const authorityDisposers: Array<() => void> = [];
+
+const createBrowserFileSystem = async (
+  files: Readonly<Record<string, string>>,
+): Promise<{ fileSystem: ReturnType<typeof fromFileSystemBridge>; service: WorkspaceFileService; root: string }> => {
+  const projectId = 'proj_remoteauthoritytest00';
+  const root = `/projects/${projectId}`;
+  const providerRegistry = new ProviderRegistry();
+  const storageRootKey = 'memory:remote-authority';
+  const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey });
+  const mountTable = new MountTable();
+  mountTable.mount('/', provider, { backend: 'memory', storageRootKey });
+  const eventBus = new ChangeEventBus();
+  const service = new WorkspaceFileService({
+    providerRegistry,
+    resourceQueue: new ResourceQueue(),
+    eventBus,
+    mountTable,
+  });
+  await service.configureProjectRoots({
+    projects: [{ projectId, backend: 'memory', storageRootKey, providerBasePath: projectId }],
+    roots: [],
+  });
+  for (const [path, content] of Object.entries(files)) {
+    // oxlint-disable-next-line no-await-in-loop -- deterministic fixture setup
+    await service.writeFile(`${root}/${path}`, content);
+  }
+
+  const workerScope = new EventTarget();
+  const exposed = exposeFileSystem(service, {
+    changeEventBus: eventBus,
+    handlerForRoot: (authorityRoot, context) => service.createRootedFileSystem(authorityRoot, context),
+    messageSource: workerScope,
+  });
+  const bridgeWorker = {
+    postMessage(message: unknown): void {
+      workerScope.dispatchEvent(new MessageEvent('message', { data: message }));
+    },
+  };
+  authorityDisposers.push(() => {
+    exposed.cleanup();
+    service.dispose();
+  });
+  return {
+    fileSystem: fromFileSystemBridge(() => openFileSystemBridge(bridgeWorker, { root })),
+    service,
+    root,
+  };
+};
 
 /** SIGTERM then SIGKILL to the whole process group (`server-modes.spec.ts:12-44`). */
 const stopProcess = async (child: ChildProcess): Promise<void> => {
@@ -292,6 +343,9 @@ const recordSockets = (): SocketRecorder => {
 afterEach(async () => {
   await Promise.all(children.splice(0).map(async (child) => stopProcess(child)));
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
+  for (const dispose of authorityDisposers.splice(0)) {
+    dispose();
+  }
 });
 
 /* ---------------------------------------------------------------- *
@@ -395,9 +449,9 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
   });
 
   it('E3: serves the UI filesystem to the remote kernel, cache writes and watch included', async () => {
-    const uiRoot = await makeRoot({ 'main.ts': boxSource(20) });
+    const authority = await createBrowserFileSystem({ 'main.ts': boxSource(20) });
     const server = await startApiServer({ mode: 'bridged' });
-    const captured = capturingTransport({ url: server.url, fileSystem: fromNodeFs(uiRoot) });
+    const captured = capturingTransport({ url: server.url, fileSystem: authority.fileSystem });
     const client = createRuntimeClient({ transport: captured.plugin });
     const tracker = trackStates((handler) => client.on('state', handler));
     /* The remote kernel's cache writes are void bridged calls. When the
@@ -428,7 +482,7 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
        * blueprint's Finding 3 pincer is about. */
       await vi.waitFor(
         async () => {
-          expect(await readdir(join(uiRoot, '.tau/cache'))).not.toHaveLength(0);
+          expect(await authority.service.readdir(`${authority.root}/.tau/cache`)).not.toHaveLength(0);
         },
         { timeout: 30_000, interval: 100 },
       );
@@ -437,7 +491,7 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
 
       // An external edit in the UI root: the watch registration crossed the socket.
       let mark = tracker.mark();
-      await writeFile(join(uiRoot, 'main.ts'), boxSource(25), 'utf8');
+      await authority.service.writeFile(`${authority.root}/main.ts`, boxSource(25));
       await delay(debounceSettlingWindow);
       expect(tracker.renders(mark)).toEqual(['rendering']);
       await tracker.settle();
@@ -455,11 +509,11 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
 
       // Cache writes in the UI root are excluded from the bridged watch too.
       mark = tracker.mark();
-      const cacheDirectory = join(uiRoot, '.tau/cache/geometry');
-      await mkdir(cacheDirectory, { recursive: true });
+      const cacheDirectory = `${authority.root}/.tau/cache/geometry`;
+      await authority.service.mkdir(cacheDirectory, { recursive: true });
       for (let index = 0; index < 20; index++) {
         // oxlint-disable-next-line no-await-in-loop -- sequential burst mirrors the cache writer's own ordering
-        await writeFile(join(cacheDirectory, `burst-${String(index)}.bin`), new Uint8Array([index]));
+        await authority.service.writeFile(`${cacheDirectory}/burst-${String(index)}.bin`, new Uint8Array([index]));
       }
       await delay(debounceSettlingWindow);
       expect(tracker.renders(mark)).toEqual([]);

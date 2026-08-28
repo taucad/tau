@@ -41,7 +41,7 @@ import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
  * const client = createRuntimeClient({
  *   transport: inProcessTransport({
  *     runtime,
- *     fileSystem: fromMemoryFs({ '/main.ts': 'export default () => "hi";' }),
+ *     fileSystem: fromMemoryFs({ 'main.ts': 'export default () => "hi";' }),
  *   }),
  * });
  * ```

@@ -78,11 +78,9 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
       expectHasToolCall(message, 'create_file');
       expectToolCallSucceeded(message, 'create_file');
 
-      expect(await testApp.memFs.exists('/main.ts'), 'Expected /main.ts to exist in the in-memory filesystem').toBe(
-        true,
-      );
+      expect(await testApp.memFs.exists('main.ts'), 'Expected main.ts to exist in the in-memory filesystem').toBe(true);
 
-      const mainTs = await testApp.memFs.readFile('/main.ts', 'utf8');
+      const mainTs = await testApp.memFs.readFile('main.ts', 'utf8');
       expect(mainTs).toBeTruthy();
     });
 

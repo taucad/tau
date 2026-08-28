@@ -1,4 +1,5 @@
 import type { editor } from 'monaco-editor';
+import { assertRootedPath } from '@taucad/utils/path';
 
 export type ChatEditorViewerProps = {
   /**
@@ -16,9 +17,8 @@ export type ChatEditorViewerProps = {
 };
 
 /**
- * Create a root-level path string for the Monaco Editor path prop.
- * Uses root-level paths (e.g., /main.ts) for consistent module resolution.
+ * Translate a Tau rooted path into Monaco's private `file://` URI path form.
  */
 export function createMonacoPath(relativePath: string): string {
-  return `/${relativePath}`;
+  return `/${assertRootedPath(relativePath)}`;
 }

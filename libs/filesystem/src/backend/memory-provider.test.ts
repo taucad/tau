@@ -18,20 +18,20 @@ describe('createMemoryProvider', () => {
 
   it('should support basic write and read operations', async () => {
     const provider = await createMemoryProvider();
-    await provider.writeFile('/test.txt', 'hello memory');
-    const content = await provider.readFile('/test.txt', 'utf8');
+    await provider.writeFile('test.txt', 'hello memory');
+    const content = await provider.readFile('test.txt', 'utf8');
     expect(content).toBe('hello memory');
   });
 
   it('should own input and output byte snapshots', async () => {
     const provider = await createMemoryProvider();
     const input = new Uint8Array([1, 2, 3]);
-    await provider.writeFile('/owned.bin', input);
+    await provider.writeFile('owned.bin', input);
     input.fill(9);
 
-    const first = await provider.readFile('/owned.bin');
+    const first = await provider.readFile('owned.bin');
     first.fill(8);
-    const second = await provider.readFile('/owned.bin');
+    const second = await provider.readFile('owned.bin');
 
     expect(second).toEqual(new Uint8Array([1, 2, 3]));
     expect(second).not.toBe(first);
@@ -40,55 +40,55 @@ describe('createMemoryProvider', () => {
   it('should create an independent provider per factory call', async () => {
     const a = await createMemoryProvider();
     const b = await createMemoryProvider();
-    await a.writeFile('/only-in-a.txt', 'a');
-    expect(await a.exists('/only-in-a.txt')).toBe(true);
-    expect(await b.exists('/only-in-a.txt')).toBe(false);
+    await a.writeFile('only-in-a.txt', 'a');
+    expect(await a.exists('only-in-a.txt')).toBe(true);
+    expect(await b.exists('only-in-a.txt')).toBe(false);
   });
 
   it('should throw ENOTEMPTY when rmdir is called on a non-empty directory', async () => {
     const provider = await createMemoryProvider();
-    await provider.mkdir('/parent');
-    await provider.writeFile('/parent/child.txt', 'data');
+    await provider.mkdir('parent');
+    await provider.writeFile('parent/child.txt', 'data');
 
-    await expect(provider.rmdir('/parent')).rejects.toThrow('ENOTEMPTY');
+    await expect(provider.rmdir('parent')).rejects.toThrow('ENOTEMPTY');
   });
 
   it('should succeed when rmdir is called on an empty directory', async () => {
     const provider = await createMemoryProvider();
-    await provider.mkdir('/empty-dir');
+    await provider.mkdir('empty-dir');
 
-    await expect(provider.rmdir('/empty-dir')).resolves.toBeUndefined();
-    expect(await provider.exists('/empty-dir')).toBe(false);
+    await expect(provider.rmdir('empty-dir')).resolves.toBeUndefined();
+    expect(await provider.exists('empty-dir')).toBe(false);
   });
 
   it('should rename a directory and move every contained file under the new prefix', async () => {
     const provider = await createMemoryProvider();
-    await provider.mkdir('/src/utils', { recursive: true });
-    await provider.writeFile('/src/index.ts', 'export {}');
-    await provider.writeFile('/src/utils/helpers.ts', 'export {}');
-    await provider.writeFile('/src/utils/strings.ts', 'export {}');
-    const nestedDirectoryStat = await provider.stat('/src/utils');
+    await provider.mkdir('src/utils', { recursive: true });
+    await provider.writeFile('src/index.ts', 'export {}');
+    await provider.writeFile('src/utils/helpers.ts', 'export {}');
+    await provider.writeFile('src/utils/strings.ts', 'export {}');
+    const nestedDirectoryStat = await provider.stat('src/utils');
     const nestedDirectoryMtime = nestedDirectoryStat.mtimeMs;
 
-    await provider.rename('/src', '/lib');
+    await provider.rename('src', 'lib');
 
-    expect(await provider.exists('/src')).toBe(false);
-    expect(await provider.exists('/src/index.ts')).toBe(false);
-    expect(await provider.exists('/lib')).toBe(true);
-    expect(await provider.exists('/lib/index.ts')).toBe(true);
-    expect(await provider.exists('/lib/utils/helpers.ts')).toBe(true);
-    expect(await provider.exists('/lib/utils/strings.ts')).toBe(true);
-    const renamedDirectoryStat = await provider.stat('/lib/utils');
+    expect(await provider.exists('src')).toBe(false);
+    expect(await provider.exists('src/index.ts')).toBe(false);
+    expect(await provider.exists('lib')).toBe(true);
+    expect(await provider.exists('lib/index.ts')).toBe(true);
+    expect(await provider.exists('lib/utils/helpers.ts')).toBe(true);
+    expect(await provider.exists('lib/utils/strings.ts')).toBe(true);
+    const renamedDirectoryStat = await provider.stat('lib/utils');
     expect(renamedDirectoryStat.mtimeMs).toBe(nestedDirectoryMtime);
   });
 
   it('should return entries with stats from readdirWithStats', async () => {
     const provider = await createMemoryProvider();
-    await provider.mkdir('/src');
-    await provider.writeFile('/src/index.ts', 'export {}');
-    await provider.mkdir('/src/utils');
+    await provider.mkdir('src');
+    await provider.writeFile('src/index.ts', 'export {}');
+    await provider.mkdir('src/utils');
 
-    const entries = await provider.readdirWithStats('/src');
+    const entries = await provider.readdirWithStats('src');
     expect(entries).toHaveLength(2);
 
     const fileEntry = entries.find((entry) => entry.name === 'index.ts');

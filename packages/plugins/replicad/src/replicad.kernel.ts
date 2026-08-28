@@ -44,6 +44,7 @@ import {
   demangleStackFrames,
   classifyLibraryFrames,
 } from '@taucad/runtime/kernel';
+import { detectMultiThreadSupport } from '@taucad/runtime/cross-origin-isolation';
 import type {
   KernelRuntime,
   RuntimeLogger,
@@ -55,7 +56,6 @@ import { replicadOptionsSchema, replicadRenderSchema, replicadExportSchemas } fr
 
 import {
   initOcct,
-  detectMultiThreadSupport,
   activateOccParallelism,
   formatOcRuntimeError,
   runOcMain,

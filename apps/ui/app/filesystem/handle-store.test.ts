@@ -138,9 +138,42 @@ const markerJson = (workspaceId: string, slug = 'tau-workspace'): string =>
 
 const evictedWorkspaceId = 'wsp_NMN8Aisp3U9ajVqBkqMrP';
 
-/** Fresh IndexedDB + fresh module graph, mirroring a cold browser start. */
-const loadStore = async (): Promise<typeof HandleStore> => {
+type LegacyProjectConfig = {
+  readonly projectId: string;
+  readonly backend: 'indexeddb';
+  readonly providerBasePath: string;
+};
+
+/** Fresh IndexedDB + fresh module graph, optionally seeded as the prior v3 schema. */
+const loadStore = async (legacyConfigs: readonly LegacyProjectConfig[] = []): Promise<typeof HandleStore> => {
   globalThis.indexedDB = new IDBFactory();
+  if (legacyConfigs.length > 0) {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 3);
+      request.addEventListener('upgradeneeded', () => {
+        request.result.createObjectStore('configs', { keyPath: 'projectId' });
+      });
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('legacy open failed'));
+      });
+    });
+    const transaction = db.transaction('configs', 'readwrite');
+    for (const config of legacyConfigs) {
+      transaction.objectStore('configs').put(config);
+    }
+    await new Promise<void>((resolve, reject) => {
+      transaction.addEventListener('complete', () => {
+        resolve();
+      });
+      transaction.addEventListener('error', () => {
+        reject(transaction.error ?? new Error('legacy write failed'));
+      });
+    });
+    db.close();
+  }
   vi.resetModules();
   return import('#filesystem/handle-store.js');
 };
@@ -200,7 +233,7 @@ const stubLocks = (): void => {
 /** Direct database access, standing in for rows written by another tab or an older build. */
 const withRawDb = async <T>(operation: (db: IDBDatabase) => Promise<T>): Promise<T> => {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 3);
+    const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 4);
     request.addEventListener('success', () => {
       resolve(request.result);
     });
@@ -453,7 +486,7 @@ describe('storage quota errors', () => {
       setProjectFileSystemConfig({
         projectId: 'proj_000000000000000000001',
         backend: 'indexeddb',
-        providerBasePath: '/demo',
+        providerBasePath: 'demo',
       }),
     ).rejects.toBeInstanceOf(storageQuotaExceededErrorClass);
   });
@@ -559,39 +592,41 @@ describe('getProjectRootConfigs', () => {
   });
 
   it('skips a pre-cutover config instead of poisoning the whole route topology', async () => {
-    const { getProjectRootConfigs, setProjectFileSystemConfig } = await loadStore();
-    await setProjectFileSystemConfig({
-      projectId: 'proj_000000000000000000001',
-      backend: 'indexeddb',
-      providerBasePath: '/projects/legacy--proj_000000000000000000001',
-    });
-    await setProjectFileSystemConfig({
-      projectId: 'proj_000000000000000000002',
-      backend: 'indexeddb',
-      providerBasePath: '/.tau',
-    });
-    await setProjectFileSystemConfig({
-      projectId: 'proj_000000000000000000003',
-      backend: 'indexeddb',
-      providerBasePath: '/flat-project',
-    });
+    const { getProjectRootConfigs } = await loadStore([
+      {
+        projectId: 'proj_000000000000000000001',
+        backend: 'indexeddb',
+        providerBasePath: '/projects/legacy--proj_000000000000000000001',
+      },
+      {
+        projectId: 'proj_000000000000000000002',
+        backend: 'indexeddb',
+        providerBasePath: '/.tau',
+      },
+      {
+        projectId: 'proj_000000000000000000003',
+        backend: 'indexeddb',
+        providerBasePath: '/flat-project',
+      },
+    ]);
 
     const configuration = await getProjectRootConfigs();
 
-    expect(configuration.projects.map((config) => config.providerBasePath)).toEqual(['/flat-project']);
+    expect(configuration.projects.map((config) => config.providerBasePath)).toEqual(['flat-project']);
   });
 
   it('re-admits the config once discovery re-points it at the flat directory', async () => {
-    const { getProjectRootConfigs, setProjectFileSystemConfig } = await loadStore();
     const projectId = 'proj_000000000000000000001';
-    await setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: '/projects/legacy' });
+    const { getProjectRootConfigs, setProjectFileSystemConfig } = await loadStore([
+      { projectId, backend: 'indexeddb', providerBasePath: '/projects/legacy' },
+    ]);
     const beforeRepoint = await getProjectRootConfigs();
     expect(beforeRepoint.projects).toEqual([]);
 
-    await setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: '/legacy' });
+    await setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: 'legacy' });
 
     const afterRepoint = await getProjectRootConfigs();
-    expect(afterRepoint.projects).toEqual([{ projectId, backend: 'indexeddb', providerBasePath: '/legacy' }]);
+    expect(afterRepoint.projects).toEqual([{ projectId, backend: 'indexeddb', providerBasePath: 'legacy' }]);
   });
 
   // R13 — a workspace dropped from the topology used to vanish in silence.
@@ -859,7 +894,7 @@ describe('project-root configuration broadcasts', () => {
       await setProjectFileSystemConfig({
         projectId: `proj_00000000000000000000${index}`,
         backend: 'indexeddb',
-        providerBasePath: `/project-${index}`,
+        providerBasePath: `project-${index}`,
       });
     }
     /* oxlint-enable no-await-in-loop */

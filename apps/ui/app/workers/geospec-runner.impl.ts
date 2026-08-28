@@ -17,7 +17,7 @@ import { fromFsLike } from '@taucad/runtime/filesystem';
 import type { FsLike } from '@taucad/runtime/filesystem';
 import type { FileStat } from '@taucad/types';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
-import { resolveVirtualPath } from '@taucad/utils/path';
+import { assertRootedPath } from '@taucad/utils/path';
 import { discoverGeoSpecFiles } from 'geospec/runner';
 import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
 import { createGeoSpecWebRunner } from 'geospec/runner/web';
@@ -59,13 +59,11 @@ type GeoSpecVmFileSystem = GeoSpecWebRunnerOptions['filesystem'];
 
 const workerScope = globalThis as unknown as WorkerScope;
 
-const toLocalAbsolutePath = (path: string): string => resolveVirtualPath(path.startsWith('/') ? path : `/${path}`);
-
 function createBridgeVmFileSystem(proxy: ProjectFileSystemBridge): GeoSpecVmFileSystem {
   async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   async function readFile(path: string, encoding: 'utf8'): Promise<string>;
   async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    const bridgePath = toLocalAbsolutePath(path);
+    const bridgePath = assertRootedPath(path);
     if (encoding === 'utf8') {
       return proxy.readFile(bridgePath, 'utf8');
     }
@@ -77,14 +75,14 @@ function createBridgeVmFileSystem(proxy: ProjectFileSystemBridge): GeoSpecVmFile
 
   return {
     async exists(path: string): Promise<boolean> {
-      return proxy.exists(toLocalAbsolutePath(path));
+      return proxy.exists(assertRootedPath(path));
     },
     readFile,
     async writeFile(path: string, content: string): Promise<void> {
-      await proxy.writeFile(toLocalAbsolutePath(path), content);
+      await proxy.writeFile(assertRootedPath(path), content);
     },
     async ensureDir(path: string): Promise<void> {
-      await proxy.mkdir(toLocalAbsolutePath(path), { recursive: true });
+      await proxy.mkdir(assertRootedPath(path), { recursive: true });
     },
   };
 }
@@ -92,10 +90,10 @@ function createBridgeVmFileSystem(proxy: ProjectFileSystemBridge): GeoSpecVmFile
 function createDiscoveryFileSystem(proxy: ProjectFileSystemBridge): GeoSpecDiscoveryFileSystem {
   return {
     async readdir(path: string): Promise<readonly string[]> {
-      return proxy.readdir(toLocalAbsolutePath(path));
+      return proxy.readdir(assertRootedPath(path));
     },
     async stat(path: string) {
-      const stat = await proxy.stat(toLocalAbsolutePath(path));
+      const stat = await proxy.stat(assertRootedPath(path));
       return { kind: stat.type === 'dir' ? 'directory' : 'file' };
     },
   };
@@ -249,21 +247,21 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
         }
         if ('code' in input) {
           const code = Object.fromEntries(
-            Object.entries(input.code).map(([file, content]) => [toLocalAbsolutePath(file), content]),
+            Object.entries(input.code).map(([file, content]) => [assertRootedPath(file), content]),
           );
           return loadModel({
             ...input,
             code,
-            file: toLocalAbsolutePath(input.file),
-            projectPath: '/',
+            file: assertRootedPath(input.file),
+            projectPath: '',
             runtime: runtimeClient,
           });
         }
-        const file = toLocalAbsolutePath(input.file);
+        const file = assertRootedPath(input.file);
         return loadModel({
           ...input,
           file,
-          projectPath: '/',
+          projectPath: '',
           runtime: runtimeClient,
         });
       };
@@ -319,7 +317,7 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
   try {
     const discovery = await discoverGeoSpecFiles({
       filesystem: createDiscoveryFileSystem(activeSession.fileSystem),
-      projectPath: '/',
+      projectPath: '',
       files: request.args.files,
       include: request.args.include,
       exclude: request.args.exclude,

@@ -6,6 +6,7 @@
  */
 
 import type { FileSystemProvider, FileStat, ProviderCapabilities } from '#types.js';
+import { assertRootedPath } from '@taucad/utils/path';
 
 /**
  * Base class for native {@link FileSystemProvider} implementations.
@@ -48,6 +49,7 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
    * @returns Either the raw bytes or, when `encoding` is supplied, the decoded string.
    */
   public async readFile(path: string, encoding?: 'utf8'): Promise<Uint8Array<ArrayBuffer> | string> {
+    this._assertRootedPath(path);
     const raw = await this.readFileRaw(path);
     return encoding === 'utf8' ? new TextDecoder().decode(raw) : raw;
   }
@@ -60,6 +62,7 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
    * @param options - When `recursive` is `true`, ancestors are auto-created.
    */
   public async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
+    this._assertRootedPath(path);
     if (!options?.recursive) {
       await this.mkdirSingle(path);
       return;
@@ -68,7 +71,7 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
     const segments = path.split('/').filter(Boolean);
     let current = '';
     for (const segment of segments) {
-      current += `/${segment}`;
+      current = current === '' ? segment : `${current}/${segment}`;
       try {
         // oxlint-disable-next-line no-await-in-loop -- Sequential mkdir required for recursive creation
         await this.mkdirSingle(current);
@@ -96,6 +99,7 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
    * recognized absence or non-directory ancestor.
    */
   public async exists(path: string): Promise<boolean> {
+    this._assertRootedPath(path);
     try {
       await this.stat(path);
       return true;
@@ -116,6 +120,7 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
    * @returns Metadata for `path`.
    */
   public async lstat(path: string): Promise<FileStat> {
+    this._assertRootedPath(path);
     return this.stat(path);
   }
 
@@ -168,6 +173,10 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
 
   protected _einval(path: string): Error {
     return this._errno('EINVAL', 'invalid argument', path);
+  }
+
+  protected _assertRootedPath(path: string): void {
+    assertRootedPath(path);
   }
 
   // -- Protected abstract methods (internal primitives) -----------------------

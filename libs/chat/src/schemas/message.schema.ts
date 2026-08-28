@@ -4,6 +4,10 @@
  */
 
 import { z } from 'zod';
+import {
+  normalizeProjectPathToolInputAliases,
+  normalizeProjectPathToolOutputAliases,
+} from '#schemas/tools/project-path-input-normalizer.js';
 import { messageMetadataSchema } from '#schemas/metadata.schema.js';
 import { providerMetadataSchema } from '#schemas/message-provider.schema.js';
 import { commonReasoningMetadataSchema } from '#schemas/common-reasoning-metadata.schema.js';
@@ -536,6 +540,7 @@ type RawToolLikePart = {
   readonly input?: unknown;
   readonly rawInput?: unknown;
   readonly errorText?: unknown;
+  readonly output?: unknown;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -586,27 +591,43 @@ const normalizeHistoricalInProgressToolPart = (part: RawToolLikePart, type: stri
 };
 
 const normalizeToolPart = (part: RawToolLikePart, historical: boolean): RawToolLikePart => {
-  if (typeof part.type !== 'string' || typeof part.state !== 'string') {
+  if (typeof part.type !== 'string') {
     return part;
   }
 
-  const { type, state } = part;
+  const { type } = part;
   const staticTool = isStaticToolPartType(type);
   const dynamicTool = isDynamicToolPartType(type);
   if (!staticTool && !dynamicTool) {
     return part;
   }
 
+  const tool = dynamicTool && typeof part.toolName === 'string' ? part.toolName : type.replace(/^tool-/, '');
+  const pathNormalized = normalizeProjectPathToolInputAliases(tool, part.input);
+  const outputNormalized = normalizeProjectPathToolOutputAliases(tool, part.output);
+  const normalizedPart =
+    pathNormalized.changed || outputNormalized.changed
+      ? {
+          ...part,
+          ...(pathNormalized.changed ? { input: pathNormalized.input } : {}),
+          ...(outputNormalized.changed ? { output: outputNormalized.input } : {}),
+        }
+      : part;
+  if (typeof normalizedPart.state !== 'string') {
+    return normalizedPart;
+  }
+
+  const { state } = normalizedPart;
   if (historical && (state === 'input-streaming' || state === 'input-available')) {
-    return normalizeHistoricalInProgressToolPart(part, type);
+    return normalizeHistoricalInProgressToolPart(normalizedPart, type);
   }
 
-  if (staticTool && state === 'output-error' && part.input !== undefined) {
+  if (staticTool && state === 'output-error' && normalizedPart.input !== undefined) {
     const inputSchema = getToolInputSchema(type);
-    return inputSchema ? withInvalidInputDemoted(part, inputSchema) : part;
+    return inputSchema ? withInvalidInputDemoted(normalizedPart, inputSchema) : normalizedPart;
   }
 
-  return part;
+  return normalizedPart;
 };
 
 const normalizeMessageParts = (message: RawMessageWithParts, historical: boolean): RawMessageWithParts => {

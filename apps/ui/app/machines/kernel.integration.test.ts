@@ -32,7 +32,7 @@ import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { replicad } from '@taucad/replicad';
 import { esbuild } from '@taucad/esbuild';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/middleware';
+import { gltfEdgeDetection } from '@taucad/middleware';
 import { assimp } from '@taucad/assimp';
 import { runtime as uiRuntime } from '#runtime/ui-runtime.definition.js';
 
@@ -59,7 +59,7 @@ export default function main(p = defaultParams): Shape3D {
 
 const integrationRuntime = defineRuntime({
   plugins: [assimp(), replicad(), esbuild()],
-  middleware: [gltfCoordinateTransform(), gltfEdgeDetection()],
+  middleware: [gltfEdgeDetection()],
 });
 
 const createIntegrationClient = (fileSystem = fromMemoryFs()) =>
@@ -112,7 +112,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
   it('renders non-empty geometry from a transport-owned filesystem source', async () => {
     const fileSystem = fromMemoryFs({
-      '/main.ts': hollowBoxSource,
+      'main.ts': hollowBoxSource,
     });
 
     client = createIntegrationClient(fileSystem);
@@ -120,7 +120,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     await client.connect();
 
     const outcome = await client.render({
-      source: { path: '/main.ts' },
+      source: { path: 'main.ts' },
       content: { includeEdges: true },
     });
 
@@ -159,8 +159,8 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
   it('renders concurrent root and nested entry paths in independent clients', async () => {
     const fileSystem = fromMemoryFs({
-      '/main.ts': hollowBoxSource,
-      '/lib/cube.ts': uiCylinderSource,
+      'main.ts': hollowBoxSource,
+      'lib/cube.ts': uiCylinderSource,
     });
     const rootClient = createIntegrationClient(fileSystem);
     const nestedClient = createIntegrationClient(fileSystem);
@@ -169,8 +169,8 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
       await Promise.all([rootClient.connect(), nestedClient.connect()]);
 
       const outcomes = await Promise.all([
-        rootClient.render({ source: { path: '/main.ts' } }),
-        nestedClient.render({ source: { path: '/lib/cube.ts' } }),
+        rootClient.render({ source: { path: 'main.ts' } }),
+        nestedClient.render({ source: { path: 'lib/cube.ts' } }),
       ]);
 
       for (const outcome of outcomes) {
@@ -195,7 +195,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
   it('updateParameters re-renders against the previously opened file', async () => {
     const fileSystem = fromMemoryFs({
-      '/main.ts': hollowBoxSource,
+      'main.ts': hollowBoxSource,
     });
 
     client = createIntegrationClient(fileSystem);
@@ -203,7 +203,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     await client.connect();
 
     const initial = await client.render({
-      source: { path: '/main.ts' },
+      source: { path: 'main.ts' },
       content: { includeEdges: true },
     });
     expect(initial.superseded).toBe(false);
@@ -236,7 +236,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     });
 
     const fileSystem = fromMemoryFs({
-      '/main.ts': uiCylinderSource,
+      'main.ts': uiCylinderSource,
     });
 
     client = createUiRuntimeClient(fileSystem);
@@ -245,7 +245,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
       await client.connect();
 
       const outcome = await client.render({
-        source: { path: '/main.ts' },
+        source: { path: 'main.ts' },
       });
 
       expect(outcome.superseded).toBe(false);
@@ -270,13 +270,13 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
   it('uses OpenRSCAD native edges without selecting the JavaScript edge fallback', async () => {
     client = createUiRuntimeClient(
       fromMemoryFs({
-        '/main.scad': 'color("red") cube(2);',
+        'main.scad': 'color("red") cube(2);',
       }),
     );
     await client.connect();
 
     const outcome = await client.render({
-      source: { path: '/main.scad' },
+      source: { path: 'main.scad' },
       content: { includeEdges: true },
     });
 

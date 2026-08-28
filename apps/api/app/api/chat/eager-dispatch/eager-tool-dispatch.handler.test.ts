@@ -10,6 +10,7 @@ import type { ChatGeneration, LLMResult } from '@langchain/core/outputs';
 import { tool } from '@langchain/core/tools';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { z } from 'zod';
+import { toolName } from '@taucad/chat/constants';
 import { EagerToolDispatchHandler } from '#api/chat/eager-dispatch/eager-tool-dispatch.handler.js';
 
 const noopStructuredToolSchema = z.object({ value: z.string() });
@@ -56,6 +57,32 @@ async function settleEntries(handler: EagerToolDispatchHandler): Promise<void> {
 }
 
 describe('EagerToolDispatchHandler', () => {
+  it('repairs a model-authored project path before eager invocation and UI emission', async () => {
+    const writer = vi.fn();
+    const handler = new EagerToolDispatchHandler({ runnableConfigBaseline: {} });
+    const invokeMock = vi.fn(async ({ targetFile }: { targetFile: string }): Promise<string> => targetFile);
+    const readFileTool = tool(invokeMock, {
+      name: toolName.readFile,
+      description: 'Read a file.',
+      schema: z.object({ targetFile: z.string() }),
+    }) as unknown as StructuredToolInterface;
+    handler.bindTools([readFileTool]);
+    handler.setWriter(writer);
+
+    emitEnd(handler, [
+      { id: 'call_path', name: toolName.readFile, args: { targetFile: '/main.ts' }, type: 'tool_call' },
+    ]);
+    await settleEntries(handler);
+
+    expect(invokeMock).toHaveBeenCalledWith({ targetFile: 'main.ts' }, expect.anything());
+    expect(writer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'tau-eager-tool-input-available',
+        input: { targetFile: 'main.ts' },
+      }),
+    );
+  });
+
   it('dispatches indexes 0..3 eagerly when each next block opens and dispatches the last tool on handleLLMEnd', async () => {
     const writer = vi.fn();
     const runnableConfigBaseline: RunnableConfig = {};

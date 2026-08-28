@@ -21,9 +21,9 @@ const runtime = defineRuntime({
 });
 const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
 const clientOptions = { transport };
-const mainPath = '/main.ts';
-const utilityPath = '/util.ts';
-const scadPath = '/project/main.scad';
+const mainPath = 'main.ts';
+const utilityPath = 'util.ts';
+const scadPath = 'project/main.scad';
 
 describe('useRuntime source input types', () => {
   it('accepts a single-key inline source map without an entry when generics are inferred', () => {
@@ -48,7 +48,7 @@ describe('useRuntime source input types', () => {
     type MultiFileOptions = UseRuntimeOptions<
       typeof runtime,
       typeof transport,
-      { '/main.ts': string; '/util.ts': string }
+      { 'main.ts': string; 'util.ts': string }
     >;
 
     const valid: MultiFileOptions = {
@@ -156,7 +156,7 @@ describe('useRuntime source input types', () => {
 
   it('accepts stable synchronous client option providers', () => {
     const provider = (): typeof clientOptions => clientOptions;
-    const options: UseRuntimeOptions<typeof runtime, typeof transport, { '/main.ts': string }> = {
+    const options: UseRuntimeOptions<typeof runtime, typeof transport, { 'main.ts': string }> = {
       clientOptions: provider,
       source: { files: { [mainPath]: 'export default () => null;' } },
     };

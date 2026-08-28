@@ -274,7 +274,7 @@ function BreadcrumbNav({
   }, [currentPath]);
 
   return (
-    <div className='flex items-center border-b text-sm'>
+    <div className='flex items-center text-sm'>
       <OmniScroller
         ref={scrollContainerRef}
         className='mx-2 flex flex-1 snap-x snap-mandatory [scrollbar-width:none] items-center gap-0.5 overscroll-x-none [&::-webkit-scrollbar]:hidden'
@@ -530,7 +530,7 @@ export function FileSelector({
   className,
   title = 'Select File',
   description = 'Choose a file from the list',
-  searchPlaceholder = 'Search files...',
+  searchPlaceholder = 'Filter files...',
   emptyMessage = 'No files found.',
   virtualizationThreshold = 50,
   popoverProperties,

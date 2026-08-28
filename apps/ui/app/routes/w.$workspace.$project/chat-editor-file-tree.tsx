@@ -1,6 +1,6 @@
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
 import { useCallback, useState, useRef, useMemo, useEffect, memo } from 'react';
-import { flushSync } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import type { ItemInstance, TreeInstance } from '@headless-tree/core';
 import {
   FilePlus,
@@ -249,21 +249,25 @@ function addDeletedDescendantPaths(options: {
 }
 
 type ChatEditorFileTreeProps = {
+  readonly actionsContainer?: Element | DocumentFragment | null;
   readonly closeButton?: React.ReactNode;
   readonly showTitle?: boolean;
   readonly borderless?: boolean;
   readonly onRequestOpen?: () => void;
   readonly onOpenFile?: (path: string, readOnly?: boolean) => void;
   readonly shouldHandleReveal?: () => boolean;
+  readonly readOnly?: boolean;
 };
 
 export const ChatEditorFileTree = memo(function ({
+  actionsContainer,
   closeButton,
   showTitle = true,
   borderless = false,
   onRequestOpen,
   onOpenFile,
   shouldHandleReveal,
+  readOnly = false,
 }: ChatEditorFileTreeProps): React.JSX.Element {
   // It's necessary to opt out of React Compiler auto-memoization for this component due to:
   // https://headless-tree.lukasbach.com/guides/react-compiler/
@@ -1490,8 +1494,77 @@ export const ChatEditorFileTree = memo(function ({
     return `${itemsToDelete.length} items`;
   }, [itemsToDelete]);
 
+  const fileActions = (
+    <FloatingPanelButtonGroup className='shrink-0'>
+      {readOnly ? null : (
+        <DropdownMenu modal={false}>
+          <FloatingPanelMenuButton asChild tooltip='Create new file' aria-label='Create new file'>
+            <DropdownMenuTrigger>
+              <FilePlus className='size-4' />
+            </DropdownMenuTrigger>
+          </FloatingPanelMenuButton>
+          <DropdownMenuContent
+            align='end'
+            onCloseAutoFocus={(event) => {
+              // Prevent Radix from restoring focus to trigger
+              event.preventDefault();
+              // Focus the pending file input (exists because we used flushSync)
+              pendingFileInputRef.current?.focus();
+            }}
+          >
+            <DropdownMenuLabel>New File</DropdownMenuLabel>
+            <DropdownMenuItem
+              onSelect={() => {
+                // Use flushSync to ensure component renders synchronously
+                // so it exists when onCloseAutoFocus fires
+                flushSync(() => {
+                  handleCreateFile(undefined);
+                });
+              }}
+            >
+              Blank
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {kernelConfigurations.map((kernel) => (
+              <DropdownMenuItem
+                key={kernel.id}
+                onSelect={() => {
+                  // Use flushSync to ensure component renders synchronously
+                  flushSync(() => {
+                    handleCreateFile(kernel);
+                  });
+                }}
+              >
+                {kernel.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {readOnly ? null : (
+        <FloatingPanelMenuButton
+          aria-label='Create new folder'
+          tooltip='Create new folder'
+          onClick={handleCreateFolder}
+        >
+          <FolderPlus className='mt-0.5 size-4' />
+        </FloatingPanelMenuButton>
+      )}
+      <FloatingPanelMenuButton
+        aria-label='Collapse all folders'
+        tooltip='Collapse all folders'
+        onClick={() => {
+          tree.collapseAll();
+        }}
+      >
+        <CopyMinus className='size-4' />
+      </FloatingPanelMenuButton>
+    </FloatingPanelButtonGroup>
+  );
+
   return (
     <>
+      {actionsContainer ? createPortal(fileActions, actionsContainer) : null}
       <input
         ref={fileInputRef}
         multiple
@@ -1545,6 +1618,7 @@ export const ChatEditorFileTree = memo(function ({
           <FloatingPanelContentHeader className={cn(borderless && 'border-0 bg-transparent px-2')}>
             {showTitle ? <FloatingPanelContentTitle>Files</FloatingPanelContentTitle> : <span />}
             <FloatingPanelContentHeaderActions className={cn(borderless && 'ml-auto pl-0')}>
+              {actionsContainer ? null : fileActions}
               {closeButton}
             </FloatingPanelContentHeaderActions>
           </FloatingPanelContentHeader>
@@ -1565,67 +1639,6 @@ export const ChatEditorFileTree = memo(function ({
                 tree.setSearch('');
               }}
             />
-            <FloatingPanelButtonGroup className='shrink-0'>
-              <DropdownMenu modal={false}>
-                <FloatingPanelMenuButton asChild tooltip='Create new file' aria-label='Create new file'>
-                  <DropdownMenuTrigger>
-                    <FilePlus className='size-4' />
-                  </DropdownMenuTrigger>
-                </FloatingPanelMenuButton>
-                <DropdownMenuContent
-                  align='end'
-                  onCloseAutoFocus={(event) => {
-                    // Prevent Radix from restoring focus to trigger
-                    event.preventDefault();
-                    // Focus the pending file input (exists because we used flushSync)
-                    pendingFileInputRef.current?.focus();
-                  }}
-                >
-                  <DropdownMenuLabel>New File</DropdownMenuLabel>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      // Use flushSync to ensure component renders synchronously
-                      // so it exists when onCloseAutoFocus fires
-                      flushSync(() => {
-                        handleCreateFile(undefined);
-                      });
-                    }}
-                  >
-                    Blank
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {kernelConfigurations.map((kernel) => (
-                    <DropdownMenuItem
-                      key={kernel.id}
-                      onSelect={() => {
-                        // Use flushSync to ensure component renders synchronously
-                        flushSync(() => {
-                          handleCreateFile(kernel);
-                        });
-                      }}
-                    >
-                      {kernel.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <FloatingPanelMenuButton
-                aria-label='Create new folder'
-                tooltip='Create new folder'
-                onClick={handleCreateFolder}
-              >
-                <FolderPlus className='mt-0.5 size-4' />
-              </FloatingPanelMenuButton>
-              <FloatingPanelMenuButton
-                aria-label='Collapse all folders'
-                tooltip='Collapse all folders'
-                onClick={() => {
-                  tree.collapseAll();
-                }}
-              >
-                <CopyMinus className='size-4' />
-              </FloatingPanelMenuButton>
-            </FloatingPanelButtonGroup>
           </div>
 
           {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (

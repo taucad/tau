@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createPortal } from 'react-dom';
 import type {
   DockviewApi,
   DockviewDidDropEvent,
@@ -54,7 +55,21 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', async (imp
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-file-tree.js', () => ({
-  FileTreePanelBody: () => <div data-testid='file-tree' />,
+  FileTreePanelBody: ({ actionsContainer }: { readonly actionsContainer?: Element | DocumentFragment | null }) => (
+    <>
+      {actionsContainer
+        ? createPortal(
+            <>
+              <button type='button' aria-label='Create new file' />
+              <button type='button' aria-label='Create new folder' />
+              <button type='button' aria-label='Collapse all folders' />
+            </>,
+            actionsContainer,
+          )
+        : null}
+      <div data-testid='file-tree' />
+    </>
+  ),
 }));
 vi.mock('#components/ui/pane-button.js', () => ({
   PaneButton: ({
@@ -489,6 +504,36 @@ describe('FileEditor routing', () => {
 
     await userEvent.click(toggle);
     expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ filesOpen: false });
+  });
+
+  it('should show file-tree actions before the Files toggle only while the pane is open', () => {
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello') });
+    const { rerender } = render(
+      <FileEditor
+        paneId='test-pane'
+        filePath='main.ts'
+        parameters={{ filePath: 'main.ts', filesOpen: true }}
+        panelApi={mockPanelApi}
+      />,
+    );
+
+    const actions = screen.getByRole('group', { name: 'File actions for main.ts' });
+    expect(
+      within(actions)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual(['Create new file', 'Create new folder', 'Collapse all folders', 'Hide files for main.ts']);
+
+    rerender(
+      <FileEditor
+        paneId='test-pane'
+        filePath='main.ts'
+        parameters={{ filePath: 'main.ts', filesOpen: false }}
+        panelApi={mockPanelApi}
+      />,
+    );
+
+    expect(within(actions).queryByRole('button', { name: 'Create new file' })).not.toBeInTheDocument();
   });
 
   it('should omit Files controls for an ineligible viewer despite stale pane state', () => {

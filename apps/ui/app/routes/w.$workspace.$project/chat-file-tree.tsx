@@ -9,6 +9,7 @@ import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/p
 const toggleFileTreeKeyCombination = projectWorkspaceKeyCombinations.files;
 
 export const FileTreePanelBody = memo(function ({
+  actionsContainer,
   className,
   isOpen = true,
   onOpenChange,
@@ -19,6 +20,7 @@ export const FileTreePanelBody = memo(function ({
   onOpenFile,
   shouldHandleReveal,
 }: {
+  readonly actionsContainer?: Element | DocumentFragment | null;
   readonly className?: string;
   readonly isOpen?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
@@ -32,6 +34,7 @@ export const FileTreePanelBody = memo(function ({
   return (
     <FloatingPanel isOpen={isOpen} side='right' className={className} onOpenChange={onOpenChange}>
       <ChatEditorFileTree
+        actionsContainer={actionsContainer}
         closeButton={closeButton}
         showTitle={showTitle}
         borderless={borderless}

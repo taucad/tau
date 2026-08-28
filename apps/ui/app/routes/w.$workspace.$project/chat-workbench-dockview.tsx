@@ -859,6 +859,7 @@ function FileWorkbenchPane({
   const regionId = useId();
   const paneState = normalizeFilePaneState({ parameters, requestsFiles: shouldRenderFiles, presentation });
   const [filesWidth, setFilesWidth] = useState(paneState.filesWidth);
+  const [fileActionsContainer, setFileActionsContainer] = useState<HTMLDivElement>();
   const alternateView = presentation?.views.find((view) => view.id !== paneState.viewId);
   const filesAction = paneState.filesOpen ? `Hide files for ${title}` : `Show files for ${title}`;
 
@@ -878,6 +879,14 @@ function FileWorkbenchPane({
         >
           View {alternateView.label.toLocaleLowerCase()}
         </PaneButton>
+      ) : null}
+      {paneState.filesOpen ? (
+        <div
+          ref={(element) => {
+            setFileActionsContainer(element ?? undefined);
+          }}
+          className='flex items-center'
+        />
       ) : null}
       {shouldRenderFiles ? (
         <PaneButton
@@ -900,7 +909,7 @@ function FileWorkbenchPane({
       {filePath ? (
         <ChatEditorBreadcrumbs filePath={filePath}>{actions}</ChatEditorBreadcrumbs>
       ) : (
-        <div className='flex min-h-8 flex-row items-center justify-between py-1 pr-1 pl-2 text-muted-foreground'>
+        <div className='flex min-h-9 flex-row items-center justify-between border-b border-border bg-background px-1 py-1 text-muted-foreground'>
           <span className='truncate px-1 text-sm font-medium'>{title}</span>
           {actions}
         </div>
@@ -916,6 +925,7 @@ function FileWorkbenchPane({
             style={{ width: filesWidth }}
           >
             <FilePaneFilesSidecar
+              actionsContainer={fileActionsContainer}
               width={filesWidth}
               onWidthChange={setFilesWidth}
               onWidthCommit={(width) => {
@@ -1210,6 +1220,7 @@ export const FileEditor = memo(function ({
 const clampFilesWidth = (width: number): number => Math.min(maximumFilesWidth, Math.max(minimumFilesWidth, width));
 
 function FilePaneFilesSidecar({
+  actionsContainer,
   width,
   onWidthChange,
   onWidthCommit,
@@ -1217,6 +1228,7 @@ function FilePaneFilesSidecar({
   onOpenFile,
   shouldHandleReveal,
 }: {
+  readonly actionsContainer: Element | DocumentFragment | undefined;
   readonly width: number;
   readonly onWidthChange: (width: number) => void;
   readonly onWidthCommit: (width: number) => void;
@@ -1275,6 +1287,7 @@ function FilePaneFilesSidecar({
         }}
       />
       <FileTreePanelBody
+        actionsContainer={actionsContainer}
         isOpen
         borderless
         className='size-full'

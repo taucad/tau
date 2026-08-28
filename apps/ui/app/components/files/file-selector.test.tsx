@@ -126,7 +126,7 @@ describe('FileSelector (explicit dataSource)', () => {
       expect(screen.getByText('README.md')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Search files...');
+    const searchInput = screen.getByPlaceholderText('Filter files...');
     await userEvent.type(searchInput, 'main');
 
     await waitFor(() => {
@@ -145,7 +145,7 @@ describe('FileSelector (explicit dataSource)', () => {
       expect(screen.getByText('README.md')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Search files...');
+    const searchInput = screen.getByPlaceholderText('Filter files...');
     await userEvent.type(searchInput, 'main');
 
     await waitFor(() => {
@@ -164,7 +164,7 @@ describe('FileSelector (explicit dataSource)', () => {
       expect(screen.getByText('README.md')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText('Search files...');
+    const searchInput = screen.getByPlaceholderText('Filter files...');
     await userEvent.type(searchInput, 'main');
 
     await waitFor(() => {

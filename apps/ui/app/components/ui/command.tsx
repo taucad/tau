@@ -32,7 +32,7 @@ function CommandDialog({
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
       <DialogContent className='overflow-hidden p-0 *:data-[slot=dialog-close]:top-2.5 *:data-[slot=dialog-close]:right-2.5'>
-        <Command className='**:data-[slot=command-input-wrapper]:h-9 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4 [&_[cmdk-input]]:h-9'>
+        <Command className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'>
           {children}
         </Command>
       </DialogContent>
@@ -45,12 +45,13 @@ function CommandInput({
   ...properties
 }: React.ComponentProps<typeof CommandPrimitive.Input>): React.JSX.Element {
   return (
-    <div data-slot='command-input-wrapper' className='relative flex h-9 items-center gap-2 border-b'>
-      <SearchIcon className='pointer-events-none absolute top-1/2 left-3 size-4 shrink-0 -translate-y-1/2 opacity-50' />
+    <div data-slot='command-input-wrapper' className='relative flex items-center p-2'>
+      <SearchIcon className='pointer-events-none absolute top-1/2 left-4 size-4 shrink-0 -translate-y-1/2 opacity-50' />
       <CommandPrimitive.Input
         data-slot='command-input'
         className={cn(
-          'flex h-9 w-full rounded-md bg-transparent py-3 pr-3 pl-9 text-sm outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50',
+          'flex h-7 w-full min-w-0 rounded-md border border-input bg-background py-1 pr-2 pl-8 text-sm shadow-xs transition-[box-shadow] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
+          'focus-visible:ring-2 focus-visible:ring-ring',
           className,
         )}
         {...properties}

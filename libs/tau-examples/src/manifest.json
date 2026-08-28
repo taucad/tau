@@ -115,6 +115,23 @@
   },
   {
     "kernel": "replicad",
+    "name": "bundler-feature-matrix",
+    "mainFile": "main.ts",
+    "files": [
+      "assets/config.json",
+      "assets/label.txt",
+      "assets/payload.bin",
+      "lib/constants.ts",
+      "lib/features/index.ts",
+      "lib/palette.js",
+      "lib/profile.ts",
+      "main.ts",
+      "ui/badge.tsx",
+      "ui/tag.jsx"
+    ]
+  },
+  {
+    "kernel": "replicad",
     "name": "card-holder",
     "mainFile": "main.ts",
     "files": ["main.ts"]

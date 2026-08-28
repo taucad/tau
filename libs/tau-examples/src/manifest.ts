@@ -25,6 +25,7 @@ export type ExampleManifest = {
     | 'bambu-plate'
     | 'birdhouse'
     | 'bottle'
+    | 'bundler-feature-matrix'
     | 'card-holder'
     | 'chair'
     | 'cycloidal-gear'

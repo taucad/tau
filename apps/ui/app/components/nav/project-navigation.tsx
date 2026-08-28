@@ -266,7 +266,7 @@ function ProjectNavigationItem({
           <Link
             to={target}
             aria-current={isActive ? 'page' : undefined}
-            className='flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-sm px-0.5 ring-sidebar-ring outline-hidden focus-visible:ring-3'
+            className='flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-sm px-0.5 ring-sidebar-ring outline-hidden focus-visible:ring-2'
             onClick={onOpen}
           >
             <span className='truncate'>{project.name}</span>

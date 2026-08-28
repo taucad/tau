@@ -46,7 +46,7 @@ export function ProjectCard({
     >
       <Link
         to={to}
-        className='absolute inset-0 z-10 cursor-pointer rounded-xl focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none focus-visible:ring-inset'
+        className='absolute inset-0 z-10 cursor-pointer rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset'
       >
         <span className='sr-only'>{linkLabel}</span>
       </Link>

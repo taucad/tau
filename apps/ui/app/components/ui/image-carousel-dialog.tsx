@@ -209,7 +209,7 @@ function ImageCarouselDialog({
         <Carousel
           ref={carouselReference}
           aria-label='Image preview carousel'
-          className='flex h-full w-full min-w-0 flex-col outline-none'
+          className='flex h-full w-full min-w-0 flex-col outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
           opts={carouselOptions}
           setApi={setCarouselApi}
           tabIndex={0}

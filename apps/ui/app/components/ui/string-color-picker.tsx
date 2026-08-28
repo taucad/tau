@@ -211,7 +211,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
           autoComplete='off'
           type='text'
           value={value}
-          className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted px-2 pr-6 text-right font-mono text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus) focus-visible:ring-0'
+          className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted px-2 pr-6 text-right font-mono text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
           placeholder='Color value'
           onChange={handleMainInputChange}
         />

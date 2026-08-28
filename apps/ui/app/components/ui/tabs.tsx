@@ -127,7 +127,7 @@ function TabsTrigger({ className, value, enableAnimation = true, ...props }: Tab
       <TabsPrimitive.Trigger
         data-slot='tabs-trigger'
         className={cn(
-          "z-10 flex size-full cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[box-shadow] select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 dark:text-sidebar-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+          "z-10 flex size-full cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[box-shadow] select-none outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 dark:text-sidebar-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           className,
         )}
         value={value}
@@ -141,7 +141,7 @@ function TabsTrigger({ className, value, enableAnimation = true, ...props }: Tab
       <TabsPrimitive.Trigger
         data-slot='tabs-trigger'
         className={cn(
-          "z-10 flex size-full cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[box-shadow] select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 dark:text-sidebar-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+          "z-10 flex size-full cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[box-shadow] select-none outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 dark:text-sidebar-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           className,
         )}
         value={value}
@@ -173,7 +173,10 @@ function TabsContent({
     return (
       <TabsPrimitive.Content
         data-slot='tabs-content'
-        className={cn('flex-1 outline-none data-[state=inactive]:hidden', className)}
+        className={cn(
+          'flex-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-[state=inactive]:hidden',
+          className,
+        )}
         {...props}
       >
         {children}
@@ -186,7 +189,10 @@ function TabsContent({
       <motion.div
         layout
         data-slot='tabs-content'
-        className={cn('flex-1 outline-none', className)}
+        className={cn(
+          'flex-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+          className,
+        )}
         initial={{ opacity: 0, y: -10, filter: 'blur(4px)' }}
         animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
         exit={{ opacity: 0, y: 10, filter: 'blur(4px)' }}

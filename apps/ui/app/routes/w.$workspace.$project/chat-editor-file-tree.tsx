@@ -1862,7 +1862,7 @@ function TreeItem({
     const renameInputProps = item.getRenameInputProps() as React.InputHTMLAttributes<HTMLInputElement>;
     return (
       <div
-        className='relative flex h-7 items-center border border-primary py-1 pr-1 pl-2'
+        className='relative flex h-7 items-center border border-input py-1 pr-1 pl-2 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         {/* Indent guide lines (VS Code-style) */}
@@ -2295,7 +2295,7 @@ function PendingFolderInput({
   return (
     <div className='flex w-full flex-col gap-0.5'>
       <div
-        className='flex h-7 w-full items-center border border-primary py-1 pr-1'
+        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         <div className='flex min-w-0 flex-1 items-center gap-2'>
@@ -2421,7 +2421,7 @@ function PendingFileInput({
   return (
     <div className='flex w-full flex-col gap-0.5'>
       <div
-        className='flex h-7 w-full items-center border border-primary py-1 pr-1'
+        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         <div className='flex min-w-0 flex-1 items-center gap-2'>

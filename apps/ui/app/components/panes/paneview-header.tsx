@@ -127,7 +127,7 @@ export function PaneviewHeader({
           aria-expanded={expanded}
           aria-label={title === undefined ? 'Toggle panel' : undefined}
           draggable
-          className='flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset'
+          className='flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
           onClick={handleClick}
         >
           <ChevronDown
@@ -185,7 +185,7 @@ export function PaneviewHeaderControls({
         'ml-auto flex items-center gap-1',
         '[&_button]:rounded-md [&_button]:text-muted-foreground [&_button]:transition-colors [&_button]:duration-150 [&_button]:outline-none',
         '[&_button:hover]:bg-muted-foreground/10 [&_button:hover]:text-foreground',
-        '[&_button:focus-visible]:bg-muted-foreground/10 [&_button:focus-visible]:text-foreground [&_button:focus-visible]:ring-2 [&_button:focus-visible]:ring-ring/50',
+        '[&_button:focus-visible]:bg-muted-foreground/10 [&_button:focus-visible]:text-foreground [&_button:focus-visible]:ring-2 [&_button:focus-visible]:ring-ring',
         '[&_button[data-state=open]]:bg-muted-foreground/10 [&_button[data-state=open]]:text-foreground',
         'motion-reduce:[&_button]:transition-none',
         className,
@@ -250,7 +250,7 @@ export function PaneviewHeaderAction({
         'flex size-6 items-center justify-center rounded-md',
         'text-muted-foreground transition-colors duration-150 motion-reduce:transition-none',
         'hover:bg-muted-foreground/10 hover:text-foreground',
-        'outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+        'outline-none focus-visible:ring-2 focus-visible:ring-ring',
         'disabled:pointer-events-none disabled:opacity-50',
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         'shrink-0 select-none',

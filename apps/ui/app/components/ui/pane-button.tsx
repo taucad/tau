@@ -1,22 +1,45 @@
 import type { ReactNode } from 'react';
 import { Slot as SlotPrimitive } from 'radix-ui';
-import { cn } from '#utils/ui.utils.js';
+import { cva } from 'class-variance-authority';
+import type { VariantProps } from 'class-variance-authority';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
 type TooltipSide = 'left' | 'right' | 'top' | 'bottom';
 
-type PaneButtonProps = React.ComponentProps<'button'> & {
-  readonly asChild?: boolean;
-  readonly tooltip?: ReactNode;
-  readonly tooltipSide?: TooltipSide;
-};
+const paneButtonVariants = cva(
+  [
+    'flex shrink-0 select-none items-center justify-center rounded-sm',
+    'text-muted-foreground transition-colors',
+    'hover:bg-muted-foreground/15 hover:text-foreground',
+    'aria-pressed:bg-muted-foreground/15 aria-pressed:hover:bg-muted-foreground/20',
+    'outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    'disabled:pointer-events-none disabled:opacity-50',
+    "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  ],
+  {
+    variants: {
+      size: {
+        icon: 'size-7',
+        label: 'h-7 gap-1.5 whitespace-nowrap px-2 text-xs',
+      },
+    },
+    defaultVariants: { size: 'icon' },
+  },
+);
+
+type PaneButtonProps = React.ComponentProps<'button'> &
+  VariantProps<typeof paneButtonVariants> & {
+    readonly asChild?: boolean;
+    readonly tooltip?: ReactNode;
+    readonly tooltipSide?: TooltipSide;
+  };
 
 /**
- * Shared icon-button primitive for panel headers (Dockview tab-bar actions,
- * floating-panel header buttons, etc.).
+ * Shared button primitive for panel headers (Dockview tab-bar actions,
+ * floating-panel header buttons, file actions, etc.).
  *
- * Renders a small (24 px), centered button with consistent sizing, hover
- * colours, focus ring, and disabled state. Accepts `ref` as a regular prop
+ * Renders a 28 px icon or labelled button with consistent hover colours,
+ * pressed state, focus ring, and disabled state. Accepts `ref` as a regular prop
  * (React 19) and supports `asChild` via Radix `SlotPrimitive.Slot` for composition with
  * triggers (DropdownMenuTrigger, PopoverTrigger, etc.).
  *
@@ -26,26 +49,14 @@ function PaneButton({
   asChild = false,
   tooltip,
   tooltipSide = 'top',
+  size,
   className,
   ...properties
 }: PaneButtonProps): React.JSX.Element {
   const Comp = asChild ? SlotPrimitive.Slot : 'button';
 
   const button = (
-    <Comp
-      type={asChild ? undefined : 'button'}
-      className={cn(
-        'flex size-6 items-center justify-center rounded-sm',
-        'text-muted-foreground transition-colors',
-        'hover:bg-muted-foreground/15 hover:text-foreground',
-        'outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
-        'disabled:pointer-events-none disabled:opacity-50',
-        "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        'shrink-0 select-none',
-        className,
-      )}
-      {...properties}
-    />
+    <Comp type={asChild ? undefined : 'button'} className={paneButtonVariants({ size, className })} {...properties} />
   );
 
   if (tooltip) {

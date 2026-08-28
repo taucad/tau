@@ -186,7 +186,7 @@ function ImagePreviewGroup({
         <DialogContent className='h-[80vh] w-auto max-w-[90vw]! overflow-hidden p-0 max-md:min-w-[90vw]'>
           <Carousel
             ref={carouselRef}
-            className='flex h-full w-full flex-col outline-none'
+            className='flex h-full w-full flex-col outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
             opts={{ loop: true }}
             setApi={setCarouselApi}
             tabIndex={0}

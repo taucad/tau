@@ -239,7 +239,7 @@ function ObjectFieldTemplate(
       onOpenChange={setIsOpen}
     >
       <CollapsibleTrigger
-        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
         aria-label={`Group: ${prettyTitle}`}
       >
         <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
@@ -317,7 +317,7 @@ function ArrayFieldTemplate(
       onOpenChange={setIsOpen}
     >
       <CollapsibleTrigger
-        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
         aria-label={`Group: ${prettyTitle}`}
       >
         <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
@@ -373,7 +373,7 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
     <Select value={String(value ?? '')} onValueChange={handleChange}>
       <SelectTrigger
         size='sm'
-        className='h-(--param-field-h) min-w-0 flex-1 rounded-(--param-field-radius) border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus) focus-visible:ring-0'
+        className='h-(--param-field-h) min-w-0 flex-1 rounded-(--param-field-radius) border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
         aria-label={prettyLabel ? `Select for ${prettyLabel}` : undefined}
       >
         <SelectValue placeholder={placeholder ?? 'Choose an option'} />
@@ -416,7 +416,7 @@ function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }):
       // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
       value={value}
       defaultValue={schema.default as string}
-      className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted pr-6 pl-2 text-right text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus) focus-visible:ring-0'
+      className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted pr-6 pl-2 text-right text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
       aria-label={prettyLabel ? `Input for ${prettyLabel}` : undefined}
       onChange={(event) => {
         onChange(event.target.value);
@@ -486,7 +486,7 @@ export const templates: TemplatesType = {
       // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
       value={value}
       defaultValue={schema.default as string}
-      className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted pr-6 pl-2 text-right text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus) focus-visible:ring-0'
+      className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted pr-6 pl-2 text-right text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
       onChange={(event) => {
         onChange(event.target.value);
       }}

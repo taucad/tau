@@ -114,7 +114,7 @@ function FourLineViewport({ children }: FourLineViewportProps): React.JSX.Elemen
           onClick={() => {
             setIsExpanded((previous) => !previous);
           }}
-          className='group/chevron-trigger absolute inset-x-0 bottom-0 flex h-5 w-full cursor-pointer items-center justify-center outline-none'
+          className='group/chevron-trigger absolute inset-x-0 bottom-0 flex h-5 w-full cursor-pointer items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
         >
           <span
             className={cn(

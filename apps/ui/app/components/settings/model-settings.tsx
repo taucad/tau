@@ -48,7 +48,7 @@ export function ModelSettings(): React.JSX.Element {
               onClick={() => {
                 setAvailable(model, !checked);
               }}
-              className='flex w-full items-center justify-between gap-3 rounded-sm px-2.5 py-2 text-left transition-colors hover:bg-menu-highlight focus-visible:bg-menu-highlight focus-visible:outline-none'
+              className='flex w-full items-center justify-between gap-3 rounded-sm px-2.5 py-2 text-left transition-colors hover:bg-menu-highlight focus-visible:bg-menu-highlight focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
             >
               <div className='flex min-w-0 items-center gap-2.5'>
                 <SvgIcon id={model.details.family} className='size-4 shrink-0' />

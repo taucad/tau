@@ -175,7 +175,7 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-tab:not(.dv-active-tab):hover]:!text-muted-foreground',
   '[&_.dv-tab:focus-visible]:outline-none',
   '[&_.dv-tab:focus-visible]:ring-2',
-  '[&_.dv-tab:focus-visible]:ring-ring/50',
+  '[&_.dv-tab:focus-visible]:ring-ring',
   '[&_.dv-tab.dv-active-tab_.dv-default-tab-action]:opacity-100',
   '[&_.dv-tab:focus-within_.dv-default-tab-action]:visible',
   '[&_.dv-tab:focus-within_.dv-default-tab-action]:opacity-100',

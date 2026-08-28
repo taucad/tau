@@ -94,6 +94,7 @@ export function ChatMessagePlanCard({ targetFile, content, status }: ChatMessage
                     type='checkbox'
                     checked={todo.checked}
                     readOnly
+                    tabIndex={-1}
                     className='mt-0.5 size-3.5 shrink-0 rounded-sm'
                   />
                   <span className='min-w-0 flex-1 wrap-break-word'>{todo.text}</span>

@@ -160,7 +160,7 @@ function ProjectChatItem({
           <Link
             to={projectChatUrl(project.slugs, chat.id)}
             aria-current={isActive ? 'page' : undefined}
-            className='flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-md pr-1.5 pl-[30px] ring-sidebar-ring outline-hidden focus-visible:ring-3'
+            className='flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-md pr-1.5 pl-[30px] ring-sidebar-ring outline-hidden focus-visible:ring-2'
           >
             <span className='truncate'>{chat.name}</span>
           </Link>

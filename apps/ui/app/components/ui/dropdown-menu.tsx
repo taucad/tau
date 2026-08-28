@@ -33,9 +33,16 @@ function DropdownMenuPortal({
 }
 
 function DropdownMenuTrigger({
+  className,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Trigger>): React.JSX.Element {
-  return <DropdownMenuPrimitive.Trigger data-slot='dropdown-menu-trigger' {...properties} />;
+  return (
+    <DropdownMenuPrimitive.Trigger
+      data-slot='dropdown-menu-trigger'
+      className={cn('outline-none focus-visible:ring-2 focus-visible:ring-ring', className)}
+      {...properties}
+    />
+  );
 }
 
 function DropdownMenuContent({

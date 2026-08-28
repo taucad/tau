@@ -37,7 +37,7 @@ export function ParametersString({
       type='text'
       value={value}
       className={cn(
-        'h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted px-3 text-(--param-field-color) text-sm shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus) focus-visible:ring-0',
+        'h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted px-3 text-(--param-field-color) text-sm shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)',
         className,
       )}
       onChange={(event) => {

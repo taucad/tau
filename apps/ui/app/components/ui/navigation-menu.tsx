@@ -52,7 +52,7 @@ function NavigationMenuItem({
 }
 
 const navigationMenuTriggerStyle = cva(
-  'group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=open]:hover:bg-accent data-[state=open]:text-accent-foreground data-[state=open]:focus:bg-accent data-[state=open]:bg-accent/50 ring-ring/10 dark:ring-ring/20 dark:outline-ring/40 outline-ring/50 transition-[color,box-shadow] focus-visible:ring-4 focus-visible:outline-1',
+  'group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 text-sm font-medium outline-none transition-[color,box-shadow] hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[state=open]:bg-accent/50 data-[state=open]:text-accent-foreground data-[state=open]:hover:bg-accent data-[state=open]:focus:bg-accent',
 );
 
 function NavigationMenuTrigger({
@@ -118,7 +118,7 @@ function NavigationMenuLink({
     <NavigationMenuPrimitive.Link
       data-slot='navigation-menu-link'
       className={cn(
-        "data-[active=true]:text-accent-foreground hover:text-accent-foreground focus:text-accent-foreground flex flex-col gap-1 rounded-sm p-2 text-sm ring-ring/10 outline-ring/50 transition-[color,box-shadow] hover:bg-accent focus:bg-accent focus-visible:ring-4 focus-visible:outline-1 data-[active=true]:bg-accent/50 data-[active=true]:hover:bg-accent data-[active=true]:focus:bg-accent dark:ring-ring/20 dark:outline-ring/40 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "data-[active=true]:text-accent-foreground hover:text-accent-foreground focus:text-accent-foreground flex flex-col gap-1 rounded-sm p-2 text-sm outline-none transition-[color,box-shadow] hover:bg-accent focus:bg-accent focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:bg-accent/50 data-[active=true]:hover:bg-accent data-[active=true]:focus:bg-accent [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       {...properties}

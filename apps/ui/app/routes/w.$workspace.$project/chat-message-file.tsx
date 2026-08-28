@@ -139,7 +139,7 @@ export function ChatMessageFileAttachments({ parts }: ChatMessageFileAttachments
                   // oxlint-disable-next-line react/no-array-index-key -- image URLs can repeat across message attachments
                   key={`${part.url}-${imageIndex}`}
                   aria-label={`Open image ${part.filename ?? imageIndex + 1}`}
-                  className='size-12 shrink-0 overflow-hidden rounded-lg border bg-background focus:ring-2 focus:ring-primary focus:outline-none'
+                  className='size-12 shrink-0 overflow-hidden rounded-lg border bg-background outline-none focus-visible:ring-2 focus-visible:ring-ring'
                   onMouseDown={(event) => {
                     event.preventDefault();
                   }}

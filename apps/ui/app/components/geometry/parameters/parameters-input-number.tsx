@@ -120,7 +120,7 @@ export const ParametersInputNumber = React.forwardRef<HTMLInputElement, Paramete
           step={step}
           className={cn(
             isCount ? 'pl-7' : 'pr-6',
-            'h-6 text-right shadow-none border-border/50 hover:border-border focus-visible:ring-0 focus-visible:border-border',
+            'h-6 border-border/50 text-right shadow-none hover:border-border focus-visible:border-border',
             className,
           )}
           {...properties}

@@ -6,20 +6,17 @@ import { Button } from '#components/ui/button.js';
 import { Input } from '#components/ui/input.js';
 import { cn } from '#utils/ui.utils.js';
 
-const inlineTextEditorVariants = cva(
-  'h-full px-[calc(var(--spacing)*1.75)] text-sm select-auto focus-visible:ring-0 focus-visible:ring-offset-0',
-  {
-    variants: {
-      variant: {
-        default: 'bg-background',
-        ghost: 'border-transparent bg-transparent px-0 shadow-none focus-visible:border-transparent',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
+const inlineTextEditorVariants = cva('h-full px-[calc(var(--spacing)*1.75)] text-sm select-auto', {
+  variants: {
+    variant: {
+      default: 'bg-background',
+      ghost: 'border-transparent bg-transparent px-0 shadow-none',
     },
   },
-);
+  defaultVariants: {
+    variant: 'default',
+  },
+});
 
 type InlineTextEditorProps = {
   readonly value: string;

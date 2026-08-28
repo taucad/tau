@@ -140,7 +140,7 @@ export function UploadCard({
     <div
       {...getRootProps()}
       className={cn(
-        'relative space-y-2 rounded-lg border bg-sidebar p-6 transition-all duration-200',
+        'relative space-y-2 rounded-lg border bg-sidebar p-6 outline-none transition-all duration-200 focus-visible:ring-2 focus-visible:ring-ring',
         isDropping ? 'border-dashed border-primary bg-primary/5' : 'border-border',
         isDisabled && 'pointer-events-none opacity-50',
         className,

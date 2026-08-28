@@ -40,7 +40,7 @@ export function createHeaderAnchor(
         <a
           href={`#${id}`}
           aria-label='Link to this section'
-          className='ml-1 inline-flex items-center justify-center rounded p-1 transition-opacity group-hover:opacity-100 hover:bg-muted-foreground/10 focus:bg-muted-foreground/20 focus:opacity-100 focus:outline-none md:opacity-0'
+          className='ml-1 inline-flex items-center justify-center rounded p-1 transition-opacity group-hover:opacity-100 hover:bg-muted-foreground/10 focus:opacity-100 focus-visible:bg-muted-foreground/20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:opacity-0'
           tabIndex={-1}
         >
           <LinkIcon className='inline size-3 text-muted-foreground md:size-4' aria-hidden='true' />

@@ -695,7 +695,7 @@ export function ComponentRow({
   const VisibilityIcon = visibilityAction.Icon;
   const actionButtonClassName = cn(
     'flex size-5 items-center justify-center rounded-md opacity-0 transition-[opacity,color,background-color] duration-150',
-    'hover:bg-muted-foreground/10 hover:text-foreground focus-visible:bg-muted-foreground/10 focus-visible:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none',
+    'hover:bg-muted-foreground/10 hover:text-foreground focus-visible:bg-muted-foreground/10 focus-visible:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
     'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:bg-muted-foreground/10 data-[state=open]:text-foreground data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none',
     (isHovered || isIsolated) && 'opacity-100',
   );
@@ -722,7 +722,7 @@ export function ComponentRow({
           data-model-component-id={node.id}
           className={cn(
             'group/part relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm leading-5 transition-colors',
-            'focus-within:bg-sidebar-accent/50 focus-within:text-sidebar-accent-foreground focus-within:ring-1 focus-within:ring-inset focus-within:ring-ring/30',
+            'focus-within:bg-sidebar-accent/50 focus-within:text-sidebar-accent-foreground',
             isSelected ? 'bg-primary/10 text-primary' : 'text-sidebar-foreground',
             !isSelected && isFocused
               ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30'
@@ -754,7 +754,7 @@ export function ComponentRow({
           ))}
           <button
             type='button'
-            className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none'
+            className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
             aria-label={node.name}
             aria-pressed={isSelected}
             onClick={toggleSelection}

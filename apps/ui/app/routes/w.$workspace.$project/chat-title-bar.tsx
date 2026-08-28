@@ -66,7 +66,7 @@ export function ChatTitleBar({
             <TooltipTrigger asChild>
               <button
                 type='button'
-                className='grid size-5 shrink-0 place-items-center rounded-sm text-warning focus-visible:ring-2 focus-visible:ring-ring/50'
+                className='grid size-5 shrink-0 place-items-center rounded-sm text-warning focus-visible:ring-2 focus-visible:ring-ring'
                 aria-label={`Chat connection ${status}`}
               >
                 <AlertCircle aria-hidden className='size-3.5' />

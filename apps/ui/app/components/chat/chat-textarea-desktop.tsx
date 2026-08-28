@@ -305,7 +305,7 @@ export const ChatTextareaDesktop = memo(function ({
           'relative flex size-full flex-col rounded-2xl border bg-background',
           'cursor-text overflow-hidden',
           'shadow-md',
-          'focus-within:border-primary/50',
+          'has-[.tiptap:focus-visible]:ring-2 has-[.tiptap:focus-visible]:ring-ring',
           className,
         )}
         onBlur={handleTextareaBlur}

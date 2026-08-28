@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEsbuildModuleVm } from '#vm/module-vm.js';
 import type { ModuleVm } from '#vm/module-vm.js';
 import type { VmFileSystem } from '#vm/types.js';
@@ -44,19 +44,20 @@ describe('createEsbuildModuleVm', () => {
   afterEach(() => {
     activeVm?.dispose();
     activeVm = undefined;
+    vi.unstubAllGlobals();
   });
 
   it('should bundle and execute project ESM with an in-memory builtin module', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/model.test.ts',
+      'project/model.test.ts',
       [
         "import { describe, expectGeo } from 'geospec';",
         "import { makeBox } from './shape';",
         'export const result = describe("box", () => expectGeo(makeBox()).toHaveBoundingBox([0, 0, 0], [1, 1, 1]));',
       ].join('\n'),
     );
-    filesystem.setText('/project/shape.ts', 'export const makeBox = () => ({ kind: "box", size: 1 });');
+    filesystem.setText('project/shape.ts', 'export const makeBox = () => ({ kind: "box", size: 1 });');
 
     const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
@@ -70,14 +71,14 @@ describe('createEsbuildModuleVm', () => {
       ].join('\n'),
     });
 
-    const imports = await vm.detectImports('/project/model.test.ts');
+    const imports = await vm.detectImports('project/model.test.ts');
     expect(imports.detectedModules).toEqual(['geospec']);
-    expect(imports.dependencies).toContain('/project/model.test.ts');
-    expect(imports.dependencies).toContain('/project/shape.ts');
+    expect(imports.dependencies).toContain('project/model.test.ts');
+    expect(imports.dependencies).toContain('project/shape.ts');
 
-    const bundled = await vm.bundle('/project/model.test.ts');
+    const bundled = await vm.bundle('project/model.test.ts');
     expect(bundled.success).toBe(true);
-    expect(bundled.dependencies).toEqual(expect.arrayContaining(['/project/model.test.ts', '/project/shape.ts']));
+    expect(bundled.dependencies).toEqual(expect.arrayContaining(['project/model.test.ts', 'project/shape.ts']));
 
     const executed = await vm.execute<{ result: unknown }>(bundled.code);
     expect(executed.success).toBe(true);
@@ -95,12 +96,12 @@ describe('createEsbuildModuleVm', () => {
 
   it('should return a structured bundle issue for unsupported private package imports', async () => {
     const filesystem = new MemoryFileSystem();
-    filesystem.setText('/project/model.ts', "import value from '#internal'; export const result = value;");
+    filesystem.setText('project/model.ts', "import value from '#internal'; export const result = value;");
 
     const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
-    const result = await vm.bundle('/project/model.ts');
+    const result = await vm.bundle('project/model.ts');
     expect(result).toMatchObject({
       success: false,
       issues: [
@@ -117,23 +118,23 @@ describe('createEsbuildModuleVm', () => {
   it('should resolve production dependencies and unresolved import paths', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/main.ts',
+      'project/main.ts',
       "import { value } from './present'; import './missing'; export const result = value;",
     );
-    filesystem.setText('/project/present.ts', 'export const value = 7;');
+    filesystem.setText('project/present.ts', 'export const value = 7;');
 
     const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
-    const result = await vm.resolveDependencies('/project/main.ts');
+    const result = await vm.resolveDependencies('project/main.ts');
 
-    expect(result.resolved).toEqual(expect.arrayContaining(['/project/main.ts', '/project/present.ts']));
+    expect(result.resolved).toEqual(expect.arrayContaining(['project/main.ts', 'project/present.ts']));
     expect(result.unresolved).toEqual(
       expect.arrayContaining([
-        '/project/missing.ts',
-        '/project/missing.tsx',
-        '/project/missing.js',
-        '/project/missing.jsx',
+        'project/missing.ts',
+        'project/missing.tsx',
+        'project/missing.js',
+        'project/missing.jsx',
       ]),
     );
   });
@@ -144,34 +145,35 @@ describe('createEsbuildModuleVm', () => {
     // resolved dependencies so asset-only edits rotate the geometry cache key.
     const filesystem = new MemoryFileSystem();
     filesystem.setText(
-      '/project/main.ts',
+      'project/main.ts',
       [
         "import attributeText from './assets/part.step' with { type: 'text' };",
         "import rawText from './assets/other.step?raw';",
         'export const result = attributeText.length + rawText.length;',
       ].join('\n'),
     );
-    filesystem.setText('/project/assets/part.step', 'ISO-10303-21;');
-    filesystem.setText('/project/assets/other.step', 'ISO-10303-21;');
+    filesystem.setText('project/assets/part.step', 'ISO-10303-21;');
+    filesystem.setText('project/assets/other.step', 'ISO-10303-21;');
 
     const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
-    const result = await vm.resolveDependencies('/project/main.ts');
+    const result = await vm.resolveDependencies('project/main.ts');
 
     expect(result.resolved).toEqual(
-      expect.arrayContaining(['/project/main.ts', '/project/assets/part.step', '/project/assets/other.step']),
+      expect.arrayContaining(['project/main.ts', 'project/assets/part.step', 'project/assets/other.step']),
     );
   });
 
   it('should return structured bundle issues when a builtin module is missing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(undefined, { status: 404 })));
     const filesystem = new MemoryFileSystem();
-    filesystem.setText('/project/model.test.ts', "import { describe } from 'geospec'; export const result = describe;");
+    filesystem.setText('project/model.test.ts', "import { describe } from 'geospec'; export const result = describe;");
 
     const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
 
-    const result = await vm.bundle('/project/model.test.ts');
+    const result = await vm.bundle('project/model.test.ts');
 
     expect(result.success).toBe(false);
     expect(result.issues).toEqual([

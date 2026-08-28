@@ -3,13 +3,12 @@
  * that subdirectory must resolve against the filesystem root, not against the
  * entry's own directory.
  *
- * This shape (`/test-exports/assembly.ts` importing `../lib/frame.js` from the
- * sibling `/lib`) broke every GeoSpec model load with
- * `Dependency path escapes the project root: /lib/frame.ts`: the dependency
+ * This shape (`test-exports/assembly.ts` importing `../lib/frame.js` from the
+ * sibling `lib`) broke every GeoSpec model load with
+ * `Dependency path escapes the project root: lib/frame.ts`: the dependency
  * containment root was reverse-derived from the entry file's directory
- * (`/test-exports`), so a sibling-directory import read as an escape. Runtime
- * `/` is the supplied filesystem's root (`docs/policy/runtime-architecture-policy.md`),
- * and `/lib/frame.ts` is inside it.
+ * (`test-exports`), so a sibling-directory import read as an escape. The supplied
+ * filesystem capability is the root, and `lib/frame.ts` is inside it.
  *
  * ponytail: in-process only — path resolution is transport-independent
  * (`resolveFileString` is client-side and shared, and the wire carries a plain
@@ -36,15 +35,15 @@ import { esbuildBundler } from '#esbuild.bundler.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
 
-/** Entry sits in `/test-exports`; its dependency sits in the sibling `/lib`. */
+/** Entry sits in `test-exports`; its dependency sits in the sibling `lib`. */
 const files = {
-  '/test-exports/assembly.ts': [
+  'test-exports/assembly.ts': [
     "import { frame } from '../lib/frame.js';",
     'export default function main() {',
     '  return frame();',
     '}',
   ].join('\n'),
-  '/lib/frame.ts': 'export function frame() {\n  return 1;\n}',
+  'lib/frame.ts': 'export function frame() {\n  return 1;\n}',
 };
 
 describe('subdirectory entry importing a sibling directory', () => {
@@ -92,8 +91,8 @@ describe('subdirectory entry importing a sibling directory', () => {
       }
       expect(rendered.geometry.success).toBe(true);
       expect(errors).toEqual([]);
-      // The sibling file is outside the entry's own directory but inside runtime `/`.
-      expect(dependencies?.resolved).toContain('/lib/frame.ts');
+      // The sibling file is outside the entry's own directory but inside the runtime root.
+      expect(dependencies?.resolved).toContain('lib/frame.ts');
       expect(dependencies?.unresolved ?? []).toEqual([]);
     } finally {
       stopErrors();

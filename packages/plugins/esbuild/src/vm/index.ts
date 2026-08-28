@@ -4,7 +4,7 @@
 export { createEsbuildModuleVm } from '#vm/module-vm.js';
 
 /** Pre-bundled module served from memory via the builtin namespace. @public */
-export type { BuiltinModule } from '#vm/module-manager.js';
+export type { BuiltinModule } from '@taucad/runtime/bundler';
 /** Outcome of bundling an entry point: executable code plus diagnostics. @public */
 export type { BundleResult } from '#vm/esbuild-core.js';
 /** Minimal filesystem contract required by the VM bundler. @public */

@@ -1,7 +1,7 @@
 {
   "name": "@taucad/esbuild",
   "version": "0.1.0-beta.0",
-  "description": "esbuild-wasm bundler plugin for Tau",
+  "description": "Native Node and WASM browser esbuild bundler plugin for Tau",
   "type": "module",
   "sideEffects": false,
   "private": false,
@@ -63,9 +63,9 @@
     "zod": "^4.0.0"
   },
   "dependencies": {
-    "cdn-resolve": "catalog:",
-    "esbuild-wasm": "catalog:",
-    "uint8array-extras": "catalog:"
+    "@taucad/bundler-core": "workspace:*",
+    "esbuild": "catalog:",
+    "esbuild-wasm": "catalog:"
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*",

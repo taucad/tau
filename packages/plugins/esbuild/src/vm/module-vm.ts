@@ -1,15 +1,6 @@
-import type { BuildOptions } from 'esbuild-wasm';
-import * as esbuild from 'esbuild-wasm';
-import {
-  EsbuildBundler,
-  createDetectionPlugin,
-  executeCode,
-  extractExternalImports,
-  extractProjectDependencies,
-  initializeEsbuild,
-} from '#vm/esbuild-core.js';
+import { EsbuildBundler, executeCode, initializeEsbuild } from '#vm/esbuild-core.js';
 import type { BundleResult } from '#vm/esbuild-core.js';
-import type { BuiltinModule } from '#vm/module-manager.js';
+import type { BuiltinModule } from '@taucad/runtime/bundler';
 import type { VmExecuteResult, VmFileSystem } from '#vm/types.js';
 
 /**
@@ -50,11 +41,11 @@ export type DetectImportsResult = {
  */
 export type ModuleVm = {
   /** Detect imports without requiring builtins to be registered. */
-  detectImports(entryPath: string): Promise<DetectImportsResult>;
+  detectImports(entryPath: string, signal?: AbortSignal): Promise<DetectImportsResult>;
   /** Bundle an ESM entry point and its transitive dependency graph. */
-  bundle(entryPath: string): Promise<BundleResult>;
+  bundle(entryPath: string, signal?: AbortSignal): Promise<BundleResult>;
   /** Execute bundled ESM code in the current JavaScript environment. */
-  execute<T = unknown>(code: string): Promise<VmExecuteResult<T>>;
+  execute<T = unknown>(code: string, signal?: AbortSignal): Promise<VmExecuteResult<T>>;
   /** Register an in-memory builtin module. */
   registerModule(name: string, module: BuiltinModule): void;
   /** Invalidate one cached execution result, or all results when code is omitted. */
@@ -82,7 +73,7 @@ export type ModuleVm = {
  * declare const filesystem: VmFileSystem;
  * const vm = await createEsbuildModuleVm({ filesystem });
  * vm.registerModule('geospec', { version: '0.0.0', code: 'export const describe = () => {}' });
- * const bundled = await vm.bundle('/project/model.test.ts');
+ * const bundled = await vm.bundle('project/model.test.ts');
  * const module = await vm.execute(bundled.code);
  * ```
  */
@@ -99,12 +90,12 @@ export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Pr
   });
   await bundler.initialize();
 
-  const execute = async <T = unknown>(code: string): Promise<VmExecuteResult<T>> => {
+  const execute = async <T = unknown>(code: string, signal?: AbortSignal): Promise<VmExecuteResult<T>> => {
     const cached = options.cacheExecution === true ? executeCache.get(code) : undefined;
     if (cached !== undefined) {
       return { success: true, value: cached as T };
     }
-    const result = await executeCode<T>(code);
+    const result = await executeCode<T>(code, signal);
     if (options.cacheExecution === true && result.success) {
       executeCache.set(code, result.value);
     }
@@ -112,37 +103,12 @@ export async function createEsbuildModuleVm(options: EsbuildModuleVmOptions): Pr
   };
 
   return {
-    async detectImports(entryPath) {
-      const buildOptions: BuildOptions = {
-        entryPoints: [entryPath],
-        bundle: true,
-        write: false,
-        metafile: true,
-        format: 'esm',
-        target: 'es2022',
-        platform: 'browser',
-        plugins: [
-          createDetectionPlugin({
-            filesystem: options.filesystem,
-          }),
-        ],
-        external: [],
-        logLevel: 'silent',
-      };
-
-      try {
-        const result = await esbuild.build(buildOptions);
-        return {
-          detectedModules: extractExternalImports(result.metafile),
-          dependencies: extractProjectDependencies(result.metafile),
-        };
-      } catch {
-        return { detectedModules: [], dependencies: [] };
-      }
+    async detectImports(entryPath, signal) {
+      return bundler.detectImports(entryPath, signal);
     },
 
-    async bundle(entryPath) {
-      return bundler.bundle(entryPath);
+    async bundle(entryPath, signal) {
+      return bundler.bundle(entryPath, signal);
     },
 
     execute,

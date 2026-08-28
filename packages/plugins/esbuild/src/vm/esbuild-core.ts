@@ -1,1230 +1,361 @@
-/**
- * ESBuild Core
- *
- * Provides in-browser bundling using esbuild-wasm with custom plugins
- * for virtual filesystem integration and node_modules resolution.
- *
- * This module is designed to run in kernel workers and uses:
- * - A `vfs` namespace for project files (project-relative paths) and CDN modules
- * - A `builtin` namespace for pre-loaded modules served from memory (zero FS I/O)
- * - An `http-url` namespace for HTTP/HTTPS URLs fetched on demand
- * - ModuleManager for CDN module fetching and caching at root `/node_modules/`
- */
+/** Host-selecting esbuild adapter backed by `@taucad/bundler-core`. */
 
-import * as esbuild from 'esbuild-wasm';
-import type { Plugin, BuildOptions, Loader, Message, Metafile } from 'esbuild-wasm';
-import {
-  isBareSpecifier,
-  isNodeModulesPath,
-  parsePackageSpecifier,
-  getCdnCachePath,
-  resolveImportPath,
-} from '#vm/import-path.js';
-import { base64ToString } from 'uint8array-extras';
-import type { VmIssue, VmFileSystem, VmExecuteResult } from '#vm/types.js';
-import type { BuiltinModule } from '#vm/module-manager.js';
-import { ModuleManager } from '#vm/module-manager.js';
-import { isNode } from '#vm/environment.js';
+import type { BuildOptions, Loader, Message, OnLoadArgs, OnLoadResult, Plugin } from 'esbuild-wasm';
+import * as wasmEsbuild from 'esbuild-wasm';
+
+import { createBundlerSourceHost } from '@taucad/bundler-core';
+import type {
+  BundlerSourceHost,
+  BundlerSourceIntent,
+  BundlerSourceResolution,
+  BundlerSourceSession,
+} from '@taucad/bundler-core';
+import type { BuiltinModule } from '@taucad/runtime/bundler';
+
 import { importBrowserModule } from '#vm/browser-module-import.js';
+import { esbuildNamespace } from '#vm/esbuild.constants.js';
+import { isNode } from '#vm/environment.js';
 import { executeCodeInNode } from '#vm/node-module-execution.js';
-import {
-  esbuildNamespace,
-  vfsNamespacePrefix,
-  httpFetchTimeout,
-  httpFetchMaxSizeBytes,
-} from '#vm/esbuild.constants.js';
+import type { VmExecuteResult, VmFileSystem, VmIssue } from '#vm/types.js';
 
-// =============================================================================
-// Types
-// =============================================================================
-
-/**
- * Outcome of bundling a CAD script entry point. Contains the executable code and any compilation diagnostics.
- *
- * @public
- */
+/** Outcome of bundling a CAD script entry point. @public */
 export type BundleResult = {
-  /** The bundled code as a string */
   code: string;
-  /** Source map (if enabled) */
   sourceMap?: string;
-  /** Compilation issues (errors, warnings) */
   issues: VmIssue[];
-  /** Whether bundling succeeded */
   success: boolean;
-  /** Absolute paths of all project files that were resolved during bundling (transitive dependencies). */
   dependencies: string[];
-  /** Absolute paths of imports that could not be resolved during bundling — used for watch-set expansion. */
   unresolvedPaths: string[];
 };
 
-/**
- * Configuration options for the in-browser esbuild bundler.
- *
- * @public
- */
+/** Configuration for the esbuild adapter. @public */
 export type BundlerOptions = {
-  /** Filesystem interface for reading/writing files */
   filesystem: VmFileSystem;
-  /** Built-in modules to use as fallback */
   builtinModules: Map<string, BuiltinModule>;
-  /** Enable source maps */
   sourceMaps?: boolean;
-  /**
-   * Names to auto-export from CommonJS-style entry paths.
-   * When code defines these as globals but doesn't export them,
-   * the bundler adds `export { ... }` statements to prevent tree-shaking.
-   * Defaults to `['main', 'defaultParams']`.
-   */
   autoExportNames?: string[];
 };
 
-// =============================================================================
-// WASM Configuration
-// =============================================================================
-
-// WASM URL using universal pattern for browsers and bundlers
-// WASM file is copied from node_modules via copy-files-from-to
-// @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
 const esbuildWasmUrl = new URL('wasm/esbuild.wasm', import.meta.url).href;
-
-const isNodejs = isNode();
-
-// =============================================================================
-// State
-// =============================================================================
-
 let esbuildInitialized = false;
 let initializationPromise: Promise<void> | undefined;
-
-// =============================================================================
-// Initialization
-// =============================================================================
+let activeEsbuild: typeof wasmEsbuild = wasmEsbuild;
 
 /**
- * Initialize esbuild-wasm. This must be called before bundling.
- * The initialization is cached - subsequent calls return immediately.
- *
- * Uses isomorphic initialization:
- * - Browser/Worker: wasmURL (fetches WASM via network from bundled file)
- * - Node.js: No options (uses child process to run native esbuild binary)
- *
- * @returns Promise that resolves when initialization is complete
- *
+ * Return the initialized host-appropriate esbuild API.
+ * @returns The active native or WASM esbuild API.
  * @public
  */
-export async function initializeEsbuild(): Promise<void> {
+export const getEsbuild = (): typeof wasmEsbuild => activeEsbuild;
+
+/**
+ * Initialize native esbuild on Node or esbuild-wasm elsewhere.
+ * @returns Completion after the selected engine is ready.
+ * @public
+ */
+export const initializeEsbuild = async (): Promise<void> => {
   if (esbuildInitialized) {
     return;
   }
-
-  if (initializationPromise) {
-    return initializationPromise;
-  }
-
-  initializationPromise = (async (): Promise<void> => {
+  initializationPromise ??= (async () => {
     try {
-      await esbuild.initialize(isNodejs ? {} : { wasmURL: esbuildWasmUrl });
-
+      if (isNode()) {
+        const packageName = 'esbuild';
+        activeEsbuild = (await import(/* @vite-ignore */ packageName)) as typeof wasmEsbuild;
+      }
+      await activeEsbuild.initialize(isNode() ? {} : { wasmURL: esbuildWasmUrl });
       esbuildInitialized = true;
     } catch (error) {
       initializationPromise = undefined;
       throw error;
     }
   })();
-
   return initializationPromise;
-}
-
-// =============================================================================
-// Shared Helpers
-// =============================================================================
-
-/** Default names to auto-export from CommonJS-style entry paths */
-const defaultAutoExportNames = ['main', 'defaultParams'];
-
-/** TypeScript ESM convention: `.js`/`.jsx` specifiers resolve to `.ts`/`.tsx` source files */
-const tsExtensionSwap = new Map<string, readonly string[]>([
-  ['.js', ['.ts', '.tsx']],
-  ['.jsx', ['.tsx']],
-]);
-
-/**
- * Resolve file extension for imports without extension.
- * Needs filesystem access, so it lives inside the plugin scope.
- *
- * @param filesystem - kernel filesystem to check file existence
- * @param path - import path to resolve
- * @returns resolved path with file extension appended
- */
-async function resolveFileExtension(filesystem: VmFileSystem, path: string): Promise<string> {
-  const extensionMatch = /\.[jt]sx?$/.exec(path);
-
-  if (extensionMatch) {
-    const fileExists = await filesystem.exists(path);
-    if (fileExists) {
-      return path;
-    }
-
-    const extension = extensionMatch[0];
-    const swaps = tsExtensionSwap.get(extension);
-    if (swaps) {
-      const stem = path.slice(0, -extension.length);
-      for (const swap of swaps) {
-        const candidate = stem + swap;
-        // oxlint-disable-next-line no-await-in-loop -- Intentional: short-circuits on first match
-        if (await filesystem.exists(candidate)) {
-          return candidate;
-        }
-      }
-    }
-
-    return path;
-  }
-
-  // Try common extensions in order
-  const extensions = ['.ts', '.tsx', '.js', '.jsx', '/index.ts', '/index.js'];
-
-  for (const extension of extensions) {
-    const fullPath = path + extension;
-    // oxlint-disable-next-line no-await-in-loop -- Intentional: short-circuits on first match
-    if (await filesystem.exists(fullPath)) {
-      return fullPath;
-    }
-  }
-
-  // Return original path if no extension found
-  return path;
-}
-
-/**
- * Vite-style query-suffix vocabulary mapped to esbuild's built-in loaders.
- *
- * `?raw` and `?text` decode bytes as UTF-8 with BOM stripping (esbuild `text` loader).
- * `?binary` exports a `Uint8Array` via base64-decoded runtime initialisation.
- * `?base64`/`?dataurl`/`?file` defer entirely to esbuild's named loaders so the asset
- * pipeline (default-export wrapping, MIME guessing, copy-emission) is identical to a
- * native esbuild build configured with the same loader for that file extension.
- *
- * Adding a new suffix is a one-line entry — no new namespace or onResolve hook needed.
- */
-const querySuffixToLoader: Record<string, Loader> = {
-  '?raw': 'text',
-  '?text': 'text',
-  '?binary': 'binary',
-  '?base64': 'base64',
-  '?dataurl': 'dataurl',
-  '?file': 'file',
 };
 
-/** Single regex powering the suffix detection — must align with `querySuffixToLoader` keys. */
-const querySuffixRegex = /\?(base64|binary|dataurl|file|raw|text)$/;
-
-/**
- * TC39 import-attribute `type` values that map to esbuild loaders.
- *
- * `with { type: 'text' }` is the JavaScript [import-text proposal](https://github.com/tc39/proposal-import-text).
- * `with { type: 'bytes' }` is the JavaScript [import-bytes proposal](https://github.com/tc39/proposal-import-bytes).
- *
- * These work alongside Vite-style query suffixes; whichever is present wins.
- */
-const importAttributeTypeToLoader: Record<string, Loader> = {
+const loaders: Record<BundlerSourceIntent, Loader> = {
+  script: 'js',
+  json: 'json',
   text: 'text',
-  bytes: 'binary',
+  binary: 'binary',
+  base64: 'base64',
+  dataurl: 'dataurl',
+  file: 'dataurl',
 };
 
-/**
- * Pick a loader override from an esbuild `args.suffix` (Vite-style) or `args.with.type` (TC39).
- *
- * Returns `undefined` when neither dispatcher matches — callers fall through to the
- * default file-extension-based loader selection.
- *
- * @param suffix - the `args.suffix` field from `OnLoadArgs`
- * @param withType - the `args.with.type` field from `OnLoadArgs`
- * @returns esbuild loader override, or undefined when no suffix/attribute applies
- */
-function resolveAssetLoader(suffix: string, withType: string | undefined): Loader | undefined {
-  if (suffix && querySuffixToLoader[suffix]) {
-    return querySuffixToLoader[suffix];
+const scriptLoader = (path: string): Loader => {
+  const clean = path.split(/[?#]/u, 1)[0] ?? path;
+  if (clean.endsWith('.ts')) {
+    return 'ts';
   }
-
-  if (withType && importAttributeTypeToLoader[withType]) {
-    return importAttributeTypeToLoader[withType];
+  if (clean.endsWith('.tsx')) {
+    return 'tsx';
   }
-
-  return undefined;
-}
-
-/**
- * Strip a recognised Vite-style query suffix from an import path.
- *
- * Returns the cleaned path and the matched suffix (including the leading `?`)
- * so callers can pass it to esbuild's `OnResolveResult.suffix`. Paths without
- * a recognised suffix are returned untouched with an empty suffix.
- *
- * @param importPath - raw import specifier as it appears in source code
- * @returns split `{ cleanPath, suffix }` where `suffix` is `''` when no match
- */
-function splitQuerySuffix(importPath: string): { cleanPath: string; suffix: string } {
-  const match = querySuffixRegex.exec(importPath);
-  if (!match) {
-    return { cleanPath: importPath, suffix: '' };
+  if (clean.endsWith('.jsx')) {
+    return 'jsx';
   }
-
-  return { cleanPath: importPath.slice(0, -match[0].length), suffix: match[0] };
-}
-
-/**
- * Strip a `?query` or `#fragment` from a project-relative path so that suffix-bearing
- * metafile keys collapse onto the underlying filesystem path used for watching.
- *
- * @param relativePath - project-relative path possibly carrying a query/fragment
- * @returns the path with everything from the first `?` or `#` removed
- */
-function stripPathQuery(relativePath: string): string {
-  const queryStart = relativePath.search(/[#?]/);
-  return queryStart === -1 ? relativePath : relativePath.slice(0, queryStart);
-}
-
-/**
- * Determine the esbuild loader based on file extension.
- *
- * @param filePath - file path to extract extension from
- * @returns esbuild loader type for the file
- */
-function getLoader(filePath: string): 'ts' | 'tsx' | 'js' | 'jsx' | 'json' | 'text' {
-  const extension = filePath.split('.').pop()?.toLowerCase() ?? '';
-  switch (extension) {
-    case 'ts': {
-      return 'ts';
-    }
-
-    case 'tsx': {
-      return 'tsx';
-    }
-
-    case 'jsx': {
-      return 'jsx';
-    }
-
-    case 'json': {
-      return 'json';
-    }
-
-    default: {
-      return 'js';
-    }
+  if (clean.endsWith('.json')) {
+    return 'json';
   }
-}
+  return 'js';
+};
 
-// =============================================================================
-// CommonJS Export Helpers
-// =============================================================================
-
-/**
- * Add CommonJS-style exports to source code if needed.
- *
- * When code defines any of the `names` as globals but doesn't export them,
- * this function adds the necessary export statements at the end of the code.
- *
- * This must be done at the source level (before bundling) to prevent esbuild
- * from tree-shaking away the unexported functions.
- *
- * Special handling for `main`: if `export default` already exists, `main` is
- * considered exported and won't be added again.
- *
- * @param code - The source code to transform
- * @param names - List of symbol names to auto-export
- * @returns The transformed code with exports added if needed
- */
-function addCommonJsExports(code: string, names: string[]): string {
-  const exportsToAdd: string[] = [];
-
-  for (const name of names) {
-    // Check if already exported
-    const hasNamedExport =
-      new RegExp(`\\bexport\\s+\\{\\s*[^}]*\\b${name}\\b`).test(code) ||
-      new RegExp(`\\bexport\\s+(const|function|let|var)\\s+${name}\\b`).test(code);
-
-    if (hasNamedExport) {
-      continue;
-    }
-
-    // Special case: `main` is considered exported if `export default` exists
-    if (name === 'main' && /\bexport\s+default\b/.test(code)) {
-      continue;
-    }
-
-    // Check if code defines this symbol (not exported)
-    const defines =
-      new RegExp(`\\bfunction\\s+${name}\\s*\\(`).test(code) ||
-      new RegExp(`\\b(const|let|var)\\s+${name}\\s*=`).test(code);
-
-    if (defines) {
-      exportsToAdd.push(name);
-    }
+const toEsbuildPath = (resolution: BundlerSourceResolution): string => {
+  if (resolution.kind === 'project' || resolution.kind === 'package') {
+    return resolution.id;
   }
+  return resolution.id;
+};
 
-  if (exportsToAdd.length > 0) {
-    return code + `\nexport { ${exportsToAdd.join(', ')} };\n`;
+const toNamespace = (resolution: BundlerSourceResolution): string => {
+  if (resolution.kind === 'builtin') {
+    return esbuildNamespace.builtin;
   }
+  if (resolution.kind === 'remote') {
+    return esbuildNamespace.httpUrl;
+  }
+  return esbuildNamespace.vfs;
+};
 
-  return code;
-}
-
-// =============================================================================
-// Source Map Extraction
-// =============================================================================
-
-/**
- * Extract the inline source map JSON from bundled code.
- *
- * esbuild with `sourcemap: 'inline'` appends a base64-encoded source map
- * as a data URL comment. This extracts and decodes it for programmatic use.
- *
- * @param code - Bundled code potentially containing an inline source map
- * @returns Decoded source map JSON string, or undefined if not found
- */
-function extractInlineSourceMap(code: string): string | undefined {
-  const match = /\/\/# sourceMappingURL=data:application\/json;base64,(.+)$/m.exec(code);
-  if (!match?.[1]) {
+const importerId = (args: { readonly importer: string; readonly namespace: string }): string | undefined => {
+  if (args.importer.length === 0) {
     return undefined;
   }
-
-  return base64ToString(match[1]);
-}
-
-// =============================================================================
-// Path Resolution
-// =============================================================================
-
-/**
- * Resolve an esbuild file path to a clean project-relative path.
- *
- * esbuild prefixes file paths with `namespace:` for custom namespaces.
- * Since the plugin uses project-relative paths in the vfs namespace,
- * stripping the prefix yields a clean filename (e.g., `main.ts`).
- *
- * @param filePath - esbuild file path, possibly prefixed with namespace
- * @returns clean project-relative path
- */
-function resolveEsbuildFilePath(filePath: string): string {
-  return filePath.startsWith(vfsNamespacePrefix) ? filePath.slice(vfsNamespacePrefix.length) : filePath;
-}
-
-// =============================================================================
-// Production VFS Plugin
-// =============================================================================
-
-/**
- * Configuration for the vfs-namespace esbuild plugin that resolves project files, builtins, and CDN modules.
- *
- * @public
- */
-export type VfsPluginOptions = {
-  filesystem: VmFileSystem;
-  moduleManager: ModuleManager;
-  builtinModules: Map<string, BuiltinModule>;
-  entryPath: string;
-  autoExportNames: string[];
-  /** Collects absolute paths of project files accessed during the build, even on failure. */
-  accessedProjectFiles?: Set<string>;
-  /** Collects absolute paths of imports that could not be resolved during the build. */
-  unresolvedPaths?: Set<string>;
+  if (args.namespace === esbuildNamespace.httpUrl) {
+    return args.importer;
+  }
+  return args.importer;
 };
 
-/**
- * Create a plugin that resolves and loads files from the kernel filesystem.
- *
- * Architecture:
- * - `vfs` namespace: Project files (project-relative paths) and CDN modules
- * - `builtin` namespace: Built-in modules served directly from memory (zero FS I/O)
- * - `http-url` namespace: HTTP/HTTPS URLs fetched on demand
- *
- * Project files use project-relative paths (e.g., `main.ts`, `src/utils.ts`) within
- * the `vfs` namespace. All filesystem I/O reconstructs absolute paths from the
- * relative esbuild path under `/`.
- *
- * Bare specifier resolution:
- * 1. Builtins (replicad, jscad, zod) -> `builtin` namespace (memory)
- * 2. CDN modules -> ensure cached at `/node_modules/`, then `vfs` namespace
- * 3. Relative/absolute imports -> resolved via filesystem with extension probing
- *
- * @param options - plugin configuration with filesystem, modules, and paths
- * @returns esbuild plugin for vfs-namespace module resolution
- *
- * @public
- */
-export function createVfsPlugin(options: VfsPluginOptions): Plugin {
-  const {
-    filesystem,
-    moduleManager,
-    builtinModules,
-    entryPath,
-    autoExportNames,
-    accessedProjectFiles,
-    unresolvedPaths,
-  } = options;
+const issueFromMessage = (message: Message, severity: 'error' | 'warning'): VmIssue => ({
+  message: message.text,
+  code: 'BUNDLER_FAILED',
+  type: 'compilation',
+  severity,
+  location:
+    message.location === null
+      ? undefined
+      : {
+          fileName: message.location.file.replace(/^vfs:\/?/u, ''),
+          startLineNumber: message.location.line,
+          startColumn: message.location.column,
+        },
+});
 
-  // Path conversion helpers: esbuild sees project-relative paths in the vfs namespace,
-  // but all filesystem I/O uses absolute paths.
-  const projectPrefix = '/';
-
-  /**
-   * Convert absolute filesystem path to project-relative path for esbuild identity.
-   *
-   * @param absolutePath - absolute filesystem path
-   * @returns project-relative path
-   */
-  function toRelative(absolutePath: string): string {
-    return absolutePath.startsWith(projectPrefix) ? absolutePath.slice(projectPrefix.length) : absolutePath;
+const issuesFromError = (error: unknown): VmIssue[] => {
+  if (typeof error === 'object' && error !== null && 'errors' in error) {
+    const build = error as { readonly errors?: Message[]; readonly warnings?: Message[] };
+    return [
+      ...(build.errors ?? []).map((message) => issueFromMessage(message, 'error')),
+      ...(build.warnings ?? []).map((message) => issueFromMessage(message, 'warning')),
+    ];
   }
-
-  /**
-   * Reconstruct absolute filesystem path from esbuild's project-relative path for filesystem I/O.
-   *
-   * @param relativePath - project-relative path from esbuild
-   * @returns absolute filesystem path
-   */
-  function toAbsolute(relativePath: string): string {
-    return relativePath.startsWith('/') ? relativePath : `${projectPrefix}${relativePath}`;
-  }
-
-  // Pre-compute the relative entry path for comparison in onLoad
-  const relativeEntryPath = toRelative(entryPath);
-
-  return {
-    name: esbuildNamespace.vfs,
-    setup(build) {
-      // -----------------------------------------------------------------
-      // onResolve: all imports
-      // -----------------------------------------------------------------
-      // oxlint-disable-next-line complexity -- TOOD: refactor
-      build.onResolve({ filter: /.*/ }, async (args) => {
-        // Entry point: convert to project-relative path in vfs namespace
-        if (args.kind === 'entry-point') {
-          return { path: toRelative(args.path), namespace: esbuildNamespace.vfs };
-        }
-
-        // Imports originating from the http-url namespace (sub-imports within
-        // fetched CDN modules) must be resolved by the namespace-specific handlers
-        // registered below. Only full URLs are handled here; relative, absolute, and
-        // bare paths are passed through by returning undefined so esbuild falls
-        // through to the http-url onResolve handlers.
-        if (args.namespace === esbuildNamespace.httpUrl) {
-          if (args.path.startsWith('http://') || args.path.startsWith('https://')) {
-            return { path: args.path, namespace: esbuildNamespace.httpUrl };
-          }
-
-          // Let the http-url-specific onResolve handlers below handle this import
-          return undefined;
-        }
-
-        // Handle data: URLs (esbuild internal)
-        if (args.path.startsWith('data:')) {
-          return { external: true };
-        }
-
-        // Handle http/https URLs - fetch and bundle them
-        if (args.path.startsWith('http://') || args.path.startsWith('https://')) {
-          return { path: args.path, namespace: esbuildNamespace.httpUrl };
-        }
-
-        if (args.path.startsWith('#')) {
-          return { errors: [{ text: `Private package import '${args.path}' is not supported.` }] };
-        }
-
-        // --- Bare specifiers ---
-        if (isBareSpecifier(args.path)) {
-          const packageInfo = parsePackageSpecifier(args.path);
-
-          // Builtins: check full specifier first (e.g., '@jscad/modeling/primitives'),
-          // then fall back to root package name (e.g., '@jscad/modeling')
-          const fullSpecifier = packageInfo.path ? `${packageInfo.name}/${packageInfo.path}` : packageInfo.name;
-          if (builtinModules.has(fullSpecifier)) {
-            return { path: fullSpecifier, namespace: esbuildNamespace.builtin };
-          }
-
-          if (builtinModules.has(packageInfo.name)) {
-            return { path: packageInfo.name, namespace: esbuildNamespace.builtin };
-          }
-
-          // CDN modules: ensure cached at root /node_modules/, return vfs-namespace path
-          // These keep absolute paths since they're outside the project directory
-          try {
-            const cachePath = getCdnCachePath(packageInfo.name, packageInfo.path || undefined);
-            await moduleManager.ensureCdnModule(packageInfo.name, packageInfo.path || undefined);
-            return { path: cachePath, namespace: esbuildNamespace.vfs };
-          } catch (error) {
-            return {
-              errors: [
-                {
-                  text: `Failed to resolve '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
-                },
-              ],
-            };
-          }
-        }
-
-        // --- Relative / absolute imports ---
-        // Reconstruct the importer's absolute path for resolution, since
-        // project files use relative paths in esbuild
-        const importerAbsolute = toAbsolute(args.importer || relativeEntryPath);
-
-        // CDN-relative paths: when a cached CDN module (under /node_modules/)
-        // imports an absolute path like /@thi.ng/vectors@^8.6.20/..., resolve
-        // it against the esm.sh CDN origin rather than the local filesystem.
-        if (args.path.startsWith('/') && isNodeModulesPath(importerAbsolute)) {
-          return {
-            path: `https://esm.sh${args.path}`,
-            namespace: esbuildNamespace.httpUrl,
-          };
-        }
-
-        // Vite-style query suffixes (`?raw`/`?text`/`?binary`/`?base64`/`?dataurl`/`?file`).
-        // Strip the suffix so the file lookup hits, then round-trip it through esbuild's
-        // idiomatic `OnResolveResult.suffix` so `(namespace, path, suffix)` module identity
-        // works automatically and the loader dispatches in `onLoad` via `args.suffix`.
-        const { cleanPath, suffix } = splitQuerySuffix(args.path);
-
-        try {
-          const resolvedPath = resolveImportPath(cleanPath, importerAbsolute);
-          // Suffixed imports always carry the full filename — skip extension probing.
-          const withExtension = suffix ? resolvedPath : await resolveFileExtension(filesystem, resolvedPath);
-
-          if (unresolvedPaths && withExtension === resolvedPath && !suffix && !/\.[jt]sx?$/.test(resolvedPath)) {
-            const extensionVariants = ['.ts', '.tsx', '.js', '.jsx'];
-            for (const extension of extensionVariants) {
-              unresolvedPaths.add(resolvedPath + extension);
-            }
-          }
-
-          return {
-            path: toRelative(withExtension),
-            namespace: esbuildNamespace.vfs,
-            ...(suffix ? { suffix } : {}),
-          };
-        } catch (error) {
-          return {
-            errors: [
-              {
-                text: `Failed to resolve '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
-              },
-            ],
-          };
-        }
-      });
-
-      // -----------------------------------------------------------------
-      // onLoad: builtin namespace (serve from memory)
-      // -----------------------------------------------------------------
-      build.onLoad({ filter: /.*/, namespace: esbuildNamespace.builtin }, (args) => {
-        const builtin = builtinModules.get(args.path);
-        if (!builtin) {
-          return {
-            errors: [{ text: `Built-in module '${args.path}' not found` }],
-          };
-        }
-
-        return { contents: builtin.code, loader: 'js' };
-      });
-
-      // -----------------------------------------------------------------
-      // onLoad: HTTP/HTTPS URLs
-      // -----------------------------------------------------------------
-      build.onLoad({ filter: /.*/, namespace: esbuildNamespace.httpUrl }, async (args) => {
-        try {
-          const response = await fetch(args.path, {
-            signal: AbortSignal.timeout(httpFetchTimeout),
-          });
-          if (!response.ok) {
-            return {
-              errors: [
-                {
-                  text: `Failed to fetch '${args.path}': ${response.status} ${response.statusText}`,
-                },
-              ],
-            };
-          }
-
-          // Guard against oversized responses
-          const contentLength = response.headers.get('content-length');
-          if (contentLength && Number(contentLength) > httpFetchMaxSizeBytes) {
-            return {
-              errors: [
-                {
-                  text: `Remote module '${args.path}' exceeds maximum size of ${httpFetchMaxSizeBytes} bytes (${contentLength} bytes)`,
-                },
-              ],
-            };
-          }
-
-          const contents = await response.text();
-
-          // Check actual size after download (content-length may be absent or incorrect)
-          if (contents.length > httpFetchMaxSizeBytes) {
-            return {
-              errors: [
-                {
-                  text: `Remote module '${args.path}' exceeds maximum size of ${httpFetchMaxSizeBytes} bytes`,
-                },
-              ],
-            };
-          }
-
-          const loader = getLoader(new URL(args.path).pathname);
-
-          return { contents, loader };
-        } catch (error) {
-          return {
-            errors: [
-              {
-                text: `Failed to fetch '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
-              },
-            ],
-          };
-        }
-      });
-
-      // -----------------------------------------------------------------
-      // onResolve: relative imports within HTTP modules (e.g. ./lib/foo.js)
-      // -----------------------------------------------------------------
-      build.onResolve({ filter: /^\./, namespace: esbuildNamespace.httpUrl }, (args) => {
-        // Resolve relative to the importer URL (resolveDir is unreliable for URLs)
-        const resolvedUrl = new URL(args.path, args.importer).href;
-        return { path: resolvedUrl, namespace: esbuildNamespace.httpUrl };
-      });
-
-      // -----------------------------------------------------------------
-      // onResolve: absolute-path imports within HTTP modules (e.g. /lodash@4.17.21/es2022/lodash.mjs)
-      // -----------------------------------------------------------------
-      build.onResolve({ filter: /^\//, namespace: esbuildNamespace.httpUrl }, (args) => {
-        // Resolve absolute paths against the importer's origin
-        const importerUrl = new URL(args.importer);
-        const resolvedUrl = new URL(args.path, importerUrl.origin).href;
-        return { path: resolvedUrl, namespace: esbuildNamespace.httpUrl };
-      });
-
-      // -----------------------------------------------------------------
-      // onResolve: bare imports within HTTP modules (e.g. lit-html/lib/shady-render.js)
-      // Bare specifiers can't be resolved against the importer's CDN origin because
-      // CDNs use different URL schemes (e.g. JSPM uses npm: prefixes, Skypack uses
-      // hashed pins). Instead, resolve through esm.sh which handles bare specifiers.
-      // -----------------------------------------------------------------
-      build.onResolve({ filter: /^[^./]/, namespace: esbuildNamespace.httpUrl }, (args) => {
-        const resolvedUrl = `https://esm.sh/${args.path}`;
-        return { path: resolvedUrl, namespace: esbuildNamespace.httpUrl };
-      });
-
-      // -----------------------------------------------------------------
-      // onLoad: vfs namespace (project files + CDN cache)
-      // -----------------------------------------------------------------
-      build.onLoad({ filter: /.*/, namespace: esbuildNamespace.vfs }, async (args) => {
-        const absolutePath = toAbsolute(args.path);
-        const isNodeModules = isNodeModulesPath(absolutePath);
-        const resolveDirectory = absolutePath.slice(0, absolutePath.lastIndexOf('/'));
-
-        // Vite-style query suffixes (`?raw`/`?text`/...) and TC39 `with { type }` import
-        // attributes both route through esbuild's built-in loaders. Read raw bytes and let
-        // the chosen loader handle UTF-8 decoding (with BOM strip), base64 emission, or
-        // pass-through binary so we don't reinvent any of that downstream.
-        const overrideLoader = resolveAssetLoader(args.suffix, args.with['type']);
-
-        if (overrideLoader) {
-          try {
-            const bytes = await filesystem.readFile(absolutePath);
-            if (!isNodeModules) {
-              accessedProjectFiles?.add(absolutePath);
-            }
-            return { contents: bytes, loader: overrideLoader, resolveDir: resolveDirectory };
-          } catch (error) {
-            if (unresolvedPaths && !isNodeModules) {
-              unresolvedPaths.add(absolutePath);
-            }
-            return {
-              errors: [
-                {
-                  text: `Failed to load '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
-                },
-              ],
-            };
-          }
-        }
-
-        try {
-          let content = await filesystem.readFile(absolutePath, 'utf8');
-          const loader = getLoader(args.path);
-
-          // Track project files accessed during the build so that even on
-          // build failure the caller knows which files were touched.
-          if (!isNodeModules) {
-            accessedProjectFiles?.add(absolutePath);
-          }
-
-          // For the entry path (not node_modules), add CommonJS exports if needed
-          // This prevents esbuild from tree-shaking away unexported main/defaultParams
-          const isEntryPath = args.path === relativeEntryPath;
-
-          if (isEntryPath && !isNodeModules && (loader === 'js' || loader === 'ts')) {
-            content = addCommonJsExports(content, autoExportNames);
-          }
-
-          return {
-            contents: content,
-            loader,
-            resolveDir: resolveDirectory,
-          };
-        } catch (error) {
-          if (unresolvedPaths && !isNodeModules) {
-            unresolvedPaths.add(absolutePath);
-          }
-
-          return {
-            errors: [
-              {
-                text: `Failed to load '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
-              },
-            ],
-          };
-        }
-      });
+  return [
+    {
+      message: error instanceof Error ? error.message : String(error),
+      code: 'BUNDLER_FAILED',
+      type: 'compilation',
+      severity: 'error',
     },
-  };
-}
+  ];
+};
 
-// =============================================================================
-// EsbuildBundler Class
-// =============================================================================
+const loadFromSession = async (
+  session: BundlerSourceSession,
+  args: OnLoadArgs,
+  detect: boolean,
+): Promise<OnLoadResult> => {
+  const resolution = args.pluginData as BundlerSourceResolution | undefined;
+  if (resolution === undefined) {
+    return { errors: [{ text: `Missing source resolution for '${args.path}'.` }] };
+  }
+  if (detect && 'intent' in resolution && resolution.intent !== 'script' && resolution.intent !== 'json') {
+    return { contents: '', loader: 'js' };
+  }
+  try {
+    const source = await session.load(resolution);
+    const loader = source.intent === 'script' ? scriptLoader(source.id) : loaders[source.intent];
+    return {
+      contents: source.bytes ?? source.text ?? '',
+      loader,
+      resolveDir: source.resolveDirectory,
+    };
+  } catch (error) {
+    return {
+      errors: [{ text: `Failed to load '${args.path}': ${error instanceof Error ? error.message : String(error)}` }],
+    };
+  }
+};
 
-/**
- * In-browser esbuild bundler for CAD scripts with virtual filesystem and CDN module support.
- *
- * @public
- */
+const createSourcePlugin = (session: BundlerSourceSession, detect: boolean): Plugin => ({
+  name: detect ? `${esbuildNamespace.vfs}-detection` : esbuildNamespace.vfs,
+  setup(build) {
+    build.onResolve({ filter: /.*/ }, async (args) => {
+      try {
+        const resolution = await session.resolve({
+          specifier: args.path,
+          importer: importerId(args),
+          attributes: args.with,
+        });
+        if (resolution.kind === 'external') {
+          return { path: resolution.specifier, external: true };
+        }
+        if (resolution.kind === 'unsupported') {
+          return { errors: [{ text: resolution.message }] };
+        }
+        return {
+          path: toEsbuildPath(resolution),
+          namespace: toNamespace(resolution),
+          pluginData: resolution,
+          ...(resolution.kind === 'project' && resolution.suffix.length > 0 ? { suffix: resolution.suffix } : {}),
+        };
+      } catch (error) {
+        return {
+          errors: [
+            { text: `Failed to resolve '${args.path}': ${error instanceof Error ? error.message : String(error)}` },
+          ],
+        };
+      }
+    });
+
+    for (const namespace of Object.values(esbuildNamespace)) {
+      build.onLoad({ filter: /.*/, namespace }, async (args) => loadFromSession(session, args, detect));
+    }
+  },
+});
+
+const commonJsBanner = (modules: ReadonlyMap<string, BuiltinModule>): string => {
+  const globals = [...modules.entries()]
+    .filter(([, module]) => module.globalName !== undefined)
+    .map(
+      ([name, module]) => `const ${module.globalName} = globalThis.__KERNEL_MODULES__?.get(${JSON.stringify(name)});`,
+    )
+    .join('\n');
+  return `${globals}\nconst exports = {};\nconst module = { exports };\n`;
+};
+
+/** Esbuild graph adapter using one compiler-neutral source host. @public */
 export class EsbuildBundler {
-  private readonly filesystem: VmFileSystem;
-  private readonly builtinModules: Map<string, BuiltinModule>;
-  private readonly moduleManager: ModuleManager;
-  private readonly sourceMaps: boolean;
-  private readonly autoExportNames: string[];
+  readonly #builtins: Map<string, BuiltinModule>;
+  readonly #host: BundlerSourceHost;
+  readonly #sourceMaps: boolean;
 
   public constructor(options: BundlerOptions) {
-    this.filesystem = options.filesystem;
-    this.builtinModules = options.builtinModules;
-    this.sourceMaps = options.sourceMaps ?? true;
-    this.autoExportNames = options.autoExportNames ?? defaultAutoExportNames;
-
-    this.moduleManager = new ModuleManager(options.filesystem);
+    this.#builtins = options.builtinModules;
+    this.#sourceMaps = options.sourceMaps ?? true;
+    this.#host = createBundlerSourceHost({
+      filesystem: options.filesystem,
+      autoExportNames: options.autoExportNames,
+    });
   }
 
-  /**
-   * Initialize the bundler (must be called before bundling).
-   */
   public async initialize(): Promise<void> {
     await initializeEsbuild();
   }
 
-  /**
-   * Register or update a builtin module on the live bundler instance.
-   * Used to replace detection stubs with real module code after kernel init.
-   *
-   * @param name - module name (e.g., 'replicad')
-   * @param builtinModule - module definition to register
-   */
-  public registerModule(name: string, builtinModule: BuiltinModule): void {
-    this.builtinModules.set(name, builtinModule);
+  public registerModule(name: string, module: BuiltinModule): void {
+    this.#builtins.set(name, module);
+    this.#host.registerBuiltin({ name, module });
   }
 
-  /**
-   * Dispose of the bundler and release resources.
-   */
-  public dispose(): void {
-    this.moduleManager.clearCaches();
+  public async detectImports(
+    entryPath: string,
+    signal = new AbortController().signal,
+  ): Promise<{ detectedModules: string[]; dependencies: string[] }> {
+    const session = this.#host.beginSession({ mode: 'detect', signal, entryPath });
+    await getEsbuild().build({
+      entryPoints: [entryPath],
+      bundle: true,
+      write: false,
+      metafile: true,
+      format: 'esm',
+      target: 'es2022',
+      platform: 'browser',
+      plugins: [createSourcePlugin(session, true)],
+      logLevel: 'silent',
+    });
+    const observation = session.complete();
+    return { detectedModules: observation.detectedModules, dependencies: observation.dependencies };
   }
 
-  /**
-   * Bundle a file and all its dependencies.
-   *
-   * @param entryPath - Canonical absolute entry path
-   * @returns Bundle result with code and any issues
-   */
-  public async bundle(entryPath: string): Promise<BundleResult> {
-    const issues: VmIssue[] = [];
-    const accessedProjectFiles = new Set<string>();
-    const unresolvedPaths = new Set<string>();
-
+  public async bundle(entryPath: string, signal = new AbortController().signal): Promise<BundleResult> {
+    const session = this.#host.beginSession({ mode: 'bundle', signal, entryPath });
     try {
-      // Create banner to inject CommonJS-style globals for built-in modules
-      // This allows code like `const { draw } = replicad;` to work without imports
-      // Only root modules with a globalName are included (not submodules)
-      // Also define module/exports objects to prevent runtime errors in CommonJS-style code
-      const moduleGlobals = [...this.builtinModules.entries()]
-        .filter(([, module_]) => module_.globalName)
-        .map(
-          ([name, module_]) =>
-            `const ${module_.globalName} = globalThis.__KERNEL_MODULES__?.get(${JSON.stringify(name)});`,
-        )
-        .join('\n');
-      const commonjsBanner = `${moduleGlobals}
-const exports = {};
-const module = { exports };
-`;
-
-      const buildOptions: BuildOptions = {
+      const options: BuildOptions = {
         entryPoints: [entryPath],
         bundle: true,
         write: false,
         format: 'esm',
         target: 'es2022',
-        metafile: true,
-        sourcemap: this.sourceMaps ? 'inline' : false,
         platform: 'browser',
-        plugins: [
-          createVfsPlugin({
-            filesystem: this.filesystem,
-            moduleManager: this.moduleManager,
-            builtinModules: this.builtinModules,
-            entryPath,
-            autoExportNames: this.autoExportNames,
-            accessedProjectFiles,
-            unresolvedPaths,
-          }),
-        ],
-        // Ensure we don't try to resolve node built-ins
-        external: [],
+        sourcemap: this.#sourceMaps ? 'external' : false,
+        outdir: 'out',
+        plugins: [createSourcePlugin(session, false)],
         logLevel: 'silent',
-        banner: { js: commonjsBanner },
+        banner: { js: commonJsBanner(this.#builtins) },
       };
-
-      const result = await esbuild.build(buildOptions);
-
-      // Extract project-file dependencies from the metafile.
-      // Keys in metafile.inputs use the format "namespace:path".
-      // Project files live in the vfs namespace with project-relative paths.
-      // CDN/node_modules paths are excluded (tracked via asset hashes separately).
-      const dependencies = this.extractDependencies(result.metafile);
-
-      // Collect warnings
-      for (const warning of result.warnings) {
-        issues.push(this.convertEsbuildMessage(warning, 'warning'));
-      }
-
-      // Collect errors
-      for (const error of result.errors) {
-        issues.push(this.convertEsbuildMessage(error, 'error'));
-      }
-
-      // Get output
-      if (result.outputFiles && result.outputFiles.length > 0) {
-        const output = result.outputFiles[0]!;
-        const sourceMap = this.sourceMaps ? extractInlineSourceMap(output.text) : undefined;
-        return {
-          code: output.text,
-          sourceMap,
-          issues,
-          dependencies,
-          unresolvedPaths: [...unresolvedPaths],
-          success: result.errors.length === 0,
-        };
-      }
-
-      return {
-        code: '',
-        dependencies,
-        unresolvedPaths: [...unresolvedPaths],
-        issues: [
-          ...issues,
-          {
-            message: 'No output generated',
-            code: 'BUNDLER_FAILED',
-            type: 'compilation',
-            severity: 'error',
-          },
-        ],
-        success: false,
-      };
-    } catch (error) {
-      // Handle build errors
-      if (error && typeof error === 'object' && 'errors' in error) {
-        const buildErrors = error as { errors: Message[]; warnings: Message[] };
-
-        for (const errorMessage of buildErrors.errors) {
-          issues.push(this.convertEsbuildMessage(errorMessage, 'error'));
-        }
-
-        for (const warningMessage of buildErrors.warnings) {
-          issues.push(this.convertEsbuildMessage(warningMessage, 'warning'));
-        }
-      } else {
+      const result = await getEsbuild().build(options);
+      const output = result.outputFiles?.find((file) => file.path.endsWith('.js')) ?? result.outputFiles?.[0];
+      const sourceMap = result.outputFiles?.find((file) => file.path.endsWith('.js.map'))?.text;
+      const observation = session.complete();
+      const issues = result.warnings.map((warning) => issueFromMessage(warning, 'warning'));
+      if (output === undefined) {
         issues.push({
-          message: error instanceof Error ? error.message : String(error),
+          message: 'No output generated',
           code: 'BUNDLER_FAILED',
           type: 'compilation',
           severity: 'error',
         });
       }
-
+      const code = output?.text ?? '';
+      return {
+        code,
+        sourceMap,
+        issues,
+        dependencies: observation.dependencies,
+        unresolvedPaths: observation.unresolvedPaths,
+        success: output !== undefined,
+      };
+    } catch (error) {
+      const observation = session.complete();
       return {
         code: '',
-        dependencies: [...accessedProjectFiles],
-        unresolvedPaths: [...unresolvedPaths],
-        issues,
+        issues: issuesFromError(error),
+        dependencies: observation.dependencies,
+        unresolvedPaths: observation.unresolvedPaths,
         success: false,
       };
     }
   }
 
-  /**
-   * Extract absolute paths of project-file dependencies from the esbuild
-   * metafile. Thin instance wrapper over {@link extractProjectDependencies}.
-   *
-   * @param metafile - The esbuild metafile from a build with `metafile: true`
-   * @returns Absolute paths of all project files involved in the bundle
-   */
-  private extractDependencies(metafile: Metafile | undefined): string[] {
-    return extractProjectDependencies(metafile);
-  }
-
-  /**
-   * Convert an esbuild message to a VmIssue.
-   *
-   * File paths in esbuild messages use the format `namespace:path`. Since the plugin
-   * stores project-relative paths in the `vfs` namespace, we strip the `vfs:` prefix
-   * to produce clean filenames (e.g., `main.ts`) for UI display and FileLink navigation.
-   *
-   * @param message - esbuild error or warning message
-   * @param severity - issue severity level
-   * @returns converted kernel issue
-   */
-  private convertEsbuildMessage(message: Message, severity: 'error' | 'warning'): VmIssue {
-    const issue: VmIssue = {
-      message: message.text,
-      code: 'BUNDLER_FAILED',
-      type: 'compilation',
-      severity,
-    };
-
-    if (message.location) {
-      issue.location = {
-        fileName: resolveEsbuildFilePath(message.location.file),
-        startLineNumber: message.location.line,
-        startColumn: message.location.column,
-      };
-    }
-
-    return issue;
+  public dispose(): void {
+    this.#host.dispose();
   }
 }
 
-// =============================================================================
-// Detection Plugin
-// =============================================================================
-
-/**
- * Options for the detection-only esbuild plugin used for kernel import detection.
- *
- * @public
- */
-export type DetectionPluginOptions = {
-  filesystem: VmFileSystem;
-};
-
-/**
- * Create a detection-only esbuild plugin.
- *
- * This is a simplified version of the production vfs plugin. The key difference:
- * bare specifiers are marked as `external` instead of being resolved via builtinModules
- * or CDN. This means esbuild reports what was imported without needing any modules
- * to be registered, eliminating the chicken-and-egg problem for kernel detection.
- *
- * Relative imports are still resolved normally via the vfs namespace so the full import tree
- * is walked correctly (TypeScript, barrel files, re-exports all handled).
- *
- * @returns esbuild plugin for import detection
- *
- * @public
- */
-export function createDetectionPlugin({ filesystem }: DetectionPluginOptions): Plugin {
-  const projectPrefix = '/';
-
-  function toRelative(absolutePath: string): string {
-    return absolutePath.startsWith(projectPrefix) ? absolutePath.slice(projectPrefix.length) : absolutePath;
-  }
-
-  function toAbsolute(relativePath: string): string {
-    return relativePath.startsWith('/') ? relativePath : `${projectPrefix}${relativePath}`;
-  }
-
-  return {
-    name: `${esbuildNamespace.vfs}-detection`,
-    setup(build) {
-      let relativeEntryPath = '';
-
-      build.onResolve({ filter: /.*/ }, async (args) => {
-        if (args.kind === 'entry-point') {
-          relativeEntryPath = toRelative(args.path);
-          return { path: relativeEntryPath, namespace: esbuildNamespace.vfs };
-        }
-
-        if (args.namespace === esbuildNamespace.httpUrl || args.path.startsWith('data:')) {
-          return { external: true };
-        }
-
-        if (args.path.startsWith('http://') || args.path.startsWith('https://')) {
-          return { external: true };
-        }
-
-        if (isBareSpecifier(args.path)) {
-          return { path: args.path, external: true };
-        }
-
-        const importerAbsolute = toAbsolute(args.importer || relativeEntryPath);
-
-        // Mirror the production resolver: strip Vite-style query suffixes so the
-        // import-detection pass walks the underlying file (no bare specifiers can
-        // hide inside an asset). The TC39 `with { type }` path is automatically
-        // covered because the import path itself stays unchanged.
-        const { cleanPath, suffix } = splitQuerySuffix(args.path);
-
-        try {
-          const resolvedPath = resolveImportPath(cleanPath, importerAbsolute);
-          const withExtension = suffix ? resolvedPath : await resolveFileExtension(filesystem, resolvedPath);
-          return {
-            path: toRelative(withExtension),
-            namespace: esbuildNamespace.vfs,
-            ...(suffix ? { suffix } : {}),
-          };
-        } catch {
-          return { external: true };
-        }
-      });
-
-      build.onLoad({ filter: /.*/, namespace: esbuildNamespace.vfs }, async (args) => {
-        // Detection pass should never feed binary asset content into esbuild's parser.
-        // Suffixed/attributed imports point at non-source files (text, binary, base64,
-        // dataurl, file) which cannot contain bare specifiers, so we stub them out.
-        if (resolveAssetLoader(args.suffix, args.with['type'])) {
-          return { contents: '', loader: 'js' };
-        }
-
-        try {
-          const absolutePath = toAbsolute(args.path);
-          const content = await filesystem.readFile(absolutePath, 'utf8');
-          const loader = getLoader(args.path);
-          return {
-            contents: content,
-            loader,
-            resolveDir: absolutePath.slice(0, absolutePath.lastIndexOf('/')),
-          };
-        } catch (error) {
-          return {
-            errors: [
-              {
-                text: `Failed to load '${args.path}': ${error instanceof Error ? error.message : String(error)}`,
-              },
-            ],
-          };
-        }
-      });
-    },
-  };
-}
-
-/**
- * Extract absolute project-file dependencies from an esbuild metafile.
- *
- * Project files live in the `vfs` namespace; CDN modules cached under the
- * node_modules mount are excluded (tracked via asset hashes). Files imported
- * @param metafile - esbuild metafile output, or undefined if unavailable
- * @returns array of absolute file paths for project dependencies
- *
- * @public
- */
-export function extractProjectDependencies(metafile: Metafile | undefined): string[] {
-  if (!metafile) {
-    return [];
-  }
-
-  const dependencies: string[] = [];
-
-  for (const inputKey of Object.keys(metafile.inputs)) {
-    if (!inputKey.startsWith(vfsNamespacePrefix)) {
-      continue;
-    }
-
-    // Strip query/fragment so `vfs:lib/cube.step?raw` collapses onto its filesystem path.
-    const relativePath = stripPathQuery(inputKey.slice(vfsNamespacePrefix.length));
-
-    // A CDN module cached under the node_modules mount is tracked via asset
-    // hashes, not as a project dependency.
-    if (isNodeModulesPath(relativePath)) {
-      continue;
-    }
-
-    dependencies.push(relativePath.startsWith('/') ? relativePath : `/${relativePath}`);
-  }
-
-  return dependencies;
-}
-
-/**
- * Extract external module specifiers from esbuild metafile output imports.
- *
- * @param metafile - esbuild metafile output, or undefined if unavailable
- * @returns array of external module specifiers
- *
- * @public
- */
-export function extractExternalImports(metafile: Metafile | undefined): string[] {
-  if (!metafile) {
-    return [];
-  }
-
-  const externals = new Set<string>();
-  for (const output of Object.values(metafile.outputs)) {
-    for (const imp of output.imports) {
-      if (imp.external) {
-        externals.add(imp.path);
-      }
-    }
-  }
-
-  return [...externals];
-}
-
-// =============================================================================
-// Execution
-// =============================================================================
-
-/**
- * Execute bundled JS/TS code via dynamic import.
- * Browser uses Blob URL, Node.js writes a temp file (data: URL imports
- * break under ESM loader hooks like `@oxc-node/core/register` or `tsx`).
- *
- * @param code - bundled JavaScript code to execute
- * @returns execution result with exported module and cleanup function
- *
- * @public
- */
-export async function executeCode<T = unknown>(code: string): Promise<VmExecuteResult<T>> {
+/** Execute bundled ESM and release its host-specific temporary resource. @public */
+export const executeCode = async <T = unknown>(
+  code: string,
+  signal = new AbortController().signal,
+): Promise<VmExecuteResult<T>> => {
   try {
+    signal.throwIfAborted();
     let moduleExports: unknown;
     let entryUrl: string | undefined;
-
     if (isNode()) {
       const result = await executeCodeInNode(code);
       moduleExports = result.value;
       entryUrl = result.entryUrl;
     } else {
-      const blob = new Blob([code], { type: 'application/javascript' });
-      entryUrl = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+      entryUrl = blobUrl;
       try {
-        moduleExports = await importBrowserModule(entryUrl);
+        moduleExports = await importBrowserModule(blobUrl);
       } finally {
-        URL.revokeObjectURL(entryUrl);
+        URL.revokeObjectURL(blobUrl);
       }
     }
-
+    signal.throwIfAborted();
     return { success: true, value: moduleExports as T, entryUrl };
   } catch (error) {
     return {
@@ -1239,19 +370,4 @@ export async function executeCode<T = unknown>(code: string): Promise<VmExecuteR
       ],
     };
   }
-}
-
-// =============================================================================
-// Bundler Context
-// =============================================================================
-
-/**
- * Shared state passed through the bundler lifecycle, holding the bundler instance and its dependencies.
- *
- * @public
- */
-export type EsbuildBundlerContext = {
-  bundler: EsbuildBundler;
-  builtinModules: Map<string, BuiltinModule>;
-  filesystem: VmFileSystem;
 };

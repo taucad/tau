@@ -153,7 +153,8 @@ catalog:
   deepmerge: ^4.3.1
   dotenv: ^17.4.2
   es-module-lexer: ^2.1.0
-  esbuild-wasm: ^0.27.7
+  esbuild: 0.28.2
+  esbuild-wasm: 0.28.2
   eslint: 9.32.0
   eslint-config-next: ^16.2.6
   eslint-plugin-import-x: ^4.16.2

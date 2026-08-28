@@ -6,12 +6,12 @@
 [![license](https://img.shields.io/npm/l/@taucad/esbuild)](./LICENSE)
 [![provenance](https://img.shields.io/badge/provenance-npm-blue)](https://docs.npmjs.com/generating-provenance-statements)
 
-esbuild-wasm bundler plugin for Tau
+Native Node and WASM browser esbuild bundler plugin for Tau
 
 ## Why @taucad/esbuild?
 
 - **TypeScript models, no build step** — bundles a model's `.ts`/`.js` sources inside the worker before a kernel sees them.
-- **Same bundler in browser and Node** — one `esbuild-wasm` payload, no per-host branch in your host code.
+- **One authoring surface across hosts** — native esbuild on Node, `esbuild-wasm` in browsers, and no host branch in your code.
 - **Bare specifiers resolve** — imports are fetched through a CDN resolver and executed in this package's own module VM.
 - **No module-scope work** — the esbuild backend loads in `initialize()`, one instance per worker.
 
@@ -55,10 +55,10 @@ One preset, `default`, selecting `bundlers.default`.
 
 ## Environment
 
-| Host           | Supported | Notes                                             |
-| -------------- | --------- | ------------------------------------------------- |
-| Browser worker | Yes       | `esbuild-wasm`; no cross-origin isolation needed  |
-| Node.js        | Yes       | `>=24`; same WASM build, no native esbuild binary |
+| Host           | Supported | Notes                                                            |
+| -------------- | --------- | ---------------------------------------------------------------- |
+| Browser worker | Yes       | `esbuild-wasm`; no cross-origin isolation needed                 |
+| Node.js        | Yes       | `>=24`; native binary selected through esbuild optional packages |
 
 ## Versioning and stability
 

@@ -28,7 +28,7 @@ export const esbuildOptionsSchema = z.object({
   extensions: z.array(z.string()).optional(),
 });
 
-/** @public */
+/** Public esbuild plugin options. @public */
 export type EsbuildOptions = z.input<typeof esbuildOptionsSchema>;
 
 const kernelIssueTypes = new Set<KernelIssueType>(['compilation', 'runtime', 'kernel', 'connection', 'unknown']);
@@ -98,16 +98,16 @@ export const esbuildBundler = defineBundler({
     return { vm };
   },
 
-  async detectImports({ entryPath }, _runtime, context) {
-    return context.vm.detectImports(entryPath);
+  async detectImports({ entryPath }, { signal }, context) {
+    return context.vm.detectImports(entryPath, signal);
   },
 
-  async bundle({ entryPath }, _runtime, context) {
-    return toBundleResult(await context.vm.bundle(entryPath));
+  async bundle({ entryPath }, { signal }, context) {
+    return toBundleResult(await context.vm.bundle(entryPath, signal));
   },
 
-  async execute({ code }, _runtime, context) {
-    return toExecuteResult(await context.vm.execute(code));
+  async execute({ code }, { signal }, context) {
+    return toExecuteResult(await context.vm.execute(code, signal));
   },
 
   registerModule({ name, module: builtinModule }, context) {

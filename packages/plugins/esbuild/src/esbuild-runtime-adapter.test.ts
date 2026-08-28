@@ -55,17 +55,17 @@ describe('Esbuild runtime adapter', () => {
     const vm = createMockVm();
     vi.mocked(vm.detectImports).mockResolvedValue({
       detectedModules: ['geospec'],
-      dependencies: ['/project/model.test.ts'],
+      dependencies: ['project/model.test.ts'],
     });
 
-    const result = await esbuildDefinition.detectImports({ entryPath: '/project/model.test.ts' }, bundlerRuntime, {
+    const result = await esbuildDefinition.detectImports({ entryPath: 'project/model.test.ts' }, bundlerRuntime, {
       vm,
     });
 
-    expect(vm.detectImports).toHaveBeenCalledWith('/project/model.test.ts');
+    expect(vm.detectImports).toHaveBeenCalledWith('project/model.test.ts', expect.any(AbortSignal));
     expect(result).toEqual({
       detectedModules: ['geospec'],
-      dependencies: ['/project/model.test.ts'],
+      dependencies: ['project/model.test.ts'],
     });
   });
 
@@ -74,7 +74,7 @@ describe('Esbuild runtime adapter', () => {
     vi.mocked(vm.bundle).mockResolvedValue({
       success: false,
       code: '',
-      dependencies: ['/project/model.ts'],
+      dependencies: ['project/model.ts'],
       unresolvedPaths: [],
       issues: [
         {
@@ -91,13 +91,13 @@ describe('Esbuild runtime adapter', () => {
       ],
     });
 
-    const result = await esbuildDefinition.bundle({ entryPath: '/project/model.ts' }, bundlerRuntime, { vm });
+    const result = await esbuildDefinition.bundle({ entryPath: 'project/model.ts' }, bundlerRuntime, { vm });
 
-    expect(vm.bundle).toHaveBeenCalledWith('/project/model.ts');
+    expect(vm.bundle).toHaveBeenCalledWith('project/model.ts', expect.any(AbortSignal));
     expect(result).toEqual({
       success: false,
       code: '',
-      dependencies: ['/project/model.ts'],
+      dependencies: ['project/model.ts'],
       unresolvedPaths: [],
       issues: [
         {
@@ -133,7 +133,7 @@ describe('Esbuild runtime adapter', () => {
 
     const result = await esbuildDefinition.execute({ code: 'throw new Error("boom");' }, bundlerRuntime, { vm });
 
-    expect(vm.execute).toHaveBeenCalledWith('throw new Error("boom");');
+    expect(vm.execute).toHaveBeenCalledWith('throw new Error("boom");', expect.any(AbortSignal));
     expect(result).toEqual({
       success: false,
       issues: [

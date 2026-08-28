@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ChevronRight, Copy, Folder, FolderOpen, Forward, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project.types.js';
 import { useProjects } from '#hooks/use-projects.js';
@@ -28,6 +28,7 @@ import {
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { ProjectShareDialog } from '#components/publish/project-share-dialog.js';
 import { ProjectChatList } from '#components/nav/project-chat-list.js';
+import { Loader } from '#components/ui/loader.js';
 import { toast } from '#components/ui/sonner.js';
 
 const projectsPerPage = 5;
@@ -41,6 +42,7 @@ export function ProjectNavigation(): React.JSX.Element {
   const { isProjectExpanded, setProjectDisclosure } = useAppUiPreferences();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const navigation = useNavigation();
   const location = useLocation();
   const [editingProjectId, setEditingProjectId] = useState<string | undefined>();
   const [publishProjectId, setPublishProjectId] = useState<string | undefined>();
@@ -48,6 +50,7 @@ export function ProjectNavigation(): React.JSX.Element {
   const sortedProjects = useMemo(() => sortProjectsByActivity(projects), [projects]);
   const visibleProjects = sortedProjects.slice(0, visibleCount);
   const publishTarget = projects.find((project) => project.id === publishProjectId);
+  const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
   const handleCreateChat = async (project: ProjectListItem): Promise<void> => {
     if (!project.slugs) {
@@ -112,6 +115,7 @@ export function ProjectNavigation(): React.JSX.Element {
                 key={project.id}
                 project={project}
                 isActive={isActive}
+                isPending={pendingUrl === projectPath}
                 isExpanded={isExpanded}
                 isEditing={editingProjectId === project.id}
                 onToggle={async () => setProjectDisclosure(project.id, !isExpanded)}
@@ -182,6 +186,7 @@ export function ProjectNavigation(): React.JSX.Element {
 function ProjectNavigationItem({
   project,
   isActive,
+  isPending,
   isExpanded,
   isEditing,
   onToggle,
@@ -196,6 +201,7 @@ function ProjectNavigationItem({
 }: {
   readonly project: ProjectListItem;
   readonly isActive: boolean;
+  readonly isPending: boolean;
   readonly isExpanded: boolean;
   readonly isEditing: boolean;
   readonly onToggle: () => Promise<unknown>;
@@ -231,7 +237,9 @@ function ProjectNavigationItem({
               aria-controls={chatsId}
               onClick={() => void onToggle()}
             >
-              {isExpanded ? (
+              {isPending ? (
+                <Loader className='size-4' />
+              ) : isExpanded ? (
                 <FolderOpen
                   aria-hidden
                   data-slot='project-folder-icon'
@@ -244,11 +252,13 @@ function ProjectNavigationItem({
                   className='size-4 group-hover/project-trigger:hidden group-focus-visible/disclosure:hidden'
                 />
               )}
-              <ChevronRight
-                aria-hidden
-                data-slot='project-disclosure-icon'
-                className={`hidden size-3.5 transition-transform group-hover/project-trigger:block group-focus-visible/disclosure:block motion-reduce:transition-none ${isExpanded ? 'rotate-90' : ''}`}
-              />
+              {isPending ? null : (
+                <ChevronRight
+                  aria-hidden
+                  data-slot='project-disclosure-icon'
+                  className={`hidden size-3.5 transition-transform group-hover/project-trigger:block group-focus-visible/disclosure:block motion-reduce:transition-none ${isExpanded ? 'rotate-90' : ''}`}
+                />
+              )}
             </Button>
           </TooltipTrigger>
           <TooltipContent side='right'>{isExpanded ? 'Collapse project' : 'Expand project'}</TooltipContent>
@@ -266,6 +276,7 @@ function ProjectNavigationItem({
           <Link
             to={target}
             aria-current={isActive ? 'page' : undefined}
+            aria-busy={isPending}
             className='flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-sm px-0.5 ring-sidebar-ring outline-hidden focus-visible:ring-2'
             onClick={onOpen}
           >

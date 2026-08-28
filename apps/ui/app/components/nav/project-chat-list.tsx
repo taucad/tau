@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Chat } from '@taucad/chat';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate, useNavigation } from 'react-router';
 import type { ProjectListItem } from '#types/project.types.js';
 import { useChats } from '#hooks/use-chats.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
+import { Loader } from '#components/ui/loader.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
 import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
 
@@ -36,12 +37,14 @@ export function ProjectChatList({
   const { chats, isLoading, error, retry, updateChatName, deleteChat } = useChats(project.id);
   const location = useLocation();
   const navigate = useNavigate();
+  const navigation = useNavigation();
   const [visibleCount, setVisibleCount] = useState(chatsPerPage);
   const [editingChatId, setEditingChatId] = useState<string | undefined>();
   const sortedChats = useMemo(() => sortProjectChats(chats), [chats]);
   const visibleChats = sortedChats.slice(0, visibleCount);
   const activeChatId = isProjectActive ? projectChatIdFromSearch(location.search) : undefined;
   const listId = `project-chats-${project.id}`;
+  const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
   const handleDelete = async (chatId: string): Promise<void> => {
     await deleteChat(chatId);
@@ -89,6 +92,7 @@ export function ProjectChatList({
           chat={chat}
           project={project}
           isActive={chat.id === activeChatId}
+          isPending={project.slugs !== undefined && pendingUrl === projectChatUrl(project.slugs, chat.id)}
           isEditing={editingChatId === chat.id}
           onRename={() => {
             setEditingChatId(chat.id);
@@ -125,6 +129,7 @@ function ProjectChatItem({
   chat,
   project,
   isActive,
+  isPending,
   isEditing,
   onRename,
   onRenameSave,
@@ -134,6 +139,7 @@ function ProjectChatItem({
   readonly chat: Chat;
   readonly project: ProjectListItem;
   readonly isActive: boolean;
+  readonly isPending: boolean;
   readonly isEditing: boolean;
   readonly onRename: () => void;
   readonly onRenameSave: (name: string) => Promise<void>;
@@ -160,8 +166,10 @@ function ProjectChatItem({
           <Link
             to={projectChatUrl(project.slugs, chat.id)}
             aria-current={isActive ? 'page' : undefined}
-            className='flex h-full min-w-0 flex-1 items-center overflow-hidden rounded-md pr-1.5 pl-[30px] ring-sidebar-ring outline-hidden focus-visible:ring-2'
+            aria-busy={isPending}
+            className='flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md pr-1.5 pl-[30px] ring-sidebar-ring outline-hidden focus-visible:ring-2'
           >
+            {isPending ? <Loader className='size-3.5 shrink-0' /> : null}
             <span className='truncate'>{chat.name}</span>
           </Link>
         ) : (

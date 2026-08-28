@@ -10,6 +10,7 @@ const mockSetProjectDisclosure = vi.fn();
 const mockNavigate = vi.fn();
 const mockInvalidateQueries = vi.fn();
 let pathname = '/';
+let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-projects.js', () => ({
   useProjects: () => mockUseProjects() as ReturnType<typeof useProjects>,
@@ -47,6 +48,7 @@ vi.mock('react-router', () => ({
   ),
   useLocation: () => ({ pathname }),
   useNavigate: () => mockNavigate,
+  useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
 }));
 vi.mock('#components/nav/project-chat-list.js', () => ({
   ProjectChatList: ({ project }: { readonly project: { readonly name: string } }) => (
@@ -140,6 +142,7 @@ describe('ProjectNavigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     pathname = '/';
+    pendingLocation = undefined;
     mockUseProjects.mockReturnValue(projectsResult);
     mockIsProjectExpanded.mockImplementation((_projectId: string, active: boolean) => active);
     mockSetProjectDisclosure.mockResolvedValue(undefined);
@@ -188,6 +191,17 @@ describe('ProjectNavigation', () => {
     expect(mockSetProjectDisclosure).toHaveBeenCalledWith('proj_two', true);
     fireEvent.click(screen.getByRole('link', { name: /Two/u }));
     expect(mockSetProjectDisclosure).toHaveBeenCalledWith('proj_two', true);
+  });
+
+  it('shows route loading only on the destination project', () => {
+    pendingLocation = { pathname: '/w/home/Two%20space', search: '' };
+    render(<ProjectNavigation />);
+
+    const pendingLink = screen.getByRole('link', { name: 'Two' });
+    const idleLink = screen.getByRole('link', { name: 'One' });
+    expect(pendingLink).toHaveAttribute('aria-busy', 'true');
+    expect(pendingLink.closest('[data-slot=project-trigger]')?.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(idleLink.closest('[data-slot=project-trigger]')?.querySelector('.animate-spin')).not.toBeInTheDocument();
   });
 
   it('creates a chat by project id before navigating to its canonical query URL', async () => {

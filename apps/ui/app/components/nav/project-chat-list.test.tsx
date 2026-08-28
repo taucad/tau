@@ -9,6 +9,7 @@ import type { ProjectListItem } from '#types/project.types.js';
 const mockUseChats = vi.fn();
 const mockNavigate = vi.fn();
 let search = '?chat=chat_12';
+let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => mockUseChats() as ReturnType<typeof useChats> }));
 vi.mock('react-router', () => ({
@@ -19,6 +20,7 @@ vi.mock('react-router', () => ({
   ),
   useLocation: () => ({ search }),
   useNavigate: () => mockNavigate,
+  useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
 }));
 vi.mock('#components/ui/sidebar.js', () => ({
   SidebarMenuButton: ({ children, ...properties }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
@@ -94,6 +96,7 @@ describe('ProjectChatList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     search = '?chat=chat_12';
+    pendingLocation = undefined;
     mockUseChats.mockReturnValue(defaultChatsResult);
     mockNavigate.mockResolvedValue(undefined);
   });
@@ -121,6 +124,16 @@ describe('ProjectChatList', () => {
 
     expect(screen.getByRole('link', { name: 'Chat 12' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Chat 11' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('shows route loading only on the destination chat', () => {
+    pendingLocation = { pathname: '/w/home/project%20one', search: '?chat=chat_11' };
+    render(<ProjectChatList project={project} isProjectActive />);
+
+    const pendingLink = screen.getByRole('link', { name: 'Chat 11' });
+    expect(pendingLink).toHaveAttribute('aria-busy', 'true');
+    expect(pendingLink.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Chat 12' }).querySelector('.animate-spin')).not.toBeInTheDocument();
   });
 
   it('replaces a deleted focused-chat URL with the deterministic next chat', async () => {

@@ -4,11 +4,13 @@ import { createPortal } from 'react-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FloatingPanel,
+  FloatingPanelClose,
   FloatingPanelContentHeader,
   FloatingPanelContentHeaderActions,
   FloatingPanelMenuButton,
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
+import { TooltipProvider } from '#components/ui/tooltip.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
@@ -54,6 +56,19 @@ describe('FloatingPanelContentHeader', () => {
     renderInPanel(<FloatingPanelContentHeader>Title</FloatingPanelContentHeader>);
 
     expect(screen.getByText('Title')).toHaveClass('h-9');
+  });
+});
+
+describe('FloatingPanelClose', () => {
+  it('uses the same responsive rounding as other header buttons', () => {
+    renderInPanel(
+      <TooltipProvider>
+        <FloatingPanelClose icon={<span />} tooltipContent={() => 'Close'} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Close panel' })).toHaveClass('max-md:rounded-md');
+    expect(screen.getByRole('button', { name: 'Close panel' })).not.toHaveClass('max-md:rounded-full');
   });
 });
 

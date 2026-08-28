@@ -218,7 +218,7 @@ function FloatingPanelClose({ icon, className, children, tooltipContent }: Float
       tooltipSide='top'
       className={cn(
         'text-muted-foreground',
-        'max-md:rounded-full max-md:border max-md:bg-background/70 max-md:backdrop-blur-lg',
+        'max-md:border max-md:bg-background/70 max-md:backdrop-blur-lg',
         className,
       )}
       aria-label='Close panel'

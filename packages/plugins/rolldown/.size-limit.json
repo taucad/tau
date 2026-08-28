@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@taucad/rolldown package code",
+    "path": "dist/**/*.mjs",
+    "limit": "6 kB"
+  }
+]

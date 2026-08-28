@@ -1,0 +1,30 @@
+{
+  "name": "rolldown",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/rolldown",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test:browser": {
+      "command": "vitest run --config vitest.browser.config.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
+    "test:browser:nonisolated": {
+      "command": "vitest run --config vitest.browser.nonisolated.config.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
+    "benchmark:browser": {
+      "command": "vitest run --config vitest.browser.benchmark.config.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    }
+  }
+}

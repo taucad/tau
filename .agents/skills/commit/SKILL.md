@@ -1,8 +1,8 @@
 ---
 name: commit
-description: Previews, stages, and commits requested changes as policy-compliant atomic commits, or explicitly pushes committed work. Use only when invoked as /commit, /commit dry, /commit stage, or /commit push.
+description: Previews, stages, and commits requested changes as policy-compliant atomic commits, or explicitly pushes committed work. Use only when invoked as /commit, /commit dry, /commit stage, /commit push, or /commit unsafe.
 disable-model-invocation: true
-argument-hint: '[dry|stage|push]'
+argument-hint: '[dry|stage|push|unsafe]'
 ---
 
 # Commit
@@ -15,6 +15,7 @@ Read the applicable repository commit policy before planning commits or changing
 - `/commit dry`: list every commit that would be made and all of its files; never stage, commit, or push.
 - `/commit stage`: stage exactly one logical group for review, then stop.
 - `/commit push`: create local commits, then push them to configured upstreams.
+- `/commit unsafe`: accept that commits may be unsafe. Dry-run only hunks relevant to changes in this chat; never stage, commit, or push.
 
 Reject other arguments or mode combinations.
 
@@ -28,6 +29,8 @@ Reject other arguments or mode combinations.
 6. Choose a message that follows the repository policy.
 
 For `/commit dry`, resolve every group exactly as `/commit` would, including groups in separate repositories. Report groups in execution order with the repository root, proposed Conventional Commit message, and status plus path of every file. Report known validation state and blockers. Do not stop merely because there are several groups, and do not change files, the index, refs, or remotes.
+
+For `/commit unsafe`, follow `/commit dry` at hunk granularity. Include only hunks relevant to changes in this chat, even when their files also contain unrelated hunks. Treat uncertain hunk attribution as an accepted risk rather than a blocker. Report each included file path and hunk header.
 
 For `/commit stage`, require one logical group. If the scope contains several groups, report them and wait. Otherwise, stage its explicit paths, show the cached names and diff summary, run `git diff --cached --check`, then stop.
 

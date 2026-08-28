@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
+import { EXTManifold } from 'manifold-3d/manifold-gltf';
 import {
   createEmptyGlb,
   createEmptyGltf,
@@ -76,6 +77,33 @@ function createLinesInput(): GlbInput {
           },
         ],
       },
+    ],
+  };
+}
+
+const cubeIndices = new Uint32Array([
+  0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5,
+]);
+
+function createManifoldInput(): GlbInput {
+  const basePositions = [-1, -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, -1, -1, -1, 1, 1, -1, 1, 1, 1, 1, -1, 1, 1];
+  const positions = new Float32Array([...basePositions, ...basePositions]);
+  const normals = new Float32Array(positions.length);
+  const first = cubeIndices.filter((_, index) => Math.floor(index / 3) % 2 === 0);
+  const second = cubeIndices.filter((_, index) => Math.floor(index / 3) % 2 === 1).map((index) => index + 8);
+  const exact = new Uint32Array([...first, ...second.map((index) => index - 8)]);
+  const { material } = createTrianglePrimitive();
+  return {
+    nodes: [
+      {
+        name: 'Surface',
+        primitives: [
+          { mode: 4, positions, normals, indices: first, material },
+          { mode: 4, positions, normals, indices: second, material: { ...material, baseColorFactor: [1, 0, 0, 1] } },
+        ],
+        manifoldTopology: { indices: exact },
+      },
+      createLinesInput().nodes[0]!,
     ],
   };
 }
@@ -307,6 +335,46 @@ describe('writeGlb', () => {
     expect(positions.getCount()).toBe(4);
 
     expect(primitive.getAttribute('NORMAL')).toBeNull();
+  });
+
+  it('should serialize certified manifold topology and keep lines in a sibling mesh', async () => {
+    const glb = writeGlb(createManifoldInput());
+    const json = readGlbJson(glb) as {
+      extensionsUsed: string[];
+      meshes: Array<{
+        extensions?: {
+          EXT_mesh_manifold?: { manifoldPrimitive: { indices: number }; mergeIndices: number; mergeValues: number };
+        };
+        primitives: Array<{ attributes: Record<string, number>; indices: number }>;
+      }>;
+      accessors: Array<{ bufferView: number; byteOffset: number; count: number; sparse?: { count: number } }>;
+    };
+    const surface = json.meshes[0]!;
+    const extension = surface.extensions?.EXT_mesh_manifold;
+
+    expect(json.extensionsUsed).toContain('EXT_mesh_manifold');
+    expect(surface.primitives[0]!.attributes).toEqual(surface.primitives[1]!.attributes);
+    expect(json.accessors[surface.primitives[0]!.indices]!.bufferView).toBe(
+      json.accessors[surface.primitives[1]!.indices]!.bufferView,
+    );
+    expect(json.accessors[surface.primitives[1]!.indices]!.byteOffset).toBe(18 * Uint32Array.BYTES_PER_ELEMENT);
+    expect(json.accessors[extension!.manifoldPrimitive.indices]!.sparse?.count).toBe(18);
+    expect(typeof extension?.mergeIndices).toBe('number');
+    expect(typeof extension?.mergeValues).toBe('number');
+    expect(json.meshes[1]!.extensions).toBeUndefined();
+
+    const document = await new NodeIO().registerExtensions([EXTManifold]).readBinary(glb);
+    expect(document.getRoot().listMeshes()[0]!.getExtension(EXTManifold.EXTENSION_NAME)).not.toBeNull();
+  });
+
+  it('should refuse false manifold claims at the writer boundary', () => {
+    const input = createSingleTriangleInput();
+    input.nodes[0]!.manifoldTopology = { indices: new Uint32Array([0, 1, 2]) };
+    expect(() => writeGlb(input)).toThrow('not an oriented 2-manifold');
+
+    const mismatched = createManifoldInput();
+    mismatched.nodes[0]!.manifoldTopology!.indices[18] = 6;
+    expect(() => writeGlb(mismatched)).toThrow('identical POSITION values');
   });
 
   it('should produce correct node names for multi-node input', async () => {

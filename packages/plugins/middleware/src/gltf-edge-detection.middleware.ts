@@ -50,8 +50,9 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
     return edgeMaterial;
   }
 
-  // Process each mesh
-  for (const mesh of document.getRoot().listMeshes()) {
+  // Process each source mesh. Newly created sibling edge meshes are not inputs.
+  const sourceMeshes = document.getRoot().listMeshes();
+  for (const mesh of sourceMeshes) {
     const primitivesToAdd: Primitive[] = [];
 
     for (const primitive of mesh.listPrimitives()) {
@@ -104,11 +105,32 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
       primitivesToAdd.push(edgePrimitive);
     }
 
-    // Add edge primitives to mesh
-    for (const edgePrimitive of primitivesToAdd) {
-      mesh.addPrimitive(edgePrimitive);
-      edgesAdded = true;
+    if (primitivesToAdd.length === 0) {
+      continue;
     }
+
+    if (mesh.getExtension('EXT_mesh_manifold')) {
+      const edgeMesh = document.createMesh(`${mesh.getName() || 'mesh'} edges`);
+      for (const edgePrimitive of primitivesToAdd) {
+        edgeMesh.addPrimitive(edgePrimitive);
+      }
+      for (const node of document
+        .getRoot()
+        .listNodes()
+        .filter((candidate) => candidate.getMesh() === mesh)) {
+        node.addChild(
+          document
+            .createNode(`${node.getName() || mesh.getName() || 'mesh'} edges`)
+            .setMesh(edgeMesh)
+            .setExtras({ ...node.getExtras() }),
+        );
+      }
+    } else {
+      for (const edgePrimitive of primitivesToAdd) {
+        mesh.addPrimitive(edgePrimitive);
+      }
+    }
+    edgesAdded = true;
   }
 
   return edgesAdded;
@@ -117,9 +139,10 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
 /**
  * Add edge primitives to a GLTF geometry while preserving component ownership.
  *
- * Generated LINES primitives are appended to the same mesh as their source
- * TRIANGLES primitive. Existing LINES primitives remain in place, because they
- * usually come from native CAD topology and already belong to their source mesh.
+ * Generated LINES primitives are appended to the source mesh unless that mesh
+ * carries `EXT_mesh_manifold`. Annotated surface meshes keep TRIANGLES only;
+ * their lines use an identity child node so component visibility and transforms
+ * remain shared without invalidating the topology extension.
  *
  * If no triangle meshes need generated edges, the original geometry is returned
  * unchanged to skip the @gltf-transform re-serialisation roundtrip.

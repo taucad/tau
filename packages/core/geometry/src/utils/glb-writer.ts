@@ -49,6 +49,12 @@ export type GlbPrimitive = {
   extensions?: Record<string, JSONObject>;
 };
 
+/** Exact oriented 2-manifold surface topology retained across render-vertex seams. @public */
+export type GlbManifoldTopology = {
+  /** Triangle indices into the node's shared POSITION accessor. */
+  indices: Uint32Array;
+};
+
 /**
  * A scene node containing one or more mesh primitives.
  *
@@ -57,6 +63,8 @@ export type GlbPrimitive = {
 export type GlbNode = {
   name?: string;
   primitives: GlbPrimitive[];
+  /** Exact topology for a triangle-only surface mesh; the writer validates and serializes `EXT_mesh_manifold`. */
+  manifoldTopology?: GlbManifoldTopology;
   extras?: JSONObject;
   extensions?: Record<string, JSONObject>;
 };
@@ -146,6 +154,7 @@ type GltfJson = {
   meshes: Array<{
     primitives: GltfJsonPrimitive[];
     name?: string;
+    extensions?: Record<string, JSONObject>;
   }>;
   accessors: GltfJsonAccessor[];
   bufferViews: GltfJsonBufferView[];
@@ -174,6 +183,11 @@ type GltfJsonAccessor = {
   type: string;
   min?: number[];
   max?: number[];
+  sparse?: {
+    count: number;
+    indices: { bufferView: number; componentType: number };
+    values: { bufferView: number };
+  };
 };
 
 type GltfJsonBufferView = {
@@ -199,6 +213,138 @@ type GltfJsonMaterial = {
 type BufferEntry = {
   data: Uint8Array<ArrayBuffer>;
   byteOffset: number;
+};
+
+type ValidatedManifoldTopology = {
+  renderIndices: Uint32Array;
+  mergeIndices: Uint32Array;
+  mergeValues: Uint32Array;
+};
+
+const arraysEqual = (left: Float32Array | undefined, right: Float32Array | undefined): boolean =>
+  left === right ||
+  (left?.length === right?.length && left?.every((value, index) => value === right?.[index]) === true);
+
+const validateManifoldTopology = (node: GlbNode): ValidatedManifoldTopology => {
+  const topology = node.manifoldTopology!;
+  const first = node.primitives[0];
+  if (!first || node.primitives.some((primitive) => primitive.mode !== 4)) {
+    throw new Error('manifoldTopology requires one or more TRIANGLES primitives');
+  }
+  if (
+    first.positions.length === 0 ||
+    first.positions.length % 3 !== 0 ||
+    first.positions.some((value) => !Number.isFinite(value)) ||
+    (first.normals?.length ?? first.positions.length) !== first.positions.length ||
+    node.primitives.some((primitive) => primitive.indices.length % 3 !== 0)
+  ) {
+    throw new Error('manifoldTopology requires complete finite triangle attributes and indices');
+  }
+  if (
+    node.primitives.some(
+      (primitive) =>
+        !arraysEqual(primitive.positions, first.positions) || !arraysEqual(primitive.normals, first.normals),
+    )
+  ) {
+    throw new Error('manifoldTopology primitives must share identical POSITION and NORMAL attributes');
+  }
+
+  const renderIndices = new Uint32Array(
+    node.primitives.reduce((count, primitive) => count + primitive.indices.length, 0),
+  );
+  let offset = 0;
+  for (const primitive of node.primitives) {
+    renderIndices.set(primitive.indices, offset);
+    offset += primitive.indices.length;
+  }
+  if (topology.indices.length !== renderIndices.length || topology.indices.length % 3 !== 0) {
+    throw new Error('manifoldTopology and render index streams must contain the same complete triangles');
+  }
+
+  const vertexCount = first.positions.length / 3;
+  const mergeIndices: number[] = [];
+  const mergeValues: number[] = [];
+  const edges = new Map<string, { count: number; winding: number }>();
+  const links = Array.from({ length: vertexCount }, () => [] as Array<[number, number]>);
+  for (let index = 0; index < topology.indices.length; index++) {
+    const vertex = topology.indices[index]!;
+    if (vertex >= vertexCount) {
+      throw new Error('manifoldTopology index out of range');
+    }
+    if (vertex !== renderIndices[index]) {
+      const original = renderIndices[index]!;
+      if (original >= vertexCount) {
+        throw new Error('render index out of range');
+      }
+      const originalOffset = original * 3;
+      const manifoldOffset = vertex * 3;
+      if (
+        first.positions[originalOffset] !== first.positions[manifoldOffset] ||
+        first.positions[originalOffset + 1] !== first.positions[manifoldOffset + 1] ||
+        first.positions[originalOffset + 2] !== first.positions[manifoldOffset + 2]
+      ) {
+        throw new Error('manifoldTopology may merge only vertices with identical POSITION values');
+      }
+      mergeIndices.push(index);
+      mergeValues.push(vertex);
+    }
+  }
+  for (let index = 0; index < topology.indices.length; index += 3) {
+    const triangle = topology.indices.subarray(index, index + 3);
+    if (triangle[0] === triangle[1] || triangle[1] === triangle[2] || triangle[2] === triangle[0]) {
+      throw new Error('manifoldTopology contains a collapsed triangle');
+    }
+    links[triangle[0]!]!.push([triangle[1]!, triangle[2]!]);
+    links[triangle[1]!]!.push([triangle[2]!, triangle[0]!]);
+    links[triangle[2]!]!.push([triangle[0]!, triangle[1]!]);
+    for (const [start, end] of [
+      [triangle[0]!, triangle[1]!],
+      [triangle[1]!, triangle[2]!],
+      [triangle[2]!, triangle[0]!],
+    ] as const) {
+      const key = start < end ? `${start}:${end}` : `${end}:${start}`;
+      const edge = edges.get(key) ?? { count: 0, winding: 0 };
+      edge.count++;
+      edge.winding += start < end ? 1 : -1;
+      edges.set(key, edge);
+    }
+  }
+  if ([...edges.values()].some(({ count, winding }) => count !== 2 || winding !== 0)) {
+    throw new Error('manifoldTopology is not an oriented 2-manifold');
+  }
+  for (const link of links) {
+    if (link.length === 0) {
+      continue;
+    }
+    const adjacency = new Map<number, number[]>();
+    for (const [left, right] of link) {
+      adjacency.set(left, [...(adjacency.get(left) ?? []), right]);
+      adjacency.set(right, [...(adjacency.get(right) ?? []), left]);
+    }
+    if ([...adjacency.values()].some((neighbors) => neighbors.length !== 2)) {
+      throw new Error('manifoldTopology has a non-manifold vertex link');
+    }
+    const start = adjacency.keys().next().value!;
+    const pending = [start];
+    const visited = new Set<number>();
+    while (pending.length > 0) {
+      const vertex = pending.pop()!;
+      if (visited.has(vertex)) {
+        continue;
+      }
+      visited.add(vertex);
+      pending.push(...adjacency.get(vertex)!);
+    }
+    if (visited.size !== adjacency.size) {
+      throw new Error('manifoldTopology has a disconnected vertex link');
+    }
+  }
+
+  return {
+    renderIndices,
+    mergeIndices: Uint32Array.from(mergeIndices),
+    mergeValues: Uint32Array.from(mergeValues),
+  };
 };
 
 /**
@@ -295,8 +441,104 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
 
   for (const node of input.nodes) {
     const primitiveJsons: GltfJsonPrimitive[] = [];
+    let meshExtensions: Record<string, JSONObject> | undefined;
 
-    for (const primitive of node.primitives) {
+    if (node.manifoldTopology) {
+      const { renderIndices, mergeIndices, mergeValues } = validateManifoldTopology(node);
+      const first = node.primitives[0]!;
+      const positionViewIndex = addBufferView(first.positions, targetArrayBuffer);
+      const { min, max } = computeMinMax(first.positions);
+      const positionAccessorIndex = accessors.length;
+      accessors.push({
+        bufferView: positionViewIndex,
+        byteOffset: 0,
+        componentType: componentTypeFloat,
+        count: first.positions.length / 3,
+        type: 'VEC3',
+        min,
+        max,
+      });
+      const attributes: Record<string, number> = {};
+      attributes['POSITION'] = positionAccessorIndex;
+      if (first.normals && first.normals.length > 0) {
+        const normalViewIndex = addBufferView(first.normals, targetArrayBuffer);
+        const normalAccessorIndex = accessors.length;
+        accessors.push({
+          bufferView: normalViewIndex,
+          byteOffset: 0,
+          componentType: componentTypeFloat,
+          count: first.normals.length / 3,
+          type: 'VEC3',
+        });
+        attributes['NORMAL'] = normalAccessorIndex;
+      }
+      const indexViewIndex = addBufferView(renderIndices, targetElementArrayBuffer);
+      let indexOffset = 0;
+      for (const primitive of node.primitives) {
+        const indexAccessorIndex = accessors.length;
+        accessors.push({
+          bufferView: indexViewIndex,
+          byteOffset: indexOffset * Uint32Array.BYTES_PER_ELEMENT,
+          componentType: componentTypeUnsignedInt,
+          count: primitive.indices.length,
+          type: 'SCALAR',
+        });
+        indexOffset += primitive.indices.length;
+        primitiveJsons.push({
+          attributes,
+          mode: primitive.mode,
+          material: getOrCreateMaterial(primitive.material),
+          indices: indexAccessorIndex,
+          ...(primitive.extras ? { extras: primitive.extras } : {}),
+          ...(primitive.extensions ? { extensions: primitive.extensions } : {}),
+        });
+      }
+      const manifoldAccessorIndex = accessors.length;
+      const manifoldAccessor: GltfJsonAccessor = {
+        bufferView: indexViewIndex,
+        byteOffset: 0,
+        componentType: componentTypeUnsignedInt,
+        count: node.manifoldTopology.indices.length,
+        type: 'SCALAR',
+      };
+      accessors.push(manifoldAccessor);
+      const manifoldAttributes: JSONObject = {};
+      manifoldAttributes['POSITION'] = positionAccessorIndex;
+      const extension: JSONObject = {
+        manifoldPrimitive: { attributes: manifoldAttributes, indices: manifoldAccessorIndex, mode: 4 },
+      };
+      if (mergeIndices.length > 0) {
+        const mergeIndexView = addBufferView(mergeIndices);
+        const mergeValueView = addBufferView(mergeValues);
+        const mergeIndexAccessor = accessors.length;
+        accessors.push({
+          bufferView: mergeIndexView,
+          byteOffset: 0,
+          componentType: componentTypeUnsignedInt,
+          count: mergeIndices.length,
+          type: 'SCALAR',
+        });
+        const mergeValueAccessor = accessors.length;
+        accessors.push({
+          bufferView: mergeValueView,
+          byteOffset: 0,
+          componentType: componentTypeUnsignedInt,
+          count: mergeValues.length,
+          type: 'SCALAR',
+        });
+        manifoldAccessor.sparse = {
+          count: mergeIndices.length,
+          indices: { bufferView: mergeIndexView, componentType: componentTypeUnsignedInt },
+          values: { bufferView: mergeValueView },
+        };
+        extension['mergeIndices'] = mergeIndexAccessor;
+        extension['mergeValues'] = mergeValueAccessor;
+      }
+      meshExtensions = {};
+      meshExtensions['EXT_mesh_manifold'] = extension;
+    }
+
+    for (const primitive of node.manifoldTopology ? [] : node.primitives) {
       const materialIndex = getOrCreateMaterial(primitive.material);
 
       const positionViewIndex = addBufferView(primitive.positions, targetArrayBuffer);
@@ -353,6 +595,7 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
       meshes.push({
         primitives: primitiveJsons,
         ...(node.name ? { name: node.name } : {}),
+        ...(meshExtensions ? { extensions: meshExtensions } : {}),
       });
 
       const nodeIndex = nodes.length;
@@ -403,8 +646,11 @@ function buildGltf(input: GlbInput): { json: GltfJson; binBuffer: Uint8Array<Arr
       typeof input.extensions === 'function' ? input.extensions(extraBufferViewIndices) : input.extensions;
   }
 
-  if (input.extensionsUsed && input.extensionsUsed.length > 0) {
-    json.extensionsUsed = [...new Set(input.extensionsUsed)];
+  const extensionsUsed = input.nodes.some((node) => node.manifoldTopology)
+    ? [...(input.extensionsUsed ?? []), 'EXT_mesh_manifold']
+    : input.extensionsUsed;
+  if (extensionsUsed && extensionsUsed.length > 0) {
+    json.extensionsUsed = [...new Set(extensionsUsed)];
   }
 
   if (input.extensionsRequired && input.extensionsRequired.length > 0) {

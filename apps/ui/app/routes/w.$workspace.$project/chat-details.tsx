@@ -45,16 +45,16 @@ function FileSystemInfo({
   const Icon = backendType === 'webaccess' ? FolderOpen : backendType === 'memory' ? MemoryStick : House;
 
   return (
-    <div className='space-y-2'>
-      <label className='text-sm font-medium text-foreground'>Location:</label>
-      <div className='flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2'>
+    <section aria-label='Storage' className='overflow-hidden rounded-xl border border-border bg-card'>
+      <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Storage</h2>
+      <div className='flex items-center gap-2 p-3'>
         <Icon className='size-4 shrink-0 text-muted-foreground' />
         <div className='flex flex-col gap-0.5'>
           <span className='text-sm font-medium'>{meta.label}</span>
           <span className='text-xs text-muted-foreground'>{meta.detail}</span>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -85,60 +85,66 @@ export function DetailsPanelBody(): React.JSX.Element {
   );
 
   return (
-    <div className='space-y-4 p-3'>
-      {/* Project Information */}
-      <div className='space-y-3'>
-        <div className='space-y-2'>
-          <label className='text-sm font-medium text-foreground' htmlFor='project-name'>
-            Name:
-          </label>
-          <Input
-            id='project-name'
-            value={projectName}
-            placeholder='Enter your project name...'
-            onChange={(event) => {
-              updateName(event.target.value);
-            }}
-          />
-        </div>
+    <div data-slot='details-panel-body' className='size-full min-h-0 overflow-hidden bg-sidebar'>
+      <div className='size-full scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
+        <div className='flex min-h-full flex-col gap-2'>
+          <section aria-label='Project' className='overflow-hidden rounded-xl border border-border bg-card'>
+            <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Project</h2>
+            <div className='space-y-3 p-3'>
+              <div className='space-y-2'>
+                <label className='text-sm font-medium text-foreground' htmlFor='project-name'>
+                  Name
+                </label>
+                <Input
+                  id='project-name'
+                  value={projectName}
+                  placeholder='Enter your project name...'
+                  onChange={(event) => {
+                    updateName(event.target.value);
+                  }}
+                />
+              </div>
 
-        <div className='space-y-2'>
-          <label className='text-sm font-medium text-foreground' htmlFor='project-description'>
-            Description:
-          </label>
-          <Textarea
-            id='project-description'
-            value={projectDescription}
-            placeholder="Describe what you're building..."
-            className='min-h-20'
-            onChange={(event) => {
-              updateDescription(event.target.value);
-            }}
-          />
-        </div>
+              <div className='space-y-2'>
+                <label className='text-sm font-medium text-foreground' htmlFor='project-description'>
+                  Description
+                </label>
+                <Textarea
+                  id='project-description'
+                  value={projectDescription}
+                  placeholder="Describe what you're building..."
+                  className='min-h-20'
+                  onChange={(event) => {
+                    updateDescription(event.target.value);
+                  }}
+                />
+              </div>
 
-        <div className='space-y-2'>
-          <label className='text-sm font-medium text-foreground'>Tags:</label>
-          <Tags tags={projectTags} onTagsChange={handleTagsChange}>
-            <TagsTrigger placeholder='Add tags...' />
-          </Tags>
-        </div>
+              <div className='space-y-2'>
+                <label className='text-sm font-medium text-foreground'>Tags</label>
+                <Tags tags={projectTags} onTagsChange={handleTagsChange}>
+                  <TagsTrigger placeholder='Add tags...' />
+                </Tags>
+              </div>
 
-        <div className='space-y-2'>
-          <label className='text-sm font-medium text-foreground'>Main File:</label>
-          <FileSelector
-            selectedFile={mainFile}
-            placeholder='Select main file...'
-            title='Select Main File'
-            description='Choose the main file for your project'
-            emptyMessage='No files available'
-            onSelect={handleMainFileChange}
-          />
+              <div className='space-y-2'>
+                <label className='text-sm font-medium text-foreground'>Main file</label>
+                <FileSelector
+                  selectedFile={mainFile}
+                  placeholder='Select main file...'
+                  title='Select Main File'
+                  description='Choose the main file for your project'
+                  emptyMessage='No files available'
+                  onSelect={handleMainFileChange}
+                />
+              </div>
+            </div>
+          </section>
+
+          <FileSystemInfo backendType={backendType} activeWorkspaceName={activeWorkspaceName} />
+          <ChatDetailsUsage />
         </div>
       </div>
-
-      <FileSystemInfo backendType={backendType} activeWorkspaceName={activeWorkspaceName} />
-      <ChatDetailsUsage />
     </div>
   );
 }
@@ -172,7 +178,7 @@ export function ChatDetails({
             />
           </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
-        <FloatingPanelContentBody className='px-0 py-0'>
+        <FloatingPanelContentBody className='p-0'>
           <DetailsPanelBody />
         </FloatingPanelContentBody>
       </FloatingPanelContent>

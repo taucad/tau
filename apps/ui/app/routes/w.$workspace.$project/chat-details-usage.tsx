@@ -68,12 +68,9 @@ export function ChatDetailsUsage(): React.JSX.Element | undefined {
   const totalTokens = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens;
 
   return (
-    <div className='@container border-t pt-3'>
-      <div className='flex items-center gap-1.5 text-sm font-medium text-foreground'>
-        <span>Chat Usage</span>
-      </div>
-
-      <Table className='-mx-2 overflow-clip rounded-md'>
+    <section aria-label='Chat usage' className='@container overflow-hidden rounded-xl border border-border bg-card'>
+      <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Chat usage</h2>
+      <Table>
         <TableHeader>
           <TableRow>
             <TableHead className=''>Metric</TableHead>
@@ -142,7 +139,7 @@ export function ChatDetailsUsage(): React.JSX.Element | undefined {
             </TableRow>
           ) : undefined}
         </TableBody>
-        <TableFooter className='overflow-clip rounded-b-md'>
+        <TableFooter>
           <TableRow>
             <TableCell>Total</TableCell>
             <TableCell className='text-right font-mono'>{formatNumberAbbreviation(totalTokens)}</TableCell>
@@ -152,6 +149,6 @@ export function ChatDetailsUsage(): React.JSX.Element | undefined {
           </TableRow>
         </TableFooter>
       </Table>
-    </div>
+    </section>
   );
 }

@@ -206,16 +206,28 @@
 
 /* Dark variant is provided by fumadocs-ui/css/preset.css: @variant dark (&:where(.dark, .dark *)) */
 
-@utility rounded-* {
-  /* 
-   * Extend rounded utility to apply the squircle shape for rounding.
-   * Squircle shape for rounding - https://developer.mozilla.org/en-US/docs/Web/CSS/superellipse
-   */
-  @supports (corner-shape: superellipse(1.15)) {
-    /* Full rounded corners preserve perfect circles. */
-    &:not(.rounded-full) {
-      /* 1.15 applies a subtle squircle shape to the rounded corners without being overwhelming.*/
-      corner-shape: superellipse(1.15);
+@supports (corner-shape: superellipse(1.5)) {
+  :root {
+    /* Preserve the fallback scale's visual corner reach with the flatter native curve. */
+    --radius-xs: 0.59375rem;
+    --radius-sm: 0.75rem;
+    --radius-md: 0.9375rem;
+    --radius-lg: 1.09375rem;
+    --radius-xl: 1.4375rem;
+    --radius-2xl: 1.78125rem;
+    --radius-3xl: 2.4375rem;
+    --radius-4xl: 3.125rem;
+  }
+}
+
+@layer base {
+  @supports (corner-shape: superellipse(1.5)) {
+    :where(*) {
+      corner-shape: superellipse(1.5);
+    }
+
+    :where([class*='rounded-full']) {
+      corner-shape: round;
     }
   }
 }

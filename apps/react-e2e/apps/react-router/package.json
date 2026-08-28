@@ -13,6 +13,7 @@
     "@react-router/node": "catalog:react-router7",
     "@taucad/esbuild": "workspace:*",
     "@taucad/middleware": "workspace:*",
+    "@taucad/rolldown": "workspace:*",
     "@taucad/react": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",

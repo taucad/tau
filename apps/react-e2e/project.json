@@ -39,6 +39,23 @@
         ]
       }
     },
+    "test:e2e:bundlers": {
+      "command": "vitest run --config apps/react-e2e/vitest.bundlers.config.ts",
+      "cache": false
+    },
+    "benchmark-bundler-products": {
+      "command": "node apps/react-e2e/scripts/benchmark-bundler-products.mts",
+      "options": {
+        "cwd": "{workspaceRoot}"
+      },
+      "cache": false,
+      "dependsOn": [
+        {
+          "projects": ["runtime", "middleware", "replicad", "bundler-core", "esbuild", "rolldown"],
+          "target": "build"
+        }
+      ]
+    },
     "test:e2e:development": {
       "executor": "nx:run-commands",
       "options": {

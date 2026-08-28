@@ -11,6 +11,7 @@
   "include": [
     "app/**/*.ts",
     "app/**/*.tsx",
+    "bundler-benchmark/**/*.ts",
     "../../support/browser-cancellation-harness.tsx",
     "../../support/browser-cancellation-kernels.ts",
     "../../support/glb-bounds.ts",

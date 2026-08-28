@@ -152,17 +152,21 @@ vi.mock('@rjsf/core', () => ({
     schema,
     formData,
     formContext,
+    idPrefix,
     onChange,
   }: {
     schema: { properties?: Record<string, unknown> };
     formData: Record<string, unknown>;
-    formContext: { displayDescriptors?: Record<string, unknown> };
+    formContext: { displayDescriptors?: Record<string, unknown>; rootPresentation?: string };
+    idPrefix: string;
     onChange: (event: { formData: Record<string, unknown> }) => void;
   }) => (
     <div
       data-testid='rjsf-form'
       data-fields={Object.keys(schema.properties ?? {}).join(',')}
       data-display-descriptors={JSON.stringify(formContext.displayDescriptors ?? {})}
+      data-id-prefix={idPrefix}
+      data-root-presentation={formContext.rootPresentation}
     >
       RJSF Form
       {schema.properties?.['includeEdges'] ? (
@@ -346,13 +350,20 @@ describe('ChatConverter', () => {
     expect(screen.getByText('No geometry to export for this file')).toBeDefined();
   });
 
+  it('should identify the export source when only one geometry unit exists', () => {
+    render(<ChatConverter isExpanded />);
+
+    expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('main.ts');
+    expect(screen.getByText('File to export')).toBeDefined();
+  });
+
   it('should keep the geometry unit selector visible when the selected file has no geometry', () => {
     mockGeometry = undefined;
     mockGeometryUnits.set('helper.ts', mockHelperCadRef);
 
     render(<ChatConverter isExpanded />);
 
-    expect(screen.getByText('Select file to export')).toBeDefined();
+    expect(screen.getByText('File to export')).toBeDefined();
     expect(screen.getByText('No geometry to export for this file')).toBeDefined();
     expect(screen.queryByRole('button', { name: /glb/i })).toBeNull();
   });
@@ -408,16 +419,31 @@ describe('ChatConverter', () => {
   });
 
   it('should disable export button when no formats are selected', () => {
-    render(<ChatConverter isExpanded />);
+    const { container } = render(<ChatConverter isExpanded />);
     const button = screen.getByRole('button', { name: /select formats to export/i });
     expect(button).toBeDefined();
     expect((button as HTMLButtonElement).disabled).toBe(true);
+
+    const scrollBody = container.querySelector('[data-slot="export-scroll-body"]');
+    const actionFooter = container.querySelector('[data-slot="export-action-footer"]');
+    const destination = container.querySelector('section[aria-label="Destination"]');
+    expect(scrollBody).not.toBeNull();
+    expect(actionFooter).not.toBeNull();
+    expect(scrollBody?.contains(actionFooter)).toBe(true);
+    expect(destination?.contains(actionFooter)).toBe(true);
+    expect(actionFooter?.querySelectorAll('button')).toHaveLength(1);
   });
 
   it('should enable format selection via click', () => {
     render(<ChatConverter isExpanded />);
     const glbButton = screen.getByRole('button', { name: /glb/i });
+    expect(glbButton).toHaveAttribute('aria-pressed', 'false');
+
     fireEvent.click(glbButton);
+
+    expect(glbButton).toHaveAttribute('aria-pressed', 'true');
+    expect(glbButton).toHaveClass('bg-accent', 'text-accent-foreground');
+    expect(glbButton).not.toHaveClass('bg-primary/10', 'text-primary');
 
     const exportButton = screen.getByRole('button', { name: /export glb/i });
     expect(exportButton).toBeDefined();
@@ -431,8 +457,14 @@ describe('ChatConverter', () => {
     fireEvent.click(stlButton);
 
     const optionsTrigger = screen.getByRole('button', { name: /stl options/i });
-    fireEvent.click(optionsTrigger);
+    expect(screen.getByTestId('rjsf-form')).toBeDefined();
+    expect(screen.getByTestId('rjsf-form').dataset['idPrefix']).toBe('///root-stl-options');
+    expect(screen.getByTestId('rjsf-form').dataset['rootPresentation']).toBe('embedded');
 
+    fireEvent.click(optionsTrigger);
+    expect(screen.queryByTestId('rjsf-form')).toBeNull();
+
+    fireEvent.click(optionsTrigger);
     expect(screen.getByTestId('rjsf-form')).toBeDefined();
   });
 
@@ -443,6 +475,18 @@ describe('ChatConverter', () => {
     fireEvent.click(glbButton);
 
     expect(screen.queryByTestId('rjsf-form')).toBeNull();
+  });
+
+  it('should keep selected format disclosures independently open', () => {
+    render(<ChatConverter isExpanded />);
+
+    fireEvent.click(screen.getByRole('button', { name: /stl/i }));
+    fireEvent.click(screen.getByRole('button', { name: /step/i }));
+    expect(screen.getAllByTestId('rjsf-form')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: /stl options/i }));
+    expect(screen.getAllByTestId('rjsf-form')).toHaveLength(1);
+    expect(screen.getByTestId('rjsf-form').dataset['idPrefix']).toBe('///root-step-options');
   });
 
   it('should render route-scoped content independently and submit it at the top level', async () => {
@@ -469,11 +513,13 @@ describe('ChatConverter', () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
-    fireEvent.click(screen.getByRole('button', { name: /webp options/i }));
     expect(screen.getByRole('region', { name: 'Content' })).toBeDefined();
+    expect(screen.queryByRole('heading', { name: 'Content' })).toBeNull();
     expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe('includeEdges');
+    expect(screen.getByRole('button', { name: /webp options defaults/i })).toBeDefined();
 
     fireEvent.click(screen.getByRole('button', { name: 'Enable edges' }));
+    expect(screen.getByRole('button', { name: /webp options modified/i })).toBeDefined();
     fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
 
     await vi.waitFor(() => {
@@ -482,6 +528,35 @@ describe('ChatConverter', () => {
         exportOptions: {},
       });
     });
+  });
+
+  it('should label Content and Format only when both schemas are present', () => {
+    mockCapabilities = createCapabilities({
+      routes: [
+        {
+          targetFormat: 'webp',
+          kernelId: 'replicad',
+          sourceFormat: 'glb',
+          transcoderId: 'image',
+          fidelity: 'mesh',
+          exportOptions: {
+            schema: { type: 'object', properties: { quality: { type: 'number' } } },
+            defaults: { quality: 1 },
+          },
+          content: {
+            schema: { type: 'object', properties: { includeEdges: { type: 'boolean' } } },
+            defaults: { includeEdges: false },
+          },
+        },
+      ],
+    });
+
+    render(<ChatConverter isExpanded />);
+    fireEvent.click(screen.getByRole('button', { name: /webp/i }));
+
+    expect(screen.getByRole('heading', { name: 'Content' })).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'Format' })).toBeDefined();
+    expect(screen.getAllByTestId('rjsf-form')).toHaveLength(2);
   });
 
   it('should scope px/deg/unitless display descriptors to the export form', () => {
@@ -513,7 +588,6 @@ describe('ChatConverter', () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
-    fireEvent.click(screen.getByRole('button', { name: /webp options/i }));
 
     expect(JSON.parse(screen.getByTestId('rjsf-form').dataset['displayDescriptors'] ?? '{}')).toEqual({
       width: { descriptor: 'count', unit: 'px' },
@@ -530,7 +604,6 @@ describe('ChatConverter', () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
-    fireEvent.click(screen.getByRole('button', { name: /webp options/i }));
     expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
       'mode,width,height,quality,margin,projection,label,axes,scaleBar,phi,theta',
     );
@@ -611,6 +684,8 @@ describe('ChatConverter', () => {
       expect(screen.queryByRole('button', { name: /glb/i })).toBeNull();
       expect(screen.queryByRole('button', { name: /stl/i })).toBeNull();
       expect(screen.queryByRole('button', { name: /step/i })).toBeNull();
+      expect(screen.getByText('Export formats are still loading')).toBeDefined();
+      expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('main.ts');
     });
 
     it('should show only replicad routes when activeKernelId is replicad', () => {
@@ -751,9 +826,6 @@ describe('ChatConverter', () => {
       const stepButton = screen.getByRole('button', { name: /step/i });
       fireEvent.click(stepButton);
 
-      const optionsTrigger = screen.getByRole('button', { name: /step options/i });
-      fireEvent.click(optionsTrigger);
-
       expect(screen.getByTestId('rjsf-form')).toBeDefined();
     });
 
@@ -801,9 +873,6 @@ describe('ChatConverter', () => {
 
       const stlButton = screen.getByRole('button', { name: /stl/i });
       fireEvent.click(stlButton);
-
-      const optionsTrigger = screen.getByRole('button', { name: /stl options/i });
-      fireEvent.click(optionsTrigger);
 
       expect(screen.getByTestId('rjsf-form')).toBeDefined();
     });
@@ -880,7 +949,6 @@ describe('ChatConverter', () => {
       await vi.waitFor(() => {
         expect(screen.getByRole('button', { name: /export webp/i })).toBeDefined();
       });
-      fireEvent.click(screen.getByRole('button', { name: /webp options/i }));
 
       const exportForm = screen.getAllByTestId('rjsf-form').find((form) => form.dataset['fields']?.startsWith('mode,'));
       expect(exportForm?.dataset['fields']).toBe('mode,width,height,quality,margin,projection,axes,scaleBar,views');

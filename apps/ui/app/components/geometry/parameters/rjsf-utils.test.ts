@@ -542,137 +542,141 @@ describe('rjsfIdToJsonPath', () => {
   describe('Basic functionality', () => {
     it('should convert single level path', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}username`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['username']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['username']);
     });
 
     it('should convert multi-level path', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}config${rjsfIdSeparator}database${rjsfIdSeparator}host`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['config', 'database', 'host']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['config', 'database', 'host']);
     });
 
     it('should return empty array for root level', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual([]);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual([]);
     });
 
     it('should handle just prefix without separator', () => {
       const rjsfId = rjsfIdPrefix; // "///root"
-      // The prefix pattern doesn't match without the separator, so it splits by "///"
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['', 'root']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual([]);
     });
 
-    it('should handle path without prefix', () => {
+    it('should reject a path outside the configured root', () => {
       const rjsfId = `config${rjsfIdSeparator}database${rjsfIdSeparator}host`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['config', 'database', 'host']);
+      expect(() => rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toThrow('does not belong to root');
+    });
+
+    it('should support a dynamic export root', () => {
+      const exportRoot = `${rjsfIdPrefix}-usdz-options`;
+      const rjsfId = `${exportRoot}${rjsfIdSeparator}tessellation${rjsfIdSeparator}linearTolerance`;
+      expect(rjsfIdToJsonPath(rjsfId, exportRoot)).toEqual(['tessellation', 'linearTolerance']);
     });
   });
 
   describe('Field names with underscores', () => {
     it('should preserve underscores in field names', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}user_name`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['user_name']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['user_name']);
     });
 
     it('should preserve underscores in multi-level paths', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}db_config${rjsfIdSeparator}host_name${rjsfIdSeparator}primary_host`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['db_config', 'host_name', 'primary_host']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['db_config', 'host_name', 'primary_host']);
     });
 
     it('should preserve multiple consecutive underscores', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field__with__underscores`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field__with__underscores']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field__with__underscores']);
     });
 
     it('should preserve leading underscores', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}_privateField`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['_privateField']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['_privateField']);
     });
 
     it('should preserve trailing underscores', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field_`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field_']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field_']);
     });
   });
 
   describe('Special characters and numbers', () => {
     it('should handle field names with numbers', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field1${rjsfIdSeparator}field2${rjsfIdSeparator}field3`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field1', 'field2', 'field3']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field1', 'field2', 'field3']);
     });
 
     it('should handle numeric field names', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}0${rjsfIdSeparator}1${rjsfIdSeparator}2`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['0', '1', '2']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['0', '1', '2']);
     });
 
     it('should handle array indices', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}items${rjsfIdSeparator}0${rjsfIdSeparator}name`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['items', '0', 'name']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['items', '0', 'name']);
     });
 
     it('should handle field names with hyphens', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field-name${rjsfIdSeparator}sub-field`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field-name', 'sub-field']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field-name', 'sub-field']);
     });
 
     it('should handle camelCase field names', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}firstName${rjsfIdSeparator}lastName${rjsfIdSeparator}emailAddress`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['firstName', 'lastName', 'emailAddress']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['firstName', 'lastName', 'emailAddress']);
     });
 
     it('should handle PascalCase field names', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}FirstName${rjsfIdSeparator}LastName`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['FirstName', 'LastName']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['FirstName', 'LastName']);
     });
 
     it('should handle field names with dots', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field.name${rjsfIdSeparator}sub.field`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field.name', 'sub.field']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field.name', 'sub.field']);
     });
   });
 
   describe('Edge cases', () => {
     it('should handle empty string', () => {
-      expect(rjsfIdToJsonPath('')).toEqual([]);
+      expect(() => rjsfIdToJsonPath('', rjsfIdPrefix)).toThrow('does not belong to root');
     });
 
     it('should handle string with only separator', () => {
       const rjsfId = rjsfIdSeparator; // "///"
-      // Splitting "///" by "///" results in two empty strings
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['', '']);
+      expect(() => rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toThrow('does not belong to root');
     });
 
     it('should handle multiple consecutive separators', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field1${rjsfIdSeparator}${rjsfIdSeparator}field2`;
       // This creates an empty string segment between the separators
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field1', '', 'field2']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field1', '', 'field2']);
     });
 
     it('should handle trailing separator', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field1${rjsfIdSeparator}field2${rjsfIdSeparator}`;
       // Trailing separator creates an empty string at the end
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field1', 'field2', '']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field1', 'field2', '']);
     });
 
     it('should handle very long paths', () => {
       const segments = Array.from({ length: 50 }, (_, i) => `level${i}`);
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}${segments.join(rjsfIdSeparator)}`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(segments);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(segments);
     });
 
     it('should handle single character field names', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}a${rjsfIdSeparator}b${rjsfIdSeparator}c`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['a', 'b', 'c']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['a', 'b', 'c']);
     });
 
     it('should handle field names with spaces', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field name${rjsfIdSeparator}sub field`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field name', 'sub field']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field name', 'sub field']);
     });
 
     it('should handle field names with special unicode characters', () => {
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}field_名前${rjsfIdSeparator}sub_поле`;
-      expect(rjsfIdToJsonPath(rjsfId)).toEqual(['field_名前', 'sub_поле']);
+      expect(rjsfIdToJsonPath(rjsfId, rjsfIdPrefix)).toEqual(['field_名前', 'sub_поле']);
     });
   });
 
@@ -688,7 +692,7 @@ describe('rjsfIdToJsonPath', () => {
     it('should correctly remove prefix and separator combination', () => {
       const field = 'testField';
       const rjsfId = `${rjsfIdPrefix}${rjsfIdSeparator}${field}`;
-      const result = rjsfIdToJsonPath(rjsfId);
+      const result = rjsfIdToJsonPath(rjsfId, rjsfIdPrefix);
       expect(result).toEqual([field]);
       expect(result[0]).toBe(field);
     });

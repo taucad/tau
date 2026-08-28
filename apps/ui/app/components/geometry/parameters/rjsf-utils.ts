@@ -28,24 +28,22 @@ export const rjsfIdSeparator = '///';
 /**
  * Converts RJSF ID to JSON path array. Handles underscores in field names.
  *
- * @param rjsfId - The RJSF field ID (e.g., "root_config_database_host")
+ * @param rjsfId - The RJSF field ID
+ * @param idPrefix - The exact root prefix configured on the owning RJSF form
  * @returns Array of path segments (e.g., ["config", "database", "host"])
  */
-export function rjsfIdToJsonPath(rjsfId: string): string[] {
-  // Remove 'root///' prefix and split by idSeparator
-  const pathString = rjsfId.replace(new RegExp(`^${rjsfIdPrefix}${rjsfIdSeparator}`), '');
-
-  // Handle empty case (root level)
-  if (!pathString) {
+export function rjsfIdToJsonPath(rjsfId: string, idPrefix: string): string[] {
+  if (rjsfId === idPrefix) {
     return [];
   }
 
-  // Split by underscore - this handles most cases correctly
-  // For more complex cases with actual underscores in field names,
-  // you might need more sophisticated parsing
-  const pathParts = pathString.split(rjsfIdSeparator);
+  const pathPrefix = `${idPrefix}${rjsfIdSeparator}`;
+  if (!rjsfId.startsWith(pathPrefix)) {
+    throw new Error(`RJSF ID "${rjsfId}" does not belong to root "${idPrefix}"`);
+  }
 
-  return pathParts;
+  const pathString = rjsfId.slice(pathPrefix.length);
+  return pathString ? pathString.split(rjsfIdSeparator) : [];
 }
 
 /**

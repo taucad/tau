@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
 import type { WidgetProps, RJSFSchema, Registry } from '@rjsf/utils';
 import { mock } from 'vitest-mock-extended';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
+import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
+import { TooltipProvider } from '#components/ui/tooltip.js';
 
 const SelectWidget = widgets['SelectWidget']!;
 
@@ -160,6 +162,8 @@ describe('SelectWidget', () => {
 describe('fixed-length arrays', () => {
   it('should route tuple schemas to the unsupported-field presentation', () => {
     const formContext: RJSFContext = {
+      idPrefix: rjsfIdPrefix,
+      rootPresentation: 'catalog',
       searchTerm: '',
       allExpanded: true,
       resetSingleParameter: vi.fn(),
@@ -182,6 +186,8 @@ describe('fixed-length arrays', () => {
         widgets={widgets}
         templates={templates}
         uiSchema={uiSchema}
+        idPrefix={rjsfIdPrefix}
+        idSeparator={rjsfIdSeparator}
         formContext={formContext}
       />,
     );
@@ -189,5 +195,94 @@ describe('fixed-length arrays', () => {
     expect(screen.getByLabelText('Invalid Field: background')).toHaveTextContent(
       'Fixed-length tuple fields are not supported.',
     );
+  });
+});
+
+describe('root presentation', () => {
+  const schema: RJSFSchema = {
+    type: 'object',
+    properties: {
+      binary: { type: 'boolean', title: 'Binary', default: false },
+      tessellation: {
+        type: 'object',
+        title: 'Tessellation',
+        properties: {
+          linearTolerance: { type: 'number', title: 'Linear tolerance', default: 0.01 },
+        },
+      },
+    },
+  };
+
+  const renderForm = ({
+    idPrefix = rjsfIdPrefix,
+    rootPresentation,
+    formData,
+    resetSingleParameter = vi.fn(),
+  }: {
+    idPrefix?: string;
+    rootPresentation: RJSFContext['rootPresentation'];
+    formData?: Record<string, unknown>;
+    resetSingleParameter?: RJSFContext['resetSingleParameter'];
+  }) => {
+    const formContext: RJSFContext = {
+      idPrefix,
+      rootPresentation,
+      searchTerm: '',
+      allExpanded: true,
+      resetSingleParameter,
+      shouldShowField: () => true,
+      defaultParameters: { binary: false, tessellation: { linearTolerance: 0.01 } },
+      units: { length: { symbol: 'mm', factor: 1 } },
+    };
+
+    return render(
+      <TooltipProvider>
+        <Form
+          schema={schema}
+          formData={formData}
+          validator={validator}
+          widgets={widgets}
+          templates={templates}
+          uiSchema={uiSchema}
+          idPrefix={idPrefix}
+          idSeparator={rjsfIdSeparator}
+          formContext={formContext}
+        />
+      </TooltipProvider>,
+    );
+  };
+
+  it('should preserve the Parameters catalog root', () => {
+    const { container } = renderForm({ rootPresentation: 'catalog' });
+
+    expect(container.querySelector('[data-slot="parameter-catalog"]')).not.toBeNull();
+    expect(container.querySelector('[data-slot="embedded-form-root"]')).toBeNull();
+  });
+
+  it('should embed a dynamic Export root while preserving meaningful nested groups', () => {
+    const { container } = renderForm({
+      idPrefix: `${rjsfIdPrefix}-usdz-options`,
+      rootPresentation: 'embedded',
+    });
+
+    expect(container.querySelector('[data-slot="parameter-catalog"]')).toBeNull();
+    expect(container.querySelector('[data-slot="embedded-form-root"]')).not.toBeNull();
+    expect(screen.getByLabelText('Parameter: Binary')).toBeDefined();
+    expect(screen.getByLabelText('Group: Tessellation')).toBeDefined();
+    expect(screen.queryByLabelText(/^Group:\s*$/)).toBeNull();
+  });
+
+  it('should reset an embedded Export field using its dynamic root path', () => {
+    const resetSingleParameter = vi.fn();
+    renderForm({
+      idPrefix: `${rjsfIdPrefix}-usdz-options`,
+      rootPresentation: 'embedded',
+      formData: { binary: true },
+      resetSingleParameter,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Binary' }));
+
+    expect(resetSingleParameter).toHaveBeenCalledWith(['binary']);
   });
 });

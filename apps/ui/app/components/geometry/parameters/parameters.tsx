@@ -119,6 +119,8 @@ export function Parameters({
 
   const formContext = useMemo<RJSFContext>(
     () => ({
+      idPrefix: rjsfIdPrefix,
+      rootPresentation: 'catalog',
       allExpanded,
       searchTerm: activeFilterTerm,
       resetSingleParameter,

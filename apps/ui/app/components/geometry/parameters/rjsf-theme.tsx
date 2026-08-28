@@ -25,8 +25,6 @@ import { HighlightText } from '#components/highlight-text.js';
 import { ParametersWidget } from '#components/geometry/parameters/parameters-widget.js';
 import {
   rjsfIdToJsonPath,
-  rjsfIdPrefix,
-  rjsfIdSeparator,
   isSchemaMatchingSearch,
   getFieldDefaultValue,
 } from '#components/geometry/parameters/rjsf-utils.js';
@@ -39,10 +37,10 @@ import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.j
 // oxlint-disable-next-line complexity -- consider refactoring.
 function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>): React.ReactNode {
   const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
+  const { formContext } = registry;
 
   if (schema.type === 'object' || schema.type === 'array') {
-    const isRoot = id === rjsfIdPrefix;
-    const { formContext } = registry;
+    const isRoot = id === formContext.idPrefix;
 
     // If we're searching and this object/array has no matching nested properties, don't render it
     if (!isRoot && formContext.searchTerm && !isSchemaMatchingSearch(schema, formContext.searchTerm, label)) {
@@ -57,7 +55,6 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   }
 
   // Always call hooks at the very top level
-  const { formContext } = registry;
   const prettyLabel = formatDisplayLabel(label);
   const descriptionText = typeof schema.description === 'string' ? schema.description : '';
 
@@ -72,9 +69,8 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     let isInMatchingGroup = false;
     if (!labelMatches && !descriptionMatches) {
       // Parse the ID to extract parent group names (e.g., ///root///handrails///colors///post)
-      const idParts = id.split(rjsfIdSeparator).filter(Boolean);
-      // Skip 'root' and check if any parent segment matches
-      for (let i = 1; i < idParts.length - 1; i++) {
+      const idParts = rjsfIdToJsonPath(id, formContext.idPrefix);
+      for (let i = 0; i < idParts.length - 1; i++) {
         const parentSegment = idParts[i];
         if (parentSegment) {
           const parentName = formatDisplayLabel(parentSegment);
@@ -95,7 +91,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   }
 
   // Convert RJSF ID to JSON path using schema-aware parsing
-  const fieldPath = rjsfIdToJsonPath(id);
+  const fieldPath = rjsfIdToJsonPath(id, formContext.idPrefix);
 
   // Get the appropriate default value (handles array items specially)
   const defaultValue = formContext.defaultParameters
@@ -160,7 +156,7 @@ function ObjectFieldTemplate(
   const { formContext } = registry;
 
   const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
-  const isRoot = idSchema.$id === rjsfIdPrefix;
+  const isRoot = idSchema.$id === formContext.idPrefix;
 
   useEffect(() => {
     setIsOpen(formContext.allExpanded);
@@ -187,6 +183,14 @@ function ObjectFieldTemplate(
   }, [formContext.searchTerm, shouldShowGroup]);
 
   if (isRoot) {
+    if (formContext.rootPresentation === 'embedded') {
+      return (
+        <div data-slot='embedded-form-root' className='properties p-2 empty:hidden'>
+          {properties.map((element) => element.content)}
+        </div>
+      );
+    }
+
     return (
       <div className='[&:has(.properties:not(:empty))_.no-params]:hidden'>
         <EmptyItems className='no-params break-all'>
@@ -506,8 +510,10 @@ export const templates: TemplatesType = {
   FieldErrorTemplate: ({ errors }) => (errors ? <div className='mt-1 text-xs text-destructive'>{errors}</div> : null),
   FieldHelpTemplate: ({ help }) => (help ? <div className='mt-1 text-xs text-muted-foreground'>{help}</div> : null),
   TitleFieldTemplate: ({ title }) => (title ? <h2 className='mb-2 text-lg font-medium'>{title}</h2> : null),
-  UnsupportedFieldTemplate({ reason, schema, idSchema }) {
-    const fieldPath = idSchema?.$id ? rjsfIdToJsonPath(idSchema.$id) : [];
+  UnsupportedFieldTemplate({ reason, schema, idSchema, registry }) {
+    const fieldId: unknown = idSchema?.$id;
+    const formContext = registry.formContext as RJSFContext;
+    const fieldPath = typeof fieldId === 'string' ? rjsfIdToJsonPath(fieldId, formContext.idPrefix) : [];
     const fieldName = fieldPath.at(-1) ?? 'root';
     const isArrayType = schema.type === 'array';
 

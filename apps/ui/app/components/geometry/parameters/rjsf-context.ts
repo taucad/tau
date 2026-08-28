@@ -10,6 +10,8 @@ export type Units = {
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {
+  idPrefix: string;
+  rootPresentation: 'catalog' | 'embedded';
   searchTerm: string;
   allExpanded: boolean;
   resetSingleParameter: (fieldPath: string[]) => void;

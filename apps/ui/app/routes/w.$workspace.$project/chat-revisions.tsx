@@ -1,4 +1,4 @@
-import { RotateCcw, XIcon } from 'lucide-react';
+import { History, RotateCcw, XIcon } from 'lucide-react';
 import {
   FloatingPanel,
   FloatingPanelClose,
@@ -9,6 +9,7 @@ import {
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
 import { Button } from '#components/ui/button.js';
+import { EmptyItems } from '#components/ui/empty-items.js';
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
@@ -55,7 +56,7 @@ export function ChatRevisions({
             />
           </FloatingPanelContentHeaderActions>
         </FloatingPanelContentHeader>
-        <FloatingPanelContentBody className='px-2 py-2'>
+        <FloatingPanelContentBody className='p-0'>
           <RevisionsPanelBody />
         </FloatingPanelContentBody>
       </FloatingPanelContent>
@@ -66,28 +67,40 @@ export function ChatRevisions({
 export function RevisionsPanelBody(): React.JSX.Element {
   const { revisions, headRevision, isDirty } = useVisibleRevisions();
   const { restore, isBusy } = useRestoreToPoint();
-  if (revisions.length === 0) {
-    return <p className='p-2 text-sm text-muted-foreground'>No revisions yet — agent edits will appear here.</p>;
-  }
+
   return (
-    <div className='flex flex-col gap-2 p-2'>
-      {[...revisions].reverse().map((revision) => {
-        const isActive = headRevision?.n === revision.n;
-        const restoreThis = (): void => {
-          restore({ messageId: revision.messageId, anchor: revision.anchor });
-        };
-        return (
-          <RevisionMarker
-            key={`${revision.chatId}:${revision.messageId}`}
-            revision={revision}
-            isActive={isActive}
-            isModified={isActive && isDirty}
-            isBusy={isBusy}
-            onRestore={restoreThis}
-            onDiscard={restoreThis}
-          />
-        );
-      })}
+    <div data-slot='revisions-panel-body' className='size-full min-h-0 overflow-hidden bg-sidebar'>
+      <div className='size-full scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
+        {revisions.length === 0 ? (
+          <EmptyItems className='m-0 min-h-full rounded-xl border-solid bg-card'>
+            <div className='mb-3 rounded-xl border bg-background p-2'>
+              <History className='size-5 text-muted-foreground' strokeWidth={1.5} />
+            </div>
+            <h3 className='mb-1 text-base font-medium text-foreground'>No revisions yet</h3>
+            <p className='text-sm text-muted-foreground'>Agent changes will appear here.</p>
+          </EmptyItems>
+        ) : (
+          <div className='flex min-h-full flex-col gap-2'>
+            {[...revisions].reverse().map((revision) => {
+              const isActive = headRevision?.n === revision.n;
+              const restoreThis = (): void => {
+                restore({ messageId: revision.messageId, anchor: revision.anchor });
+              };
+              return (
+                <RevisionMarker
+                  key={`${revision.chatId}:${revision.messageId}`}
+                  revision={revision}
+                  isActive={isActive}
+                  isModified={isActive && isDirty}
+                  isBusy={isBusy}
+                  onRestore={restoreThis}
+                  onDiscard={restoreThis}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

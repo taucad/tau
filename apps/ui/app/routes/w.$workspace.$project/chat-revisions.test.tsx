@@ -66,6 +66,15 @@ beforeEach(() => {
 });
 
 describe('ChatRevisions', () => {
+  it('renders a bounded invitation when no revisions exist', () => {
+    setRevisions({ revisions: [], headRevision: undefined, maxRevision: 0 });
+
+    render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
+
+    expect(screen.getByText('No revisions yet')).not.toBeNull();
+    expect(screen.getByText('Agent changes will appear here.')).not.toBeNull();
+  });
+
   it('T-PANE-LIST: lists every Revision newest-first with the head marked current', () => {
     render(<ChatRevisions isExpanded setIsExpanded={vi.fn()} />);
     const headers = screen.getAllByText(/^Revision \d+$/);

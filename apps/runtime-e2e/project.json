@@ -19,6 +19,27 @@
         "cwd": "{projectRoot}"
       }
     },
+    "benchmark-bundlers": {
+      "command": "node scripts/benchmark-bundlers.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "dependsOn": [{ "projects": ["bundler-core", "esbuild", "rolldown"], "target": "build" }]
+    },
+    "benchmark-bundler-products": {
+      "command": "node scripts/benchmark-bundler-products.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false,
+      "dependsOn": [
+        {
+          "projects": ["runtime", "middleware", "replicad", "bundler-core", "esbuild", "rolldown"],
+          "target": "build"
+        }
+      ]
+    },
     "build-matrix": {
       "command": "tsx scripts/build-matrix-report.mts",
       "options": {

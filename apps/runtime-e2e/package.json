@@ -19,6 +19,7 @@
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
     "@taucad/openrscad-native": "workspace:*",
+    "@taucad/rolldown": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",

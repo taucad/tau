@@ -5,6 +5,7 @@ import { useProject } from '#hooks/use-project.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
+import { PaneButton } from '#components/ui/pane-button.js';
 
 type ChatEditorBreadcrumbsProperties = {
   readonly filePath: string;
@@ -61,13 +62,10 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
                 popoverProperties={{ align: 'start' }}
                 onSelect={handleFileSelect}
               >
-                <button
-                  type='button'
-                  className='flex max-w-32 shrink-0 items-center gap-1.5 rounded-sm px-1 py-0.5 text-sm font-medium hover:bg-muted'
-                >
+                <PaneButton size='label' className='max-w-32 gap-1.5 px-1 text-sm font-medium'>
                   {crumb.isLast ? <FileExtensionIcon filename={crumb.name} className='size-3 shrink-0' /> : undefined}
                   <span className='truncate'>{crumb.name}</span>
-                </button>
+                </PaneButton>
               </FileSelector>
               {crumb.isLast ? undefined : <ChevronRight className='size-4 shrink-0' />}
             </Fragment>

@@ -29,7 +29,7 @@ const chainStopPropagation = <E extends React.SyntheticEvent>(
 const floatingPanelContentHeaderVariants = cva(
   cn(
     'group/floating-panel-content-header',
-    'flex h-7.75 shrink-0 max-md:h-10 items-center justify-between',
+    'flex h-9 shrink-0 max-md:h-10 items-center justify-between',
     'border-b bg-sidebar py-0.5',
     'text-sm font-medium text-muted-foreground',
   ),

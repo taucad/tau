@@ -56,7 +56,12 @@ function PaneButton({
   const Comp = asChild ? SlotPrimitive.Slot : 'button';
 
   const button = (
-    <Comp type={asChild ? undefined : 'button'} className={paneButtonVariants({ size, className })} {...properties} />
+    <Comp
+      data-slot='pane-button'
+      type={asChild ? undefined : 'button'}
+      className={paneButtonVariants({ size, className })}
+      {...properties}
+    />
   );
 
   if (tooltip) {

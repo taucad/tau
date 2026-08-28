@@ -49,6 +49,14 @@ function setMobileDrawerContext(): void {
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
+describe('FloatingPanelContentHeader', () => {
+  it('matches the desktop Dockview tab-strip height', () => {
+    renderInPanel(<FloatingPanelContentHeader>Title</FloatingPanelContentHeader>);
+
+    expect(screen.getByText('Title')).toHaveClass('h-9');
+  });
+});
+
 describe('FloatingPanelContentHeaderActions', () => {
   beforeEach(() => {
     mockUseIsMobile.mockReset().mockReturnValue(false);

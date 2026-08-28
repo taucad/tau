@@ -10,8 +10,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server as SocketIoServer } from 'socket.io';
 import type { Environment } from '#config/environment.config.js';
 import { RedisService } from '#redis/redis.service.js';
-// oxlint-disable-next-line eslint-plugin-import/no-cycle -- gateway and dev-websocket are tightly coupled
-import { chatRpcPath } from '#api/chat/chat-rpc.gateway.js';
+
+export const chatRpcPath = '/v1/chat/rpc';
 
 export type WebSocketConnectionHandler = (socket: WebSocket, request: IncomingMessage) => void | Promise<void>;
 

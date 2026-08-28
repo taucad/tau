@@ -13,10 +13,7 @@ import type { ChatRpcJoinAck, ChatRpcJoinMessage } from '@taucad/chat';
 import { MetricsService } from '#telemetry/metrics.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
-// oxlint-disable-next-line eslint-plugin-import/no-cycle -- gateway and dev-websocket are tightly coupled
-import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
-
-export const chatRpcPath = '/v1/chat/rpc';
+import { chatRpcPath, DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 
 /**
  * WebSocket Gateway for chat RPC execution using Socket.IO.

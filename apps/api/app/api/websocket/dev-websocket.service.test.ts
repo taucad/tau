@@ -145,10 +145,6 @@ vi.mock('ws', () => {
   };
 });
 
-vi.mock('#api/chat/chat-rpc.gateway.js', () => ({
-  chatRpcPath: '/v1/chat/rpc',
-}));
-
 function createMockDuplicateClient() {
   return {
     on: vi.fn(),

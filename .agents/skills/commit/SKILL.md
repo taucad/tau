@@ -1,8 +1,8 @@
 ---
 name: commit
-description: Previews, stages, and commits requested changes as policy-compliant atomic commits, or explicitly pushes committed work. Use only when invoked as /commit, /commit dry, /commit stage, /commit push, or /commit unsafe.
+description: Previews, stages, and commits requested changes as policy-compliant atomic commits, or explicitly pushes committed work. Use only when invoked as /commit, /commit dry, /commit stage, /commit push, /commit unsafe, /commit unsafe continue, or /commit unsafe proceed.
 disable-model-invocation: true
-argument-hint: '[dry|stage|push|unsafe]'
+argument-hint: '[dry|stage|push|unsafe [continue|proceed]]'
 ---
 
 # Commit
@@ -16,6 +16,7 @@ Read the applicable repository commit policy before planning commits or changing
 - `/commit stage`: stage exactly one logical group for review, then stop.
 - `/commit push`: create local commits, then push them to configured upstreams.
 - `/commit unsafe`: accept that commits may be unsafe. Dry-run only hunks relevant to changes in this chat; never stage, commit, or push.
+- `/commit unsafe continue` or `/commit unsafe proceed`: continue the latest `/commit unsafe` dry run by committing its planned hunks locally; never push.
 
 Reject other arguments or mode combinations.
 
@@ -32,6 +33,8 @@ For `/commit dry`, resolve every group exactly as `/commit` would, including gro
 
 For `/commit unsafe`, follow `/commit dry` at hunk granularity. Include only hunks relevant to changes in this chat, even when their files also contain unrelated hunks. Treat uncertain hunk attribution as an accepted risk rather than a blocker. Report each included file path and hunk header.
 
+For `/commit unsafe continue` and `/commit unsafe proceed`, require a preceding `/commit unsafe` dry run in this chat. Reinspect only its planned hunks; if they changed since the dry run, rerun `/commit unsafe` and stop. Otherwise, process one group at a time: stage only the planned hunks, review the cached diff, run `git diff --cached --check`, commit, then verify status and the new log entry before continuing.
+
 For `/commit stage`, require one logical group. If the scope contains several groups, report them and wait. Otherwise, stage its explicit paths, show the cached names and diff summary, run `git diff --cached --check`, then stop.
 
 For `/commit` and `/commit push`, process one group at a time: stage explicit paths, review the cached diff, commit, then verify status and the new log entry before continuing.
@@ -41,7 +44,7 @@ For `/commit push`, finish every local commit first. Before the first push, veri
 ## Boundaries
 
 - Never push unless invoked as `/commit push`; never force-push, push tags, or create an upstream.
-- Never stage or commit in `/commit dry` mode.
+- Never stage or commit in `/commit dry` or bare `/commit unsafe` mode.
 - Never amend, stash, reset, bypass hooks, or include unrelated changes.
 - If a hook fails, fix only an in-scope cause and retry; otherwise report the blocker.
 - “All changes” expands scope but does not collapse distinct logical groups.

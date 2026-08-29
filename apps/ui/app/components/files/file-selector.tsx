@@ -433,7 +433,7 @@ function FileSelectorItemList({
         defaultItemHeight={40}
         itemContent={renderItem}
         components={{
-          List: (properties) => <div {...properties} className='px-1' />,
+          List: (properties) => <div {...properties} className='flex flex-col gap-0.5 px-1' />,
           Header: () => <div className='h-1' />,
           Footer: () => <div className='h-1' />,
         }}
@@ -442,7 +442,7 @@ function FileSelectorItemList({
   }
 
   return (
-    <div className='p-1'>
+    <div className='flex flex-col gap-0.5 p-1'>
       {items.map((item) => {
         const hint = isSearching ? getDirectoryHint(item.path, currentPath) : undefined;
         return (

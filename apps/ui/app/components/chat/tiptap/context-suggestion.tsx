@@ -340,7 +340,7 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
       totalCount={entries.length}
       itemContent={(index) => renderEntry(entries[index]!, index)}
       components={{
-        List: (properties) => <div {...properties} className='px-0' />,
+        List: (properties) => <div {...properties} className='flex flex-col gap-0.5 px-0' />,
         Header: () => <div className='h-0.5' />,
         Footer: () => <div className='h-0.5' />,
       }}
@@ -357,7 +357,7 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
     return (
       <>
         {recentFiles.length > 0 && (
-          <div>
+          <div className='flex flex-col gap-0.5'>
             {recentFiles.map((file) => {
               const index = entryIndex++;
               return renderEntry({ kind: 'item', item: file }, index);
@@ -366,7 +366,7 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
         )}
         {recentFiles.length > 0 && categories.length > 0 && <Separator className='my-1' />}
         {categories.length > 0 && (
-          <div>
+          <div className='flex flex-col gap-0.5'>
             {categories.map((category) => {
               const index = entryIndex++;
               return renderEntry({ kind: 'category', category }, index);
@@ -383,7 +383,7 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
       <div className='sticky -top-1 z-10 -mt-1 bg-popover pt-1 pb-0.5'>
         <button
           type='button'
-          className='hover:text-accent-foreground flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent'
+          className='flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground'
           onClick={handleDrillBack}
         >
           <ChevronLeft className='size-3 shrink-0' />
@@ -453,7 +453,7 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
     <div
       ref={containerReference}
       className={cn(
-        'fixed z-50 max-h-64 w-64 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md scroll-shadows-y',
+        'fixed z-50 flex max-h-64 w-64 flex-col gap-0.5 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md scroll-shadows-y',
       )}
       style={{
         left: rect.left,

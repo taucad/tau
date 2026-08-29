@@ -13,7 +13,11 @@ function SelectGroup({
   ...properties
 }: React.ComponentProps<typeof SelectPrimitive.Group>): React.JSX.Element {
   return (
-    <SelectPrimitive.Group data-slot='select-group' className={cn('scroll-my-1 p-1', className)} {...properties} />
+    <SelectPrimitive.Group
+      data-slot='select-group'
+      className={cn('flex scroll-my-1 flex-col gap-0.5 p-1', className)}
+      {...properties}
+    />
   );
 }
 
@@ -73,7 +77,7 @@ function SelectContent({
         <SelectPrimitive.Viewport
           data-position={position}
           className={cn(
-            'p-1',
+            'flex flex-col gap-0.5 p-1',
             position === 'popper' &&
               'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1',
           )}

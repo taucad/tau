@@ -170,7 +170,7 @@ export function WorkspaceSelector({
       footer={
         <>
           <div className='border-t' />
-          <div className='p-1'>
+          <div className='flex flex-col gap-0.5 p-1'>
             {recovery ? (
               <>
                 <button

@@ -308,7 +308,7 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
         [...groups.entries()].map(([groupName, group]) => {
           const GroupIcon = groupIcons[groupName] ?? Zap;
           return (
-            <div key={groupName}>
+            <div key={groupName} className='flex flex-col gap-0.5'>
               <div className='flex items-center gap-1.5 px-2.25 py-1 text-xs font-medium text-muted-foreground'>
                 <GroupIcon className='size-3 shrink-0' />
                 {groupName}

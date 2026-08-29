@@ -358,7 +358,7 @@ function ItemList<T>({
               // absolute positioning used for virtualization. Use Header/Footer for vertical
               // spacing instead.
               components={{
-                List: (properties) => <div {...properties} className='px-1' />,
+                List: (properties) => <div {...properties} className='flex flex-col gap-0.5 px-1' />,
                 Header: () => <div className='h-1' />,
                 Footer: isLoadingMore
                   ? () => (

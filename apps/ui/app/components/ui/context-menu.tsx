@@ -25,8 +25,17 @@ function ContextMenuTrigger({
   return <ContextMenuPrimitive.Trigger data-slot='context-menu-trigger' {...props} />;
 }
 
-function ContextMenuGroup({ ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Group>): React.JSX.Element {
-  return <ContextMenuPrimitive.Group data-slot='context-menu-group' {...props} />;
+function ContextMenuGroup({
+  className,
+  ...props
+}: React.ComponentProps<typeof ContextMenuPrimitive.Group>): React.JSX.Element {
+  return (
+    <ContextMenuPrimitive.Group
+      data-slot='context-menu-group'
+      className={cn('flex flex-col gap-0.5', className)}
+      {...props}
+    />
+  );
 }
 
 function ContextMenuPortal({ ...props }: React.ComponentProps<typeof ContextMenuPrimitive.Portal>): React.JSX.Element {
@@ -38,9 +47,16 @@ function ContextMenuSub({ ...props }: React.ComponentProps<typeof ContextMenuPri
 }
 
 function ContextMenuRadioGroup({
+  className,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.RadioGroup>): React.JSX.Element {
-  return <ContextMenuPrimitive.RadioGroup data-slot='context-menu-radio-group' {...props} />;
+  return (
+    <ContextMenuPrimitive.RadioGroup
+      data-slot='context-menu-radio-group'
+      className={cn('flex flex-col gap-0.5', className)}
+      {...props}
+    />
+  );
 }
 
 function ContextMenuSubTrigger({

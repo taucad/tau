@@ -188,27 +188,24 @@ async function hasHoverAtPoint(
   return false;
 }
 
-async function findComponentHitPoint(bridgeIndex?: number): Promise<{ x: number; y: number }> {
-  let projectedComponentPoints: Array<{ x: number; y: number; visible: boolean }> = [];
-  if (bridgeIndex !== undefined) {
-    projectedComponentPoints = await target.evaluate((nextBridgeIndex) => {
-      const bridge = (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.[
-        nextBridgeIndex
-      ];
-      if (!bridge) {
-        throw new Error(`Viewer bridge ${nextBridgeIndex} is not installed.`);
-      }
-      return bridge
-        .getModelComponents()
-        .flatMap(({ id }) => bridge.projectModelComponent(id))
-        .filter((point) => point.visible);
-    }, bridgeIndex);
+async function findComponentHitPoint(bridgeIndex = 0): Promise<{ x: number; y: number }> {
+  const projectedComponentPoints = await target.evaluate((nextBridgeIndex) => {
+    const bridge = (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.[
+      nextBridgeIndex
+    ];
+    if (!bridge) {
+      throw new Error(`Viewer bridge ${nextBridgeIndex} is not installed.`);
+    }
+    return bridge
+      .getModelComponents()
+      .flatMap(({ id }) => bridge.projectModelComponent(id))
+      .filter((point) => point.visible);
+  }, bridgeIndex);
 
-    for (const screenPoint of projectedComponentPoints) {
-      // oxlint-disable-next-line no-await-in-loop -- Each projected component must be verified against the live raycast.
-      if (await hasHoverAtPoint(screenPoint, bridgeIndex, 3)) {
-        return { x: screenPoint.x, y: screenPoint.y };
-      }
+  for (const screenPoint of projectedComponentPoints) {
+    // oxlint-disable-next-line no-await-in-loop -- Each projected component must be verified against the live raycast.
+    if (await hasHoverAtPoint(screenPoint, bridgeIndex, 3)) {
+      return { x: screenPoint.x, y: screenPoint.y };
     }
   }
 
@@ -246,6 +243,16 @@ async function openSeededProject(): Promise<void> {
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region'), 60_000);
   await target.expectVisible(selectors.getByCss(canvasSelector), 60_000);
   await waitForViewerBridge();
+  await target.waitFor(
+    () => {
+      const bridge = (globalThis as unknown as ViewerContextMenuBridgeWindow).__TAU_SECTION_VIEW_TEST_BRIDGES__?.[0];
+      return (
+        bridge?.getModelComponents().some(({ id }) => bridge.getRenderedModelComponentState(id).visibleMeshCount > 0) ??
+        false
+      );
+    },
+    { timeout: 60_000 },
+  );
   await driveStableCamera();
 }
 
@@ -258,11 +265,32 @@ test.describe('Chat viewer model component context menu', () => {
 
     const focusMenuItem = selectors.getByRole('menuitem', { name: /focus on part/i });
     const addToChatMenuItem = selectors.getByRole('menuitem', { name: /add to chat/i });
+    const resetOpacityMenuItem = selectors.getByRole('menuitem', { name: 'Reset opacity' });
     await target.expectVisible(focusMenuItem, 15_000);
     await target.expectVisible(addToChatMenuItem);
     await target.expectVisible(selectors.getByRole('menuitem', { name: /^hide$/i }));
     await target.expectVisible(selectors.getByRole('menuitem', { name: /^isolate$/i }));
     await target.expectVisible(selectors.getByText('Opacity'));
+    await target.expectVisible(resetOpacityMenuItem);
+
+    const rowSpacing = await target.evaluateLocator(resetOpacityMenuItem, (resetOpacityElement) => {
+      const menu = resetOpacityElement.parentElement;
+      const opacityElement = menu?.querySelector<HTMLElement>(
+        '[data-slot="viewer-model-component-action-slider-item"]',
+      );
+      const sidebarMenu = document.querySelector<HTMLElement>('[data-slot="sidebar-menu"][class~="gap-0.5"]');
+      if (!menu || !opacityElement || !sidebarMenu) {
+        throw new Error('Expected viewer and sidebar menu collection owners.');
+      }
+
+      return {
+        adjacentGap: resetOpacityElement.getBoundingClientRect().top - opacityElement.getBoundingClientRect().bottom,
+        menuRowGap: Number.parseFloat(getComputedStyle(menu).rowGap),
+        sidebarRowGap: Number.parseFloat(getComputedStyle(sidebarMenu).rowGap),
+      };
+    });
+    expect(Math.abs(rowSpacing.menuRowGap - rowSpacing.sidebarRowGap)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(rowSpacing.adjacentGap - rowSpacing.sidebarRowGap)).toBeLessThanOrEqual(0.5);
 
     const initialFocusVisualState = await readMenuItemVisualState(focusMenuItem);
     await target.hover(addToChatMenuItem);

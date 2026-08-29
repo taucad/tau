@@ -111,7 +111,7 @@ function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
     <ComboboxPrimitive.List
       data-slot='combobox-list'
       className={cn(
-        'max-h-[min(calc(--spacing(96)---spacing(9)),calc(var(--available-height)---spacing(9)))] scroll-py-1 overflow-y-auto p-1 data-empty:p-0',
+        'flex max-h-[min(calc(--spacing(96)---spacing(9)),calc(var(--available-height)---spacing(9)))] scroll-py-1 flex-col gap-0.5 overflow-y-auto p-1 data-empty:p-0',
         className,
       )}
       {...props}
@@ -141,7 +141,9 @@ function ComboboxItem({ className, children, ...props }: ComboboxPrimitive.Item.
 }
 
 function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
-  return <ComboboxPrimitive.Group data-slot='combobox-group' className={cn(className)} {...props} />;
+  return (
+    <ComboboxPrimitive.Group data-slot='combobox-group' className={cn('flex flex-col gap-0.5', className)} {...props} />
+  );
 }
 
 function ComboboxLabel({ className, ...props }: ComboboxPrimitive.GroupLabel.Props) {

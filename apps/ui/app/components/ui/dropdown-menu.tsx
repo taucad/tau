@@ -81,9 +81,16 @@ function DropdownMenuContent({
 }
 
 function DropdownMenuGroup({
+  className,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Group>): React.JSX.Element {
-  return <DropdownMenuPrimitive.Group data-slot='dropdown-menu-group' {...properties} />;
+  return (
+    <DropdownMenuPrimitive.Group
+      data-slot='dropdown-menu-group'
+      className={cn('flex flex-col gap-0.5', className)}
+      {...properties}
+    />
+  );
 }
 
 function DropdownMenuItem({
@@ -130,9 +137,16 @@ function DropdownMenuCheckboxItem({
 }
 
 function DropdownMenuRadioGroup({
+  className,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.RadioGroup>): React.JSX.Element {
-  return <DropdownMenuPrimitive.RadioGroup data-slot='dropdown-menu-radio-group' {...properties} />;
+  return (
+    <DropdownMenuPrimitive.RadioGroup
+      data-slot='dropdown-menu-radio-group'
+      className={cn('flex flex-col gap-0.5', className)}
+      {...properties}
+    />
+  );
 }
 
 function DropdownMenuRadioItem({

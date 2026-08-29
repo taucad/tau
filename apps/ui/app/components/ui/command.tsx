@@ -67,7 +67,7 @@ function CommandList({
   return (
     <CommandPrimitive.List
       data-slot='command-list'
-      className={cn('max-h-[400px] overflow-x-hidden overflow-y-auto', className)}
+      className={cn('flex max-h-[400px] flex-col gap-0.5 overflow-x-hidden overflow-y-auto', className)}
       {...properties}
     />
   );
@@ -94,7 +94,7 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot='command-group'
       className={cn(
-        'overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground',
+        'overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-items]]:flex [&_[cmdk-group-items]]:flex-col [&_[cmdk-group-items]]:gap-0.5',
         className,
       )}
       {...properties}

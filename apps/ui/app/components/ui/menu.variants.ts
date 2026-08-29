@@ -36,7 +36,7 @@ export const menuItemVariants = cva(
  * Instant open/close (no animation) by default for a snappy feel.
  */
 export const menuContentVariants = cva(
-  'z-50 min-w-32 overflow-hidden rounded-[10px] bg-popover p-0.75 text-popover-foreground shadow-menu',
+  'z-50 flex min-w-32 flex-col gap-0.5 overflow-hidden rounded-[10px] bg-popover p-0.75 text-popover-foreground shadow-menu',
   {
     variants: {
       animated: {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectManifestSchemaUrl, projectToManifest } from '@taucad/types';
@@ -7,7 +7,7 @@ import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
 import type { ProjectListItem } from '#types/project.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
-import type { ProjectDiscoveryConflict } from '#hooks/use-project-manager.js';
+import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 
 const makeProject = (id: string, name: string, directory = `/${id}`): ProjectListItem => ({
   ...projectToManifest({
@@ -30,6 +30,7 @@ const createUseProjectsResult = () => ({
   projects: mockProjects,
   conflicts: [] as ProjectDiscoveryConflict[],
   recoveries: [] as PendingProjectRecovery[],
+  workspaceBindingRepairs: [] as WorkspaceBindingRepairGroup[],
   error: undefined as Error | undefined,
   retry: vi.fn(),
   deleteProject: vi.fn(async () => true),
@@ -45,11 +46,19 @@ vi.mock('#hooks/use-projects.js', () => ({
   useProjects: () => mockUseProjectsResult,
 }));
 
-const { mockDiscardRecovery } = vi.hoisted(() => ({ mockDiscardRecovery: vi.fn(async () => undefined) }));
+const { mockDiscardRecovery, mockRepairWorkspaceBindings } = vi.hoisted(() => ({
+  mockDiscardRecovery: vi.fn(async () => undefined),
+  mockRepairWorkspaceBindings: vi.fn(async () => ({
+    repairedProjectCount: 47,
+    removedWorkspaceIds: ['wsp_previous'],
+    skipped: [],
+  })),
+}));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     createProject: vi.fn(),
     discardRecovery: mockDiscardRecovery,
+    repairWorkspaceBindings: mockRepairWorkspaceBindings,
   }),
 }));
 
@@ -248,6 +257,51 @@ describe('ProjectLibrary', () => {
     expect(
       screen.queryByText('This copied project shares an identity with another directory.'),
     ).not.toBeInTheDocument();
+  });
+
+  it('groups eligible historical bindings behind an explicit metadata-only repair confirmation', async () => {
+    const locator = {
+      backend: 'webaccess',
+      storageRootKey: 'webaccess:wsp_canonical',
+      relativeDirectory: 'blocked',
+      workspaceId: 'wsp_canonical',
+    } as const;
+    mockUseProjectsResult = {
+      ...createUseProjectsResult(),
+      conflicts: [
+        {
+          status: 'route-blocked',
+          manifest: projectToManifest({
+            id: 'proj_ccccccccccccccccccccc',
+            name: 'Blocked Project',
+            description: '',
+            tags: [],
+            assets: { main: { entryPath: 'main.ts' } },
+          }),
+          locator,
+        },
+      ],
+      workspaceBindingRepairs: [{ canonicalWorkspaceId: 'wsp_canonical', workspaceName: 'Workshop', projectCount: 47 }],
+    };
+
+    render(
+      <MemoryRouter>
+        <TooltipProvider>
+          <ProjectLibrary />
+        </TooltipProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('47 projects are linked to previous workspace identities.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Repair links' }));
+    expect(screen.getByText(/updates browser routing metadata only/u)).toBeInTheDocument();
+    expect(screen.getByText(/will not move or modify folder contents/u)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Repair 47 projects' }));
+
+    await waitFor(() => {
+      expect(mockRepairWorkspaceBindings).toHaveBeenCalledExactlyOnceWith('wsp_canonical');
+    });
+    expect(mockToastSuccess).toHaveBeenCalledWith('Repaired 47 project links');
   });
 
   it('renders a terminal retryable load error instead of an empty-library state', () => {

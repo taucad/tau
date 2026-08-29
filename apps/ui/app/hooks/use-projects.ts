@@ -23,7 +23,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
   } = useProjectManager();
 
   const {
-    data: listing = { projects: [], conflicts: [], recoveries: [] },
+    data: listing = { projects: [], conflicts: [], recoveries: [], workspaceBindingRepairs: [] },
     isLoading,
     error,
     refetch,
@@ -108,6 +108,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     projects: listing.projects.map(projectLibraryEntryToListItem),
     conflicts: listing.conflicts,
     recoveries: listing.recoveries,
+    workspaceBindingRepairs: listing.workspaceBindingRepairs,
     isLoading,
     error: error instanceof Error ? error : undefined,
     retry: refetch,

@@ -2,19 +2,15 @@
  * Workspace-unavailable recovery leaf.
  *
  * Renders inside the `ProjectUnavailableOverlay` indirection when the
- * project's webaccess workspace can't be initialised — either because the
- * workspace itself disappeared from the handle store (handle missing) or
- * because the browser revoked read/write permission on it. Mirrors the
+ * project's webaccess workspace can't be initialised — because its metadata
+ * is missing, its handle was disconnected, or browser permission was revoked.
+ * Mirrors the
  * full-shell FloatingPanel aesthetic so the broken
  * editor content underneath stays completely covered (Audit R8).
  *
- * Recovery actions all call `bindProjectToWorkspace` once the user
- * clears the underlying gate (grants permission or picks a different
- * folder). That helper performs the binding transaction — writes
- * `ProjectFileSystemConfig.workspaceId` first, then dispatches
- * `reloadWorkspace` on the FM machine. The machine re-runs
- * `initializeServicesActor` against the freshly persisted record and
- * transitions back to `ready` automatically. The persistent record is
+ * Reconnecting a deliberately disconnected workspace replaces only its
+ * handle, then reloads the existing project binding. Picking a different
+ * workspace still uses `bindProjectToWorkspace`. The persistent record is
  * the only authority for the project ↔ workspace binding — see
  * `docs/policy/filesystem-policy.md` Rule 13b.
  */
@@ -29,16 +25,18 @@ import {
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
 import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
-import { createWorkspace, getWorkspace, listWorkspaces, requestHandlePermission } from '#filesystem/handle-store.js';
+import { getWorkspace, listWorkspaces, requestHandlePermission } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { toast } from '#components/ui/sonner.js';
+import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { cn } from '#utils/ui.utils.js';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 import { Label } from '#components/ui/label.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
 
 type WorkspaceUnavailableRecoveryProps = {
   readonly reason: WorkspaceUnavailableReason;
@@ -53,7 +51,8 @@ export function WorkspaceUnavailableRecovery({
   workspaceName,
   className,
 }: WorkspaceUnavailableRecoveryProps): React.JSX.Element {
-  const { bindProjectToWorkspace } = useFileManager();
+  const { bindProjectToWorkspace, fileManagerRef, workspace } = useFileManager();
+  const projectManager = useProjectManager();
   const telemetry = useWorkspaceTelemetry();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [pickedWorkspaceId, setPickedWorkspaceId] = useState<string | undefined>(workspaceId);
@@ -82,6 +81,7 @@ export function WorkspaceUnavailableRecovery({
       if (granted) {
         telemetry.workspaceConnected({ workspaceId });
         await bindProjectToWorkspace(workspaceId);
+        await projectManager.refreshWorkspaceCatalog();
       } else {
         telemetry.workspaceOpenFailed({ workspaceId, reason: 'permission' });
         toast.error('Permission was not granted.');
@@ -89,7 +89,7 @@ export function WorkspaceUnavailableRecovery({
     } finally {
       setIsBusy(false);
     }
-  }, [bindProjectToWorkspace, telemetry, workspaceId]);
+  }, [bindProjectToWorkspace, projectManager, telemetry, workspaceId]);
 
   const handlePickAnother = useCallback(async () => {
     if (!isFileSystemAccessSupported) {
@@ -97,37 +97,70 @@ export function WorkspaceUnavailableRecovery({
     }
     setIsBusy(true);
     try {
-      const handle = await globalThis.window.showDirectoryPicker({
-        id: workspaceId ? `tau-workspace-${workspaceId}` : 'tau-workspace',
-        mode: 'readwrite',
-      });
-      const workspace = await createWorkspace(handle);
-      if (workspace.minted) {
-        telemetry.workspaceCreated({ workspaceId: workspace.workspaceId });
-      }
-      await bindProjectToWorkspace(workspace.workspaceId);
-      toast.success(`Connected workspace "${workspace.name}"`);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      const connected = await projectManager.connectWorkspace();
+      if (connected === undefined) {
         telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
         return;
       }
+      if (connected.minted) {
+        telemetry.workspaceCreated({ workspaceId: connected.workspace.workspaceId });
+      }
+      await bindProjectToWorkspace(connected.workspace.workspaceId);
+      await projectManager.refreshWorkspaceCatalog();
+      toast.success(`Connected workspace "${connected.workspace.name}"`);
+    } catch (error) {
       telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
       toast.error('Failed to connect workspace.');
       throw error;
     } finally {
       setIsBusy(false);
     }
-  }, [bindProjectToWorkspace, telemetry, workspaceId]);
+  }, [bindProjectToWorkspace, projectManager, telemetry, workspaceId]);
+
+  const handleReconnect = useCallback(async () => {
+    if (!isFileSystemAccessSupported || !workspaceId) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const handle = await globalThis.window.showDirectoryPicker({
+        id: `tau-workspace-${workspaceId}`,
+        mode: 'readwrite',
+      });
+      await workspace.replaceWorkspaceHandle(workspaceId, handle);
+      fileManagerRef.send({ type: 'reloadWorkspace' });
+      await projectManager.refreshWorkspaceCatalog();
+      telemetry.workspaceConnected({ workspaceId });
+      toast.success(`Connected workspace "${workspaceName ?? handle.name}"`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
+        return;
+      }
+      telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
+      toast.error(
+        isWorkspaceIdentityConflictError(error) ? workspaceIdentityConflictCopy : 'Failed to reconnect workspace.',
+      );
+      console.error('Failed to reconnect workspace:', error);
+    } finally {
+      setIsBusy(false);
+    }
+  }, [fileManagerRef, projectManager, telemetry, workspace, workspaceId, workspaceName]);
 
   const handleSwitchToExisting = useCallback(async () => {
     if (!pickedWorkspaceId || pickedWorkspaceId === workspaceId) {
       return;
     }
     await bindProjectToWorkspace(pickedWorkspaceId);
-  }, [bindProjectToWorkspace, pickedWorkspaceId, workspaceId]);
+    await projectManager.refreshWorkspaceCatalog();
+  }, [bindProjectToWorkspace, pickedWorkspaceId, projectManager, workspaceId]);
 
-  const title = reason === 'permission' ? 'Workspace Access Revoked' : 'Workspace Not Connected';
+  const title =
+    reason === 'permission'
+      ? 'Workspace Access Revoked'
+      : reason === 'disconnected'
+        ? 'Workspace Disconnected'
+        : 'Workspace Not Connected';
 
   return (
     <div className={cn('absolute inset-0 z-20', className)}>
@@ -151,7 +184,7 @@ export function WorkspaceUnavailableRecovery({
                 workspaceId={workspaceId}
                 workspaceName={workspaceName}
                 isBusy={isBusy}
-                onConnect={handlePickAnother}
+                onConnect={reason === 'disconnected' ? handleReconnect : handlePickAnother}
                 onGrantAccess={reason === 'permission' ? handleGrantAccess : undefined}
               />
 

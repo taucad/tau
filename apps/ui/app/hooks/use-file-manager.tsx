@@ -10,13 +10,14 @@ import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '@taucad/fs-
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError } from '@taucad/filesystem';
 import {
-  forgetWorkspace as forgetStoredWorkspace,
+  disconnectWorkspace as disconnectStoredWorkspace,
   getHomeStorageBackend,
   getProjectRootConfigs,
+  restoreWorkspaceHandle as restoreStoredWorkspaceHandle,
   setProjectFileSystemConfig,
   updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
-import type { HomeStorageBackend } from '#filesystem/handle-store.js';
+import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -183,7 +184,8 @@ export type FileSystemClientFacade = Pick<
 /**
  * Workspace lifecycle facade. Groups admin operations that are not
  * per-call FS dispatch — mount/unmount and standalone-provider
- * invalidation. Each call gates on the FM machine becoming `ready`.
+ * invalidation. Ordinary calls gate on `ready`; handle replacement also
+ * accepts the connected worker in `webAccessUnavailable` so recovery can run.
  *
  * @public
  */
@@ -196,8 +198,10 @@ export type WorkspaceFacade = {
   syncProjectRoots: () => Promise<void>;
   /** Replace a workspace handle and synchronize this tab before resolving. */
   replaceWorkspaceHandle: (workspaceId: string, handle: FileSystemDirectoryHandle) => Promise<void>;
-  /** Forget an unreferenced workspace and synchronize this tab before resolving. */
-  forgetWorkspace: (workspaceId: string) => Promise<void>;
+  /** Remove retained folder authority while preserving workspace identity and project bindings. */
+  disconnectWorkspace: (workspaceId: string) => Promise<WorkspaceEntry | undefined>;
+  /** Restore an Undo handle only while the workspace remains disconnected. */
+  restoreWorkspaceHandle: (workspaceId: string, handle: FileSystemDirectoryHandle) => Promise<boolean>;
 };
 
 type FileManagerContextType = {
@@ -805,8 +809,21 @@ export function FileManagerProvider({
     };
   }, [getReadiedProxy]);
 
-  const workspace = useMemo<WorkspaceFacade>(
-    () => ({
+  const workspace = useMemo<WorkspaceFacade>(() => {
+    const configurePersistedRoots = async (): Promise<void> => {
+      const [proxy, services, configuration] = await Promise.all([
+        getReadiedProxy(),
+        whenServicesReady(),
+        getProjectRootConfigs(),
+      ]);
+      await proxy.configureProjectRoots(configuration);
+      if (configuration.roots.some(({ backend }) => backend === 'webaccess')) {
+        services.treeService.startPolling();
+      } else {
+        services.treeService.stopPolling();
+      }
+    };
+    return {
       mount: async (prefix, config) => {
         const proxy = await getReadiedProxy();
         await proxy.mount(prefix, config);
@@ -836,24 +853,54 @@ export function FileManagerProvider({
         proxy.disposeStorageRoot(storageRootKey);
       },
       syncProjectRoots: async () => {
-        const proxy = await getReadiedProxy();
-        await proxy.configureProjectRoots(await getProjectRootConfigs());
+        await configurePersistedRoots();
       },
       replaceWorkspaceHandle: async (workspaceId, handle) => {
+        const snapshot = await waitForWithTimeout({
+          fileManagerRef,
+          predicate: createErrorAwareWaitPredicate((state) => state.context.proxy !== undefined),
+          readyTimeout: fileManagerReadyTimeout,
+          reason: 'proxy-timeout',
+        });
+        assertNotErrorState(snapshot);
+        const { proxy } = snapshot.context;
+        if (!proxy) {
+          throw new FileManagerNotReadyError('proxy-timeout');
+        }
         await updateWorkspaceHandle(workspaceId, handle);
-        const proxy = await getReadiedProxy();
         proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
         await proxy.configureProjectRoots(await getProjectRootConfigs());
       },
-      forgetWorkspace: async (workspaceId) => {
-        await forgetStoredWorkspace(workspaceId);
+      disconnectWorkspace: async (workspaceId) => {
         const proxy = await getReadiedProxy();
+        const disconnected = await disconnectStoredWorkspace(workspaceId);
+        if (!disconnected) {
+          return undefined;
+        }
         proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
-        await proxy.configureProjectRoots(await getProjectRootConfigs());
+        try {
+          await configurePersistedRoots();
+        } catch (error) {
+          console.warn('[FileManager] Workspace disconnected but root refresh failed', error);
+        }
+        return disconnected;
       },
-    }),
-    [getReadiedProxy, fileManagerRef, workspaceTelemetry],
-  );
+      restoreWorkspaceHandle: async (workspaceId, handle) => {
+        const proxy = await getReadiedProxy();
+        const restored = await restoreStoredWorkspaceHandle(workspaceId, handle);
+        if (!restored) {
+          return false;
+        }
+        proxy.disposeStorageRoot(`webaccess:${workspaceId}`);
+        try {
+          await configurePersistedRoots();
+        } catch (error) {
+          console.warn('[FileManager] Workspace handle restored but root refresh failed', error);
+        }
+        return true;
+      },
+    };
+  }, [getReadiedProxy, fileManagerRef, whenServicesReady, workspaceTelemetry]);
 
   const value = useMemo<FileManagerContextType>(
     () => ({

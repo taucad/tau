@@ -8,6 +8,7 @@ import type { ProjectRootConfiguration } from '@taucad/filesystem';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
 import type { WorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { WorkspaceEntry } from '#filesystem/handle-store.js';
 
 const workerTestState = vi.hoisted(() => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- recursive type cannot be expressed inline
@@ -106,13 +107,15 @@ const mockGetProjectRootConfigs = vi.fn<() => Promise<ProjectRootConfiguration>>
 const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs'>>();
 const handleStoreTestState = vi.hoisted(() => ({
   updateWorkspaceHandle: vi.fn(async () => undefined),
-  forgetWorkspace: vi.fn(async () => undefined),
+  disconnectWorkspace: vi.fn<(workspaceId: string) => Promise<WorkspaceEntry | undefined>>(async () => undefined),
+  restoreWorkspaceHandle: vi.fn(async () => false),
 }));
 
 vi.mock('#filesystem/handle-store.js', () => ({
   getHomeStorageBackend: async () => mockGetHomeStorageBackend(),
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
   getWorkspace: vi.fn(async () => undefined),
+  getWorkspaceMetadata: vi.fn(async () => undefined),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
   checkHandlePermission: vi.fn(async () => 'granted'),
   createWorkspace: vi.fn(),
@@ -120,7 +123,8 @@ vi.mock('#filesystem/handle-store.js', () => ({
     mockSetProjectFileSystemConfig(config),
   requestHandlePermission: vi.fn(async () => true),
   updateWorkspaceHandle: handleStoreTestState.updateWorkspaceHandle,
-  forgetWorkspace: handleStoreTestState.forgetWorkspace,
+  disconnectWorkspace: handleStoreTestState.disconnectWorkspace,
+  restoreWorkspaceHandle: handleStoreTestState.restoreWorkspaceHandle,
 }));
 
 // Stub the workspace-telemetry hook so the provider doesn't pull in
@@ -461,7 +465,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess:wsp_x');
   });
 
-  it('synchronizes the initiating tab after replacing or forgetting a workspace handle', async () => {
+  it('synchronizes the initiating tab after replacing, disconnecting, or restoring a workspace handle', async () => {
     const { result } = renderProvider();
     const handle = mock<FileSystemDirectoryHandle>();
 
@@ -473,12 +477,54 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(mockConfigureProjectRoots).toHaveBeenCalledWith(await mockGetProjectRootConfigs());
 
     vi.clearAllMocks();
-    await act(async () => {
-      await result.current.workspace.forgetWorkspace('wsp_x');
+    handleStoreTestState.disconnectWorkspace.mockResolvedValue({
+      workspace: {
+        workspaceId: 'wsp_x',
+        name: 'Workspace',
+        slug: 'workspace',
+        lastConnectedAt: 1,
+      },
+      handle,
     });
-    expect(handleStoreTestState.forgetWorkspace).toHaveBeenCalledExactlyOnceWith('wsp_x');
+    await act(async () => {
+      await result.current.workspace.disconnectWorkspace('wsp_x');
+    });
+    expect(handleStoreTestState.disconnectWorkspace).toHaveBeenCalledExactlyOnceWith('wsp_x');
     expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess:wsp_x');
     expect(mockConfigureProjectRoots).toHaveBeenCalledWith(await mockGetProjectRootConfigs());
+
+    vi.clearAllMocks();
+    handleStoreTestState.restoreWorkspaceHandle.mockResolvedValue(true);
+    await act(async () => {
+      await result.current.workspace.restoreWorkspaceHandle('wsp_x', handle);
+    });
+    expect(handleStoreTestState.restoreWorkspaceHandle).toHaveBeenCalledExactlyOnceWith('wsp_x', handle);
+    expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess:wsp_x');
+    expect(mockConfigureProjectRoots).toHaveBeenCalledWith(await mockGetProjectRootConfigs());
+  });
+
+  it('starts external polling when a webaccess root is connected after provider boot', async () => {
+    const { result } = renderProvider();
+    await vi.waitFor(() => {
+      expect(result.current.treeService).toBeDefined();
+    });
+    const startPolling = vi.spyOn(result.current.treeService!, 'startPolling');
+    mockGetProjectRootConfigs.mockResolvedValue({
+      projects: [],
+      roots: [
+        {
+          backend: 'webaccess',
+          workspaceId: 'wsp_late',
+          directoryHandle: mock<FileSystemDirectoryHandle>(),
+        },
+      ],
+    });
+
+    await act(async () => {
+      await result.current.workspace.syncProjectRoots();
+    });
+
+    expect(startPolling).toHaveBeenCalledOnce();
   });
 
   it('routes createDirectory through the project content facade with an absolute project path', async () => {

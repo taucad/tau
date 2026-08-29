@@ -6,6 +6,7 @@ import FileManagerWorker from '#machines/file-manager.worker.js?worker';
 import {
   getProjectFileSystemConfig,
   getWorkspace,
+  getWorkspaceMetadata,
   checkHandlePermission,
   getHomeStorageBackend,
   getProjectRootConfigs,
@@ -43,13 +44,14 @@ const filePoolBytes = 50 * 1024 * 1024;
  * rendered by `ProjectUnavailableOverlay` (R8) and the legacy
  * `chat-error-service-unavailable` component.
  *
- * - `missing` — the bound workspace doesn't exist in the handle store (the
- *   user deleted/forgot it, or the project was created on another device).
+ * - `missing` — the bound workspace metadata doesn't exist in this browser.
+ * - `disconnected` — workspace identity remains but its directory handle was
+ *   deliberately removed. Re-picking restores that exact identity.
  * - `permission` — the workspace's handle is intact but the browser
  *   revoked read/write permission. A user-gesture `Grant Access` flow
  *   recovers without a re-pick.
  */
-export type WorkspaceUnavailableReason = 'missing' | 'permission';
+export type WorkspaceUnavailableReason = 'missing' | 'disconnected' | 'permission';
 
 type FileManagerContext = {
   worker: Worker | undefined;
@@ -287,11 +289,12 @@ const initializeServicesActor = fromSafeAsync<
 
     const entry = requestedWorkspaceId ? await getWorkspace(requestedWorkspaceId) : undefined;
     if (!entry) {
+      const metadata = requestedWorkspaceId ? await getWorkspaceMetadata(requestedWorkspaceId) : undefined;
       return {
         type: 'webAccessUnavailable',
-        reason: 'missing',
+        reason: metadata ? 'disconnected' : 'missing',
         activeWorkspaceId: requestedWorkspaceId,
-        activeWorkspaceName: undefined,
+        activeWorkspaceName: metadata?.name,
       };
     }
 

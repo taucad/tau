@@ -83,6 +83,39 @@ export function isWorkspaceDirectoryRequiredError(error: unknown): error is Work
   return error instanceof WorkspaceDirectoryRequiredError;
 }
 
+export type WorkspaceIdentityConflictCode =
+  | 'handle-owned-by-another-workspace'
+  | 'marker-owned-by-another-workspace'
+  | 'stale-target';
+
+/** A reconnect selection would merge or overwrite two durable workspace identities. */
+export class WorkspaceIdentityConflictError extends Error {
+  public readonly code: WorkspaceIdentityConflictCode;
+  public readonly workspaceId: string;
+  public readonly conflictingWorkspaceId: string | undefined;
+
+  public constructor(
+    code: WorkspaceIdentityConflictCode,
+    options: { readonly workspaceId: string; readonly conflictingWorkspaceId?: string },
+  ) {
+    super(
+      code === 'stale-target'
+        ? 'This workspace connection changed before the folder was selected.'
+        : 'That folder is already linked to another workspace.',
+    );
+    this.name = 'WorkspaceIdentityConflictError';
+    this.code = code;
+    this.workspaceId = options.workspaceId;
+    this.conflictingWorkspaceId = options.conflictingWorkspaceId;
+  }
+}
+
+export const isWorkspaceIdentityConflictError = (error: unknown): error is WorkspaceIdentityConflictError =>
+  error instanceof WorkspaceIdentityConflictError;
+
+export const workspaceIdentityConflictCopy =
+  'That folder belongs to another workspace. Choose its original folder or disconnect the existing workspace first.';
+
 /**
  * Thrown when a durable write fails because the origin is out of quota.
  * Distinguishes "the browser refused to store this" from generic IndexedDB

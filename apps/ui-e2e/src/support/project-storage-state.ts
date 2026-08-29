@@ -26,6 +26,26 @@ export type PhysicalProjectEvidence = {
   readonly sourceText: string;
 };
 
+/** Read a fixture's durable workspace marker. */
+export const readOpfsWorkspaceMarker = async (
+  fixture: string,
+): Promise<Readonly<Record<string, unknown>> | undefined> =>
+  target.evaluate(async (fixtureName) => {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const fixtureRoot = await root.getDirectoryHandle(fixtureName);
+      const tau = await fixtureRoot.getDirectoryHandle('.tau');
+      const marker = await tau.getFileHandle('workspace.json');
+      const file = await marker.getFile();
+      return JSON.parse(await file.text()) as Readonly<Record<string, unknown>>;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'NotFoundError') {
+        return undefined;
+      }
+      throw error;
+    }
+  }, fixture);
+
 /** Read the shared project-routing metadata without importing application modules into the browser runner. */
 export const readProjectStorageState = async (): Promise<ProjectStorageState> =>
   target.evaluate(async () => {
@@ -81,7 +101,11 @@ export const readProjectStorageState = async (): Promise<ProjectStorageState> =>
         pin: (pin as { backend?: string } | undefined)?.backend,
         preference: (preference as { location?: ProjectStorageState['preference'] } | undefined)?.location,
         configs: configs as ProjectStorageState['configs'],
-        workspaces: workspaces as ProjectStorageState['workspaces'],
+        workspaces: (workspaces as ProjectStorageState['workspaces']).map(({ workspaceId, name, slug }) => ({
+          workspaceId,
+          name,
+          slug,
+        })),
         handleWorkspaceIds: handleWorkspaceIds.map(String),
       };
     } finally {
@@ -137,6 +161,91 @@ export const deleteWorkspaceHandle = async (workspaceId: string): Promise<void> 
       db.close();
     }
   }, workspaceId);
+
+/** Seed the historical duplicate-row incident while retaining one connected canonical workspace. */
+export const seedDisconnectedWorkspaceAliases = async (options: {
+  readonly canonicalWorkspaceId: string;
+  readonly aliasWorkspaceIds: readonly string[];
+  readonly retainedConfig?: StoredProjectConfig;
+}): Promise<void> =>
+  target.evaluate(async ({ canonicalWorkspaceId, aliasWorkspaceIds, retainedConfig }) => {
+    const databases = await indexedDB.databases();
+    const database = databases.find(({ name }) => name?.endsWith('fs-handles'));
+    if (!database?.name) {
+      throw new Error('Project storage metadata database is missing');
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(database.name!);
+      request.addEventListener(
+        'success',
+        () => {
+          resolve(request.result);
+        },
+        { once: true },
+      );
+      request.addEventListener(
+        'error',
+        () => {
+          reject(request.error ?? new Error('Failed to open project storage metadata'));
+        },
+        { once: true },
+      );
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(['configs', 'workspaces', 'handles', 'meta'], 'readwrite');
+        const configs = tx.objectStore('configs');
+        const read = configs.getAll();
+        read.addEventListener('success', () => {
+          const rows = read.result as StoredProjectConfig[];
+          for (const [index, config] of rows.entries()) {
+            if (config.backend === 'webaccess' && config.workspaceId === canonicalWorkspaceId) {
+              configs.put({ ...config, workspaceId: aliasWorkspaceIds[index % aliasWorkspaceIds.length] });
+            }
+          }
+          if (retainedConfig) {
+            configs.put(retainedConfig);
+          }
+          for (const [index, workspaceId] of aliasWorkspaceIds.entries()) {
+            tx.objectStore('workspaces').put({
+              workspaceId,
+              name: 'Previous workspace',
+              slug: `previous-workspace-${index + 1}`,
+              lastConnectedAt: index + 1,
+            });
+            tx.objectStore('handles').delete(workspaceId);
+          }
+          tx.objectStore('meta').put({
+            key: 'project-creation-location',
+            location: { kind: 'workspace', workspaceId: aliasWorkspaceIds[0] },
+          });
+        });
+        tx.addEventListener(
+          'complete',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+        tx.addEventListener(
+          'error',
+          () => {
+            reject(tx.error ?? new Error('Failed to seed workspace aliases'));
+          },
+          { once: true },
+        );
+        tx.addEventListener(
+          'abort',
+          () => {
+            reject(tx.error ?? new Error('Workspace alias seed was aborted'));
+          },
+          { once: true },
+        );
+      });
+    } finally {
+      db.close();
+    }
+  }, options);
 
 /** Read manifest and authored source from an OPFS directory (Home or a seeded disk fixture). */
 export const readOpfsProjectEvidence = async (options: {

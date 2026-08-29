@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectCreationLocationRead, Workspace, WorkspaceConnection } from '#filesystem/handle-store.js';
 import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
+import { WorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
 
 type TestHandle = { readonly name: string };
 type TestWorkspaceEntry = { readonly workspace: Workspace; readonly handle: TestHandle };
@@ -23,6 +24,27 @@ const mockWorkspaceCreated = vi.fn();
 const mockWorkspaceConnected = vi.fn();
 const mockWorkspaceOpenFailed = vi.fn();
 const mockToastError = vi.fn();
+const mockConnectWorkspace = vi.fn(async () => {
+  try {
+    const handle = (await globalThis.window.showDirectoryPicker({
+      id: 'tau-workspace',
+      mode: 'readwrite',
+    })) as unknown as TestHandle;
+    const connected = await mockCreateWorkspace(handle);
+    await mockSyncProjectRoots();
+    return { workspace: connected, projectCount: 0, minted: connected.minted };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return undefined;
+    }
+    throw error;
+  }
+});
+const mockRefreshWorkspaceCatalog = vi.fn(async () => undefined);
+const mockProjectManager = {
+  connectWorkspace: mockConnectWorkspace,
+  refreshWorkspaceCatalog: mockRefreshWorkspaceCatalog,
+};
 
 vi.mock('#constants/browser.constants.js', () => ({
   get isFileSystemAccessSupported() {
@@ -46,6 +68,10 @@ vi.mock('#hooks/use-file-manager.js', () => {
   };
   return { useFileManager: () => ({ workspace: workspaceManager }) };
 });
+
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => mockProjectManager,
+}));
 
 vi.mock('#utils/workspace-telemetry.utils.js', () => {
   const telemetry = {
@@ -88,6 +114,8 @@ describe('useProjectCreationLocation', () => {
     mockGetWorkspace.mockResolvedValue(undefined);
     mockCheckPermission.mockResolvedValue('granted');
     mockRequestPermission.mockResolvedValue(true);
+    mockReplaceWorkspaceHandle.mockReset();
+    mockReplaceWorkspaceHandle.mockResolvedValue(undefined);
     mockGetPreference.mockResolvedValue({ location: { kind: 'home' }, repaired: undefined });
     Object.defineProperty(globalThis.window, 'showDirectoryPicker', {
       configurable: true,
@@ -294,6 +322,35 @@ describe('useProjectCreationLocation', () => {
       workspaceId: disconnected.workspaceId,
     });
     expect(result.current.canCreate).toBe(false);
+  });
+
+  it('explains an exact reconnect identity conflict without changing the selection', async () => {
+    const disconnected = workspace('wsp_disconnected', 'Disconnected', 1);
+    mockListWorkspaces.mockResolvedValue([disconnected]);
+    mockGetPreference.mockResolvedValue({
+      location: { kind: 'workspace', workspaceId: disconnected.workspaceId },
+      repaired: undefined,
+    });
+    mockGetWorkspace.mockResolvedValue(undefined);
+    vi.mocked(globalThis.window.showDirectoryPicker).mockResolvedValue({ name: 'Other' } as FileSystemDirectoryHandle);
+    mockReplaceWorkspaceHandle.mockRejectedValue(
+      new WorkspaceIdentityConflictError('marker-owned-by-another-workspace', {
+        workspaceId: disconnected.workspaceId,
+        conflictingWorkspaceId: 'wsp_other',
+      }),
+    );
+    const { result } = renderHook(() => useProjectCreationLocation());
+    await waitForReady(result);
+
+    await act(async () => {
+      await capableReady(result.current).selectedWorkspaceRecovery?.run();
+    });
+
+    expect(mockToastError).toHaveBeenCalledWith(workspaceIdentityConflictCopy);
+    expect(capableReady(result.current).value).toEqual({
+      kind: 'workspace',
+      workspaceId: disconnected.workspaceId,
+    });
   });
 
   it('keeps action identities stable across ready-state refreshes', async () => {

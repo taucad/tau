@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
 import {
   checkHandlePermission,
-  createWorkspace,
   getProjectCreationLocation,
   getWorkspace,
   listWorkspaces,
@@ -19,6 +18,8 @@ import type {
 import { projectCreationLocationsEqual, projectLocationDescriptor } from '#utils/project-creation-location.utils.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { toast } from '#components/ui/sonner.js';
+import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
 
 export type HomeLocationOption = {
   readonly location: HomeProjectCreationLocation;
@@ -115,6 +116,7 @@ const probeWorkspaceOption = async (workspace: Workspace): Promise<WorkspaceLoca
 /** Product-level creation-location state shared by every direct-create surface. */
 export const useProjectCreationLocation = (): ProjectCreationLocationState => {
   const fileManager = useFileManager();
+  const projectManager = useProjectManager();
   const telemetry = useWorkspaceTelemetry();
   const [state, setState] = useState<ProjectCreationLocationState>(
     isFileSystemAccessSupported ? loadingState : homeOnlyState,
@@ -135,9 +137,10 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
       }
       telemetry.workspaceConnected({ workspaceId });
       await fileManager.workspace.syncProjectRoots();
+      await projectManager.refreshWorkspaceCatalog();
       await loadRef.current(false);
     },
-    [fileManager.workspace, telemetry],
+    [fileManager.workspace, projectManager, telemetry],
   );
 
   const reconnectWorkspace = useCallback(
@@ -148,6 +151,7 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
           mode: 'readwrite',
         });
         await fileManager.workspace.replaceWorkspaceHandle(workspaceId, handle);
+        await projectManager.refreshWorkspaceCatalog();
         telemetry.workspaceConnected({ workspaceId });
         await loadRef.current(false);
       } catch (error) {
@@ -156,10 +160,12 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
           return;
         }
         telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
-        toast.error('Failed to reconnect the folder.');
+        toast.error(
+          isWorkspaceIdentityConflictError(error) ? workspaceIdentityConflictCopy : 'Failed to reconnect the folder.',
+        );
       }
     },
-    [fileManager.workspace, telemetry],
+    [fileManager.workspace, projectManager, telemetry],
   );
 
   const getSelectedWorkspaceRecovery = useCallback(
@@ -254,23 +260,23 @@ export const useProjectCreationLocation = (): ProjectCreationLocationState => {
 
   const connectWorkspace = useCallback(async (): Promise<void> => {
     try {
-      const handle = await globalThis.window.showDirectoryPicker({ id: 'tau-workspace', mode: 'readwrite' });
-      const workspace = await createWorkspace(handle);
-      await fileManager.workspace.syncProjectRoots();
-      if (workspace.minted) {
-        telemetry.workspaceCreated({ workspaceId: workspace.workspaceId });
-      }
-      selectedRef.current = { kind: 'workspace', workspaceId: workspace.workspaceId };
-      await loadRef.current(false);
-    } catch (error) {
-      if (isAbortError(error)) {
+      const connected = await projectManager.connectWorkspace();
+      if (connected === undefined) {
         telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'aborted' });
         return;
       }
+      if (connected.minted) {
+        telemetry.workspaceCreated({ workspaceId: connected.workspace.workspaceId });
+      } else {
+        telemetry.workspaceConnected({ workspaceId: connected.workspace.workspaceId });
+      }
+      selectedRef.current = { kind: 'workspace', workspaceId: connected.workspace.workspaceId };
+      await loadRef.current(false);
+    } catch {
       telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown' });
       toast.error('Failed to connect the folder.');
     }
-  }, [fileManager.workspace, telemetry]);
+  }, [projectManager, telemetry]);
 
   const refresh = useCallback(async (): Promise<void> => loadRef.current(false), []);
 

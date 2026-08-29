@@ -25,20 +25,30 @@ import { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import type { ObjectStoreWorker, InitialEditorState } from '#hooks/object-store.worker.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import {
+  createWorkspace,
   setProjectFileSystemConfig,
   getProjectFileSystemConfig,
   getHomeStorageBackend,
   getProjectCreationLocation,
   getWorkspace,
   checkHandlePermission,
+  requestHandlePermission,
   deleteProjectFileSystemConfig,
   getAllProjectFileSystemConfigs,
   listWorkspaces,
   pinHomeStorageBackend,
   setProjectCreationLocation,
   subscribeProjectRootConfigurationChanges,
+  applyProjectFileSystemConfigChanges,
+  repairWorkspaceBindings as repairStoredWorkspaceBindings,
 } from '#filesystem/handle-store.js';
-import type { ProjectFileSystemConfig, WorkspaceEntry } from '#filesystem/handle-store.js';
+import type {
+  ProjectFileSystemConfig,
+  Workspace,
+  WorkspaceBindingRepair,
+  WorkspaceBindingRepairResult,
+  WorkspaceEntry,
+} from '#filesystem/handle-store.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
@@ -61,6 +71,9 @@ import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
+import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import type { PreparedWorkspaceCatalog, WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 
 /**
  * Shared options for initial chat configuration.
@@ -132,10 +145,21 @@ export type CreateProjectOptions = CreateProjectFromKernel | CreateProjectFromDa
  */
 export type CreatedProject = ProjectManifest & { readonly slugs: ProjectSlugs };
 
+export type ConnectedWorkspace = {
+  readonly workspace: Workspace;
+  readonly projectCount: number;
+  readonly minted: boolean;
+};
+
 type ProjectManagerContextType = {
   isLoading: boolean;
   error: Error | undefined;
   projectManagerRef: ActorRefFrom<typeof projectManagerMachine>;
+  workspaceConnection: WorkspaceConnectionState;
+  connectWorkspace: (handle?: FileSystemDirectoryHandle) => Promise<ConnectedWorkspace | undefined>;
+  retryWorkspaceConnection: () => Promise<ConnectedWorkspace | undefined>;
+  refreshWorkspaceCatalog: () => Promise<void>;
+  repairWorkspaceBindings: (workspaceId: string) => Promise<WorkspaceBindingRepairResult>;
   createProject: (options: CreateProjectOptions) => Promise<CreatedProject>;
   updateProject: (projectId: string, update: PartialDeep<ProjectManifest>) => Promise<ProjectManifest | undefined>;
   touchProject: (projectId: string) => Promise<ProjectLibraryState | undefined>;
@@ -197,6 +221,13 @@ export type ProjectListing = {
   readonly projects: readonly ProjectLibraryEntry[];
   readonly conflicts: readonly ProjectDiscoveryConflict[];
   readonly recoveries: readonly PendingProjectRecovery[];
+  readonly workspaceBindingRepairs: readonly WorkspaceBindingRepairGroup[];
+};
+
+export type WorkspaceBindingRepairGroup = {
+  readonly canonicalWorkspaceId: string;
+  readonly workspaceName: string;
+  readonly projectCount: number;
 };
 
 export type ProjectRouteAccess =
@@ -217,6 +248,22 @@ const ProjectManagerContext = createContext<ProjectManagerContextType | undefine
  * than a discovery rescan completes: one trailing-edge refetch per burst.
  */
 const discoveryInvalidationDebounce = 300;
+
+/** Concurrent disk-side library-state recoveries after IndexedDB eviction. */
+const libraryRecoveryConcurrency = 16;
+
+type WorkspaceConnectionTrace = {
+  readonly operationId: string;
+  startedAt: number;
+  workspaceId: string | undefined;
+  registeringDuration: number;
+  mountingDuration: number;
+  catalogDuration: number;
+  publishingDuration: number;
+  candidateCount: number;
+  projectCount: number;
+  conflictCount: number;
+};
 
 /**
  * Failure modes that a later attempt cannot change: the directory holds foreign
@@ -415,6 +462,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const actorRef = useActorRef(projectManagerMachine);
   const fileManager = useFileManager();
   const queryClient = useQueryClient();
+  const workspaceTelemetry = useWorkspaceTelemetry();
   const projectNameClient = useProjectNameClient();
   const discoveryReadinessRef = useRef<Promise<void> | undefined>(undefined);
   const recoveryLoopRef = useRef<Promise<void> | undefined>(undefined);
@@ -422,6 +470,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   /** Settle attempts per pending operation this session (DF11 retry cap). */
   const recoveryAttemptsRef = useRef(new Map<string, number>());
   const discoveryPassRef = useRef<Promise<ProjectDiscoveryResult> | undefined>(undefined);
+  const connectionTraceRef = useRef<WorkspaceConnectionTrace | undefined>(undefined);
+  const connectionPromiseRef = useRef<Promise<ConnectedWorkspace | undefined> | undefined>(undefined);
   /**
    * Bumped when a discovery pass starts and when the durable route
    * configuration changes underneath one. A pass whose epoch is no longer
@@ -794,16 +844,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // its old location is unreachable by definition, so re-pointing cannot
       // lose data. `rootStatuses` alone cannot tell "unknown workspace" from
       // "workspace not scanned this pass", which is why the store is consulted.
-      const workspaces = await listWorkspaces();
+      const [workspaces, persistedConfigs] = await Promise.all([listWorkspaces(), getAllProjectFileSystemConfigs()]);
       const knownWorkspaceIds = new Set(workspaces.map((workspace) => workspace.workspaceId));
       // One cursor pass over the route configs serves both the per-entry
       // reconcile below and the orphan sweep after it. Mid-loop writes update
       // the map so the sweep judges the route this pass just published.
-      const persistedConfigs = await getAllProjectFileSystemConfigs();
       const configs = new Map(persistedConfigs.map((config) => [config.projectId, config] as const));
-      let routesChanged = false;
+      const configUpserts: ProjectFileSystemConfig[] = [];
+      const configDeletes: string[] = [];
       const blockedProjectIds = new Set<string>();
-      /* oxlint-disable eslint/no-await-in-loop -- Discovery reconciles each durable locator before publishing the route snapshot. */
       for (const entry of result.entries) {
         if (entry.status !== 'valid') {
           continue;
@@ -843,9 +892,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             continue;
           }
         }
-        await setProjectFileSystemConfig(next);
+        configUpserts.push(next);
         configs.set(next.projectId, next);
-        routesChanged = true;
       }
       if (blockedProjectIds.size > 0) {
         result = {
@@ -888,14 +936,13 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           ) {
             // Chats, editor layout and library rows are keyed by project id, so
             // they must go with the config or they re-attach if the folder returns.
-            await worker.deleteProjectResources(config.projectId);
-            await deleteProjectFileSystemConfig(config.projectId);
-            routesChanged = true;
+            configDeletes.push(config.projectId);
           }
         }
+        await Promise.all(configDeletes.map(async (projectId) => worker.deleteProjectResources(projectId)));
       }
-      /* oxlint-enable eslint/no-await-in-loop -- End ordered locator reconciliation. */
-      if (routesChanged) {
+      if (configUpserts.length > 0 || configDeletes.length > 0) {
+        await applyProjectFileSystemConfigChanges({ upserts: configUpserts, deletes: configDeletes });
         await fileManager.workspace.syncProjectRoots();
       }
       return result;
@@ -1087,6 +1134,42 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [fileManager.client],
   );
 
+  const ensureProjectLibraryStates = useCallback(
+    async (
+      worker: Remote<ObjectStoreWorker>,
+      projectIds: readonly string[],
+    ): Promise<ReadonlyMap<string, ProjectLibraryState>> => {
+      const states = await worker.getProjectLibraryStates(projectIds);
+      const byProjectId = new Map(states.map((state) => [state.projectId, state] as const));
+      const missing = projectIds.filter((projectId) => !byProjectId.has(projectId));
+      const recovered: ProjectLibraryState[] = [];
+      for (let offset = 0; offset < missing.length; offset += libraryRecoveryConcurrency) {
+        recovered.push(
+          // oxlint-disable-next-line eslint/no-await-in-loop -- Chunked filesystem reads bound handle pressure.
+          ...(await Promise.all(
+            missing.slice(offset, offset + libraryRecoveryConcurrency).map(async (projectId) => {
+              const [tombstone, lastActivityAt] = await Promise.all([
+                readProjectLibraryFile(fileManager.client, projectId),
+                readManifestActivityAt(fileManager.client, projectId),
+              ]);
+              return {
+                projectId,
+                lastActivityAt,
+                ...(tombstone.deletedAt === undefined ? {} : { deletedAt: tombstone.deletedAt }),
+              };
+            }),
+          )),
+        );
+      }
+      const created = recovered.length === 0 ? [] : await worker.createProjectLibraryStates(recovered);
+      for (const state of created) {
+        byProjectId.set(state.projectId, state);
+      }
+      return byProjectId;
+    },
+    [fileManager.client],
+  );
+
   const getProjectRouteAccess = useCallback(
     async (projectId: string): Promise<ProjectRouteAccess> => {
       await ensureDiscoveryReady();
@@ -1234,48 +1317,381 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   // (getProjectFileSystemConfig / getWorkspace are stable module-level
   // bindings — intentionally omitted from the dep array.)
 
-  const getProjectListing = useCallback(
-    async (options?: { includeDeleted?: boolean }): Promise<ProjectListing> => {
+  const deriveWorkspaceBindingRepairs = useCallback(async (discovery: ProjectDiscoveryResult) => {
+    if (!discovery.entries.some((entry) => entry.status === 'route-blocked' && entry.locator.backend === 'webaccess')) {
+      return [];
+    }
+    const [configs, workspaces] = await Promise.all([getAllProjectFileSystemConfigs(), listWorkspaces()]);
+    const configByProjectId = new Map(configs.map((config) => [config.projectId, config] as const));
+    const workspaceById = new Map(workspaces.map((workspace) => [workspace.workspaceId, workspace] as const));
+    const completeWorkspaceIds = new Set(
+      discovery.roots.flatMap(({ root, status }) =>
+        status === 'complete' && root.backend === 'webaccess' ? [root.workspaceId] : [],
+      ),
+    );
+    const blocked = discovery.entries.filter(
+      (
+        entry,
+      ): entry is Extract<ProjectDiscoveryEntry, { status: 'route-blocked' }> & {
+        locator: Extract<ProjectLocator, { backend: 'webaccess' }>;
+      } =>
+        entry.status === 'route-blocked' &&
+        entry.locator.backend === 'webaccess' &&
+        completeWorkspaceIds.has(entry.locator.workspaceId) &&
+        projectOccurrences(discovery, entry.manifest.id).length === 1,
+    );
+    const sourceWorkspaceIds = new Set(
+      blocked.flatMap((entry) => {
+        const config = configByProjectId.get(entry.manifest.id);
+        return config?.backend === 'webaccess' ? [config.workspaceId] : [];
+      }),
+    );
+    const sourceEntries = await Promise.all(
+      [...sourceWorkspaceIds].map(async (workspaceId) => ({ workspaceId, entry: await getWorkspace(workspaceId) })),
+    );
+    const connectedSources = new Set(
+      sourceEntries.filter(({ entry }) => entry !== undefined).map(({ workspaceId }) => workspaceId),
+    );
+    const candidates = blocked.flatMap((entry) => {
+      const config = configByProjectId.get(entry.manifest.id);
+      if (
+        config?.backend !== 'webaccess' ||
+        config.workspaceId === entry.locator.workspaceId ||
+        config.providerBasePath !== entry.locator.relativeDirectory ||
+        !workspaceById.has(config.workspaceId) ||
+        connectedSources.has(config.workspaceId)
+      ) {
+        return [];
+      }
+      return [
+        {
+          canonicalWorkspaceId: entry.locator.workspaceId,
+          workspaceName: workspaceById.get(entry.locator.workspaceId)?.name ?? entry.locator.workspaceId,
+          repair: {
+            projectId: entry.manifest.id,
+            sourceWorkspaceId: config.workspaceId,
+            providerBasePath: config.providerBasePath,
+          } satisfies WorkspaceBindingRepair,
+        },
+      ];
+    });
+    const byWorkspace = Map.groupBy(candidates, ({ canonicalWorkspaceId }) => canonicalWorkspaceId);
+    return [...byWorkspace].map(([canonicalWorkspaceId, group]) => ({
+      canonicalWorkspaceId,
+      workspaceName: group[0]!.workspaceName,
+      projectCount: group.length,
+      repairs: group.map(({ repair }) => repair),
+    }));
+  }, []);
+
+  const buildProjectListing = useCallback(
+    async (discovery: ProjectDiscoveryResult): Promise<ProjectListing> => {
       const worker = await getReadiedWorker();
-      await ensureDiscoveryReady();
-      const discovery = await discoverProjects();
       const validEntries = discovery.entries.filter(
         (entry): entry is Extract<ProjectDiscoveryEntry, { status: 'valid' }> => entry.status === 'valid',
       );
       // Slugs come from the same pass that produced the locators, so every
       // listing-fed surface can render its canonical `/w/…` link without a
       // second lookup (blueprint L1).
-      const workspaces = await listWorkspaces();
-      const projects: ProjectLibraryEntry[] = await Promise.all(
-        validEntries.map(async (entry) => {
-          const { locator } = entry;
-          const slugs = projectSlugsOf(locator, workspaces);
-          const workspaceName =
-            locator.backend === 'webaccess'
-              ? workspaces.find((workspace) => workspace.workspaceId === locator.workspaceId)?.name
-              : undefined;
-          return {
-            manifest: entry.manifest,
-            library: await ensureProjectLibraryState(worker, entry.manifest.id),
-            locator,
-            ...(slugs === undefined ? {} : { slugs }),
-            ...(workspaceName === undefined ? {} : { workspaceName }),
-          };
-        }),
-      );
+      const [workspaces, libraryStates, workspaceBindingRepairs] = await Promise.all([
+        listWorkspaces(),
+        ensureProjectLibraryStates(
+          worker,
+          validEntries.map(({ manifest }) => manifest.id),
+        ),
+        deriveWorkspaceBindingRepairs(discovery),
+      ]);
+      const projects: ProjectLibraryEntry[] = validEntries.map((entry) => {
+        const { locator } = entry;
+        const slugs = projectSlugsOf(locator, workspaces);
+        const workspaceName =
+          locator.backend === 'webaccess'
+            ? workspaces.find((workspace) => workspace.workspaceId === locator.workspaceId)?.name
+            : undefined;
+        return {
+          manifest: entry.manifest,
+          library: libraryStates.get(entry.manifest.id)!,
+          locator,
+          ...(slugs === undefined ? {} : { slugs }),
+          ...(workspaceName === undefined ? {} : { workspaceName }),
+        };
+      });
       const conflicts: ProjectDiscoveryConflict[] = discovery.entries.filter(
         (entry): entry is Exclude<ProjectDiscoveryEntry, { status: 'valid' }> => entry.status !== 'valid',
       );
       return {
-        projects: options?.includeDeleted
-          ? projects
-          : projects.filter((project) => project.library.deletedAt === undefined),
+        projects,
         conflicts,
         recoveries: [...recoveriesRef.current.values()],
+        workspaceBindingRepairs: workspaceBindingRepairs.map(({ repairs: _repairs, ...group }) => group),
       };
     },
-    [discoverProjects, ensureDiscoveryReady, ensureProjectLibraryState, getReadiedWorker, recoveryRevision],
+    [deriveWorkspaceBindingRepairs, ensureProjectLibraryStates, getReadiedWorker, recoveryRevision],
   );
+
+  const getProjectListing = useCallback(
+    async (options?: { includeDeleted?: boolean }): Promise<ProjectListing> => {
+      await ensureDiscoveryReady();
+      const listing = await buildProjectListing(await discoverProjects());
+      return options?.includeDeleted
+        ? listing
+        : {
+            ...listing,
+            projects: listing.projects.filter((project) => project.library.deletedAt === undefined),
+          };
+    },
+    [buildProjectListing, discoverProjects, ensureDiscoveryReady],
+  );
+
+  const prepareCurrentWorkspaceCatalog = useCallback(
+    async (workspaceId?: string, signal?: AbortSignal): Promise<PreparedWorkspaceCatalog> => {
+      const previous = discoveryPassRef.current;
+      if (previous) {
+        await previous.catch(() => undefined);
+      }
+      signal?.throwIfAborted();
+      await retryFailedRecoveries();
+      const listing = await buildProjectListing(await discoverProjects());
+      signal?.throwIfAborted();
+      const visibleListing: ProjectListing = {
+        ...listing,
+        projects: listing.projects.filter((project) => project.library.deletedAt === undefined),
+      };
+      const isSelectedWorkspace = (locator: ProjectLocator): boolean =>
+        locator.backend === 'webaccess' && locator.workspaceId === workspaceId;
+      const selectedProjects = listing.projects.filter(({ locator }) => isSelectedWorkspace(locator));
+      const selectedConflicts = listing.conflicts.filter(({ locator }) => isSelectedWorkspace(locator));
+      return {
+        projectCount: selectedProjects.length,
+        candidateCount: selectedProjects.length + selectedConflicts.length,
+        conflictCount: selectedConflicts.length,
+        publish: async () => {
+          queryClient.setQueryData(['projects', { includeDeleted: true }], listing);
+          queryClient.setQueryData(['projects', { includeDeleted: false }], visibleListing);
+        },
+      };
+    },
+    [buildProjectListing, discoverProjects, queryClient, retryFailedRecoveries],
+  );
+
+  const refreshWorkspaceCatalog = useCallback(async (): Promise<void> => {
+    const catalog = await prepareCurrentWorkspaceCatalog(undefined);
+    await catalog.publish();
+  }, [prepareCurrentWorkspaceCatalog]);
+
+  const repairWorkspaceBindings = useCallback(
+    async (canonicalWorkspaceId: string): Promise<WorkspaceBindingRepairResult> => {
+      await ensureDiscoveryReady();
+      const groups = await deriveWorkspaceBindingRepairs(await discoverProjects());
+      const group = groups.find((candidate) => candidate.canonicalWorkspaceId === canonicalWorkspaceId);
+      if (!group) {
+        return { repairedProjectCount: 0, removedWorkspaceIds: [], skipped: [] };
+      }
+      const result = await repairStoredWorkspaceBindings({ canonicalWorkspaceId, repairs: group.repairs });
+      if (result.repairedProjectCount === 0) {
+        return result;
+      }
+      await fileManager.workspace.syncProjectRoots();
+      const catalog = await prepareCurrentWorkspaceCatalog(undefined);
+      await catalog.publish();
+      return result;
+    },
+    [
+      deriveWorkspaceBindingRepairs,
+      discoverProjects,
+      ensureDiscoveryReady,
+      fileManager.workspace,
+      prepareCurrentWorkspaceCatalog,
+    ],
+  );
+
+  const workspaceConnectionServices = useMemo(
+    () => ({
+      registerWorkspace: async (handle: FileSystemDirectoryHandle, signal: AbortSignal) => {
+        const startedAt = performance.now();
+        signal.throwIfAborted();
+        try {
+          const connection = await createWorkspace(handle);
+          signal.throwIfAborted();
+          if (connectionTraceRef.current) {
+            connectionTraceRef.current.workspaceId = connection.workspaceId;
+          }
+          return { workspace: connection, handle, minted: connection.minted };
+        } finally {
+          if (connectionTraceRef.current) {
+            connectionTraceRef.current.registeringDuration += performance.now() - startedAt;
+          }
+        }
+      },
+      mountWorkspace: async (workspace: WorkspaceEntry, signal: AbortSignal) => {
+        const startedAt = performance.now();
+        signal.throwIfAborted();
+        try {
+          if ((await checkHandlePermission(workspace.handle)) !== 'granted') {
+            throw new DOMException('Tau needs access to this workspace folder.', 'NotAllowedError');
+          }
+          await fileManager.workspace.syncProjectRoots();
+          signal.throwIfAborted();
+        } finally {
+          if (connectionTraceRef.current) {
+            connectionTraceRef.current.mountingDuration += performance.now() - startedAt;
+          }
+        }
+      },
+      prepareWorkspaceCatalog: async (
+        workspace: WorkspaceEntry,
+        signal: AbortSignal,
+      ): Promise<PreparedWorkspaceCatalog> => {
+        const startedAt = performance.now();
+        try {
+          const catalog = await prepareCurrentWorkspaceCatalog(workspace.workspace.workspaceId, signal);
+          const trace = connectionTraceRef.current;
+          if (trace) {
+            trace.candidateCount = catalog.candidateCount;
+            trace.projectCount = catalog.projectCount;
+            trace.conflictCount = catalog.conflictCount;
+          }
+          return {
+            ...catalog,
+            publish: async () => {
+              const publishStartedAt = performance.now();
+              try {
+                await catalog.publish();
+              } finally {
+                if (connectionTraceRef.current) {
+                  connectionTraceRef.current.publishingDuration += performance.now() - publishStartedAt;
+                }
+              }
+            },
+          };
+        } finally {
+          if (connectionTraceRef.current) {
+            connectionTraceRef.current.catalogDuration += performance.now() - startedAt;
+          }
+        }
+      },
+    }),
+    [fileManager.workspace, prepareCurrentWorkspaceCatalog],
+  );
+  const workspaceConnectionRef = useActorRef(workspaceConnectionMachine, { input: workspaceConnectionServices });
+  const workspaceConnection = useSelector(workspaceConnectionRef, selectWorkspaceConnectionState);
+
+  const waitForWorkspaceConnection = useCallback(
+    async (operationId: string): Promise<ConnectedWorkspace> =>
+      new Promise<ConnectedWorkspace>((resolve, reject) => {
+        const settle = (snapshot: ReturnType<typeof workspaceConnectionRef.getSnapshot>): void => {
+          if (snapshot.context.operationId !== operationId) {
+            return;
+          }
+          if (snapshot.matches('ready')) {
+            subscription.unsubscribe();
+            resolve({
+              workspace: snapshot.context.workspace!.workspace,
+              projectCount: snapshot.context.catalog!.projectCount,
+              minted: snapshot.context.workspace!.minted,
+            });
+          } else if (snapshot.matches('failed')) {
+            subscription.unsubscribe();
+            const failure = snapshot.context.error;
+            reject(failure instanceof Error ? failure : new Error('Workspace connection failed.', { cause: failure }));
+          }
+        };
+        const subscription = workspaceConnectionRef.subscribe(settle);
+        settle(workspaceConnectionRef.getSnapshot());
+      }),
+    [workspaceConnectionRef],
+  );
+
+  const connectWorkspace = useCallback(
+    async (selectedHandle?: FileSystemDirectoryHandle): Promise<ConnectedWorkspace | undefined> => {
+      if (!isFileSystemAccessSupported) {
+        return undefined;
+      }
+      if (connectionPromiseRef.current) {
+        return connectionPromiseRef.current;
+      }
+      const connection = (async (): Promise<ConnectedWorkspace | undefined> => {
+        const operationId = generatePrefixedId(idPrefix.request);
+        workspaceConnectionRef.send({ type: 'beginSelection', operationId });
+        let handle = selectedHandle;
+        try {
+          handle ??= await globalThis.window.showDirectoryPicker({ id: 'tau-workspace', mode: 'readwrite' });
+        } catch (error) {
+          workspaceConnectionRef.send({ type: 'selectionCancelled' });
+          if (error instanceof DOMException && error.name === 'AbortError') {
+            return undefined;
+          }
+          throw error;
+        }
+        connectionTraceRef.current = {
+          operationId,
+          startedAt: performance.now(),
+          workspaceId: undefined,
+          registeringDuration: 0,
+          mountingDuration: 0,
+          catalogDuration: 0,
+          publishingDuration: 0,
+          candidateCount: 0,
+          projectCount: 0,
+          conflictCount: 0,
+        };
+        const completion = waitForWorkspaceConnection(operationId);
+        workspaceConnectionRef.send({ type: 'workspaceSelected', operationId, handle });
+        try {
+          const connected = await completion;
+          const trace = connectionTraceRef.current;
+          if (trace.operationId === operationId) {
+            const { startedAt, ...metrics } = trace;
+            workspaceTelemetry.workspaceConnection({
+              ...metrics,
+              outcome: 'ready',
+              totalMs: performance.now() - startedAt,
+            });
+          }
+          return connected;
+        } catch (error) {
+          const trace = connectionTraceRef.current;
+          if (trace.operationId === operationId) {
+            const { startedAt, ...metrics } = trace;
+            workspaceTelemetry.workspaceConnection({
+              ...metrics,
+              outcome: 'failed',
+              totalMs: performance.now() - startedAt,
+            });
+          }
+          throw error;
+        }
+      })();
+      connectionPromiseRef.current = connection;
+      try {
+        return await connection;
+      } finally {
+        if (connectionPromiseRef.current === connection) {
+          connectionPromiseRef.current = undefined;
+        }
+      }
+    },
+    [waitForWorkspaceConnection, workspaceConnectionRef, workspaceTelemetry],
+  );
+
+  const retryWorkspaceConnection = useCallback(async (): Promise<ConnectedWorkspace | undefined> => {
+    const current = selectWorkspaceConnectionState(workspaceConnectionRef.getSnapshot());
+    if (current.phase !== 'failed') {
+      return undefined;
+    }
+    if (current.retry === 'pick-again') {
+      return connectWorkspace();
+    }
+    if (current.retry === 'grant-access') {
+      const handle = workspaceConnectionRef.getSnapshot().context.workspace?.handle;
+      if (handle === undefined || !(await requestHandlePermission(handle))) {
+        return undefined;
+      }
+    }
+    const completion = waitForWorkspaceConnection(current.operationId);
+    workspaceConnectionRef.send({ type: 'retry' });
+    return completion;
+  }, [connectWorkspace, waitForWorkspaceConnection, workspaceConnectionRef]);
 
   const getProjects = useCallback(
     async (options?: { includeDeleted?: boolean }): Promise<ProjectLibraryEntry[]> => {
@@ -1553,6 +1969,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       isLoading,
       error,
       projectManagerRef: actorRef,
+      workspaceConnection,
+      connectWorkspace,
+      retryWorkspaceConnection,
+      refreshWorkspaceCatalog,
+      repairWorkspaceBindings,
       createProject,
       updateProject,
       touchProject,
@@ -1591,6 +2012,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     isLoading,
     error,
     actorRef,
+    workspaceConnection,
+    connectWorkspace,
+    retryWorkspaceConnection,
+    refreshWorkspaceCatalog,
+    repairWorkspaceBindings,
     createProject,
     updateProject,
     touchProject,

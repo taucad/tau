@@ -46,7 +46,7 @@ import {
 } from '@taucad/types';
 import { metaConfig } from '#constants/meta.constants.js';
 import { allocateSlug, projectNameToSlug } from '#utils/project-directory.utils.js';
-import { toStorageWriteError } from '#filesystem/workspace-errors.js';
+import { toStorageWriteError, WorkspaceIdentityConflictError } from '#filesystem/workspace-errors.js';
 import { probeHomeOpfs } from '#filesystem/home-opfs-probe.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
@@ -279,9 +279,15 @@ async function acquireDb(): Promise<IDBDatabase> {
 
   openPromise ??= openHandleDbRaw();
 
-  cachedDb = await openPromise;
-  openPromise = undefined;
-  return cachedDb;
+  try {
+    cachedDb = await openPromise;
+    return cachedDb;
+  } catch (error) {
+    refCount--;
+    throw error;
+  } finally {
+    openPromise = undefined;
+  }
 }
 
 function releaseDb(): void {
@@ -348,9 +354,9 @@ async function readWorkspaceMarker(handle: FileSystemDirectoryHandle): Promise<W
  * folder may be read-only, and a workspace that cannot be marked is still a
  * usable workspace — it just loses eviction recovery.
  *
- * The marker's `workspaceId` is authoritative and never rewritten in place; a
- * differing id means the caller deliberately minted a new identity (copied
- * folder), which does get a fresh marker.
+ * The resolved store identity is written after collision checks. A live
+ * `isSameEntry` match may normalize a stale marker; a copied folder receives
+ * a fresh identity before this helper is called.
  */
 async function syncWorkspaceMarker(
   handle: FileSystemDirectoryHandle,
@@ -581,6 +587,19 @@ async function isSameStoredEntry(
   }
 }
 
+async function findSameEntryWorkspaceId(
+  handles: ReadonlyMap<string, FileSystemDirectoryHandle>,
+  handle: FileSystemDirectoryHandle,
+  excludedWorkspaceId: string,
+): Promise<string | undefined> {
+  const matches = await Promise.all(
+    [...handles].map(async ([workspaceId, stored]) =>
+      workspaceId !== excludedWorkspaceId && (await isSameStoredEntry(stored, handle)) ? workspaceId : undefined,
+    ),
+  );
+  return matches.find((workspaceId) => workspaceId !== undefined);
+}
+
 /**
  * Create a new workspace bound to the given handle. Identity resolves in three
  * steps: `isSameEntry` against stored handles, then the on-disk
@@ -634,17 +653,41 @@ async function createWorkspaceLocked(
             tx.objectStore(workspacesStoreName).put(refreshed);
             tx.objectStore(handlesStoreName).put(handle, workspace.workspaceId);
           });
-          await syncWorkspaceMarker(handle, marker, {
-            workspaceId: marker?.workspaceId ?? workspace.workspaceId,
-            slug,
-          });
+          await syncWorkspaceMarker(handle, marker, { workspaceId: workspace.workspaceId, slug });
           return { ...refreshed, minted: false };
         }
       }
       /* oxlint-enable eslint/no-await-in-loop -- End ordered handle identity checks. */
-      // Adopt the marker's identity unless it already names a live row — that
-      // means the user copied a marked folder, so the copy needs its own id.
-      const adopted = marker && !existing.some((w) => w.workspaceId === marker.workspaceId) ? marker : undefined;
+      const markedWorkspace = marker
+        ? existing.find((workspace) => workspace.workspaceId === marker.workspaceId)
+        : undefined;
+      if (markedWorkspace && (await readHandle(db, markedWorkspace.workspaceId)) === undefined) {
+        const reconnected: Workspace = {
+          ...markedWorkspace,
+          name: options?.name ?? markedWorkspace.name,
+          lastConnectedAt: Date.now(),
+          ...(storagePersisted === undefined ? {} : { storagePersisted }),
+        };
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction([workspacesStoreName, handlesStoreName], 'readwrite');
+          tx.objectStore(workspacesStoreName).put(reconnected);
+          tx.objectStore(handlesStoreName).put(handle, reconnected.workspaceId);
+          tx.addEventListener('complete', () => {
+            resolve();
+          });
+          tx.addEventListener('error', () => {
+            reject(tx.error ?? new Error('Failed to reconnect workspace'));
+          });
+          tx.addEventListener('abort', () => {
+            reject(tx.error ?? new Error('Workspace reconnect transaction aborted'));
+          });
+        });
+        await syncWorkspaceMarker(handle, marker, reconnected);
+        return { ...reconnected, minted: false };
+      }
+      // An unknown marker resurrects evicted profile state. A known marker with
+      // a different live handle is a copied folder and must receive a fresh id.
+      const adopted = marker && markedWorkspace === undefined ? marker : undefined;
       const workspaceId = adopted?.workspaceId ?? generatePrefixedId(idPrefix.workspace);
       const slug = allocateWorkspaceSlug(handle.name, existing);
       const workspace: Workspace = {
@@ -672,7 +715,7 @@ async function createWorkspaceLocked(
 
       await syncWorkspaceMarker(handle, marker, { workspaceId, slug });
 
-      return { ...workspace, minted: true };
+      return { ...workspace, minted: adopted === undefined };
     }),
   );
 }
@@ -755,6 +798,11 @@ export async function getWorkspace(workspaceId: string): Promise<WorkspaceEntry 
   });
 }
 
+/** Resolve workspace identity by id even when its directory handle is disconnected. */
+export async function getWorkspaceMetadata(workspaceId: string): Promise<Workspace | undefined> {
+  return withDb(async (db) => readWorkspace(db, workspaceId));
+}
+
 /** Rename a workspace. The id is immutable — only the human label changes. */
 export async function renameWorkspace(workspaceId: string, name: string): Promise<void> {
   return withProjectRootConfigurationMutation(async () =>
@@ -768,43 +816,84 @@ export async function renameWorkspace(workspaceId: string, name: string): Promis
   );
 }
 
-/**
- * Remove the workspace entirely (handle, metadata, and any cached
- * disk-usage info). Callers must guarantee no `ProjectFileSystemConfig`
- * references this workspace — verify via `listProjectsForWorkspace`
- * before calling.
- *
- * If this workspace is the remembered creation location, Home is selected in
- * the same transaction that removes the row and handle.
- */
-export async function forgetWorkspace(workspaceId: string): Promise<void> {
-  return withProjectRootConfigurationMutation(async () =>
+/** Remove only the retained handle, preserving workspace identity and every project binding. */
+export async function disconnectWorkspace(workspaceId: string): Promise<WorkspaceEntry | undefined> {
+  const disconnected = await withStorageWrite(async () =>
     withDb(async (db) => {
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction([workspacesStoreName, handlesStoreName, metaStoreName], 'readwrite');
+      // Backfill any pre-slug row before the atomic mutation returns it as a current Workspace.
+      await readAllWorkspaces(db);
+      return new Promise<WorkspaceEntry | undefined>((resolve, reject) => {
+        const tx = db.transaction([workspacesStoreName, handlesStoreName], 'readwrite');
+        const workspaceRequest = tx.objectStore(workspacesStoreName).get(workspaceId);
+        const handleRequest = tx.objectStore(handlesStoreName).get(workspaceId);
+        let disconnectedEntry: WorkspaceEntry | undefined;
+
+        handleRequest.addEventListener('success', () => {
+          const workspace = workspaceRequest.result as Workspace | undefined;
+          const handle = handleRequest.result as FileSystemDirectoryHandle | undefined;
+          if (!workspace || !handle) {
+            return;
+          }
+          disconnectedEntry = { workspace, handle };
+          tx.objectStore(handlesStoreName).delete(workspaceId);
+        });
         tx.addEventListener('complete', () => {
-          resolve();
+          resolve(disconnectedEntry);
         });
         tx.addEventListener('error', () => {
-          reject(tx.error ?? new Error('Failed to forget workspace'));
-        });
-        tx.objectStore(workspacesStoreName).delete(workspaceId);
-        tx.objectStore(handlesStoreName).delete(workspaceId);
-        const meta = tx.objectStore(metaStoreName);
-        const readPreference = meta.get(projectCreationLocationMetaKey);
-        readPreference.addEventListener('success', () => {
-          const stored = readPreference.result as Partial<ProjectCreationLocationMeta> | undefined;
-          const location = parseProjectCreationLocation(stored?.location);
-          if (location?.kind === 'workspace' && location.workspaceId === workspaceId) {
-            meta.put({
-              key: projectCreationLocationMetaKey,
-              location: homeProjectCreationLocation,
-            } satisfies ProjectCreationLocationMeta);
-          }
+          reject(tx.error ?? new Error('Failed to disconnect workspace'));
         });
       });
     }),
   );
+  if (disconnected) {
+    publishProjectRootConfigurationChange();
+  }
+  return disconnected;
+}
+
+/** Restore an undo handle only while the workspace still exists and remains disconnected. */
+export async function restoreWorkspaceHandle(workspaceId: string, handle: FileSystemDirectoryHandle): Promise<boolean> {
+  const restored = await withWorkspaceMintLock(async () => {
+    const marker = await readWorkspaceMarker(handle);
+    return withStorageWrite(async () =>
+      withDb(async (db) => {
+        const handles = await readAllHandles(db);
+        if (marker && marker.workspaceId !== workspaceId) {
+          return false;
+        }
+        if (await findSameEntryWorkspaceId(handles, handle, workspaceId)) {
+          return false;
+        }
+        return new Promise<boolean>((resolve, reject) => {
+          const tx = db.transaction([workspacesStoreName, handlesStoreName], 'readwrite');
+          const workspaceRequest = tx.objectStore(workspacesStoreName).get(workspaceId);
+          const handleRequest = tx.objectStore(handlesStoreName).get(workspaceId);
+          let didRestore = false;
+
+          handleRequest.addEventListener('success', () => {
+            const workspace = workspaceRequest.result as Workspace | undefined;
+            if (!workspace || handleRequest.result !== undefined) {
+              return;
+            }
+            didRestore = true;
+            tx.objectStore(workspacesStoreName).put({ ...workspace, lastConnectedAt: Date.now() } satisfies Workspace);
+            tx.objectStore(handlesStoreName).put(handle, workspaceId);
+          });
+          tx.addEventListener('complete', () => {
+            resolve(didRestore);
+          });
+          tx.addEventListener('error', () => {
+            reject(tx.error ?? new Error('Failed to restore workspace handle'));
+          });
+        });
+      }),
+    );
+  });
+  if (restored) {
+    publishProjectRootConfigurationChange();
+  }
+  return restored;
 }
 
 /**
@@ -814,29 +903,52 @@ export async function forgetWorkspace(workspaceId: string): Promise<void> {
  * it remains valid.
  */
 export async function updateWorkspaceHandle(workspaceId: string, handle: FileSystemDirectoryHandle): Promise<void> {
-  return withProjectRootConfigurationMutation(async () =>
-    withDb(async (db) => {
-      const existing = await readWorkspace(db, workspaceId);
-      if (!existing) {
-        throw new Error(`Cannot update handle on unknown workspace: ${workspaceId}`);
-      }
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction([workspacesStoreName, handlesStoreName], 'readwrite');
-        tx.addEventListener('complete', () => {
-          resolve();
+  return withWorkspaceMintLock(async () => {
+    const marker = await readWorkspaceMarker(handle);
+    return withProjectRootConfigurationMutation(async () =>
+      withDb(async (db) => {
+        const existing = await readWorkspace(db, workspaceId);
+        if (!existing) {
+          throw new WorkspaceIdentityConflictError('stale-target', { workspaceId });
+        }
+        const handles = await readAllHandles(db);
+        const current = handles.get(workspaceId);
+        const sameTarget = await isSameStoredEntry(current, handle);
+        if (current && !sameTarget) {
+          throw new WorkspaceIdentityConflictError('stale-target', { workspaceId });
+        }
+        const conflictingWorkspaceId = await findSameEntryWorkspaceId(handles, handle, workspaceId);
+        if (conflictingWorkspaceId) {
+          throw new WorkspaceIdentityConflictError('handle-owned-by-another-workspace', {
+            workspaceId,
+            conflictingWorkspaceId,
+          });
+        }
+        if (!sameTarget && marker && marker.workspaceId !== workspaceId) {
+          throw new WorkspaceIdentityConflictError('marker-owned-by-another-workspace', {
+            workspaceId,
+            conflictingWorkspaceId: marker.workspaceId,
+          });
+        }
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction([workspacesStoreName, handlesStoreName], 'readwrite');
+          tx.addEventListener('complete', () => {
+            resolve();
+          });
+          tx.addEventListener('error', () => {
+            reject(tx.error ?? new Error('Failed to update workspace handle'));
+          });
+          const nextWorkspace: Workspace = {
+            ...existing,
+            lastConnectedAt: Date.now(),
+          };
+          tx.objectStore(workspacesStoreName).put(nextWorkspace);
+          tx.objectStore(handlesStoreName).put(handle, workspaceId);
         });
-        tx.addEventListener('error', () => {
-          reject(tx.error ?? new Error('Failed to update workspace handle'));
-        });
-        const nextWorkspace: Workspace = {
-          ...existing,
-          lastConnectedAt: Date.now(),
-        };
-        tx.objectStore(workspacesStoreName).put(nextWorkspace);
-        tx.objectStore(handlesStoreName).put(handle, workspaceId);
-      });
-    }),
-  );
+        await syncWorkspaceMarker(handle, marker, existing);
+      }),
+    );
+  });
 }
 
 // ============ Permissions (per-handle) ============
@@ -871,17 +983,61 @@ export async function requestHandlePermission(handle: FileSystemDirectoryHandle)
  * discriminated union enforces this at the type level).
  */
 export async function setProjectFileSystemConfig(config: ProjectFileSystemConfig): Promise<void> {
+  return applyProjectFileSystemConfigChanges({ upserts: [config], deletes: [] });
+}
+
+export type ProjectFileSystemConfigChanges = {
+  readonly upserts: readonly ProjectFileSystemConfig[];
+  readonly deletes: readonly string[];
+};
+
+/** Validate and commit one complete route-generation diff in a single transaction. */
+export async function applyProjectFileSystemConfigChanges(changes: ProjectFileSystemConfigChanges): Promise<void> {
+  const upsertIds = new Set<string>();
+  for (const config of changes.upserts) {
+    if (!isFlatProjectBasePath(config.providerBasePath)) {
+      throw new TypeError(
+        `Project provider path must be a canonical root-relative directory: ${config.providerBasePath}`,
+      );
+    }
+    if (upsertIds.has(config.projectId)) {
+      throw new TypeError(`Duplicate project filesystem config upsert: ${config.projectId}`);
+    }
+    upsertIds.add(config.projectId);
+  }
+  const deleteIds = new Set(changes.deletes);
+  if (deleteIds.size !== changes.deletes.length) {
+    throw new TypeError('Duplicate project filesystem config delete');
+  }
+  for (const projectId of upsertIds) {
+    if (deleteIds.has(projectId)) {
+      throw new TypeError(`Project filesystem config cannot be upserted and deleted together: ${projectId}`);
+    }
+  }
+  if (changes.upserts.length === 0 && changes.deletes.length === 0) {
+    return;
+  }
+
   return withProjectRootConfigurationMutation(async () =>
     withDb(
       async (db) =>
         new Promise<void>((resolve, reject) => {
           const tx = db.transaction(configsStoreName, 'readwrite');
-          const request = tx.objectStore(configsStoreName).put(config);
-          request.addEventListener('success', () => {
+          const store = tx.objectStore(configsStoreName);
+          for (const projectId of changes.deletes) {
+            store.delete(projectId);
+          }
+          for (const config of changes.upserts) {
+            store.put(config);
+          }
+          tx.addEventListener('complete', () => {
             resolve();
           });
-          request.addEventListener('error', () => {
-            reject(request.error ?? new Error('Failed to store project filesystem config'));
+          tx.addEventListener('error', () => {
+            reject(tx.error ?? new Error('Failed to apply project filesystem config changes'));
+          });
+          tx.addEventListener('abort', () => {
+            reject(tx.error ?? new Error('Applying project filesystem config changes was aborted'));
           });
         }),
     ),
@@ -911,21 +1067,7 @@ export async function getProjectFileSystemConfig(projectId: string): Promise<Pro
 
 /** Remove the filesystem config for a deleted project. */
 export async function deleteProjectFileSystemConfig(projectId: string): Promise<void> {
-  return withProjectRootConfigurationMutation(async () =>
-    withDb(
-      async (db) =>
-        new Promise<void>((resolve, reject) => {
-          const tx = db.transaction(configsStoreName, 'readwrite');
-          const request = tx.objectStore(configsStoreName).delete(projectId);
-          request.addEventListener('success', () => {
-            resolve();
-          });
-          request.addEventListener('error', () => {
-            reject(request.error ?? new Error('Failed to delete project filesystem config'));
-          });
-        }),
-    ),
-  );
+  return applyProjectFileSystemConfigChanges({ upserts: [], deletes: [projectId] });
 }
 
 /**
@@ -934,19 +1076,235 @@ export async function deleteProjectFileSystemConfig(projectId: string): Promise<
  * how many projects reference each workspace.
  */
 export async function getAllProjectFileSystemConfigs(): Promise<ProjectFileSystemConfig[]> {
-  return withDb(
-    async (db) =>
-      new Promise<ProjectFileSystemConfig[]>((resolve, reject) => {
-        const tx = db.transaction(configsStoreName, 'readonly');
-        const request = tx.objectStore(configsStoreName).getAll();
-        request.addEventListener('success', () => {
-          resolve((request.result as unknown[]).filter((value) => isProjectFileSystemConfig(value)));
-        });
-        request.addEventListener('error', () => {
-          reject(request.error ?? new Error('Failed to retrieve all project filesystem configs'));
-        });
+  return withDb(readAllProjectFileSystemConfigs);
+}
+
+export type WorkspaceBindingRepair = {
+  readonly projectId: string;
+  readonly sourceWorkspaceId: string;
+  readonly providerBasePath: string;
+};
+
+export type WorkspaceBindingRepairSkipReason =
+  | 'canonical-disconnected'
+  | 'source-missing'
+  | 'source-connected'
+  | 'config-changed';
+
+export type WorkspaceBindingRepairResult = {
+  readonly repairedProjectCount: number;
+  readonly removedWorkspaceIds: readonly string[];
+  readonly skipped: ReadonlyArray<{ readonly projectId: string; readonly reason: WorkspaceBindingRepairSkipReason }>;
+};
+
+async function readRequest<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    request.addEventListener('success', () => {
+      resolve(request.result);
+    });
+    request.addEventListener('error', () => {
+      reject(request.error ?? new Error('Workspace binding repair read failed'));
+    });
+  });
+}
+
+async function waitForTransaction(tx: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    tx.addEventListener('complete', () => {
+      resolve();
+    });
+    tx.addEventListener('abort', () => {
+      reject(tx.error ?? new Error('Workspace binding repair was aborted'));
+    });
+    tx.addEventListener('error', () => {
+      reject(tx.error ?? new Error('Workspace binding repair failed'));
+    });
+  });
+}
+
+function abortActiveTransaction(tx: IDBTransaction): void {
+  try {
+    tx.abort();
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === 'InvalidStateError')) {
+      throw error;
+    }
+  }
+}
+
+function workspaceBindingRepairError(error: unknown): Error {
+  return error instanceof Error ? error : new Error('Workspace binding repair failed', { cause: error });
+}
+
+/** Atomically re-point verified stale workspace bindings; project files are never touched. */
+export async function repairWorkspaceBindings(options: {
+  readonly canonicalWorkspaceId: string;
+  readonly repairs: readonly WorkspaceBindingRepair[];
+}): Promise<WorkspaceBindingRepairResult> {
+  if (options.repairs.length === 0) {
+    return { repairedProjectCount: 0, removedWorkspaceIds: [], skipped: [] };
+  }
+  const projectIds = new Set(options.repairs.map(({ projectId }) => projectId));
+  if (projectIds.size !== options.repairs.length) {
+    throw new TypeError('Workspace binding repair contains a duplicate project id');
+  }
+
+  const result = await withWorkspaceMintLock(async () =>
+    withStorageWrite(async () =>
+      withDb(async (db) => {
+        const tx = db.transaction(
+          [configsStoreName, workspacesStoreName, handlesStoreName, metaStoreName],
+          'readwrite',
+        );
+        const completion = waitForTransaction(tx);
+        const configsStore = tx.objectStore(configsStoreName);
+        const workspacesStore = tx.objectStore(workspacesStoreName);
+        const handlesStore = tx.objectStore(handlesStoreName);
+        const metaStore = tx.objectStore(metaStoreName);
+
+        try {
+          const [rawConfigs, workspaces, rawHandleKeys, rawPreference] = await Promise.all([
+            readRequest(configsStore.getAll() as IDBRequest<unknown[]>),
+            readRequest(workspacesStore.getAll() as IDBRequest<Workspace[]>),
+            readRequest(handlesStore.getAllKeys()),
+            readRequest(
+              metaStore.get(projectCreationLocationMetaKey) as IDBRequest<
+                Partial<ProjectCreationLocationMeta> | undefined
+              >,
+            ),
+          ]);
+          const configs = rawConfigs.filter((config) => isProjectFileSystemConfig(config));
+          const handleIds = new Set(rawHandleKeys.filter((key): key is string => typeof key === 'string'));
+          const skipped: Array<{ projectId: string; reason: WorkspaceBindingRepairSkipReason }> = [];
+          if (
+            !workspaces.some(({ workspaceId }) => workspaceId === options.canonicalWorkspaceId) ||
+            !handleIds.has(options.canonicalWorkspaceId)
+          ) {
+            skipped.push(
+              ...options.repairs.map(
+                ({ projectId }): { projectId: string; reason: WorkspaceBindingRepairSkipReason } => ({
+                  projectId,
+                  reason: 'canonical-disconnected',
+                }),
+              ),
+            );
+          } else {
+            const configByProjectId = new Map(configs.map((config) => [config.projectId, config] as const));
+            for (const repair of options.repairs) {
+              const sourceExists = workspaces.some(({ workspaceId }) => workspaceId === repair.sourceWorkspaceId);
+              const current = configByProjectId.get(repair.projectId);
+              let reason: WorkspaceBindingRepairSkipReason | undefined;
+              if (!sourceExists) {
+                reason = 'source-missing';
+              } else if (handleIds.has(repair.sourceWorkspaceId)) {
+                reason = 'source-connected';
+              } else if (
+                current?.backend !== 'webaccess' ||
+                current.workspaceId !== repair.sourceWorkspaceId ||
+                current.providerBasePath !== repair.providerBasePath
+              ) {
+                reason = 'config-changed';
+              }
+              if (reason) {
+                skipped.push({ projectId: repair.projectId, reason });
+              }
+            }
+          }
+          if (skipped.length > 0) {
+            await completion;
+            return { repairedProjectCount: 0, removedWorkspaceIds: [], skipped };
+          }
+
+          for (const repair of options.repairs) {
+            configsStore.put({
+              projectId: repair.projectId,
+              backend: 'webaccess',
+              workspaceId: options.canonicalWorkspaceId,
+              providerBasePath: repair.providerBasePath,
+            } satisfies ProjectFileSystemConfig);
+          }
+          const repairedIds = new Set(options.repairs.map(({ projectId }) => projectId));
+          const sourceIds = new Set(options.repairs.map(({ sourceWorkspaceId }) => sourceWorkspaceId));
+          const removedWorkspaceIds = [...sourceIds].filter(
+            (sourceWorkspaceId) =>
+              !configs.some(
+                (config) =>
+                  config.backend === 'webaccess' &&
+                  config.workspaceId === sourceWorkspaceId &&
+                  !repairedIds.has(config.projectId),
+              ),
+          );
+          for (const sourceWorkspaceId of removedWorkspaceIds) {
+            workspacesStore.delete(sourceWorkspaceId);
+            handlesStore.delete(sourceWorkspaceId);
+          }
+          if (
+            rawPreference?.location?.kind === 'workspace' &&
+            removedWorkspaceIds.includes(rawPreference.location.workspaceId)
+          ) {
+            metaStore.put({
+              key: projectCreationLocationMetaKey,
+              location: { kind: 'workspace', workspaceId: options.canonicalWorkspaceId },
+            } satisfies ProjectCreationLocationMeta);
+          }
+          const result: WorkspaceBindingRepairResult = {
+            repairedProjectCount: options.repairs.length,
+            removedWorkspaceIds,
+            skipped: [],
+          };
+          await completion;
+          return result;
+        } catch (error) {
+          abortActiveTransaction(tx);
+          try {
+            await completion;
+          } catch {
+            // Preserve the original failure below; completion only confirms rollback.
+          }
+          throw workspaceBindingRepairError(error);
+        }
       }),
+    ),
   );
+  if (result.repairedProjectCount > 0) {
+    publishProjectRootConfigurationChange();
+  }
+  return result;
+}
+
+async function readAllProjectFileSystemConfigs(db: IDBDatabase): Promise<ProjectFileSystemConfig[]> {
+  return new Promise<ProjectFileSystemConfig[]>((resolve, reject) => {
+    const tx = db.transaction(configsStoreName, 'readonly');
+    const request = tx.objectStore(configsStoreName).getAll();
+    request.addEventListener('success', () => {
+      resolve((request.result as unknown[]).filter((value) => isProjectFileSystemConfig(value)));
+    });
+    request.addEventListener('error', () => {
+      reject(request.error ?? new Error('Failed to retrieve all project filesystem configs'));
+    });
+  });
+}
+
+async function readAllHandles(db: IDBDatabase): Promise<ReadonlyMap<string, FileSystemDirectoryHandle>> {
+  return new Promise((resolve, reject) => {
+    const handles = new Map<string, FileSystemDirectoryHandle>();
+    const tx = db.transaction(handlesStoreName, 'readonly');
+    const request = tx.objectStore(handlesStoreName).openCursor();
+    request.addEventListener('success', () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(handles);
+        return;
+      }
+      if (typeof cursor.key === 'string') {
+        handles.set(cursor.key, cursor.value as FileSystemDirectoryHandle);
+      }
+      cursor.continue();
+    });
+    request.addEventListener('error', () => {
+      reject(request.error ?? new Error('Failed to retrieve workspace handles'));
+    });
+  });
 }
 
 /**
@@ -975,7 +1333,7 @@ let persistRequestedThisSession = false;
 /** Why a workspace was left out of the route topology. */
 export type WorkspaceRootSkip = {
   readonly workspaceId: string;
-  readonly reason: 'missing' | 'permission';
+  readonly reason: 'disconnected' | 'permission';
 };
 
 // The configuration snapshot is rebuilt on every route change, so an
@@ -992,11 +1350,11 @@ function reportWorkspaceRootSkip(
     return;
   }
   warnedSkippedWorkspaces.add(workspaceId);
-  console.warn(
-    `[HandleStore] Skipped workspace ${name ?? '(unknown)'} (${workspaceId}): ${
-      reason === 'missing' ? 'missing-handle' : 'permission-state'
-    }`,
-  );
+  if (reason === 'disconnected') {
+    onSkip?.({ workspaceId, reason });
+    return;
+  }
+  console.warn(`[HandleStore] Skipped workspace ${name ?? '(unknown)'} (${workspaceId}): permission-state`);
   onSkip?.({ workspaceId, reason });
 }
 
@@ -1012,57 +1370,46 @@ export async function getProjectRootConfigs(
     persistRequestedThisSession = true;
     void ensurePersistentStorage();
   }
-  const configs = await getAllProjectFileSystemConfigs();
-  const projects: ProjectRootConfig[] = [];
-  /* oxlint-disable eslint/no-await-in-loop -- The configuration snapshot performs bounded permission checks in stable registry order. */
-  for (const config of configs) {
-    // A row written before the flat-layout cutover still points at
-    // `/projects/<dir>`, which `configureProjectRoots` rejects for the whole
-    // topology. Skip it: discovery re-mints the row from disk on the next pass,
-    // and the orphan sweep clears it when the directory is really gone.
-    if (!isFlatProjectBasePath(config.providerBasePath)) {
-      continue;
-    }
-    if (config.backend !== 'webaccess') {
-      projects.push(config);
-      continue;
-    }
-    const entry = await getWorkspace(config.workspaceId);
-    if (!entry) {
-      reportWorkspaceRootSkip({ workspaceId: config.workspaceId, reason: 'missing' }, onRootSkipped);
-      continue;
-    }
-    if ((await checkHandlePermission(entry.handle)) !== 'granted') {
-      reportWorkspaceRootSkip(
-        { workspaceId: config.workspaceId, name: entry.workspace.name, reason: 'permission' },
-        onRootSkipped,
-      );
-      continue;
-    }
-    projects.push({
-      ...config,
-      directoryHandle: entry.handle,
-    });
-  }
-
-  const roots: StorageRootConfig[] = [{ backend: await getHomeStorageBackend() }];
-  for (const workspace of await listWorkspaces()) {
-    const entry = await getWorkspace(workspace.workspaceId);
-    if (!entry) {
-      reportWorkspaceRootSkip({ ...workspace, reason: 'missing' }, onRootSkipped);
-      continue;
-    }
-    if ((await checkHandlePermission(entry.handle)) !== 'granted') {
-      reportWorkspaceRootSkip({ ...workspace, reason: 'permission' }, onRootSkipped);
-      continue;
-    }
-    roots.push({
-      backend: 'webaccess',
-      directoryHandle: entry.handle,
-      workspaceId: workspace.workspaceId,
-    });
-  }
-  /* oxlint-enable eslint/no-await-in-loop -- End bounded ordered permission checks. */
+  const { configs, handles, workspaces } = await withDb(async (db) => {
+    const [configs, handles, workspaces] = await Promise.all([
+      readAllProjectFileSystemConfigs(db),
+      readAllHandles(db),
+      readAllWorkspaces(db),
+    ]);
+    return { configs, handles, workspaces };
+  });
+  const entries = await Promise.all(
+    workspaces.map(async (workspace) => {
+      const handle = handles.get(workspace.workspaceId);
+      if (!handle) {
+        reportWorkspaceRootSkip({ ...workspace, reason: 'disconnected' }, onRootSkipped);
+        return undefined;
+      }
+      if ((await checkHandlePermission(handle)) !== 'granted') {
+        reportWorkspaceRootSkip({ ...workspace, reason: 'permission' }, onRootSkipped);
+        return undefined;
+      }
+      return { workspace, handle };
+    }),
+  );
+  const connected = new Map(
+    entries
+      .filter((entry): entry is WorkspaceEntry => entry !== undefined)
+      .map((entry) => [entry.workspace.workspaceId, entry] as const),
+  );
+  const projects: ProjectRootConfig[] = configs.filter(
+    (config) => config.backend !== 'webaccess' || connected.has(config.workspaceId),
+  );
+  const roots: StorageRootConfig[] = [
+    { backend: await getHomeStorageBackend() },
+    ...[...connected.values()].map(
+      ({ workspace, handle }): StorageRootConfig => ({
+        backend: 'webaccess',
+        directoryHandle: handle,
+        workspaceId: workspace.workspaceId,
+      }),
+    ),
+  ];
   return { projects, roots };
 }
 

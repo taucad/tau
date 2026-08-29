@@ -69,6 +69,7 @@ import { NewProjectChatComposer } from '#components/chat/new-project-chat-compos
 import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import type { WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
@@ -91,10 +92,12 @@ export function ProjectLibrary(): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   const [showDeleted, setShowDeleted] = useState(false);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<ProjectListItem | undefined>();
+  const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
   const {
     projects,
     conflicts,
     recoveries,
+    workspaceBindingRepairs,
     error: listingError,
     retry,
     deleteProject,
@@ -183,6 +186,27 @@ export function ProjectLibrary(): React.JSX.Element {
     }
   }, [deleteProjectPermanently, permanentDeleteTarget]);
 
+  const confirmWorkspaceBindingRepair = useCallback(async (): Promise<void> => {
+    const target = repairTarget;
+    if (!target) {
+      return;
+    }
+    try {
+      const result = await projectManager.repairWorkspaceBindings(target.canonicalWorkspaceId);
+      if (result.repairedProjectCount > 0) {
+        toast.success(
+          `Repaired ${result.repairedProjectCount} project ${result.repairedProjectCount === 1 ? 'link' : 'links'}`,
+        );
+      } else {
+        toast.info('Project links changed before repair. Nothing was updated.');
+      }
+      setRepairTarget(undefined);
+    } catch (error) {
+      toast.error('Could not repair project links');
+      console.error('Error repairing workspace bindings:', error);
+    }
+  }, [projectManager, repairTarget]);
+
   const handleDuplicate = useCallback(
     async (project: ProjectListItem) => {
       try {
@@ -252,6 +276,35 @@ export function ProjectLibrary(): React.JSX.Element {
           <NavLink to='/'>{({ isPending }) => (isPending ? <Loader /> : 'New Project')}</NavLink>
         </Button>
       </div>
+
+      {workspaceBindingRepairs.length > 0 && (
+        <div className='mb-6 space-y-2' aria-label='Workspace link repair'>
+          {workspaceBindingRepairs.map((repair) => (
+            <div
+              key={repair.canonicalWorkspaceId}
+              className='border-amber-500/40 flex items-center gap-3 rounded-md border p-3'
+            >
+              <AlertCircle className='text-amber-600 size-4 shrink-0' />
+              <div className='min-w-0 flex-1'>
+                <div className='font-medium'>
+                  {repair.projectCount} {repair.projectCount === 1 ? 'project is' : 'projects are'} linked to previous
+                  workspace identities.
+                </div>
+                <div className='text-sm text-muted-foreground'>Repair their links to “{repair.workspaceName}”.</div>
+              </div>
+              <Button
+                size='sm'
+                variant='outline'
+                onClick={() => {
+                  setRepairTarget(repair);
+                }}
+              >
+                Repair links
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {conflicts.length > 0 && (
         <div className='mb-6 space-y-2' aria-label='Project conflicts'>
@@ -391,6 +444,29 @@ export function ProjectLibrary(): React.JSX.Element {
       ) : (
         <UnifiedProjectList projects={projects} viewMode={viewMode} actions={actions} />
       )}
+      <AlertDialog
+        open={repairTarget !== undefined}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRepairTarget(undefined);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Repair project links to “{repairTarget?.workspaceName}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tau updates browser routing metadata only. It will not move or modify folder contents.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmWorkspaceBindingRepair()}>
+              Repair {repairTarget?.projectCount} {repairTarget?.projectCount === 1 ? 'project' : 'projects'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog
         open={permanentDeleteTarget !== undefined}
         onOpenChange={(open) => {

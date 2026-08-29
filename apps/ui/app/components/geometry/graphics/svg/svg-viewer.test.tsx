@@ -35,7 +35,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
 }));
 
 vi.mock('#hooks/use-theme.js', () => ({
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the production Theme enum shape.
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the production Theme values.
   Theme: { LIGHT: 'light' },
   useTheme: () => ({ theme: 'light' }),
 }));

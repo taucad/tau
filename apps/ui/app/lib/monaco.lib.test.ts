@@ -80,7 +80,7 @@ describe('configureMonaco', () => {
     mockMeasure.mockClear();
   });
 
-  it('should emit performance marks when creating TS worker', async () => {
+  it('should configure workers and all four GitHub themes', async () => {
     const { configureMonaco } = await import('#lib/monaco.lib.client.js');
 
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Monaco global
@@ -105,5 +105,16 @@ describe('configureMonaco', () => {
 
     expect(mockMark).toHaveBeenCalledWith('ts-worker:create');
     expect(mockMeasure).toHaveBeenCalledWith('ts-worker:cold-start', 'ts-worker:create');
+
+    const monaco = await import('monaco-editor');
+    const definedThemes = vi.mocked(monaco.editor.defineTheme).mock.calls;
+    expect(definedThemes.map(([themeId]) => themeId)).toEqual([
+      'github-dark',
+      'github-light',
+      'github-dark-high-contrast',
+      'github-light-high-contrast',
+    ]);
+    expect(definedThemes.find(([themeId]) => themeId === 'github-dark-high-contrast')?.[1].base).toBe('hc-black');
+    expect(definedThemes.find(([themeId]) => themeId === 'github-light-high-contrast')?.[1].base).toBe('hc-light');
   });
 });

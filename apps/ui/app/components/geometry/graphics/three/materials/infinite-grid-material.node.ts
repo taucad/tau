@@ -222,6 +222,10 @@ export function createInfiniteGridNodeMaterial(
     if (overrides.color !== undefined) {
       uColor.value = overrides.color;
     }
+
+    if (overrides.lineOpacity !== undefined) {
+      uLineOpacity.value = overrides.lineOpacity;
+    }
   };
 
   return { material, applyVisualOverrides };

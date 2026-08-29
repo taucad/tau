@@ -230,7 +230,7 @@ export function DiffViewer({
   language,
   className,
 }: DiffViewerProps): React.JSX.Element {
-  const { theme } = useTheme();
+  const { theme, isHighContrast } = useTheme();
   const [highlighter, setHighlighter] = useState<HighlighterCore | undefined>();
 
   useEffect(() => {
@@ -260,7 +260,7 @@ export function DiffViewer({
       const sourceText = segment.lines.map((line) => line.content).join('\n');
       const html = highlighter.codeToHtml(sourceText, {
         lang: resolvedLanguage.shikiLanguage,
-        theme: `github-${theme}`,
+        theme: `github-${theme}${isHighContrast ? '-high-contrast' : ''}`,
         transformers: [buildDiffLineTransformer(segment.lines)],
       });
 
@@ -292,7 +292,7 @@ export function DiffViewer({
         />
       );
     });
-  }, [segments, resolvedLanguage.shikiLanguage, theme, highlighter]);
+  }, [segments, resolvedLanguage.shikiLanguage, theme, isHighContrast, highlighter]);
 
   // Outer container w-max min-w-full ensures all segments extend to longest line across all groups
   return (

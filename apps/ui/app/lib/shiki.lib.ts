@@ -24,7 +24,12 @@ export const getHighlighter = async (): Promise<HighlighterCore> => {
     const { createJavaScriptRawEngine } = await import('shiki/engine/javascript');
 
     return createHighlighterCore({
-      themes: [import('@shikijs/themes/github-light'), import('@shikijs/themes/github-dark')],
+      themes: [
+        import('@shikijs/themes/github-light'),
+        import('@shikijs/themes/github-dark'),
+        import('@shikijs/themes/github-light-high-contrast'),
+        import('@shikijs/themes/github-dark-high-contrast'),
+      ],
       langs: runtimeShikiLanguageLoaders,
       engine: createJavaScriptRawEngine(),
     });

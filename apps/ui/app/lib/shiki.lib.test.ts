@@ -23,4 +23,17 @@ describe('shiki.lib', () => {
       expect(loadedLanguages).toContain(language);
     }
   });
+
+  it('should load standard and high-contrast GitHub themes', async () => {
+    const highlighter = await getHighlighter();
+
+    expect(highlighter.getLoadedThemes()).toEqual(
+      expect.arrayContaining([
+        'github-light',
+        'github-dark',
+        'github-light-high-contrast',
+        'github-dark-high-contrast',
+      ]),
+    );
+  });
 });

@@ -110,10 +110,17 @@ const monacoOverlayRestoreStyles = [
 await configureMonaco();
 
 export function CodeEditor({ className, options: optionsFromProps, ...rest }: CodeEditorProperties): React.JSX.Element {
-  const { theme } = useTheme();
+  const { theme, isHighContrast } = useTheme();
   const [areInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
   const completionRef = useRef<CompletionRegistration | undefined>(null);
   const isMobile = useIsMobile();
+  const monacoBaseTheme = cn(
+    theme === Theme.LIGHT && !isHighContrast && 'vs',
+    theme === Theme.DARK && !isHighContrast && 'vs-dark',
+    theme === Theme.LIGHT && isHighContrast && 'hc-light',
+    theme === Theme.DARK && isHighContrast && 'hc-black',
+  );
+  const monacoTheme = `github-${theme}${isHighContrast ? '-high-contrast' : ''}`;
 
   // Sync the shared overflow widgets container with the current theme and
   // styling overrides. This container lives on document.body (outside the
@@ -122,14 +129,14 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
   useEffect(() => {
     overflowWidgetsDomNode.className = cn(
       'monaco-editor',
-      theme === Theme.DARK ? 'vs-dark' : 'vs',
+      monacoBaseTheme,
       // Override Monaco's default SF Mono/system sans-serif with app fonts
       '![--monaco-monospace-font:var(--font-mono)]',
       '![font-family:var(--font-sans)]',
       ...monacoScrollbarStyles,
       ...monacoOverlayRestoreStyles,
     );
-  }, [theme]);
+  }, [monacoBaseTheme]);
 
   const handleMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
     completionRef.current = registerCompletions(editor, monaco);
@@ -285,7 +292,7 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
     <Editor
       keepCurrentModel
       className={classNames}
-      theme={theme === Theme.DARK ? 'github-dark' : 'github-light'}
+      theme={monacoTheme}
       wrapperProps={{
         className: 'editor-container',
         style: { height: '100%' },

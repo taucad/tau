@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { AlertCircle, Check, ChevronDown, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, Circle, Contrast, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
 import { Theme, useTheme, themeOptions } from '#hooks/use-theme.js';
@@ -40,6 +40,14 @@ function getThemeIcon(themeId: ThemeWithSystem): React.JSX.Element {
 
     case Theme.DARK: {
       return <Moon className='size-4' />;
+    }
+
+    case Theme.BLACK: {
+      return <Circle className='size-4 fill-black' />;
+    }
+
+    case Theme.HIGH_CONTRAST: {
+      return <Contrast className='size-4' />;
     }
 
     default: {

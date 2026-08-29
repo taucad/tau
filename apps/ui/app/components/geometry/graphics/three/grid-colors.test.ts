@@ -13,13 +13,22 @@ import {
   gltfEdgeColorDarkMode,
   gltfEdgeColorLightMode,
   infiniteGridColorDarkMode,
+  infiniteGridColorHighContrastDarkMode,
+  infiniteGridColorHighContrastLightMode,
   infiniteGridColorLightMode,
+  infiniteGridOpacityHighContrast,
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 
 describe('Grid theme colors', () => {
   it('uses linear-blend tuned tints visible on both WebGL gamma blend and WebGPU linear blend', () => {
     expect(infiniteGridColorLightMode).toBe(0x73_73_73);
     expect(infiniteGridColorDarkMode).toBe(0x55_55_55);
+  });
+
+  it('uses maximum neutral tints and stronger opacity in high-contrast mode', () => {
+    expect(infiniteGridColorHighContrastLightMode).toBe(0x00_00_00);
+    expect(infiniteGridColorHighContrastDarkMode).toBe(0xff_ff_ff);
+    expect(infiniteGridOpacityHighContrast).toBe(0.7);
   });
 });
 

@@ -31,6 +31,8 @@ export default defineConfig({
       themes: {
         light: 'github-light',
         dark: 'github-dark',
+        'high-contrast-light': 'github-light-high-contrast',
+        'high-contrast-dark': 'github-dark-high-contrast',
       },
       defaultColor: false,
       inline: 'tailing-curly-colon',

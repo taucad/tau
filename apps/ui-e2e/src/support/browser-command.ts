@@ -165,6 +165,22 @@ export const uiEmulateColorScheme: BrowserCommand<
   await pageFor(sessionFor(commandContext), surface).emulateMedia({ colorScheme });
 };
 
+export const uiEmulateContrast: BrowserCommand<[contrast: 'more' | 'no-preference', surface?: TargetSurface]> = async (
+  commandContext,
+  contrast,
+  surface,
+) => {
+  await pageFor(sessionFor(commandContext), surface).emulateMedia({ contrast });
+};
+
+export const uiEmulateForcedColors: BrowserCommand<[forcedColors: 'active' | 'none', surface?: TargetSurface]> = async (
+  commandContext,
+  forcedColors,
+  surface,
+) => {
+  await pageFor(sessionFor(commandContext), surface).emulateMedia({ forcedColors });
+};
+
 export const uiClickTarget: BrowserCommand<
   [selector: string, options?: TargetClickOptions, surface?: TargetSurface]
 > = async (commandContext, selector, options, surface) => {
@@ -439,6 +455,8 @@ export const uiBrowserCommands = {
   uiCookies,
   uiDragTarget,
   uiEmulateColorScheme,
+  uiEmulateContrast,
+  uiEmulateForcedColors,
   uiEvaluateTarget,
   uiEvaluateTargetLocator,
   uiFillTarget,

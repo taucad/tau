@@ -1,16 +1,24 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeAll } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeAll, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { DiffViewer, getDiffLineCount, getFirstChangedLine } from '#components/code/diff-viewer.js';
 import { getHighlighter } from '#lib/shiki.lib.js';
 import { supportedHighlightLanguages } from '#lib/code-language-resolution.js';
 
-vi.mock('#hooks/use-theme.js', () => ({
-  useTheme: (): { theme: string } => ({ theme: 'light' }),
-}));
+const useThemeMock = vi.hoisted(() => vi.fn(() => ({ theme: 'light', isHighContrast: false })));
+
+vi.mock('#hooks/use-theme.js', () => ({ useTheme: useThemeMock }));
 
 beforeAll(async () => {
   await getHighlighter();
+});
+
+beforeEach(() => {
+  useThemeMock.mockReturnValue({ theme: 'light', isHighContrast: false });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function expectDiffViewerShikiReady(container: HTMLElement): void {
@@ -20,6 +28,21 @@ function expectDiffViewerShikiReady(container: HTMLElement): void {
 }
 
 describe('DiffViewer', () => {
+  it('should use the high-contrast Shiki palette when contrast is enhanced', async () => {
+    useThemeMock.mockReturnValue({ theme: 'dark', isHighContrast: true });
+    const highlighter = await getHighlighter();
+    const codeToHtml = vi.spyOn(highlighter, 'codeToHtml');
+
+    render(<DiffViewer originalContent='before' modifiedContent='after' language='typescript' />);
+
+    await waitFor(() => {
+      expect(codeToHtml).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ theme: 'github-dark-high-contrast' }),
+      );
+    });
+  });
+
   describe('per-language diff highlighting (no [!code] leak)', () => {
     it.each(supportedHighlightLanguages)('language %s: diff classes, no notation leak', async (language) => {
       const originalContent = 'alpha\nbeta\ngamma';

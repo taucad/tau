@@ -294,6 +294,10 @@ export function createInfiniteGridGlMaterial(
     if (overrides.color !== undefined) {
       material.uniforms['uColor']!.value = overrides.color;
     }
+
+    if (overrides.lineOpacity !== undefined) {
+      material.uniforms['uLineOpacity']!.value = overrides.lineOpacity;
+    }
   };
 
   return { material, applyVisualOverrides };

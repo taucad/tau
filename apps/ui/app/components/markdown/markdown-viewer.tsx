@@ -6,6 +6,7 @@ import { memo, useMemo } from 'react';
 import { cn } from '#utils/ui.utils.js';
 import { MarkdownHyperlink } from '#components/markdown/markdown-hyperlink.js';
 import { MarkdownCode } from '#components/markdown/markdown-code.js';
+import { useTheme } from '#hooks/use-theme.js';
 
 type MarkdownViewerProps = {
   readonly children: string;
@@ -44,6 +45,10 @@ const tauRemarkPlugins: StreamdownProps['remarkPlugins'] = Object.values({
 
 const { sanitize: _sanitize, ...unsanitizedRehypePlugins } = defaultRehypePlugins;
 const tauRehypePlugins: StreamdownProps['rehypePlugins'] = Object.values(unsanitizedRehypePlugins);
+const shikiThemes = {
+  default: ['github-light', 'github-dark'],
+  highContrast: ['github-light-high-contrast', 'github-dark-high-contrast'],
+} satisfies Record<string, NonNullable<StreamdownProps['shikiTheme']>>;
 
 export const MarkdownViewer = memo(function ({
   children,
@@ -54,6 +59,7 @@ export const MarkdownViewer = memo(function ({
   className,
   streamdownClassName,
 }: MarkdownViewerProps): React.JSX.Element {
+  const { isHighContrast } = useTheme();
   const memoizedComponents = useMemo(
     () => ({
       ...defaultMarkdownComponents,
@@ -82,7 +88,7 @@ export const MarkdownViewer = memo(function ({
         controls={controls}
         remarkPlugins={tauRemarkPlugins}
         rehypePlugins={mergedRehypePlugins}
-        shikiTheme={['github-light', 'github-dark']}
+        shikiTheme={isHighContrast ? shikiThemes.highContrast : shikiThemes.default}
         className={streamdownClassName}
       >
         {children}

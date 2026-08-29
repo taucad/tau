@@ -18,7 +18,7 @@ const codeViewerClassName =
   'not-fumadocs-codeblock text-sm [&_pre]:m-0 [&_pre]:my-0 [&_pre]:bg-transparent! [&_pre]:p-0 [&_pre]:leading-[1.45]';
 
 export function CodeViewer({ text, language, className }: CodeViewerProps): React.JSX.Element {
-  const { theme } = useTheme();
+  const { theme, isHighContrast } = useTheme();
   const [highlighter, setHighlighter] = useState<HighlighterCore | undefined>();
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function CodeViewer({ text, language, className }: CodeViewerProps): Reac
     <HighlightedCode
       text={text}
       language={resolvedLanguage.shikiLanguage}
-      theme={theme}
+      theme={`github-${theme}${isHighContrast ? '-high-contrast' : ''}`}
       highlighter={highlighter}
       className={className}
     />
@@ -64,7 +64,7 @@ function HighlightedCode({
   highlighter: HighlighterCore;
   className?: ClassValue;
 }): React.JSX.Element {
-  const highlightedCode = useShikiHighlighter(text, language, `github-${theme}`, { delay: 150, highlighter });
+  const highlightedCode = useShikiHighlighter(text, language, theme, { delay: 150, highlighter });
 
   return <div className={cn(codeViewerClassName, className)}>{highlightedCode}</div>;
 }

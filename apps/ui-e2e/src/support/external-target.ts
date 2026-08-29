@@ -62,6 +62,8 @@ declare module 'vitest/browser' {
     uiCookies(): Promise<TargetCookie[]>;
     uiDragTarget(source: string, target: string, surface?: TargetSurface): Promise<void>;
     uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
+    uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
+    uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
     uiEvaluateTarget(source: string, argument?: unknown, surface?: TargetSurface): Promise<unknown>;
     uiEvaluateTargetLocator(
       selector: string,
@@ -112,6 +114,10 @@ export const emulateColorScheme = (
   colorScheme: 'dark' | 'light' | 'no-preference',
   surface?: TargetSurface,
 ): Promise<void> => server.commands.uiEmulateColorScheme(colorScheme, surface);
+export const emulateContrast = (contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void> =>
+  server.commands.uiEmulateContrast(contrast, surface);
+export const emulateForcedColors = (forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void> =>
+  server.commands.uiEmulateForcedColors(forcedColors, surface);
 export const click = (selector: TargetSelector, options?: TargetClickOptions, surface?: TargetSurface): Promise<void> =>
   server.commands.uiClickTarget(selectorFor(selector), options ?? {}, surface);
 export const fill = (selector: TargetSelector, value: string, surface?: TargetSurface): Promise<void> =>

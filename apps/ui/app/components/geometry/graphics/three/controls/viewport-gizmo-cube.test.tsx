@@ -29,8 +29,10 @@ const mocks = vi.hoisted(() => {
   const binding = { detach: vi.fn(), setCamera: vi.fn() };
   const graphicsActor = { send: vi.fn() };
   const interactionLock = { activeRef: { current: false } };
+  const themeState = { theme: 'light', isHighContrast: false };
   const gizmos: Array<{
     camera: unknown;
+    options: { edges: { color: number }; right: { color: number; labelColor: number } };
     add: ReturnType<typeof vi.fn>;
     cameraUpdate: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
@@ -62,6 +64,7 @@ const mocks = vi.hoisted(() => {
     },
     state,
     syncGizmoFov,
+    themeState,
   };
 });
 
@@ -99,8 +102,16 @@ vi.mock('three-viewport-gizmo', () => ({
     public readonly update = vi.fn();
     public readonly scale = { multiplyScalar: vi.fn() };
 
-    public constructor(camera: unknown, _renderer: unknown, _options: unknown) {
+    // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids constructor parameter properties.
+    public readonly options: { edges: { color: number }; right: { color: number; labelColor: number } };
+
+    public constructor(
+      camera: unknown,
+      _renderer: unknown,
+      options: { edges: { color: number }; right: { color: number; labelColor: number } },
+    ) {
       this.camera = camera;
+      this.options = options;
       mocks.gizmos.push(this);
     }
   },
@@ -128,9 +139,9 @@ vi.mock('#hooks/use-graphics.js', () => ({
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Fixed mock value, not rendered application styling.
 vi.mock('#hooks/use-color.js', () => ({ useColor: () => ({ serialized: { hex: '#00aaff' } }) }));
 vi.mock('#hooks/use-theme.js', () => ({
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the production Theme enum.
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the production Theme values.
   Theme: { DARK: 'dark' },
-  useTheme: () => ({ theme: 'light' }),
+  useTheme: () => mocks.themeState,
 }));
 vi.mock('#components/geometry/graphics/three/three-graphics-backend-context.js', () => ({
   useThreeGraphicsBackend: () => 'webgpu',
@@ -166,6 +177,8 @@ describe('ViewportGizmoCube camera retention', () => {
     mocks.setDriverSnapshot(createDriverSnapshot(60, 0));
     mocks.setRetarget(undefined);
     mocks.syncGizmoFov.mockClear();
+    mocks.themeState.theme = 'light';
+    mocks.themeState.isHighContrast = false;
   });
 
   it('retargets one gizmo and binding without recreation', () => {
@@ -206,5 +219,15 @@ describe('ViewportGizmoCube camera retention', () => {
       mocks.perspectiveCamera,
       mocks.orthographicCamera,
     ]);
+  });
+
+  it('uses stronger neutral faces and edges in high-contrast dark mode', () => {
+    mocks.themeState.theme = 'dark';
+    mocks.themeState.isHighContrast = true;
+
+    render(<ViewportGizmoCube />);
+
+    expect(mocks.gizmos[0]!.options.right).toMatchObject({ color: 0x66_66_66, labelColor: 0xff_ff_ff });
+    expect(mocks.gizmos[0]!.options.edges.color).toBe(0xff_ff_ff);
   });
 });

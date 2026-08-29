@@ -5,6 +5,11 @@ export type InfiniteGridVisualOverrides = {
   readonly smallSize?: number;
   readonly largeSize?: number;
   readonly color?: Color;
+  readonly lineOpacity?: number;
+  readonly gridDistance?: number;
+  readonly planeOffset?: number;
+  readonly smallPhase?: readonly [number, number];
+  readonly largePhase?: readonly [number, number];
 };
 
 /** Long-lived infinite grid material bundle (WebGL `ShaderMaterial` or WebGPU `MeshBasicNodeMaterial`). */

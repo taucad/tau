@@ -48,7 +48,7 @@ vi.mock('@react-three/fiber', () => ({
 }));
 
 vi.mock('#hooks/use-theme.js', () => ({
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the production Theme enum.
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Mirrors the production Theme values.
   Theme: { DARK: 'dark', LIGHT: 'light' },
   useTheme: () => ({ theme: 'light' }),
 }));

@@ -204,6 +204,227 @@
   --diagram-note-border: oklch(0.38 0.025 calc(var(--hue-primary) + 60deg));
 }
 
+.black,
+:root[class~='black'] {
+  /* Pure-black canvas with tightly stepped, achromatic surfaces. */
+  --l-base: 0;
+  --l-surface: 0.075;
+  --l-subtle: 0.16;
+  --l-element: 0.2;
+  --l-medium: 0.5;
+  --l-emphasized: 0.65;
+  --l-high: 0.82;
+  --l-intense: 0.95;
+  --l-deepest: 0.95;
+
+  --background: oklch(0 0 none);
+  --muted: oklch(var(--l-surface) 0 none);
+  --input: oklch(0.13 0 none);
+  --border: oklch(var(--l-subtle) 0 none);
+  --accent: oklch(0.12 0 none);
+  --neutral: oklch(0.44 0 none);
+  --sidebar-background: oklch(0.035 0 none);
+  --sidebar-border: oklch(0.14 0 none);
+  --sidebar-accent: oklch(0.11 0 none);
+
+  --diagram-node: oklch(0.13 0.012 var(--hue-primary));
+  --diagram-node-border: oklch(0.27 0.025 var(--hue-primary));
+  --diagram-cluster: oklch(0.055 0.006 var(--hue-primary));
+  --diagram-cluster-border: oklch(0.2 0.015 var(--hue-primary));
+  --diagram-note: oklch(0.11 0.01 calc(var(--hue-primary) + 60deg));
+  --diagram-note-border: oklch(0.25 0.02 calc(var(--hue-primary) + 60deg));
+}
+
+.high-contrast,
+:root[class~='high-contrast'] {
+  /* Dark-based accessible palette with strong, achromatic structural separation. */
+  --l-base: 0.06;
+  --l-surface: 0.15;
+  --l-subtle: 0.55;
+  --l-element: 0.3;
+  --l-medium: 0.72;
+  --l-emphasized: 0.82;
+  --l-high: 0.95;
+  --l-intense: 1;
+  --l-deepest: 1;
+  --l-primary: 0.4;
+  --l-highlighter: 0.78;
+
+  --background: oklch(var(--l-base) 0 none);
+  --muted: oklch(var(--l-surface) 0 none);
+  --input: oklch(var(--l-subtle) 0 none);
+  --border: oklch(var(--l-subtle) 0 none);
+  --accent: oklch(var(--l-element) 0 none);
+  --neutral: oklch(var(--l-medium) 0 none);
+  --popover: oklch(0.12 0 none);
+  --card: oklch(0.12 0 none);
+
+  --menu-ring: color-mix(in oklch, white 70%, var(--popover));
+  --menu-highlight: color-mix(in oklch, white 20%, var(--popover));
+  --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 35%, var(--popover));
+
+  --sidebar-background: oklch(0.1 0 none);
+  --sidebar-border: oklch(var(--l-subtle) 0 none);
+  --sidebar-accent: oklch(0.28 0 none);
+  --sidebar-primary-foreground: oklch(var(--l-base) 0 none);
+
+  --scrollbar-thumb: oklch(0.65 0 none);
+
+  --chart-1: oklch(0.8 0.14 250deg);
+  --chart-2: oklch(0.8 0.14 290deg);
+  --chart-3: oklch(0.8 0.12 180deg);
+  --chart-4: oklch(0.8 0.14 150deg);
+  --chart-5: oklch(0.8 0.16 30deg);
+
+  --diagram-node: oklch(0.18 0.012 var(--hue-primary));
+  --diagram-node-border: oklch(0.72 0.05 var(--hue-primary));
+  --diagram-cluster: oklch(0.11 0.006 var(--hue-primary));
+  --diagram-cluster-border: oklch(0.62 0.03 var(--hue-primary));
+  --diagram-line: oklch(0.82 0.04 var(--hue-primary));
+  --diagram-note: oklch(0.2 0.012 calc(var(--hue-primary) + 60deg));
+  --diagram-note-border: oklch(0.72 0.04 calc(var(--hue-primary) + 60deg));
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --l-base: 1;
+    --l-surface: 0.94;
+    --l-subtle: 0.58;
+    --l-element: 0.82;
+    --l-medium: 0.42;
+    --l-emphasized: 0.4;
+    --l-high: 0.14;
+    --l-intense: 0.08;
+    --l-deepest: 0.08;
+    --l-primary: 0.4;
+
+    --background: oklch(var(--l-base) 0 none);
+    --muted: oklch(var(--l-surface) 0 none);
+    --input: oklch(var(--l-subtle) 0 none);
+    --border: oklch(var(--l-subtle) 0 none);
+    --accent: oklch(var(--l-element) 0 none);
+    --neutral: oklch(var(--l-medium) 0 none);
+    --popover: oklch(0.96 0 none);
+    --card: oklch(0.96 0 none);
+
+    --menu-ring: color-mix(in oklch, black 55%, var(--popover));
+    --menu-highlight: color-mix(in oklch, black 14%, var(--popover));
+    --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 25%, var(--popover));
+
+    --sidebar-background: oklch(0.96 0 none);
+    --sidebar-border: oklch(var(--l-subtle) 0 none);
+    --sidebar-accent: oklch(0.82 0 none);
+
+    --scrollbar-thumb: oklch(0.48 0 none);
+
+    --chart-1: oklch(0.42 0.16 250deg);
+    --chart-2: oklch(0.42 0.16 290deg);
+    --chart-3: oklch(0.42 0.14 180deg);
+    --chart-4: oklch(0.42 0.16 150deg);
+    --chart-5: oklch(0.42 0.18 30deg);
+
+    --diagram-node: oklch(0.92 0.012 var(--hue-primary));
+    --diagram-node-border: oklch(0.48 0.05 var(--hue-primary));
+    --diagram-cluster: oklch(0.96 0.006 var(--hue-primary));
+    --diagram-cluster-border: oklch(0.5 0.03 var(--hue-primary));
+    --diagram-line: oklch(0.38 0.04 var(--hue-primary));
+    --diagram-note: oklch(0.9 0.012 calc(var(--hue-primary) + 60deg));
+    --diagram-note-border: oklch(0.46 0.04 calc(var(--hue-primary) + 60deg));
+  }
+
+  .dark,
+  :root[class~='dark'] {
+    --l-base: 0.06;
+    --l-surface: 0.15;
+    --l-subtle: 0.55;
+    --l-element: 0.3;
+    --l-medium: 0.72;
+    --l-emphasized: 0.82;
+    --l-high: 0.95;
+    --l-intense: 1;
+    --l-deepest: 1;
+    --l-primary: 0.4;
+    --l-highlighter: 0.78;
+
+    --background: oklch(var(--l-base) 0 none);
+    --muted: oklch(var(--l-surface) 0 none);
+    --input: oklch(var(--l-subtle) 0 none);
+    --border: oklch(var(--l-subtle) 0 none);
+    --accent: oklch(var(--l-element) 0 none);
+    --neutral: oklch(var(--l-medium) 0 none);
+    --popover: oklch(0.12 0 none);
+    --card: oklch(0.12 0 none);
+
+    --menu-ring: color-mix(in oklch, white 70%, var(--popover));
+    --menu-highlight: color-mix(in oklch, white 20%, var(--popover));
+    --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 35%, var(--popover));
+
+    --sidebar-background: oklch(0.1 0 none);
+    --sidebar-border: oklch(var(--l-subtle) 0 none);
+    --sidebar-accent: oklch(0.28 0 none);
+    --sidebar-primary-foreground: oklch(var(--l-base) 0 none);
+
+    --scrollbar-thumb: oklch(0.65 0 none);
+
+    --chart-1: oklch(0.8 0.14 250deg);
+    --chart-2: oklch(0.8 0.14 290deg);
+    --chart-3: oklch(0.8 0.12 180deg);
+    --chart-4: oklch(0.8 0.14 150deg);
+    --chart-5: oklch(0.8 0.16 30deg);
+
+    --diagram-node: oklch(0.18 0.012 var(--hue-primary));
+    --diagram-node-border: oklch(0.72 0.05 var(--hue-primary));
+    --diagram-cluster: oklch(0.11 0.006 var(--hue-primary));
+    --diagram-cluster-border: oklch(0.62 0.03 var(--hue-primary));
+    --diagram-line: oklch(0.82 0.04 var(--hue-primary));
+    --diagram-note: oklch(0.2 0.012 calc(var(--hue-primary) + 60deg));
+    --diagram-note-border: oklch(0.72 0.04 calc(var(--hue-primary) + 60deg));
+  }
+
+  .black,
+  :root[class~='black'] {
+    --l-base: 0;
+    --background: oklch(0 0 none);
+    --muted: oklch(0.12 0 none);
+    --popover: oklch(0.09 0 none);
+    --card: oklch(0.09 0 none);
+    --sidebar-background: oklch(0.035 0 none);
+  }
+}
+
+/* Fumadocs emits all four palettes; these selectors choose the contrast pair. */
+.high-contrast .shiki:not(.not-fumadocs-codeblock *) code span {
+  color: var(--shiki-high-contrast-dark);
+  font-style: var(--shiki-high-contrast-dark-font-style);
+}
+
+.high-contrast code.shiki:not(.not-fumadocs-code *) span {
+  color: var(--shiki-high-contrast-dark);
+  font-style: var(--shiki-high-contrast-dark-font-style);
+}
+
+@media (prefers-contrast: more) {
+  .shiki:not(.not-fumadocs-codeblock *) code span {
+    color: var(--shiki-high-contrast-light);
+    font-style: var(--shiki-high-contrast-light-font-style);
+  }
+
+  code.shiki:not(.not-fumadocs-code *) span {
+    color: var(--shiki-high-contrast-light);
+    font-style: var(--shiki-high-contrast-light-font-style);
+  }
+
+  .dark .shiki:not(.not-fumadocs-codeblock *) code span {
+    color: var(--shiki-high-contrast-dark);
+    font-style: var(--shiki-high-contrast-dark-font-style);
+  }
+
+  .dark code.shiki:not(.not-fumadocs-code *) span {
+    color: var(--shiki-high-contrast-dark);
+    font-style: var(--shiki-high-contrast-dark-font-style);
+  }
+}
+
 /* Dark variant is provided by fumadocs-ui/css/preset.css: @variant dark (&:where(.dark, .dark *)) */
 
 @supports (corner-shape: superellipse(1.5)) {

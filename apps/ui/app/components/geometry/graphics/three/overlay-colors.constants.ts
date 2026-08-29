@@ -45,6 +45,12 @@ export const infiniteGridColorLightMode = 0x73_73_73;
  */
 export const infiniteGridColorDarkMode = 0x55_55_55;
 
+/** High-contrast grid tints and opacity. The stronger alpha keeps both WebGL's gamma blend and WebGPU's linear blend above 3:1. */
+export const infiniteGridColorHighContrastLightMode = 0x00_00_00;
+export const infiniteGridColorHighContrastDarkMode = 0xff_ff_ff;
+export const infiniteGridOpacity = 0.3;
+export const infiniteGridOpacityHighContrast = 0.7;
+
 /**
  * GLTF characteristic-edge tint, **light theme**. sRGB hex.
  *

@@ -1,8 +1,16 @@
-import { useCallback } from 'react';
-import { Theme, useTheme as useRemixTheme } from 'remix-themes';
+import type { ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-// oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export Theme enum so consumers don't need to depend on remix-themes directly
-export { Theme } from 'remix-themes';
+/* eslint-disable @typescript-eslint/naming-convention -- Preserve the existing enum-style public API with erasable object syntax. */
+export const Theme = {
+  LIGHT: 'light',
+  DARK: 'dark',
+  BLACK: 'black',
+  HIGH_CONTRAST: 'high-contrast',
+} as const;
+/* eslint-enable @typescript-eslint/naming-convention -- Re-enable project naming checks. */
+
+export type Theme = (typeof Theme)[keyof typeof Theme];
 
 // Null is used to represent the system theme
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- null is used to represent the system theme, as it's serializable in JSON
@@ -26,67 +34,230 @@ export const themeOptions: ThemeOption[] = [
     description: 'Easy on the eyes',
   },
   {
+    id: Theme.BLACK,
+    name: 'Black',
+    description: 'True black with ultra-dark surfaces',
+  },
+  {
+    id: Theme.HIGH_CONTRAST,
+    name: 'High Contrast',
+    description: 'Stronger text, borders, and focus indicators',
+  },
+  {
     id: null,
     name: 'System',
     description: 'Follow your system preference',
   },
 ];
 
+type ThemeMetadata = {
+  definedBy: 'USER' | 'SYSTEM';
+};
+
+type ThemeState = {
+  theme?: Theme;
+  metadata: ThemeMetadata;
+};
+
+type ThemeContextValue = ThemeState & {
+  prefersMoreContrast: boolean;
+  setTheme: (theme: ThemeWithSystem) => void;
+};
+
+const missingThemeProvider = (): never => {
+  throw new Error('Theme changes require a ThemeProvider');
+};
+const ThemeContext = createContext<ThemeContextValue>({
+  theme: Theme.LIGHT,
+  metadata: { definedBy: 'USER' },
+  prefersMoreContrast: false,
+  setTheme: missingThemeProvider,
+});
+const prefersLightMediaQuery = '(prefers-color-scheme: light)';
+const prefersMoreContrastMediaQuery = '(prefers-contrast: more)';
+
+export const isTheme = (value: unknown): value is Theme => Object.values(Theme).includes(value as Theme);
+
+const getPreferredTheme = (): Theme =>
+  globalThis.matchMedia(prefersLightMediaQuery).matches ? Theme.LIGHT : Theme.DARK;
+
+export const ThemeProvider = ({
+  children,
+  specifiedTheme,
+  themeAction,
+}: {
+  readonly children: ReactNode;
+  readonly specifiedTheme: ThemeWithSystem;
+  readonly themeAction: string;
+}): React.JSX.Element => {
+  const [state, setState] = useState<ThemeState>(() => ({
+    theme: specifiedTheme ?? (import.meta.env.SSR ? undefined : getPreferredTheme()),
+    metadata: { definedBy: specifiedTheme === null ? 'SYSTEM' : 'USER' },
+  }));
+  const [prefersMoreContrast, setPrefersMoreContrast] = useState(
+    () => !import.meta.env.SSR && globalThis.matchMedia(prefersMoreContrastMediaQuery).matches,
+  );
+  const broadcastChannel = useRef<BroadcastChannel | undefined>(undefined);
+
+  useEffect(() => {
+    if (!('BroadcastChannel' in globalThis)) {
+      return;
+    }
+
+    const channel = new globalThis.BroadcastChannel('tau-theme');
+    const handleMessage = ({ data }: MessageEvent<unknown>): void => {
+      if (!data || typeof data !== 'object') {
+        return;
+      }
+
+      const candidate = data as { theme?: unknown; metadata?: { definedBy?: unknown } };
+      const definedBy = candidate.metadata?.definedBy;
+      if (!isTheme(candidate.theme) || (definedBy !== 'USER' && definedBy !== 'SYSTEM')) {
+        return;
+      }
+
+      setState({ theme: candidate.theme, metadata: { definedBy } });
+    };
+    channel.addEventListener('message', handleMessage);
+    broadcastChannel.current = channel;
+
+    return () => {
+      channel.removeEventListener('message', handleMessage);
+      channel.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = globalThis.matchMedia(prefersMoreContrastMediaQuery);
+    const handleChange = ({ matches }: MediaQueryListEvent): void => {
+      setPrefersMoreContrast(matches);
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (state.metadata.definedBy === 'USER') {
+      return;
+    }
+
+    const mediaQuery = globalThis.matchMedia(prefersLightMediaQuery);
+    const handleChange = ({ matches }: MediaQueryListEvent): void => {
+      setState({ theme: matches ? Theme.LIGHT : Theme.DARK, metadata: { definedBy: 'SYSTEM' } });
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
+  }, [state.metadata.definedBy]);
+
+  const setTheme = useCallback(
+    (theme: ThemeWithSystem) => {
+      const nextState: ThemeState = {
+        theme: theme ?? getPreferredTheme(),
+        metadata: { definedBy: theme === null ? 'SYSTEM' : 'USER' },
+      };
+      setState(nextState);
+      broadcastChannel.current?.postMessage(nextState);
+      void fetch(themeAction, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ theme }),
+      });
+    },
+    [themeAction],
+  );
+
+  const value = useMemo(() => ({ ...state, prefersMoreContrast, setTheme }), [prefersMoreContrast, setTheme, state]);
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+};
+
 type UseThemeReturn = {
-  /** The resolved theme - always 'light' or 'dark', never 'system' */
-  theme: Theme;
-  /** The raw resolved theme from remix-themes. Null during SSR when no preference is stored (system theme mode). */
+  /** The resolved color scheme used by integrations that support only light or dark. */
+  theme: typeof Theme.LIGHT | typeof Theme.DARK;
+  /** The resolved app theme. Null only during SSR when following the system preference. */
   ssrTheme: ThemeWithSystem;
-  /** The user's theme preference including 'system' (null) option */
+  /** The user's theme preference including the system, Black, and High Contrast options. */
   themeWithSystem: ThemeWithSystem;
+  /** Whether the explicit theme or operating-system preference requests increased contrast. */
+  isHighContrast: boolean;
   setTheme: (theme: ThemeWithSystem) => void;
   cycleTheme: () => void;
   currentOption: ThemeOption;
 };
 
-/**
- * Hook for managing theme state.
- *
- * @returns theme - The resolved theme, always 'light' or 'dark'
- * @returns themeWithSystem - The user's preference including 'system' (null)
- * @returns setTheme - Function to set the theme preference
- * @returns cycleTheme - Function to cycle through theme options
- * @returns currentOption - The current theme option object
- */
-export function useTheme(): UseThemeReturn {
-  const [resolvedTheme, setRemixTheme, metadata] = useRemixTheme();
-  // ResolvedTheme from remix-themes is always defined as 'light' or 'dark' on the client.
-  const theme = resolvedTheme ?? Theme.LIGHT;
-  const themeWithSystem = metadata.definedBy === 'SYSTEM' ? null : theme;
-
-  const setTheme = useCallback(
-    (newTheme: ThemeWithSystem) => {
-      setRemixTheme(newTheme);
-    },
-    [setRemixTheme],
-  );
+/** Manages the resolved color scheme and the user's app-theme preference. */
+export const useTheme = (): UseThemeReturn => {
+  const context = useContext(ThemeContext);
+  const { theme: appTheme, metadata, prefersMoreContrast, setTheme } = context;
+  const theme = appTheme === Theme.BLACK || appTheme === Theme.HIGH_CONTRAST ? Theme.DARK : (appTheme ?? Theme.LIGHT);
+  const themeWithSystem: ThemeWithSystem = metadata.definedBy === 'SYSTEM' ? null : (appTheme ?? null);
+  const isHighContrast = appTheme === Theme.HIGH_CONTRAST || prefersMoreContrast;
 
   const cycleTheme = useCallback(() => {
     let newTheme: ThemeWithSystem;
-    if (themeWithSystem === Theme.LIGHT) {
-      newTheme = Theme.DARK;
-    } else if (themeWithSystem === Theme.DARK) {
-      newTheme = null;
-    } else {
-      newTheme = Theme.LIGHT;
+    switch (themeWithSystem) {
+      case Theme.LIGHT: {
+        newTheme = Theme.DARK;
+        break;
+      }
+      case Theme.DARK: {
+        newTheme = Theme.BLACK;
+        break;
+      }
+      case Theme.BLACK: {
+        newTheme = Theme.HIGH_CONTRAST;
+        break;
+      }
+      case Theme.HIGH_CONTRAST: {
+        newTheme = null;
+        break;
+      }
+      default: {
+        newTheme = Theme.LIGHT;
+      }
     }
 
     setTheme(newTheme);
   }, [themeWithSystem, setTheme]);
 
-  const currentOption = themeOptions.find((option) => option.id === themeWithSystem) ?? themeOptions[2]!;
+  const currentOption = themeOptions.find((option) => option.id === themeWithSystem) ?? themeOptions.at(-1)!;
 
   return {
     theme,
-    ssrTheme: resolvedTheme,
+    ssrTheme: appTheme ?? null,
     themeWithSystem,
+    isHighContrast,
     setTheme,
     cycleTheme,
     currentOption,
   };
-}
+};
+
+const clientThemeCode = String.raw`
+(() => {
+  const theme = window.matchMedia(${JSON.stringify(prefersLightMediaQuery)}).matches ? 'light' : 'dark';
+  const classList = document.documentElement.classList;
+  if (!classList.contains('light') && !classList.contains('dark') && !classList.contains('black') && !classList.contains('high-contrast')) {
+    classList.add(theme);
+  }
+  const meta = document.querySelector('meta[name=color-scheme]');
+  if (meta) meta.content = theme === 'light' ? 'light dark' : 'dark light';
+})();
+`;
+
+export const PreventFlashOnWrongTheme = ({ hasSsrTheme }: { readonly hasSsrTheme: boolean }): React.JSX.Element => {
+  const { theme } = useTheme();
+
+  return (
+    <>
+      <meta name='color-scheme' content={theme === Theme.LIGHT ? 'light dark' : 'dark light'} />
+      {hasSsrTheme ? null : (
+        // oxlint-disable-next-line react/no-danger -- static inline script must run before hydration to prevent a theme flash
+        <script dangerouslySetInnerHTML={{ __html: clientThemeCode }} suppressHydrationWarning />
+      )}
+    </>
+  );
+};

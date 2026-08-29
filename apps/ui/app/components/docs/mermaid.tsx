@@ -139,7 +139,7 @@ let mermaidIdCounter = 0;
 
 function MermaidRenderer({ chart }: { readonly chart: string }): React.JSX.Element | undefined {
   const [id] = useState(() => `mermaid-${mermaidIdCounter++}`);
-  const { theme } = useTheme();
+  const { theme, isHighContrast } = useTheme();
   const isDark = theme === Theme.DARK;
   const [svg, setSvg] = useState<string>();
   // oxlint-disable-next-line typescript/no-invalid-void-type -- React DOM refs require null initializer
@@ -185,7 +185,7 @@ function MermaidRenderer({ chart }: { readonly chart: string }): React.JSX.Eleme
     return () => {
       cancelled = true;
     };
-  }, [chart, isDark, id]);
+  }, [chart, isDark, isHighContrast, id]);
 
   useEffect(() => {
     if (containerRef.current && bindFunctionsRef.current) {

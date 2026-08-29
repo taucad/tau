@@ -77,9 +77,17 @@ export function InfiniteGrid(properties: InfiniteGridProperties): React.JSX.Elem
       smallSize: materialProperties.smallSize,
       largeSize: materialProperties.largeSize,
       color: materialProperties.color,
+      lineOpacity: materialProperties.lineOpacity,
     });
     invalidate();
-  }, [gridHandle, invalidate, materialProperties.smallSize, materialProperties.largeSize, materialProperties.color]);
+  }, [
+    gridHandle,
+    invalidate,
+    materialProperties.smallSize,
+    materialProperties.largeSize,
+    materialProperties.color,
+    materialProperties.lineOpacity,
+  ]);
 
   return (
     <Plane

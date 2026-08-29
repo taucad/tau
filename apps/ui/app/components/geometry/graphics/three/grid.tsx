@@ -4,7 +4,11 @@ import { useThree } from '@react-three/fiber';
 import { InfiniteGrid } from '#components/geometry/graphics/three/react/infinite-grid.js';
 import {
   infiniteGridColorDarkMode,
+  infiniteGridColorHighContrastDarkMode,
+  infiniteGridColorHighContrastLightMode,
   infiniteGridColorLightMode,
+  infiniteGridOpacity,
+  infiniteGridOpacityHighContrast,
 } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
@@ -17,7 +21,7 @@ import { useGraphicsSelector } from '#hooks/use-graphics.js';
 export const Grid = React.memo(() => {
   const gridSizes = useGraphicsSelector((state) => state.context.gridSizes);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-  const { theme } = useTheme();
+  const { theme, isHighContrast } = useTheme();
   const { invalidate } = useThree();
 
   React.useEffect(() => {
@@ -25,8 +29,17 @@ export const Grid = React.memo(() => {
   }, [invalidate]);
 
   const gridColor = React.useMemo(
-    () => new THREE.Color(theme === Theme.LIGHT ? infiniteGridColorLightMode : infiniteGridColorDarkMode),
-    [theme],
+    () =>
+      new THREE.Color(
+        isHighContrast
+          ? theme === Theme.LIGHT
+            ? infiniteGridColorHighContrastLightMode
+            : infiniteGridColorHighContrastDarkMode
+          : theme === Theme.LIGHT
+            ? infiniteGridColorLightMode
+            : infiniteGridColorDarkMode,
+      ),
+    [isHighContrast, theme],
   );
 
   // Calculate grid axes based on the up direction
@@ -38,8 +51,13 @@ export const Grid = React.memo(() => {
   // Memoize materialProperties to prevent InfiniteGrid from recreating its
   // ShaderMaterial on every Grid re-render (the inline object would be a new reference each time).
   const materialProperties = React.useMemo(
-    () => ({ smallSize: gridSizes.smallSize, largeSize: gridSizes.largeSize, color: gridColor }),
-    [gridSizes.smallSize, gridSizes.largeSize, gridColor],
+    () => ({
+      smallSize: gridSizes.smallSize,
+      largeSize: gridSizes.largeSize,
+      color: gridColor,
+      lineOpacity: isHighContrast ? infiniteGridOpacityHighContrast : infiniteGridOpacity,
+    }),
+    [gridSizes.smallSize, gridSizes.largeSize, gridColor, isHighContrast],
   );
 
   return <InfiniteGrid axes={axes} materialProperties={materialProperties} />;

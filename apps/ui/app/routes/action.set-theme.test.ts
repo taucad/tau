@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { Theme } from 'remix-themes';
 import { describe, expect, it } from 'vitest';
+import { Theme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { action } from '#routes/action.set-theme.js';
 
@@ -56,6 +56,8 @@ describe('/action/set-theme', () => {
     { requestUrl: 'http://localhost:3000/action/set-theme', theme: Theme.LIGHT, secure: false },
     { requestUrl: 'https://taucad.dev/action/set-theme', theme: Theme.LIGHT, secure: true },
     { requestUrl: 'https://tau.new/action/set-theme', theme: Theme.DARK, secure: true },
+    { requestUrl: 'https://tau.new/action/set-theme', theme: Theme.BLACK, secure: true },
+    { requestUrl: 'https://tau.new/action/set-theme', theme: Theme.HIGH_CONTRAST, secure: true },
   ] satisfies SetCookieExpectation[])(
     'should commit a host-only theme cookie for $requestUrl when setting $theme',
     async ({ requestUrl, theme, secure }) => {

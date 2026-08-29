@@ -37,12 +37,14 @@ describe('createInfiniteGridGlMaterial', () => {
       smallSize: 2,
       largeSize: 100,
       color: overrideColor,
+      lineOpacity: 0.7,
     });
 
     expect(material.uniforms['uSmallSize']!.value).toBe(2);
     expect(material.uniforms['uLargeSize']!.value).toBe(100);
     expect(material.uniforms['uColor']!.value).toBeInstanceOf(THREE.Color);
     expect((material.uniforms['uColor']!.value as THREE.Color).getHex()).toBe(0xaa_bb_cc);
+    expect(material.uniforms['uLineOpacity']!.value).toBe(0.7);
   });
 
   it('keeps fully opaque on-screen grid samples inside both endpoint camera depth ranges', () => {

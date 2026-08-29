@@ -2,7 +2,14 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { entitlementsFromTier } from '@taucad/billing';
 import { GeneralSettings } from '#components/settings/general-settings.js';
+import type { ThemeOption } from '#hooks/use-theme.js';
+
+const useEntitlementsMock = vi.hoisted(() => vi.fn());
+vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
+  useEntitlements: useEntitlementsMock,
+}));
 
 const mockSetTheme = vi.fn();
 const mockSetHue = vi.fn();
@@ -31,10 +38,14 @@ vi.mock('#hooks/use-privacy-preferences.js', () => ({
 }));
 
 vi.mock('#hooks/use-theme.js', () => {
+  /* eslint-disable @typescript-eslint/naming-convention -- Mirrors the production Theme values. */
   const Theme = {
     LIGHT: 'light',
     DARK: 'dark',
+    BLACK: 'black',
+    HIGH_CONTRAST: 'high-contrast',
   } as const;
+  /* eslint-enable @typescript-eslint/naming-convention -- Re-enable project naming checks. */
 
   const systemOption = {
     id: null,
@@ -55,11 +66,22 @@ vi.mock('#hooks/use-theme.js', () => {
         name: 'Dark',
         description: 'Easy on the eyes',
       },
+      {
+        id: Theme.BLACK,
+        name: 'Black',
+        description: 'True black with ultra-dark surfaces',
+      },
+      {
+        id: Theme.HIGH_CONTRAST,
+        name: 'High Contrast',
+        description: 'Stronger text, borders, and focus indicators',
+      },
       systemOption,
     ],
     useTheme: () => ({
       themeWithSystem: null,
       theme: Theme.LIGHT,
+      isHighContrast: false,
       setTheme: mockSetTheme,
       currentOption: systemOption,
     }),
@@ -82,7 +104,36 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 
 vi.mock('#components/ui/combobox-responsive.js', () => ({
-  ComboBoxResponsive: ({ children }: { children: ReactNode }): ReactElement => <div>{children}</div>,
+  ComboBoxResponsive: ({
+    children,
+    groupedItems,
+    renderLabel,
+    onSelect,
+    value,
+  }: {
+    children: ReactNode;
+    groupedItems: Array<{ items: ThemeOption[] }>;
+    renderLabel: (item: ThemeOption, selectedItem?: ThemeOption) => ReactNode;
+    onSelect: (value: string) => void;
+    value?: ThemeOption;
+  }): ReactElement => (
+    <div>
+      {children}
+      {groupedItems.flatMap(({ items }) =>
+        items.map((item) => (
+          <button
+            key={String(item.id)}
+            type='button'
+            onClick={() => {
+              onSelect(String(item.id));
+            }}
+          >
+            {renderLabel(item, value)}
+          </button>
+        )),
+      )}
+    </div>
+  ),
 }));
 
 vi.mock('#components/ui/color-picker.js', () => ({
@@ -92,6 +143,7 @@ vi.mock('#components/ui/color-picker.js', () => ({
 describe('GeneralSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     mockCodeInlayHintsValue = false;
   });
 
@@ -118,5 +170,16 @@ describe('GeneralSettings', () => {
     render(<GeneralSettings />);
 
     expect(screen.getByRole('switch')).toHaveAttribute('data-state', 'checked');
+  });
+
+  it('should expose and select the High Contrast theme', async () => {
+    const user = userEvent.setup();
+    render(<GeneralSettings />);
+
+    await user.click(
+      screen.getByRole('button', { name: /high contrast stronger text, borders, and focus indicators/i }),
+    );
+
+    expect(mockSetTheme).toHaveBeenCalledWith('high-contrast');
   });
 });

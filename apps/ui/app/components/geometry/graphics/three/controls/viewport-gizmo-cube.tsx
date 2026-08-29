@@ -63,7 +63,7 @@ export function ViewportGizmoCube({
   const cameraRig = useCameraRig();
 
   const { serialized } = useColor();
-  const { theme } = useTheme();
+  const { theme, isHighContrast } = useTheme();
 
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref
   const gizmoRef = useRef<ViewportGizmo | undefined>(undefined);
@@ -97,15 +97,29 @@ export function ViewportGizmoCube({
       return;
     }
 
+    const faceColor = isHighContrast
+      ? theme === Theme.DARK
+        ? 0x66_66_66
+        : 0x8c_8c_8c
+      : theme === Theme.DARK
+        ? 0x33_33_33
+        : 0xdd_dd_dd;
+    const edgeColor = isHighContrast
+      ? theme === Theme.DARK
+        ? 0xff_ff_ff
+        : 0x22_22_22
+      : theme === Theme.DARK
+        ? 0x55_55_55
+        : 0xee_ee_ee;
     const faceConfig = {
-      color: theme === Theme.DARK ? 0x33_33_33 : 0xdd_dd_dd,
+      color: faceColor,
       labelColor: theme === Theme.DARK ? 0xff_ff_ff : 0x00_00_00,
       hover: {
         color: serialized.hex,
       },
     } as const satisfies GizmoAxisOptions;
     const edgeConfig = {
-      color: theme === Theme.DARK ? 0x55_55_55 : 0xee_ee_ee,
+      color: edgeColor,
       opacity: 1,
       hover: {
         color: serialized.hex,
@@ -113,7 +127,7 @@ export function ViewportGizmoCube({
     } as const satisfies GizmoAxisOptions;
     const cornerConfig = {
       ...faceConfig,
-      color: theme === Theme.DARK ? 0x33_33_33 : 0xdd_dd_dd,
+      color: faceColor,
       hover: {
         color: serialized.hex,
       },
@@ -259,6 +273,7 @@ export function ViewportGizmoCube({
     scene,
     serialized.hex,
     theme,
+    isHighContrast,
     size,
     container,
     invalidate,

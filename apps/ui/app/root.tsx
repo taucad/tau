@@ -1,12 +1,11 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { Links, Meta, Scripts, ScrollRestoration, useRouteLoaderData } from 'react-router';
-import { PreventFlashOnWrongTheme, ThemeProvider } from 'remix-themes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
-import { useTheme } from '#hooks/use-theme.js';
+import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import type { ClientEnvironment } from '#environment.config.js';
 import { getClientEnvironment } from '#environment.config.js';
@@ -102,7 +101,7 @@ const extractBetterFetchErrorBodyMessage = (error: unknown): string | undefined 
 
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const data = useRouteLoaderData<typeof loader>('root');
-  // Preserve null for system theme - remix-themes needs null to detect system preference
+  // Preserve null so the theme provider can resolve the system preference before hydration.
   const ssrTheme = data?.theme ?? null;
   const queryClient = useMemo(() => {
     const client = new QueryClient({
@@ -190,8 +189,8 @@ function LayoutDocument({
       lang='en'
       className={cn(
         '[--spacing:0.275rem] md:[--spacing:0.25rem]',
-        // Leave this class last as the `PreventFlashOnWrongTheme` script will
-        // append the theme last when needed to prevent light mode flash on dark systems.
+        (resolvedTheme === Theme.BLACK || resolvedTheme === Theme.HIGH_CONTRAST) && Theme.DARK,
+        // Leave the specific product theme last so it overrides Dark's base palette.
         resolvedTheme,
       )}
       style={color.rootStyles}
@@ -200,7 +199,7 @@ function LayoutDocument({
         <meta charSet='utf-8' />
         <meta name='viewport' content='width=device-width, initial-scale=1' />
         <Meta />
-        <PreventFlashOnWrongTheme ssrTheme={ssrTheme !== null} />
+        <PreventFlashOnWrongTheme hasSsrTheme={ssrTheme !== null} />
         <Links />
       </head>
       <body>

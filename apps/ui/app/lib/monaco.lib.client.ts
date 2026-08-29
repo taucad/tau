@@ -194,12 +194,22 @@ export const configureMonaco = async (): Promise<void> => {
 
   // Augment GitHub themes with JSON-specific depth and value rules
   // derived from each theme's own scope colors.
-  for (const themeId of ['github-dark', 'github-light'] as const) {
+  for (const themeId of [
+    'github-dark',
+    'github-light',
+    'github-dark-high-contrast',
+    'github-light-high-contrast',
+  ] as const) {
     const shikiTheme = highlighter.getTheme(themeId);
     // MonacoTheme extends monaco-editor-core's IStandaloneThemeData which is
     // structurally identical to monaco-editor's but TypeScript can't unify
     // the two package namespaces.
     const monacoTheme = textmateThemeToMonacoTheme(shikiTheme) as unknown as Monaco.editor.IStandaloneThemeData;
+    if (themeId === 'github-dark-high-contrast') {
+      monacoTheme.base = 'hc-black';
+    } else if (themeId === 'github-light-high-contrast') {
+      monacoTheme.base = 'hc-light';
+    }
     monacoTheme.rules.push(...generateJsonThemeRules(shikiTheme));
     Object.assign(monacoTheme.colors, generateJsonBracketHighlightColors(shikiTheme));
     monaco.editor.defineTheme(themeId, monacoTheme);

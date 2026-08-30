@@ -32,6 +32,7 @@ import type { StorageProvider } from '#types/storage.types.js';
 import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
 import { joinPath } from '@taucad/utils/path';
 import { parseParameterEntry, createDefaultEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
+import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
 
 type ProjectContextType = {
   projectId: string;
@@ -92,13 +93,7 @@ export async function ensureFocusedChatForProject({
   if (chats.length > 0) {
     let mostRecent = chats[0]!;
     for (const candidate of chats) {
-      if (
-        candidate.updatedAt > mostRecent.updatedAt ||
-        (candidate.updatedAt === mostRecent.updatedAt && candidate.createdAt > mostRecent.createdAt) ||
-        (candidate.updatedAt === mostRecent.updatedAt &&
-          candidate.createdAt === mostRecent.createdAt &&
-          candidate.id < mostRecent.id)
-      ) {
+      if (compareChatsByRecency(candidate, mostRecent) < 0) {
         mostRecent = candidate;
       }
     }

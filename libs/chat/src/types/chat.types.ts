@@ -68,6 +68,10 @@ export type Chat = {
    * fall back to the cookie default.
    */
   activeKernel?: KernelId;
+  /** Product recency for chat ordering, in Unix epoch milliseconds. */
+  recencyAt?: number;
+  /** Whether this browser profile has an unattended turn requiring review. */
+  hasUnreadTurn?: boolean;
   createdAt: number;
   updatedAt: number;
   deletedAt?: number; // Soft delete support

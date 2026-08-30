@@ -101,8 +101,12 @@ describe('ProjectChatList', () => {
     mockNavigate.mockResolvedValue(undefined);
   });
 
-  it('sorts by updated, created, then id deterministically', () => {
-    const chats = [chat(3, 10), chat(2, 10), chat(1, 11)].map((item) => ({ ...item, createdAt: 1 }));
+  it('sorts by user activity, ignoring newer passive row updates, then breaks ties deterministically', () => {
+    const chats = [
+      { ...chat(3, 999), createdAt: 1, recencyAt: 10 },
+      { ...chat(2, 10), createdAt: 1, recencyAt: 20 },
+      { ...chat(1, 11), createdAt: 1, recencyAt: 20 },
+    ];
     expect(sortProjectChats(chats).map((item) => item.id)).toEqual(['chat_1', 'chat_2', 'chat_3']);
   });
 
@@ -140,7 +144,10 @@ describe('ProjectChatList', () => {
     const deleteChat = vi.fn().mockResolvedValue(undefined);
     mockUseChats.mockReturnValue({
       ...defaultChatsResult,
-      chats: [chat(1, 20), chat(2, 10)],
+      chats: [
+        { ...chat(1, 20), recencyAt: 20 },
+        { ...chat(2, 10), recencyAt: 10 },
+      ],
       deleteChat,
     });
     search = '?chat=chat_1';

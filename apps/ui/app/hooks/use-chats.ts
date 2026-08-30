@@ -37,7 +37,9 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
   });
 
   const createChat = useCallback(
-    async (chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>): Promise<Chat> => {
+    async (
+      chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>,
+    ): Promise<Chat> => {
       const newChat = await createChatInManager(resourceId, chatData);
       void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
       void queryClient.invalidateQueries({ queryKey: ['all-chats'] });

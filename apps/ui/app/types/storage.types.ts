@@ -22,7 +22,8 @@ export type AppUiPreferences = {
  * `docs/policy/storage-policy.md`:
  *  - `updateChat` must perform `get → merge → put` inside a single transaction
  *    (or equivalent isolation primitive).
- *  - The field-scoped helpers (`patchChat`, `setMessageEdit`,
+ *  - The field-scoped helpers (`patchChat`, `touchChatRecency`,
+ *    `setChatUnreadState`, `setMessageEdit`,
  *    `clearMessageEdit`, `softDeleteChat`) must mutate only the named slot,
  *    never round-trip the entire row through a partial merge.
  *  - Concurrent callers for the same id must not lose writes.
@@ -54,7 +55,9 @@ export type StorageProvider = {
   // ---------------------------------------------------------------------------
   createChat(
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & {
+      id?: string;
+    },
   ): Promise<Chat>;
   createNavigationRepairChat(resourceId: string): Promise<Chat>;
   /**
@@ -69,6 +72,10 @@ export type StorageProvider = {
    * read-modify-write race that resurrects sent drafts.
    */
   patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined>;
+  /** Advance user-action recency monotonically. */
+  touchChatRecency(chatId: string, requestedAt: number): Promise<Chat | undefined>;
+  /** Set boolean unread state without changing row or product recency. */
+  setChatUnreadState(chatId: string, hasUnreadTurn: boolean): Promise<Chat | undefined>;
   /**
    * Atomic one-shot startup request consumption. Clears the startup request
    * only when the persisted id still matches `requestId`; returns undefined

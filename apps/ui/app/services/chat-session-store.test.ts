@@ -30,6 +30,7 @@ type FakeChatInstance = {
   // shim. The mock exposes it as a public spy so tests can assert the
   // continuation path calls it with the expected arg shape.
   makeRequest: ReturnType<typeof vi.fn>;
+  finish: (options?: Partial<{ isAbort: boolean; isError: boolean; isDisconnect: boolean }>) => void;
   // Test driver — invoke any registered messages callback
   emitMessagesChange: () => void;
   emitStatusChange: () => void;
@@ -59,7 +60,16 @@ vi.mock('@ai-sdk/react', () => ({
     readonly #statusListeners = new Set<() => void>();
     readonly #errorListeners = new Set<() => void>();
 
-    constructor(init: { id: string; messages?: MyUIMessage[] }) {
+    constructor(init: {
+      id: string;
+      messages?: MyUIMessage[];
+      onFinish?: (input: {
+        messages: MyUIMessage[];
+        isAbort: boolean;
+        isError: boolean;
+        isDisconnect: boolean;
+      }) => void;
+    }) {
       this.id = init.id;
       this.messages = init.messages ?? [];
       const fake: FakeChatInstance = Object.assign(this, {
@@ -77,6 +87,14 @@ vi.mock('@ai-sdk/react', () => ({
           for (const listener of this.#errorListeners) {
             listener();
           }
+        },
+        finish: (options?: Partial<{ isAbort: boolean; isError: boolean; isDisconnect: boolean }>) => {
+          init.onFinish?.({
+            messages: this.messages,
+            isAbort: options?.isAbort ?? false,
+            isError: options?.isError ?? false,
+            isDisconnect: options?.isDisconnect ?? false,
+          });
         },
       });
       harness.created.push(fake);
@@ -136,6 +154,8 @@ function createStubDeps(): StubDeps {
   return {
     getChat: vi.fn<ChatSessionDeps['getChat']>().mockResolvedValue(undefined),
     patchChat: vi.fn<ChatSessionDeps['patchChat']>().mockResolvedValue(undefined),
+    touchChatRecency: vi.fn<ChatSessionDeps['touchChatRecency']>().mockResolvedValue(undefined),
+    setChatUnreadState: vi.fn<ChatSessionDeps['setChatUnreadState']>().mockResolvedValue(undefined),
     consumeChatStartupRequest: vi.fn<ChatSessionDeps['consumeChatStartupRequest']>().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn<ChatSessionDeps['commitCancelledDraftRestore']>().mockResolvedValue(undefined),
     setMessageEdit: vi.fn<ChatSessionDeps['setMessageEdit']>().mockResolvedValue(undefined),
@@ -156,6 +176,102 @@ describe('ChatSessionStore', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('routes accepted user activity through the current dependency set', async () => {
+    const store = new ChatSessionStore();
+    const deps = createStubDeps();
+    store.setDependencies(deps);
+
+    await store.touchChatRecency('chat_activity', 123);
+
+    expect(deps.touchChatRecency).toHaveBeenCalledWith('chat_activity', 123);
+  });
+
+  describe('unread lifecycle', () => {
+    it('marks unattended terminal success and error, but not abort or disconnect', () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      store.setDependencies(deps);
+
+      for (const [chatId, options] of [
+        ['chat_success', {}],
+        ['chat_error', { isError: true }],
+        ['chat_abort', { isAbort: true }],
+        ['chat_disconnect', { isDisconnect: true }],
+      ] as const) {
+        store.retainDurableRun({ chatId, runId: `run_${chatId}` });
+        harness.created.at(-1)!.finish(options);
+      }
+
+      expect(deps.setChatUnreadState.mock.calls).toEqual([
+        ['chat_success', true],
+        ['chat_error', true],
+      ]);
+    });
+
+    it('marks a new unattended approval once while it remains pending', () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      store.setDependencies(deps);
+      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_approval' });
+      const chat = harness.created[0]!;
+      const approval = {
+        type: 'tool-delete_file',
+        toolCallId: 'tool-1',
+        state: 'approval-requested',
+        input: { targetFile: 'main.ts' },
+        approval: { id: 'approval-1' },
+      } as unknown as MyUIMessage['parts'][number];
+      chat.messages = [{ id: 'assistant-1', role: 'assistant', parts: [approval] }];
+
+      chat.emitMessagesChange();
+      chat.emitMessagesChange();
+
+      expect(deps.setChatUnreadState).toHaveBeenCalledOnce();
+      expect(deps.setChatUnreadState).toHaveBeenCalledWith('chat_approval', true);
+    });
+
+    it('does not mark terminal or approval events viewed in an active document', () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      store.setDependencies(deps);
+      store.acquire('chat_active');
+      const chat = harness.created[0]!;
+      chat.messages = [
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-delete_file',
+              toolCallId: 'tool-1',
+              state: 'approval-requested',
+              input: { targetFile: 'main.ts' },
+              approval: { id: 'approval-1' },
+            } as unknown as MyUIMessage['parts'][number],
+          ],
+        },
+      ];
+
+      chat.emitMessagesChange();
+      chat.finish();
+
+      expect(deps.setChatUnreadState).not.toHaveBeenCalled();
+    });
+
+    it('marks a terminal event when its mounted view is hidden', () => {
+      vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      store.setDependencies(deps);
+      store.acquire('chat_hidden');
+
+      harness.created[0]!.finish();
+
+      expect(deps.setChatUnreadState).toHaveBeenCalledWith('chat_hidden', true);
+    });
   });
 
   // ===========================================================================

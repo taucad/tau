@@ -64,6 +64,8 @@ export type ChatSessionDeps = {
     key: K,
     value: ChatEntity[K],
   ) => Promise<ChatEntity | undefined>;
+  touchChatRecency: (chatId: string, requestedAt: number) => Promise<ChatEntity | undefined>;
+  setChatUnreadState: (chatId: string, hasUnreadTurn: boolean) => Promise<ChatEntity | undefined>;
   consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<ChatEntity | undefined>;
   commitCancelledDraftRestore: (
     chatId: string,
@@ -212,6 +214,12 @@ function countPersistMilestones(message: MyUIMessage): number {
   return count;
 }
 
+function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
+  return messages.some((message) =>
+    message.parts.some((part) => isAnyToolPart(part) && part.state === 'approval-requested'),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // ChatSessionStore
 // ---------------------------------------------------------------------------
@@ -260,6 +268,12 @@ export class ChatSessionStore {
     async patchChat() {
       throw new Error('ChatSessionStore: patchChat not provided');
     },
+    async touchChatRecency() {
+      throw new Error('ChatSessionStore: touchChatRecency not provided');
+    },
+    async setChatUnreadState() {
+      throw new Error('ChatSessionStore: setChatUnreadState not provided');
+    },
     async consumeChatStartupRequest() {
       throw new Error('ChatSessionStore: consumeChatStartupRequest not provided');
     },
@@ -281,6 +295,11 @@ export class ChatSessionStore {
    */
   public setDependencies(deps: ChatSessionDeps): void {
     this.#deps = deps;
+  }
+
+  /** Record one accepted user action independently of transcript persistence. */
+  public async touchChatRecency(chatId: string, requestedAt: number): Promise<ChatEntity | undefined> {
+    return this.#deps.touchChatRecency(chatId, requestedAt);
   }
 
   public acquire(chatId: string): ChatSession {
@@ -376,6 +395,19 @@ export class ChatSessionStore {
     // Defensive aliases so closures bound to the AI SDK's internal scheduler
     // always read through `this.#deps` (the latest provider snapshot).
     const depsRef = (): ChatSessionDeps => this.#deps;
+
+    // oxlint-disable-next-line eslint/prefer-const -- initialised only after the actor/chat callbacks that close over it are constructed.
+    let session: InternalSession;
+    let approvalWasPending = false;
+
+    const markUnreadIfUnattended = (): void => {
+      const documentIsActive =
+        typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
+      if (session.viewRefcount > 0 && documentIsActive) {
+        return;
+      }
+      void depsRef().setChatUnreadState(chatId, true);
+    };
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
@@ -501,6 +533,10 @@ export class ChatSessionStore {
       chatId,
       onFinish({ messages, isAbort, isError, isDisconnect }) {
         persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
+        if (!isAbort && !isDisconnect) {
+          markUnreadIfUnattended();
+        }
+        this.#scheduleRunReleaseIfTerminal(session);
       },
       onError(error) {
         persistenceActorRef.send({ type: 'handleError', error });
@@ -720,6 +756,12 @@ export class ChatSessionStore {
     // the AI SDK's "internal-but-intended-for-subscribers" marker — see
     // node_modules/@ai-sdk/react/dist/index.d.ts).
     const unregisterMessages = chat['~registerMessagesCallback'](() => {
+      const approvalIsPending = hasPendingApproval(chat.messages);
+      if (approvalIsPending && !approvalWasPending) {
+        markUnreadIfUnattended();
+      }
+      approvalWasPending = approvalIsPending;
+
       const lastIndex = chat.messages.length - 1;
       const last = chat.messages[lastIndex];
       if (last?.role === 'assistant') {
@@ -760,11 +802,10 @@ export class ChatSessionStore {
     persistenceActorRef.start();
     draftActorRef.start();
 
-    // Kick off chat hydration. Sent after start() so the persistence machine
-    // is in `chatLoading.idle` and ready to transition into `loading`.
-    persistenceActorRef.send({ type: 'setActiveChatId', chatId });
-
-    const session: InternalSession = {
+    // oxlint-disable-next-line eslint/prefer-const -- assigned after `session.dispose` captures it so immediate actor emissions cannot observe a partial session.
+    let lifecycleSubscription: { unsubscribe: () => void } | undefined;
+    let requestLifecycleWasActive = false;
+    session = {
       chatId,
       chat,
       persistenceActorRef,

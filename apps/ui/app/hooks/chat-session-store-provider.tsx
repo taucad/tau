@@ -37,6 +37,8 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
   store.setDependencies({
     getChat: projectManager.getChat,
     patchChat: projectManager.patchChat,
+    touchChatRecency: projectManager.touchChatRecency,
+    setChatUnreadState: projectManager.setChatUnreadState,
     consumeChatStartupRequest: projectManager.consumeChatStartupRequest,
     commitCancelledDraftRestore: projectManager.commitCancelledDraftRestore,
     setMessageEdit: projectManager.setMessageEdit,

@@ -4,6 +4,7 @@ import type { Chat } from '@taucad/chat';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
 import {
   buildContextItems,
+  buildContextItemsFromSearch,
   getRecentFiles,
   getCategories,
   getItemsForCategory,
@@ -140,10 +141,10 @@ describe('buildContextItems', () => {
     expect(directoryItem?.group).toBe(filesFoldersGroup);
   });
 
-  it('should build chat items with updatedAt as sortKey', () => {
+  it('should build chat items with user activity as sortKey', () => {
     const chats = [
-      createChat({ id: 'c1', name: 'Chat 1', updatedAt: 5000 }),
-      createChat({ id: 'c2', name: 'Chat 2', updatedAt: 3000 }),
+      createChat({ id: 'c1', name: 'Chat 1', updatedAt: 9000, recencyAt: 5000 }),
+      createChat({ id: 'c2', name: 'Chat 2', updatedAt: 10, recencyAt: 3000 }),
     ];
 
     const items = buildContextItems({ fileTree: new Map(), chats });
@@ -159,6 +160,15 @@ describe('buildContextItems', () => {
         path: '.tau/transcripts/c1.jsonl',
       }),
     );
+  });
+
+  it('should use user activity for chat sort keys from worker search results', () => {
+    const items = buildContextItemsFromSearch({
+      fileEntries: [],
+      chats: [createChat({ id: 'c1', name: 'Chat 1', updatedAt: 9000, recencyAt: 5000 })],
+    });
+
+    expect(items).toEqual([expect.objectContaining({ id: 'c1', group: pastChatsGroup, sortKey: 5000 })]);
   });
 
   it('should merge actionItems into the result', () => {

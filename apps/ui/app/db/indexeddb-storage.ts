@@ -12,6 +12,7 @@ import type {
 import type { PersistedRevisionState, ProjectLibraryState } from '#types/project.types.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
+import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 
 const defaultNavigationChatName = 'New chat';
 
@@ -434,7 +435,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
 
   public async createChat(
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & { id?: string },
   ): Promise<Chat> {
     return this.createChatRecord(resourceId, chat);
   }
@@ -461,6 +462,29 @@ export class IndexedDbStorageProvider implements StorageProvider {
         }
         chat[key] = value;
         return true;
+      }),
+    );
+  }
+
+  /** Strictly advance product recency for one accepted user chat action. */
+  public async touchChatRecency(chatId: string, requestedAt: number): Promise<Chat | undefined> {
+    return this.mutex.run(chatId, async () =>
+      this.atomicChatMutation(chatId, (chat) => {
+        chat.recencyAt = Math.max(requestedAt, getChatRecencyAt(chat) + 1);
+        return true;
+      }),
+    );
+  }
+
+  /** Set unread state without reporting the chat row as material activity. */
+  public async setChatUnreadState(chatId: string, hasUnreadTurn: boolean): Promise<Chat | undefined> {
+    return this.mutex.run(chatId, async () =>
+      this.writeChatAtomic(chatId, (chat) => {
+        if ((chat.hasUnreadTurn ?? false) === hasUnreadTurn) {
+          return undefined;
+        }
+        chat.hasUnreadTurn = hasUnreadTurn;
+        return chat;
       }),
     );
   }
@@ -783,7 +807,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
 
   private async createChatRecord(
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & { id?: string },
   ): Promise<Chat> {
     const id = chat.id ?? generatePrefixedId(idPrefix.chat);
     const timestamp = Date.now();
@@ -793,6 +817,8 @@ export class IndexedDbStorageProvider implements StorageProvider {
       resourceId,
       createdAt: timestamp,
       updatedAt: timestamp,
+      recencyAt: timestamp,
+      hasUnreadTurn: false,
     };
 
     const db = await this.getDb();
@@ -834,60 +860,11 @@ export class IndexedDbStorageProvider implements StorageProvider {
   }
 
   private async applyGeneratedChatNameAtomic(chatId: string, name: string): Promise<Chat | undefined> {
-    const db = await this.getDb();
-
-    return new Promise<Chat | undefined>((resolve, reject) => {
-      const transaction = db.transaction(this.chatsStoreName, 'readwrite');
-      const store = transaction.objectStore(this.chatsStoreName);
-
-      let resolved: Chat | undefined;
-
-      const getRequest = store.get(chatId);
-
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      getRequest.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(getRequest.error);
-      };
-
-      getRequest.onsuccess = () => {
-        const existingChat = getRequest.result as Chat | undefined;
-        if (
-          !existingChat ||
-          existingChat.deletedAt !== undefined ||
-          existingChat.name !== defaultNavigationChatName ||
-          existingChat.name === name
-        ) {
-          return;
-        }
-
-        const updatedChat: Chat = { ...existingChat, name };
-        const putRequest = store.put(updatedChat);
-        // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-        putRequest.onerror = () => {
-          // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-          reject(putRequest.error);
-        };
-        putRequest.onsuccess = () => {
-          resolved = updatedChat;
-        };
-      };
-
-      transaction.oncomplete = () => {
-        resolve(resolved);
-      };
-
-      // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
-      transaction.onerror = () => {
-        // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
-        reject(transaction.error);
-      };
-
-      transaction.addEventListener('abort', () => {
-        reject(transaction.error ?? new Error(`Naming chat ${chatId} was aborted`));
-      });
-    }).finally(() => {
-      db.close();
+    return this.writeChatAtomic(chatId, (chat) => {
+      if (chat.deletedAt !== undefined || chat.name !== defaultNavigationChatName || chat.name === name) {
+        return undefined;
+      }
+      return { ...chat, name };
     });
   }
 
@@ -1001,6 +978,17 @@ export class IndexedDbStorageProvider implements StorageProvider {
    * `request.onsuccess`) so callers never observe a pre-durability value.
    */
   private async atomicChatMutation(chatId: string, mutate: (chat: Chat) => boolean): Promise<Chat | undefined> {
+    return this.writeChatAtomic(chatId, (chat) => {
+      if (!mutate(chat)) {
+        return undefined;
+      }
+      chat.updatedAt = Date.now();
+      return chat;
+    });
+  }
+
+  /** Persist one material chat-row transition inside a single transaction. */
+  private async writeChatAtomic(chatId: string, mutate: (chat: Chat) => Chat | undefined): Promise<Chat | undefined> {
     const db = await this.getDb();
 
     return new Promise<Chat | undefined>((resolve, reject) => {
@@ -1023,21 +1011,19 @@ export class IndexedDbStorageProvider implements StorageProvider {
           return;
         }
 
-        const changed = mutate(existingChat);
-        if (!changed) {
+        const updatedChat = mutate(existingChat);
+        if (!updatedChat) {
           return;
         }
 
-        existingChat.updatedAt = Date.now();
-
-        const putRequest = store.put(existingChat);
+        const putRequest = store.put(updatedChat);
         // oxlint-disable-next-line unicorn/prefer-add-event-listener -- this is the preferred API for indexedDB
         putRequest.onerror = () => {
           // oxlint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- we want to let the actual error be thrown
           reject(putRequest.error);
         };
         putRequest.onsuccess = () => {
-          resolved = existingChat;
+          resolved = updatedChat;
         };
       };
 

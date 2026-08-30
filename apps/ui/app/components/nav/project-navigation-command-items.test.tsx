@@ -17,8 +17,19 @@ const chats = [
     id: 'chat/one',
     resourceId: 'project-one',
     name: 'Refine gusset',
+    messages: [],
     createdAt: 1,
-    updatedAt: 4,
+    updatedAt: 999,
+    recencyAt: 4,
+  },
+  {
+    id: 'chat/two',
+    resourceId: 'project-one',
+    name: 'Latest activity',
+    messages: [],
+    createdAt: 2,
+    updatedAt: 2,
+    recencyAt: 5,
   },
 ];
 let registered: CommandPaletteItem[] = [];
@@ -38,13 +49,14 @@ describe('ProjectNavigationCommandItems', () => {
     registered = [];
     render(<ProjectNavigationCommandItems />);
 
-    expect(registered).toHaveLength(2);
+    expect(registered).toHaveLength(3);
     expect(registered[0]).toMatchObject({
       id: 'project-project-one',
       searchValue: 'Bracket Assembly',
       link: '/w/home/Bracket%20Assembly',
     });
-    expect(registered[1]).toMatchObject({
+    expect(registered[1]).toMatchObject({ id: 'chat-chat/two' });
+    expect(registered[2]).toMatchObject({
       id: 'chat-chat/one',
       searchValue: 'Refine gusset Bracket Assembly',
       link: '/w/home/Bracket%20Assembly?chat=chat%2Fone',

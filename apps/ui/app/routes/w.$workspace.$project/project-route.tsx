@@ -22,6 +22,7 @@ import { useBlockBrowserNavigation } from '#hooks/use-block-browser-navigation.j
 import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
 import { debugKernelOptions } from '#constants/kernel-options.presets.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { Loader } from '#components/ui/loader.js';
 import { Button } from '#components/ui/button.js';
@@ -386,6 +387,7 @@ function ChatWithProvider(): React.JSX.Element {
   const { projectRef } = useProject();
   const name = useSelector(projectRef, (state) => state.context.project?.name);
   const description = useSelector(projectRef, (state) => state.context.project?.description);
+  useFocusedChatReadState();
 
   return (
     <>

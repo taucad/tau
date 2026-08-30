@@ -269,7 +269,7 @@ const pendingPermanentDelete: Extract<PendingProjectOperation, { kind: 'permanen
 
 type PrepareProjectCreationInput = {
   readonly manifest: ProjectManifest;
-  readonly chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>;
+  readonly chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>;
   readonly editorState?: unknown;
   readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
   readonly storage: PendingProjectStorage;
@@ -318,6 +318,27 @@ const mockTrashProject = vi.fn<(projectId: string) => Promise<ProjectLibraryStat
 const mockRestoreProject = vi.fn<(projectId: string) => Promise<ProjectLibraryState | undefined>>(
   async (projectId: string) => ({ projectId, lastActivityAt: 10 }),
 );
+const activityChat: Chat = {
+  id: 'chat_activity',
+  resourceId: fakeProject.id,
+  name: 'Activity',
+  messages: [],
+  createdAt: 1,
+  updatedAt: 2,
+  recencyAt: 2,
+  hasUnreadTurn: false,
+};
+const mockTouchChatRecency = vi.fn<(chatId: string, activityAt: number) => Promise<Chat | undefined>>(
+  async () => activityChat,
+);
+const mockSetChatUnreadState = vi.fn<(chatId: string, hasUnreadTurn: boolean) => Promise<Chat | undefined>>(
+  async (_chatId, hasUnreadTurn) => ({ ...activityChat, hasUnreadTurn }),
+);
+const mockPatchChat = vi.fn(async () => ({ ...activityChat, name: 'Patched' }));
+const mockTouchProjectActivity = vi.fn(async (projectId: string, activityAt?: number) => ({
+  projectId,
+  lastActivityAt: activityAt ?? 10,
+}));
 
 vi.mock('#chat-clients/use-project-name-client.js', () => ({
   useProjectNameClient: () => ({ generate: mockGenerateProjectName }),
@@ -353,6 +374,10 @@ vi.mock('xstate', async (importOriginal) => {
           createProjectLibraryStates: mockCreateProjectLibraryStates,
           trashProject: mockTrashProject,
           restoreProject: mockRestoreProject,
+          touchProjectActivity: mockTouchProjectActivity,
+          touchChatRecency: mockTouchChatRecency,
+          setChatUnreadState: mockSetChatUnreadState,
+          patchChat: mockPatchChat,
           beginPermanentDeleteProject: mockBeginPermanentDeleteProject,
           deleteProjectResources: mockDeleteProjectResources,
           setProjectDisclosure: mockSetProjectDisclosure,
@@ -1932,5 +1957,61 @@ describe('useProjectManager.createProject', () => {
     });
     mockCheckHandlePermission.mockResolvedValueOnce('prompt');
     await expect(create()).rejects.toMatchObject({ code: 'permission', workspaceId: 'wsp_stale' });
+  });
+
+  it('uses committed chat recency for project activity and invalidates both query families', async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useProjectManager(), { wrapper });
+    invalidateQueries.mockClear();
+    mockTouchChatRecency.mockResolvedValueOnce({ ...activityChat, recencyAt: 124 });
+
+    await act(async () => result.current.touchChatRecency(activityChat.id, 123));
+
+    expect(mockTouchChatRecency).toHaveBeenCalledWith(activityChat.id, 123);
+    expect(mockTouchProjectActivity).toHaveBeenCalledWith(fakeProject.id, 124);
+    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual(
+      expect.arrayContaining([['chats', fakeProject.id], ['all-chats'], ['chat', activityChat.id], ['projects']]),
+    );
+  });
+
+  it('sets unread state with chat invalidation only and leaves no-op recency silent', async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useProjectManager(), { wrapper });
+    invalidateQueries.mockClear();
+    mockSetChatUnreadState.mockResolvedValueOnce({ ...activityChat, hasUnreadTurn: true });
+
+    await act(async () => result.current.setChatUnreadState(activityChat.id, true));
+
+    expect(mockTouchProjectActivity).not.toHaveBeenCalled();
+    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+      ['chats', fakeProject.id],
+      ['all-chats'],
+      ['chat', activityChat.id],
+    ]);
+
+    invalidateQueries.mockClear();
+    mockTouchChatRecency.mockResolvedValueOnce(undefined);
+    await act(async () => result.current.touchChatRecency(activityChat.id, 2));
+    expect(mockTouchProjectActivity).not.toHaveBeenCalled();
+    expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it('refreshes chat projections after row persistence without changing project recency', async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const { result } = renderHook(() => useProjectManager(), { wrapper });
+    invalidateQueries.mockClear();
+
+    await act(async () => result.current.patchChat(activityChat.id, 'name', 'Patched'));
+
+    expect(mockPatchChat).toHaveBeenCalledWith(activityChat.id, 'name', 'Patched');
+    expect(mockTouchProjectActivity).not.toHaveBeenCalled();
+    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+      ['chats', fakeProject.id],
+      ['all-chats'],
+      ['chat', activityChat.id],
+    ]);
   });
 });

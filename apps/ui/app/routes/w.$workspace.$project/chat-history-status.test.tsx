@@ -44,7 +44,17 @@ vi.mock('@xstate/react', () => ({
 
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({
-    chats: [{ id: 'chat_test', updatedAt: 0 }],
+    chats: [
+      {
+        id: 'chat_test',
+        resourceId: 'project_test',
+        name: 'Chat',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 999,
+        recencyAt: 1,
+      },
+    ],
   }),
 }));
 

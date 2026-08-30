@@ -853,6 +853,83 @@ describe('IndexedDbStorageProvider', () => {
   });
 
   // =========================================================================
+  // Product recency / unread state
+  // =========================================================================
+  describe('chat recency and unread semantics', () => {
+    it('initializes recency with row timestamps and starts read', async () => {
+      const chat = await freshChat(new IndexedDbStorageProvider());
+
+      expect(chat.recencyAt).toBe(chat.createdAt);
+      expect(chat.updatedAt).toBe(chat.createdAt);
+      expect(chat.hasUnreadTurn).toBe(false);
+    });
+
+    it('strictly advances recency for every accepted action and bumps row updatedAt', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const chat = await freshChat(provider);
+      const activityAt = chat.recencyAt! + 100;
+      await sleep(2);
+
+      const result = await provider.touchChatRecency(chat.id, activityAt);
+
+      expect(result?.recencyAt).toBe(activityAt);
+      expect(result?.updatedAt).toBeGreaterThan(chat.updatedAt);
+      const repeated = await provider.touchChatRecency(chat.id, activityAt - 1);
+      expect(repeated?.recencyAt).toBe(activityAt + 1);
+      const stored = await provider.getChat(chat.id);
+      expect(stored?.recencyAt).toBe(activityAt + 1);
+    });
+
+    it('sets and clears unread state while preserving row and recency timestamps', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const chat = await freshChat(provider);
+
+      const unread = await provider.setChatUnreadState(chat.id, true);
+
+      expect(unread?.hasUnreadTurn).toBe(true);
+      expect(unread?.updatedAt).toBe(chat.updatedAt);
+      expect(unread?.recencyAt).toBe(chat.recencyAt);
+      await expect(provider.setChatUnreadState(chat.id, true)).resolves.toBeUndefined();
+      const read = await provider.setChatUnreadState(chat.id, false);
+      expect(read?.hasUnreadTurn).toBe(false);
+      expect(read?.updatedAt).toBe(chat.updatedAt);
+      expect(read?.recencyAt).toBe(chat.recencyAt);
+      const stored = await provider.getChat(chat.id);
+      expect(stored?.hasUnreadTurn).toBe(false);
+    });
+
+    it('returns undefined for missing recency and unread targets', async () => {
+      const provider = new IndexedDbStorageProvider();
+
+      await expect(provider.touchChatRecency('chat_missing', 1)).resolves.toBeUndefined();
+      await expect(provider.setChatUnreadState('chat_missing', true)).resolves.toBeUndefined();
+    });
+
+    it('preserves recency, unread state, and messages across repeated concurrent writes', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const chat = await freshChat(provider);
+      const initialActivityAt = chat.recencyAt!;
+
+      /* oxlint-disable no-await-in-loop -- race regression requires each iteration to settle before the next */
+      for (let index = 1; index <= 100; index++) {
+        const activityAt = initialActivityAt + index;
+        const messages = [userMessage(`activity-race-${index}`)];
+        await Promise.all([
+          provider.touchChatRecency(chat.id, activityAt),
+          provider.setChatUnreadState(chat.id, index % 2 === 1),
+          provider.patchChat(chat.id, 'messages', messages),
+        ]);
+
+        const stored = await provider.getChat(chat.id);
+        expect(stored?.recencyAt).toBe(activityAt);
+        expect(stored?.hasUnreadTurn).toBe(index % 2 === 1);
+        expect(stored?.messages).toEqual(messages);
+      }
+      /* oxlint-enable no-await-in-loop */
+    });
+  });
+
+  // =========================================================================
   // setMessageEdit / clearMessageEdit
   // =========================================================================
   describe('setMessageEdit / clearMessageEdit', () => {
@@ -1048,12 +1125,16 @@ describe('IndexedDbStorageProvider', () => {
         activeExecution: { kind: 'tau', model: 'gpt-5.4-medium' },
         activeKernel: 'manifold',
       });
+      await sleep(2);
 
       const copy = await provider.duplicateChat(original.id);
 
       expect(copy.id).not.toBe(original.id);
       expect(copy.activeExecution).toEqual({ kind: 'tau', model: 'gpt-5.4-medium' });
       expect(copy.activeKernel).toBe('manifold');
+      expect(copy.recencyAt).toBe(copy.createdAt);
+      expect(copy.recencyAt).toBeGreaterThan(original.recencyAt!);
+      expect(copy.hasUnreadTurn).toBe(false);
     });
 
     it('should leave duplicate fields undefined when the source chat had none', async () => {

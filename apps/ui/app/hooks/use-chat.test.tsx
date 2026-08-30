@@ -48,6 +48,8 @@ type FakeChat = {
 const harness = vi.hoisted(() => ({
   created: [] as FakeChat[],
   patchChat: vi.fn(),
+  touchChatRecency: vi.fn(),
+  setChatUnreadState: vi.fn(),
   setMessageEdit: vi.fn(),
   clearMessageEdit: vi.fn(),
   getChat: vi.fn(),
@@ -148,6 +150,8 @@ vi.mock('#utils/error.utils.js', () => ({
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     patchChat: harness.patchChat,
+    touchChatRecency: harness.touchChatRecency,
+    setChatUnreadState: harness.setChatUnreadState,
     setMessageEdit: harness.setMessageEdit,
     clearMessageEdit: harness.clearMessageEdit,
     getChat: harness.getChat,
@@ -277,6 +281,8 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     harness.created = [];
     harness.getChat.mockReset().mockResolvedValue(undefined);
     harness.patchChat.mockReset().mockResolvedValue(undefined);
+    harness.touchChatRecency.mockReset().mockResolvedValue(undefined);
+    harness.setChatUnreadState.mockReset().mockResolvedValue(undefined);
     harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
@@ -293,6 +299,36 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
   // are translated faithfully by the store-side dispatch listeners.
   // ===========================================================================
 
+  it('records accepted user actions once and ignores invalid targets and stop', () => {
+    const { result } = renderHook(() => ({ actions: useChatActions(), store: useChatSessionStore() }), {
+      wrapper: createWrapper(defaultTestChatId),
+    });
+    const user = makeUserMessage('msg_user_activity', 'activity');
+    const assistant = makeAssistantMessage('msg_assistant_activity', 'answer');
+    getFake(defaultTestChatId).messages = [user, assistant];
+    result.current.store.setLatestAgentBody(defaultTestChatId, { agent: { profile: 'cad' } });
+
+    act(() => {
+      result.current.actions.sendMessage(user, { body: { agent: { profile: 'cad' } } });
+      result.current.actions.regenerate({ body: { agent: { profile: 'cad' } } });
+      result.current.actions.continueChat();
+      result.current.actions.editMessage(user.id, 'edited', { body: { agent: { profile: 'cad' } } });
+      result.current.actions.retryMessage(assistant.id, { body: { agent: { profile: 'cad' } } });
+      result.current.actions.stop();
+      result.current.actions.editMessage('missing-edit', 'ignored');
+      result.current.actions.retryMessage('missing-retry');
+    });
+
+    expect(harness.touchChatRecency).toHaveBeenCalledTimes(5);
+    expect(harness.touchChatRecency).toHaveBeenNthCalledWith(1, defaultTestChatId, user.metadata?.createdAt);
+    expect(harness.touchChatRecency.mock.calls.slice(1)).toEqual([
+      [defaultTestChatId, expect.any(Number)],
+      [defaultTestChatId, expect.any(Number)],
+      [defaultTestChatId, expect.any(Number)],
+      [defaultTestChatId, expect.any(Number)],
+    ]);
+  });
+
   it('routes a `send` request through to chat.sendMessage', async () => {
     const { result } = renderProvider();
     const message = makeUserMessage('msg_1', 'hello');
@@ -307,6 +343,8 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     const fake = getFake(defaultTestChatId);
     expect(fake.sendMessage).toHaveBeenCalledTimes(1);
     expect(fake.sendMessage).toHaveBeenCalledWith(message);
+    expect(harness.touchChatRecency).toHaveBeenCalledOnce();
+    expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, message.metadata?.createdAt);
     expect(fake.regenerate).not.toHaveBeenCalled();
     expect(fake.stop).not.toHaveBeenCalled();
   });
@@ -321,6 +359,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
     const fake = getFake(defaultTestChatId);
     expect(fake.regenerate).toHaveBeenCalledTimes(1);
+    expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, expect.any(Number));
     expect(fake.sendMessage).not.toHaveBeenCalled();
   });
 
@@ -337,6 +376,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     expect(fake.makeRequest).toHaveBeenCalledWith({ trigger: 'submit-message' });
     expect(fake.regenerate).not.toHaveBeenCalled();
     expect(fake.sendMessage).not.toHaveBeenCalled();
+    expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, expect.any(Number));
   });
 
   /**
@@ -384,6 +424,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
     const fake = getFake(defaultTestChatId);
     expect(fake.stop).toHaveBeenCalledTimes(1);
+    expect(harness.touchChatRecency).toHaveBeenCalledTimes(1);
   });
 
   it('replaces the message tail and regenerates on edit', async () => {
@@ -401,6 +442,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     expect(fake.messages[0]!.id).toBe('msg_1');
     expect(fake.messages[0]!.parts[0]).toMatchObject({ type: 'text', text: 'second try' });
     expect(fake.regenerate).toHaveBeenCalledTimes(1);
+    expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, expect.any(Number));
   });
 
   it('skips edit dispatch when the target message is no longer present', async () => {
@@ -413,6 +455,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
     const fake = getFake(defaultTestChatId);
     expect(fake.regenerate).not.toHaveBeenCalled();
+    expect(harness.touchChatRecency).not.toHaveBeenCalled();
     expect(result.current.context.persistenceActorRef!.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
   });
 
@@ -431,6 +474,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     expect(fake.messages).toHaveLength(1);
     expect(fake.messages[0]!.id).toBe('msg_user');
     expect(fake.regenerate).toHaveBeenCalledTimes(1);
+    expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, expect.any(Number));
     expect(fake.makeRequest).not.toHaveBeenCalled();
   });
 
@@ -443,6 +487,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
 
     const fake = getFake(defaultTestChatId);
     expect(fake.regenerate).not.toHaveBeenCalled();
+    expect(harness.touchChatRecency).not.toHaveBeenCalled();
   });
 
   // ===========================================================================
@@ -775,6 +820,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       expect(persistenceActorRef.getSnapshot().context.retryAttempt).toBe(0);
       expect(persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
       expect(fake.messages).toBe(partialMessagesRef);
+      expect(harness.touchChatRecency).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }

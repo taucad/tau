@@ -7,6 +7,71 @@ const projectNames = {
   b: 'Project Navigation B',
 } as const;
 
+const chatNames = {
+  older: 'Older activity',
+  newer: 'Newer activity',
+} as const;
+
+type PersistedChatActivity = Readonly<{
+  id: string;
+  name: string;
+  resourceId: string;
+  createdAt: number;
+  updatedAt: number;
+  recencyAt?: number;
+  hasUnreadTurn?: boolean;
+  activeExecution?: unknown;
+  activeKernel?: string;
+  draft?: unknown;
+  error?: unknown;
+  messageEdits?: unknown;
+  messages: readonly unknown[];
+  startupRequest?: unknown;
+}>;
+
+type ChatActivitySnapshot = Readonly<{
+  chats: readonly PersistedChatActivity[];
+  projectLastActivityAt: number;
+}>;
+
+type ChatActivityBridge = Readonly<{
+  read(): Promise<ChatActivitySnapshot>;
+}>;
+
+const readChatActivitySnapshot = async (): Promise<ChatActivitySnapshot> =>
+  target.evaluate(async () => {
+    const bridge = (globalThis as typeof globalThis & { __TAU_CHAT_ACTIVITY_TEST__?: ChatActivityBridge })
+      .__TAU_CHAT_ACTIVITY_TEST__;
+    if (!bridge) {
+      throw new Error('Chat activity e2e bridge is unavailable');
+    }
+    return bridge.read();
+  });
+
+const readActivityChatOrder = async (): Promise<string[]> =>
+  target.evaluate(
+    (names) =>
+      [...document.querySelectorAll<HTMLElement>('[data-slot="chat-trigger"]')]
+        .map((row) => row.textContent.trim())
+        .filter((name): name is string => name === names.older || name === names.newer),
+    chatNames,
+  );
+
+const openActivityChat = async (name: string): Promise<void> => {
+  await target.click(selectors.getByRole('link', { name, exact: true }));
+  await expect
+    .poll(async () =>
+      target.evaluate(
+        (expected) =>
+          [...document.querySelectorAll<HTMLElement>('[data-slot="chat-trigger"]')]
+            .find((row) => row.dataset['active'] === 'true')
+            ?.textContent.trim() === expected,
+        name,
+      ),
+    )
+    .toBe(true);
+};
+
 type CameraInput = Readonly<{
   position: readonly [number, number, number];
   target: readonly [number, number, number];
@@ -284,6 +349,54 @@ test('client navigation keeps every project-scoped resource on one logical proje
     (message) => /modelInteraction actor is not available|null.*addEventListener/iu.test(message),
   );
   expect(lifecycleFailures).toEqual([]);
+});
+
+test('chat navigation preserves ordering until an accepted user submit advances recency', async () => {
+  await target.navigate('/__e2e/project-navigation?activity=1');
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  await target.expectVisible(selectors.getByRole('link', { name: chatNames.older, exact: true }), 60_000);
+  await target.expectVisible(selectors.getByRole('link', { name: chatNames.newer, exact: true }), 60_000);
+  await expect.poll(readActivityChatOrder).toEqual([chatNames.newer, chatNames.older]);
+
+  const beforeNavigation = await readChatActivitySnapshot();
+  await openActivityChat(chatNames.newer);
+  const afterFirstFocus = await readChatActivitySnapshot();
+  expect(beforeNavigation.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(true);
+  expect(afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(false);
+  await openActivityChat(chatNames.older);
+  await openActivityChat(chatNames.newer);
+  const afterRepeatedFocus = await readChatActivitySnapshot();
+  expect(afterRepeatedFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(
+    afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn,
+  );
+  await openActivityChat(chatNames.older);
+  const afterNavigation = await readChatActivitySnapshot();
+
+  expect(await readActivityChatOrder()).toEqual([chatNames.newer, chatNames.older]);
+  expect(afterNavigation.chats.map(({ name, updatedAt, recencyAt }) => ({ name, updatedAt, recencyAt }))).toEqual(
+    beforeNavigation.chats.map(({ name, updatedAt, recencyAt }) => ({ name, updatedAt, recencyAt })),
+  );
+  expect(afterNavigation.projectLastActivityAt).toBe(beforeNavigation.projectLastActivityAt);
+
+  const composer = selectors.getByCss('.tiptap[contenteditable="true"]').first();
+  await target.fill(composer, 'advance this chat');
+  await target.press(composer, 'Enter');
+  await expect.poll(readActivityChatOrder).toEqual([chatNames.older, chatNames.newer]);
+
+  const afterSubmit = await readChatActivitySnapshot();
+  const olderBefore = beforeNavigation.chats.find(({ name }) => name === chatNames.older)!;
+  const olderAfter = afterSubmit.chats.find(({ name }) => name === chatNames.older)!;
+  expect(olderAfter.recencyAt).toBeGreaterThan(olderBefore.recencyAt!);
+  expect(afterSubmit.projectLastActivityAt).toBeGreaterThan(beforeNavigation.projectLastActivityAt);
+
+  await openRecentProject(projectNames.b);
+  await openRecentProject(projectNames.a);
+  await expect.poll(readActivityChatOrder).toEqual([chatNames.older, chatNames.newer]);
+  const afterRevisit = await readChatActivitySnapshot();
+  expect(afterRevisit.chats.map(({ name, recencyAt }) => ({ name, recencyAt }))).toEqual(
+    afterSubmit.chats.map(({ name, recencyAt }) => ({ name, recencyAt })),
+  );
+  expect(afterRevisit.projectLastActivityAt).toBe(afterSubmit.projectLastActivityAt);
 });
 
 test('project and chat rows expose full-width Codex-style hover actions', async () => {

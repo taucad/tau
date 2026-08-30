@@ -2,6 +2,7 @@ import type { FileEntry, FileStatEntry } from '@taucad/types';
 import type { Chat } from '@taucad/chat';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
 import { fuzzyMatch } from '#components/chat/tiptap/fuzzy-match.js';
+import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 
 const recentFilesLimit = 3;
 
@@ -81,7 +82,7 @@ export function buildContextItems({ fileTree, chats, actionItems }: BuildContext
       chipType: 'chat',
       path: `.tau/transcripts/${chat.id}.jsonl`,
       group: pastChatsGroup,
-      sortKey: chat.updatedAt,
+      sortKey: getChatRecencyAt(chat),
     });
   }
 
@@ -135,7 +136,7 @@ export function buildContextItemsFromSearch({
       chipType: 'chat',
       path: `.tau/transcripts/${chat.id}.jsonl`,
       group: pastChatsGroup,
-      sortKey: chat.updatedAt,
+      sortKey: getChatRecencyAt(chat),
     });
   }
 

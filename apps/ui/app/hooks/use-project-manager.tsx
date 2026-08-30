@@ -73,6 +73,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { selectWorkspaceConnectionState, workspaceConnectionMachine } from '#hooks/workspace-connection.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 import type { PreparedWorkspaceCatalog, WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 
 /**
@@ -162,7 +163,7 @@ type ProjectManagerContextType = {
   repairWorkspaceBindings: (workspaceId: string) => Promise<WorkspaceBindingRepairResult>;
   createProject: (options: CreateProjectOptions) => Promise<CreatedProject>;
   updateProject: (projectId: string, update: PartialDeep<ProjectManifest>) => Promise<ProjectManifest | undefined>;
-  touchProject: (projectId: string) => Promise<ProjectLibraryState | undefined>;
+  touchProject: (projectId: string, activityAt?: number) => Promise<ProjectLibraryState | undefined>;
   duplicateProject: (projectId: string) => Promise<CreatedProject>;
   getProjects: (options?: { includeDeleted?: boolean }) => Promise<ProjectLibraryEntry[]>;
   getProjectListing: (options?: { includeDeleted?: boolean }) => Promise<ProjectListing>;
@@ -187,7 +188,7 @@ type ProjectManagerContextType = {
   // Chat methods
   createChat: (
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & {
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & {
       id?: string;
     },
   ) => Promise<Chat>;
@@ -195,6 +196,8 @@ type ProjectManagerContextType = {
   updateChat: (chatId: string, update: PartialDeep<Chat>) => Promise<Chat | undefined>;
   applyGeneratedChatName: (chatId: string, name: string) => Promise<Chat | undefined>;
   patchChat: <K extends keyof Chat>(chatId: string, key: K, value: Chat[K]) => Promise<Chat | undefined>;
+  touchChatRecency: (chatId: string, requestedAt: number) => Promise<Chat | undefined>;
+  setChatUnreadState: (chatId: string, hasUnreadTurn: boolean) => Promise<Chat | undefined>;
   consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<Chat | undefined>;
   commitCancelledDraftRestore: (chatId: string, input: CommitCancelledDraftRestoreInput) => Promise<Chat | undefined>;
   setMessageEdit: (
@@ -483,6 +486,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const invalidateProjectsList = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['projects'] });
   }, [queryClient]);
+
+  const invalidateChatQueries = useCallback(
+    (resourceId: string, chatId: string) => {
+      void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
+      void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
+      void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+    },
+    [queryClient],
+  );
 
   const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const scheduleProjectsListInvalidation = useCallback(() => {
@@ -1231,10 +1243,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   );
 
   const touchProject = useCallback(
-    async (projectId: string): Promise<ProjectLibraryState | undefined> => {
+    async (projectId: string, activityAt?: number): Promise<ProjectLibraryState | undefined> => {
       await ensureDiscoveryReady();
       const worker = await getReadiedWorker();
-      return worker.touchProjectActivity(projectId);
+      return worker.touchProjectActivity(projectId, activityAt);
     },
     [ensureDiscoveryReady, getReadiedWorker],
   );
@@ -1786,7 +1798,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const createChat = useCallback(
     async (
       resourceId: string,
-      chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & {
+      chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & {
         id?: string;
       },
     ): Promise<Chat> => {
@@ -1810,15 +1822,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const updateChat = useCallback(
     async (chatId: string, update: PartialDeep<Chat>): Promise<Chat | undefined> => {
       const worker = await getReadiedWorker();
-      const result = await worker.updateChat(chatId, update);
-      if (result) {
-        await touchProject(result.resourceId);
-        invalidateProjectsList();
-      }
-
-      return result;
+      return worker.updateChat(chatId, update);
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [getReadiedWorker],
   );
 
   const applyGeneratedChatName = useCallback(
@@ -1834,40 +1840,55 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const worker = await getReadiedWorker();
       const result = await worker.patchChat(chatId, key, value);
       if (result) {
-        await touchProject(result.resourceId);
-        invalidateProjectsList();
+        invalidateChatQueries(result.resourceId, chatId);
       }
-
       return result;
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [getReadiedWorker, invalidateChatQueries],
+  );
+
+  const touchChatRecency = useCallback(
+    async (chatId: string, requestedAt: number): Promise<Chat | undefined> => {
+      const worker = await getReadiedWorker();
+      const result = await worker.touchChatRecency(chatId, requestedAt);
+      if (!result) {
+        return undefined;
+      }
+
+      invalidateChatQueries(result.resourceId, chatId);
+      await touchProject(result.resourceId, getChatRecencyAt(result));
+      invalidateProjectsList();
+      return result;
+    },
+    [getReadiedWorker, invalidateChatQueries, invalidateProjectsList, touchProject],
+  );
+
+  const setChatUnreadState = useCallback(
+    async (chatId: string, hasUnreadTurn: boolean): Promise<Chat | undefined> => {
+      const worker = await getReadiedWorker();
+      const result = await worker.setChatUnreadState(chatId, hasUnreadTurn);
+      if (result) {
+        invalidateChatQueries(result.resourceId, chatId);
+      }
+      return result;
+    },
+    [getReadiedWorker, invalidateChatQueries],
   );
 
   const consumeChatStartupRequest = useCallback(
     async (chatId: string, requestId: string): Promise<Chat | undefined> => {
       const worker = await getReadiedWorker();
-      const result = await worker.consumeChatStartupRequest(chatId, requestId);
-      if (result) {
-        invalidateProjectsList();
-      }
-
-      return result;
+      return worker.consumeChatStartupRequest(chatId, requestId);
     },
-    [getReadiedWorker, invalidateProjectsList],
+    [getReadiedWorker],
   );
 
   const commitCancelledDraftRestore = useCallback(
     async (chatId: string, input: CommitCancelledDraftRestoreInput): Promise<Chat | undefined> => {
       const worker = await getReadiedWorker();
-      const result = await worker.commitCancelledDraftRestore(chatId, input);
-      if (result) {
-        await touchProject(result.resourceId);
-        invalidateProjectsList();
-      }
-
-      return result;
+      return worker.commitCancelledDraftRestore(chatId, input);
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [getReadiedWorker],
   );
 
   const setMessageEdit = useCallback(
@@ -1877,29 +1898,17 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       draft: NonNullable<Chat['messageEdits']>[string],
     ): Promise<Chat | undefined> => {
       const worker = await getReadiedWorker();
-      const result = await worker.setMessageEdit(chatId, messageId, draft);
-      if (result) {
-        await touchProject(result.resourceId);
-        invalidateProjectsList();
-      }
-
-      return result;
+      return worker.setMessageEdit(chatId, messageId, draft);
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [getReadiedWorker],
   );
 
   const clearMessageEdit = useCallback(
     async (chatId: string, messageId: string): Promise<Chat | undefined> => {
       const worker = await getReadiedWorker();
-      const result = await worker.clearMessageEdit(chatId, messageId);
-      if (result) {
-        await touchProject(result.resourceId);
-        invalidateProjectsList();
-      }
-
-      return result;
+      return worker.clearMessageEdit(chatId, messageId);
     },
-    [getReadiedWorker, invalidateProjectsList, touchProject],
+    [getReadiedWorker],
   );
 
   const softDeleteChat = useCallback(
@@ -1997,6 +2006,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       updateChat,
       applyGeneratedChatName,
       patchChat,
+      touchChatRecency,
+      setChatUnreadState,
       consumeChatStartupRequest,
       commitCancelledDraftRestore,
       setMessageEdit,
@@ -2040,6 +2051,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     updateChat,
     applyGeneratedChatName,
     patchChat,
+    touchChatRecency,
+    setChatUnreadState,
     consumeChatStartupRequest,
     commitCancelledDraftRestore,
     setMessageEdit,

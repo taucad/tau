@@ -18,14 +18,11 @@ import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { Loader } from '#components/ui/loader.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
 import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
+import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
 
 const chatsPerPage = 5;
 
-export const sortProjectChats = (chats: readonly Chat[]): Chat[] =>
-  [...chats].sort(
-    (left, right) =>
-      right.updatedAt - left.updatedAt || right.createdAt - left.createdAt || left.id.localeCompare(right.id),
-  );
+export const sortProjectChats = (chats: readonly Chat[]): Chat[] => [...chats].sort(compareChatsByRecency);
 
 export function ProjectChatList({
   project,

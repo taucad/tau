@@ -6,6 +6,7 @@ import { useAllChats } from '#hooks/use-all-chats.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
 import type { ProjectListItem } from '#types/project.types.js';
+import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
 
 const hasSlugs = (
   project: ProjectListItem,
@@ -38,24 +39,22 @@ export function ProjectNavigationCommandItems(): undefined {
         icon: <Folder aria-hidden />,
         link: projectUrl(project.slugs),
       })),
-      ...[...chats]
-        .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
-        .flatMap((chat): CommandPaletteItem[] => {
-          const project = projectsById.get(chat.resourceId);
-          if (!project?.slugs) {
-            return [];
-          }
-          return [
-            {
-              id: `chat-${chat.id}`,
-              label: chat.name,
-              searchValue: `${chat.name} ${project.name}`,
-              group: 'Chats',
-              icon: <MessageSquare aria-hidden />,
-              link: projectChatUrl(project.slugs, chat.id),
-            },
-          ];
-        }),
+      ...[...chats].sort(compareChatsByRecency).flatMap((chat): CommandPaletteItem[] => {
+        const project = projectsById.get(chat.resourceId);
+        if (!project?.slugs) {
+          return [];
+        }
+        return [
+          {
+            id: `chat-${chat.id}`,
+            label: chat.name,
+            searchValue: `${chat.name} ${project.name}`,
+            group: 'Chats',
+            icon: <MessageSquare aria-hidden />,
+            link: projectChatUrl(project.slugs, chat.id),
+          },
+        ];
+      }),
     ],
     [chats, navigableProjects, projectsById],
   );

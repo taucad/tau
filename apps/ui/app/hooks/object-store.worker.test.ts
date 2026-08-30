@@ -39,11 +39,11 @@ describe('pickDuplicatedFocusedChatId', () => {
     ).toBe('chat_a_clone');
   });
 
-  it('falls back to the most-recently-updated cloned chat when source has no focused chat', () => {
+  it('falls back to the most-recently-active cloned chat when source has no focused chat', () => {
     const clonedChats = [
-      makeChat({ id: 'chat_old', updatedAt: 1 }),
-      makeChat({ id: 'chat_recent', updatedAt: 999 }),
-      makeChat({ id: 'chat_mid', updatedAt: 500 }),
+      makeChat({ id: 'chat_old', updatedAt: 999, recencyAt: 1 }),
+      makeChat({ id: 'chat_recent', updatedAt: 1, recencyAt: 999 }),
+      makeChat({ id: 'chat_mid', updatedAt: 500, recencyAt: 500 }),
     ];
     expect(
       pickDuplicatedFocusedChatId({

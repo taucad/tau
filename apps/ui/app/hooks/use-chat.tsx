@@ -571,10 +571,12 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
+        const outgoingMessage = message as MyUIMessage;
+        void store.touchChatRecency(resolvedChatId, outgoingMessage.metadata?.createdAt ?? Date.now());
         session.persistenceActorRef.send({
           type: 'startRequest',
-          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
-          request: { kind: 'send', message: message as MyUIMessage, body: options?.body },
+          request: { kind: 'send', message: outgoingMessage, body: options?.body },
         });
       },
       regenerate(options) {
@@ -582,6 +584,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
+        void store.touchChatRecency(resolvedChatId, Date.now());
         session.persistenceActorRef.send({
           type: 'startRequest',
           request: { kind: 'regenerate', body: options?.body },
@@ -592,6 +595,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session) {
           return;
         }
+        void store.touchChatRecency(resolvedChatId, Date.now());
         session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
       },
       stop() {
@@ -624,6 +628,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session.chat.messages.some((m) => m.id === messageId)) {
           return;
         }
+        void store.touchChatRecency(resolvedChatId, Date.now());
         session.persistenceActorRef.send({
           type: 'startRequest',
           request: { kind: 'edit', messageId, content, imageUrls: options?.imageUrls, body: options?.body },
@@ -638,6 +643,7 @@ export function useChatActions(chatId?: string): ChatActions {
         if (!session.chat.messages.some((m) => m.id === messageId)) {
           return;
         }
+        void store.touchChatRecency(resolvedChatId, Date.now());
         session.persistenceActorRef.send({
           type: 'startRequest',
           request: { kind: 'retry', messageId, body: options?.body },

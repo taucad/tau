@@ -11,6 +11,7 @@ import { useModels } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChats } from '#hooks/use-chats.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
+import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
 
 type ChatHistoryStatusProps = {
   readonly className?: string;
@@ -25,7 +26,7 @@ export const ChatHistoryStatus = memo(function ({ className }: ChatHistoryStatus
   const activeChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const { chats } = useChats(projectId);
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
-  const updatedAt = activeChat?.updatedAt;
+  const recencyAt = activeChat ? getChatRecencyAt(activeChat) : undefined;
 
   // Force re-render every minute to update relative time
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
@@ -72,11 +73,11 @@ export const ChatHistoryStatus = memo(function ({ className }: ChatHistoryStatus
     >
       {/* Left side: Last activity */}
       <div className='flex items-center gap-3'>
-        {updatedAt ? (
+        {recencyAt ? (
           <div className='flex items-center gap-1 text-muted-foreground'>
             <Clock className='size-3' />
-            <span className='@[20rem]:hidden'>{formatRelativeTime(updatedAt, { short: true })}</span>
-            <span className='hidden @[20rem]:inline'>{formatRelativeTime(updatedAt)}</span>
+            <span className='@[20rem]:hidden'>{formatRelativeTime(recencyAt, { short: true })}</span>
+            <span className='hidden @[20rem]:inline'>{formatRelativeTime(recencyAt)}</span>
           </div>
         ) : undefined}
       </div>

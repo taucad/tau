@@ -27,6 +27,8 @@ const harness = vi.hoisted(() => ({
   projectManager: {
     getChat: vi.fn().mockResolvedValue(undefined),
     patchChat: vi.fn().mockResolvedValue(undefined),
+    touchChatRecency: vi.fn().mockResolvedValue(undefined),
+    setChatUnreadState: vi.fn().mockResolvedValue(undefined),
     setMessageEdit: vi.fn().mockResolvedValue(undefined),
     clearMessageEdit: vi.fn().mockResolvedValue(undefined),
     consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
@@ -124,6 +126,8 @@ describe('useChatSession', () => {
     harness.created = [];
     harness.projectManager.getChat.mockReset().mockResolvedValue(undefined);
     harness.projectManager.patchChat.mockReset().mockResolvedValue(undefined);
+    harness.projectManager.touchChatRecency.mockReset().mockResolvedValue(undefined);
+    harness.projectManager.setChatUnreadState.mockReset().mockResolvedValue(undefined);
     harness.projectManager.setMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.projectManager.clearMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.projectManager.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);

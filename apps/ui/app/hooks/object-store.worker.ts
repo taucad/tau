@@ -16,6 +16,7 @@ import type {
 } from '#types/pending-project-operation.types.js';
 import { defaultPanelState } from '#constants/editor.constants.js';
 import { mergePanelState } from '#utils/panel-state.utils.js';
+import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
 
 /**
  * Type for initial editor state overrides during project creation.
@@ -30,7 +31,7 @@ const storage = new IndexedDbStorageProvider();
 /**
  * Pick the focused chat id to persist on a duplicated project. Prefers the
  * source project's mapped chat (so reopening the duplicate matches the
- * source's last focus), falling back to the most-recently-updated cloned
+ * source's last focus), falling back to the most-recently-active cloned
  * chat. Returns `undefined` only when no chats were cloned (in which case
  * the caller skips the editor-state write entirely — the editor machine's
  * load-time `ensureFocusedChat` actor will auto-create a chat on first
@@ -60,7 +61,7 @@ export function pickDuplicatedFocusedChatId(args: {
   let mostRecent = clonedChats[0]!;
   for (let i = 1; i < clonedChats.length; i++) {
     const candidate = clonedChats[i]!;
-    if (candidate.updatedAt > mostRecent.updatedAt) {
+    if (compareChatsByRecency(candidate, mostRecent) < 0) {
       mostRecent = candidate;
     }
   }
@@ -126,7 +127,7 @@ const objectStoreWorker = {
   /** Prepare stable replay data before any cross-store project creation writes. */
   async prepareProjectCreation(options: {
     manifest: ProjectManifest;
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'>;
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>;
     editorState?: InitialEditorState;
     files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
     storage: PendingProjectStorage;
@@ -139,6 +140,8 @@ const objectStoreWorker = {
       resourceId: project.id,
       createdAt: timestamp,
       updatedAt: timestamp,
+      recencyAt: timestamp,
+      hasUnreadTurn: false,
     };
     const operationId = generatePrefixedId(idPrefix.request);
     const operation: PendingCreateProjectOperation = {
@@ -180,6 +183,8 @@ const objectStoreWorker = {
         resourceId: newProject.id,
         createdAt: timestamp,
         updatedAt: timestamp,
+        recencyAt: timestamp,
+        hasUnreadTurn: false,
         deletedAt: undefined,
       };
     });
@@ -303,7 +308,7 @@ const objectStoreWorker = {
 
   async createChat(
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt'> & { id?: string },
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & { id?: string },
   ): Promise<Chat> {
     return storage.createChat(resourceId, chat);
   },
@@ -322,6 +327,14 @@ const objectStoreWorker = {
 
   async patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined> {
     return storage.patchChat(chatId, key, value);
+  },
+
+  async touchChatRecency(chatId: string, requestedAt: number): Promise<Chat | undefined> {
+    return storage.touchChatRecency(chatId, requestedAt);
+  },
+
+  async setChatUnreadState(chatId: string, hasUnreadTurn: boolean): Promise<Chat | undefined> {
+    return storage.setChatUnreadState(chatId, hasUnreadTurn);
   },
 
   async consumeChatStartupRequest(chatId: string, requestId: string): Promise<Chat | undefined> {

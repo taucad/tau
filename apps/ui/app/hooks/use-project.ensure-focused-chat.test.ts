@@ -80,13 +80,13 @@ describe('ensureFocusedChatForProject', () => {
 
   it('uses deterministic recency ordering when neither requested nor persisted chat is valid', async () => {
     const chats = [
-      makeChat({ id: 'chat_z', createdAt: 2000, updatedAt: 3000 }),
-      makeChat({ id: 'chat_b', createdAt: 2500, updatedAt: 3000 }),
-      makeChat({ id: 'chat_a', createdAt: 2500, updatedAt: 3000 }),
-      makeChat({ id: 'chat_newer_update', createdAt: 1000, updatedAt: 4000 }),
+      makeChat({ id: 'chat_z', createdAt: 2000, updatedAt: 9000, recencyAt: 3000 }),
+      makeChat({ id: 'chat_b', createdAt: 2500, updatedAt: 3000, recencyAt: 3000 }),
+      makeChat({ id: 'chat_a', createdAt: 2500, updatedAt: 3000, recencyAt: 3000 }),
+      makeChat({ id: 'chat_newer_activity', createdAt: 1000, updatedAt: 1000, recencyAt: 4000 }),
     ];
 
-    const newestUpdate = await ensureFocusedChatForProject({
+    const newestActivity = await ensureFocusedChatForProject({
       projectId: 'project_test',
       requestedChatId: 'chat_missing',
       persistedChatId: 'chat_stale',
@@ -105,7 +105,7 @@ describe('ensureFocusedChatForProject', () => {
       },
     });
 
-    expect(newestUpdate.focusedChatId).toBe('chat_newer_update');
+    expect(newestActivity.focusedChatId).toBe('chat_newer_activity');
     expect(deterministicTie.focusedChatId).toBe('chat_a');
   });
 });

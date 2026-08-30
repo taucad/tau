@@ -162,6 +162,8 @@ describe('new chat submit regression', () => {
     store.setDependencies({
       getChat: harness.getChat,
       patchChat: harness.patchChat,
+      touchChatRecency: vi.fn().mockResolvedValue(undefined),
+      setChatUnreadState: vi.fn().mockResolvedValue(undefined),
       setMessageEdit: harness.setMessageEdit,
       clearMessageEdit: harness.clearMessageEdit,
       consumeChatStartupRequest: harness.consumeChatStartupRequest,
@@ -226,6 +228,8 @@ describe('new chat submit regression', () => {
     store.setDependencies({
       getChat: harness.getChat,
       patchChat: harness.patchChat,
+      touchChatRecency: vi.fn().mockResolvedValue(undefined),
+      setChatUnreadState: vi.fn().mockResolvedValue(undefined),
       setMessageEdit: harness.setMessageEdit,
       clearMessageEdit: harness.clearMessageEdit,
       consumeChatStartupRequest: harness.consumeChatStartupRequest,

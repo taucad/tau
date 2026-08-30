@@ -29,6 +29,8 @@ type FakeChat = {
 const harness = vi.hoisted(() => ({
   created: [] as FakeChat[],
   patchChat: vi.fn(),
+  touchChatRecency: vi.fn(),
+  setChatUnreadState: vi.fn(),
   setMessageEdit: vi.fn(),
   clearMessageEdit: vi.fn(),
   getChat: vi.fn(),
@@ -119,6 +121,8 @@ vi.mock('#machines/inspector.js', () => ({
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     patchChat: harness.patchChat,
+    touchChatRecency: harness.touchChatRecency,
+    setChatUnreadState: harness.setChatUnreadState,
     setMessageEdit: harness.setMessageEdit,
     clearMessageEdit: harness.clearMessageEdit,
     getChat: harness.getChat,
@@ -236,6 +240,8 @@ function createComposerWrapper() {
 beforeEach(() => {
   harness.created = [];
   harness.patchChat.mockReset().mockResolvedValue(undefined);
+  harness.touchChatRecency.mockReset().mockResolvedValue(undefined);
+  harness.setChatUnreadState.mockReset().mockResolvedValue(undefined);
   harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
   harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
   harness.getChat.mockReset().mockResolvedValue(undefined);

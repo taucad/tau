@@ -150,8 +150,8 @@ export type PendingFilePlacement = {
 
 type WorkbenchPlaceholderParameters = FilePaneState & { mode: 'launcher' | 'open-file' };
 
-const defaultFilesWidth = 240;
 const minimumFilesWidth = 176;
+const defaultFilesWidth = minimumFilesWidth;
 const maximumFilesWidth = 360;
 
 export type NormalizedFilePaneState = {

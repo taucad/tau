@@ -967,7 +967,7 @@ describe('normalizeFilePaneState', () => {
 
   it('should apply eligible-pane and viewer defaults to legacy parameters', () => {
     expect(normalizeFilePaneState({ parameters: {}, requestsFiles: true, presentation: markdownPresentation })).toEqual(
-      { filesOpen: true, filesWidth: 240, viewId: 'preview' },
+      { filesOpen: true, filesWidth: 176, viewId: 'preview' },
     );
   });
 

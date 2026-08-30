@@ -1,8 +1,7 @@
 import * as React from 'react';
 import { useLoaderData } from 'react-router';
-import { createWorkspace } from '#filesystem/handle-store.js';
 import { getEnvironment } from '#environment.config.js';
-import { useFileManager } from '#hooks/use-file-manager.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
 
 const validFixture = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 
@@ -24,7 +23,7 @@ export const loader = async ({ request }: { readonly request: Request }): Promis
 /** Seeds a genuine, structured-cloneable directory handle through production workspace APIs. */
 export default function ProjectCreationLocationDebugRoute(): React.JSX.Element {
   const { fixture } = useLoaderData<typeof loader>();
-  const fileManager = useFileManager();
+  const projectManager = useProjectManager();
   const [workspace, setWorkspace] = React.useState<{
     readonly workspaceId: string;
     readonly name: string;
@@ -43,15 +42,14 @@ export default function ProjectCreationLocationDebugRoute(): React.JSX.Element {
       try {
         const root = await navigator.storage.getDirectory();
         const handle = await root.getDirectoryHandle(fixture, { create: true });
-        const connected = await createWorkspace(handle);
-        await fileManager.workspace.syncProjectRoots();
-        setWorkspace(connected);
+        const connected = await projectManager.connectWorkspace(handle);
+        setWorkspace(connected?.workspace);
       } catch (seedError) {
         setError(seedError instanceof Error ? seedError.message : String(seedError));
       }
     };
     void seed();
-  }, [fileManager.workspace, fixture]);
+  }, [fixture, projectManager]);
 
   if (error) {
     return <main role='alert'>Project creation location fixture failed: {error}</main>;

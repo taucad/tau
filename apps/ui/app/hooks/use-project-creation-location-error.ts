@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { getWorkspace, requestHandlePermission } from '#filesystem/handle-store.js';
 import { isWorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectCreationLocationErrorCopy } from '#utils/project-creation-location.utils.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import { toast } from '#components/ui/sonner.js';
@@ -9,6 +10,7 @@ import { toast } from '#components/ui/sonner.js';
 /** Presents one canonical recovery path while leaving retry and source state to the caller. */
 export const useProjectCreationLocationError = (): ((error: unknown) => boolean) => {
   const fileManager = useFileManager();
+  const projectManager = useProjectManager();
   const telemetry = useWorkspaceTelemetry();
 
   return useCallback(
@@ -32,6 +34,7 @@ export const useProjectCreationLocationError = (): ((error: unknown) => boolean)
                   return;
                 }
                 await fileManager.workspace.syncProjectRoots();
+                await projectManager.refreshWorkspaceCatalog();
                 toast.success('Folder access restored. Try creating the project again.');
               } catch (grantError) {
                 console.error('Failed to restore folder access:', grantError);
@@ -58,6 +61,6 @@ export const useProjectCreationLocationError = (): ((error: unknown) => boolean)
       toast.error(copy.message);
       return true;
     },
-    [fileManager.workspace, telemetry],
+    [fileManager.workspace, projectManager, telemetry],
   );
 };

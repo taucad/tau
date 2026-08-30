@@ -87,6 +87,16 @@ function createManifest(node = createNode(), sourceFile?: string): GeometryCompo
   };
 }
 
+const fireSliderPointerEvent = (
+  element: HTMLElement,
+  type: 'pointerdown' | 'pointermove' | 'pointerup',
+  clientX: number,
+): void => {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX });
+  Object.defineProperty(event, 'pointerId', { value: 1 });
+  fireEvent(element, event);
+};
+
 beforeEach(() => {
   mocks.addContextReferences.mockReset();
   mocks.editorSend.mockReset();
@@ -227,7 +237,7 @@ describe('model component action menu', () => {
     expect(screen.getByRole('menuitem', { name: 'Isolate' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Show all' })).toBeDisabled();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Reset all opacities' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Reset opacity' })).toBeDisabled();
 
     await user.click(screen.getByRole('menuitem', { name: 'Hide' }));
 
@@ -238,6 +248,63 @@ describe('model component action menu', () => {
       source: 'viewer',
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('should type and scrub opacity through the viewer source without closing the menu', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+    const onOpenChange = vi.fn();
+
+    render(
+      <ViewerModelComponentActionMenu
+        isOpen
+        point={{ clientX: 120, clientY: 160 }}
+        data={{
+          manifest: createManifest(node, 'src/main.ts'),
+          node,
+          graphicsRef,
+          unitId,
+          source: 'viewer',
+          isFocused: false,
+          isIsolated: false,
+          hasHiddenComponents: false,
+          hasOpacityOverrides: false,
+          opacity: 1,
+        }}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    const input = screen.getByRole('textbox', { name: 'Opacity' });
+    expect(input).toHaveValue('100');
+    expect(screen.getByText('%')).toBeInTheDocument();
+    await user.click(input);
+    await user.clear(input);
+    await user.type(input, '42');
+    await user.keyboard('{Enter}');
+    expect(graphicsRef.send).toHaveBeenLastCalledWith({
+      type: 'setModelComponentOpacity',
+      unitId,
+      componentId,
+      opacity: 0.42,
+      source: 'viewer',
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    const sliderItem = input.closest<HTMLElement>('[data-slot="viewer-model-component-action-slider-item"]')!;
+    Object.defineProperty(sliderItem, 'offsetWidth', { configurable: true, value: 100 });
+    fireSliderPointerEvent(sliderItem, 'pointerdown', 100);
+    fireSliderPointerEvent(sliderItem, 'pointermove', 80);
+    fireSliderPointerEvent(sliderItem, 'pointerup', 80);
+    expect(graphicsRef.send).toHaveBeenLastCalledWith({
+      type: 'setModelComponentOpacity',
+      unitId,
+      componentId,
+      opacity: 0.8,
+      source: 'viewer',
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it('should reveal viewer components in Explorer without adding the action to Explorer menus', async () => {
@@ -339,7 +406,7 @@ describe('model component action menu', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
-    const resetOpacity = screen.getByRole('menuitem', { name: 'Reset all opacities' });
+    const resetOpacity = screen.getByRole('menuitem', { name: 'Reset opacity' });
     expect(resetOpacity).toBeEnabled();
     await user.click(resetOpacity);
     expect(graphicsRef.send).toHaveBeenCalledWith({

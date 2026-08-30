@@ -15,33 +15,20 @@ function createDefaultInput(overrides?: Partial<ParameterInput>): ParameterInput
     enableContinualOnChange: false,
     initialUnitFactor: 1,
     initialUnitSymbol: 'mm',
-    inputRef: { current: null },
     ...overrides,
   };
 }
 
-/* oxlint-disable no-empty-function, @typescript-eslint/no-restricted-types -- no-op stubs for tests; null matches React.RefObject<T | null> */
+/* oxlint-disable no-empty-function -- no-op stub for the global keyboard listener */
 const keydownNoop = fromCallback<{ type: 'keyStateChanged'; key: string; isPressed: boolean }, { key: string }>(
   () => () => {},
 );
-
-const focusNoop = fromCallback<
-  { type: 'focusStateChanged'; isFocused: boolean },
-  { elementRef: React.RefObject<HTMLElement | null> }
->(() => () => {});
-
-const arrowKeyNoop = fromCallback<
-  { type: 'arrowKeyPressed'; direction: 'up' | 'down' },
-  { elementRef: React.RefObject<HTMLElement | null> }
->(() => () => {});
-/* oxlint-enable no-empty-function, @typescript-eslint/no-restricted-types */
+/* oxlint-enable no-empty-function */
 
 function createTestActor(overrides?: Partial<ParameterInput>) {
   const machine = parameterMachine.provide({
     actors: {
       keydownListener: keydownNoop,
-      focusListener: focusNoop,
-      arrowKeyListener: arrowKeyNoop,
     },
   });
 
@@ -370,53 +357,6 @@ describe('parameterMachine', () => {
       actor.send({ type: 'keyStateChanged', key: 'Control', isPressed: true });
       expect(actor.getSnapshot().context.step).toBe(stepBefore);
       expect(actor.getSnapshot().context.isShiftHeld).toBe(false);
-      actor.stop();
-    });
-  });
-
-  // =========================================================================
-  // Arrow key navigation
-  // =========================================================================
-  describe('arrow key navigation', () => {
-    it('should increment local value on arrow up', () => {
-      const actor = createTestActor({ initialValue: 50, defaultValue: 50 });
-      actor.start();
-      const emitted = collectEmitted(actor);
-      const { step } = actor.getSnapshot().context;
-      actor.send({ type: 'arrowKeyPressed', direction: 'up' });
-      expect(actor.getSnapshot().context.localValue).toBeCloseTo(50 + step);
-      expect(emitted).toHaveLength(1);
-      actor.stop();
-    });
-
-    it('should decrement local value on arrow down', () => {
-      const actor = createTestActor({ initialValue: 50, defaultValue: 50 });
-      actor.start();
-      const emitted = collectEmitted(actor);
-      const { step } = actor.getSnapshot().context;
-      actor.send({ type: 'arrowKeyPressed', direction: 'down' });
-      expect(actor.getSnapshot().context.localValue).toBeCloseTo(50 - step);
-      expect(emitted).toHaveLength(1);
-      actor.stop();
-    });
-
-    it('should clamp arrow key value to range min/max', () => {
-      const actor = createTestActor({ initialValue: 0, defaultValue: 0, min: 0, max: 10, step: 1 });
-      actor.start();
-      actor.send({ type: 'arrowKeyPressed', direction: 'down' });
-      expect(actor.getSnapshot().context.localValue).toBe(0);
-      actor.stop();
-    });
-
-    it('should use shift-multiplied step for arrow keys when shift is held', () => {
-      const actor = createTestActor({ initialValue: 50, defaultValue: 50 });
-      actor.start();
-      const emitted = collectEmitted(actor);
-      const { baseStep } = actor.getSnapshot().context;
-      actor.send({ type: 'keyStateChanged', key: 'Shift', isPressed: true });
-      actor.send({ type: 'arrowKeyPressed', direction: 'up' });
-      expect(actor.getSnapshot().context.localValue).toBeCloseTo(50 + baseStep * 5);
-      expect(emitted).toHaveLength(1);
       actor.stop();
     });
   });

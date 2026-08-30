@@ -79,7 +79,7 @@ type ModelComponentActionDescriptor =
       readonly min: number;
       readonly max: number;
       readonly step: number;
-      readonly formatValue: (value: number) => string;
+      readonly trailingAdornment: React.ReactNode;
       readonly onValueChange: (value: number) => void;
     };
 
@@ -229,13 +229,13 @@ function useModelComponentActionDescriptors(
       min: 0,
       max: 100,
       step: 1,
-      formatValue: (value) => `${value}%`,
+      trailingAdornment: '%',
       onValueChange: actions.setOpacityPercent,
     },
     {
       type: 'item',
       id: 'resetOpacity',
-      label: 'Reset all opacities',
+      label: 'Reset opacity',
       icon: <RotateCcw className='size-3.5' />,
       isDisabled: !data.hasOpacityOverrides,
       onSelect: actions.resetAllOpacities,
@@ -256,7 +256,8 @@ function renderDropdownActionDescriptor(descriptor: ModelComponentActionDescript
         min={descriptor.min}
         max={descriptor.max}
         step={descriptor.step}
-        formatValue={descriptor.formatValue}
+        trailingAdornment={descriptor.trailingAdornment}
+        aria-label={descriptor.label}
         onValueChange={descriptor.onValueChange}
       >
         {descriptor.icon}
@@ -286,7 +287,8 @@ function renderContextActionDescriptor(descriptor: ModelComponentActionDescripto
         min={descriptor.min}
         max={descriptor.max}
         step={descriptor.step}
-        formatValue={descriptor.formatValue}
+        trailingAdornment={descriptor.trailingAdornment}
+        aria-label={descriptor.label}
         onValueChange={descriptor.onValueChange}
       >
         {descriptor.icon}
@@ -320,7 +322,8 @@ function renderViewerActionDescriptor(
         min={descriptor.min}
         max={descriptor.max}
         step={descriptor.step}
-        formatValue={descriptor.formatValue}
+        trailingAdornment={descriptor.trailingAdornment}
+        aria-label={descriptor.label}
         onValueChange={descriptor.onValueChange}
       >
         {descriptor.icon}

@@ -4,6 +4,7 @@ import { ModelComponentViewerMenuItems } from '#components/geometry/cad/model-co
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
 import { Popover, PopoverAnchor, PopoverContent } from '#components/ui/popover.js';
 import { menuContentVariants } from '#components/ui/menu.variants.js';
+import { preventMenuSliderEscapeDismissal } from '#components/ui/menu-slider-item.js';
 import { cn } from '#utils/ui.utils.js';
 
 export type ViewerModelComponentActionMenuPoint = {
@@ -50,6 +51,7 @@ export function ViewerModelComponentActionMenu({
           onCloseAutoFocus={(event) => {
             event.preventDefault();
           }}
+          onEscapeKeyDown={preventMenuSliderEscapeDismissal}
         >
           <ModelComponentViewerMenuItems {...data} onRequestClose={handleRequestClose} />
         </PopoverContent>

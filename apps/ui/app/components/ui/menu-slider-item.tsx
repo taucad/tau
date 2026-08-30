@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { Slider } from '#components/ui/slider.js';
-import { menuItemIconClass, menuItemLayoutClass } from '#components/ui/menu.variants.js';
+import { menuItemVariants } from '#components/ui/menu.variants.js';
+import { SliderInput } from '#components/ui/slider-input.js';
 import { cn } from '#utils/ui.utils.js';
 
 export type MenuSliderItemProperties = {
@@ -11,12 +11,23 @@ export type MenuSliderItemProperties = {
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
-  readonly infoTooltip?: React.ReactNode;
-  readonly formatValue?: (value: number) => string;
+  readonly trailingAdornment?: React.ReactNode;
+  readonly 'aria-label': string;
   readonly dataSlot: string;
 };
 
-export function MenuSliderItem({
+export const preventMenuSliderEscapeDismissal = (event: { preventDefault: () => void }): void => {
+  const { activeElement } = document;
+  if (activeElement instanceof HTMLInputElement && activeElement.dataset['slot'] === 'slider-input-input') {
+    event.preventDefault();
+  }
+};
+
+const stopPointerPropagation = (event: React.PointerEvent<HTMLDivElement>): void => {
+  event.stopPropagation();
+};
+
+export const MenuSliderItem = ({
   className,
   children,
   value,
@@ -24,38 +35,31 @@ export function MenuSliderItem({
   min = 0,
   max = 100,
   step = 1,
-  infoTooltip,
-  formatValue,
+  trailingAdornment,
+  'aria-label': ariaLabel,
   dataSlot,
-}: MenuSliderItemProperties): React.JSX.Element {
-  const handleValueChange = React.useCallback(
-    (values: number[]) => {
-      const newValue = values[0];
-      if (newValue !== undefined) {
-        onValueChange?.(newValue);
-      }
-    },
-    [onValueChange],
-  );
-
-  const displayValue = formatValue ? formatValue(value) : `${value}`;
-
-  return (
-    <div
-      data-slot={dataSlot}
-      className={cn('px-3 py-2', className)}
-      onPointerDown={(event) => {
-        event.stopPropagation();
-      }}
-    >
-      <div className='mb-2 flex items-center justify-between'>
-        <span className={cn(menuItemLayoutClass, menuItemIconClass, 'text-sm')}>
-          {children}
-          {infoTooltip}
+}: MenuSliderItemProperties): React.JSX.Element => (
+  <SliderInput
+    dataSlot={dataSlot}
+    value={value}
+    min={min}
+    max={max}
+    step={step}
+    leadingContent={children}
+    trailingAdornment={
+      trailingAdornment ? (
+        <span aria-hidden='true' className='ml-0.5 text-muted-foreground'>
+          {trailingAdornment}
         </span>
-        <span className='text-xs text-muted-foreground'>{displayValue}</span>
-      </div>
-      <Slider value={[value]} min={min} max={max} step={step} className='w-full' onValueChange={handleValueChange} />
-    </div>
-  );
-}
+      ) : undefined
+    }
+    className={cn(menuItemVariants(), 'w-full focus-within:text-foreground', className)}
+    aria-label={ariaLabel}
+    onScrubChange={onValueChange}
+    onInputCommit={onValueChange}
+    onPointerDown={stopPointerPropagation}
+    onPointerMove={stopPointerPropagation}
+    onPointerUp={stopPointerPropagation}
+    onPointerCancel={stopPointerPropagation}
+  />
+);

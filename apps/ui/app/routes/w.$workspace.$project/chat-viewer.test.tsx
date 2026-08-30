@@ -593,6 +593,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Opacity' })).toHaveValue('100');
 
     fireEvent.click(screen.getByText('Reveal in Explorer'));
 

@@ -60,6 +60,22 @@ describe('snapToStep', () => {
 });
 
 describe('SliderInput', () => {
+  it('owns the shared outline and cursor states', () => {
+    const { container, rerender } = renderSlider({ className: 'cursor-pointer ring-0' });
+    const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+
+    expect(root).toHaveClass('ring-1', 'ring-border/50', 'ring-inset', 'cursor-col-resize', 'hover:ring-border');
+    expect(root).not.toHaveClass('cursor-pointer', 'ring-0');
+
+    rerender(<SliderInput {...defaultProperties} isReadOnly />);
+    expect(root).toHaveClass('cursor-default');
+    expect(root).not.toHaveClass('cursor-col-resize', 'hover:ring-border');
+
+    rerender(<SliderInput {...defaultProperties} disabled />);
+    expect(root).toHaveClass('cursor-not-allowed');
+    expect(root).not.toHaveClass('cursor-col-resize', 'cursor-default', 'hover:ring-border');
+  });
+
   it('renders the controlled display, slots, accessible input, and proportional fill', () => {
     const { container } = renderSlider({
       displayValue: '50.0',

@@ -14,6 +14,11 @@ type ParametersNumberProps = {
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
+  readonly id?: string;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop
+  readonly autoFocus?: boolean;
+  // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop
+  readonly readOnly?: boolean;
   // oxlint-disable-next-line react-js/boolean-prop-naming -- third-party component prop
   readonly disabled?: boolean;
   /**
@@ -25,6 +30,8 @@ type ParametersNumberProps = {
   readonly className?: string;
   readonly 'aria-label'?: string;
   readonly units: Units;
+  readonly onFocus?: () => void;
+  readonly onBlur?: () => void;
 };
 
 export function ParametersNumber({
@@ -36,15 +43,17 @@ export function ParametersNumber({
   min,
   max,
   step,
+  id,
+  autoFocus,
+  readOnly,
   disabled,
   units,
   enableContinualOnChange = false,
   className,
   'aria-label': ariaLabel,
+  onFocus,
+  onBlur,
 }: ParametersNumberProps): React.JSX.Element {
-  // Create ref for input element (for focus and arrow key listeners)
-  const inputRef = React.useRef<HTMLInputElement>(null);
-
   // Create parameter machine instance
   const parameterRef = useActorRef(parameterMachine, {
     input: {
@@ -54,7 +63,6 @@ export function ParametersNumber({
       enableContinualOnChange,
       initialUnitFactor: units.length.factor,
       initialUnitSymbol: units.length.symbol,
-      inputRef,
       min,
       max,
       step,
@@ -110,7 +118,6 @@ export function ParametersNumber({
 
   return (
     <ParametersNumberField
-      ref={inputRef}
       value={localValue}
       formattedValue={formattedValue}
       isApproximation={isApproximation}
@@ -119,6 +126,9 @@ export function ParametersNumber({
       rangeMin={rangeMin}
       rangeMax={rangeMax}
       step={currentStep}
+      id={id}
+      autoFocus={autoFocus}
+      readOnly={readOnly}
       disabled={disabled}
       className={className}
       aria-label={ariaLabel}
@@ -133,6 +143,14 @@ export function ParametersNumber({
       }}
       onTextChange={(text) => {
         parameterRef.send({ type: 'textInputChanged', text });
+      }}
+      onFocusChange={(isFocused) => {
+        parameterRef.send({ type: 'focusStateChanged', isFocused });
+        if (isFocused) {
+          onFocus?.();
+        } else {
+          onBlur?.();
+        }
       }}
     />
   );

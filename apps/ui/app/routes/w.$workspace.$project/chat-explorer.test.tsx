@@ -644,7 +644,7 @@ describe('Chat explorer component rows', () => {
     );
   });
 
-  it('should keep Add to chat in the dropdown while removing reference drawing show-all and export actions', async () => {
+  it('should keep the shared model actions while removing reference drawing and export actions', async () => {
     const user = userEvent.setup();
     const node = createNode(firstComponentId, 'planetary_housing');
     const manifest = createManifest([node]);
@@ -671,9 +671,21 @@ describe('Chat explorer component rows', () => {
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
+    const dropdownOpacity = screen.getByRole('textbox', { name: 'Opacity' });
+    await user.click(dropdownOpacity);
+    await user.clear(dropdownOpacity);
+    await user.type(dropdownOpacity, '42');
+    await user.keyboard('{Enter}');
+    expect(graphicsRef.send).toHaveBeenLastCalledWith({
+      type: 'setModelComponentOpacity',
+      unitId,
+      componentId: firstComponentId,
+      opacity: 0.42,
+      source: 'explorer',
+    });
     expect(screen.queryByText('Copy @reference')).not.toBeInTheDocument();
     expect(screen.queryByText('View drawings')).not.toBeInTheDocument();
-    expect(screen.queryByText('Show all')).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Show all' })).toHaveAttribute('aria-disabled', 'true');
     expect(screen.queryByText('Export part as')).not.toBeInTheDocument();
 
     await user.click(screen.getByText('Add to chat'));
@@ -716,6 +728,18 @@ describe('Chat explorer component rows', () => {
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
+    const contextOpacity = screen.getByRole('textbox', { name: 'Opacity' });
+    await user.click(contextOpacity);
+    await user.clear(contextOpacity);
+    await user.type(contextOpacity, '37');
+    await user.keyboard('{Enter}');
+    expect(graphicsRef.send).toHaveBeenLastCalledWith({
+      type: 'setModelComponentOpacity',
+      unitId,
+      componentId: firstComponentId,
+      opacity: 0.37,
+      source: 'explorer',
+    });
 
     await user.click(screen.getByText('Hide'));
 

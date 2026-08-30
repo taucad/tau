@@ -2,7 +2,7 @@
 import * as React from 'react';
 import { ContextMenu as ContextMenuPrimitive } from 'radix-ui';
 import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
-import { MenuSliderItem } from '#components/ui/menu-slider-item.js';
+import { MenuSliderItem, preventMenuSliderEscapeDismissal } from '#components/ui/menu-slider-item.js';
 import type { MenuSliderItemProperties } from '#components/ui/menu-slider-item.js';
 import { cn } from '#utils/ui.utils.js';
 import {
@@ -102,6 +102,7 @@ function ContextMenuSubContent({
 
 function ContextMenuContent({
   className,
+  onEscapeKeyDown,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Content>): React.JSX.Element {
   return (
@@ -113,6 +114,10 @@ function ContextMenuContent({
           'max-h-(--radix-context-menu-content-available-height) origin-(--radix-context-menu-content-transform-origin) overflow-x-hidden overflow-y-auto',
           className,
         )}
+        onEscapeKeyDown={(event) => {
+          onEscapeKeyDown?.(event);
+          preventMenuSliderEscapeDismissal(event);
+        }}
         {...props}
       />
     </ContextMenuPrimitive.Portal>

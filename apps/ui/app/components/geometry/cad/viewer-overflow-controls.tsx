@@ -35,15 +35,14 @@ export function FovOverflowControl(): React.JSX.Element {
     [cameraRig],
   );
 
-  const formatValue = useCallback((value: number): string => `${value}\u00B0`, []);
-
   return (
     <DropdownMenuSliderItem
       value={fovAngle}
       min={0}
       max={90}
       step={1}
-      formatValue={formatValue}
+      trailingAdornment='°'
+      aria-label='Field of View'
       onValueChange={handleFovChange}
     >
       Field of View

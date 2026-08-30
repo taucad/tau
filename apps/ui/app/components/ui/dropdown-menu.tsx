@@ -7,7 +7,7 @@ import { Switch } from '#components/ui/switch.js';
 import { ToggleGroup, ToggleGroupItem } from '#components/ui/toggle-group.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Button } from '#components/ui/button.js';
-import { MenuSliderItem } from '#components/ui/menu-slider-item.js';
+import { MenuSliderItem, preventMenuSliderEscapeDismissal } from '#components/ui/menu-slider-item.js';
 import type { MenuSliderItemProperties } from '#components/ui/menu-slider-item.js';
 import {
   menuItemVariants,
@@ -51,6 +51,7 @@ function DropdownMenuContent({
   side,
   alignOffset,
   onClick,
+  onEscapeKeyDown,
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>): React.JSX.Element {
   const resolvedAlignOffset = alignOffset ?? (side === 'left' || side === 'right' ? menuSideAlignOffset : undefined);
@@ -68,6 +69,10 @@ function DropdownMenuContent({
           className,
         )}
         {...properties}
+        onEscapeKeyDown={(event) => {
+          onEscapeKeyDown?.(event);
+          preventMenuSliderEscapeDismissal(event);
+        }}
         onClick={(event: React.MouseEvent<HTMLDivElement>) => {
           // Prevent clicks inside portaled dropdown content from bubbling to
           // ancestor DrawerHandle elements, which would cycle snap points via

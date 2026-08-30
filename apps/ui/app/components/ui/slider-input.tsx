@@ -23,6 +23,9 @@ export type SliderInputProperties = Omit<
   readonly leadingContent?: React.ReactNode;
   readonly trailingAdornment?: React.ReactNode;
   readonly dataSlot?: string;
+  readonly inputId?: string;
+  readonly shouldAutoFocus?: boolean;
+  readonly isReadOnly?: boolean;
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop
   readonly disabled?: boolean;
   readonly 'aria-label': string;
@@ -73,6 +76,9 @@ export const SliderInput = ({
   leadingContent,
   trailingAdornment,
   dataSlot = 'slider-input',
+  inputId,
+  shouldAutoFocus,
+  isReadOnly,
   disabled,
   className,
   'aria-label': ariaLabel,
@@ -105,7 +111,7 @@ export const SliderInput = ({
   const handlePointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       onPointerDown?.(event);
-      if (disabled === true || isEditing || event.button !== 0 || event.defaultPrevented) {
+      if (disabled === true || isReadOnly === true || isEditing || event.button !== 0 || event.defaultPrevented) {
         return;
       }
 
@@ -119,7 +125,7 @@ export const SliderInput = ({
       };
       lastScrubValueRef.current = value;
     },
-    [disabled, isEditing, onPointerDown, value],
+    [disabled, isEditing, isReadOnly, onPointerDown, value],
   );
 
   const handlePointerMove = React.useCallback(
@@ -229,7 +235,7 @@ export const SliderInput = ({
 
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (disabled) {
+      if (disabled === true || isReadOnly === true) {
         return;
       }
       if (event.key === 'Enter') {
@@ -260,7 +266,7 @@ export const SliderInput = ({
       setHasUserEdit(false);
       onInputCommit?.(nextValue);
     },
-    [disabled, max, min, onInputCommit, step, value],
+    [disabled, isReadOnly, max, min, onInputCommit, step, value],
   );
 
   return (
@@ -269,8 +275,12 @@ export const SliderInput = ({
       data-slot={dataSlot}
       data-disabled={disabled ? true : undefined}
       className={cn(
-        'group/slider-input relative flex items-center overflow-hidden focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring',
+        'group/slider-input relative flex items-center overflow-hidden',
         className,
+        'ring-1 ring-border/50 ring-inset focus-within:ring-2 focus-within:ring-ring',
+        disabled !== true && isReadOnly !== true && 'cursor-col-resize hover:ring-border',
+        isReadOnly === true && disabled !== true && 'cursor-default',
+        disabled === true && 'cursor-not-allowed',
       )}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -309,12 +319,15 @@ export const SliderInput = ({
         )}
         <input
           ref={inputRef}
+          id={inputId}
+          autoFocus={shouldAutoFocus}
           autoComplete='off'
           type='text'
           inputMode='decimal'
           aria-label={ariaLabel}
           value={inputValue}
           disabled={disabled}
+          readOnly={isReadOnly}
           className={cn(
             'col-start-1 row-start-1 h-full min-w-0 bg-transparent text-right tabular-nums outline-none',
             isEditing ? 'opacity-100' : 'pointer-events-none opacity-0',

@@ -1,5 +1,5 @@
 import { vi, describe, it, expect } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { LengthSymbol } from '@taucad/units';
 import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
@@ -18,6 +18,16 @@ function createUnits(factor: number, symbol: LengthSymbol): Units {
 
 // Default units (mm)
 const defaultUnits = createUnits(1, 'mm');
+
+const fireSliderPointerEvent = (
+  element: HTMLElement,
+  type: 'pointercancel' | 'pointerdown' | 'pointermove',
+  { clientX, pointerId = 1 }: { readonly clientX: number; readonly pointerId?: number },
+): void => {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX });
+  Object.defineProperty(event, 'pointerId', { value: pointerId });
+  fireEvent(element, event);
+};
 
 // Test wrapper component that provides TooltipProvider
 function TestWrapper({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
@@ -265,6 +275,37 @@ describe('ParametersNumber', () => {
       const fillBar = container.querySelector('[class*="bg-primary"]');
       expect(fillBar).toBeTruthy();
       expect((fillBar as HTMLElement).style.width).toBe('0%');
+    });
+
+    it('should accept the next external value after pointer cancellation', () => {
+      const mockOnChange = vi.fn();
+      const properties = {
+        defaultValue: 50,
+        descriptor: 'length',
+        min: 0,
+        max: 100,
+        units: defaultUnits,
+        onChange: mockOnChange,
+      } satisfies Omit<React.ComponentProps<typeof ParametersNumber>, 'value'>;
+      const { container, rerender } = render(
+        <TestWrapper>
+          <ParametersNumber {...properties} value={50} />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 25 });
+      fireSliderPointerEvent(sliderInput, 'pointercancel', { clientX: 25 });
+      expect(mockOnChange).toHaveBeenLastCalledWith(75);
+
+      rerender(
+        <TestWrapper>
+          <ParametersNumber {...properties} value={20} />
+        </TestWrapper>,
+      );
+      expect(screen.getByRole('textbox')).toHaveValue('20');
     });
 
     it('should enter edit mode on focus and show the input', () => {

@@ -6,8 +6,6 @@ import { parseLengthInput } from '@taucad/units/parser';
 import { roundToSignificantFigures, formatUnitDisplay } from '#utils/number.utils.js';
 import type { MeasurementDescriptor } from '#constants/project-parameters.js';
 import { keydownListener } from '#machines/keydown.actor.js';
-import { focusListener } from '#machines/focus.actor.js';
-import { arrowKeyListener } from '#machines/arrow-key.actor.js';
 
 /**
  * Slider calculation constants
@@ -151,9 +149,6 @@ export type ParameterContext = {
   isShiftHeld: boolean;
   /** Last emitted value (to prevent duplicate emissions) */
   lastEmittedValue: number | undefined;
-  /** Ref to the input element for focus/arrow key listeners */
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- ref can be null
-  inputRef: React.RefObject<HTMLInputElement | null>;
 };
 
 /**
@@ -172,9 +167,6 @@ export type ParameterInput = {
   initialUnitFactor: number;
   /** Initial unit symbol */
   initialUnitSymbol: LengthSymbol;
-  /** Ref to the input element for focus/arrow key listeners */
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- ref can be null
-  inputRef: React.RefObject<HTMLInputElement | null>;
   /** Optional minimum value in baseline units */
   min?: number;
   /** Optional maximum value in baseline units */
@@ -283,8 +275,7 @@ type ParameterEventInternal =
       enableContinualOnChange?: boolean;
     }
   | { type: 'keyStateChanged'; key: string; isPressed: boolean }
-  | { type: 'focusStateChanged'; isFocused: boolean }
-  | { type: 'arrowKeyPressed'; direction: 'up' | 'down' };
+  | { type: 'focusStateChanged'; isFocused: boolean };
 
 /**
  * Parameter Machine Emitted Events
@@ -311,8 +302,6 @@ export const parameterMachine = setup({
   },
   actors: {
     keydownListener,
-    focusListener,
-    arrowKeyListener,
   },
   guards: {
     /**
@@ -555,69 +544,6 @@ export const parameterMachine = setup({
       };
     }),
 
-    handleArrowKey: enqueueActions(({ enqueue, event, context }) => {
-      if (event.type !== 'arrowKeyPressed') {
-        return;
-      }
-
-      const { direction } = event;
-
-      // Use current step (already accounts for shift multiplier)
-      const delta = direction === 'up' ? context.step : -context.step;
-      const rawValue = context.localValue + delta;
-
-      // Round to step precision to avoid floating-point errors
-      const decimalPlaces = Math.max(0, -Math.floor(Math.log10(context.baseStep)));
-      const roundedValue = Number(rawValue.toFixed(decimalPlaces));
-
-      // Clamp to range min/max
-      const clampedValue = Math.max(context.rangeMin, Math.min(context.rangeMax, roundedValue));
-
-      // Convert to baseline units
-      const isLength = context.descriptor === 'length';
-      const unitFactor = isLength ? context.currentUnitFactor : 1;
-      const baselineValue = clampedValue * unitFactor;
-
-      // Check if this value is different from the last emitted value
-      if (context.lastEmittedValue !== undefined && Math.abs(baselineValue - context.lastEmittedValue) < 1e-10) {
-        // Value hasn't changed, don't emit (but still update local state for UI)
-        // Use editing mode for formatting to preserve precision during arrow key interaction
-        const formatting = calculateFormatting({
-          committedValue: baselineValue,
-          unitFactor,
-          isLength,
-          isInteracting: true,
-        });
-        enqueue.assign({
-          localValue: clampedValue,
-          committedValue: baselineValue,
-          ...formatting,
-        });
-        return;
-      }
-
-      // Recalculate formatting with new committed value
-      // Use editing mode for formatting to preserve precision during arrow key interaction
-      const formatting = calculateFormatting({
-        committedValue: baselineValue,
-        unitFactor,
-        isLength,
-        isInteracting: true,
-      });
-
-      enqueue.assign({
-        localValue: clampedValue,
-        committedValue: baselineValue,
-        lastEmittedValue: baselineValue,
-        ...formatting,
-      });
-
-      enqueue.emit({
-        type: 'valueCommit',
-        value: baselineValue,
-      });
-    }),
-
     parseAndCommitText: enqueueActions(({ enqueue, event, context }) => {
       if (event.type !== 'textInputChanged') {
         return;
@@ -743,7 +669,6 @@ export const parameterMachine = setup({
       step: range.baseStep, // Initialize with baseStep (no shift multiplier)
       isShiftHeld: false,
       lastEmittedValue: undefined,
-      inputRef: input.inputRef,
     };
   },
   initial: 'idle',
@@ -753,20 +678,6 @@ export const parameterMachine = setup({
       src: 'keydownListener',
       input: () => ({
         key: 'Shift',
-      }),
-    },
-    {
-      id: 'focusListener',
-      src: 'focusListener',
-      input: ({ context }) => ({
-        elementRef: context.inputRef,
-      }),
-    },
-    {
-      id: 'arrowKeyListener',
-      src: 'arrowKeyListener',
-      input: ({ context }) => ({
-        elementRef: context.inputRef,
       }),
     },
   ],
@@ -788,9 +699,6 @@ export const parameterMachine = setup({
         },
         focusStateChanged: {
           actions: 'handleFocusChange',
-        },
-        arrowKeyPressed: {
-          actions: 'handleArrowKey',
         },
         sliderChanged: [
           {

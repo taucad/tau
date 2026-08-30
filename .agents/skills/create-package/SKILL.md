@@ -32,7 +32,7 @@ pnpm nx g @taucad/workspace-plugin:package <name> --description="..."
 
 For a package that supplies runtime plugin capabilities, stop and use
 `.agents/skills/create-plugin/SKILL.md`. For a kernel specifically, use
-`.agents/skills/new-kernel/SKILL.md`. Those workflows own their generators and
+`.agents/skills/create-kernel/SKILL.md`. Those workflows own their generators and
 integration requirements; this skill does not duplicate them.
 
 ### Options

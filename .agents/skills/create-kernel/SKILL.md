@@ -1,9 +1,9 @@
 ---
-name: new-kernel
+name: create-kernel
 description: Add a new first-party CAD kernel to Tau as a standalone @taucad/* package. Use when adding a kernel, integrating a new CAD engine, implementing defineKernel, scaffolding a kernel package, or wiring kernel UI catalog, prompt, and Monaco entries.
 ---
 
-# New Kernel Integration
+# Create Kernel
 
 Add a new first-party CAD kernel to Tau as a publishable `@taucad/*` plugin toolkit (like `@taucad/openrscad`). Kernel packages live under `packages/plugins/<name>/` and consume the runtime only through public entries such as `@taucad/runtime/kernel`, `/plugin`, and `/types` — never its `#`-prefixed internals. Reusable test support comes from `@taucad/runtime-testing`, not from a runtime subpath.
 

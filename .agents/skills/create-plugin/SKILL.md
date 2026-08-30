@@ -6,7 +6,7 @@ description: Create or update a publishable Tau runtime plugin toolkit with the 
 # Create Plugin
 
 Create or update one `@taucad/*` runtime plugin toolkit. For a kernel-specific
-implementation, use `.agents/skills/new-kernel/SKILL.md` after this routing step.
+implementation, use `.agents/skills/create-kernel/SKILL.md` after this routing step.
 
 ## Resolve
 
@@ -43,7 +43,7 @@ role-named source file per selected capability, public JSDoc, Apache-2.0
 metadata, and browser payload isolation where applicable.
 
 Use public runtime authoring subpaths only. Never import runtime internals or app
-code. Route kernel details and product surfaces through `/new-kernel`; do not
+code. Route kernel details and product surfaces through `/create-kernel`; do not
 duplicate that workflow here.
 
 Wire only the consumers and host rosters in the request. Record why an

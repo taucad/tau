@@ -97,15 +97,7 @@ export const SliderInput = ({
   const [isEditing, setIsEditing] = React.useState(false);
   const [hasUserEdit, setHasUserEdit] = React.useState(false);
   const [isScrubbing, setIsScrubbing] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!isEditing || !hasUserEdit) {
-      setText(displayValue);
-      if (!isEditing) {
-        setHasUserEdit(false);
-      }
-    }
-  }, [displayValue, hasUserEdit, isEditing]);
+  const inputValue = isEditing && hasUserEdit ? text : displayValue;
 
   const range = max - min;
   const fillPercent = range > 0 ? clamp(((value - min) / range) * 100, 0, 100) : 0;
@@ -321,7 +313,7 @@ export const SliderInput = ({
           type='text'
           inputMode='decimal'
           aria-label={ariaLabel}
-          value={text}
+          value={inputValue}
           disabled={disabled}
           className={cn(
             'col-start-1 row-start-1 h-full min-w-0 bg-transparent text-right tabular-nums outline-none',

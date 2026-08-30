@@ -19,6 +19,21 @@ type SectionViewBridgeWindow = Window & {
       fov?: number;
       zoom?: number;
     }): void;
+    getPresentation(): {
+      sectionViewPivot: readonly [number, number, number];
+    };
+    getRenderFrame(): {
+      anchorFrameId: string;
+      originMeters: readonly [number, number, number];
+      metersPerRenderUnit: number;
+    };
+    setRenderFrame(renderFrame: {
+      anchorFrameId: string;
+      originMeters: readonly [number, number, number];
+      metersPerRenderUnit: number;
+    }): void;
+    projectWorldPoint(point: readonly [number, number, number]): { x: number; y: number; visible: boolean };
+    projectSectionTransformHandle(axis: 'X' | 'Y' | 'Z'): { x: number; y: number; visible: boolean } | undefined;
   };
 };
 
@@ -196,6 +211,81 @@ async function samplePng(pngBase64: string, region: CanvasSampleRegion): Promise
 }
 
 test.describe('Section view control restyle regressions', () => {
+  test('keeps React updates bounded during a sustained physical section-plane drag', async () => {
+    await openSectionControlFixture('webgl');
+    await target.evaluate(() => {
+      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      if (!bridge) {
+        throw new Error('Section view e2e bridge is not installed.');
+      }
+
+      bridge.setCamera({
+        position: [0.096, -0.11, 0.078],
+        target: [0, 0, 0],
+        fov: 36,
+        zoom: 1.05,
+      });
+      bridge.setSectionView({
+        plane: 'xy',
+        direction: 1,
+        rotationRadians: [0, 0, 0],
+        pivot: [0, 0, 0],
+        translation: 0,
+      });
+    });
+    await target.delay(300);
+
+    const before = await target.evaluate(() => {
+      const bridge = (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!;
+      return {
+        handle: bridge.projectSectionTransformHandle('Z'),
+        pivot: bridge.getPresentation().sectionViewPivot,
+        axisPoint: bridge.projectWorldPoint([0, 0, 0.01]),
+      };
+    });
+    expect(before.handle?.visible).toBe(true);
+    const directionX = before.axisPoint.x - before.handle!.x;
+    const directionY = before.axisPoint.y - before.handle!.y;
+    const directionLength = Math.hypot(directionX, directionY);
+    expect(directionLength).toBeGreaterThan(0);
+    const unitX = directionX / directionLength;
+    const unitY = directionY / directionLength;
+    const eventBaseline = await target.events();
+    let movedPivot = before.pivot;
+
+    await target.mouseMove(before.handle!.x, before.handle!.y);
+    await target.mouseDown();
+    try {
+      await target.mouseMove(before.handle!.x + unitX * 28, before.handle!.y + unitY * 28, { steps: 12 });
+      movedPivot = await target.evaluate(
+        () =>
+          (globalThis as unknown as SectionViewBridgeWindow).__TAU_SECTION_VIEW_TEST__!.getPresentation()
+            .sectionViewPivot,
+      );
+
+      await target.mouseMove(before.handle!.x - unitX * 28, before.handle!.y - unitY * 28, { steps: 64 });
+      await target.mouseMove(before.handle!.x + unitX * 36, before.handle!.y + unitY * 36, { steps: 64 });
+    } finally {
+      await target.mouseUp();
+    }
+    await target.delay(300);
+
+    const events = await target.events();
+    const updateDepthFailures = [
+      ...events.pageErrors.slice(eventBaseline.pageErrors.length),
+      ...events.consoleMessages
+        .slice(eventBaseline.consoleMessages.length)
+        .filter(({ type }) => type === 'error')
+        .map(({ text }) => text),
+    ].filter((message) => message.includes('Maximum update depth exceeded'));
+
+    expect(updateDepthFailures, 'sustained section dragging should not recursively update React').toEqual([]);
+    expect(
+      movedPivot.some((value, index) => Math.abs(value - before.pivot[index]!) > 1e-6),
+      'the physical transform handle should move the section pivot',
+    ).toBe(true);
+    await target.expectVisible(selectors.getByCss(previewCanvasSelector));
+  });
   test('renders solid bordered transform arrows without interior seam walls', async () => {
     await openSectionControlFixture();
     await driveObliqueTransformControls();

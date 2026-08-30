@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Profiler } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -178,6 +179,28 @@ describe('SliderInput', () => {
 
     await user.tab();
     expect(input).toHaveValue('80');
+  });
+
+  it('does not schedule a passive follow-up commit for an idle controlled value update', () => {
+    let commitCount = 0;
+    const onRender = (): void => {
+      commitCount += 1;
+    };
+    const { rerender } = render(
+      <Profiler id='slider-input' onRender={onRender}>
+        <SliderInput {...defaultProperties} />
+      </Profiler>,
+    );
+    const initialCommitCount = commitCount;
+
+    rerender(
+      <Profiler id='slider-input' onRender={onRender}>
+        <SliderInput {...defaultProperties} value={60} />
+      </Profiler>,
+    );
+
+    expect(commitCount - initialCommitCount).toBe(1);
+    expect(screen.getByRole('textbox', { name: 'Amount' })).toHaveValue('60');
   });
 
   it('starts scrubbing only beyond the threshold and commits once on release', () => {

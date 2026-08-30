@@ -20,7 +20,7 @@ import {
 } from '#components/geometry/graphics/three/controls/selector-label-atlas.js';
 import { adjustHexColorBrightness } from '#utils/color.utils.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
-import { sceneTag, sceneTagData, setSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 // Module-scope scratch vectors for PlaneSelector useFrame (avoids per-frame allocations)
 // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- dir refers to direction vector, not directory
@@ -531,7 +531,7 @@ function SectionTransformControls(properties: React.ComponentProps<typeof Transf
     }
 
     controls.traverse((child) => {
-      setSceneTag(child, sceneTag.sectionViewHelper);
+      Object.assign(child.userData, sceneTagData(sceneTag.sectionViewHelper));
     });
   }, []);
 

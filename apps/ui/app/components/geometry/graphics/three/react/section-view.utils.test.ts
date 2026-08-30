@@ -6,7 +6,7 @@ import {
   collectClippableTargets,
   enforceMaterialClipping,
 } from '#components/geometry/graphics/three/react/section-view.utils.js';
-import { sceneTag, setSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 const testPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
@@ -228,7 +228,7 @@ describe('collectClippableTargets', () => {
     const rootGroup = new THREE.Group();
     const userMesh = createDoubleSidedMesh();
     const helperMesh = createDoubleSidedMesh();
-    setSceneTag(helperMesh, sceneTag.sectionViewHelper);
+    helperMesh.userData = sceneTagData(sceneTag.sectionViewHelper);
 
     rootGroup.add(userMesh);
     rootGroup.add(helperMesh);

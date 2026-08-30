@@ -3,18 +3,12 @@ import type { Object3D } from 'three';
 /**
  * Typed registry of boolean scene-graph tags stored on `Object3D.userData`.
  *
- * Each tag acts as a contract between **producers** (components that tag
- * objects) and **consumers** (screenshot capture, matcap application,
- * raycasting) without coupling them via imports.
- *
- * The underlying `userData` string keys are kept stable so existing
- * serialized scenes continue to work.
+ * Tags identify interactive viewport helpers that picking, clipping, and
+ * section-topology traversal must distinguish from model geometry.
  */
 export const sceneTag = {
-  /** Section-view helpers (contour fills and diagnostic outlines) whose materials must not be replaced. */
+  /** Section-view controls, contour fills, and diagnostic outlines excluded from model processing. */
   sectionViewHelper: 'isSectionViewHelper',
-  /** Preview-only objects (grid, axes) hidden during screenshot capture. */
-  previewOnly: 'isPreviewOnly',
   /** Measurement UI meshes excluded from model raycasting. */
   measurementUi: 'isMeasurementUi',
 } as const;
@@ -42,34 +36,6 @@ export const hasSceneTagInHierarchy = (object: Object3D, tags: ReadonlySet<Scene
   }
 
   return false;
-};
-
-/**
- * Set a boolean scene tag on an Object3D.
- */
-export const setSceneTag = (object: Object3D, tag: SceneTagKey, value = true): void => {
-  object.userData[tag] = value;
-};
-
-/**
- * Remove a scene tag from an Object3D.
- */
-export const clearSceneTag = (object: Object3D, tag: SceneTagKey): void => {
-  // oxlint-disable-next-line @typescript-eslint/no-dynamic-delete -- userData is an untyped record
-  delete object.userData[tag];
-};
-
-/**
- * Collect all descendants (inclusive) of `root` that carry the given tag.
- */
-export const findBySceneTag = (root: Object3D, tag: SceneTagKey): Object3D[] => {
-  const results: Object3D[] = [];
-  root.traverse((child) => {
-    if (hasSceneTag(child, tag)) {
-      results.push(child);
-    }
-  });
-  return results;
 };
 
 /**

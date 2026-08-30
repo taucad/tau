@@ -22,6 +22,8 @@ export const workspaceEventName = {
   unmountFailed: 'workspace.unmount_failed',
   projectCreateWebaccessBlocked: 'project.create.webaccess_blocked',
   externalPoll: 'workspace.external_poll',
+  rootSkipped: 'workspace.root_skipped',
+  connection: 'workspace.connection',
 } as const;
 
 export type WorkspaceEventName = (typeof workspaceEventName)[keyof typeof workspaceEventName];
@@ -53,6 +55,28 @@ export type WorkspaceTelemetry = {
   }) => void;
   readonly projectCreateWebaccessBlocked: (input: { readonly reason: WorkspaceFailureReason }) => void;
   readonly workspaceExternalPoll: (input: ExternalPollTelemetry) => void;
+  /**
+   * A configured workspace was left out of the worker's route topology
+   * because its handle is gone or its permission is no longer granted
+   * (R13). Previously a bare `continue` with no signal at all.
+   */
+  readonly workspaceRootSkipped: (input: {
+    readonly workspaceId: string;
+    readonly reason: Extract<WorkspaceFailureReason, 'disconnected' | 'permission'>;
+  }) => void;
+  readonly workspaceConnection: (input: {
+    readonly operationId: string;
+    readonly workspaceId: string | undefined;
+    readonly outcome: 'ready' | 'failed';
+    readonly totalMs: number;
+    readonly registeringDuration: number;
+    readonly mountingDuration: number;
+    readonly catalogDuration: number;
+    readonly publishingDuration: number;
+    readonly candidateCount: number;
+    readonly projectCount: number;
+    readonly conflictCount: number;
+  }) => void;
 };
 
 const emit = (analytics: Analytics, name: WorkspaceEventName, properties: Record<string, unknown>): void => {
@@ -86,6 +110,12 @@ export const buildWorkspaceTelemetry = (analytics: Analytics): WorkspaceTelemetr
   },
   workspaceExternalPoll: (aggregate) => {
     emit(analytics, workspaceEventName.externalPoll, aggregate);
+  },
+  workspaceRootSkipped: ({ workspaceId, reason }) => {
+    emit(analytics, workspaceEventName.rootSkipped, { workspaceId, reason });
+  },
+  workspaceConnection: (aggregate) => {
+    emit(analytics, workspaceEventName.connection, aggregate);
   },
 });
 

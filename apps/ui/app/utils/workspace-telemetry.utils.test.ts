@@ -90,6 +90,26 @@ describe('buildWorkspaceTelemetry', () => {
       p95: 9,
     });
   });
+  it('emits a path-free workspace connection trace', () => {
+    const { analytics, capture } = makeAnalyticsStub();
+    const trace = {
+      operationId: 'req_abc',
+      workspaceId: 'wsp_abc',
+      outcome: 'ready',
+      totalMs: 480,
+      registeringDuration: 40,
+      mountingDuration: 20,
+      catalogDuration: 400,
+      publishingDuration: 20,
+      candidateCount: 106,
+      projectCount: 104,
+      conflictCount: 2,
+    };
+
+    buildWorkspaceTelemetry(analytics).workspaceConnection({ ...trace, outcome: 'ready' });
+
+    expect(capture).toHaveBeenCalledWith(workspaceEventName.connection, trace);
+  });
 
   // Audit Finding 10: explicit `unmount` is a fire-and-forget operation —
   // when it rejects (e.g. the worker crashed mid-call) the failure must still

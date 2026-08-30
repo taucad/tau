@@ -3,7 +3,7 @@ title: 'Storage Policy'
 description: 'Store-selection boundary (what belongs in IndexedDB at all) plus rules for atomic read-modify-write semantics, field-scoped patches, and concurrent-writer safety in client-side persistent storage providers.'
 status: active
 created: '2026-04-20'
-updated: '2026-08-24'
+updated: '2026-08-30'
 related:
   - docs/policy/project-manifest-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -11,6 +11,7 @@ related:
   - docs/policy/filesystem-policy.md
   - docs/policy/testing-policy.md
   - docs/research/chat-draft-resurrection-race.md
+  - docs/research/chat-user-activity-ordering-blueprint.md
   - docs/research/project-updated-at-activity-boundary.md
   - docs/research/tau-json-project-library-state-boundary.md
 ---
@@ -23,7 +24,7 @@ Internal reference for how persistent storage providers (`IndexedDbStorageProvid
 
 Two independent XState actors (`persistDraftActor`, `persistMessagesActor`) used to share `IndexedDbStorageProvider.updateChat`, which performed `getChat → deepmerge → put` across two separate IndexedDB transactions with no per-`chatId` lock. When the user sent a message, the two writers raced and the message-pipeline writer's `getChat` could land inside the gap between the draft-pipeline writer's read and write, snapshotting a stale `draft` and re-saving the just-sent text. On reload, the previously sent message reappeared in the composer. See `docs/research/chat-draft-resurrection-race.md` for the full timeline.
 
-This policy locks the fix in and prevents the same shape of bug recurring in future storage primitives or new fields on `Chat`/`ProjectLibraryState`.
+This policy locks the fix in and prevents the same shape of bug recurring in future storage primitives or new fields on `Chat`/`ProjectLibraryState`. It also separates generic chat-row mutation time from the user-activity timestamp that owns recent-chat ordering.
 
 ## Rules
 
@@ -161,7 +162,7 @@ updateChat(
 
 Storage mutators must compute the candidate row before stamping. If the candidate is equal to the persisted row, return `undefined`, skip `put`, skip row `updatedAt`, and skip parent-project cascades. Field-scoped helpers express this with a `(chat) => boolean` mutator: returning `false` means "nothing changed".
 
-**Why**: `updatedAt` drives sort order and React Query invalidation. A no-op clear, patch, generated-name retry, or load repair should not reorder the list.
+**Why**: `updatedAt` reports generic row mutation and can drive row-level invalidation, but it never owns chat recency. A no-op clear, patch, generated-name retry, or load repair should not claim that the row materially changed.
 
 CORRECT:
 
@@ -175,7 +176,11 @@ this.atomicChatMutation(chatId, (chat) => {
 
 ### 6. Project recency belongs to the project domain boundary
 
-Do not add low-level timestamp flags to storage, filesystem, worker, or hook APIs. Project naming resolves before project creation; generated chat metadata and navigation repair use semantic operations (`applyGeneratedChatName`, `createNavigationRepairChat`). User/content activity enters through project-domain operations such as project rename, chat message persistence, parameter changes, or `projectFileActivity`, then calls the field-scoped `touchProjectActivity` writer.
+Do not add low-level timestamp flags to storage, filesystem, worker, or hook APIs. Project naming resolves before project creation; generated chat metadata and navigation repair use semantic operations (`applyGeneratedChatName`, `createNavigationRepairChat`). User/content activity enters through project-domain operations such as project rename, accepted user chat actions, parameter changes, or `projectFileActivity`, then calls the field-scoped `touchProjectActivity` writer.
+
+`Chat.recencyAt` is the sole chat-recency authority. Advance it strictly through `touchChatRecency` only after Tau accepts an explicit user send, edit/resubmit, retry, regenerate, or manual-continue action. Generic message/error/draft/config persistence, assistant streaming, startup hydration, automatic retry, navigation, unread/read transitions, and generated labels must never advance it or touch parent-project activity. Legacy rows resolve chat recency from the raw legacy activity field, then the newest stamped user message, then `createdAt`; never fall back to `updatedAt` or an assistant timestamp.
+
+Set `hasUnreadTurn` through `setChatUnreadState`. The semantic writer must be atomic and idempotent while preserving `updatedAt` and `recencyAt` byte-for-byte. Background terminal success/error turns and approval-request transitions set it; aborts and disconnects do not. An active, visible, focused chat clears it. The writer invalidates material chat row/collection queries but never touches or invalidates project recency.
 
 `lastActivityAt` is not a generic row `updatedAt` and is never computed from filesystem mtimes. A no-op activity call must skip its write and invalidation. The one-off audited pre-release workspace snapshot seeds known projects from their old semantic `updatedAt` while discovery is quiesced; first discovery of any other valid project may seed it to discovery time.
 
@@ -245,6 +250,8 @@ const patchChat = useCallback(
 | Full chat replacement (e.g. import, duplicate) | `updateChat(chatId, fullChat)` with `fullChat.id === chatId`  |
 | Generated chat label                           | `applyGeneratedChatName(chatId, name)`                        |
 | Navigation repair empty chat                   | `createNavigationRepairChat(projectId)`                       |
+| Accepted user chat action                      | `touchChatRecency(chatId, timestamp)`                         |
+| Unread/read transition                         | `setChatUnreadState(chatId, hasUnreadTurn)`                   |
 | Material project activity                      | `touchProjectActivity(projectId, timestamp)`                  |
 | Soft-delete / restore project                  | `trashProject(projectId)` / `restoreProject(projectId)`       |
 | Revision pointer                               | `setProjectRevisionState(projectId, revisionState)`           |
@@ -262,6 +269,8 @@ Before merging a storage-layer change:
 - [ ] New multi-writer fields have field-scoped helpers, not extra `updateChat` options.
 - [ ] No `ignoreKeys`/`customMerge` knob is reintroduced.
 - [ ] Row `updatedAt` values and project `lastActivityAt` change only for their separately defined material mutations.
+- [ ] Chat ordering reads `recencyAt` through the canonical legacy fallback and never reads `updatedAt`.
+- [ ] Unread/read transitions preserve row/recency timestamps and never touch project recency.
 - [ ] Derived metadata and navigation repair use semantic operations, not timestamp flags.
 - [ ] A concurrency regression test in `apps/ui/app/db/indexeddb-storage.test.ts` covers the new field with ≥100 iterations.
 - [ ] React Query invalidation hits both collection and row keys only when a material row change occurred, except create/delete membership changes.

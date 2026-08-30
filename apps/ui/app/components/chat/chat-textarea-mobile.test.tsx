@@ -64,6 +64,7 @@ vi.mock('#components/ui/button.js', () => ({
 }));
 
 vi.mock('#components/ui/menu.variants.js', () => ({
+  menuContentVariants: () => 'shared-menu-surface',
   menuItemVariants: () => '',
 }));
 
@@ -102,11 +103,11 @@ const stubTextareaRef: React.RefObject<HTMLTextAreaElement | null> = { current: 
 const stubContainerRef: React.RefObject<HTMLDivElement | null> = { current: null };
 // oxlint-enable @typescript-eslint/no-restricted-types
 
-function renderMobile() {
+function renderMobile(options?: { readonly showContextMenu?: boolean }) {
   return render(
     <ChatTextareaMobile
       dragKind={undefined}
-      showContextMenu={false}
+      showContextMenu={options?.showContextMenu ?? false}
       contextSearchQuery=''
       selectedMenuIndex={0}
       isSubmitting={false}
@@ -163,5 +164,11 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
     renderMobile();
     expect(screen.getAllByText('JSCAD').length).toBeGreaterThan(0);
     expect(screen.queryByText('OpenSCAD')).toBeNull();
+  });
+
+  it('uses the shared menu surface for inline context actions', () => {
+    const { container } = renderMobile({ showContextMenu: true });
+
+    expect(container.querySelector('.shared-menu-surface')).toBeInTheDocument();
   });
 });

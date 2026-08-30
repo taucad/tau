@@ -8,6 +8,7 @@ import {
   filesFoldersGroup,
   pastChatsGroup,
   takeScreenshotGroup,
+  getItemsForCategory,
 } from '#components/chat/tiptap/context-suggestion.utils.js';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
@@ -98,6 +99,21 @@ describe('ContextSuggestionDropdown', () => {
   });
 
   describe('root view (empty query)', () => {
+    it('uses the shared menu surface and item geometry', () => {
+      renderDropdown();
+
+      const dropdown = screen.getByTestId('context-suggestion-dropdown');
+      const scrollArea = screen.getByTestId('context-suggestion-scroll-area');
+      const firstItem = within(dropdown).getAllByRole('button')[0]!;
+
+      expect(dropdown).toHaveClass('rounded-md', 'border-0', 'shadow-menu');
+      expect(dropdown).not.toHaveClass('scroll-shadows-y', 'overflow-y-auto');
+      expect(scrollArea).toHaveClass('scroll-shadows-y', 'overflow-y-auto');
+      expect(scrollArea.parentElement).toBe(dropdown);
+      expect(firstItem).toHaveClass('rounded-sm');
+      expect(firstItem).toHaveAttribute('data-selected', 'true');
+    });
+
     it('should render the 3 recent files at the top sorted by most recently modified', () => {
       renderDropdown();
 
@@ -402,7 +418,7 @@ describe('ContextSuggestionDropdown', () => {
 
     it('should navigate with arrow keys when virtualized', async () => {
       const user = userEvent.setup();
-      const { keydownRef } = renderDropdown({ items: largeItems });
+      const { state, keydownRef } = renderDropdown({ items: largeItems });
 
       const dropdown = screen.getByTestId('context-suggestion-dropdown');
       await user.click(within(dropdown).getByText(filesFoldersGroup));
@@ -418,10 +434,8 @@ describe('ContextSuggestionDropdown', () => {
         keydownRef.current!(new KeyboardEvent('keydown', { key: 'Enter' }));
       });
 
-      const dropdown2 = screen.getByTestId('context-suggestion-dropdown');
-      const buttons = within(dropdown2).getAllByRole('button');
-      const highlightedButton = buttons.find((b) => b.className.includes('bg-accent'));
-      expect(highlightedButton).toBeDefined();
+      const expectedItem = getItemsForCategory(largeItems, filesFoldersGroup)[2]!;
+      expect(state.command).toHaveBeenCalledWith(expect.objectContaining({ id: expectedItem.id }));
     });
 
     it('should wrap around when navigating past the last item', async () => {

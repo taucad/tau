@@ -12,7 +12,7 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { cn } from '#utils/ui.utils.js';
-import { menuItemLayoutClass } from '#components/ui/menu.variants.js';
+import { menuItemLayoutClass, menuItemVariants } from '#components/ui/menu.variants.js';
 import type { DraftImageOptions } from '#hooks/use-chat.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -379,9 +379,11 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
                 <button
                   key={item.id}
                   type='button'
-                  className={`flex w-full items-center px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
-                    isSelected ? 'bg-accent text-accent-foreground' : ''
-                  }`}
+                  className={cn(
+                    menuItemVariants({ highlight: 'selected' }),
+                    'w-full px-2 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50',
+                  )}
+                  data-selected={isSelected}
                   disabled={isContextItemDisabled(item)}
                   onClick={() => {
                     item.action();

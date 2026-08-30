@@ -4,6 +4,7 @@ import type { LegendPayload } from 'recharts/types/component/DefaultLegendConten
 import type { NameType, Payload, ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import type { Props as LegendProps } from 'recharts/types/component/Legend';
 import type { TooltipContentProps } from 'recharts/types/component/Tooltip';
+import { popoverSurfaceVariants } from '#components/ui/popover.variants.js';
 import { cn } from '#utils/ui.utils.js';
 
 // Format: { THEME_NAME: CSS_SELECTOR }
@@ -313,12 +314,7 @@ function ChartTooltipContent({
   const typedPayload = payload as PayloadItem[];
 
   return (
-    <div
-      className={cn(
-        'shadow-xl grid min-w-32 items-start gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs',
-        className,
-      )}
-    >
+    <div className={cn(popoverSurfaceVariants(), 'grid min-w-32 items-start gap-1.5 px-2.5 py-1.5 text-xs', className)}>
       {isNestedLabel ? undefined : tooltipLabel}
       <div className='grid gap-1.5'>
         {typedPayload.map((item, index) => (

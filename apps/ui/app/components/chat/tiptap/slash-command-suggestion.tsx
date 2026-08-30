@@ -292,51 +292,54 @@ export const SlashCommandDropdown = memo(function SlashCommandDropdown({
 
   return createPortal(
     <div
-      className={cn(
-        menuContentVariants(),
-        'fixed max-h-64 w-[min(44rem,calc(100vw-2rem))] overflow-y-auto border scroll-shadows-y',
-      )}
+      className={cn(menuContentVariants(), 'fixed max-h-64 w-[min(44rem,calc(100vw-2rem))]')}
       style={{
         left: rect.left,
         top: rect.top - 8,
         transform: 'translateY(-100%)',
       }}
+      data-testid='slash-command-dropdown'
     >
-      {items.length === 0 ? (
-        <div className='px-2 py-1.5 text-xs text-muted-foreground'>No commands found</div>
-      ) : (
-        [...groups.entries()].map(([groupName, group]) => {
-          const GroupIcon = groupIcons[groupName] ?? Zap;
-          return (
-            <div key={groupName} className='flex flex-col gap-0.5'>
-              <div className='flex items-center gap-1.5 px-2.25 py-1 text-xs font-medium text-muted-foreground'>
-                <GroupIcon className='size-3 shrink-0' />
-                {groupName}
+      <div
+        className='flex min-h-0 scroll-shadows-y flex-col gap-0.5 overflow-x-hidden overflow-y-auto'
+        data-testid='slash-command-scroll-area'
+      >
+        {items.length === 0 ? (
+          <div className='px-2 py-1.5 text-xs text-muted-foreground'>No commands found</div>
+        ) : (
+          [...groups.entries()].map(([groupName, group]) => {
+            const GroupIcon = groupIcons[groupName] ?? Zap;
+            return (
+              <div key={groupName} className='flex flex-col gap-0.5'>
+                <div className='flex items-center gap-1.5 px-2.25 py-1 text-xs font-medium text-muted-foreground'>
+                  <GroupIcon className='size-3 shrink-0' />
+                  {groupName}
+                </div>
+                {group.items.map((item, itemIndex) => {
+                  const globalIndex = group.startIndex + itemIndex;
+                  return (
+                    <SkillItemButton
+                      key={item.id}
+                      item={item}
+                      globalIndex={globalIndex}
+                      isSelected={globalIndex === selectedIndex}
+                      onSelect={selectItem}
+                      onHover={setSelectedIndex}
+                      buttonRef={(element) => {
+                        if (element) {
+                          itemReferences.current.set(globalIndex, element);
+                        } else {
+                          itemReferences.current.delete(globalIndex);
+                        }
+                      }}
+                    />
+                  );
+                })}
               </div>
-              {group.items.map((item, itemIndex) => {
-                const globalIndex = group.startIndex + itemIndex;
-                return (
-                  <SkillItemButton
-                    key={item.id}
-                    item={item}
-                    globalIndex={globalIndex}
-                    isSelected={globalIndex === selectedIndex}
-                    onSelect={selectItem}
-                    onHover={setSelectedIndex}
-                    buttonRef={(element) => {
-                      if (element) {
-                        itemReferences.current.set(globalIndex, element);
-                      } else {
-                        itemReferences.current.delete(globalIndex);
-                      }
-                    }}
-                  />
-                );
-              })}
-            </div>
-          );
-        })
-      )}
+            );
+          })
+        )}
+      </div>
     </div>,
     document.body,
   );

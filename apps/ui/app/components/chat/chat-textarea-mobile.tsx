@@ -5,7 +5,7 @@ import { Button } from '#components/ui/button.js';
 import { Textarea } from '#components/ui/textarea.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { cn } from '#utils/ui.utils.js';
-import { menuItemVariants } from '#components/ui/menu.variants.js';
+import { menuContentVariants, menuItemVariants } from '#components/ui/menu.variants.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
@@ -394,7 +394,7 @@ export const ChatTextareaMobile = memo(function ({
 
         {/* Context Menu (inline popover for @ mentions) */}
         {showContextMenu ? (
-          <div className='absolute bottom-full left-0 z-50 mb-1 w-full rounded-md border bg-popover p-1 shadow-md'>
+          <div className={cn(menuContentVariants(), 'absolute bottom-full left-0 mb-1 w-full')}>
             <ChatContextActions
               asPopoverMenu
               searchQuery={contextSearchQuery}

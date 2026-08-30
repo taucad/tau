@@ -14,6 +14,8 @@ import type { Node, Edge, EdgeProps, NodeProps, NodeTypes, EdgeTypes, ColorMode 
 import '@xyflow/react/dist/style.css';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
+import { popoverSurfaceVariants } from '#components/ui/popover.variants.js';
+import { cn } from '#utils/ui.utils.js';
 
 type DiagramNodeData = {
   label: string;
@@ -64,7 +66,7 @@ function DiagramNodeContent({ data }: NodeProps<DiagramNode>): React.JSX.Element
 
       {data.description && (
         <NodeToolbar isVisible={isHovered} position={Position.Bottom} offset={8}>
-          <div className='shadow-lg z-50 w-64 rounded-lg border border-border/60 bg-popover p-3 text-xs leading-relaxed text-popover-foreground'>
+          <div className={cn(popoverSurfaceVariants(), 'z-50 w-64 p-3 text-xs leading-relaxed')}>
             {data.description}
           </div>
         </NodeToolbar>

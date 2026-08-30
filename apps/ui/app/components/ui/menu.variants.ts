@@ -1,8 +1,9 @@
 import { cva } from 'class-variance-authority';
+import { popoverSurfaceVariants } from '#components/ui/popover.variants.js';
 
 /**
  * Shared item styling for all menu-like components (dropdown-menu, context-menu, command, select).
- * Compact macOS-inspired design with primary focus highlight.
+ * Compact macOS-inspired design with a neutral focus highlight.
  */
 export const menuItemVariants = cva(
   "relative flex cursor-pointer items-center gap-2 rounded-sm px-3 py-1 text-[13px] outline-hidden select-none data-disabled:pointer-events-none data-disabled:text-muted-foreground/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:-translate-y-[0.5px] [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground",
@@ -36,7 +37,7 @@ export const menuItemVariants = cva(
  * Instant open/close (no animation) by default for a snappy feel.
  */
 export const menuContentVariants = cva(
-  'z-50 flex min-w-32 flex-col gap-0.5 overflow-hidden rounded-[10px] bg-popover p-0.75 text-popover-foreground shadow-menu',
+  [popoverSurfaceVariants({ appearance: 'menu' }), 'z-50 flex min-w-32 flex-col gap-0.5 overflow-hidden p-0.75'],
   {
     variants: {
       animated: {

@@ -8,6 +8,7 @@ import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-
 import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '#components/ui/button.js';
+import { popoverSurfaceVariants } from '#components/ui/popover.variants.js';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
@@ -596,7 +597,8 @@ function ModelComponentNameBadge({
       aria-hidden='true'
       data-testid='model-component-name-badge'
       className={cn(
-        'pointer-events-none absolute z-20 max-w-[min(18rem,calc(100%-1rem))] truncate rounded-md border border-border/60 bg-popover px-2 py-1 text-xs font-medium text-popover-foreground shadow-md',
+        popoverSurfaceVariants(),
+        'pointer-events-none absolute z-20 max-w-[min(18rem,calc(100%-1rem))] truncate px-2 py-1 text-xs font-medium',
         position.horizontal === 'right' ? '-translate-x-[calc(100%+8px)]' : 'translate-x-2',
         position.vertical === 'above' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-2.5',
       )}

@@ -54,6 +54,22 @@ describe('ChatContextActions', () => {
     vi.clearAllMocks();
   });
 
+  it('uses shared menu-item geometry for inline popover actions', () => {
+    render(
+      <ChatContextActions
+        asPopoverMenu
+        selectedIndex={0}
+        onSelectedIndexChange={vi.fn()}
+        addImage={mockAddImage}
+        addText={vi.fn()}
+      />,
+    );
+
+    const firstAction = screen.getByRole('button', { name: 'Current view' });
+    expect(firstAction).toHaveClass('rounded-sm');
+    expect(firstAction).toHaveAttribute('data-selected', 'true');
+  });
+
   it('completes a capture after its popover closes and unmounts', async () => {
     const capture = Promise.withResolvers<Awaited<ReturnType<typeof captureCadImagesType>>>();
     mockCaptureCadImages.mockReturnValueOnce(capture.promise);

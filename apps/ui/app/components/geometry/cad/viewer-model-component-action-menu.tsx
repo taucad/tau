@@ -46,7 +46,7 @@ export function ViewerModelComponentActionMenu({
           collisionPadding={8}
           className={cn(
             menuContentVariants(),
-            'max-h-[min(24rem,calc(100vh-1rem))] w-auto min-w-56 overflow-x-hidden overflow-y-auto border-0 p-0.75 shadow-menu',
+            'max-h-[min(24rem,calc(100vh-1rem))] w-auto min-w-56 overflow-x-hidden overflow-y-auto',
           )}
           onCloseAutoFocus={(event) => {
             event.preventDefault();

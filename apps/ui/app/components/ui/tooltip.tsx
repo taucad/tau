@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Tooltip as TooltipPrimitive } from 'radix-ui';
 import { cn } from '#utils/ui.utils.js';
+import { popoverSurfaceVariants } from '#components/ui/popover.variants.js';
 
 function TooltipProvider({
   delayDuration = 0,
@@ -37,7 +38,8 @@ function TooltipContent({
         data-slot='tooltip-content'
         sideOffset={sideOffset}
         className={cn(
-          'z-50 w-fit rounded-md border border-black bg-black px-2 py-1 text-xs text-balance text-white select-none dark:border-muted',
+          popoverSurfaceVariants({ appearance: 'inverse' }),
+          'z-50 w-fit px-2 py-1 text-xs text-balance select-none',
           className,
         )}
         {...properties}

@@ -9,6 +9,7 @@ import type { VirtuosoHandle } from 'react-virtuoso';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { cn } from '#utils/ui.utils.js';
 import { Separator } from '#components/ui/separator.js';
+import { menuContentVariants, menuItemVariants } from '#components/ui/menu.variants.js';
 import {
   getRecentFiles,
   getCategories,
@@ -281,11 +282,8 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
             }
           }}
           type='button'
-          className={cn(
-            'flex w-full items-center gap-2 rounded-sm px-2 h-7 text-left text-sm',
-            'hover:bg-accent hover:text-accent-foreground',
-            index === selectedIndex && 'bg-accent text-accent-foreground',
-          )}
+          className={cn(menuItemVariants({ highlight: 'selected' }), 'h-7 w-full px-2 text-left text-sm')}
+          data-selected={index === selectedIndex}
           onClick={() => {
             selectEntry(index);
           }}
@@ -312,11 +310,8 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
           }
         }}
         type='button'
-        className={cn(
-          'flex w-full items-center gap-2 rounded-sm px-2 h-7 text-left text-sm',
-          'hover:bg-accent hover:text-accent-foreground',
-          index === selectedIndex && 'bg-accent text-accent-foreground',
-        )}
+        className={cn(menuItemVariants({ highlight: 'selected' }), 'h-7 w-full px-2 text-left text-sm')}
+        data-selected={index === selectedIndex}
         onClick={() => {
           selectEntry(index);
         }}
@@ -383,7 +378,10 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
       <div className='sticky -top-1 z-10 -mt-1 bg-popover pt-1 pb-0.5'>
         <button
           type='button'
-          className='flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+          className={cn(
+            menuItemVariants({ highlight: 'selected' }),
+            'w-full gap-1.5 px-2 py-1.5 text-xs font-medium text-muted-foreground',
+          )}
           onClick={handleDrillBack}
         >
           <ChevronLeft className='size-3 shrink-0' />
@@ -452,9 +450,7 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
   return createPortal(
     <div
       ref={containerReference}
-      className={cn(
-        'fixed z-50 flex max-h-64 w-64 flex-col gap-0.5 overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md scroll-shadows-y',
-      )}
+      className={cn(menuContentVariants(), 'fixed max-h-64 w-64')}
       style={{
         left: rect.left,
         top: rect.top - 8,
@@ -462,7 +458,12 @@ export const ContextSuggestionDropdown = memo(function ContextSuggestionDropdown
       }}
       data-testid='context-suggestion-dropdown'
     >
-      {drilledCategory ? renderDrilledView() : hasQuery ? renderFlatSearch() : renderRootView()}
+      <div
+        className='flex min-h-0 scroll-shadows-y flex-col gap-0.5 overflow-x-hidden overflow-y-auto'
+        data-testid='context-suggestion-scroll-area'
+      >
+        {drilledCategory ? renderDrilledView() : hasQuery ? renderFlatSearch() : renderRootView()}
+      </div>
     </div>,
     document.body,
   );

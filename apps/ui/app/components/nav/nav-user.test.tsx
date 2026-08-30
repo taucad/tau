@@ -2,8 +2,14 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavUser } from '#components/nav/nav-user.js';
+import { metaConfig } from '#constants/meta.constants.js';
 
 const useNetworkConnectivityMock = vi.hoisted(() => vi.fn(() => true));
+const useEntitlementsMock = vi.hoisted(() => vi.fn(() => ({ tier: 'free' })));
+
+vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
+  useEntitlements: useEntitlementsMock,
+}));
 
 vi.mock('#components/auth/user/user-button.js', () => ({
   UserButton: ({
@@ -26,7 +32,12 @@ vi.mock('#hooks/use-network-connectivity.js', () => ({
 }));
 
 vi.mock('#components/ui/dropdown-menu.js', () => ({
+  DropdownMenu: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuContent: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuItem: ({ children }: { readonly children?: React.ReactNode }) => <div role='menuitem'>{children}</div>,
+  DropdownMenuLabel: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuSeparator: () => <hr />,
+  DropdownMenuTrigger: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
 vi.mock('#components/ui/utils/client-only.js', () => ({
@@ -49,15 +60,38 @@ describe('NavUser', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useNetworkConnectivityMock.mockReturnValue(true);
+    useEntitlementsMock.mockReturnValue({ tier: 'free' });
   });
 
-  it('shows the complete footer menu above its full-width trigger', () => {
+  it('shows upgrade and settings to free users', () => {
     render(<NavUser />);
 
     expect(screen.getByText('Upgrade to Pro')).toBeDefined();
-    expect(screen.getByText('Billing')).toBeDefined();
-    expect(screen.getByTestId('user-button')).not.toHaveAttribute('data-size', 'icon');
+    expect(screen.queryByText('Billing')).not.toBeInTheDocument();
+    expect(screen.getByText('Settings')).toBeInTheDocument();
+    expect(screen.getByTestId('user-button')).toHaveAttribute('data-size', 'sm');
     expect(screen.getByTestId('user-button')).toHaveAttribute('data-side', 'top');
+  });
+
+  it('shows billing instead of upgrade to paid users', () => {
+    useEntitlementsMock.mockReturnValue({ tier: 'pro' });
+
+    render(<NavUser />);
+
+    expect(screen.getByText('Billing')).toBeInTheDocument();
+    expect(screen.queryByText('Upgrade to Pro')).not.toBeInTheDocument();
+    expect(screen.getByText('Settings')).toBeInTheDocument();
+  });
+
+  it('moves product help into its own menu with the current version', () => {
+    render(<NavUser />);
+
+    expect(screen.getByRole('button', { name: 'Help' })).toBeInTheDocument();
+    expect(screen.getByText('Report a bug')).toBeInTheDocument();
+    expect(screen.getByText('GitHub')).toBeInTheDocument();
+    expect(screen.getByText('Community Discord')).toBeInTheDocument();
+    expect(screen.getByText(`Tau v${metaConfig.version}`)).toBeInTheDocument();
+    expect(screen.queryByText('About Tau')).not.toBeInTheDocument();
   });
 
   it('shows connectivity in the footer row and user menu only while offline', () => {

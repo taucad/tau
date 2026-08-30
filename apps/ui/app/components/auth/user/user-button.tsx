@@ -40,12 +40,12 @@ export type UserButtonProps = {
   align?: 'center' | 'end' | 'start' | undefined;
   side?: 'top' | 'right' | 'bottom' | 'left';
   sideOffset?: number;
-  size?: 'default' | 'icon';
+  size?: 'default' | 'icon' | 'sm';
   variant?: 'default' | 'destructive' | 'ghost' | 'link' | 'outline' | 'secondary';
   /** Additional menu entries rendered above the built-in items. */
   links?: Array<UserButtonLink | ReactElement>;
   /** Hide the built-in "Settings" link. Useful when replacing it via `links`. */
-  hideSettings?: boolean;
+  shouldHideSettings?: boolean;
 };
 
 function renderUserLink(
@@ -73,15 +73,6 @@ function renderUserLink(
  *
  * Includes user profile, settings link, optional multi-session account switching, theme picker,
  * and sign-in/sign-up/sign-out actions depending on authentication state.
- *
- * @param className - Additional CSS classes applied to the button trigger
- * @param align - Alignment of the dropdown menu relative to the trigger
- * @param sideOffset - Offset between the trigger and the dropdown menu
- * @param size - "icon" renders only the avatar; "default" renders a full button with label and chevron
- * @param variant - Visual variant of the trigger button
- * @param links - Additional menu entries rendered above the built-in items
- * @param hideSettings - Hide the built-in "Settings" link
- * @returns The dropdown menu component with user actions
  */
 export function UserButton({
   className,
@@ -91,11 +82,12 @@ export function UserButton({
   size = 'default',
   variant = 'ghost',
   links,
-  hideSettings = false,
-}: UserButtonProps) {
+  shouldHideSettings = false,
+}: UserButtonProps): React.JSX.Element {
   const { authClient, basePaths, viewPaths, localization, plugins, Link } = useAuth();
 
   const { data: session, isPending: sessionPending } = useSession(authClient);
+  const isCompact = size === 'sm';
 
   const userLinks = links?.flatMap((link, index) => {
     if (!isValidElement(link)) {
@@ -117,23 +109,27 @@ export function UserButton({
           size === 'icon' && 'rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring',
           size === 'icon' && className,
         )}
-        asChild={size === 'default'}
+        asChild={size !== 'icon'}
       >
         {size === 'icon' ? (
           <UserAvatar />
         ) : (
-          <Button variant={variant} className={cn('py-2.5 h-auto font-normal', className)} size='lg'>
+          <Button
+            variant={variant}
+            className={cn('font-normal', size === 'default' && 'h-auto py-2.5', className)}
+            size={isCompact ? 'sm' : 'lg'}
+          >
             {(session ?? sessionPending) ? (
-              <UserView />
+              <UserView isCompact={isCompact} />
             ) : (
               <>
-                <UserAvatar />
+                <UserAvatar className={cn(isCompact && 'size-4 text-[10px]')} />
 
                 <div className='grid flex-1 text-left text-sm leading-tight'>{localization.auth.account}</div>
               </>
             )}
 
-            <ChevronsUpDown className='ml-auto' />
+            {isCompact ? null : <ChevronsUpDown className='ml-auto' />}
           </Button>
         )}
       </DropdownMenuTrigger>
@@ -143,8 +139,8 @@ export function UserButton({
         sideOffset={sideOffset}
         side={side}
         align={align}
-        onCloseAutoFocus={(e) => {
-          e.preventDefault();
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
         }}
       >
         {session && (
@@ -161,7 +157,7 @@ export function UserButton({
           <>
             {userLinks}
 
-            {!hideSettings && (
+            {!shouldHideSettings && (
               <DropdownMenuItem asChild>
                 <Link href={`${basePaths.settings}/${viewPaths.settings.account}`}>
                   <Settings className='text-muted-foreground' />

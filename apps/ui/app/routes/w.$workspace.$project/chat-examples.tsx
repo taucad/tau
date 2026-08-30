@@ -4,7 +4,7 @@ import { getRandomExamples } from '#constants/chat-prompt-examples.js';
 import type { ChatExample } from '#constants/chat-prompt-examples.js';
 import { Button } from '#components/ui/button.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 
 export const ChatExamples = memo(function () {
   // Lazy initialization to ensure consistent examples across renders.
@@ -25,7 +25,7 @@ export const ChatExamples = memo(function () {
   };
 
   return (
-    <EmptyItems>
+    <CollectionEmptyState>
       <div className='mb-2 flex items-center justify-between'>
         <h3 className='text-sm font-medium'>Get started with 3D model examples</h3>
         <Button variant='ghost' size='icon' className='size-7' onClick={handleRefreshExamples}>
@@ -46,6 +46,6 @@ export const ChatExamples = memo(function () {
           </Button>
         ))}
       </div>
-    </EmptyItems>
+    </CollectionEmptyState>
   );
 });

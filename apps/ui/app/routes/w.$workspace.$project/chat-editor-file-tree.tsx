@@ -76,7 +76,7 @@ import {
 } from '#components/ui/context-menu.js';
 import { useProject } from '#hooks/use-project.js';
 import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-extension-icon.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
@@ -1807,7 +1807,7 @@ export const ChatEditorFileTree = memo(function ({
               })()}
             </div>
           ) : (
-            <EmptyItems className='m-2'>No files available</EmptyItems>
+            <CollectionEmptyState className='m-2'>No files available</CollectionEmptyState>
           )}
         </FloatingPanelContentBody>
       </FloatingPanelContent>

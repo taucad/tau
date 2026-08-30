@@ -3,7 +3,7 @@ import { Command as CommandPrimitive } from 'cmdk';
 import { SearchIcon } from 'lucide-react';
 import { cn } from '#utils/ui.utils.js';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#components/ui/dialog.js';
-import { emptyItemVariants } from '#components/ui/empty-items.js';
+import { collectionEmptyStateVariants } from '#components/ui/collection-empty-state.js';
 import { menuItemVariants, menuSeparatorVariants, menuShortcutClass } from '#components/ui/menu.variants.js';
 
 function Command({ className, ...properties }: React.ComponentProps<typeof CommandPrimitive>): React.JSX.Element {
@@ -80,7 +80,7 @@ function CommandEmpty({
   return (
     <CommandPrimitive.Empty
       data-slot='command-empty'
-      className={cn(emptyItemVariants({ variant: 'default' }), className)}
+      className={cn(collectionEmptyStateVariants(), className)}
       {...properties}
     />
   );

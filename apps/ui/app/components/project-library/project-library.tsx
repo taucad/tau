@@ -64,7 +64,7 @@ import { formatRelativeTime } from '#utils/date.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
 import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
@@ -571,7 +571,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
   // Show empty state if no projects at all
   if (projects.length === 0) {
     return (
-      <EmptyItems className='min-h-[60vh]'>
+      <CollectionEmptyState className='min-h-[60vh]'>
         {/* Empty-library CTA — composer-only, no chat session to attach to. */}
         <ChatComposerProvider>
           <div className='mx-auto max-w-2xl space-y-6'>
@@ -599,7 +599,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
             </div>
           </div>
         </ChatComposerProvider>
-      </EmptyItems>
+      </CollectionEmptyState>
     );
   }
 

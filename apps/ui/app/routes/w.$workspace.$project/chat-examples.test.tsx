@@ -65,8 +65,8 @@ vi.mock('#components/ui/button.js', () => ({
   ),
 }));
 
-vi.mock('#components/ui/empty-items.js', () => ({
-  EmptyItems: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
+vi.mock('#components/ui/collection-empty-state.js', () => ({
+  CollectionEmptyState: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 
 const { ChatExamples } = await import('#routes/w.$workspace.$project/chat-examples.js');

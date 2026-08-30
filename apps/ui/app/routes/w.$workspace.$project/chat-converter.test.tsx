@@ -143,10 +143,6 @@ vi.mock('#utils/keys.utils.js', () => ({
   formatKeyCombination: () => 'Ctrl+D',
 }));
 
-vi.mock('#components/ui/empty-items.js', () => ({
-  EmptyItems: ({ children }: { children: React.ReactNode }) => <div data-testid='empty-items'>{children}</div>,
-}));
-
 vi.mock('@rjsf/core', () => ({
   default: ({
     schema,

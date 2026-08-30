@@ -6,7 +6,7 @@ import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneviewReact } from 'dockview-react';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { SearchInput } from '#components/search-input.js';
 import { HighlightText } from '#components/highlight-text.js';
 import {
@@ -832,13 +832,15 @@ export function ComponentRow({
 }
 
 function ExplorerEmptyState(): React.JSX.Element {
-  return <EmptyItems>No model components available</EmptyItems>;
+  return <CollectionEmptyState>No model components available</CollectionEmptyState>;
 }
 
 function ExplorerUnavailableState(): React.JSX.Element {
-  return <EmptyItems className='min-h-16 break-all'>Open renderer to inspect components</EmptyItems>;
+  return (
+    <CollectionEmptyState className='min-h-16 break-all'>Open renderer to inspect components</CollectionEmptyState>
+  );
 }
 
 function ExplorerNoMatchesState(): React.JSX.Element {
-  return <EmptyItems className='min-h-16 break-all'>No matching parts</EmptyItems>;
+  return <CollectionEmptyState className='min-h-16 break-all'>No matching parts</CollectionEmptyState>;
 }

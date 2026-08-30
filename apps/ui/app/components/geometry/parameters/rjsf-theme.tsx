@@ -29,7 +29,7 @@ import {
   getFieldDefaultValue,
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { hasCustomValue } from '#utils/object.utils.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { InlineCode } from '#components/code/code-block.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 
@@ -193,9 +193,9 @@ function ObjectFieldTemplate(
 
     return (
       <div className='[&:has(.properties:not(:empty))_.no-params]:hidden'>
-        <EmptyItems className='no-params break-all'>
+        <CollectionEmptyState className='no-params break-all'>
           No parameters matching &quot;{formContext.searchTerm}&quot;
-        </EmptyItems>
+        </CollectionEmptyState>
         <div
           data-slot='parameter-catalog'
           className='properties m-2 overflow-hidden rounded-xl border border-border bg-card p-1 empty:hidden'

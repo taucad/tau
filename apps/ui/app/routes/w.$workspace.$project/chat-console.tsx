@@ -16,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { SearchInput } from '#components/search-input.js';
@@ -212,9 +212,9 @@ const ConsolePanelBody = ({ params }: { readonly params: ConsolePanelParams }): 
     );
   } else {
     content = (
-      <EmptyItems className='m-2 h-[calc(100%-1rem)]'>
+      <CollectionEmptyState className='m-2 h-[calc(100%-1rem)]'>
         {params.totalCount === 0 ? 'No logs yet.' : 'No matching logs.'}
-      </EmptyItems>
+      </CollectionEmptyState>
     );
   }
 
@@ -473,7 +473,7 @@ export const ChatConsole = memo(function ChatConsole(): React.JSX.Element {
 
       <div className='min-h-0 flex-1 overflow-hidden'>
         {entryPaths.length === 0 ? (
-          <EmptyItems className='bg-card'>No geometry units.</EmptyItems>
+          <CollectionEmptyState className='bg-card'>No geometry units.</CollectionEmptyState>
         ) : (
           <ConsolePaneview
             entryPaths={entryPaths}

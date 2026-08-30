@@ -4,7 +4,7 @@ import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { FilterCondition } from '#components/kernel/trace-condition-picker.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { Button } from '#components/ui/button.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type {
@@ -301,7 +301,7 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
             />
 
             {processedTree.length === 0 ? (
-              <EmptyItems className='min-h-20 flex-1'>No matching telemetry</EmptyItems>
+              <CollectionEmptyState className='min-h-20 flex-1'>No matching telemetry</CollectionEmptyState>
             ) : viewMode === 'trace' ? (
               <TraceTreeView
                 spanTree={processedTree}
@@ -330,9 +330,9 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
           </div>
         </>
       ) : (
-        <EmptyItems className='min-h-24 flex-1'>
+        <CollectionEmptyState className='min-h-24 flex-1'>
           {renderPhase ? 'Recording telemetry for the current render…' : 'No telemetry recorded yet'}
-        </EmptyItems>
+        </CollectionEmptyState>
       )}
     </div>
   );

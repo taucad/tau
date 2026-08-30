@@ -29,7 +29,7 @@ const readLayoutMetrics = async (): Promise<LayoutMetrics> =>
     const firstPane = root?.querySelector<HTMLElement>(':scope > .split-view-container > .split-view-view-visible');
     const sashContainer = root?.querySelector<HTMLElement>(':scope > .sash-container');
     const sidebar = document.querySelector<HTMLElement>('[data-slot="sidebar-inner"]');
-    const content = document.querySelector<HTMLElement>('[data-slot="empty-items"]');
+    const content = document.querySelector<HTMLElement>('[data-slot="collection-empty-state"]');
     if (!root || !firstPane || !sashContainer || !sidebar || !content) {
       throw new Error('Desktop editor layout was not ready.');
     }

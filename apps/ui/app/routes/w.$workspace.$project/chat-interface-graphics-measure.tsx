@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Pin, PinOff, Trash } from 'lucide-react';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { Button } from '#components/ui/button.js';
 import { cn } from '#utils/ui.utils.js';
 import { axesColors } from '#constants/color.constants.js';
@@ -53,7 +53,9 @@ export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
         <div className='text-[11px]'>Hover to preview, pin to persist</div>
       </div>
       <div className='mt-1 grid gap-1'>
-        {sorted.length === 0 ? <EmptyItems className='mx-1 -mt-1'>No measurements</EmptyItems> : null}
+        {sorted.length === 0 ? (
+          <CollectionEmptyState className='mx-1 -mt-1'>No measurements</CollectionEmptyState>
+        ) : null}
 
         {sorted.map((m) => {
           const value = (m.distance / lengthFactor).toFixed(1);

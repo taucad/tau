@@ -283,6 +283,10 @@ const objectStoreWorker = {
     return storage.createProjectLibraryState(state);
   },
 
+  async createProjectLibraryStates(states: readonly ProjectLibraryState[]): Promise<ProjectLibraryState[]> {
+    return storage.createProjectLibraryStates(states);
+  },
+
   async touchProjectActivity(projectId: string, activityAt?: number): Promise<ProjectLibraryState | undefined> {
     return storage.touchProjectActivity(projectId, activityAt);
   },

@@ -39,6 +39,7 @@ export type StorageProvider = {
   // Project-library operations
   // ---------------------------------------------------------------------------
   createProjectLibraryState(state: ProjectLibraryState): Promise<ProjectLibraryState>;
+  createProjectLibraryStates(states: readonly ProjectLibraryState[]): Promise<ProjectLibraryState[]>;
   getProjectLibraryState(projectId: string): Promise<ProjectLibraryState | undefined>;
   getProjectLibraryStates(projectIds?: readonly string[]): Promise<ProjectLibraryState[]>;
   touchProjectActivity(projectId: string, activityAt?: number): Promise<ProjectLibraryState | undefined>;

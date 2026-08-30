@@ -284,28 +284,41 @@ export class IndexedDbStorageProvider implements StorageProvider {
   }
 
   public async createProjectLibraryState(state: ProjectLibraryState): Promise<ProjectLibraryState> {
+    const states = await this.createProjectLibraryStates([state]);
+    return states[0]!;
+  }
+
+  public async createProjectLibraryStates(states: readonly ProjectLibraryState[]): Promise<ProjectLibraryState[]> {
+    if (new Set(states.map(({ projectId }) => projectId)).size !== states.length) {
+      throw new TypeError('Duplicate project ids in library-state batch');
+    }
+    if (states.length === 0) {
+      return [];
+    }
     const db = await this.getDb();
-    return new Promise<ProjectLibraryState>((resolve, reject) => {
+    return new Promise<ProjectLibraryState[]>((resolve, reject) => {
       const transaction = db.transaction(this.projectLibraryStatesStoreName, 'readwrite');
       const store = transaction.objectStore(this.projectLibraryStatesStoreName);
-      let resolved = state;
-      const request = store.get(state.projectId);
-      request.addEventListener('success', () => {
-        const existing = request.result as ProjectLibraryState | undefined;
-        if (existing) {
-          resolved = existing;
-          return;
-        }
-        store.add(state);
-      });
+      const resolved = [...states];
+      for (const [index, state] of states.entries()) {
+        const request = store.get(state.projectId);
+        request.addEventListener('success', () => {
+          const existing = request.result as ProjectLibraryState | undefined;
+          if (existing) {
+            resolved[index] = existing;
+          } else {
+            store.add(state);
+          }
+        });
+      }
       transaction.addEventListener('complete', () => {
         resolve(resolved);
       });
       transaction.addEventListener('error', () => {
-        reject(transaction.error ?? new Error('Failed to create project library state'));
+        reject(transaction.error ?? new Error('Failed to create project library states'));
       });
       transaction.addEventListener('abort', () => {
-        reject(transaction.error ?? new Error('Creating project library state was aborted'));
+        reject(transaction.error ?? new Error('Creating project library states was aborted'));
       });
     }).finally(() => {
       db.close();

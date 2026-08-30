@@ -129,6 +129,7 @@ export class FileTreeService {
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingRefreshPath: string | undefined;
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
+  private pollingActive = false;
   private visibilityUnsub: (() => void) | undefined;
   /** Set from the worker's last poll result: native observation makes the poll a safety net. */
   private nativelyObserved = false;
@@ -480,7 +481,11 @@ export class FileTreeService {
    * Begin polling the worker on a visibility-aware interval.
    */
   public startPolling(): void {
+    if (this.pollingActive) {
+      return;
+    }
     this.stopPolling();
+    this.pollingActive = true;
     const epoch = ++this.pollingEpoch;
     const telemetry: PollingTelemetryState = {
       startedAt: performance.now(),
@@ -553,6 +558,7 @@ export class FileTreeService {
    * Tear down polling timers and visibility subscriptions.
    */
   public stopPolling(): void {
+    this.pollingActive = false;
     this.pollingEpoch++;
     this.nativelyObserved = false;
     this.reschedulePoll = undefined;

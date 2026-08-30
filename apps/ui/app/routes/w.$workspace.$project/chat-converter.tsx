@@ -23,7 +23,7 @@ import {
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import { toast } from '#components/ui/sonner.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { Button } from '#components/ui/button.js';
 import { Checkbox } from '#components/ui/checkbox.js';
@@ -1063,26 +1063,25 @@ export const ConverterPanelBody = function (): ReactElement {
                 </section>
               </>
             ) : (
-              <EmptyItems className='m-0 h-auto min-h-40 flex-1 rounded-xl border-solid bg-card'>
-                <div className='mb-3 rounded-full bg-muted/50 p-2'>
-                  <Info className='size-6 text-muted-foreground' strokeWidth={1.5} />
-                </div>
-                <h3 className='mb-1 text-base font-medium text-foreground'>Export formats are still loading</h3>
-                <p className='wrap-break-word text-muted-foreground'>
-                  Formats for {selectedEntryPath || 'this file'} will appear when its kernel is ready.
-                </p>
-              </EmptyItems>
+              <PanelEmptyState
+                icon={Info}
+                title='Export formats are still loading'
+                description={<>Formats for {selectedEntryPath || 'this file'} will appear when its kernel is ready.</>}
+                role='status'
+                aria-label='Export formats are still loading'
+                aria-busy='true'
+                className='m-0 h-auto min-h-40 flex-1 rounded-xl border bg-card'
+              />
             )
           ) : (
-            <EmptyItems className='m-0 h-auto min-h-40 flex-1 rounded-xl border-solid bg-card'>
-              <div className='mb-3 rounded-full bg-muted/50 p-2'>
-                <Info className='size-6 text-muted-foreground' strokeWidth={1.5} />
-              </div>
-              <h3 className='mb-1 text-base font-medium text-foreground'>No geometry to export for this file</h3>
-              <p className='wrap-break-word text-muted-foreground'>
-                Generate or compute geometry for {selectedEntryPath || 'this file'} to enable export options.
-              </p>
-            </EmptyItems>
+            <PanelEmptyState
+              icon={Info}
+              title='No geometry to export for this file'
+              description={
+                <>Generate or compute geometry for {selectedEntryPath || 'this file'} to enable export options.</>
+              }
+              className='m-0 h-auto min-h-40 flex-1 rounded-xl border bg-card'
+            />
           )}
         </div>
       </div>

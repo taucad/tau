@@ -24,7 +24,7 @@ import { defaultGraphicsSettings, parseGraphicsViewSettings } from '#constants/e
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { Dockview } from '#components/panes/dockview.js';
-import { DockviewWatermark } from '#components/panes/dockview-watermark.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
 import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-tab-context-menu.js';
 import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
@@ -310,13 +310,13 @@ function ViewerEmptyState({
   );
 
   return (
-    <DockviewWatermark
+    <PanelEmptyState
       icon={Box}
       title='Choose a file to view'
       description='Select a design file below, or drag one here from the file tree'
     >
       <ViewerEmptyFilePicker files={files} onSelect={handleSelect} onClose={onClose} closeLabel={closeLabel} />
-    </DockviewWatermark>
+    </PanelEmptyState>
   );
 }
 

@@ -9,10 +9,10 @@ import {
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
 import { Button } from '#components/ui/button.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 
 /**
  * The Revisions pane (R13) — the primary, discoverable cross-chat time-travel
@@ -72,13 +72,12 @@ export function RevisionsPanelBody(): React.JSX.Element {
     <div data-slot='revisions-panel-body' className='size-full min-h-0 overflow-hidden bg-sidebar'>
       <div className='size-full scroll-shadows-y overflow-y-auto p-2 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
         {revisions.length === 0 ? (
-          <EmptyItems className='m-0 min-h-full rounded-xl border-solid bg-card'>
-            <div className='mb-3 rounded-xl border bg-background p-2'>
-              <History className='size-5 text-muted-foreground' strokeWidth={1.5} />
-            </div>
-            <h3 className='mb-1 text-base font-medium text-foreground'>No revisions yet</h3>
-            <p className='text-sm text-muted-foreground'>Agent changes will appear here.</p>
-          </EmptyItems>
+          <PanelEmptyState
+            icon={History}
+            title='No revisions yet'
+            description='Agent changes will appear here.'
+            className='m-0 min-h-full rounded-xl border bg-card'
+          />
         ) : (
           <div className='flex min-h-full flex-col gap-2'>
             {[...revisions].reverse().map((revision) => {

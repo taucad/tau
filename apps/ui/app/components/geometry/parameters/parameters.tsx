@@ -11,7 +11,7 @@ import { templates, uiSchema, widgets } from '#components/geometry/parameters/rj
 import type { RJSFContext, Units } from '#components/geometry/parameters/rjsf-context.js';
 import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath, extractModifiedProperties, getValueAtPath, setValueAtPath } from '#utils/object.utils.js';
-import { EmptyItems } from '#components/ui/empty-items.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 
 type ParametersProperties = {
   readonly parameters: Record<string, unknown>;
@@ -202,13 +202,12 @@ export function Parameters({
           />
         </>
       ) : (
-        <EmptyItems className='mt-0'>
-          <div className='mb-3 rounded-full bg-muted/50 p-2'>
-            <Info className='size-6 text-muted-foreground' strokeWidth={1.5} />
-          </div>
-          <h3 className='mb-1 text-base font-medium'>{emptyMessage}</h3>
-          <p className='text-muted-foreground'>{emptyDescription}</p>
-        </EmptyItems>
+        <PanelEmptyState
+          icon={Info}
+          title={emptyMessage}
+          description={emptyDescription}
+          className='mx-2 mb-2 rounded-xs border border-dashed'
+        />
       )}
     </div>
   );

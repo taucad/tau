@@ -50,6 +50,7 @@ import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes
 import { WorkbenchTabContextMenu } from '#components/panes/editor-tab-context-menu.js';
 import { withTabContextMenu } from '#components/panes/with-tab-context-menu.js';
 import { DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { ChatEditorTooLargeWarning } from '#routes/w.$workspace.$project/chat-editor-too-large-warning.js';
@@ -505,11 +506,7 @@ export function WorkbenchPlaceholderPanel(
           openPlaceholderFile?.(path, readOnly, placeholder);
         }}
       >
-        <div className='flex size-full flex-col items-center justify-center gap-2 text-center'>
-          <FolderOpen aria-hidden className='size-7 stroke-1 text-muted-foreground' />
-          <p className='text-sm font-medium'>Open file</p>
-          <p className='text-xs text-muted-foreground'>Select a file from the workspace tree</p>
-        </div>
+        <PanelEmptyState icon={FolderOpen} title='Open file' description='Select a file from the workspace tree' />
       </FileWorkbenchPane>
     );
   }

@@ -1,0 +1,55 @@
+{
+  "name": "@taucad/share",
+  "version": "0.0.1",
+  "description": "Private project snapshot sharing providers and portable artifacts",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "apps/libs/share"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/apps/libs/share#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    "./artifact": "./src/artifact.ts",
+    "./artifact-worker": "./src/artifact-worker.ts",
+    "./bitbucket": "./src/bitbucket.ts",
+    "./direct": "./src/direct.ts",
+    "./github-gist": "./src/github-gist.ts",
+    "./github": "./src/github.ts",
+    "./gitlab": "./src/gitlab.ts",
+    "./locator": "./src/locator.ts",
+    "./provider": "./src/provider.ts",
+    "./repository-archive": "./src/repository-archive.ts",
+    "./repository-target": "./src/repository-target.ts",
+    "./registry": "./src/registry.ts",
+    "./snapshot": "./src/snapshot.ts",
+    "./tau": "./src/tau.ts",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/types": "workspace:*",
+    "jose": "^6.2.3",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "vitest": "catalog:"
+  }
+}

@@ -61,11 +61,11 @@ describe('parseAtReferences', () => {
   });
 
   it('should handle paths with special characters', () => {
-    const result = parseAtReferences('check @apps/ui/app/routes/projects_.$id/chat-message.tsx');
+    const result = parseAtReferences('check @apps/ui/app/routes/w.$workspace.$project/chat-message.tsx');
 
     expect(result).toEqual([
       { type: 'text', value: 'check ' },
-      { type: 'reference', path: 'apps/ui/app/routes/projects_.$id/chat-message.tsx' },
+      { type: 'reference', path: 'apps/ui/app/routes/w.$workspace.$project/chat-message.tsx' },
     ]);
   });
 
@@ -425,7 +425,7 @@ describe('parseInlineReferences', () => {
 });
 
 describe('resolveSlashCommand', () => {
-  const knownSkills = new Set(['create-policy', 'repos', 'new-kernel']);
+  const knownSkills = new Set(['create-policy', 'repos', 'create-kernel']);
 
   it('should resolve known skill', () => {
     expect(resolveSlashCommand('create-policy', knownSkills)).toEqual({

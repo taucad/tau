@@ -47,7 +47,13 @@ type GltfNode = {
   extras?: JsonObject;
 };
 
+type GltfScene = {
+  nodes?: number[];
+};
+
 type GltfJson = {
+  scene?: number;
+  scenes?: GltfScene[];
   nodes?: GltfNode[];
   meshes?: GltfMesh[];
   accessors?: GltfAccessor[];
@@ -88,7 +94,7 @@ type ParsedGltf = {
 
 const rootId = 'root';
 const defaultMeshFormats = ['glb', 'stl'];
-const defaultBrepFormats = ['step', 'stp', 'iges', 'igs', 'brep', 'dxf'];
+const defaultBrepFormats = ['step', 'stp', 'brep', 'dxf'];
 
 function alignTo4(value: number): number {
   const remainder = value % 4;
@@ -121,6 +127,48 @@ function parseGltfBytes(content: Uint8Array<ArrayBuffer>): ParsedGltf {
     json: JSON.parse(new TextDecoder().decode(content.slice(jsonStart, jsonEnd)).trim()) as GltfJson,
     bin: binChunkLength > 0 ? content.slice(binStart, binStart + binChunkLength) : new Uint8Array(),
   };
+}
+
+/** List every primitive instance reachable from the glTF's active scene. */
+export function listReachableGltfPrimitiveReferences(
+  content: Uint8Array<ArrayBuffer>,
+): GeometryComponentPrimitiveRef[] {
+  const { json } = parseGltfBytes(content);
+  const referencedNodeIndices = new Set((json.nodes ?? []).flatMap((node) => node.children ?? []));
+  const scene = json.scenes?.[json.scene ?? 0];
+  const roots =
+    scene?.nodes ??
+    (json.nodes ?? []).flatMap((_, nodeIndex) => (referencedNodeIndices.has(nodeIndex) ? [] : [nodeIndex]));
+  const visited = new Set<number>();
+  const references: GeometryComponentPrimitiveRef[] = [];
+  const visit = (nodeIndex: number): void => {
+    if (visited.has(nodeIndex)) {
+      return;
+    }
+    visited.add(nodeIndex);
+    const node = json.nodes?.[nodeIndex];
+    if (!node) {
+      return;
+    }
+    const meshIndex = node.mesh;
+    if (meshIndex !== undefined) {
+      for (const primitiveIndex of (json.meshes?.[meshIndex]?.primitives ?? []).keys()) {
+        references.push({ nodeIndex, meshIndex, primitiveIndex });
+      }
+    }
+    for (const childIndex of node.children ?? []) {
+      visit(childIndex);
+    }
+  };
+  for (const root of roots) {
+    visit(root);
+  }
+  if (!scene) {
+    for (const nodeIndex of (json.nodes ?? []).keys()) {
+      visit(nodeIndex);
+    }
+  }
+  return references;
 }
 
 function createFallbackComponentId(nodeIndex: number): string {
@@ -552,25 +600,40 @@ export function buildGltfComponentManifest(
 
   const nodesById: Record<string, GeometryComponentNode> = {};
   const nodeOrder: string[] = [rootId];
-  const childIds: string[] = [];
   const usedIds = new Map<string, number>([[rootId, 1]]);
+  const visitedNodeIndices = new Set<number>();
+  const visitingNodeIndices = new Set<number>();
   let hasPreciseTopology = false;
 
-  for (const [nodeIndex, gltfNode] of (json.nodes ?? []).entries()) {
-    if (gltfNode.mesh === undefined && !topologyByNodeIndex.has(nodeIndex)) {
-      continue;
+  const visit = ({
+    nodeIndex,
+    parentId,
+    depth,
+    parentPath,
+  }: {
+    nodeIndex: number;
+    parentId: string;
+    depth: number;
+    parentPath: readonly string[];
+  }): string | undefined => {
+    const gltfNode = json.nodes?.[nodeIndex];
+    if (!gltfNode || visitedNodeIndices.has(nodeIndex) || visitingNodeIndices.has(nodeIndex)) {
+      return undefined;
     }
 
+    visitingNodeIndices.add(nodeIndex);
     const topology = topologyByNodeIndex.get(nodeIndex);
     const mesh = gltfNode.mesh === undefined ? undefined : json.meshes?.[gltfNode.mesh];
     const primitiveIndices = mesh?.primitives?.map((_, primitiveIndex) => primitiveIndex) ?? [];
-    const materialIndices = [
-      ...new Set(
-        mesh?.primitives
-          ?.map((primitive) => primitive.material)
-          .filter((materialIndex): materialIndex is number => typeof materialIndex === 'number') ?? [],
-      ),
-    ];
+    const primitiveReferences =
+      gltfNode.mesh === undefined
+        ? []
+        : primitiveIndices.map((primitiveIndex) => ({
+            nodeIndex,
+            meshIndex: gltfNode.mesh!,
+            primitiveIndex,
+          }));
+    const ownMaterialIndices = getPrimitiveReferencesMaterialIndices(json, primitiveReferences);
     const name = topology?.name ?? gltfNode.name ?? mesh?.name ?? `Component ${nodeIndex + 1}`;
     const kind = topology?.kind ?? toGeometryKind(gltfNode.extras?.['tauComponentKind']);
     const selector =
@@ -588,27 +651,23 @@ export function buildGltfComponentManifest(
     const capabilities = topology?.capabilities
       ? { ...createCapabilities(componentHasPreciseTopology), ...topology.capabilities }
       : createCapabilities(componentHasPreciseTopology);
+    const path = [...parentPath, name];
 
-    childIds.push(id);
     nodeOrder.push(id);
     nodesById[id] = {
       id,
       name,
       kind,
       selector,
-      parentId: rootId,
+      parentId,
       childIds: [],
-      depth: 1,
-      path: ['Model', name],
-      meshNodeIndices: [nodeIndex],
+      depth,
+      path,
+      meshNodeIndices: gltfNode.mesh === undefined ? [] : [nodeIndex],
       primitiveIndices,
-      primitiveRefs: primitiveIndices.map((primitiveIndex) => ({
-        nodeIndex,
-        meshIndex: gltfNode.mesh!,
-        primitiveIndex,
-      })),
-      materialIndices,
-      appearance: getComponentAppearance(json, materialIndices),
+      primitiveRefs: primitiveReferences,
+      materialIndices: ownMaterialIndices,
+      appearance: getComponentAppearance(json, ownMaterialIndices),
       bounds: getNodeBounds(json, gltfNode),
       capabilities,
       reference:
@@ -625,6 +684,48 @@ export function buildGltfComponentManifest(
             },
       extras: gltfNode.extras,
     };
+
+    const childIds = (gltfNode.children ?? [])
+      .map((childNodeIndex) => visit({ nodeIndex: childNodeIndex, parentId: id, depth: depth + 1, parentPath: path }))
+      .filter((childId): childId is string => childId !== undefined);
+    const childNodes = childIds.map((childId) => nodesById[childId]!).filter(Boolean);
+    const materialIndices = [
+      ...new Set([...ownMaterialIndices, ...childNodes.flatMap((child) => child.materialIndices)]),
+    ];
+    nodesById[id] = {
+      ...nodesById[id],
+      childIds,
+      materialIndices,
+      appearance: getComponentAppearance(json, materialIndices),
+      bounds: combineBounds(
+        [getNodeBounds(json, gltfNode), ...childNodes.map((child) => child.bounds)].filter(
+          (bounds): bounds is GeometryComponentBounds => bounds !== undefined,
+        ),
+      ),
+    };
+    visitingNodeIndices.delete(nodeIndex);
+    visitedNodeIndices.add(nodeIndex);
+    return id;
+  };
+
+  const referencedNodeIndices = new Set((json.nodes ?? []).flatMap((node) => node.children ?? []));
+  const scene = json.scenes?.[json.scene ?? 0];
+  const rootNodeIndices =
+    scene?.nodes ??
+    (json.nodes ?? []).flatMap((_, nodeIndex) => (referencedNodeIndices.has(nodeIndex) ? [] : [nodeIndex]));
+  const childIds = rootNodeIndices
+    .map((nodeIndex) => visit({ nodeIndex, parentId: rootId, depth: 1, parentPath: ['Model'] }))
+    .filter((childId): childId is string => childId !== undefined);
+
+  if (!scene) {
+    for (const nodeIndex of (json.nodes ?? []).keys()) {
+      if (!visitedNodeIndices.has(nodeIndex)) {
+        const childId = visit({ nodeIndex, parentId: rootId, depth: 1, parentPath: ['Model'] });
+        if (childId) {
+          childIds.push(childId);
+        }
+      }
+    }
   }
 
   const rootCapabilities = createCapabilities(hasPreciseTopology);

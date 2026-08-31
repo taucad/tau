@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import type { Camera, Group, Object3D, Material, Texture, Intersection, Ray } from 'three';
+import type { Camera, Group, Object3D, Material, Texture, Intersection, Ray, BufferGeometry, Mesh } from 'three';
 import {
   Vector2,
   Box3,
@@ -9,11 +9,6 @@ import {
   Raycaster,
   PerspectiveCamera,
   OrthographicCamera,
-  BufferGeometry,
-  BufferAttribute,
-  Matrix4,
-  Mesh,
-  MeshBasicMaterial,
   WebGLCoordinateSystem,
   WebGPUCoordinateSystem,
 } from 'three';
@@ -32,6 +27,7 @@ import {
   updateGltfEdgeColor,
   updateLineMaterialResolution,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import { applyGltfSurfaceDepthBiasToScene } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
 import {
   gltfEdgeColorDarkMode,
   gltfEdgeColorLightMode,
@@ -40,6 +36,14 @@ import { Theme, useTheme } from '#hooks/use-theme.js';
 import { darkModeIntensityScale } from '#components/geometry/graphics/three/utils/lights.utils.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import {
+  createGltfComponentOwnership,
+  getComponentAncestorIds,
+  getGltfPrimitiveComponentId,
+  hasComponentOrAncestor,
+  hasComponentOrDescendant,
+  isModelComponentVisible,
+} from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
 import { hasSceneTagInHierarchy, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import {
@@ -53,6 +57,7 @@ import {
   useGraphicsSelector,
   useModelInteractionRef,
   useModelInteractionSelector,
+  useRenderFrame,
 } from '#hooks/use-graphics.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
@@ -62,12 +67,14 @@ import {
 } from '#components/geometry/graphics/three/use-section-view.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
-import {
-  configureSectionSourceOnlyMaterial,
-  isSectionSourceOnlyObject,
-  markSectionSourceOnlyObject,
-} from '#components/geometry/graphics/three/utils/section-source-only.js';
 import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentPrimitiveRef } from '@taucad/types';
+import { toThreeRenderBounds } from '@taucad/three/spatial';
+import {
+  applyCanonicalGltfBounds,
+  createCanonicalGltfToTauMatrix,
+} from '#components/geometry/graphics/three/gltf-world.js';
+import { registerGltfSectionSurfaceSources } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import type { SectionTopologyGltfParser } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 
 // Module-scoped GLTFLoader instance. GLTFLoader is stateless and fully reusable,
 // so creating a fresh instance per parse wastes initialization overhead and GC pressure.
@@ -520,49 +527,6 @@ export function resolveComponentVisualState({
   };
 }
 
-function getComponentAncestorIds(manifest: GeometryComponentManifest, componentId: string): string[] {
-  const ancestors: string[] = [];
-  let current = manifest.nodesById[componentId];
-  const seen = new Set<string>();
-  while (current?.parentId && !seen.has(current.parentId)) {
-    seen.add(current.parentId);
-    ancestors.push(current.parentId);
-    current = manifest.nodesById[current.parentId];
-  }
-  return ancestors;
-}
-
-function hasComponentOrAncestor(
-  manifest: GeometryComponentManifest,
-  componentId: string,
-  componentIds: ReadonlySet<string>,
-): boolean {
-  if (componentIds.has(componentId)) {
-    return true;
-  }
-  return getComponentAncestorIds(manifest, componentId).some((ancestorId) => componentIds.has(ancestorId));
-}
-
-function hasComponentOrDescendant(
-  manifest: GeometryComponentManifest,
-  componentId: string,
-  componentIds: ReadonlySet<string>,
-): boolean {
-  if (componentIds.has(componentId)) {
-    return true;
-  }
-
-  const stack = [...(manifest.nodesById[componentId]?.childIds ?? [])];
-  while (stack.length > 0) {
-    const nextId = stack.pop()!;
-    if (componentIds.has(nextId)) {
-      return true;
-    }
-    stack.push(...(manifest.nodesById[nextId]?.childIds ?? []));
-  }
-  return false;
-}
-
 function resolveInheritedOpacity({
   manifest,
   componentId,
@@ -591,7 +555,6 @@ function resolveComponentVisualStateWithManifest({
   focusedComponentId,
   opacityByComponentId,
 }: ComponentVisualStateWithManifestOptions): { readonly visible: boolean; readonly opacity: number } {
-  const isHidden = hasComponentOrAncestor(manifest, componentId, hiddenComponentIds);
   const isIncludedByIsolation =
     isolatedComponentIds.size === 0 ||
     hasComponentOrAncestor(manifest, componentId, isolatedComponentIds) ||
@@ -604,7 +567,7 @@ function resolveComponentVisualStateWithManifest({
   const explicitOpacity = resolveInheritedOpacity({ manifest, componentId, opacityByComponentId });
 
   return {
-    visible: !isHidden && isIncludedByIsolation,
+    visible: isModelComponentVisible({ manifest, componentId, hiddenComponentIds, isolatedComponentIds }),
     opacity: explicitOpacity ?? (!isIncludedByIsolation || isDimmedByFocus ? 0.5 : 1),
   };
 }
@@ -678,10 +641,6 @@ export function collectModelPickableSurfaceMeshes(root: Object3D): Mesh[] {
       return;
     }
 
-    if (isSectionSourceOnlyObject(object)) {
-      return;
-    }
-
     if (!getObjectComponentId(object)) {
       return;
     }
@@ -696,133 +655,15 @@ export function collectModelPickableSurfaceMeshes(root: Object3D): Mesh[] {
   return meshes;
 }
 
-function configureSectionSourceOnlyMaterials(scene: Group): void {
-  scene.traverse((object) => {
-    if (!isSectionSourceOnlyObject(object)) {
-      return;
-    }
-
-    for (const material of getObjectMaterials(object)) {
-      configureSectionSourceOnlyMaterial(material);
-    }
-  });
-}
-
 function getPrimitiveReferences(node: GeometryComponentNode): readonly GeometryComponentPrimitiveRef[] {
   return Array.isArray(node.primitiveRefs) ? (node.primitiveRefs as readonly GeometryComponentPrimitiveRef[]) : [];
 }
 
-function appendMeshTrianglesToSectionSource({
-  mesh,
-  sceneWorldInverse,
-  positions,
-  indices,
-}: {
-  readonly mesh: Mesh;
-  readonly sceneWorldInverse: Matrix4;
-  readonly positions: number[];
-  readonly indices: number[];
-}): void {
-  const { position } = mesh.geometry.attributes;
-  if (!(position instanceof BufferAttribute)) {
-    return;
-  }
-
-  const localToScene = new Matrix4().multiplyMatrices(sceneWorldInverse, mesh.matrixWorld);
-  const index = mesh.geometry.getIndex();
-  const sourceIndexCount = index?.count ?? position.count;
-  const sourceIndices = index?.array as ArrayLike<number> | undefined;
-  const point = new Vector3();
-  const vertexOffset = positions.length / 3;
-
-  for (let sourceOffset = 0; sourceOffset < sourceIndexCount; sourceOffset++) {
-    const sourceVertexIndex = sourceIndices ? sourceIndices[sourceOffset]! : sourceOffset;
-    point.fromBufferAttribute(position, sourceVertexIndex).applyMatrix4(localToScene);
-    positions.push(point.x, point.y, point.z);
-    indices.push(vertexOffset + sourceOffset);
-  }
-}
-
-function createSectionSourceProxyGeometry(scene: Group, meshes: readonly Mesh[]): BufferGeometry | undefined {
-  if (meshes.length === 0) {
-    return undefined;
-  }
-
-  scene.updateMatrixWorld(true);
-  const sceneWorldInverse = new Matrix4().copy(scene.matrixWorld).invert();
-  const positions: number[] = [];
-  const indices: number[] = [];
-
-  for (const mesh of meshes) {
-    mesh.updateMatrixWorld(true);
-    appendMeshTrianglesToSectionSource({ mesh, sceneWorldInverse, positions, indices });
-  }
-
-  if (positions.length === 0 || indices.length === 0) {
-    return undefined;
-  }
-
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
-  geometry.setIndex(new BufferAttribute(new Uint32Array(indices), 1));
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function createInvisibleSectionSourceMaterial(): MeshBasicMaterial {
-  const material = new MeshBasicMaterial();
-  configureSectionSourceOnlyMaterial(material);
-  return material;
-}
-
-function installSectionSourceProxyMeshes(
-  scene: Group,
-  manifest: GeometryComponentManifest,
-  options: { readonly unitId: string },
-): void {
-  const sourceMeshesByComponentId = new Map<string, Mesh[]>();
-  scene.traverse((object) => {
-    if (!isSurfaceObject(object) || isSectionSourceOnlyObject(object)) {
-      return;
-    }
-
-    const componentId = getModelComponentId(object);
-    if (!componentId) {
-      return;
-    }
-
-    const meshes = sourceMeshesByComponentId.get(componentId) ?? [];
-    meshes.push(object);
-    sourceMeshesByComponentId.set(componentId, meshes);
-  });
-
-  for (const componentId of manifest.nodeOrder) {
-    const component = manifest.nodesById[componentId];
-    if (component?.kind !== 'body' || component.childIds.length === 0) {
-      continue;
-    }
-
-    const sourceMeshes = component.childIds.flatMap((childId) => sourceMeshesByComponentId.get(childId) ?? []);
-    if (sourceMeshes.length < 2) {
-      continue;
-    }
-
-    const geometry = createSectionSourceProxyGeometry(scene, sourceMeshes);
-    if (!geometry) {
-      continue;
-    }
-
-    const proxy = new Mesh(geometry, createInvisibleSectionSourceMaterial());
-    proxy.name = `${component.name} section source`;
-    proxy.frustumCulled = false;
-    proxy.renderOrder = -1;
-    markSectionSourceOnlyObject(proxy);
-    setModelComponentOwner(proxy, { unitId: options.unitId, componentId });
-    proxy.userData['tauSectionOwnerComponentId'] = componentId;
-    scene.add(proxy);
-  }
-}
+type GltfLoaderAssociation = {
+  readonly nodes?: number;
+  readonly meshes?: number;
+  readonly primitives?: number;
+};
 
 function isWorldVisible(object: Object3D): boolean {
   let current: Object3D | undefined = object;
@@ -883,16 +724,24 @@ function syncModelRaycasterFromPointerEvent({
 export function annotateSceneComponents(
   scene: Group,
   manifest: GeometryComponentManifest,
-  options: { readonly unitId: string },
+  options: {
+    readonly unitId: string;
+    readonly associations?: ReadonlyMap<Object3D, GltfLoaderAssociation>;
+  },
 ): void {
   const childComponentIds = manifest.nodesById[manifest.rootId]?.childIds ?? [];
   const primitiveComponentNodes: GeometryComponentNode[] = [];
+  const ownership = createGltfComponentOwnership(manifest);
   for (const componentId of manifest.nodeOrder) {
     const node = manifest.nodesById[componentId];
-    if (!node || getPrimitiveReferences(node).length === 0 || node.childIds.length > 0) {
+    if (!node) {
       continue;
     }
-    primitiveComponentNodes.push(node);
+
+    const primitiveReferences = getPrimitiveReferences(node);
+    if (primitiveReferences.length > 0 && node.childIds.length === 0) {
+      primitiveComponentNodes.push(node);
+    }
   }
 
   const primitiveComponentIds = primitiveComponentNodes
@@ -910,30 +759,52 @@ export function annotateSceneComponents(
   let fallbackIndex = 0;
   let primitiveFallbackIndex = 0;
 
-  const annotateObject = (
-    object: Object3D,
-    inheritedComponentId: string | undefined,
-    previousSiblingRenderableComponentId: string | undefined,
-  ): string | undefined => {
+  const annotateObject = ({
+    object,
+    inheritedComponentId,
+    previousSiblingRenderableComponentId,
+    inheritedNodeIndex,
+  }: {
+    object: Object3D;
+    inheritedComponentId: string | undefined;
+    previousSiblingRenderableComponentId: string | undefined;
+    inheritedNodeIndex: number | undefined;
+  }): string | undefined => {
     const existingComponentId = getModelComponentId(object);
     if (typeof existingComponentId === 'string') {
       setModelComponentOwner(object, { unitId: options.unitId, componentId: existingComponentId });
       for (const child of object.children) {
-        annotateObject(child, existingComponentId, undefined);
+        annotateObject({
+          object: child,
+          inheritedComponentId: existingComponentId,
+          previousSiblingRenderableComponentId: undefined,
+          inheritedNodeIndex,
+        });
       }
       return existingComponentId;
     }
 
-    let componentId = inheritedComponentId;
+    const association = options.associations?.get(object);
+    const nodeIndex = association?.nodes ?? inheritedNodeIndex;
+    const primitiveComponentId =
+      nodeIndex !== undefined && association?.meshes !== undefined && association.primitives !== undefined
+        ? getGltfPrimitiveComponentId(ownership, {
+            nodeIndex,
+            meshIndex: association.meshes,
+            primitiveIndex: association.primitives,
+          })
+        : undefined;
+    const associatedComponentId = primitiveComponentId ?? ownership.componentIdByNodeIndex.get(nodeIndex ?? -1);
+    let componentId = associatedComponentId ?? inheritedComponentId;
 
     if (isModelRenderableObject(object)) {
-      const primitiveComponentId =
-        !isLineObject(object) && primitiveComponentIds.length > 0
+      const fallbackPrimitiveComponentId =
+        !associatedComponentId && !isLineObject(object) && primitiveComponentIds.length > 0
           ? primitiveComponentIds[primitiveFallbackIndex]
           : undefined;
-      if (primitiveComponentId) {
+      if (fallbackPrimitiveComponentId) {
         primitiveFallbackIndex += 1;
-        componentId = primitiveComponentId;
+        componentId = fallbackPrimitiveComponentId;
       }
 
       if (!componentId) {
@@ -951,7 +822,12 @@ export function annotateSceneComponents(
 
     let previousChildRenderableComponentId: string | undefined;
     for (const child of object.children) {
-      const childComponentId = annotateObject(child, componentId, previousChildRenderableComponentId);
+      const childComponentId = annotateObject({
+        object: child,
+        inheritedComponentId: componentId,
+        previousSiblingRenderableComponentId: previousChildRenderableComponentId,
+        inheritedNodeIndex: nodeIndex,
+      });
       if (childComponentId && isModelRenderableObject(child)) {
         previousChildRenderableComponentId = childComponentId;
       }
@@ -961,7 +837,12 @@ export function annotateSceneComponents(
   };
 
   for (const child of scene.children) {
-    annotateObject(child, undefined, undefined);
+    annotateObject({
+      object: child,
+      inheritedComponentId: undefined,
+      previousSiblingRenderableComponentId: undefined,
+      inheritedNodeIndex: undefined,
+    });
   }
 }
 
@@ -1037,13 +918,6 @@ export function applyModelComponentVisualStateToScene({
       return;
     }
 
-    if (isSectionSourceOnlyObject(object)) {
-      for (const material of materials) {
-        configureSectionSourceOnlyMaterial(material);
-      }
-      return;
-    }
-
     const emphasis = resolveModelComponentEmphasisWithManifest(modelVisualState, componentManifest, componentId);
     for (const material of materials) {
       const snapshot = getOrCaptureModelMaterialAppearance(material);
@@ -1095,6 +969,8 @@ export function GltfMesh({
   const graphicsBackendThree = useThreeGraphicsBackend();
   const sectionView = useSectionView();
   const cameraRig = useCameraRig();
+  const renderFrame = useRenderFrame();
+  const assetMatrix = useMemo(createCanonicalGltfToTauMatrix, []);
   // The "base scene" is the parsed GLTF with line segments converted but no material overrides.
   // It serves as the template from which material modes (matcap/original) are derived.
   const [baseScene, setBaseScene] = useState<Group | undefined>(undefined);
@@ -1197,8 +1073,20 @@ export function GltfMesh({
           unitId,
         ).manifest;
         const manifest = graphicsOwnedManifest ?? buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
-        annotateSceneComponents(gltf.scene, manifest, { unitId });
-        installSectionSourceProxyMeshes(gltf.scene, manifest, { unitId });
+        annotateSceneComponents(gltf.scene, manifest, {
+          unitId,
+          associations: gltf.parser.associations as ReadonlyMap<Object3D, GltfLoaderAssociation>,
+        });
+        await registerGltfSectionSurfaceSources({
+          scene: gltf.scene,
+          manifest,
+          unitId,
+          parser: gltf.parser as unknown as SectionTopologyGltfParser,
+        });
+        if (isCancelled()) {
+          disposeSceneResources(gltf.scene);
+          return;
+        }
 
         // Convert LineSegments to LineSegments2 for fat line rendering
         const edgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
@@ -1326,11 +1214,11 @@ export function GltfMesh({
     }
 
     applyMaterials(baseScene);
-    configureSectionSourceOnlyMaterials(baseScene);
+    applyGltfSurfaceDepthBiasToScene(baseScene, graphicsBackendThree);
     seedSceneMaterialAppearances(baseScene);
     setScene(baseScene);
     invalidate();
-  }, [baseScene, applyMaterials, invalidate]);
+  }, [baseScene, applyMaterials, graphicsBackendThree, invalidate]);
 
   // Toggle visibility when enableSurfaces or enableLines change
   useEffect(() => {
@@ -1352,8 +1240,9 @@ export function GltfMesh({
       enableSurfaces,
       enableLines,
     });
+    applyGltfSurfaceDepthBiasToScene(scene, graphicsBackendThree);
     invalidate();
-  }, [scene, componentManifest, modelVisualState, enableSurfaces, enableLines, invalidate]);
+  }, [scene, componentManifest, modelVisualState, enableSurfaces, enableLines, graphicsBackendThree, invalidate]);
 
   useEffect(() => {
     lastHoveredComponentIdRef.current = modelVisualState.isViewerHoverSuppressed
@@ -1377,7 +1266,16 @@ export function GltfMesh({
     }
 
     lastFocusedComponentIdRef.current = modelVisualState.focusedComponentId;
-    const box = new Box3(new Vector3(...focusedNode.bounds.min), new Vector3(...focusedNode.bounds.max));
+    const physicalBox = applyCanonicalGltfBounds(
+      new Box3(new Vector3(...focusedNode.bounds.min), new Vector3(...focusedNode.bounds.max)),
+    );
+    const box = toThreeRenderBounds({
+      renderFrame,
+      bounds: {
+        min: [physicalBox.min.x, physicalBox.min.y, physicalBox.min.z],
+        max: [physicalBox.max.x, physicalBox.max.y, physicalBox.max.z],
+      },
+    });
     const cameraControls = controls as
       | {
           fitToBox?: (
@@ -1402,7 +1300,7 @@ export function GltfMesh({
     const center = box.getCenter(new Vector3());
     camera.lookAt(center);
     invalidate();
-  }, [camera, componentManifest, controls, invalidate, modelVisualState.focusedComponentId]);
+  }, [camera, componentManifest, controls, invalidate, modelVisualState.focusedComponentId, renderFrame]);
 
   const handlePointerMove = useCallback(
     (event: ThreeEvent<PointerEvent>) => {
@@ -1596,13 +1494,15 @@ export function GltfMesh({
   }
 
   return (
-    <primitive
-      object={scene}
-      onPointerMove={handlePointerMove}
-      onPointerDown={handlePointerDown}
-      onPointerOut={handlePointerOut}
-      onClick={handleClick}
-      onPointerMissed={handlePointerMissed}
-    />
+    <group matrix={assetMatrix} matrixAutoUpdate={false}>
+      <primitive
+        object={scene}
+        onPointerMove={handlePointerMove}
+        onPointerDown={handlePointerDown}
+        onPointerOut={handlePointerOut}
+        onClick={handleClick}
+        onPointerMissed={handlePointerMissed}
+      />
+    </group>
   );
 }

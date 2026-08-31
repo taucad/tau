@@ -13,19 +13,14 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
 import { Queue } from '#lib/kcl-language/lsp/codec/queue.js';
 import { StreamDemuxer } from '#lib/kcl-language/lsp/codec/stream-demuxer.js';
 import { encodeMessage } from '#lib/kcl-language/lsp/codec/utils.js';
 
-// Resolve the WASM file path: test is at apps/ui/app/lib/kcl-language/lsp/
-// 6 levels up reaches the workspace root
-const wasmPath = path.resolve(
-  import.meta.dirname,
-  '../../../../../../node_modules/@taucad/kcl-wasm-lib/kcl_wasm_lib_bg.wasm',
-);
+const wasmPath = fileURLToPath(import.meta.resolve('@taucad/kcl-wasm-lib/kcl.wasm'));
 
 // LSP server state — initialized once for all tests in this file
 let intoServer: Queue<Uint8Array<ArrayBuffer>>;

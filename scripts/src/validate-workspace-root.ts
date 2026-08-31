@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
-const stableUntrackedRoots = ['.git', '.nx', 'node_modules', 'out', 'repos'] as const;
+const stableUntrackedRoots = ['.git', '.nx', 'node_modules', 'out', 'out-tsc', 'repos'] as const;
 
 type WorkspaceRootInventory = {
   readonly actualEntries: readonly string[];

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import type { ThumbnailEvent, ThumbnailInput } from '#machines/thumbnail.machine.js';
 import type { HeadlessImageJob } from '#services/headless-image.service.js';
 
@@ -15,12 +14,13 @@ vi.mock('@xstate/react', () => ({
 }));
 
 const sourceEntryPath = 'src/main.ts';
+const geometryContent = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+const geometryFormat = 'gltf';
 let snapshotEntryPath: string | undefined = sourceEntryPath;
 const getSnapshot = vi.fn(() => ({
   context: {
-    kernelClient: {},
     entryPath: snapshotEntryPath,
-    parameters: { size: 10 },
+    geometry: { format: geometryFormat, content: geometryContent, hash: 'geometry-hash' },
   },
 }));
 let geometryListener: ((event: { geometry: { hash: string } }) => void) | undefined;
@@ -39,9 +39,8 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 const writeFile = vi.fn(async () => undefined);
-const runtimeFileSystem = fromMemoryFs();
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ writeFile, runtimeFileSystem }),
+  useFileManager: () => ({ writeFile }),
 }));
 
 const webpFile = (bytes: number[]) => [{ name: 'render.webp', mimeType: 'image/webp', bytes: new Uint8Array(bytes) }];
@@ -88,28 +87,32 @@ describe('useThumbnailGenerator', () => {
       kind: 'manual-thumbnail',
       identity: 'proj_aaaaaaaaaaaaaaaaaaaaa:unsettled',
       projectId: 'proj_aaaaaaaaaaaaaaaaaaaaa',
-      sourceFormat: 'gltf',
+      sourceFormat: 'glb',
+      sourcePath: sourceEntryPath,
+      geometryHash: 'geometry-hash',
+      content: geometryContent,
       format: 'webp',
-      fileSystem: runtimeFileSystem,
-      source: { path: sourceEntryPath },
-      parameters: { size: 10 },
-      includeEdges: true,
       exportOptions: {
         mode: 'single',
         width: 768,
         height: 576,
-        margin: 0.1,
-        projection: 'perspective',
-        phi: 60,
-        theta: -45,
+        lineWidth: 3,
+        camera: {
+          framing: 'bounds',
+          direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+          up: [0, 0, 1],
+          margin: 0.1,
+          projection: { kind: 'perspective', verticalFieldOfView: 45 },
+        },
         quality: 0.9,
       },
     });
     const job = exportImage.mock.calls[0]![0];
-    if (job.sourceFormat !== 'gltf') {
-      throw new Error('Expected a GLTF image job');
+    if (job.sourceFormat !== 'glb' || job.kind === 'capture') {
+      throw new Error('Expected a GLB thumbnail job');
     }
-    expect(job.source.path).toBe(sourceEntryPath);
+    expect(job.sourcePath).toBe(sourceEntryPath);
+    expect(job.content).toBe(geometryContent);
   });
 
   it('should reject a missing settled source without enqueueing an image export', async () => {
@@ -121,7 +124,7 @@ describe('useThumbnailGenerator', () => {
       expect.fail('render should reject without a settled entry path');
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toBe('source-unavailable: settled CAD entry path not ready');
+      expect((error as Error).message).toBe('source-unavailable: settled canonical GLB not ready');
     }
     expect(exportImage).not.toHaveBeenCalled();
   });
@@ -144,7 +147,7 @@ describe('useThumbnailGenerator', () => {
     expect(writeFile).not.toHaveBeenCalled();
   });
 
-  it('should include 4:3 dimensions in the settled thumbnail identity', () => {
+  it('should include the render recipe in the settled thumbnail identity', () => {
     renderHook(() => useThumbnailGenerator());
 
     geometryListener?.({ geometry: { hash: 'geometry-hash' } });
@@ -152,7 +155,9 @@ describe('useThumbnailGenerator', () => {
     const event = send.mock.calls.at(-1)?.[0];
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
-      expect(event.hash).toBe('proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:768x576:m0.1:edges');
+      expect(event.hash).toBe(
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:768x576:m0.1:lw3:camera-bounds-v1:edges',
+      );
     }
   });
 

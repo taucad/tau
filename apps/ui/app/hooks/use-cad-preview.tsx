@@ -80,12 +80,22 @@ function deriveStatus(cadState: string): CadPreviewStatus {
 export const deriveCadPreviewStatus = (args: {
   readonly initError: Error | undefined;
   readonly cadState: string;
+  /** The latest render settled as a failure and no geometry frame exists to keep showing. */
+  readonly geometryFailed?: boolean;
 }): CadPreviewStatus => {
   if (args.initError) {
     return 'error';
   }
 
-  return deriveStatus(args.cadState);
+  const status = deriveStatus(args.cadState);
+  /* A kernel result with `success: false` settles the worker to `idle`, not
+   * `error`, so a failed *first* render would otherwise display as an
+   * eternal loader. A failure after a successful frame keeps the stale
+   * frame (geometryFailed is false then). */
+  if (args.geometryFailed === true && (status === 'ready' || status === 'idle')) {
+    return 'error';
+  }
+  return status;
 };
 
 /**
@@ -236,8 +246,23 @@ export function CadPreviewProvider({
 
   // Selectors on cadRef for reactive state
   const geometry = useSelector(cadRef, (s) => s.context.geometry);
-  const cadStateValue = useSelector(cadRef, (s) => s.value);
+  const cadStateValue = useSelector(cadRef, (state) => {
+    if (state.matches('connecting')) {
+      return 'connecting';
+    }
+    if (state.matches('buffering')) {
+      return 'buffering';
+    }
+    if (state.matches('rendering')) {
+      return 'rendering';
+    }
+    if (state.matches('error')) {
+      return 'error';
+    }
+    return 'idle';
+  });
   const kernelIssues = useSelector(cadRef, (s) => s.context.kernelIssues);
+  const latestGeometryOutcome = useSelector(cadRef, (s) => s.context.latestGeometryOutcome);
   const defaultParameters = useSelector(cadRef, (s) => s.context.defaultParameters);
   const jsonSchema = useSelector(cadRef, (s) => s.context.jsonSchema);
   const cadUnits = useSelector(cadRef, (s) => s.context.units);
@@ -249,9 +274,10 @@ export function CadPreviewProvider({
     () =>
       deriveCadPreviewStatus({
         initError,
-        cadState: typeof cadStateValue === 'string' ? cadStateValue : 'idle',
+        cadState: cadStateValue,
+        geometryFailed: latestGeometryOutcome === 'failure' && geometry === undefined,
       }),
-    [initError, cadStateValue],
+    [initError, cadStateValue, latestGeometryOutcome, geometry],
   );
 
   const error = useMemo(() => {

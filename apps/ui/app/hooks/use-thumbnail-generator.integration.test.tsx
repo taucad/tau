@@ -1,15 +1,13 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HeadlessImageJob } from '#services/headless-image.service.js';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
 
 const sourceEntryPath = 'src/main.ts';
-const parameters = { width: 24 };
+const geometryContent = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 const getSnapshot = vi.fn(() => ({
   context: {
-    kernelClient: {},
     entryPath: sourceEntryPath,
-    parameters,
+    geometry: { format: 'gltf' as const, content: geometryContent, hash: 'geometry-hash' },
   },
 }));
 let geometryListener: ((event: { geometry: { hash: string } }) => void) | undefined;
@@ -28,9 +26,8 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 const writeFile = vi.fn(async () => undefined);
-const runtimeFileSystem = fromMemoryFs();
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ writeFile, runtimeFileSystem }),
+  useFileManager: () => ({ writeFile }),
 }));
 
 const webpFile = (bytes: number[]) => [{ name: 'render.webp', mimeType: 'image/webp', bytes: new Uint8Array(bytes) }];
@@ -99,11 +96,11 @@ describe('useThumbnailGenerator integration', () => {
 
     expect(exportImage).toHaveBeenCalledOnce();
     const job = exportImage.mock.calls[0]![0];
-    if (job.sourceFormat !== 'gltf') {
-      throw new Error('Expected a GLTF image job');
+    if (job.sourceFormat !== 'glb' || job.kind === 'capture') {
+      throw new Error('Expected a GLB thumbnail job');
     }
-    expect(job.source.path).toBe(sourceEntryPath);
-    expect(job.parameters).toBe(parameters);
+    expect(job.sourcePath).toBe(sourceEntryPath);
+    expect(job.content).toBe(geometryContent);
     expect(writeFile).toHaveBeenCalledOnce();
     expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', new Uint8Array([1, 2, 3]), { source: 'machine' });
   });

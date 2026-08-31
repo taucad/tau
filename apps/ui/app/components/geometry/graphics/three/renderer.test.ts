@@ -113,19 +113,7 @@ describe('createRenderer', () => {
       expect(created?.setTransparentSort).not.toHaveBeenCalled();
     });
 
-    it('should NOT register a custom transparent sort on the WebGPU screenshot renderer (no reversed-Z)', async () => {
-      const { createRenderer } = await import('#components/geometry/graphics/three/renderer.js');
-
-      const canvas = document.createElement('canvas');
-      await createRenderer('screenshot', 'webgpu', canvas);
-
-      expect(hoisted.createdRenderers).toHaveLength(1);
-      const created = hoisted.createdRenderers.at(0);
-      expect(created?.kind).toBe('webgpu');
-      expect(created?.setTransparentSort).not.toHaveBeenCalled();
-    });
-
-    it.each(['viewport', 'offscreen', 'screenshot'] as const)(
+    it.each(['viewport', 'offscreen'] as const)(
       'should NOT register a custom transparent sort on the WebGL %s renderer',
       async (useCase) => {
         const { createRenderer } = await import('#components/geometry/graphics/three/renderer.js');

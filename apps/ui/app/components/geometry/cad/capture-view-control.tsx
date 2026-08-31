@@ -9,17 +9,17 @@ import { useChatActions } from '#hooks/use-chat.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
 import { toast } from '#components/ui/sonner.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { useFileManager } from '#hooks/use-file-manager.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
+import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 
 const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<void>) => {
   const graphicsRef = useGraphics();
   const cadRef = useCad();
   const { addDraftImage } = useChatActions();
   const imageService = useHeadlessImageService();
-  const { runtimeFileSystem } = useFileManager();
 
   return useCallback(async () => {
+    const clickStartedAt = performance.now();
     if (!cadRef) {
       toast.error('No CAD view available for image capture');
       return;
@@ -29,15 +29,17 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
         cadRef,
         graphicsRef,
         imageService,
-        fileSystem: runtimeFileSystem,
         recipe: { purpose: 'chat', mode: 'current' },
       });
+      const publishStartedAt = performance.now();
       addDraftImage(captureFilesToDataUrls(files)[0]!, { preserveOriginal: true });
+      recordHeadlessImageTiming('capture.publish-draft', publishStartedAt, { count: 1 });
       onSuccess?.();
+      recordHeadlessImageTiming('capture.click-to-draft', clickStartedAt);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to capture view');
     }
-  }, [addDraftImage, cadRef, graphicsRef, imageService, onSuccess, runtimeFileSystem]);
+  }, [addDraftImage, cadRef, graphicsRef, imageService, onSuccess]);
 };
 
 /**

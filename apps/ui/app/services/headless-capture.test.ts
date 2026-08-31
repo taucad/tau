@@ -51,7 +51,11 @@ const snapshot = (geometry: Geometry, entryPath = '/parts/bracket.ts') =>
     },
   }) as unknown as Parameters<typeof captureSettledCadImages>[0]['cadSnapshot'];
 
-const gltf = { format: 'gltf', content: { json: {}, buffers: [] }, hash: 'gltf-hash' } as unknown as Geometry;
+const gltf = {
+  format: 'gltf',
+  content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
+  hash: 'gltf-hash',
+} as Extract<Geometry, { format: 'gltf' }>;
 const presentationGltf = {
   format: 'gltf',
   content: new TextEncoder().encode(
@@ -73,11 +77,12 @@ const svg = {
   hash: 'svg-hash',
 } as Extract<Geometry, { format: 'svg' }>;
 const cameraState = {
-  position: [8000, -6000, 4000],
-  target: [1000, 2000, 3000],
+  frameId: 'tau:root',
+  position: [8, -6, 4],
+  target: [1, 2, 3],
   up: [0.1, 0.2, 0.97],
   projection: { kind: 'perspective', verticalFieldOfView: 52, zoom: 1.4 },
-  clipping: { near: 200, far: 900_000 },
+  clipping: { near: 0.2, far: 900 },
   aspect: 16 / 9,
 } as const;
 
@@ -89,19 +94,17 @@ describe('headless capture adapter', () => {
       cadSnapshot: snapshot(gltf),
       cameraState,
       imageService: { export: exportImage },
-      fileSystem: {} as Parameters<typeof captureSettledCadImages>[0]['fileSystem'],
       recipe: { purpose: 'chat', mode: 'current' },
     });
 
     expect(files).toHaveLength(1);
     const job = exportImage.mock.calls[0]![0];
-    if (job.sourceFormat !== 'gltf' || job.format !== 'webp') {
-      throw new Error('Expected a GLTF WebP job');
+    if (job.sourceFormat !== 'glb' || job.format !== 'webp') {
+      throw new Error('Expected a GLB WebP job');
     }
     expect(job).toMatchObject({
-      source: { path: '/parts/bracket.ts' },
-      parameters: { width: 42 },
-      includeEdges: true,
+      sourcePath: '/parts/bracket.ts',
+      content: gltf.content,
     });
     expect(job.exportOptions).toMatchObject({
       width: 2400,
@@ -120,6 +123,7 @@ describe('headless capture adapter', () => {
       label: '/parts/bracket.ts',
       axes: true,
       scaleBar: true,
+      world: { up: '+z', forward: '-y', unit: 'meter' },
     });
   });
 
@@ -131,13 +135,13 @@ describe('headless capture adapter', () => {
     await captureSettledCadImages({
       cadSnapshot: snapshot(gltf),
       imageService: { export: exportImage },
-      fileSystem: {} as Parameters<typeof captureSettledCadImages>[0]['fileSystem'],
       recipe: { purpose: 'chat', mode: 'orthographic' },
     });
 
     const job = exportImage.mock.calls[0]![0];
     expect(job).toMatchObject({
-      sourceFormat: 'gltf',
+      sourceFormat: 'glb',
+      geometryHash: 'gltf-hash',
       exportOptions: {
         mode: 'batch',
         width: 1600,
@@ -149,8 +153,8 @@ describe('headless capture adapter', () => {
         quality: 1,
       },
     });
-    if (job.sourceFormat !== 'gltf' || job.format !== 'webp') {
-      throw new Error('Expected a GLTF WebP batch job');
+    if (job.sourceFormat !== 'glb' || job.format !== 'webp') {
+      throw new Error('Expected a GLB WebP batch job');
     }
     const batchOptions = job.exportOptions as {
       readonly mode: 'batch';
@@ -170,13 +174,11 @@ describe('headless capture adapter', () => {
     await captureSettledCadImages({
       cadSnapshot: snapshot(gltf),
       imageService: { export: exportImage },
-      fileSystem: {} as Parameters<typeof captureSettledCadImages>[0]['fileSystem'],
       recipe: { purpose: 'agent', mode: 'isometric', includeEdges: false },
     });
 
     expect(exportImage.mock.calls[0]![0]).toMatchObject({
-      includeEdges: false,
-      exportOptions: { width: 1600, height: 1600, lineWidth: 3 },
+      exportOptions: { width: 1600, height: 1600, lineWidth: 3, lines: false },
     });
   });
 
@@ -187,7 +189,6 @@ describe('headless capture adapter', () => {
       cadSnapshot: snapshot(gltf),
       cameraState,
       imageService: { export: exportImage },
-      fileSystem: {} as Parameters<typeof captureSettledCadImages>[0]['fileSystem'],
       recipe: { purpose: 'utility', mode: 'current' },
     });
 
@@ -203,19 +204,19 @@ describe('headless capture adapter', () => {
       cadSnapshot: snapshot(presentationGltf),
       cameraState,
       presentation: {
+        upDirection: 'z',
         enableSurfaces: false,
         enableLines: false,
         hiddenComponentIds: ['component:node-0'],
         isolatedComponentIds: [],
         section: {
-          point: [1000, 2000, 3000],
+          point: [1, 2, 3],
           normal: [0, 1, 0],
           clipSurfaces: true,
           clipLines: false,
         },
       },
       imageService: { export: exportImage },
-      fileSystem: {} as Parameters<typeof captureSettledCadImages>[0]['fileSystem'],
       recipe: { purpose: 'chat', mode: 'current' },
     });
 
@@ -240,6 +241,7 @@ describe('headless capture adapter', () => {
     });
     vi.mocked(awaitFreshRender).mockReturnValue(fresh);
     const liveCamera: {
+      frameId: string;
       position: [number, number, number];
       target: [number, number, number];
       up: [number, number, number];
@@ -247,11 +249,12 @@ describe('headless capture adapter', () => {
       clipping: CameraState['clipping'];
       aspect: number;
     } = {
-      position: [8000, -6000, 4000] as [number, number, number],
-      target: [1000, 2000, 3000] as [number, number, number],
+      frameId: 'tau:root',
+      position: [8, -6, 4] as [number, number, number],
+      target: [1, 2, 3] as [number, number, number],
       up: [0, 0, 1] as [number, number, number],
       projection: { kind: 'perspective', verticalFieldOfView: 52, zoom: 1.4 },
-      clipping: { near: 200, far: 900_000 },
+      clipping: { near: 0.2, far: 900 },
       aspect: 16 / 9,
     };
     const liveUnit = {
@@ -261,10 +264,11 @@ describe('headless capture adapter', () => {
     const liveContext = {
       enableSurfaces: false,
       enableLines: true,
+      upDirection: 'z',
       isSectionViewActive: true,
       availableSectionViews: [{ id: 'xy', normal: [0, 0, 1] as [number, number, number], constant: 0 }],
       selectedSectionViewId: 'xy',
-      sectionViewPivot: [1000, 0, 0] as [number, number, number],
+      sectionViewPivot: [1, 0, 0] as [number, number, number],
       sectionViewRotation: [0, 0, 0] as [number, number, number],
       sectionViewDirection: -1 as const,
       enableClippingMesh: true,
@@ -285,14 +289,13 @@ describe('headless capture adapter', () => {
       cadRef: {} as Parameters<typeof captureCadImages>[0]['cadRef'],
       graphicsRef,
       imageService: { export: exportImage },
-      fileSystem: {} as Parameters<typeof captureCadImages>[0]['fileSystem'],
       recipe: { purpose: 'chat', mode: 'current' },
     });
 
-    liveCamera.position[0] = 99_000;
+    liveCamera.position[0] = 99;
     liveCamera.up[0] = 1;
     liveContext.enableSurfaces = true;
-    liveContext.sectionViewPivot[0] = 9000;
+    liveContext.sectionViewPivot[0] = 9;
     liveUnit.hiddenComponentIds[0] = 'component:node-1';
     resolveFresh(snapshot(presentationGltf));
     await capture;
@@ -312,7 +315,6 @@ describe('headless capture adapter', () => {
     const common = {
       cadSnapshot: snapshot(svg, '/drawings/profile.ts'),
       imageService: { export: exportImage },
-      fileSystem: {} as Parameters<typeof captureSettledCadImages>[0]['fileSystem'],
     };
 
     await captureSettledCadImages({
@@ -351,7 +353,6 @@ describe('headless capture adapter', () => {
         cadSnapshot: snapshot(gltf),
         cameraState,
         imageService: { export: exportImage },
-        fileSystem: {} as Parameters<typeof captureSettledCadImages>[0]['fileSystem'],
         recipe: { purpose: 'chat', mode: 'current' },
       }),
     ).rejects.toThrow('2400×1350');
@@ -367,7 +368,6 @@ describe('headless capture adapter', () => {
         cadSnapshot: snapshot(webrtc),
         cameraState,
         imageService: { export: exportImage },
-        fileSystem: {} as Parameters<typeof captureSettledCadImages>[0]['fileSystem'],
         recipe: { purpose: 'chat', mode: 'current' },
       }),
     ).rejects.toThrow('Live WebRTC geometry cannot be captured headlessly');

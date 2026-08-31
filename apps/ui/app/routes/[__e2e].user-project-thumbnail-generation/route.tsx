@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
@@ -11,7 +11,7 @@ const encoder = new TextEncoder();
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => encoder.encode(text);
 
-const replicadModel = `import { makeBaseBox } from 'replicad';
+const boxModel = `import { makeBaseBox } from 'replicad';
 
 export const defaultParams = {
   width: 20,
@@ -22,26 +22,49 @@ export default function main(parameters = defaultParams) {
 }
 `;
 
-const seedFiles = Object.fromEntries([
-  [
-    'package.json',
-    {
-      content: encode(
-        JSON.stringify(
-          {
-            type: 'module',
-          },
-          null,
-          2,
-        ),
-      ),
-    },
-  ],
-  ['src/main.ts', { content: encode(replicadModel) }],
-]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
+const curvedModel = `import { makeBaseBox, makeSphere } from 'replicad';
 
-const createSeedProject = (): Omit<ProjectManifest, '$schema' | 'id'> => ({
-  name: 'Thumbnail Generation E2E',
+export const defaultParams = {
+  width: 20,
+};
+
+export default function main(parameters = defaultParams) {
+  const radius = parameters.width / 2;
+  return [
+    { name: 'Sphere', shape: makeSphere(radius) },
+    {
+      name: 'Asymmetric key',
+      shape: makeBaseBox(radius * 0.2, radius * 0.15, radius * 0.15).translate([
+        radius * 0.88,
+        -radius * 0.2,
+        radius * 0.1,
+      ]),
+    },
+  ];
+}
+`;
+
+const createSeedFiles = (model: string) =>
+  Object.fromEntries([
+    [
+      'package.json',
+      {
+        content: encode(
+          JSON.stringify(
+            {
+              type: 'module',
+            },
+            null,
+            2,
+          ),
+        ),
+      },
+    ],
+    ['src/main.ts', { content: encode(model) }],
+  ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
+
+const createSeedProject = (curved: boolean): Omit<ProjectManifest, '$schema' | 'id'> => ({
+  name: curved ? 'Thumbnail Curved Parity E2E' : 'Thumbnail Generation E2E',
   description: 'Deterministic nested-entry fixture for user-project thumbnail generation.',
   tags: ['e2e', 'replicad', 'thumbnail'],
   assets: {
@@ -65,6 +88,7 @@ export const loader = async (): Promise<Response> => {
 const UserProjectThumbnailGenerationDebugRoute = (): React.JSX.Element => {
   const { createProject, isLoading } = useProjectManager();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [error, setError] = React.useState<string>();
   const seedStarted = React.useRef(false);
 
@@ -76,11 +100,12 @@ const UserProjectThumbnailGenerationDebugRoute = (): React.JSX.Element => {
 
     const seed = async (): Promise<void> => {
       try {
+        const curved = searchParams.get('fixture') === 'curved';
         const project = await createProject({
-          project: createSeedProject(),
+          project: createSeedProject(curved),
           activeKernel: 'replicad',
           location: homeProjectCreationLocation,
-          files: seedFiles,
+          files: createSeedFiles(curved ? curvedModel : boxModel),
           editorState: {
             panelState: {
               desktopLayout: { chatOpen: false, workbenchOpen: true, compactAuxiliary: 'workbench' },
@@ -88,14 +113,14 @@ const UserProjectThumbnailGenerationDebugRoute = (): React.JSX.Element => {
           },
         });
 
-        void navigate(projectUrl(project.slugs));
+        void navigate(`${projectUrl(project.slugs)}?graphicsBackend=webgpu`);
       } catch (seedError) {
         setError(seedError instanceof Error ? seedError.message : String(seedError));
       }
     };
 
     void seed();
-  }, [createProject, isLoading, navigate]);
+  }, [createProject, isLoading, navigate, searchParams]);
 
   if (error) {
     return (

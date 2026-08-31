@@ -21,11 +21,10 @@ export type RendererInstance = WebGlRenderer | WebGpuRenderer;
  *   `frameloop='demand'` (see `docs/policy/graphics-backend-policy.md`) and temporal effects cannot
  *   converge while the scene is idle, so static frames must be AA-clean from a single render.
  * - **`offscreen`** — Shared/doc bitmap path: MSAA + log-depth + stencil; WebGL omits preserve-buffer (bitmap transfer).
- * - **`screenshot`** — Headless clones + readback path: matches offscreen presets and adds **`preserveDrawingBuffer`** on WebGL where pixels are sampled from the framebuffer.
  *
  * @see `docs/policy/graphics-backend-policy.md`
  */
-export type RendererUseCase = 'viewport' | 'offscreen' | 'screenshot';
+export type RendererUseCase = 'viewport' | 'offscreen';
 
 async function initWebGpuIfNeeded(renderer: WebGpuRenderer): Promise<void> {
   await renderer.init();
@@ -34,7 +33,7 @@ async function initWebGpuIfNeeded(renderer: WebGpuRenderer): Promise<void> {
 /**
  * Instantiate a Tau-normalised Three.js renderer for the given GPU backend and UI surface.
  *
- * @param useCase - Viewport / offscreen / screenshot preset (see {@link RendererUseCase}).
+ * @param useCase - Viewport or offscreen preset (see {@link RendererUseCase}).
  * @param backend - `'webgl'` or `'webgpu'`.
  * @param canvas - Backing canvas (`OffscreenCanvas` callers rely on the same cast path as upstream Three.js typings).
  */
@@ -92,12 +91,6 @@ export async function createRenderer(
     stencil: true,
     logarithmicDepthBuffer: true,
   } satisfies THREE.WebGLRendererParameters);
-
-  if (useCase === 'screenshot') {
-    Object.assign(webGlOptions, {
-      preserveDrawingBuffer: true,
-    } satisfies THREE.WebGLRendererParameters);
-  }
 
   return new THREE.WebGLRenderer(webGlOptions);
 }

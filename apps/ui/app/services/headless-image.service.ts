@@ -1,15 +1,16 @@
-import type { FilesystemRuntimeSource } from '@taucad/runtime/client';
-import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import type { RuntimeClient } from '@taucad/runtime/client';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import type { TelemetryEntry } from '@taucad/runtime';
 import type { ExportFile } from '@taucad/types';
+import { renderSvgPng } from '@taucad/image/svg';
 import type { SvgPngOptions } from '@taucad/image/svg';
+import { canonicalJson } from '@taucad/utils/hash';
 import { assertRootedPath } from '@taucad/utils/path';
-import type { AppRuntimeClient, AppRuntimeExportFormat, AppRuntimeExportOptions } from '#types/runtime-client.alias.js';
-import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
-import type { runtime } from '#runtime/ui-runtime.definition.js';
+import type { AppRuntimeExportFormat, AppRuntimeExportOptions } from '#types/runtime-client.alias.js';
+import type { imageRuntime } from '#runtime/image-runtime.definition.js';
+import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 
-/** Milliseconds. */
-const defaultIdleTimeout = 60_000;
-
+type ImageTranscodeInput = Parameters<RuntimeClient<typeof imageRuntime>['transcode']>[0];
 type ImageFormat = Extract<AppRuntimeExportFormat, 'jpeg' | 'png' | 'webp'>;
 
 type HeadlessImageJobBase = {
@@ -18,18 +19,14 @@ type HeadlessImageJobBase = {
   readonly projectId?: string;
 };
 
-type HeadlessGltfImageJobBase = HeadlessImageJobBase & {
-  readonly sourceFormat: 'gltf';
-  readonly fileSystem: RuntimeFileSystem;
-  readonly source: FilesystemRuntimeSource;
-  readonly parameters?: Record<string, unknown>;
-  readonly includeEdges: boolean;
-};
-
-type HeadlessGltfImageJob = {
-  [Format in ImageFormat]: HeadlessGltfImageJobBase & {
+type HeadlessGlbImageJob = {
+  [Format in ImageFormat]: HeadlessImageJobBase & {
+    readonly sourceFormat: 'glb';
+    readonly sourcePath: string;
+    readonly geometryHash: string;
+    readonly content: Uint8Array<ArrayBuffer>;
     readonly format: Format;
-    readonly exportOptions?: AppRuntimeExportOptions<Format>['exportOptions'];
+    readonly exportOptions: NonNullable<AppRuntimeExportOptions<Format>['exportOptions']>;
   };
 }[ImageFormat];
 
@@ -41,21 +38,21 @@ type HeadlessSvgImageJob = HeadlessImageJobBase & {
   readonly exportOptions?: SvgPngOptions;
 };
 
-export type HeadlessImageJob = HeadlessGltfImageJob | HeadlessSvgImageJob;
+export type HeadlessImageJob = HeadlessGlbImageJob | HeadlessSvgImageJob;
 
 export type HeadlessImageServiceDependencies = {
-  readonly runtimeConfig: UiRuntimeConfigInput;
-  /** Test seam for the standard runtime client; production uses the lazy web-worker path. */
-  readonly createClient?: (fileSystem: RuntimeFileSystem) => Promise<AppRuntimeClient>;
+  /** Test seam for the image-only runtime client. */
+  readonly createImageClient?: () => Promise<RuntimeClient<typeof imageRuntime>>;
   readonly isGpuAvailable?: () => boolean;
-  /** Milliseconds before an idle headless client is terminated. */
-  readonly idleTimeout?: number;
+  readonly debug?: boolean;
 };
 
 type QueuedJob = {
   readonly job: HeadlessImageJob;
   readonly resolve: (files: ExportFile[] | undefined) => void;
   readonly reject: (error: unknown) => void;
+  readonly enqueuedAt: number;
+  readonly queueDepth: number;
 };
 
 export type HeadlessImageFailureCode =
@@ -117,29 +114,35 @@ const svgIssueToError = (error: unknown): HeadlessImageError => {
   return new HeadlessImageError('unknown', error instanceof Error ? error.message : String(error));
 };
 
-const sourceLocator = (job: HeadlessImageJob): string =>
-  job.sourceFormat === 'gltf' ? job.source.path : job.sourcePath;
+const sourceLocator = (job: HeadlessImageJob): string => job.sourcePath;
+
+const cloneFiles = (files: readonly ExportFile[]): ExportFile[] =>
+  files.map((file) => ({ ...file, bytes: new Uint8Array(file.bytes) }));
+
+const captureCacheKey = (job: HeadlessImageJob): string | undefined =>
+  job.kind === 'capture' && job.sourceFormat === 'glb'
+    ? `${job.geometryHash}\0${job.format}\0${canonicalJson(job.exportOptions)}`
+    : undefined;
 
 /**
  * App-owned, lazy image export client shared by thumbnails and agent captures.
  * It serializes GPU work, coalesces queued automatic jobs by project, and
- * releases the worker after one minute of inactivity.
+ * retains its owner-scoped image worker until disposal.
  */
 export class HeadlessImageService {
   // oxlint-disable-next-line typescript/parameter-properties -- UI uses erasableSyntaxOnly, which forbids TypeScript parameter properties.
   private readonly dependencies: HeadlessImageServiceDependencies;
-  private client: AppRuntimeClient | undefined;
-  private fileSystem: RuntimeFileSystem | undefined;
+  private imageClient: RuntimeClient<typeof imageRuntime> | undefined;
   private queue: QueuedJob[] = [];
   private running = false;
-  private activeJob: HeadlessImageJob | undefined;
-  private preemptedAutomaticJob: HeadlessImageJob | undefined;
   private disposed = false;
-  private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly failedAutomaticIdentities = new Set<string>();
+  private activeTelemetry: TelemetryEntry[] | undefined;
+  private unsubscribeTelemetry: (() => void) | undefined;
   private generation = 0;
+  private lastSuccessfulCapture: { readonly key: string; readonly files: ExportFile[] } | undefined;
 
-  public constructor(dependencies: HeadlessImageServiceDependencies) {
+  public constructor(dependencies: HeadlessImageServiceDependencies = {}) {
     this.dependencies = dependencies;
   }
 
@@ -151,13 +154,25 @@ export class HeadlessImageService {
     if (job.kind === 'automatic-thumbnail' && this.failedAutomaticIdentities.has(job.identity)) {
       return undefined;
     }
-    if (job.kind !== 'automatic-thumbnail' && this.activeJob?.kind === 'automatic-thumbnail') {
-      this.preemptedAutomaticJob = this.activeJob;
-      this.terminateClient();
+    const cacheKey = captureCacheKey(job);
+    if (cacheKey && this.lastSuccessfulCapture?.key === cacheKey) {
+      const files = cloneFiles(this.lastSuccessfulCapture.files);
+      recordHeadlessImageTiming('cache.hit', performance.now(), {
+        identity: job.identity,
+        geometryHash: job.sourceFormat === 'glb' ? job.geometryHash : job.identity,
+        outputCount: files.length,
+        outputBytes: files.reduce((total, file) => total + file.bytes.byteLength, 0),
+      });
+      return files;
     }
-
     return new Promise((resolve, reject) => {
-      const queued = { job, resolve, reject };
+      const queued = {
+        job,
+        resolve,
+        reject,
+        enqueuedAt: performance.now(),
+        queueDepth: this.queue.length + (this.running ? 1 : 0),
+      };
       if (job.kind === 'automatic-thumbnail' && job.projectId) {
         const existingIndex = this.queue.findIndex(
           (entry) => entry.job.kind === 'automatic-thumbnail' && entry.job.projectId === job.projectId,
@@ -182,8 +197,8 @@ export class HeadlessImageService {
 
   public dispose(): void {
     this.disposed = true;
-    this.clearIdleTimer();
-    this.terminateClient();
+    this.lastSuccessfulCapture = undefined;
+    this.terminateClients();
     for (const queued of this.queue.splice(0)) {
       queued.reject(new Error('HeadlessImageService was disposed'));
     }
@@ -194,21 +209,34 @@ export class HeadlessImageService {
       return;
     }
     this.running = true;
-    this.clearIdleTimer();
     try {
       /* oxlint-disable no-await-in-loop -- A single GPU queue must execute image exports serially. */
       while (this.queue.length > 0) {
         const queued = this.queue.shift()!;
-        this.activeJob = queued.job;
+        const startedAt = performance.now();
+        this.activeTelemetry = this.dependencies.debug ? [] : undefined;
+        recordHeadlessImageTiming('queue.wait', queued.enqueuedAt, {
+          kind: queued.job.kind,
+          identity: queued.job.identity,
+          queueDepth: queued.queueDepth,
+        });
         try {
           const files = await this.execute(queued.job);
+          const cacheKey = captureCacheKey(queued.job);
+          if (cacheKey) {
+            this.lastSuccessfulCapture = { key: cacheKey, files: cloneFiles(files) };
+          }
           this.failedAutomaticIdentities.delete(queued.job.identity);
+          recordHeadlessImageTiming('job.complete', startedAt, {
+            kind: queued.job.kind,
+            identity: queued.job.identity,
+            geometryHash: queued.job.sourceFormat === 'glb' ? queued.job.geometryHash : queued.job.identity,
+            outputCount: files.length,
+            outputBytes: files.reduce((total, file) => total + file.bytes.byteLength, 0),
+            success: true,
+          });
           queued.resolve(files);
         } catch (error) {
-          if (this.preemptedAutomaticJob === queued.job) {
-            queued.resolve(undefined);
-            continue;
-          }
           console.warn('Headless image job failed', {
             message: error instanceof Error ? error.message : String(error),
             kind: queued.job.kind,
@@ -218,17 +246,20 @@ export class HeadlessImageService {
             code: error instanceof HeadlessImageError ? error.code : 'unknown',
           });
           if (error instanceof HeadlessImageError && error.isGpuFault) {
-            this.terminateClient();
+            this.terminateClients();
           }
           if (queued.job.kind === 'automatic-thumbnail') {
             this.failedAutomaticIdentities.add(queued.job.identity);
           }
+          recordHeadlessImageTiming('job.complete', startedAt, {
+            kind: queued.job.kind,
+            identity: queued.job.identity,
+            success: false,
+            errorCode: error instanceof HeadlessImageError ? error.code : 'unknown',
+          });
           queued.reject(error);
         } finally {
-          if (this.preemptedAutomaticJob === queued.job) {
-            this.preemptedAutomaticJob = undefined;
-          }
-          this.activeJob = undefined;
+          this.activeTelemetry = undefined;
         }
       }
       /* oxlint-enable no-await-in-loop */
@@ -238,10 +269,6 @@ export class HeadlessImageService {
       if (!this.disposed && this.queue.length > 0) {
         void this.drain();
         // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- dispose() can run while execute() awaits.
-      } else if (!this.disposed) {
-        this.idleTimer = setTimeout(() => {
-          this.terminateClient();
-        }, this.dependencies.idleTimeout ?? defaultIdleTimeout);
       }
     }
   }
@@ -250,7 +277,6 @@ export class HeadlessImageService {
     if (job.sourceFormat === 'svg') {
       const { generation } = this;
       try {
-        const { renderSvgPng } = await import('@taucad/image/svg');
         const file = await renderSvgPng(job.content, job.exportOptions);
         if (this.disposed || generation !== this.generation) {
           throw new Error('Headless image result arrived after its service was disposed');
@@ -261,29 +287,22 @@ export class HeadlessImageService {
       }
     }
 
-    const client = await this.getClient(job.fileSystem);
+    const client = await this.getImageClient();
     const { generation } = this;
-    const result =
-      job.format === 'webp'
-        ? await client.export('webp', {
-            source: job.source,
-            parameters: job.parameters,
-            content: { includeEdges: job.includeEdges },
-            exportOptions: job.exportOptions,
-          })
-        : job.format === 'png'
-          ? await client.export('png', {
-              source: job.source,
-              parameters: job.parameters,
-              content: { includeEdges: job.includeEdges },
-              exportOptions: job.exportOptions,
-            })
-          : await client.export('jpeg', {
-              source: job.source,
-              parameters: job.parameters,
-              content: { includeEdges: job.includeEdges },
-              exportOptions: job.exportOptions,
-            });
+    const transcodeStartedAt = performance.now();
+    const result = await client.transcode({
+      from: 'glb',
+      to: job.format,
+      files: [{ name: 'render.glb', bytes: job.content, mimeType: 'model/gltf-binary' }],
+      options: job.exportOptions,
+    } as ImageTranscodeInput);
+    recordHeadlessImageTiming('runtime.transcode', transcodeStartedAt, {
+      kind: job.kind,
+      identity: job.identity,
+      geometryHash: job.geometryHash,
+      inputBytes: job.content.byteLength,
+      telemetry: this.activeTelemetry ?? [],
+    });
     if (this.disposed || generation !== this.generation) {
       throw new Error('Headless image result arrived after its client was disposed');
     }
@@ -293,12 +312,10 @@ export class HeadlessImageService {
     return result.data;
   }
 
-  private async getClient(fileSystem: RuntimeFileSystem): Promise<AppRuntimeClient> {
-    if (this.client && this.fileSystem === fileSystem) {
-      return this.client;
-    }
-    if (this.client) {
-      this.terminateClient();
+  private async getImageClient(): Promise<RuntimeClient<typeof imageRuntime>> {
+    if (this.imageClient) {
+      recordHeadlessImageTiming('worker.ready', performance.now(), { cold: false });
+      return this.imageClient;
     }
     const gpuAvailable =
       this.dependencies.isGpuAvailable?.() ?? (typeof navigator !== 'undefined' && 'gpu' in navigator);
@@ -308,53 +325,49 @@ export class HeadlessImageService {
         'WebGPU is unavailable; update your browser or use the Tau CLI for image exports.',
       );
     }
-
     const { generation } = this;
-    if (this.dependencies.createClient) {
-      const client = await this.dependencies.createClient(fileSystem);
-      if (this.disposed || generation !== this.generation) {
-        client.terminate();
-        throw new Error('Headless image client creation was superseded');
-      }
-      this.client = client;
-      this.fileSystem = fileSystem;
-      return this.client;
-    }
-
-    const [{ createRuntimeClient }, { webWorkerTransport }] = await Promise.all([
-      import('@taucad/runtime/client'),
-      import('@taucad/runtime/transport/web'),
-    ]);
+    const startedAt = performance.now();
+    const client = this.dependencies.createImageClient
+      ? await this.dependencies.createImageClient()
+      : await (async () => {
+          const [{ createRuntimeClient }, { webWorkerTransport }] = await Promise.all([
+            import('@taucad/runtime/client'),
+            import('@taucad/runtime/transport/web'),
+          ]);
+          return createRuntimeClient<typeof imageRuntime>({
+            transport: webWorkerTransport({
+              createWorker: () =>
+                new Worker(new URL('../runtime/image-runtime.worker.ts', import.meta.url), {
+                  name: 'tau-headless-image-transcoder-worker',
+                  type: 'module',
+                }),
+              fileSystem: fromMemoryFs(),
+            }),
+          });
+        })();
     if (this.disposed || generation !== this.generation) {
+      client.terminate();
       throw new Error('Headless image client creation was superseded');
     }
-    const client = createRuntimeClient<typeof runtime>({
-      config: this.dependencies.runtimeConfig,
-      transport: webWorkerTransport({
-        createWorker: () =>
-          new Worker(new URL('../runtime/runtime.worker.ts', import.meta.url), {
-            name: 'tau-headless-image-runtime-worker',
-            type: 'module',
-          }),
-        fileSystem,
-      }),
-    });
-    this.client = client;
-    this.fileSystem = fileSystem;
+    if (this.dependencies.debug) {
+      this.unsubscribeTelemetry = client.on('telemetry', (entries) => this.activeTelemetry?.push(...entries));
+    }
+    await client.connect();
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- dispose() can run while connect() awaits.
+    if (this.disposed || generation !== this.generation) {
+      client.terminate();
+      throw new Error('Headless image client connection was superseded');
+    }
+    this.imageClient = client;
+    recordHeadlessImageTiming('worker.ready', startedAt, { cold: true });
     return client;
   }
 
-  private terminateClient(): void {
+  private terminateClients(): void {
     this.generation += 1;
-    this.client?.terminate();
-    this.client = undefined;
-    this.fileSystem = undefined;
-  }
-
-  private clearIdleTimer(): void {
-    if (this.idleTimer) {
-      clearTimeout(this.idleTimer);
-      this.idleTimer = undefined;
-    }
+    this.unsubscribeTelemetry?.();
+    this.unsubscribeTelemetry = undefined;
+    this.imageClient?.terminate();
+    this.imageClient = undefined;
   }
 }

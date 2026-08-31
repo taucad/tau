@@ -38,6 +38,36 @@ describe('deriveCadPreviewStatus', () => {
     ).toBe('loading');
   });
 
+  it('should report error when the first render settled as failure with no geometry', () => {
+    expect(
+      deriveCadPreviewStatus({
+        initError: undefined,
+        cadState: 'idle',
+        geometryFailed: true,
+      }),
+    ).toBe('error');
+  });
+
+  it('should stay loading during a re-render even after a prior failure', () => {
+    expect(
+      deriveCadPreviewStatus({
+        initError: undefined,
+        cadState: 'rendering',
+        geometryFailed: true,
+      }),
+    ).toBe('loading');
+  });
+
+  it('should stay ready when a later failure still has a stale frame to show', () => {
+    expect(
+      deriveCadPreviewStatus({
+        initError: undefined,
+        cadState: 'idle',
+        geometryFailed: false,
+      }),
+    ).toBe('ready');
+  });
+
   it('should prefer initError over CAD state', () => {
     expect(
       deriveCadPreviewStatus({

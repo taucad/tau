@@ -1,16 +1,16 @@
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ExportFile } from '@taucad/types';
-import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import type { CameraState } from '@taucad/camera';
-import { convertLength } from '@taucad/units/converter';
 import { toNanorasterCamera } from '@taucad/image/camera';
+import { normalizeImageLabel } from '@taucad/image/label';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
+import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import {
   buildGltfComponentManifest,
   listReachableGltfPrimitiveReferences,
@@ -37,7 +37,6 @@ type CaptureCadImagesOptions = {
   readonly graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
   readonly cameraState?: CameraState;
   readonly imageService: Pick<HeadlessImageService, 'export'>;
-  readonly fileSystem: RuntimeFileSystem;
   readonly recipe: HeadlessCaptureRecipe;
 };
 
@@ -48,6 +47,7 @@ type CaptureSettledCadImagesOptions = Omit<CaptureCadImagesOptions, 'cadRef' | '
 };
 
 export type CapturePresentationIntent = {
+  readonly upDirection: 'x' | 'y' | 'z';
   readonly enableSurfaces: boolean;
   readonly enableLines: boolean;
   readonly hiddenComponentIds: readonly string[];
@@ -98,6 +98,7 @@ const snapshotPresentationIntent = (
         }
       : undefined;
   return {
+    upDirection: context.upDirection,
     enableSurfaces: context.enableSurfaces,
     enableLines: context.enableLines,
     hiddenComponentIds: [...(unit?.hiddenComponentIds ?? [])],
@@ -173,36 +174,39 @@ const requireImages = (
     readonly size: readonly [number, number];
   },
 ): ExportFile[] => {
-  if (!files || files.length !== options.count) {
-    throw new Error(`Image capture expected ${options.count} artifact(s), received ${files?.length ?? 0}`);
-  }
-  for (const file of files) {
-    const dimensions = options.mimeType === 'image/png' ? pngDimensions(file.bytes) : webpDimensions(file.bytes);
-    if (
-      file.mimeType !== options.mimeType ||
-      file.bytes.length === 0 ||
-      dimensions?.[0] !== options.size[0] ||
-      dimensions[1] !== options.size[1]
-    ) {
-      throw new Error(
-        `Image capture expected non-empty ${options.mimeType} ${options.size[0]}×${options.size[1]} artifacts`,
-      );
+  const startedAt = performance.now();
+  try {
+    if (!files || files.length !== options.count) {
+      throw new Error(`Image capture expected ${options.count} artifact(s), received ${files?.length ?? 0}`);
     }
+    for (const file of files) {
+      const dimensions = options.mimeType === 'image/png' ? pngDimensions(file.bytes) : webpDimensions(file.bytes);
+      if (
+        file.mimeType !== options.mimeType ||
+        file.bytes.length === 0 ||
+        dimensions?.[0] !== options.size[0] ||
+        dimensions[1] !== options.size[1]
+      ) {
+        throw new Error(
+          `Image capture expected non-empty ${options.mimeType} ${options.size[0]}×${options.size[1]} artifacts`,
+        );
+      }
+    }
+    return files;
+  } finally {
+    recordHeadlessImageTiming('capture.validate', startedAt, { count: files?.length ?? 0 });
   }
-  return files;
 };
 
 /** Capture from an already-settled CAD snapshot through the shared image service. */
 export const captureSettledCadImages = async (options: CaptureSettledCadImagesOptions): Promise<ExportFile[]> => {
-  const { cadSnapshot, cameraState, fileSystem, imageService, presentation, recipe } = options;
+  const { cadSnapshot, cameraState, imageService, presentation, recipe } = options;
   const { geometry, entryPath } = requireSettledGeometry(cadSnapshot);
   if (geometry.format === 'webrtc') {
     throw new Error('Live WebRTC geometry cannot be captured headlessly');
   }
   const [width, height] = recipeSize(recipe, geometry.format === 'svg' ? undefined : cameraState);
   const annotated = recipe.purpose !== 'utility';
-  const imageLabel = annotated ? await import('@taucad/image/label') : undefined;
-  const normalizeImageLabel = imageLabel?.normalizeImageLabel ?? ((value: string): string => value);
 
   if (geometry.format === 'svg') {
     if (recipe.mode === 'orthographic') {
@@ -241,25 +245,27 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
           isolatedComponentIds: presentation.isolatedComponentIds,
         })
       : undefined;
-  const lengthScale = convertLength(1, cadSnapshot.context.units.length, 'm');
+  const upDirection = presentation?.upDirection ?? 'z';
+  const forwardByUp = { x: '-z', y: '+z', z: '-y' } as const;
   const common = {
     width,
     height,
     lineWidth: 3,
     background: captureBackground,
     ...(presentation?.enableSurfaces === false ? { surfaces: false } : {}),
-    ...(presentation?.enableLines === false ? { lines: false } : {}),
+    ...(!includeEdges || presentation?.enableLines === false ? { lines: false } : {}),
+    world: {
+      up: `+${upDirection}`,
+      forward: forwardByUp[upDirection],
+      unit: 'meter',
+    },
     ...(visiblePrimitives ? { visiblePrimitives } : {}),
     ...(presentation?.section
       ? {
           sections: {
             planes: [
               {
-                point: presentation.section.point.map((coordinate) => coordinate * lengthScale) as [
-                  number,
-                  number,
-                  number,
-                ],
+                point: presentation.section.point,
                 normal: presentation.section.normal,
               },
             ] as const,
@@ -277,7 +283,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
       mode: 'batch',
       views: canonicalCaptureViews.map((view) => ({
         id: view.id,
-        label: normalizeImageLabel(view.label),
+        label: annotated ? normalizeImageLabel(view.label) : view.label,
         camera: {
           framing: 'fit',
           direction: view.direction,
@@ -301,7 +307,6 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
         : cameraState
           ? toNanorasterCamera({
               cameraState,
-              lengthScale,
             })
           : undefined;
     if (!camera) {
@@ -320,12 +325,11 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   const files = await imageService.export({
     kind: 'capture',
     identity,
-    sourceFormat: 'gltf',
-    fileSystem,
+    sourceFormat: 'glb',
+    sourcePath: entryPath,
+    geometryHash: geometry.hash,
+    content: geometry.content,
     format,
-    source: { path: entryPath },
-    parameters: cadSnapshot.context.parameters,
-    includeEdges,
     exportOptions,
   });
   return requireImages(files, {
@@ -343,17 +347,22 @@ export const captureCadImages = async (options: CaptureCadImagesOptions): Promis
       ? copyCameraState(options.cameraState ?? getGraphicsCameraState(options.graphicsRef))
       : undefined;
   const presentation = snapshotPresentationIntent(graphicsSnapshot);
+  const freshnessStartedAt = performance.now();
   const cadSnapshot = await awaitFreshRender(options.cadRef);
+  recordHeadlessImageTiming('capture.freshness', freshnessStartedAt);
   return captureSettledCadImages({
     cadSnapshot,
     cameraState,
     presentation,
     imageService: options.imageService,
-    fileSystem: options.fileSystem,
     recipe: options.recipe,
   });
 };
 
 /** Encode validated image files for the existing chat draft pipeline. */
-export const captureFilesToDataUrls = (files: readonly ExportFile[]): string[] =>
-  files.map((file) => `data:${file.mimeType};base64,${uint8ArrayToBase64(file.bytes)}`);
+export const captureFilesToDataUrls = (files: readonly ExportFile[]): string[] => {
+  const startedAt = performance.now();
+  const dataUrls = files.map((file) => `data:${file.mimeType};base64,${uint8ArrayToBase64(file.bytes)}`);
+  recordHeadlessImageTiming('capture.encode-data-url', startedAt, { count: files.length });
+  return dataUrls;
+};

@@ -19,11 +19,7 @@ import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
  * Use this alias instead of inlining the runtime projection so that
  * downstream consumers have a single source of truth.
  */
-export type AppRuntimeClient = RuntimeClient<
-  RuntimeKernels<typeof runtime>,
-  RuntimeMiddleware<typeof runtime>,
-  RuntimeTranscoders<typeof runtime>
->;
+export type AppRuntimeClient = RuntimeClient<typeof runtime>;
 
 export type AppCapabilitiesManifest = CapabilitiesManifest<
   RuntimeKernels<typeof runtime>,

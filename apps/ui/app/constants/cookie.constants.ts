@@ -54,10 +54,6 @@ export const cookieName = {
   /* Chat Tool Sections - collapse state (true = open, false = collapsed) */
   // Whether code preview section is open in file operations.
   chatToolCodePreview: 'chat-tool-code-preview',
-  // Whether images section in visual analysis is open.
-  chatToolAnalysisImages: 'chat-tool-analysis-images',
-  // The quality of the screenshots in the chat.
-  chatScreenshotQuality: 'chat-screenshot-quality',
   // Whether GeoSpec testing tools are enabled.
   chatTestingEnabled: 'chat-testing-enabled',
 

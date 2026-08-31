@@ -18,25 +18,3 @@ export const matcapMaterial = (): THREE.Texture => {
   cachedMatcapTexture = matcapTexture;
   return matcapTexture;
 };
-
-/**
- * Ensure the matcap texture is fully loaded before use.
- *
- * The synchronous `matcapMaterial()` returns a texture object immediately but
- * loads pixel data asynchronously. This async variant guarantees the texture
- * image is available, which is required for offline rendering (screenshots)
- * where the GPU must sample real texels on the first draw call.
- *
- * Uses the same singleton cache — subsequent calls resolve instantly.
- */
-export async function ensureMatcapTextureLoaded(): Promise<THREE.Texture> {
-  if (cachedMatcapTexture?.image) {
-    return cachedMatcapTexture;
-  }
-
-  const textureLoader = new TextureLoader();
-  const texture = await textureLoader.loadAsync('/textures/matcap-soft.png');
-  texture.colorSpace = THREE.SRGBColorSpace;
-  cachedMatcapTexture = texture;
-  return texture;
-}

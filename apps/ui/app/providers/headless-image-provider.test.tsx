@@ -13,7 +13,7 @@ const createJob = (identity: string): Extract<HeadlessImageJob, { sourceFormat: 
   kind: 'capture',
   identity,
   sourceFormat: 'svg',
-  sourcePath: '/drawing.ts',
+  sourcePath: 'drawing.ts',
   content,
   format: 'png',
   exportOptions: { width: 320, height: 240 },

@@ -9,6 +9,7 @@ import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 
 /** Project-relative path for the generated thumbnail. */
 const thumbnailPath = 'thumbnail.webp';
+const thumbnailLineWidth = 3;
 
 const locatorIdentity = (config: ProjectFileSystemConfig | undefined): string =>
   config
@@ -32,7 +33,7 @@ const locatorIdentity = (config: ProjectFileSystemConfig | undefined): string =>
  */
 export function useThumbnailGenerator(): { regenerate: () => void } {
   const { geometryUnits, mainEntryPath, projectId } = useProject();
-  const { writeFile, runtimeFileSystem } = useFileManager();
+  const { writeFile } = useFileManager();
   const imageService = useHeadlessImageService();
 
   const mainCadActor = geometryUnits.get(mainEntryPath);
@@ -49,11 +50,9 @@ export function useThumbnailGenerator(): { regenerate: () => void } {
     input: {
       render: async (request) => {
         const snapshot = cadActorRef.current?.getSnapshot();
-        if (!snapshot?.context.kernelClient) {
-          throw new Error('adapter-unavailable: kernel client not ready');
-        }
-        if (!snapshot.context.entryPath) {
-          throw new Error('source-unavailable: settled CAD entry path not ready');
+        const geometry = snapshot?.context.geometry;
+        if (!snapshot?.context.entryPath || geometry?.format !== 'gltf') {
+          throw new Error('source-unavailable: settled canonical GLB not ready');
         }
         const generation = generationRef.current;
         const identity = request.identity ?? identityRef.current;
@@ -62,20 +61,23 @@ export function useThumbnailGenerator(): { regenerate: () => void } {
           kind: request.kind,
           identity,
           projectId,
-          sourceFormat: 'gltf',
-          fileSystem: runtimeFileSystem,
+          sourceFormat: 'glb',
+          sourcePath: snapshot.context.entryPath,
+          geometryHash: geometry.hash,
+          content: geometry.content,
           format: 'webp',
-          source: { path: snapshot.context.entryPath },
-          parameters: snapshot.context.parameters,
-          includeEdges: true,
           exportOptions: {
             mode: 'single',
             width: 768,
             height: 576,
-            margin: 0.1,
-            projection: 'perspective',
-            phi: 60,
-            theta: -45,
+            lineWidth: thumbnailLineWidth,
+            camera: {
+              framing: 'bounds',
+              direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+              up: [0, 0, 1],
+              margin: 0.1,
+              projection: { kind: 'perspective', verticalFieldOfView: 45 },
+            },
             quality: 0.9,
           },
         });
@@ -119,7 +121,7 @@ export function useThumbnailGenerator(): { regenerate: () => void } {
     }
     const subscription = mainCadActor.on('geometryEvaluated', (event) => {
       generationRef.current += 1;
-      identityRef.current = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:768x576:m0.1:edges`;
+      identityRef.current = `${projectId}:${mainEntryPath}:${event.geometry.hash}:webp:q0.9:768x576:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges`;
       thumbnailActor.send({ type: 'settled', hash: identityRef.current });
     });
     return () => {

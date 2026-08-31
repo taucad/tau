@@ -114,8 +114,8 @@ export function Lights({
   const { theme } = useTheme();
   const isDark = theme === Theme.DARK;
 
-  // Clamp sceneRadius to avoid zero/tiny values before geometry loads
-  const clampedSceneRadius = Math.max(sceneRadius, 1);
+  // Lighting operates in normalized render units; use a neutral radius only before geometry loads.
+  const clampedSceneRadius = sceneRadius > 0 ? sceneRadius : 1;
 
   // Keep clamped radius accessible in useFrame without re-subscribing
   const radiusRef = useRef(clampedSceneRadius);

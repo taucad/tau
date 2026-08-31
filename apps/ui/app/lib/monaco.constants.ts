@@ -2,7 +2,7 @@
  * Monaco Editor Constants
  *
  * Centralized constants for Monaco language IDs, file extensions, and URI prefixes.
- * Follows pattern from @packages/types/src/constants/code.constants.ts
+ * Follows pattern from @libs/types/src/constants/code.constants.ts
  */
 import type { CodeLanguage } from '@taucad/types';
 import { languageFromExtension } from '@taucad/types/constants';

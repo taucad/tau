@@ -8,6 +8,7 @@ const log = createKclLogger('Queue');
 
 export class Queue<T> {
   private readonly promises: Array<Promise<T>> = [];
+  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- Single-consumer FIFO waiters; enqueue shifts exactly one resolver.
   private readonly resolvers: Array<(item: T) => void> = [];
   private closed = false;
 

@@ -11,7 +11,7 @@ type ChatInterfaceGraphicsProps = {
 /**
  * Derives a stable string for the current operational mode.
  * Using a primitive return avoids re-renders on unrelated state machine
- * context changes (e.g. controlsChanged during resize).
+ * context changes (for example viewport updates during resize).
  */
 type OperationalMode = 'ready' | 'section-view' | 'measure' | 'unknown';
 

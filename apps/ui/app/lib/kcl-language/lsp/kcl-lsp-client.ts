@@ -111,7 +111,7 @@ export class KclLspClient {
   private isReady = false;
   private readonly readyPromise: Promise<void>;
   private resolveReady: () => void;
-  // oxlint-disable-next-line typescript-eslint(parameter-properties) -- TS erasableSyntaxOnly forbids constructor parameter properties
+  // oxlint-disable-next-line @typescript-eslint/parameter-properties -- TS erasableSyntaxOnly forbids constructor parameter properties
   private readonly options: KclLspClientOptions;
 
   public constructor(options: KclLspClientOptions) {

@@ -44,8 +44,9 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
+      // Artifact requirement: the benchmark writes its structured report through Vitest Browser Mode.
       api: { allowWrite: true },
-      provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chrome' } }),
+      provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
       instances: [{ browser: 'chromium', name: 'rolldown-benchmark-isolated' }],
     },
   },

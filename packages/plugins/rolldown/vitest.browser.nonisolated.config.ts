@@ -9,7 +9,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chrome' } }),
+      provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
       instances: [{ browser: 'chromium', name: 'rolldown-nonisolated' }],
     },
   },

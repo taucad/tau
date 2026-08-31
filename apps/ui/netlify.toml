@@ -82,7 +82,7 @@ Document-Policy = "js-profiling"
 #     Socket.IO endpoint. Listed explicitly so when CSP flips to enforcing
 #     (report-only first) we don't rely on the catch-all `wss:` and any unintended hop is
 #     immediately reported.
-Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
 
 # Content-hashed Vite bundles + WASM (immutable filenames)
 [[headers]]

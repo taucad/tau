@@ -1,48 +1,6 @@
 import { Octokit } from '@octokit/rest';
+import type { GithubBranchesResponse } from '#routes/api.github-branches/route.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import { ENV } from '#environment.config.js';
-
-/**
- * Branch node from GraphQL response
- */
-type BranchNode = {
-  name: string;
-  target: {
-    oid: string;
-    committedDate?: string;
-  };
-};
-
-/**
- * GraphQL response type for branches query
- */
-type BranchesGraphqlResponse = {
-  repository: {
-    refs: {
-      pageInfo: {
-        hasNextPage: boolean;
-        endCursor: string | undefined;
-      };
-      nodes: BranchNode[];
-    };
-  };
-};
-
-/**
- * GraphQL response type for branches query with default branch info
- * Used on the first page request to include the repository's default branch
- */
-export type BranchesWithDefaultResponse = BranchesGraphqlResponse & {
-  repository: {
-    defaultBranchRef?: {
-      name: string;
-      target: {
-        oid: string;
-        committedDate?: string;
-      };
-    };
-  };
-};
 
 /**
  * Error thrown when GitHub's Git Trees API returns a truncated response.
@@ -83,63 +41,31 @@ export class GitHubTreeTruncatedError extends Error {
 }
 
 /**
- * Check if an error is a 401 Unauthorized error
- */
-function isUnauthorizedError(error: unknown): boolean {
-  if (error instanceof Error) {
-    const message = error.message.toLowerCase();
-    // Check for 401 status code or common 401 error messages
-    return (
-      message.includes('401') ||
-      message.includes('unauthorized') ||
-      message.includes('bad credentials') ||
-      message.includes('requires authentication')
-    );
-  }
-
-  return false;
-}
-
-/**
- * GitHub API client singleton
- * Provides authenticated access to GitHub API with proper typing
+ * GitHub API client singleton.
  *
- * When a 401 error occurs with an authenticated client, the client will
- * automatically retry the request without authentication. This allows
- * fetching public repository information even when the token is invalid.
+ * Unauthenticated by design: this runs in the browser, so it must never hold a
+ * token. Endpoints that require authentication go through a server route
+ * instead (see `listBranches`), which keeps `GITHUB_API_TOKEN` server-side.
+ * Public reads are subject to GitHub's unauthenticated rate limit.
  */
 class GitHubApiClient {
-  public static getInstance(auth?: string): GitHubApiClient {
-    GitHubApiClient.instance ??= new GitHubApiClient(auth);
+  public static getInstance(): GitHubApiClient {
+    GitHubApiClient.instance ??= new GitHubApiClient();
     return GitHubApiClient.instance;
-  }
-
-  /**
-   * Get an unauthenticated client instance for retrying after 401 errors.
-   * This bypasses the singleton to ensure no auth token is used.
-   */
-  public static getUnauthenticatedInstance(): GitHubApiClient {
-    return new GitHubApiClient(undefined);
   }
 
   private static instance: GitHubApiClient | undefined;
 
   private readonly octokit: Octokit;
-  private readonly hasAuth: boolean;
 
-  private constructor(auth?: string) {
+  private constructor() {
     this.octokit = new Octokit({
-      auth,
       userAgent: metaConfig.userAgent,
     });
-    this.hasAuth = auth !== undefined && auth.length > 0;
   }
 
   /**
    * Get repository metadata
-   *
-   * If authenticated and a 401 error occurs, automatically retries without authentication
-   * to fetch public repository information.
    */
   public async getRepository(
     owner: string,
@@ -155,46 +81,32 @@ class GitHubApiClient {
     isPrivate: boolean;
     lastUpdated: string;
   }> {
-    try {
-      const { data } = await this.octokit.repos.get({
-        owner,
-        repo,
-      });
+    const { data } = await this.octokit.repos.get({
+      owner,
+      repo,
+    });
 
-      return {
-        avatarUrl: data.owner.avatar_url,
-        description: data.description ?? undefined,
-        stars: data.stargazers_count,
-        forks: data.forks_count,
-        watchers: data.watchers_count,
-        license: data.license?.spdx_id ?? undefined,
-        defaultBranch: data.default_branch,
-        isPrivate: data.private,
-        lastUpdated: data.updated_at,
-      };
-    } catch (error) {
-      // If we have auth and got a 401, retry without auth for public repos
-      if (this.hasAuth && isUnauthorizedError(error)) {
-        const unauthClient = GitHubApiClient.getUnauthenticatedInstance();
-        return unauthClient.getRepository(owner, repo);
-      }
-
-      throw error;
-    }
+    return {
+      avatarUrl: data.owner.avatar_url,
+      description: data.description ?? undefined,
+      stars: data.stargazers_count,
+      forks: data.forks_count,
+      watchers: data.watchers_count,
+      license: data.license?.spdx_id ?? undefined,
+      defaultBranch: data.default_branch,
+      isPrivate: data.private,
+      lastUpdated: data.updated_at,
+    };
   }
 
   /**
-   * Get list of branches for a repository with commit timestamps
-   * Uses GraphQL API with cursor-based pagination
-   * On the first page (no cursor), the default branch is included and placed first
-   * Branches within each page are sorted by commit date (most recent first)
+   * Get list of branches for a repository with commit timestamps.
    *
-   * Note: Cross-page sorting by commit date is not possible since GitHub's
-   * TAG_COMMIT_DATE ordering only works for tags. Consider fetching all pages
-   * client-side if full sorting is required.
-   *
-   * Note: The GraphQL API requires authentication. If a 401 error occurs,
-   * this method will throw a clean error that can be handled gracefully by the UI.
+   * Delegates to `/api/github-branches` because GitHub's GraphQL API rejects
+   * unauthenticated requests, and the token must stay server-side. The route
+   * owns the query, the per-page sort and the default-branch hoist; it reports
+   * a non-OK status when the token is missing or rejected, which surfaces here
+   * as a throw the import machine already degrades on.
    */
   public async listBranches({
     owner,
@@ -211,117 +123,23 @@ class GitHubApiClient {
     hasMore: boolean;
     endCursor: string | undefined;
   }> {
-    const isFirstPage = cursor === undefined;
-
-    // On first page, also fetch the default branch info
-    const query = isFirstPage
-      ? `
-          query($owner: String!, $repo: String!, $first: Int!, $after: String) {
-            repository(owner: $owner, name: $repo) {
-              defaultBranchRef {
-                name
-                target {
-                  ... on Commit {
-                    oid
-                    committedDate
-                  }
-                }
-              }
-              refs(refPrefix: "refs/heads/", first: $first, after: $after) {
-                pageInfo {
-                  hasNextPage
-                  endCursor
-                }
-                nodes {
-                  name
-                  target {
-                    ... on Commit {
-                      oid
-                      committedDate
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `
-      : `
-          query($owner: String!, $repo: String!, $first: Int!, $after: String) {
-            repository(owner: $owner, name: $repo) {
-              refs(refPrefix: "refs/heads/", first: $first, after: $after) {
-                pageInfo {
-                  hasNextPage
-                  endCursor
-                }
-                nodes {
-                  name
-                  target {
-                    ... on Commit {
-                      oid
-                      committedDate
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `;
-
-    try {
-      const response = await this.octokit.graphql<BranchesWithDefaultResponse>(query, {
-        owner,
-        repo,
-        first: pageSize,
-        after: cursor,
-      });
-
-      // Type guard to check if a branch node has a valid committed date
-      const hasCommittedDate = (
-        node: BranchNode,
-      ): node is BranchNode & {
-        target: { oid: string; committedDate: string };
-      } => {
-        return node.target.committedDate !== undefined;
-      };
-
-      // Map branches, filtering out those without commit dates
-      const branches = response.repository.refs.nodes
-        .filter((node) => hasCommittedDate(node))
-        .map((node) => ({
-          name: node.name,
-          sha: node.target.oid,
-          updatedAt: new Date(node.target.committedDate).getTime(),
-        }));
-
-      // Sort branches within this page by commit date (most recent first)
-      branches.sort((a, b) => b.updatedAt - a.updatedAt);
-
-      // On first page, move default branch to the start if it exists
-      if (isFirstPage && response.repository.defaultBranchRef) {
-        const defaultBranchName = response.repository.defaultBranchRef.name;
-        const defaultBranchIndex = branches.findIndex((b) => b.name === defaultBranchName);
-        if (defaultBranchIndex > 0) {
-          const defaultBranch = branches[defaultBranchIndex];
-          if (defaultBranch) {
-            branches.splice(defaultBranchIndex, 1);
-            branches.unshift(defaultBranch);
-          }
-        }
-      }
-
-      return {
-        branches,
-        hasMore: response.repository.refs.pageInfo.hasNextPage,
-        endCursor: response.repository.refs.pageInfo.endCursor,
-      };
-    } catch (error) {
-      // Convert 401 errors to a cleaner error message
-      if (isUnauthorizedError(error)) {
-        throw new Error('401 Unauthorized: GitHub API token is invalid or expired. Branches list unavailable.');
-      }
-
-      throw error;
+    const parameters = new URLSearchParams({ owner, repo, pageSize: String(pageSize) });
+    if (cursor !== undefined) {
+      parameters.set('cursor', cursor);
     }
+
+    const response = await fetch(`/api/github-branches?${parameters.toString()}`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+
+    const body = (await response.json()) as GithubBranchesResponse;
+
+    return {
+      branches: [...body.branches],
+      hasMore: body.hasMore,
+      endCursor: body.endCursor,
+    };
   }
 
   /**
@@ -329,58 +147,45 @@ class GitHubApiClient {
    * Uses the Git Trees API with recursive option
    * Filters to only include files (blobs), not directories (trees)
    *
-   * If authenticated and a 401 error occurs, automatically retries without authentication
-   * to fetch public repository file listings.
-   *
    * @throws {GitHubTreeTruncatedError} When the tree is too large (>100k entries or >7MB response)
    *         and GitHub returns a truncated result. Callers should handle this error and consider
    *         alternative strategies for large repositories.
    */
   public async listFiles(owner: string, repo: string, ref: string): Promise<Array<{ path: string; size: number }>> {
-    try {
-      // Get the tree for the ref
-      const { data } = await this.octokit.git.getTree({
+    // Get the tree for the ref
+    const { data } = await this.octokit.git.getTree({
+      owner,
+      repo,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub API uses snake_case
+      tree_sha: ref,
+      recursive: 'true',
+    });
+
+    // Check if the tree response was truncated due to size limits
+    // GitHub truncates trees exceeding ~100,000 entries or 7MB response size
+    if (data.truncated) {
+      throw new GitHubTreeTruncatedError({
         owner,
         repo,
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- GitHub API uses snake_case
-        tree_sha: ref,
-        recursive: 'true',
+        ref,
+        partialCount: data.tree.length,
+        message:
+          'The repository tree is too large and was truncated by GitHub. ' +
+          'Consider using one of the following alternative strategies:\n' +
+          '1. Use the Repository Contents API to traverse directories incrementally\n' +
+          '2. Use the GraphQL API with pagination for more control\n' +
+          '3. Clone the repository locally using git\n' +
+          '4. Filter to a specific subdirectory if you only need part of the tree',
       });
-
-      // Check if the tree response was truncated due to size limits
-      // GitHub truncates trees exceeding ~100,000 entries or 7MB response size
-      if (data.truncated) {
-        throw new GitHubTreeTruncatedError({
-          owner,
-          repo,
-          ref,
-          partialCount: data.tree.length,
-          message:
-            'The repository tree is too large and was truncated by GitHub. ' +
-            'Consider using one of the following alternative strategies:\n' +
-            '1. Use the Repository Contents API to traverse directories incrementally\n' +
-            '2. Use the GraphQL API with pagination for more control\n' +
-            '3. Clone the repository locally using git\n' +
-            '4. Filter to a specific subdirectory if you only need part of the tree',
-        });
-      }
-
-      // Filter to only blobs (files) and map to path/size
-      return data.tree
-        .filter((item) => item.type === 'blob')
-        .map((item) => ({
-          path: item.path,
-          size: item.size ?? 0,
-        }));
-    } catch (error) {
-      // If we have auth and got a 401, retry without auth for public repos
-      if (this.hasAuth && isUnauthorizedError(error)) {
-        const unauthClient = GitHubApiClient.getUnauthenticatedInstance();
-        return unauthClient.listFiles(owner, repo, ref);
-      }
-
-      throw error;
     }
+
+    // Filter to only blobs (files) and map to path/size
+    return data.tree
+      .filter((item) => item.type === 'blob')
+      .map((item) => ({
+        path: item.path,
+        size: item.size ?? 0,
+      }));
   }
 
   /**
@@ -395,9 +200,7 @@ class GitHubApiClient {
    * Intended for use by the import worker which fetches off the main thread.
    */
   public getArchiveUrl({ owner, repo, ref }: { owner: string; repo: string; ref: string }): string {
-    const fullRef = ref.startsWith('refs/') ? ref : `refs/heads/${ref}`;
-    const zipUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${fullRef}`;
-    return `/api/import?url=${encodeURIComponent(zipUrl)}`;
+    return `/api/import?${new URLSearchParams({ provider: 'github', owner, repo, ref })}`;
   }
 
   /**
@@ -425,14 +228,7 @@ class GitHubApiClient {
     stream: ReadableStream<Uint8Array<ArrayBuffer>>;
     size: number | undefined;
   }> {
-    // Convert short ref to full ref for GitHub API (required for Content-Length header)
-    // refs/heads/main, refs/tags/v1.0, etc work; short refs like "main" don't return Content-Length
-    const fullRef = ref.startsWith('refs/') ? ref : `refs/heads/${ref}`;
-
-    // Use GitHub API endpoint (not direct codeload.github.com) to get Content-Length header
-    const zipUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${fullRef}`;
-    // Use proxy endpoint to avoid CORS issues
-    const proxyUrl = `/api/import?url=${encodeURIComponent(zipUrl)}`;
+    const proxyUrl = this.getArchiveUrl({ owner, repo, ref });
 
     const response = await fetch(proxyUrl, {
       headers: {
@@ -465,9 +261,11 @@ class GitHubApiClient {
 }
 
 /**
- * Get GitHub API client instance
- * Pass token from environment variable or config
+ * Get the GitHub API client instance.
+ *
+ * Deliberately unauthenticated — see `GitHubApiClient`. Authenticated calls go
+ * through server routes so `GITHUB_API_TOKEN` never reaches the browser.
  */
 export function getGitHubClient(): GitHubApiClient {
-  return GitHubApiClient.getInstance(ENV.GITHUB_API_TOKEN);
+  return GitHubApiClient.getInstance();
 }

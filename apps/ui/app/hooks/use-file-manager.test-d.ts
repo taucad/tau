@@ -91,7 +91,8 @@ describe('useFileManager surface', () => {
     expectTypeOf<Workspace>().toHaveProperty('unmount');
     expectTypeOf<Workspace>().toHaveProperty('disposeStorageRoot');
     expectTypeOf<Workspace>().toHaveProperty('replaceWorkspaceHandle');
-    expectTypeOf<Workspace>().toHaveProperty('forgetWorkspace');
+    expectTypeOf<Workspace>().toHaveProperty('disconnectWorkspace');
+    expectTypeOf<Workspace>().toHaveProperty('restoreWorkspaceHandle');
 
     type MountConfigArgument = Parameters<Workspace['mount']>[1];
     type WebaccessMount = Extract<MountConfigArgument, { backend: 'webaccess' }>;

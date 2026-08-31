@@ -81,7 +81,7 @@ describe('useFileContent', () => {
 
   it('should return binary kind when contentService reports binary', () => {
     const head = new Uint8Array([0x00, 0x01, 0x02]);
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'binary', size: 4096, head });
+    mockContentService.peekOutcome.mockReturnValue({ kind: 'binary', size: 4096, head, revision: 1 });
 
     const { result } = renderHook(() => useFileContent('mystery.dat'));
 

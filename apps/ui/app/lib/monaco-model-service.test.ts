@@ -374,6 +374,7 @@ describe('MonacoModelService', () => {
         kind: 'binary',
         size: 1024,
         head: new Uint8Array([0, 1, 2]),
+        revision: 1,
       });
 
       const model = await service.getOrEnsureModel('src/asset.ts');
@@ -747,7 +748,8 @@ describe('Monaco external-content production wiring', () => {
       applyOutcomeChange: vi.fn(),
     } as unknown as MonacoModelService;
     const binding = createWorkspaceContentBinding(modelService);
-    const uri = { scheme: 'file', path: '/main.ts' } as Monaco.Uri;
+    const uriShape = { scheme: 'file', path: '/main.ts' };
+    const uri = uriShape as Monaco.Uri;
     const removal: ContentChangeEvent = { type: 'deleted', path: 'main.ts', source: 'user' };
     const outcome: OutcomeChangeEvent = { path: 'main.ts', result: { kind: 'orphaned' } };
 

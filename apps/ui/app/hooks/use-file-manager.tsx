@@ -415,9 +415,9 @@ export function HomeFileManagerProvider({
     const controller = new AbortController();
     // async-iife: bootstrap
     void (async () => {
-      const backend = await getHomeStorageBackend();
+      const resolved = await getHomeStorageBackend();
       if (!controller.signal.aborted) {
-        setResolvedBackend(backend);
+        setResolvedBackend(resolved);
       }
     })();
     return () => {

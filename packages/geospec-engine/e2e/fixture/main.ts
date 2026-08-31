@@ -18,11 +18,6 @@ import { createCollector, discoverGeoSpecFiles, installCollector } from 'geospec
 // smoke test of a narrower graph.
 import { createGeoSpecWebRunner } from 'geospec/runner/web';
 import { loadModel } from 'geospec/model';
-// `apps/ui` reaches the chat wire contract through the `@taucad/chat` barrel.
-// Importing it here is what makes this suite fail when a browser-reachable
-// package regresses onto a Node host — or when the chat path starts dragging
-// the GeoSpec engine into the UI bundle again.
-import { testModelOutputSchema } from '@taucad/chat';
 import '@taucad/geospec-engine/register';
 
 /** A closed unit box: 8 corners, 12 triangles, every edge shared exactly twice. */
@@ -95,7 +90,7 @@ const run = async (): Promise<BrowserEngineReport> => {
   const workerSurface = [createGeoSpecWebRunner, loadModel, discoverGeoSpecFiles].every(
     (entry) => typeof entry === 'function',
   );
-  if (!workerSurface || typeof testModelOutputSchema.parse !== 'function') {
+  if (!workerSurface) {
     throw new Error('The UI worker surface is not callable in the browser build.');
   }
 

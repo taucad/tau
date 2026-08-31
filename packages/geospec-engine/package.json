@@ -115,7 +115,6 @@
   },
   "devDependencies": {
     "@libcascade/toolchain": "catalog:",
-    "@taucad/chat": "workspace:*",
     "@taucad/openrscad": "workspace:*",
     "@taucad/tau-examples": "workspace:*"
   },

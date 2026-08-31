@@ -21,7 +21,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright({ actionTimeout: 120_000 }),
+      provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
       commands: { runGeospecPreview },
       screenshotFailures: true,
       trace: 'retain-on-failure',

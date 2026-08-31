@@ -174,13 +174,8 @@ describe('bundledLibraries()', () => {
     ]);
   });
 
-  it('over-approximates geospec-engine, whose one candidate is test-only', () => {
-    // Known and accepted (research Finding 4): the manifest/tag rule states what
-    // *may* bundle; the emitted `dist/libs/*` mirrors state what did. Pinned so a
-    // change to the devDependency is noticed. `@taucad/tau-examples` left the set
-    // when it was retagged `type:example` (correctness-review OQ5) — geospec-engine
-    // reaches it by filesystem path from one test, never by import.
-    expect(bundledLibraries(live, 'geospec-engine')).toEqual(['@taucad/chat']);
+  it('assigns the private chat contracts to their public MCP bundle owner', () => {
+    expect(bundledLibraries(live, 'mcp')).toEqual(['@taucad/chat']);
   });
 
   it('yields nothing for every other publishable, or for an unknown project', () => {
@@ -188,7 +183,7 @@ describe('bundledLibraries()', () => {
       .filter((entry) => bundledLibraries(live, entry.name).length > 0)
       .map((entry) => entry.name);
 
-    expect(bundlers).toEqual(['geospec-engine', 'runtime']);
+    expect(bundlers).toEqual(['mcp', 'runtime']);
     expect(bundledLibraries(live, 'no-such-project')).toEqual([]);
   });
 

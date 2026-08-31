@@ -27,13 +27,7 @@ import type {
   KernelSuccessResult,
   RuntimeContentInput,
 } from '@taucad/runtime/types';
-import type {
-  AnyRuntimeDefinition,
-  RuntimeDefinition,
-  RuntimeKernels,
-  RuntimeMiddleware,
-  RuntimeTranscoders,
-} from '@taucad/runtime/worker';
+import type { AnyRuntimeDefinition, RuntimeDefinition } from '@taucad/runtime/worker';
 import { expect, vi } from 'vitest';
 import type { Mock } from 'vitest';
 
@@ -294,7 +288,9 @@ export const createMockRuntime = <
   logger: ReturnType<typeof createMockLogger>;
   filesystem: MockFileSystem;
   state: ReturnType<typeof createMockState<State>>;
+  tracer: { startSpan: ReturnType<typeof vi.fn> };
 } => ({
+  tracer: { startSpan: vi.fn(() => ({ end: vi.fn() })) },
   logger: createMockLogger(),
   filesystem: createMockFileSystem(options?.filesystemOverrides),
   state: createMockState<State>(),
@@ -376,11 +372,7 @@ const noop = (): void => undefined;
 
 /** Creates an explicit Vitest-backed RuntimeClient literal. @public */
 export function createMockRuntimeClient(): RuntimeClient;
-export function createMockRuntimeClient<Runtime extends AnyRuntimeDefinition>(): RuntimeClient<
-  RuntimeKernels<Runtime>,
-  RuntimeMiddleware<Runtime>,
-  RuntimeTranscoders<Runtime>
->;
+export function createMockRuntimeClient<Runtime extends AnyRuntimeDefinition>(): RuntimeClient<Runtime>;
 /** Implements the wide and runtime-projected mock client overloads. @public */
 export function createMockRuntimeClient(): unknown {
   const client = {
@@ -398,6 +390,8 @@ export function createMockRuntimeClient(): unknown {
     activeKernelId: undefined,
     capabilities: undefined,
     connect: vi.fn(async () => undefined),
+    transcode: vi.fn(async () => ({ success: false, issues: [] })),
+    snapshotSource: vi.fn(async () => ({ success: false, issues: [] })),
     render: vi.fn(async () => ({ superseded: true })),
     updateParameters: vi.fn(async () => ({ superseded: true })),
     setOptions: vi.fn(async () => ({ superseded: true })),

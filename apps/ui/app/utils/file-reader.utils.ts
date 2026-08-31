@@ -12,6 +12,34 @@ export type FileData = {
 
 export type FileMap = Map<string, FileData>;
 
+const isDerivedImportCachePath = (path: string): boolean => path === '.tau/cache' || path.startsWith('.tau/cache/');
+
+/**
+ * Convert imported files into the project-create payload while omitting Tau's
+ * derived cache subtree.
+ */
+export function createImportedProjectFiles(
+  files: FileMap,
+  mainFile: string,
+): Record<string, { content: Uint8Array<ArrayBuffer> }> {
+  if (isDerivedImportCachePath(mainFile)) {
+    throw new Error('The selected main file is inside the derived .tau/cache directory and cannot be imported.');
+  }
+
+  const projectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};
+  for (const [path, file] of files) {
+    if (!isDerivedImportCachePath(path)) {
+      projectFiles[path] = { content: file.content };
+    }
+  }
+
+  if (!Object.hasOwn(projectFiles, mainFile)) {
+    throw new Error(`The selected main file "${mainFile}" is not present in the imported files.`);
+  }
+
+  return projectFiles;
+}
+
 /**
  * Read a FileSystemFileEntry and return a File object.
  */

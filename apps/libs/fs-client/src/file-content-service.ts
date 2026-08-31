@@ -37,7 +37,7 @@ export type ContentChangeEvent =
 export type FileContentResult =
   | { kind: 'loading' }
   | { kind: 'text'; content: Uint8Array<ArrayBuffer> }
-  | { kind: 'binary'; size: number; head: Uint8Array<ArrayBuffer> }
+  | { kind: 'binary'; size: number; head: Uint8Array<ArrayBuffer>; revision: number }
   | { kind: 'too-large'; size: number; limit: number }
   | { kind: 'orphaned' }
   | { kind: 'error'; cause: unknown };
@@ -51,6 +51,11 @@ export type ResolveOptions = {
   /** Bypass binary sniff and treat the bytes as text regardless. */
   readonly forceText?: boolean;
   /** Override the open-time size limit for this resolve only. */
+  readonly sizeLimit?: number;
+};
+
+/** Options for bounded content-agnostic reads. @public */
+export type RawReadOptions = {
   readonly sizeLimit?: number;
 };
 
@@ -318,6 +323,46 @@ export class FileContentService {
       case 'loading': {
         throw new Error(`Unexpected 'loading' outcome for '${path}'`);
       }
+    }
+  }
+
+  /**
+   * Read owned bytes without forcing text classification.
+   * The file is scoped and stat-gated before a worker allocation.
+   * @param path - Workspace-relative path.
+   * @param options - Optional one-read size ceiling.
+   * @returns An owned byte array.
+   */
+  public async readRawBytes(path: string, options?: RawReadOptions): Promise<Uint8Array<ArrayBuffer>> {
+    const key = this.paths.toWorkspaceRelativeKey('readRawBytes', path);
+    const absolutePath = this.paths.toAbsolutePath(key);
+    const limit = options?.sizeLimit ?? this.openSizeBytes;
+
+    try {
+      const stat = await this.proxy.stat(absolutePath);
+      if (stat.size > limit) {
+        throw new FileTooLargeError(
+          `File '${key}' (${stat.size} bytes) exceeds open-time size limit (${limit} bytes)`,
+          { path: key, size: stat.size, limit },
+        );
+      }
+
+      const data = await this.proxy.readFile(absolutePath);
+      if (data.byteLength > limit) {
+        throw new FileTooLargeError(
+          `File '${key}' (${data.byteLength} bytes) exceeds open-time size limit (${limit} bytes)`,
+          { path: key, size: data.byteLength, limit },
+        );
+      }
+      return new Uint8Array(data);
+    } catch (error) {
+      if (error instanceof FileTooLargeError) {
+        throw error;
+      }
+      if (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new FileNotFoundError(`File '${key}' was not found`, { path: key });
+      }
+      throw error;
     }
   }
 
@@ -1150,9 +1195,8 @@ export class FileContentService {
 
     const limit = this.openSizeBytes;
 
-    if (seemsBinary(data)) {
-      const head = data.slice(0, headSniffByteLength);
-      const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head };
+    if (data.byteLength > limit) {
+      const outcome: FileContentResult = { kind: 'too-large', size: data.byteLength, limit };
       if (!this.refreshGuard.isCurrent(path, generation)) {
         return;
       }
@@ -1161,8 +1205,9 @@ export class FileContentService {
       return;
     }
 
-    if (data.byteLength > limit) {
-      const outcome: FileContentResult = { kind: 'too-large', size: data.byteLength, limit };
+    if (seemsBinary(data)) {
+      const head = data.slice(0, headSniffByteLength);
+      const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head, revision: generation };
       if (!this.refreshGuard.isCurrent(path, generation)) {
         return;
       }
@@ -1189,17 +1234,17 @@ export class FileContentService {
     const limit = options?.sizeLimit ?? this.openSizeBytes;
     const forceText = Boolean(options?.forceText);
 
-    if (!forceText && seemsBinary(data)) {
-      const head = data.slice(0, headSniffByteLength);
-      const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head };
+    if (data.byteLength > limit) {
+      const outcome: FileContentResult = { kind: 'too-large', size: data.byteLength, limit };
       if (this.refreshGuard.isCurrent(path, generation)) {
         this.publishOutcome(path, outcome);
       }
       return outcome;
     }
 
-    if (data.byteLength > limit) {
-      const outcome: FileContentResult = { kind: 'too-large', size: data.byteLength, limit };
+    if (!forceText && seemsBinary(data)) {
+      const head = data.slice(0, headSniffByteLength);
+      const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head, revision: generation };
       if (this.refreshGuard.isCurrent(path, generation)) {
         this.publishOutcome(path, outcome);
       }
@@ -1300,7 +1345,7 @@ function outcomesEqual(a: FileContentResult, b: FileContentResult): boolean {
     }
     case 'binary': {
       const other = b as Extract<FileContentResult, { kind: 'binary' }>;
-      return a.size === other.size && bytesEqual(a.head, other.head);
+      return a.revision === other.revision;
     }
     case 'too-large': {
       const other = b as Extract<FileContentResult, { kind: 'too-large' }>;

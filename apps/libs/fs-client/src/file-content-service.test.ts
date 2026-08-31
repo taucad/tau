@@ -594,6 +594,15 @@ describe('FileContentService', () => {
       expect(service.peek('mystery.dat')).toBeUndefined();
     });
 
+    it('should produce too-large before binary when bytes exceed the open limit', async () => {
+      const { service: tinyService, proxy: tinyProxy } = createHarness({ proxy, openSizeBytes: 2 });
+      vi.mocked(tinyProxy.readFile).mockResolvedValue(new Uint8Array([0x00, 0x01, 0x02]));
+
+      const result = await tinyService.resolve('large.png');
+
+      expect(result).toEqual({ kind: 'too-large', size: 3, limit: 2 });
+    });
+
     it('should produce too-large outcome when ASCII content exceeds open limit', async () => {
       const { service: tinyService, proxy: tinyProxy } = createHarness({
         proxy,
@@ -869,19 +878,25 @@ describe('FileContentService', () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('should treat separately allocated equal binary heads as the same outcome', async () => {
+    it('should publish a new revision for separately allocated equal binary heads', async () => {
       vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([0, 1, 2]));
       await service.resolve('asset.bin');
+      const first = service.peekOutcome('asset.bin');
       const handler = vi.fn<(event: OutcomeChangeEvent) => void>();
       service.onDidChangeOutcome(handler);
       vi.mocked(proxy.readFile).mockResolvedValueOnce(new Uint8Array([0, 1, 2]));
 
       emitFileChanged(fileWritten('asset.bin'));
       await vi.waitFor(() => {
-        expect(proxy.readFile).toHaveBeenCalledTimes(2);
+        expect(handler).toHaveBeenCalledOnce();
       });
 
-      expect(handler).not.toHaveBeenCalled();
+      const second = service.peekOutcome('asset.bin');
+      expect(first.kind).toBe('binary');
+      expect(second.kind).toBe('binary');
+      if (first.kind === 'binary' && second.kind === 'binary') {
+        expect(second.revision).toBeGreaterThan(first.revision);
+      }
     });
 
     it('should stop firing onDidChangeOutcome after unsubscribe', async () => {
@@ -960,6 +975,61 @@ describe('FileContentService', () => {
       vi.mocked(proxy.readFile).mockRejectedValue(cause);
 
       await expect(service.resolveBytes('main.ts')).rejects.toBe(cause);
+    });
+  });
+
+  describe('readRawBytes', () => {
+    it('should return owned text bytes without changing text resolution semantics', async () => {
+      const bytes = new TextEncoder().encode('hello');
+      vi.mocked(proxy.stat).mockResolvedValue({
+        type: 'file',
+        size: bytes.byteLength,
+        mtimeMs: 0,
+        contentKind: 'text',
+        lineCount: 1,
+      });
+      vi.mocked(proxy.readFile).mockResolvedValue(bytes);
+
+      const result = await service.readRawBytes('notes.txt');
+
+      expect(new TextDecoder().decode(result)).toBe('hello');
+      expect(result).not.toBe(bytes);
+    });
+
+    it('should stat before reading and return owned binary bytes', async () => {
+      const bytes = new Uint8Array([0, 1, 2]);
+      vi.mocked(proxy.stat).mockResolvedValue({
+        type: 'file',
+        size: bytes.byteLength,
+        mtimeMs: 0,
+        contentKind: 'binary',
+      });
+      vi.mocked(proxy.readFile).mockResolvedValue(bytes);
+
+      const result = await service.readRawBytes('preview.png');
+
+      expect(proxy.stat).toHaveBeenCalledWith('/project/preview.png');
+      expect(proxy.readFile).toHaveBeenCalledWith('/project/preview.png');
+      expect(result).toEqual(bytes);
+      expect(result).not.toBe(bytes);
+    });
+
+    it('should reject an oversized resource before reading it', async () => {
+      vi.mocked(proxy.stat).mockResolvedValue({ type: 'file', size: 10, mtimeMs: 0, contentKind: 'binary' });
+
+      await expect(service.readRawBytes('preview.png', { sizeLimit: 5 })).rejects.toBeInstanceOf(FileTooLargeError);
+      expect(proxy.readFile).not.toHaveBeenCalled();
+    });
+
+    it('should map missing resources to FileNotFoundError', async () => {
+      vi.mocked(proxy.stat).mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+
+      await expect(service.readRawBytes('missing.png')).rejects.toBeInstanceOf(FileNotFoundError);
+    });
+
+    it('should enforce workspace scope before touching the proxy', async () => {
+      await expect(service.readRawBytes('../outside.png')).rejects.toBeInstanceOf(WorkspaceScopeViolationError);
+      expect(proxy.stat).not.toHaveBeenCalled();
     });
   });
 

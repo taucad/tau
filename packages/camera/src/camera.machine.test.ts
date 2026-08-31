@@ -11,6 +11,7 @@ import type { CameraDriverEvent, CameraDriverInput } from '#camera.machine.js';
 import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta, resolveCameraFrame } from '#camera-domain.js';
 
 const initialView = createCameraView({
+  frameId: 'test-root',
   requestedVerticalFieldOfView: 60,
   perspectiveZoom: 1,
   target: [35, -20, 12],

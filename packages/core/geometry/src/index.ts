@@ -11,6 +11,8 @@ export {
 
 // GlTF IO + document transforms
 export { createNodeIo } from '#gltf.utils.js';
+export { readGltfSceneBounds } from '#gltf-scene-bounds.js';
+export type { ReadGltfSceneBoundsOptions } from '#gltf-scene-bounds.js';
 export {
   createCoordinateTransform,
   createReverseCoordinateTransform,

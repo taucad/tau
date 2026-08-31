@@ -21,7 +21,6 @@ describe('@taucad/middleware', () => {
       'parameterFileResolver',
       'parameterCache',
       'geometryCache',
-      'gltfCoordinateTransform',
       'gltfEdgeDetection',
     ]);
     expect(capabilities.bundlers.map(({ id }) => id)).toEqual([]);

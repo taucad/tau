@@ -11,6 +11,7 @@ import {
   perspectiveDistanceForVerticalSpan,
   perspectiveVerticalSpan,
   resolveCameraFrame,
+  resolveCameraState,
 } from '#index.js';
 
 const bounds = {
@@ -32,6 +33,7 @@ const volumetricCorners = [
 
 const createView = () =>
   createCameraView({
+    frameId: 'test-root',
     requestedVerticalFieldOfView: 60,
     perspectiveZoom: 1,
     target: [35, -20, 12],
@@ -79,8 +81,32 @@ const projectedPoint = ({
 };
 
 describe('@taucad/camera', () => {
+  it('resolves a complete serializable state from the framed view', () => {
+    const view = frameCameraBounds({ view: createView(), bounds: volumetricBounds });
+    const frame = resolveCameraFrame({ view });
+
+    expect(resolveCameraState({ view })).toEqual({
+      frameId: view.frameId,
+      position: [
+        view.target[0] + view.direction[0] * frame.distance,
+        view.target[1] + view.direction[1] * frame.distance,
+        view.target[2] + view.direction[2] * frame.distance,
+      ],
+      target: view.target,
+      up: view.up,
+      projection: {
+        kind: 'perspective',
+        verticalFieldOfView: 60,
+        zoom: frame.zoom,
+      },
+      clipping: frame.clipping,
+      aspect: view.viewport.width / view.viewport.height,
+    });
+  });
+
   it('copies and validates complete serializable camera state', () => {
     const state = createCameraState({
+      frameId: 'test-root',
       position: [8, -6, 4],
       target: [1, 2, 3],
       up: [0, 0, 2],
@@ -263,5 +289,46 @@ describe('@taucad/camera', () => {
 
     expect(denser).toBeLessThan(base);
     expect(higherRatio).toBeLessThan(base);
+  });
+
+  it('is scale-covariant from 1e-30 through 1e30 metres', () => {
+    const scales = [1e-30, 1e-24, 1e-18, 1e-12, 1e-9, 1e-6, 1e-3, 1, 1e3, 1e6, 1e12, 1e18, 1e24, 1e30];
+    const baseBounds = { min: [-2, -1, -0.5], max: [2, 1, 0.5] } as const;
+    const baseView = createCameraView({
+      ...createView(),
+      target: [0, 0, 0],
+      verticalSpan: 6,
+      bounds: baseBounds,
+    });
+    const baseFramed = frameCameraBounds({ view: baseView, bounds: baseBounds });
+    const baseFrame = resolveCameraFrame({ view: baseFramed });
+    const baseDelta = maximumProjectedPixelDelta({ view: baseFramed, perspectiveVerticalFieldOfView: 0.05 });
+
+    for (const scale of scales) {
+      const scaledBounds = {
+        min: baseBounds.min.map((value) => value * scale) as [number, number, number],
+        max: baseBounds.max.map((value) => value * scale) as [number, number, number],
+      };
+      const framed = frameCameraBounds({
+        view: createCameraView({
+          ...baseView,
+          target: baseView.target.map((value) => value * scale) as [number, number, number],
+          verticalSpan: baseView.verticalSpan * scale,
+          bounds: scaledBounds,
+        }),
+        bounds: scaledBounds,
+      });
+      const frame = resolveCameraFrame({ view: framed });
+
+      expect(framed.verticalSpan / scale).toBeCloseTo(baseFramed.verticalSpan, 10);
+      expect(frame.distance / scale).toBeCloseTo(baseFrame.distance, 10);
+      expect(frame.clipping.near / scale).toBeCloseTo(baseFrame.clipping.near, 9);
+      expect(frame.clipping.far / scale).toBeCloseTo(baseFrame.clipping.far, 9);
+      expect(frame.clipping.far / frame.clipping.near).toBeCloseTo(baseFrame.clipping.far / baseFrame.clipping.near, 9);
+      expect(maximumProjectedPixelDelta({ view: framed, perspectiveVerticalFieldOfView: 0.05 })).toBeCloseTo(
+        baseDelta,
+        8,
+      );
+    }
   });
 });

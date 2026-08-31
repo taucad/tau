@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import { coordinateSystemSchema, unitSchema } from '@taucad/runtime/kernel';
+import { gltfExportConventionSchema } from '@taucad/runtime/kernel';
 
 /**
  * Manifold kernel initialization options schema.
@@ -22,5 +22,5 @@ export const manifoldOptionsSchema = z.object({
  * @public
  */
 export const manifoldExportSchemas = {
-  glb: coordinateSystemSchema.extend(unitSchema.shape),
+  glb: gltfExportConventionSchema,
 } as const satisfies Record<string, z.ZodType>;

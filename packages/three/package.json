@@ -1,16 +1,16 @@
 {
-  "name": "@taucad/geometry-core",
-  "version": "0.1.0-beta.0",
-  "description": "Shared geometry import, export, and inventory helpers",
+  "name": "@taucad/three",
+  "version": "0.0.1",
+  "description": "Framework-independent Three.js capabilities for Tau",
   "type": "module",
   "sideEffects": false,
   "private": false,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/core/geometry"
+    "directory": "packages/three"
   },
-  "homepage": "https://github.com/taucad/tau/tree/main/packages/core/geometry#readme",
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/three#readme",
   "bugs": {
     "url": "https://github.com/taucad/tau/issues"
   },
@@ -19,12 +19,10 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md",
-    "CHANGELOG.md"
+    "README.md"
   ],
   "keywords": [
     "cad",
-    "core",
     "typescript"
   ],
   "author": "Richard Fontein",
@@ -34,6 +32,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./camera": "./src/camera.ts",
+    "./spatial": "./src/spatial.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -44,6 +44,16 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
+      "./camera": {
+        "types": "./dist/camera.d.mts",
+        "import": "./dist/camera.mjs",
+        "default": "./dist/camera.mjs"
+      },
+      "./spatial": {
+        "types": "./dist/spatial.d.mts",
+        "import": "./dist/spatial.mjs",
+        "default": "./dist/spatial.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -52,19 +62,18 @@
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
-  "dependencies": {
-    "@taucad/spatial": "workspace:*",
-    "@gltf-transform/core": "catalog:",
-    "@gltf-transform/extensions": "catalog:",
-    "@gltf-transform/functions": "catalog:"
-  },
   "peerDependencies": {
-    "@taucad/runtime": "^0.1.0-beta.0"
+    "@taucad/camera": "^0.0.1",
+    "@taucad/spatial": "^0.0.1",
+    "three": "^0.184.0",
+    "xstate": "^5.0.0"
   },
   "devDependencies": {
-    "@taucad/runtime": "workspace:*"
-  },
-  "taucad": {
-    "hostTarget": "browser"
+    "@gltf-transform/core": "catalog:",
+    "@taucad/camera": "workspace:*",
+    "@taucad/geometry-core": "workspace:*",
+    "@taucad/spatial": "workspace:*",
+    "three": "catalog:",
+    "xstate": "catalog:"
   }
 }

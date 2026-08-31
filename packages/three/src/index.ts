@@ -6,3 +6,15 @@ export type {
   ThreeCameraRig,
   ThreeCameraRigOptions,
 } from '#camera.js';
+export {
+  createThreeRenderMatrix,
+  fromThreeRenderBounds,
+  fromThreeRenderPlane,
+  fromThreeRenderPoint,
+  fromThreeRenderRay,
+  toThreeRenderBounds,
+  toThreeRenderPlane,
+  toThreeRenderPoint,
+  toThreeRenderRay,
+} from '#spatial.js';
+export type { FromThreeRenderPointOptions, ToThreeRenderPointOptions } from '#spatial.js';

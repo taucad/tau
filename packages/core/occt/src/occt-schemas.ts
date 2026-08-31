@@ -1,4 +1,4 @@
-import { coordinateSystemSchema, unitSchema } from '@taucad/runtime/kernel';
+import { coordinateSystemSchema, gltfExportConventionSchema } from '@taucad/runtime/kernel';
 import { z } from 'zod';
 
 /** Shared OCCT render tessellation schema with preview defaults. @public */
@@ -27,4 +27,6 @@ export const occtStlExportSchema = z
   .extend(coordinateSystemSchema.shape);
 
 /** Shared OCCT glTF export schema with fine tessellation defaults. @public */
-export const occtGltfExportSchema = occtStlExportSchema.omit({ binary: true }).extend(unitSchema.shape);
+export const occtGltfExportSchema = occtStlExportSchema
+  .omit({ binary: true, coordinateSystem: true })
+  .extend(gltfExportConventionSchema.shape);

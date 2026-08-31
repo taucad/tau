@@ -1,16 +1,16 @@
 {
-  "name": "@taucad/geometry-core",
-  "version": "0.1.0-beta.0",
-  "description": "Shared geometry import, export, and inventory helpers",
+  "name": "@taucad/camera",
+  "version": "0.0.1",
+  "description": "Renderer-neutral camera state and projection logic",
   "type": "module",
   "sideEffects": false,
   "private": false,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/taucad/tau.git",
-    "directory": "packages/core/geometry"
+    "directory": "packages/camera"
   },
-  "homepage": "https://github.com/taucad/tau/tree/main/packages/core/geometry#readme",
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/camera#readme",
   "bugs": {
     "url": "https://github.com/taucad/tau/issues"
   },
@@ -19,12 +19,10 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md",
-    "CHANGELOG.md"
+    "README.md"
   ],
   "keywords": [
     "cad",
-    "core",
     "typescript"
   ],
   "author": "Richard Fontein",
@@ -34,7 +32,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./machine": "./src/camera.machine.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -44,7 +43,12 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./machine": {
+        "types": "./dist/camera.machine.d.mts",
+        "import": "./dist/camera.machine.mjs",
+        "default": "./dist/camera.machine.mjs"
+      }
     },
     "imports": {}
   },
@@ -52,19 +56,12 @@
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
-  "dependencies": {
-    "@taucad/spatial": "workspace:*",
-    "@gltf-transform/core": "catalog:",
-    "@gltf-transform/extensions": "catalog:",
-    "@gltf-transform/functions": "catalog:"
-  },
   "peerDependencies": {
-    "@taucad/runtime": "^0.1.0-beta.0"
+    "@taucad/spatial": "^0.0.1",
+    "xstate": "^5.0.0"
   },
   "devDependencies": {
-    "@taucad/runtime": "workspace:*"
-  },
-  "taucad": {
-    "hostTarget": "browser"
+    "@taucad/spatial": "workspace:*",
+    "xstate": "catalog:"
   }
 }

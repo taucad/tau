@@ -8,12 +8,13 @@ The package root contains data types and math. Importing `@taucad/camera` does n
 
 Use `CameraView` while a viewer frames bounds and moves between perspective and orthographic projections. It stores target, target-to-camera direction, screen-up, visible vertical span, perspective zoom, viewport, and bounds. `resolveCameraFrame` applies the same two-stage bounds fit used by Tau's thumbnails: an AABB-safe distance followed by a projected-corner zoom. The resulting visible span remains the projection-independent handoff invariant at 0° FOV.
 
-Use `CameraState` when another process must reproduce one frame. It stores position, target, screen-up, projection, zoom, clipping, and aspect as serializable values. `createCameraState` validates and copies those values before asynchronous work:
+Use `CameraState` when another process must reproduce one frame. It stores position, target, screen-up, projection, zoom, clipping, and aspect as serializable values. `resolveCameraState({ view })` resolves a framed `CameraView` into that complete state; `createCameraState` validates and copies already resolved values before asynchronous work:
 
 ```ts
 import { createCameraState } from '@taucad/camera';
 
 const captureCamera = createCameraState({
+  frameId: 'tau:root',
   position: [80, -55, 35],
   target: [5, 0, 8],
   up: [0.18, 0.12, 0.98],
@@ -29,7 +30,7 @@ const captureCamera = createCameraState({
 JSON.stringify(captureCamera); // safe to send to a worker or remote renderer
 ```
 
-The vectors use the host's world coordinate system and length unit. `up` preserves camera roll. Perspective field of view is vertical and measured in degrees. Zoom is a positive magnification. Orthographic state replaces `verticalFieldOfView` with an unzoomed `verticalSpan` in world units.
+The vectors use the named physical frame and metres. `up` preserves camera roll. Perspective field of view is vertical and measured in degrees. Zoom is a positive magnification. Orthographic state replaces `verticalFieldOfView` with an unzoomed `verticalSpan` in metres. Renderers map this state into their local render frame; changing that representation does not change camera state.
 
 ## Drive a viewer
 
@@ -39,6 +40,7 @@ import { cameraMachine } from '@taucad/camera/machine';
 import { createActor } from 'xstate';
 
 const initialView = createCameraView({
+  frameId: 'tau:root',
   requestedVerticalFieldOfView: 60,
   target: [0, 0, 0],
   direction: [1, -1, 0.7],

@@ -1,6 +1,5 @@
 import { definePlugin } from '@taucad/runtime/plugin';
 import { geometryCache } from '#geometry-cache.middleware.js';
-import { gltfCoordinateTransform } from '#gltf-coordinate-transform.middleware.js';
 import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
 import { parameterCache } from '#parameter-cache.middleware.js';
 import { parameterFileResolver } from '#parameter-file-resolver.middleware.js';
@@ -15,7 +14,6 @@ export const middleware = definePlugin({
     parameterFileResolver,
     parameterCache,
     geometryCache,
-    gltfCoordinateTransform,
     gltfEdgeDetection,
   },
 
@@ -24,7 +22,6 @@ export const middleware = definePlugin({
       'middleware.parameterFileResolver',
       'middleware.parameterCache',
       'middleware.geometryCache',
-      'middleware.gltfCoordinateTransform',
       'middleware.gltfEdgeDetection',
     ],
     cache: ['middleware.parameterCache', 'middleware.geometryCache'],

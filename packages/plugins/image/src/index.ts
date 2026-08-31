@@ -7,3 +7,5 @@ export { svgTranscoder } from '#svg.transcoder.js';
 
 export { imageEdgeSchemas } from '#image-export-options.js';
 export { normalizeImageLabel } from '#image-label.js';
+export { toNanorasterCamera } from '#nanoraster-camera.js';
+export type { NanorasterCameraOptions } from '#nanoraster-camera.js';

@@ -10,18 +10,51 @@ import { imageTranscoder } from '#image.transcoder.js';
 import { imageEdgeSchemas } from '#image-export-options.js';
 
 const backendMock = vi.hoisted(() => ({ load: vi.fn() }));
+const sceneBoundsMock = vi.hoisted(() => ({
+  read: vi.fn(
+    async (_options: {
+      readonly bytes: Uint8Array<ArrayBuffer>;
+      readonly targetWorld: { readonly up: string; readonly forward: string; readonly metersPerUnit: number };
+    }) => ({ min: [-2, -1, -0.5] as const, max: [2, 1, 0.5] as const }),
+  ),
+}));
+type SpanAttributes = Record<string, string | number | boolean>;
+const endSpan = vi.fn<(values?: SpanAttributes) => void>();
 
 vi.mock('nanoraster', async (importOriginal) => ({
   ...(await importOriginal<typeof RenderModule>()),
+  describeAdapter: vi.fn(),
   renderImage: vi.fn(),
   renderImages: vi.fn(),
 }));
 vi.mock('#image-backend.js', () => ({ loadImageBackend: backendMock.load }));
+vi.mock('@taucad/geometry-core', () => ({ readGltfSceneBounds: sceneBoundsMock.read }));
 
 const createRuntime = (): TranscoderRuntime =>
   mock<TranscoderRuntime>({
     logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    tracer: { startSpan: vi.fn(() => ({ end: endSpan })) },
   });
+
+const timings: RenderModule.RenderTimings = {
+  parse: 1,
+  setup: 2,
+  capBuild: 3,
+  upload: 4,
+  peakReadbackBytes: 128,
+  glbParses: 1,
+  adapterDeviceRequests: 0,
+  pipelineSets: 0,
+  presentationBuilds: 1,
+  sceneUploads: 1,
+  targetAllocations: 0,
+  views: [{ id: 'single', render: 5, overlay: 6, encode: 7 }],
+};
+
+const timedImages = (
+  images: Array<{ readonly id: string; readonly file: RenderModule.RenderedImageFile }>,
+  value: RenderModule.RenderTimings = timings,
+) => Object.assign(images, { timings: value });
 
 const glbFile = (bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46])): ExportFile => ({
   name: 'model.glb',
@@ -32,7 +65,7 @@ const glbFile = (bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46])): ExportFile =
 describe('image transcoder', () => {
   const resolveImageDefinition = async () => resolveRuntimePluginDefinition('transcoder', imageTranscoder());
   let imageDefinition: Awaited<ReturnType<typeof resolveImageDefinition>>;
-  let context: { renderer: typeof RenderModule };
+  let context: { renderer: typeof RenderModule; adapter: RenderModule.AdapterInfo | undefined };
   let runtime: TranscoderRuntime;
   let renderImage: MockedFunction<typeof RenderModule.renderImage>;
   let renderImages: MockedFunction<typeof RenderModule.renderImages>;
@@ -41,11 +74,16 @@ describe('image transcoder', () => {
     vi.clearAllMocks();
     const renderModule = await import('nanoraster');
     backendMock.load.mockResolvedValue(renderModule);
+    vi.mocked(renderModule.describeAdapter).mockResolvedValue({
+      backend: 'webgpu',
+      name: 'Test Adapter',
+      deviceType: 'integrated-gpu',
+    });
     renderImage = vi.mocked(renderModule.renderImage);
     renderImages = vi.mocked(renderModule.renderImages);
     runtime = createRuntime();
     imageDefinition = await resolveImageDefinition();
-    context = (await imageDefinition.initialize({}, runtime)) as { renderer: typeof RenderModule };
+    context = (await imageDefinition.initialize({}, runtime)) as typeof context;
   });
 
   afterEach(() => {
@@ -54,28 +92,27 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('7.0.0');
+      expect(imageDefinition.version).toBe('9.0.0');
     });
 
-    it('should load the renderer once during initialize', () => {
+    it('should load the renderer and describe its adapter once during initialize', () => {
       expect(context.renderer).toBeDefined();
+      expect(context.adapter).toEqual({ backend: 'webgpu', name: 'Test Adapter', deviceType: 'integrated-gpu' });
       expect(backendMock.load).toHaveBeenCalledOnce();
+      expect(context.renderer.describeAdapter).toHaveBeenCalledOnce();
       expect(renderImage).not.toHaveBeenCalled();
     });
   });
 
   describe('edges', () => {
-    it('should declare png, webp, and jpeg as Z-up metre glb→<format> mesh edges', () => {
+    it('should declare png, webp, and jpeg over canonical glTF input', () => {
       const targets = imageDefinition.edges.map((edge) => edge.to);
       expect(targets).toEqual(['png', 'webp', 'jpeg']);
       for (const edge of imageDefinition.edges) {
         expect(edge.from).toBe('glb');
         expect(edge.fidelity).toBe('mesh');
         expect(edge.optionsSchema).toBeDefined();
-        expect(edge.sourceOptions).toEqual({
-          coordinateSystem: 'z-up',
-          unit: { length: 'meter' },
-        });
+        expect(edge.sourceOptions).toBeUndefined();
       }
     });
   });
@@ -84,8 +121,6 @@ describe('image transcoder', () => {
     it('should default an empty request to the strict single branch', () => {
       expect(imageEdgeSchemas.webp.parse({})).toMatchObject({
         mode: 'single',
-        phi: 60,
-        theta: -45,
         axes: false,
         scaleBar: false,
       });
@@ -95,14 +130,14 @@ describe('image transcoder', () => {
       expect(
         imageEdgeSchemas.webp.parse({
           mode: 'batch',
-          views: [{ id: 'front', phi: 90, theta: 0 }],
+          views: [{ id: 'front' }],
         }),
-      ).toMatchObject({ mode: 'batch', views: [{ id: 'front', phi: 90, theta: 0 }] });
+      ).toMatchObject({ mode: 'batch', views: [{ id: 'front' }] });
       expect(
         imageEdgeSchemas.webp.safeParse({
           mode: 'batch',
           phi: 90,
-          views: [{ id: 'front', phi: 90, theta: 0 }],
+          views: [{ id: 'front' }],
         }).success,
       ).toBe(false);
       expect(imageEdgeSchemas.webp.safeParse({ mode: 'single', views: [] }).success).toBe(false);
@@ -113,15 +148,10 @@ describe('image transcoder', () => {
       expect(
         imageEdgeSchemas.webp.safeParse({
           mode: 'batch',
-          views: [
-            { id: 'front', phi: 90, theta: 0 },
-            { id: 'front', phi: 90, theta: 180 },
-          ],
+          views: [{ id: 'front' }, { id: 'front' }],
         }).success,
       ).toBe(false);
-      expect(
-        imageEdgeSchemas.webp.safeParse({ mode: 'batch', views: [{ id: '../front', phi: 90, theta: 0 }] }).success,
-      ).toBe(false);
+      expect(imageEdgeSchemas.webp.safeParse({ mode: 'batch', views: [{ id: '../front' }] }).success).toBe(false);
     });
   });
 
@@ -141,20 +171,135 @@ describe('image transcoder', () => {
   });
 
   describe('transcode', () => {
-    it('should reuse the initialized renderer across transcodes', async () => {
-      renderImage.mockResolvedValue({
+    it('should resolve bounds framing once and give nanoraster a fixed camera', async () => {
+      const file = {
+        name: 'render.webp',
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/webp',
+        width: 768,
+        height: 576,
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
+
+      await imageDefinition.transcode(
+        {
+          from: 'glb',
+          to: 'webp',
+          files: [glbFile()],
+          options: {
+            width: 768,
+            height: 576,
+            camera: {
+              framing: 'bounds',
+              direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+              up: [0, 0, 1],
+              margin: 0.1,
+              projection: { kind: 'perspective', verticalFieldOfView: 45 },
+            },
+          },
+        },
+        runtime,
+        context,
+      );
+
+      expect(sceneBoundsMock.read).toHaveBeenCalledOnce();
+      expect(sceneBoundsMock.read.mock.calls[0]?.[0]).toEqual({
+        bytes: glbFile().bytes,
+        targetWorld: { up: '+z', forward: '-y', metersPerUnit: 1 },
+      });
+      const renderOptions = renderImages.mock.calls[0]?.[1];
+      const camera = renderOptions?.views[0]?.camera;
+      expect(camera?.framing).toBe('fixed');
+      if (camera?.framing !== 'fixed') {
+        throw new Error('Expected bounds framing to lower to a fixed camera.');
+      }
+      expect(camera.target).toEqual([0, 0, 0]);
+      expect(camera.position).toHaveLength(3);
+      expect(camera.up).toHaveLength(3);
+      expect(camera.projection).toMatchObject({ kind: 'perspective', verticalFieldOfView: 45 });
+      expect(camera.clipping?.near).toBeGreaterThan(0);
+      expect(camera.clipping?.far).toBeGreaterThan(camera.clipping?.near ?? Number.POSITIVE_INFINITY);
+      /* oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Assertion preserves the public telemetry key. */
+      expect(typeof endSpan.mock.calls.at(-1)?.[0]?.['boundsFitMs']).toBe('number');
+      /* oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Assertion preserves the public telemetry key. */
+      expect(typeof endSpan.mock.calls.at(-1)?.[0]?.['boundsParseMs']).toBe('number');
+      /* oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Assertion preserves the public telemetry key. */
+      expect(typeof endSpan.mock.calls.at(-1)?.[0]?.['cameraSolveMs']).toBe('number');
+    });
+
+    it('should reuse one scene-bounds read across a mixed batch', async () => {
+      const file = {
+        name: 'front.webp',
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/webp',
+        width: 768,
+        height: 576,
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'front', file }]));
+      const boundsCamera = {
+        framing: 'bounds',
+        direction: [0, -1, 0],
+        up: [0, 0, 1],
+        projection: { kind: 'perspective', verticalFieldOfView: 45 },
+      } as const;
+
+      await imageDefinition.transcode(
+        {
+          from: 'glb',
+          to: 'webp',
+          files: [glbFile()],
+          options: {
+            mode: 'batch',
+            views: [
+              { id: 'front', camera: boundsCamera },
+              { id: 'top', camera: { ...boundsCamera, direction: [0, 0, 1], up: [0, 1, 0] } },
+              { id: 'native', camera: { framing: 'fit', direction: [1, -1, 1], up: [0, 0, 1] } },
+            ],
+          },
+        },
+        runtime,
+        context,
+      );
+
+      expect(sceneBoundsMock.read).toHaveBeenCalledOnce();
+      const views = renderImages.mock.calls[0]?.[1].views;
+      expect(views?.map((view) => [view.id, view.camera?.framing])).toEqual([
+        ['front', 'fixed'],
+        ['top', 'fixed'],
+        ['native', 'fit'],
+      ]);
+    });
+
+    it('should not read scene bounds for native fit and fixed cameras', async () => {
+      const file = {
         name: 'render.webp',
         bytes: new Uint8Array([1]),
         mimeType: 'image/webp',
         width: 768,
         height: 432,
-      });
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
+
+      await imageDefinition.transcode({ from: 'glb', to: 'webp', files: [glbFile()], options: {} }, runtime, context);
+
+      expect(sceneBoundsMock.read).not.toHaveBeenCalled();
+    });
+
+    it('should reuse the initialized renderer across transcodes', async () => {
+      const file = {
+        name: 'render.webp',
+        bytes: new Uint8Array([1]),
+        mimeType: 'image/webp',
+        width: 768,
+        height: 432,
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
 
       await imageDefinition.transcode({ from: 'glb', to: 'webp', files: [glbFile()], options: {} }, runtime, context);
       await imageDefinition.transcode({ from: 'glb', to: 'webp', files: [glbFile()], options: {} }, runtime, context);
 
       expect(backendMock.load).toHaveBeenCalledOnce();
-      expect(renderImage).toHaveBeenCalledTimes(2);
+      expect(renderImages).toHaveBeenCalledTimes(2);
     });
 
     it('should render the GLB and return exactly one ExportFile on success', async () => {
@@ -165,7 +310,7 @@ describe('image transcoder', () => {
         width: 768,
         height: 432,
       };
-      renderImage.mockResolvedValue(thumbnail);
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file: thumbnail }]));
 
       const result = await imageDefinition.transcode(
         { from: 'glb', to: 'webp', files: [glbFile()], options: {} },
@@ -175,20 +320,79 @@ describe('image transcoder', () => {
 
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data).toEqual([{ name: thumbnail.name, bytes: thumbnail.bytes, mimeType: thumbnail.mimeType }]);
+        expect(result.data).toEqual([{ name: 'render.webp', bytes: thumbnail.bytes, mimeType: thumbnail.mimeType }]);
         expect(result.data[0]).not.toHaveProperty('width');
         expect(result.data[0]).not.toHaveProperty('height');
       }
+      expect(runtime.tracer.startSpan).toHaveBeenCalledWith('image.render', {
+        mode: 'single',
+        format: 'webp',
+        width: 768,
+        height: 432,
+        adapterBackend: 'webgpu',
+        adapterName: 'Test Adapter',
+        adapterDeviceType: 'integrated-gpu',
+      });
+      /* oxlint-disable tau-lint/no-time-unit-suffix -- Assertions preserve the public telemetry key names. */
+      expect(endSpan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          outputCount: 1,
+          outputBytes: 3,
+          parseMs: 1,
+          renderMs: 5,
+          encodeMs: 7,
+          glbParses: 1,
+          sceneUploads: 1,
+        }),
+      );
+      /* oxlint-enable tau-lint/no-time-unit-suffix */
     });
 
+    it.each([
+      { format: 'png', mimeType: 'image/png' },
+      { format: 'webp', mimeType: 'image/webp' },
+      { format: 'jpeg', mimeType: 'image/jpeg' },
+    ] as const)(
+      'should preserve singular $format bytes through the timed one-view plan',
+      async ({ format, mimeType }) => {
+        const bytes = new Uint8Array([9, 8, 7, 6]);
+        renderImages.mockResolvedValue(
+          timedImages([
+            {
+              id: 'single',
+              file: { name: `render-single.${format}`, bytes, mimeType, width: 32, height: 24 },
+            },
+          ]),
+        );
+
+        const result = await imageDefinition.transcode(
+          { from: 'glb', to: format, files: [glbFile()], options: { width: 32, height: 24 } },
+          runtime,
+          context,
+        );
+
+        expect(result).toEqual({
+          success: true,
+          data: [{ name: `render.${format}`, bytes, mimeType }],
+          issues: [],
+        });
+        expect(renderImages).toHaveBeenCalledWith(
+          expect.any(Uint8Array),
+          expect.objectContaining({ timings: true, views: [expect.objectContaining({ id: 'single' })] }),
+        );
+      },
+    );
+
     it('should forward the target format and schema-defaulted options to the renderer', async () => {
-      renderImage.mockResolvedValue({
+      const file = {
         name: 'render.png',
         bytes: new Uint8Array([1]),
         mimeType: 'image/png',
         width: 768,
         height: 432,
-      });
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
       const bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 
       await imageDefinition.transcode(
@@ -197,50 +401,62 @@ describe('image transcoder', () => {
         context,
       );
 
-      expect(renderImage).toHaveBeenCalledWith(
+      expect(renderImages).toHaveBeenCalledWith(
         bytes,
         expect.objectContaining({
           format: 'png',
           width: 768,
           height: 432,
-          phi: 60,
-          theta: -45,
-          margin: 0.1,
+          lineWidth: 3,
           axes: false,
           scaleBar: false,
-          up: 'z',
+          timings: true,
+          views: [
+            {
+              id: 'single',
+              camera: {
+                framing: 'fit',
+                direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+                up: [0, 0, 1],
+                margin: 0.1,
+                projection: { kind: 'perspective', verticalFieldOfView: 45 },
+              },
+            },
+          ],
         }),
       );
-      expect(renderImage.mock.calls[0]?.[1]).not.toHaveProperty('mode');
-      expect(renderImage.mock.calls[0]?.[1]).not.toHaveProperty('includeAxes');
-      expect(renderImage.mock.calls[0]?.[1]).not.toHaveProperty('includeScale');
+      expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('mode');
+      expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('includeAxes');
+      expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('includeScale');
     });
 
     it('should default JPEG to an opaque white background so the encoder never sees alpha', async () => {
-      renderImage.mockResolvedValue({
+      const file = {
         name: 'render.jpeg',
         bytes: new Uint8Array([1]),
         mimeType: 'image/jpeg',
         width: 768,
         height: 432,
-      });
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
 
       await imageDefinition.transcode({ from: 'glb', to: 'jpeg', files: [glbFile()], options: {} }, runtime, context);
 
-      expect(renderImage).toHaveBeenCalledWith(
+      expect(renderImages).toHaveBeenCalledWith(
         expect.any(Uint8Array),
-        expect.objectContaining({ format: 'jpeg', background: '#FFFFFF', quality: 0.92, up: 'z' }),
+        expect.objectContaining({ format: 'jpeg', background: '#FFFFFF', quality: 0.92 }),
       );
     });
 
-    it('should pass through caller overrides for camera and size', async () => {
-      renderImage.mockResolvedValue({
+    it('should pass through camera, presentation, and size', async () => {
+      const file = {
         name: 'render.png',
         bytes: new Uint8Array([1]),
         mimeType: 'image/png',
         width: 1920,
         height: 1080,
-      });
+      } as const;
+      renderImages.mockResolvedValue(timedImages([{ id: 'single', file }]));
 
       await imageDefinition.transcode(
         {
@@ -250,24 +466,65 @@ describe('image transcoder', () => {
           options: {
             width: 1920,
             height: 1080,
-            phi: 30,
+            camera: {
+              framing: 'fixed',
+              position: [8, -6, 4],
+              target: [1, 2, 3],
+              up: [0, 0, 1],
+              projection: { kind: 'perspective', verticalFieldOfView: 52, zoom: 1.4 },
+              clipping: { near: 0.2, far: 900 },
+            },
             label: 'Housing datum A',
+            surfaces: false,
+            lines: true,
+            visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
+            sections: {
+              planes: [
+                { point: [0, 0, 0], normal: [0, 0, 1] },
+                { point: [1, 0, 0], normal: [-1, 0, 0] },
+              ],
+              clipSurfaces: true,
+              clipLines: false,
+            },
           },
         },
         runtime,
         context,
       );
 
-      expect(renderImage).toHaveBeenCalledWith(
+      expect(renderImages).toHaveBeenCalledWith(
         expect.any(Uint8Array),
         expect.objectContaining({
           width: 1920,
           height: 1080,
-          phi: 30,
-          label: 'Housing datum A',
+          surfaces: false,
+          lines: true,
+          visiblePrimitives: [{ nodeIndex: 2, meshIndex: 1, primitiveIndex: 0 }],
+          sections: {
+            planes: [
+              { point: [0, 0, 0], normal: [0, 0, 1] },
+              { point: [1, 0, 0], normal: [-1, 0, 0] },
+            ],
+            clipSurfaces: true,
+            clipLines: false,
+          },
+          views: [
+            {
+              id: 'single',
+              camera: {
+                framing: 'fixed',
+                position: [8, -6, 4],
+                target: [1, 2, 3],
+                up: [0, 0, 1],
+                projection: { kind: 'perspective', verticalFieldOfView: 52, zoom: 1.4 },
+                clipping: { near: 0.2, far: 900 },
+              },
+              label: 'Housing datum A',
+            },
+          ],
         }),
       );
-      expect(renderImage.mock.calls[0]?.[1]).not.toHaveProperty('includeLabel');
+      expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('includeLabel');
     });
 
     it('should render an ordered batch with one plural renderer call', async () => {
@@ -285,13 +542,34 @@ describe('image transcoder', () => {
         width: 384,
         height: 216,
       };
-      renderImages.mockResolvedValue([
-        { id: 'front', file: front },
-        { id: 'top', file: top },
-      ]);
+      renderImages.mockResolvedValue(
+        timedImages(
+          [
+            { id: 'front', file: front },
+            { id: 'top', file: top },
+          ],
+          {
+            ...timings,
+            views: [
+              { id: 'front', render: 1, overlay: 2, encode: 3 },
+              { id: 'top', render: 4, overlay: 5, encode: 6 },
+            ],
+          },
+        ),
+      );
       const views = [
-        { id: 'front', label: 'Front — View From +Z', phi: 90, theta: 0 },
-        { id: 'top', phi: 0, theta: 0, width: 384, height: 216, quality: 0.9 },
+        {
+          id: 'front',
+          label: 'Front — View From +Z',
+          camera: { framing: 'fit', direction: [0, -1, 0], up: [0, 0, 1], projection: { kind: 'orthographic' } },
+        },
+        {
+          id: 'top',
+          camera: { framing: 'fit', direction: [0, 0, 1], up: [0, 1, 0], projection: { kind: 'orthographic' } },
+          width: 384,
+          height: 216,
+          quality: 0.9,
+        },
       ] as const;
 
       const result = await imageDefinition.transcode(
@@ -302,9 +580,14 @@ describe('image transcoder', () => {
           options: {
             mode: 'batch',
             views,
-            projection: 'orthographic',
             axes: true,
             scaleBar: true,
+            surfaces: false,
+            sections: {
+              planes: [{ point: [0, 0, 0], normal: [0, 0, 1] }],
+              clipSurfaces: true,
+              clipLines: true,
+            },
           },
         },
         runtime,
@@ -320,25 +603,37 @@ describe('image transcoder', () => {
         issues: [],
       });
       expect(renderImages).toHaveBeenCalledOnce();
-      expect(renderImages).toHaveBeenCalledWith(
-        expect.any(Uint8Array),
-        expect.objectContaining({
-          format: 'webp',
-          quality: 1,
-          views,
-          projection: 'orthographic',
-          axes: true,
-          scaleBar: true,
-          up: 'z',
-        }),
-      );
+      expect(renderImages.mock.calls[0]?.[0]).toEqual(expect.any(Uint8Array));
+      expect(renderImages.mock.calls[0]?.[1]).toMatchObject({
+        format: 'webp',
+        quality: 1,
+        views: [
+          {
+            id: 'front',
+            camera: { projection: { kind: 'orthographic' } },
+          },
+          {
+            id: 'top',
+            camera: { projection: { kind: 'orthographic' } },
+          },
+        ],
+        axes: true,
+        scaleBar: true,
+        surfaces: false,
+        sections: {
+          planes: [{ point: [0, 0, 0], normal: [0, 0, 1] }],
+          clipSurfaces: true,
+          clipLines: true,
+        },
+        timings: true,
+      });
       expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('mode');
       expect(renderImages.mock.calls[0]?.[1]).not.toHaveProperty('includeLabel');
       expect(renderImage).not.toHaveBeenCalled();
     });
 
     it('should return an error result when the renderer throws', async () => {
-      renderImage.mockRejectedValue(new Error('adapter-unavailable: no gpu adapter'));
+      renderImages.mockRejectedValue(new Error('adapter-unavailable: no gpu adapter'));
 
       const result = await imageDefinition.transcode(
         { from: 'glb', to: 'webp', files: [glbFile()], options: {} },
@@ -352,6 +647,7 @@ describe('image transcoder', () => {
         expect(result.issues[0]!.severity).toBe('error');
         expect(result.issues[0]!.details).toEqual({ type: 'render', code: 'adapter-unavailable' });
       }
+      expect(endSpan).toHaveBeenCalledWith({ success: false, errorCode: 'adapter-unavailable' });
     });
 
     it.each([{ files: [] }, { files: [glbFile(), glbFile()] }])(
@@ -367,7 +663,6 @@ describe('image transcoder', () => {
         if (!result.success) {
           expect(result.issues[0]!.message).toContain('expected exactly one GLB source artifact');
         }
-        expect(renderImage).not.toHaveBeenCalled();
         expect(renderImages).not.toHaveBeenCalled();
       },
     );
@@ -381,7 +676,7 @@ describe('image transcoder', () => {
 
       expect(result.success).toBe(false);
       expect(result.issues[0]?.message).toContain('Too big');
-      expect(renderImage).not.toHaveBeenCalled();
+      expect(renderImages).not.toHaveBeenCalled();
     });
   });
 

@@ -107,6 +107,7 @@ const defaultCameraDriver = fromCallback<CameraDriverEvent, CameraDriverInput>((
  * import { cameraMachine } from '@taucad/camera/machine';
  *
  * const initialView = createCameraView({
+ *   frameId: 'tau:root',
  *   requestedVerticalFieldOfView: 60,
  *   perspectiveZoom: 1,
  *   target: [0, 0, 0],

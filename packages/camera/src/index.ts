@@ -11,6 +11,7 @@ export {
   perspectiveDistanceForVerticalSpan,
   perspectiveVerticalSpan,
   resolveCameraFrame,
+  resolveCameraState,
 } from '#camera-domain.js';
 export type {
   CameraBounds,

@@ -348,7 +348,7 @@ describe('jscadToGltf', () => {
     const parsed = jscadExportSchemas.glb.parse({});
 
     expect(parsed).toEqual({
-      coordinateSystem: 'z-up',
+      coordinateSystem: 'y-up',
       unit: { length: 'meter' },
     });
   });

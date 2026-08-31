@@ -1,9 +1,10 @@
+import type { SpatialVector } from '@taucad/spatial';
+
 const maximumPerspectiveVerticalFieldOfView = 179;
-const minimumPositiveValue = 1e-12;
 const minimumOrthographicPlaneIncidence = 1e-3;
 
 /** A renderer-neutral three-dimensional vector. @public */
-export type CameraVector = readonly [number, number, number];
+export type CameraVector = SpatialVector;
 
 /** Axis-aligned world bounds used for framing and clip planes. @public */
 export type CameraBounds = Readonly<{
@@ -33,6 +34,7 @@ export type CameraStateProjection =
 
 /** Complete serializable camera state for renderer and RPC boundaries. @public */
 export type CameraState = Readonly<{
+  frameId: string;
   position: CameraVector;
   target: CameraVector;
   up: CameraVector;
@@ -46,6 +48,7 @@ export type CameraStateOptions = CameraState;
 
 /** Canonical renderer-neutral camera view. @public */
 export type CameraView = Readonly<{
+  frameId: string;
   requestedVerticalFieldOfView: number;
   perspectiveZoom: number;
   target: CameraVector;
@@ -141,7 +144,7 @@ const magnitude = (value: CameraVector): number => Math.hypot(value[0], value[1]
 
 const normalize = (value: CameraVector, label: string): MutableVector => {
   const length = magnitude(value);
-  if (length <= minimumPositiveValue) {
+  if (length === 0 || !Number.isFinite(length)) {
     throw new RangeError(`${label} must have non-zero length.`);
   }
   return [value[0] / length, value[1] / length, value[2] / length];
@@ -196,10 +199,14 @@ const boundsDiagonal = (bounds: CameraBounds): number => magnitude(subtract(boun
  * @public
  */
 export const createCameraView = (options: CameraViewOptions): CameraView => {
+  if (options.frameId.length === 0) {
+    throw new RangeError('frameId must not be empty.');
+  }
   const direction = normalize(vector(options.direction, 'direction'), 'direction');
   const up = normalize(vector(options.up, 'up'), 'up');
   cameraBasis({ direction, up });
   return {
+    frameId: options.frameId,
     requestedVerticalFieldOfView: assertVerticalFieldOfView(options.requestedVerticalFieldOfView),
     perspectiveZoom: assertPositive(options.perspectiveZoom, 'perspectiveZoom'),
     target: vector(options.target, 'target'),
@@ -223,6 +230,9 @@ export const createCameraView = (options: CameraViewOptions): CameraView => {
  * @public
  */
 export const createCameraState = (options: CameraStateOptions): CameraState => {
+  if (options.frameId.length === 0) {
+    throw new RangeError('frameId must not be empty.');
+  }
   const position = vector(options.position, 'position');
   const target = vector(options.target, 'target');
   const up = normalize(vector(options.up, 'up'), 'up');
@@ -249,6 +259,7 @@ export const createCameraState = (options: CameraStateOptions): CameraState => {
     throw new RangeError('clipping.far must be greater than clipping.near.');
   }
   return {
+    frameId: options.frameId,
     position,
     target,
     up,
@@ -361,10 +372,11 @@ export const orthographicCameraDistance = ({
   const foregroundExtent = Math.max(
     ...boundsCorners(validBounds).map((corner) => dot(subtract(corner, validTarget), validDirection)),
   );
-  const boundsDistance = foregroundExtent + Math.max(diagonal, verticalSpan, minimumPositiveValue);
+  const boundsDistance = foregroundExtent + Math.max(diagonal, verticalSpan);
   const planeIncidence = Math.max(Math.abs(dot(validDirection, validUp)), minimumOrthographicPlaneIncidence);
   const planeDistance =
-    ((verticalSpan / 2) * Math.abs(dot(screenUp, validUp))) / planeIncidence + Math.max(diagonal * 0.05, 1e-3);
+    ((verticalSpan / 2) * Math.abs(dot(screenUp, validUp))) / planeIncidence +
+    Math.max(diagonal * 0.05, verticalSpan * 1e-6);
   return Math.max(boundsDistance, planeDistance);
 };
 
@@ -388,9 +400,12 @@ export const clipPlanesForCameraBounds = ({
   const depths = boundsCorners(validBounds).map(
     (corner) => distance - dot(subtract(corner, validTarget), validDirection),
   );
-  const margin = Math.max(boundsDiagonal(validBounds) * 0.05, distance * 1e-6, 1e-4);
-  const near = Math.max(Math.min(...depths) - margin, 1e-4);
-  return { near, far: Math.max(Math.max(...depths) + margin, near + 1e-3) };
+  const diagonal = boundsDiagonal(validBounds);
+  const margin = Math.max(diagonal * 0.05, distance * 1e-6);
+  const minimumNear = Math.max(distance * 1e-9, Number.MIN_VALUE);
+  const near = Math.max(Math.min(...depths) - margin, minimumNear);
+  const minimumDepthRange = Math.max(diagonal, distance) * 1e-9;
+  return { near, far: Math.max(Math.max(...depths) + margin, near + minimumDepthRange) };
 };
 
 /**
@@ -430,6 +445,45 @@ export const resolveCameraFrame = ({
 };
 
 /**
+ * Resolves a canonical view to complete renderer-neutral camera state.
+ *
+ * @param options - Canonical view and optional effective field-of-view override.
+ * @returns A serializable native endpoint camera state.
+ * @public
+ */
+export const resolveCameraState = ({
+  view,
+  verticalFieldOfView = view.requestedVerticalFieldOfView,
+}: {
+  view: CameraView;
+  verticalFieldOfView?: number;
+}): CameraState => {
+  const validView = createCameraView(view);
+  const frame = resolveCameraFrame({ view: validView, verticalFieldOfView });
+  const position: CameraVector = [
+    validView.target[0] + validView.direction[0] * frame.distance,
+    validView.target[1] + validView.direction[1] * frame.distance,
+    validView.target[2] + validView.direction[2] * frame.distance,
+  ];
+  return createCameraState({
+    frameId: validView.frameId,
+    position,
+    target: validView.target,
+    up: validView.up,
+    projection:
+      frame.projection.kind === 'perspective'
+        ? {
+            kind: 'perspective',
+            verticalFieldOfView: frame.projection.verticalFieldOfView,
+            zoom: frame.zoom,
+          }
+        : { kind: 'orthographic', verticalSpan: validView.verticalSpan, zoom: frame.zoom },
+    clipping: frame.clipping,
+    aspect: validView.viewport.width / validView.viewport.height,
+  });
+};
+
+/**
  * Reframes canonical camera state around new bounds.
  *
  * @param options - Current view, new bounds, and fractional margin.
@@ -460,11 +514,11 @@ export const frameCameraBounds = ({
   if (validView.requestedVerticalFieldOfView === 0) {
     let halfWidth = Math.max(
       ...corners.map((corner) => Math.abs(dot(subtract(corner, target), right))),
-      minimumPositiveValue,
+      validView.verticalSpan * 1e-9,
     );
     let halfHeight = Math.max(
       ...corners.map((corner) => Math.abs(dot(subtract(corner, target), up))),
-      minimumPositiveValue,
+      validView.verticalSpan * 1e-9,
     );
     halfWidth /= padding;
     halfHeight /= padding;
@@ -477,7 +531,7 @@ export const frameCameraBounds = ({
   }
 
   const fieldOfViewRadians = (validView.requestedVerticalFieldOfView * Math.PI) / 180;
-  const radius = Math.max(boundsDiagonal(validBounds) / 2, minimumPositiveValue);
+  const radius = Math.max(boundsDiagonal(validBounds) / 2, validView.verticalSpan * 1e-9);
   const modelDistance = radius * 2 * (Math.tan(Math.PI / 6) / Math.tan(fieldOfViewRadians / 2));
   const verticalTangent = Math.tan(fieldOfViewRadians / 2) * padding;
   const horizontalTangent = verticalTangent * aspect;

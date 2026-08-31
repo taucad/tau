@@ -7,7 +7,7 @@
  */
 
 import { z } from 'zod';
-import { coordinateSystemSchema, unitSchema } from '@taucad/runtime/kernel';
+import { coordinateSystemSchema, gltfExportConventionSchema } from '@taucad/runtime/kernel';
 
 const stlUnitSchema = z.object({
   unit: z
@@ -43,6 +43,6 @@ export const zooExportSchemas = {
     .extend(coordinateSystemSchema.shape)
     .extend(stlUnitSchema.shape),
   step: coordinateSystemSchema,
-  glb: coordinateSystemSchema.extend(unitSchema.shape),
-  gltf: coordinateSystemSchema.extend(unitSchema.shape),
+  glb: gltfExportConventionSchema,
+  gltf: gltfExportConventionSchema,
 } as const satisfies Record<string, z.ZodType>;

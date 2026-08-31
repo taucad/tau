@@ -101,12 +101,23 @@ describe('plugin generator', () => {
       .sort();
     const referenceRoot = resolve(import.meta.dirname, '../../../../../packages/plugins/image');
     const packageSpecific = new Set([
+      '.gitignore',
+      'copy-files-from-to.cjson',
+      'src/asset-ownership.test.ts',
+      'src/fonts/Geist-Regular.ttf',
       'src/image-backend.ts',
       'src/image-export-options.test.ts',
       'src/image-export-options.ts',
       'src/image-import-failure.test.ts',
+      'src/image-label.test.ts',
+      'src/image-label.ts',
       'src/image.transcoder.test-d.ts',
       'src/image.transcoder.test.ts',
+      'src/label.ts',
+      'src/svg.transcoder.test.ts',
+      'src/svg.transcoder.ts',
+      'src/svg.ts',
+      'src/svg.vite-build.test.ts',
     ]);
     const reference = readdirSync(referenceRoot, { encoding: 'utf8', recursive: true })
       .filter((path) => !path.startsWith('dist/') && !path.startsWith('node_modules/') && !path.startsWith('out-tsc/'))

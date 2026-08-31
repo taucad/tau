@@ -7,12 +7,12 @@
  */
 
 import type { z } from 'zod';
-import { coordinateSystemSchema, unitSchema } from '@taucad/runtime/kernel';
+import { gltfExportConventionSchema } from '@taucad/runtime/kernel';
 
 /**
  * JSCAD per-format export schemas.
  * @public
  */
 export const jscadExportSchemas = {
-  glb: coordinateSystemSchema.extend(unitSchema.shape),
+  glb: gltfExportConventionSchema,
 } as const satisfies Record<string, z.ZodType>;

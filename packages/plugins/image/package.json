@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./camera": "./src/nanoraster-camera.ts",
     "./label": "./src/label.ts",
     "./svg": "./src/svg.ts",
     "./package.json": "./package.json"
@@ -45,6 +46,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./camera": {
+        "types": "./dist/nanoraster-camera.d.mts",
+        "import": "./dist/nanoraster-camera.mjs",
+        "default": "./dist/nanoraster-camera.mjs"
       },
       "./label": {
         "types": "./dist/label.d.mts",
@@ -65,16 +71,20 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
+    "@taucad/camera": "^0.0.1",
     "@taucad/runtime": "^0.1.0-beta.0",
     "zod": "^4.0.0"
   },
   "dependencies": {
     "@resvg/resvg-wasm": "2.6.2",
-    "nanoraster": "^0.4.1"
+    "@taucad/geometry-core": "workspace:*",
+    "nanoraster": "file:../../../repos/nanoraster/tests/out/candidate-section-cap-halfedge-ci/nanoraster-0.4.1.tgz"
   },
   "devDependencies": {
+    "@taucad/camera": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "geist": "catalog:",
+    "nanoraster-darwin-arm64": "file:../../../repos/nanoraster/tests/out/candidate-5895253/nanoraster-darwin-arm64-0.4.1.tgz",
     "vite": "catalog:",
     "vitest-mock-extended": "catalog:",
     "zod": "catalog:"

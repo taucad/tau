@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- format names */
 import type { FileExtension } from '#types/mime-types.types.js';
 
 type FormatConfiguration = {
@@ -85,6 +84,22 @@ export const formatConfigurations = {
     name: 'GL Transmission Format (GLTF)',
     description:
       'Developed by the Khronos Group for use in transmitting 3D models and scenes efficiently, particularly in web applications and real-time rendering.',
+  },
+  avif: {
+    name: 'AV1 Image File Format (AVIF)',
+    description: 'Modern image format based on AV1 compression with support for transparency and high dynamic range.',
+  },
+  bmp: {
+    name: 'Bitmap Image (BMP)',
+    description: 'Raster image format commonly used for uncompressed or losslessly compressed bitmap data.',
+  },
+  gif: {
+    name: 'Graphics Interchange Format (GIF)',
+    description: 'Palette-based raster image format with transparency and animation support.',
+  },
+  ico: {
+    name: 'Icon Image (ICO)',
+    description: 'Container format for one or more icon images at different sizes and color depths.',
   },
   png: {
     name: 'Portable Network Graphics (PNG)',
@@ -180,6 +195,11 @@ export const formatConfigurations = {
     name: 'Stereolithography (STL)',
     description:
       'Developed by 3D Systems for use in stereolithography, serving as the de facto standard format for 3D printing and rapid prototyping.',
+  },
+  svg: {
+    name: 'Scalable Vector Graphics (SVG)',
+    description:
+      'W3C vector graphics format for two-dimensional drawings, diagrams, and illustrations with resolution-independent geometry.',
   },
   stp: {
     name: 'STEP (STP)',

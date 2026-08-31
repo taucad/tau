@@ -62,12 +62,9 @@ function conjugateQuaternionBy(r: Quat, q: Quat): Quat {
  */
 const gltfWorld = { up: '+y', forward: '+z', metersPerUnit: 1 } as const;
 const tauWorld = { up: '+z', forward: '-y', metersPerUnit: 1 } as const;
-const gltfCoordinateTransformMatrix: mat4 = [
-  ...resolveCoordinateTransform({ source: gltfWorld, target: tauWorld }).matrix,
-];
-
-/** Quaternion for +90° rotation around X (Y-up → Z-up) */
-const coordinateQuat: Quat = [Math.SQRT2 / 2, 0, 0, Math.SQRT2 / 2];
+const coordinateTransform = resolveCoordinateTransform({ source: gltfWorld, target: tauWorld });
+const gltfCoordinateTransformMatrix: mat4 = [...coordinateTransform.matrix];
+const coordinateQuat: Quat = [...coordinateTransform.rotation];
 
 /**
  * Gltf-transform matrix for meters to millimeters scaling
@@ -78,12 +75,8 @@ const gltfScalingMatrix: mat4 = [1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1000, 0, 0,
  * Gltf-transform matrix for Z-up to Y-up coordinate transformation (reverse of Y-up to Z-up)
  * Matrix layout: column-major format (gltf-transform standard)
  */
-const gltfReverseCoordinateTransformMatrix: mat4 = [
-  ...resolveCoordinateTransform({ source: tauWorld, target: gltfWorld }).matrix,
-];
-
-/** Quaternion for −90° rotation around X (Z-up → Y-up) */
-const reverseCoordinateQuat: Quat = invertUnitQuaternion(coordinateQuat);
+const gltfReverseCoordinateTransformMatrix: mat4 = [...coordinateTransform.inverse];
+const reverseCoordinateQuat: Quat = [...coordinateTransform.inverseRotation];
 
 // ---------------------------------------------------------------------------
 // Document-level rotation / scaling helpers

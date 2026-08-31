@@ -4,7 +4,6 @@ import type {
   GeometryComponentManifest,
   GeometryComponentNode,
   GeometryComponentReference,
-  ScreenshotOptions,
 } from '@taucad/types';
 
 const duplicateDurableIdField = `persistent${'Id'}` as const;
@@ -82,25 +81,5 @@ describe('geometry component shared contracts', () => {
     expectTypeOf(manifest.capabilities.exports[0]!.fidelity).toEqualTypeOf<'mesh'>();
     expectTypeOf<GeometryComponentNode>().not.toHaveProperty(duplicateDurableIdField);
     expectTypeOf<GeometryComponentNode>().not.toHaveProperty(duplicateDurableKeyField);
-  });
-
-  it('should type screenshot options for scene-wide capture settings', () => {
-    const options = {
-      aspectRatio: 1,
-      maxResolution: 800,
-      zoomLevel: 1.2,
-      cameraAngles: [{ label: 'front', phi: 90, theta: 270 }],
-      output: {
-        format: 'image/webp',
-        quality: 0.9,
-        isPreview: true,
-      },
-    } satisfies ScreenshotOptions;
-
-    expectTypeOf(options.cameraAngles[0]!.label).toEqualTypeOf<string>();
-    expectTypeOf(options.output.format).toEqualTypeOf<'image/webp'>();
-    expectTypeOf<ScreenshotOptions>().not.toHaveProperty('target');
-    expectTypeOf<ScreenshotOptions>().not.toHaveProperty('camera');
-    expectTypeOf<ScreenshotOptions>().not.toHaveProperty('display');
   });
 });

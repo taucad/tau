@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- file format names don't follow camelCase */
-
 /**
  * Canonical MIME types for 3D file formats.
  * Single source of truth consumed by runtime plugins and apps.
@@ -18,6 +16,11 @@ export const mimeTypes = {
   webp: 'image/webp',
   jpeg: 'image/jpeg',
   jpg: 'image/jpeg',
+  gif: 'image/gif',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  svg: 'image/svg+xml',
 
   // CAD interchange
   step: 'application/step',

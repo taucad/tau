@@ -7,7 +7,7 @@
  * @public
  */
 
-import { coordinateSystemSchema, unitSchema } from '@taucad/runtime/kernel';
+import { gltfExportConventionSchema } from '@taucad/runtime/kernel';
 import { z } from 'zod';
 
 /**
@@ -56,6 +56,6 @@ export const opencascadeNativeRenderSchema = tessellationFragment(0.02);
  * @public
  */
 export const opencascadeNativeExportSchemas = {
-  glb: tessellationFragment(0.01).extend(coordinateSystemSchema.shape).extend(unitSchema.shape),
+  glb: tessellationFragment(0.01).extend(gltfExportConventionSchema.shape),
   step: z.object({}),
 } as const satisfies Record<string, z.ZodType>;

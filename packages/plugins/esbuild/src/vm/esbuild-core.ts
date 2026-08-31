@@ -60,8 +60,12 @@ export const initializeEsbuild = async (): Promise<void> => {
   initializationPromise ??= (async () => {
     try {
       if (isNode()) {
-        const packageName = 'esbuild';
-        activeEsbuild = (await import(/* @vite-ignore */ packageName)) as typeof wasmEsbuild;
+        activeEsbuild = (await import(
+          /* webpackIgnore: true */
+          /* @vite-ignore */
+          /* turbopackIgnore: true */
+          'esbuild'
+        )) as typeof wasmEsbuild;
       }
       await activeEsbuild.initialize(isNode() ? {} : { wasmURL: esbuildWasmUrl });
       esbuildInitialized = true;

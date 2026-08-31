@@ -90,7 +90,7 @@ export function createCodeActionProvider(
               startColumn: diagnostic.range.start.character + 1,
               endLineNumber: diagnostic.range.end.line + 1,
               endColumn: diagnostic.range.end.character + 1,
-              message: diagnostic.message,
+              message: typeof diagnostic.message === 'string' ? diagnostic.message : diagnostic.message.value,
             })),
             isPreferred: codeAction.isPreferred,
             edit: codeAction.edit ? convertWorkspaceEdit(monaco, codeAction.edit) : undefined,

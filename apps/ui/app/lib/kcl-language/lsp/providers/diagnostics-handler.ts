@@ -30,7 +30,7 @@ export function handleDiagnostics(
     startColumn: diagnostic.range.start.character + 1,
     endLineNumber: diagnostic.range.end.line + 1,
     endColumn: diagnostic.range.end.character + 1,
-    message: diagnostic.message,
+    message: typeof diagnostic.message === 'string' ? diagnostic.message : diagnostic.message.value,
     source: diagnostic.source,
     code: typeof diagnostic.code === 'string' ? diagnostic.code : String(diagnostic.code ?? ''),
   }));

@@ -3,5 +3,5 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/lsp",
   "projectType": "library",
-  "tags": ["scope:shared", "type:app-lib"]
+  "tags": ["scope:ui", "type:app-lib", "layer:data-access"]
 }

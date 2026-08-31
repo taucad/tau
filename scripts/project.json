@@ -75,6 +75,12 @@
         "command": "node --import tsx scripts/src/update-license-deps.mts --check"
       }
     },
+    "validate-workflows": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/src/validate-workflows.ts"
+      }
+    },
     "validate": {
       "executor": "nx:run-commands",
       "options": {

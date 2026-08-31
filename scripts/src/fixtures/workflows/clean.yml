@@ -1,0 +1,36 @@
+# Every shape the rule allows: targets, tag: selectors, globs, `nx affected`,
+# `nx release`, `nx show projects`, and `nx run` against a `type:tool` project.
+name: Clean
+on:
+  push:
+    branches: [main]
+
+jobs:
+  workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Run every workspace validator
+        run: pnpm nx run scripts:validate
+
+  affected:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Plan
+        run: pnpm nx show projects --affected --with-target size --json
+      - name: Lint, test, build what changed
+        run: |
+          pnpm nx affected -t lint test build typecheck \
+            --exclude=tag:type:e2e
+          echo "affected done"
+      - name: Audit everything that has the target
+        run: pnpm nx run-many -t audit-public-surface --projects=*
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build the release train
+        run: pnpm nx run-many -t build --projects=tag:type:package,tag:type:lib
+      - name: Publish
+        run: pnpm nx release publish -p tag:type:package --tag=beta

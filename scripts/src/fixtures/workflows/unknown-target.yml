@@ -1,0 +1,10 @@
+# A target no project defines: `nx affected` would run nothing and exit 0.
+name: Unknown target
+on: [push]
+
+jobs:
+  affected:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run a target that does not exist
+        run: pnpm nx affected -t does-not-exist

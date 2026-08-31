@@ -51,8 +51,7 @@
     "json-rpc-2.0": "^1.7.1",
     "monaco-editor": "^0.55.1",
     "vscode-languageserver-protocol": "^3.18.0",
-    "vscode-uri": "catalog:",
-    "zod": "catalog:"
+    "vscode-uri": "catalog:"
   },
   "imports": {
     "#*.js": "./src/*.ts",

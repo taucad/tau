@@ -21,7 +21,9 @@ describe('withTauRuntime', () => {
     const config = withTauRuntime({}, { document: '/workspace/:path*' });
 
     await expect(config.headers()).resolves.toEqual(nextRuntimeHeaders({ document: '/workspace/:path*' }));
-    expect(config.turbopack).not.toHaveProperty('rules');
+    expect(config.turbopack.rules?.['**/packages/**/*.{js,jsx,ts,tsx,mjs,cjs}']).toEqual({
+      loaders: [expect.stringMatching(/\/nextjs\/package-assets-loader\.mjs$/)],
+    });
     expect(config.turbopack.resolveAlias).toEqual({
       fs: '@taucad/runtime/nextjs/browser-node-builtins',
       'node:crypto': '@taucad/runtime/nextjs/browser-node-builtins',

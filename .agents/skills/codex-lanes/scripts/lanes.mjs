@@ -13,7 +13,9 @@
 //
 // Dispatch flags: --review [--scope auto|working-tree|branch] [--base REF] (brief = focus text),
 //   --read-only (task without --write), --model M (default gpt-5.6-sol),
-//   --effort E (default: inherit ~/.codex/config.toml), --ledger FILE (append "name id cwd").
+//   --effort E (default: inherit ~/.codex/config.toml), --ledger FILE (append "name id cwd"),
+//   --section NAME|ID (Codex sidebar section for the lane's chat; defaults to
+//   $CODEX_LANES_SECTION or DEFAULT_SECTION), --no-section to leave it with the project.
 //
 // Supervision model (parity with Claude subagents — no wall-clock deadline):
 //   worker alive + log/state advancing        -> keep waiting, however long it takes
@@ -23,17 +25,22 @@
 //
 // Exit codes: 0 completed · 1 dead · 2 usage · 3 alive (stalled or time-boxed)
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { globSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import readline from 'node:readline';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 const SELF = path.resolve(process.argv[1]);
 const JOB_ID_RE = /(task|review)-[a-z0-9]+-[a-z0-9]+/;
+// Codex sidebar section for lane threads, so they don't bury the project's own
+// chats. Override per call with --section <name|id>, or --no-section to opt out.
+const DEFAULT_SECTION = process.env.CODEX_LANES_SECTION ?? 'Claude';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function resolveCompanion() {
   const pattern = path.join(os.homedir(), '.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs');
@@ -90,6 +97,74 @@ function progressStamp(job) {
 
 const fmtMin = (ms) => `${(ms / 60000).toFixed(1)}m`;
 
+// Minimal JSON-RPC client over `codex app-server` stdio. The companion CLI has no
+// section surface, and thread/section/move is only reachable on the app-server.
+async function withAppServer(cwd, fn) {
+  const proc = spawn('codex', ['app-server'], { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: strippedEnv() });
+  const rl = readline.createInterface({ input: proc.stdout });
+  const pending = new Map();
+  let nextId = 1;
+  proc.stderr.resume(); // drain, or the pipe fills and the child blocks
+  rl.on('line', (line) => {
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      return; // app-server also emits non-JSON banter
+    }
+    const p = msg.id != null && pending.get(msg.id);
+    if (!p) return;
+    pending.delete(msg.id);
+    msg.error ? p.reject(new Error(JSON.stringify(msg.error))) : p.resolve(msg.result);
+  });
+  const req = (method, params) =>
+    new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject });
+      proc.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      setTimeout(() => {
+        if (pending.delete(id)) reject(new Error(`app-server timeout: ${method}`));
+      }, 20_000);
+    });
+  try {
+    await req('initialize', {
+      clientInfo: { title: 'Codex Lanes', name: 'Claude Code', version: '1.0.0' },
+      capabilities: { experimentalApi: true },
+    });
+    proc.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} })}\n`);
+    return await fn(req);
+  } finally {
+    proc.kill();
+  }
+}
+
+// File a lane's thread under a Codex sidebar section. Never fatal: a lane that ran
+// is worth more than its sidebar placement.
+async function moveThreadToSection(threadId, section, cwd) {
+  try {
+    await withAppServer(cwd, async (req) => {
+      let sectionId = UUID_RE.test(section) ? section : null;
+      if (!sectionId) {
+        // No section/list method exists; sections are only visible on threads that
+        // already carry one, so the target section must have at least one member.
+        const list = await req('thread/list', { limit: 100 });
+        const wanted = section.toLowerCase();
+        for (const t of list.threads ?? list.data ?? []) {
+          if (t.section?.name?.toLowerCase() === wanted) {
+            sectionId = t.section.id;
+            break;
+          }
+        }
+        if (!sectionId) throw new Error(`no section named "${section}" found on any recent thread`);
+      }
+      await req('thread/section/move', { threadId, sectionId });
+      console.log(`filed thread ${threadId} under section "${section}"`);
+    });
+  } catch (err) {
+    console.log(`note: could not file thread under section "${section}": ${err.message.split('\n')[0]}`);
+  }
+}
+
 function parseLanes(file) {
   if (!existsSync(file)) throw new Error(`lanes file not found: ${file}`);
   return readFileSync(file, 'utf8')
@@ -116,8 +191,9 @@ function parseFlags(args) {
     '--stall-min',
     '--deadline-min',
     '--interval-sec',
+    '--section',
   ]);
-  const BOOL = new Set(['--review', '--read-only']);
+  const BOOL = new Set(['--review', '--read-only', '--no-section']);
   const opts = {};
   const positionals = [];
   for (let i = 0; i < args.length; i++) {
@@ -141,6 +217,7 @@ function supervisionOpts(opts) {
     stallMin: Number(opts['stall-min'] ?? 15),
     deadlineMin: opts['deadline-min'] != null ? Number(opts['deadline-min']) : null,
     intervalSec: Number(opts['interval-sec'] ?? 10),
+    section: opts['no-section'] ? null : (opts.section ?? DEFAULT_SECTION) || null,
   };
 }
 
@@ -218,6 +295,7 @@ async function superviseLane(CC, lane, sup) {
   let lastPhase;
   let strikes = 0;
   let ticks = 0;
+  let filed = false;
 
   for (;;) {
     let job;
@@ -239,6 +317,12 @@ async function superviseLane(CC, lane, sup) {
       continue;
     }
     strikes = 0;
+    // The thread id only exists once Codex has started the thread; file it then, so
+    // the chat lands in the right sidebar section while the lane is still running.
+    if (!filed && sup.section && job.threadId) {
+      filed = true;
+      await moveThreadToSection(job.threadId, sup.section, lane.cwd);
+    }
     const state = classify(job);
 
     if (state === 'completed') {
@@ -457,6 +541,7 @@ class UsageError extends Error {}
 
 const USAGE = [
   'usage: lanes.mjs lane <name> <cwd> "<brief>" [--review] [--read-only] [--model M] [--effort E] [--scope S] [--base R] [--ledger FILE]',
+  `       lanes.mjs lane ... [--section NAME|ID] [--no-section]   (default section: ${DEFAULT_SECTION})`,
   '       lanes.mjs lane --attach <job-id> [--cwd DIR] [--name NAME]',
   '       lanes.mjs redispatch <job-id> [--cwd DIR] [--name NAME]',
   '       lanes.mjs wait <lanes-file>',

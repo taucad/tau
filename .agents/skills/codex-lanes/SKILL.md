@@ -95,6 +95,13 @@ Dispatch variants: `--review [--scope auto|working-tree|branch] [--base <ref>]` 
 adversarial review, with the brief as focus text; `--read-only` drops `--write`; `--effort xhigh`
 pins effort when a run must be reproducible from its transcript alone.
 
+**Sidebar section.** Each lane opens a chat in the Codex desktop app, and by default those pile up in
+the project's own chat list. The supervisor files every lane's thread under a Codex sidebar section —
+`Claude` unless `$CODEX_LANES_SECTION` or `--section <name|id>` says otherwise — a few seconds after
+dispatch, as soon as the thread id exists. `--no-section` leaves the chat with the project's own.
+Filing is best-effort and never fails a lane: if the section has been renamed or has no members left,
+the lane logs `note: could not file thread…` and carries on.
+
 Supervision matches Claude subagents — **no deadline**. Worker alive and producing output → the
 waiter waits, however long it takes. Worker dead → exit `1` immediately. Worker alive but silent for
 `--stall-min` minutes (default 15) → advisory exit `3`; nothing is killed. `--deadline-min N` exists
@@ -242,6 +249,8 @@ Then dispatch from each worktree (`lane N1 ../repo-lane-1 "<brief>"`), merge the
 | Writes outside the workspace are refused by the sandbox                                                       | Cross-repository tampering is contained; within the workspace, budgets are the only boundary                   |
 | Lanes inherit `~/.codex/config.toml`, `AGENTS.md`, and Codex-side skills                                      | Lanes are **not hermetic**. Treat operator config as an input when reproducing a run                           |
 | `cancel <id> --json` interrupts a running turn and leaves the tree coherent                                   | Use it to abandon a lane (the stall block prints the exact command)                                            |
+| Sections live only on the app-server (`thread/section/move`), never on the companion CLI                      | `lanes.mjs` spawns a short-lived `codex app-server` to file a thread; nothing else needs it                    |
+| There is no `section/list` method, and ephemeral threads reject moves                                         | A section is resolved by name from a recent thread already in it, so the target section needs ≥1 member        |
 
 ## Briefing a lane with session context
 

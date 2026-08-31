@@ -14,9 +14,6 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "dependencies": {
-    "zod": "catalog:"
-  },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"

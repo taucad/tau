@@ -445,7 +445,6 @@ function createBrowserGraphicsClient(projectRef: ActorRefFrom<typeof projectMach
 function createBrowserImageClient(
   projectRef: ActorRefFrom<typeof projectMachine>,
   imageService: Pick<HeadlessImageService, 'export'>,
-  fileSystem: RuntimeFileSystem,
 ): RpcImageClient {
   const findGraphicsRef = (targetFile: string): ActorRefFrom<typeof graphicsMachine> | undefined => {
     const unitId = createSourceModelInteractionUnitId(targetFile);
@@ -476,7 +475,6 @@ function createBrowserImageClient(
         const files = await captureCadImages({
           cadRef: resolved.cadUnit,
           graphicsRef: findGraphicsRef(input.targetFile),
-          fileSystem,
           imageService,
           recipe: {
             purpose: 'agent',
@@ -531,9 +529,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
     geospec: createBrowserGeoSpecClient(createGeoSpecClient),
     skillResolver,
     graphics: createBrowserGraphicsClient(projectRef),
-    images: headlessImageService
-      ? createBrowserImageClient(projectRef, headlessImageService, fileManager.runtimeFileSystem)
-      : undefined,
+    images: headlessImageService ? createBrowserImageClient(projectRef, headlessImageService) : undefined,
   };
 
   const dispatcher = createRpcDispatcher(rpcDeps);

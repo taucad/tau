@@ -15,7 +15,6 @@ import { cn } from '#utils/ui.utils.js';
 import { menuItemLayoutClass, menuItemVariants } from '#components/ui/menu.variants.js';
 import type { DraftImageOptions } from '#hooks/use-chat.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
-import { useFileManager } from '#hooks/use-file-manager.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
 import { useCameraRegistryVersion } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
@@ -75,7 +74,6 @@ export function ChatContextActions({
 
   const codeIssues = useSelector(cadActor, (state) => state?.context.codeIssues ?? []);
   const imageService = useHeadlessImageService();
-  const { runtimeFileSystem } = useFileManager();
 
   const capture = useCallback(
     async (
@@ -96,7 +94,6 @@ export function ChatContextActions({
           graphicsRef,
           cameraState: mode === 'current' ? getGraphicsCameraState(graphicsRef) : undefined,
           imageService,
-          fileSystem: runtimeFileSystem,
           recipe: { purpose: 'chat', mode },
         });
         for (const dataUrl of captureFilesToDataUrls(files)) {
@@ -106,7 +103,7 @@ export function ChatContextActions({
         toast.error(error instanceof Error ? error.message : 'Image capture failed');
       }
     },
-    [addImage, asPopoverMenu, imageService, onClose, runtimeFileSystem],
+    [addImage, asPopoverMenu, imageService, onClose],
   );
 
   const handleViewScreenshot = useCallback(

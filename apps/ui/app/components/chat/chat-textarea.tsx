@@ -85,7 +85,7 @@ export const ChatTextarea = memo(function ({
   });
 
   const projectContext = useProject({ enableNoContext: true });
-  const { treeService, runtimeFileSystem } = useFileManager();
+  const { treeService } = useFileManager();
   const imageService = useHeadlessImageService();
   const { chats } = useChats(projectContext?.projectId ?? '');
   const { setDraftText: setMainDraftText, setEditDraftText } = useDraftActions();
@@ -248,7 +248,6 @@ export const ChatTextarea = memo(function ({
           cadRef,
           graphicsRef: resolveGraphicsRefForEntry(entryPath),
           imageService,
-          fileSystem: runtimeFileSystem,
           recipe: { purpose: 'chat', mode: captureMode },
         });
         if (!mounted.current) {
@@ -266,7 +265,7 @@ export const ChatTextarea = memo(function ({
         }
       }
     },
-    [imageService, resolveCadRefForEntry, resolveGraphicsRefForEntry, runtimeFileSystem],
+    [imageService, resolveCadRefForEntry, resolveGraphicsRefForEntry],
   );
 
   // Viewer-drop screenshots use the same settled-geometry adapter as menu actions.

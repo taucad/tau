@@ -9,10 +9,7 @@ const meshFormats: FormatEntry[] = [
   { format: 'glb', fidelity: 'mesh', direct: true },
   { format: 'stl', fidelity: 'mesh', direct: true },
 ];
-const brepFormats: FormatEntry[] = [
-  { format: 'step', fidelity: 'brep', direct: true },
-  { format: 'iges', fidelity: 'brep', direct: false },
-];
+const brepFormats: FormatEntry[] = [{ format: 'step', fidelity: 'brep', direct: true }];
 
 describe('ExportFormatGrid', () => {
   it('should render BREP formats above mesh formats', () => {

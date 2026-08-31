@@ -14,7 +14,7 @@ import type { ExportFormatLayout } from '#components/files/export-format-grid.js
 import { useExportToDisk } from '#components/files/use-export-to-disk.js';
 import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import type { FormatEntry } from '#utils/export-formats.utils.js';
-import { sortGeometryUnitEntries } from '#routes/projects_.$id/geometry-unit.utils.js';
+import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 type GeometryUnitEntry = {

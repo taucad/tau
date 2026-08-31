@@ -3,7 +3,7 @@ import type { ActorRefFrom } from 'xstate';
 import type { FileExtension } from '@taucad/types';
 import { toast } from '#components/ui/sonner.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import type { AppRuntimeExportFormat } from '#types/runtime-client.alias.js';
+import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 
 export type UseExportToDiskResult = {
@@ -40,14 +40,14 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
 
       setIsExporting(true);
       try {
-        const route = kernelClient.bestRouteFor(format, activeKernelId);
+        const route = bestRouteForActiveKernel(kernelClient, format, activeKernelId);
         if (!route || route.kernelId !== activeKernelId) {
           toast.error(`Export failed: ${format.toUpperCase()} is not available for this model`);
           return;
         }
-        const exportFormat = route.targetFormat as AppRuntimeExportFormat;
-        const options = route.defaults;
-        const result = await kernelClient.export(exportFormat, { exportOptions: options });
+        const exportFormat = route.targetFormat;
+        const options = route.exportOptions.defaults;
+        const result = await exportWithRuntimeValidatedInput(kernelClient, route, { exportOptions: options });
 
         if (!result.success) {
           const message = result.issues[0]?.message ?? 'Export failed';

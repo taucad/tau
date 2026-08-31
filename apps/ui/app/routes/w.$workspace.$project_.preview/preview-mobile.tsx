@@ -1,14 +1,11 @@
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { FileCode } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
 import { Button } from '#components/ui/button.js';
 import { Tabs, TabsContent } from '#components/ui/tabs.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '#components/ui/drawer.js';
-import { toast } from '#components/ui/sonner.js';
 import { cn } from '#utils/ui.utils.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 import { CadPreviewViewer, CadPreviewStatus } from '#components/cad-preview.js';
 import { usePreviewProject } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
@@ -18,68 +15,24 @@ import { PreviewDetails } from '#routes/w.$workspace.$project_.preview/preview-d
 import { PreviewFiles } from '#routes/w.$workspace.$project_.preview/preview-files.js';
 import { PreviewParameters } from '#routes/w.$workspace.$project_.preview/preview-parameters.js';
 import { usePreviewFileList } from '#routes/w.$workspace.$project_.preview/use-preview-file-list.js';
-import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 
 export const PreviewMobile = memo(function (): React.JSX.Element {
   const navigate = useNavigate();
-  const { project, isStaticProject, staticProjectFiles } = usePreviewProject();
+  const { project } = usePreviewProject();
   const { geometry, cadRef } = useCadPreview();
-  const projectManager = useProjectManager();
-  const presentLocationError = useProjectCreationLocationError();
   const files = usePreviewFileList();
-
-  const [isCloning, setIsCloning] = useState(false);
 
   const { activeTab, drawerOpen, activeSnapPoint, snapPoints, handleTabChange, handleDrawerChange, handleSnapChange } =
     usePreviewState();
 
   const isModelTab = activeTab === 'model';
-  // "Remix" on an owned project's preview goes to its canonical editor URL.
+  // "Edit" on an owned project's preview goes to its canonical editor URL.
   const editorUrl = useProjectUrl(project?.id);
 
-  const handleRemix = useCallback(async () => {
-    if (!isStaticProject || !staticProjectFiles || !project) {
-      void navigate(editorUrl);
-      return;
-    }
-
-    if (isCloning) {
-      return;
-    }
-
-    setIsCloning(true);
-
-    try {
-      const createProject = await projectManager.createProject({
-        project: {
-          name: `${project.name} (Remixed)`,
-          description: project.description,
-          tags: [...project.tags],
-          assets: project.assets,
-        },
-        files: staticProjectFiles,
-      });
-
-      await navigate(projectUrl(createProject.slugs));
-    } catch (error) {
-      console.error('Failed to remix project:', error);
-      if (!presentLocationError(error)) {
-        toast.error('Failed to remix project');
-      }
-    } finally {
-      setIsCloning(false);
-    }
-  }, [
-    isStaticProject,
-    staticProjectFiles,
-    project,
-    isCloning,
-    editorUrl,
-    projectManager,
-    navigate,
-    presentLocationError,
-  ]);
+  const handleEdit = useCallback(() => {
+    void navigate(editorUrl);
+  }, [editorUrl, navigate]);
 
   if (!project) {
     return (
@@ -113,15 +66,9 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
             !isModelTab && 'hidden',
           )}
         >
-          <Button
-            variant='default'
-            size='lg'
-            disabled={isCloning}
-            className='shadow-lg rounded-full'
-            onClick={handleRemix}
-          >
-            {isCloning ? <Loader /> : <FileCode className='mr-2 size-4' />}
-            {isCloning ? 'Remixing...' : isStaticProject ? 'Remix' : 'Edit'}
+          <Button variant='default' size='lg' className='shadow-lg rounded-full' onClick={handleEdit}>
+            <FileCode className='mr-2 size-4' />
+            Edit
           </Button>
         </div>
       </div>

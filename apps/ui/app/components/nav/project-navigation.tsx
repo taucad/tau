@@ -26,7 +26,6 @@ import {
   DropdownMenuTrigger,
 } from '#components/ui/dropdown-menu.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
-import { ProjectShareDialog } from '#components/publish/project-share-dialog.js';
 import { ProjectChatList } from '#components/nav/project-chat-list.js';
 import { Loader } from '#components/ui/loader.js';
 import { toast } from '#components/ui/sonner.js';
@@ -45,11 +44,9 @@ export function ProjectNavigation(): React.JSX.Element {
   const navigation = useNavigation();
   const location = useLocation();
   const [editingProjectId, setEditingProjectId] = useState<string | undefined>();
-  const [publishProjectId, setPublishProjectId] = useState<string | undefined>();
   const [visibleCount, setVisibleCount] = useState(projectsPerPage);
   const sortedProjects = useMemo(() => sortProjectsByActivity(projects), [projects]);
   const visibleProjects = sortedProjects.slice(0, visibleCount);
-  const publishTarget = projects.find((project) => project.id === publishProjectId);
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
   const handleCreateChat = async (project: ProjectListItem): Promise<void> => {
@@ -74,112 +71,99 @@ export function ProjectNavigation(): React.JSX.Element {
   };
 
   return (
-    <>
-      <SidebarGroup className='px-2 group-data-[collapsible=icon]:hidden'>
-        <SidebarGroupLabel>Projects</SidebarGroupLabel>
-        <SidebarMenu className='gap-2'>
-          {isLoading && projects.length === 0
-            ? Array.from({ length: 3 }, (_, index) => (
-                <SidebarMenuItem key={index} data-testid='project-navigation-skeleton'>
-                  <div className='flex h-7 items-center gap-2 px-2'>
-                    <Skeleton className='size-4 rounded-sm' />
-                    <Skeleton className='h-4 flex-1' />
-                  </div>
-                </SidebarMenuItem>
-              ))
-            : null}
-          {error && projects.length === 0 ? (
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => void retry()}>
-                <span>Could not load projects</span>
-                <span className='ml-auto text-xs text-muted-foreground'>Retry</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ) : null}
-          {!isLoading && !error && projects.length === 0 ? (
-            <SidebarMenuItem>
-              <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No projects yet</div>
-            </SidebarMenuItem>
-          ) : null}
-          {error && projects.length > 0 ? (
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => void retry()}>Projects could not be refreshed. Retry</SidebarMenuButton>
-            </SidebarMenuItem>
-          ) : null}
-          {visibleProjects.map((project) => {
-            const projectPath = projectUrlOr(project.slugs);
-            const isActive = project.slugs !== undefined && location.pathname === projectPath;
-            const isExpanded = isProjectExpanded(project.id, isActive);
-            return (
-              <ProjectNavigationItem
-                key={project.id}
-                project={project}
-                isActive={isActive}
-                isPending={pendingUrl === projectPath}
-                isExpanded={isExpanded}
-                isEditing={editingProjectId === project.id}
-                onToggle={async () => setProjectDisclosure(project.id, !isExpanded)}
-                onOpen={() => {
-                  if (!isExpanded) {
-                    void setProjectDisclosure(project.id, true);
-                  }
-                }}
-                onCreateChat={async () => handleCreateChat(project)}
-                onRename={() => {
-                  setEditingProjectId(project.id);
-                }}
-                onRenameSave={async (name) => {
-                  await updateName(project.id, name);
-                }}
-                onEditingChange={(editing) => {
-                  if (!editing) {
-                    setEditingProjectId(undefined);
-                  }
-                }}
-                onDuplicate={async () => handleDuplicate(project)}
-                onShare={() => {
-                  setPublishProjectId(project.id);
-                }}
-                onDelete={async () => {
-                  await deleteProject(project.id);
-                  toast.success(`Deleted ${project.name}`);
-                }}
-              />
-            );
-          })}
-          {visibleCount < sortedProjects.length ? (
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                type='button'
-                className='pr-1.5 pl-[30px] text-muted-foreground/55 hover:bg-transparent hover:text-muted-foreground/90 active:bg-transparent active:text-muted-foreground/90 dark:hover:bg-transparent'
-                aria-label='Show more projects'
-                onClick={() => {
-                  setVisibleCount((count) => count + projectsPerPage);
-                }}
-              >
-                Show more projects
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ) : null}
-        </SidebarMenu>
-      </SidebarGroup>
-      {publishTarget ? (
-        <ProjectShareDialog
-          open
-          projectId={publishTarget.id}
-          projectName={publishTarget.name}
-          projectDescription={publishTarget.description}
-          projectUpdatedAt={publishTarget.lastActivityAt}
-          entryPath={publishTarget.assets.main.entryPath}
-          parameters={{}}
-          onOpenChange={(open) => {
-            if (!open) {
-              setPublishProjectId(undefined);
-            }
-          }}
-        />
-      ) : null}
-    </>
+    <SidebarGroup className='px-2 group-data-[collapsible=icon]:hidden'>
+      <SidebarGroupLabel>Projects</SidebarGroupLabel>
+      <SidebarMenu className='gap-2'>
+        {isLoading && projects.length === 0
+          ? Array.from({ length: 3 }, (_, index) => (
+              <SidebarMenuItem key={index} data-testid='project-navigation-skeleton'>
+                <div className='flex h-7 items-center gap-2 px-2'>
+                  <Skeleton className='size-4 rounded-sm' />
+                  <Skeleton className='h-4 flex-1' />
+                </div>
+              </SidebarMenuItem>
+            ))
+          : null}
+        {error && projects.length === 0 ? (
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => void retry()}>
+              <span>Could not load projects</span>
+              <span className='ml-auto text-xs text-muted-foreground'>Retry</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : null}
+        {!isLoading && !error && projects.length === 0 ? (
+          <SidebarMenuItem>
+            <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No projects yet</div>
+          </SidebarMenuItem>
+        ) : null}
+        {error && projects.length > 0 ? (
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => void retry()}>Projects could not be refreshed. Retry</SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : null}
+        {visibleProjects.map((project) => {
+          const projectPath = projectUrlOr(project.slugs);
+          const isActive = project.slugs !== undefined && location.pathname === projectPath;
+          const isExpanded = isProjectExpanded(project.id, isActive);
+          return (
+            <ProjectNavigationItem
+              key={project.id}
+              project={project}
+              isActive={isActive}
+              isPending={pendingUrl === projectPath}
+              isExpanded={isExpanded}
+              isEditing={editingProjectId === project.id}
+              onToggle={async () => setProjectDisclosure(project.id, !isExpanded)}
+              onOpen={() => {
+                if (!isExpanded) {
+                  void setProjectDisclosure(project.id, true);
+                }
+              }}
+              onCreateChat={async () => handleCreateChat(project)}
+              onRename={() => {
+                setEditingProjectId(project.id);
+              }}
+              onRenameSave={async (name) => {
+                await updateName(project.id, name);
+              }}
+              onEditingChange={(editing) => {
+                if (!editing) {
+                  setEditingProjectId(undefined);
+                }
+              }}
+              onDuplicate={async () => handleDuplicate(project)}
+              onShare={() => {
+                if (!project.slugs) {
+                  return;
+                }
+                const parameters = new URLSearchParams(isActive ? location.search : '');
+                parameters.set('workbench', 'share');
+                void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
+              }}
+              onDelete={async () => {
+                await deleteProject(project.id);
+                toast.success(`Deleted ${project.name}`);
+              }}
+            />
+          );
+        })}
+        {visibleCount < sortedProjects.length ? (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              type='button'
+              className='pr-1.5 pl-[30px] text-muted-foreground/55 hover:bg-transparent hover:text-muted-foreground/90 active:bg-transparent active:text-muted-foreground/90 dark:hover:bg-transparent'
+              aria-label='Show more projects'
+              onClick={() => {
+                setVisibleCount((count) => count + projectsPerPage);
+              }}
+            >
+              Show more projects
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : null}
+      </SidebarMenu>
+    </SidebarGroup>
   );
 }
 
@@ -314,7 +298,7 @@ function ProjectNavigationItem({
                   <Copy aria-hidden />
                   Duplicate
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={onShare}>
+                <DropdownMenuItem disabled={!project.slugs} onSelect={onShare}>
                   <Forward aria-hidden />
                   Share project
                 </DropdownMenuItem>

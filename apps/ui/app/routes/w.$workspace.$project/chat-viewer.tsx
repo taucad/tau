@@ -98,9 +98,15 @@ type ChatViewerProps = {
   readonly entryPath: string | undefined;
   /** Dockview panel API for updating title, etc. */
   readonly panelApi: IDockviewPanelHeaderProps['api'];
+  readonly profile?: 'editor' | 'shared';
 };
 
-export const ChatViewer = memo(function ({ viewId, entryPath, panelApi }: ChatViewerProps): React.JSX.Element {
+export const ChatViewer = memo(function ({
+  viewId,
+  entryPath,
+  panelApi,
+  profile = 'editor',
+}: ChatViewerProps): React.JSX.Element {
   const { projectRef, editorRef, viewGraphics, geometryUnits } = useProject();
   // Get the per-view graphics machine
   const graphicsActor = viewGraphics.get(viewId);
@@ -266,7 +272,7 @@ export const ChatViewer = memo(function ({ viewId, entryPath, panelApi }: ChatVi
           cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
         }}
       >
-        <ViewerContent viewId={viewId} entryPath={entryPath} />
+        <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
       </GraphicsProvider>
     </CadProvider>
   );
@@ -281,9 +287,11 @@ export const ChatViewer = memo(function ({ viewId, entryPath, panelApi }: ChatVi
 const ViewerContent = memo(function ({
   viewId,
   entryPath,
+  profile,
 }: {
   readonly viewId: string;
   readonly entryPath: string;
+  readonly profile: 'editor' | 'shared';
 }): React.JSX.Element {
   const { editorRef, projectRef } = useProject();
   const cadRef = useCad();
@@ -578,8 +586,12 @@ const ViewerContent = memo(function ({
         className='pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2 [&>*]:pointer-events-auto'
       >
         <ChatInterfaceGraphics />
-        <ChatStackTrace entryPath={entryPath} side='bottom' />
-        <ChatViewerControls availableWidth={toolbarAvailableWidth} className='self-stretch' />
+        {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
+        <ChatViewerControls
+          availableWidth={toolbarAvailableWidth}
+          className='self-stretch'
+          shouldEnableCapture={profile === 'editor'}
+        />
       </div>
     </div>
   );

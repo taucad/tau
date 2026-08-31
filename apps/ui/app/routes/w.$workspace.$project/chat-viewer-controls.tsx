@@ -43,15 +43,21 @@ type ChatViewerControlsProps = React.HTMLAttributes<HTMLDivElement> & {
    * Must not be the toolbar element's own width — use a parent measurement so overflow can restore when widened.
    */
   readonly availableWidth?: number;
+  /** Capture writes to the active chat draft and is unavailable in read-only shared sessions. */
+  readonly shouldEnableCapture?: boolean;
 };
 
 export function ChatViewerControls({
   className,
   availableWidth,
+  shouldEnableCapture = true,
   ...props
 }: ChatViewerControlsProps): React.JSX.Element {
   const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
-  const controlItems = is2dGeometry ? controlItems2d : controlItems3d;
+  const controlsForGeometry = is2dGeometry ? controlItems2d : controlItems3d;
+  const controlItems = shouldEnableCapture
+    ? controlsForGeometry
+    : controlsForGeometry.filter((item) => item.id !== 'capture');
   const { visibleIds, overflowIds, isCompact } = useToolbarOverflow(controlItems, availableWidth, overflowOptions);
 
   const overflowControls = useMemo(() => {
@@ -61,7 +67,7 @@ export function ChatViewerControls({
 
     return (
       <>
-        {overflowIds.has('capture') && <CaptureViewOverflowControl />}
+        {shouldEnableCapture && overflowIds.has('capture') && <CaptureViewOverflowControl />}
         {overflowIds.has('reset') && <ResetCameraOverflowControl />}
         {overflowIds.has('measure') && <MeasureOverflowControl />}
         {overflowIds.has('section') && <SectionViewOverflowControl />}
@@ -69,7 +75,7 @@ export function ChatViewerControls({
         {overflowIds.has('fov') && !is2dGeometry && <FovOverflowControl />}
       </>
     );
-  }, [overflowIds, is2dGeometry]);
+  }, [is2dGeometry, overflowIds, shouldEnableCapture]);
 
   return (
     <div className={cn('flex items-center gap-2', className)} {...props}>
@@ -80,7 +86,7 @@ export function ChatViewerControls({
       {visibleIds.has('section') && <SectionViewControl />}
       {visibleIds.has('measure') && <MeasureControl />}
       {visibleIds.has('reset') && <ResetCameraControl />}
-      {visibleIds.has('capture') && <CaptureViewControl />}
+      {shouldEnableCapture && visibleIds.has('capture') && <CaptureViewControl />}
       <ViewerSettings overflowControls={overflowControls} />
     </div>
   );

@@ -9,7 +9,6 @@ let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
 let cameraState: Record<string, unknown> | undefined;
 const openPanel = vi.fn();
-const openShare = vi.fn();
 const captureCadImages = vi.fn<(options: unknown) => Promise<ExportFile[]>>();
 const downloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
 const runtimeFileSystem = {};
@@ -103,10 +102,6 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   useProjectWorkspace: () => ({ openPanel }),
 }));
 
-vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
-  useProjectShare: () => ({ openShare }),
-}));
-
 vi.mock('#flags/use-feature.js', () => ({
   useFeature: () => isTauDebugEnabled,
 }));
@@ -135,7 +130,6 @@ describe('ProjectCommandPaletteItems', () => {
     geometryFormat = undefined;
     cameraState = undefined;
     openPanel.mockClear();
-    openShare.mockClear();
     captureCadImages.mockReset();
     downloadBlob.mockReset();
   });
@@ -149,10 +143,10 @@ describe('ProjectCommandPaletteItems', () => {
     expect(openPanel).toHaveBeenCalledWith('export');
   });
 
-  it('registers Share with the same dialog owner', () => {
+  it('registers Share with the shared Workbench owner', () => {
     render(<ProjectCommandPaletteItems match={match} />);
     registeredItems.find((item) => item.id === 'share-project')?.action?.();
-    expect(openShare).toHaveBeenCalledOnce();
+    expect(openPanel).toHaveBeenCalledWith('share');
   });
 
   it('routes every Workbench command through the shared workspace owner', () => {

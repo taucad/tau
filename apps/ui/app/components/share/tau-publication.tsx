@@ -1,38 +1,24 @@
-import type React from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { data, isRouteErrorResponse, useLoaderData, useRouteError } from 'react-router';
 import { useSession } from '@better-auth-ui/react';
 import { authClient } from '#lib/auth-client.js';
 import { getEnvironment } from '#environment.config.js';
 import { cacheTag, cdnBackedSsrRouteHeaders } from '#lib/react-router.lib.js';
-import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
-import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
+import { SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { Loader } from '#components/ui/loader.js';
 import { ErrorPage } from '#components/error-page.js';
-import type { Handle } from '#types/matches.types.js';
-import { PublicationLockScreen, parsePublicationLockPayload } from '#routes/v.$id/publication-lock-screen.js';
-import type { PublicationLockReason, PublicationLockScreenVariant } from '#routes/v.$id/publication-lock-screen.js';
-import { parsePublicationRecord, publicationFileFetchInit } from '#routes/v.$id/parsed-publication.js';
-import type { ParsedPublication } from '#routes/v.$id/parsed-publication.js';
-import { PublicationTopbar } from '#routes/v.$id/publication-topbar.js';
-import { PublicationShell } from '#routes/v.$id/publication-shell.js';
-import { PublicationReadmeCard } from '#routes/v.$id/publication-readme-card.js';
-import { PublicationMobileSheet } from '#routes/v.$id/publication-mobile-sheet.js';
-import { useViewPing } from '#routes/v.$id/use-view-ping.js';
+import { PublicationLockScreen, parsePublicationLockPayload } from '#components/share/publication-lock-screen.js';
+import type { PublicationLockReason, PublicationLockScreenVariant } from '#components/share/publication-lock-screen.js';
+import { parsePublicationRecord, publicationFileFetchInit } from '#components/share/parsed-publication.js';
+import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import { useViewPing } from '#components/share/use-view-ping.js';
+import { ClientOnly } from '#components/ui/utils/client-only.js';
 
-export const handle: Handle = {
-  enablePageWrapper: false,
-};
-
-/**
- * CSS variable bag set on the layout root so child components can compute
- * `calc(100dvh - var(--publication-topbar-h))` without knowing the topbar
- * height literal. Kept tiny so React does not unnecessarily re-render due to
- * style identity churn.
- */
-// oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- React's CSSProperties type does not surface custom properties
-const layoutStyle = { '--publication-topbar-h': 'calc(var(--spacing) * 12)' } as React.CSSProperties;
+const SharedProjectWorkbench = lazy(async () => {
+  const module = await import('#components/share/shared-project-workbench.js');
+  return { default: module.SharedProjectWorkbench };
+});
 
 export type PublicationRouteLoaderData = {
   publication: Record<string, unknown>;
@@ -64,7 +50,7 @@ function throwPublicationLock(reason: PublicationLockReason, httpStatus: number)
   });
 }
 
-export const loader = async ({ request, params }: LoaderFunctionArgs): Promise<unknown> => {
+export const loadPublication = async ({ request, params }: LoaderFunctionArgs): Promise<unknown> => {
   const publicationId = params['id'];
   if (publicationId === undefined || publicationId === '') {
     throwPublicationLock('not-found', 404);
@@ -127,7 +113,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs): Promise<u
   return data(body, { headers: responseHeaders });
 };
 
-export const meta: MetaFunction<typeof loader> = ({ loaderData }) => {
+export const publicationMeta: MetaFunction<typeof loadPublication> = ({ loaderData }) => {
   if (!loaderData) {
     return [];
   }
@@ -196,44 +182,38 @@ const PublicationViewPingInner = ({
   return null;
 };
 
-const PublicationLayout = ({
+export const PublicationInteractiveSurface = ({
   data,
   publication,
-  files,
+  archive,
+  shouldTrackView = true,
+  hydratedFiles,
+  shareUrl,
+  sourceLabel,
+  managementActions,
 }: {
   readonly data: PublicationRouteLoaderData;
   readonly publication: ParsedPublication;
-  readonly files: Map<string, { filename: string; content: Uint8Array<ArrayBuffer> }>;
+  readonly archive?: Uint8Array<ArrayBuffer>;
+  readonly shouldTrackView?: boolean;
+  readonly hydratedFiles?: Record<string, { content: Uint8Array<ArrayBuffer> }>;
+  readonly shareUrl?: string;
+  readonly sourceLabel?: string;
+  readonly managementActions?: React.ReactNode;
 }): React.JSX.Element => {
-  return (
-    <div className='flex h-dvh w-full flex-col overflow-y-auto bg-background' style={layoutStyle}>
-      <PublicationViewPingMount publicationId={publication.id} />
-      <PublicationTopbar publication={publication} files={files} />
-      <PublicationShell publication={publication} publicationFiles={data.files} />
-      <PublicationReadmeCard files={data.files} visibility={publication.visibility} />
-      <PublicationMobileSheet publication={publication} />
-    </div>
+  const [filesRecord, setFilesRecord] = useState<Record<string, { content: Uint8Array<ArrayBuffer> }> | undefined>(
+    hydratedFiles,
   );
-};
-
-const PublicationInteractiveSurface = ({
-  data,
-  publication,
-  viewProjectId,
-}: {
-  readonly data: PublicationRouteLoaderData;
-  readonly publication: ParsedPublication;
-  readonly viewProjectId: string;
-}): React.JSX.Element => {
-  const [filesRecord, setFilesRecord] = useState<Record<string, { content: Uint8Array<ArrayBuffer> }> | undefined>();
   const [fetchError, setFetchError] = useState<Error | undefined>();
-
-  const seededParameters = useMemo(() => ({ ...data.manifest.parameters }), [data.manifest.parameters]);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadFiles = async (): Promise<void> => {
+      if (hydratedFiles) {
+        setFilesRecord(hydratedFiles);
+        return;
+      }
       try {
         const pairs = await Promise.all(
           Object.entries(data.files).map(async ([path, blobUrl]) => {
@@ -265,20 +245,7 @@ const PublicationInteractiveSurface = ({
     return () => {
       cancelled = true;
     };
-  }, [data.files, publication.visibility]);
-
-  const filesMap = useMemo(() => {
-    const map = new Map<string, { filename: string; content: Uint8Array<ArrayBuffer> }>();
-    if (!filesRecord) {
-      return map;
-    }
-
-    for (const [path, file] of Object.entries(filesRecord)) {
-      map.set(path, { filename: path, content: file.content });
-    }
-
-    return map;
-  }, [filesRecord]);
+  }, [data.files, hydratedFiles, publication.visibility]);
 
   if (fetchError) {
     return <PublicationLockScreen variant='filesUnavailable' isInline />;
@@ -294,14 +261,34 @@ const PublicationInteractiveSurface = ({
   }
 
   return (
-    <CadPreviewProvider
-      projectId={viewProjectId}
-      mainFile={publication.entryPath}
-      files={filesRecord}
-      parameters={seededParameters}
-    >
-      <PublicationLayout data={data} publication={publication} files={filesMap} />
-    </CadPreviewProvider>
+    <>
+      {shouldTrackView ? <PublicationViewPingMount publicationId={publication.id} /> : null}
+      <ClientOnly
+        fallback={
+          <div className='flex h-dvh items-center justify-center bg-background'>
+            <Loader className='size-8' />
+          </div>
+        }
+      >
+        <Suspense
+          fallback={
+            <div className='flex h-dvh items-center justify-center bg-background'>
+              <Loader className='size-8' />
+            </div>
+          }
+        >
+          <SharedProjectWorkbench
+            projectId={data.manifest.projectId}
+            publication={publication}
+            hydratedFiles={filesRecord}
+            archive={archive}
+            shareUrl={shareUrl}
+            sourceLabel={sourceLabel}
+            managementActions={managementActions}
+          />
+        </Suspense>
+      </ClientOnly>
+    </>
   );
 };
 
@@ -317,17 +304,9 @@ export default function PublicationViewRoute(): React.JSX.Element {
     );
   }
 
-  const viewProjectId = `view-${publication.id}`;
-
   return (
     <SharedWorkerGate>
-      <HomeFileManagerProvider
-        key={viewProjectId}
-        projectId={viewProjectId}
-        rootDirectory={`/projects/${viewProjectId}`}
-      >
-        <PublicationInteractiveSurface data={loaderData} publication={publication} viewProjectId={viewProjectId} />
-      </HomeFileManagerProvider>
+      <PublicationInteractiveSurface data={loaderData} publication={publication} />
     </SharedWorkerGate>
   );
 }

@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { LoaderFunctionArgs } from 'react-router';
 import { publicationApiCode } from '@taucad/types/constants';
-import { loader, meta } from '#routes/v.$id/route.js';
-import type { PublicationRouteLoaderData } from '#routes/v.$id/route.js';
-import type { PublicationLockReason } from '#routes/v.$id/publication-lock-screen.js';
+import { loadPublication as loader, publicationMeta as meta } from '#components/share/tau-publication.js';
+import type { PublicationRouteLoaderData } from '#components/share/tau-publication.js';
+import type { PublicationLockReason } from '#components/share/publication-lock-screen.js';
 import { getEnvironment } from '#environment.config.js';
 import type { Environment } from '#environment.config.js';
 import type * as EnvironmentConfigModule from '#environment.config.js';
@@ -52,8 +52,8 @@ const sampleLoaderData: PublicationRouteLoaderData = {
   },
   viewerRole: 'public',
   urls: {
-    view: 'https://tau.example/v/pub_1',
-    share: 'https://tau.example/v/pub_1',
+    view: 'https://tau.example/s/tau~pub_1',
+    share: 'https://tau.example/s/tau~pub_1',
     og: 'https://cdn.example/defaults/og.png',
     thumbnail: 'https://cdn.example/defaults/thumb.webp',
   },
@@ -61,14 +61,12 @@ const sampleLoaderData: PublicationRouteLoaderData = {
     version: 1,
     projectId: 'proj_x',
     entryPath: 'main.ts',
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- file-path keys can't be camelCase
     files: { 'main.ts': 'sha256:abc' },
     kernels: ['jscad'],
     runtime: '~1.0.0',
     parameters: { width: 1 },
     createdAt: '2026-01-01T00:00:00.000Z',
   },
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- file-path keys can't be camelCase
   files: { 'main.ts': 'sha256:abc' },
 };
 
@@ -96,7 +94,7 @@ const expectThrowsPublicationLock = async (
   }
 };
 
-describe('public viewer loader', () => {
+describe('Tau publication loader', () => {
   beforeEach(() => {
     mockedGetEnvironment.mockResolvedValue(
       // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variable keys are UPPER_SNAKE_CASE
@@ -119,7 +117,7 @@ describe('public viewer loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/v/xyz'),
+            request: new Request('http://localhost/s/tau~xyz'),
             params: {},
           }),
         ),
@@ -131,7 +129,7 @@ describe('public viewer loader', () => {
   it('returns JSON from GET /v1/publications/:id', async () => {
     const data = await loaderJson(
       loaderArgs({
-        request: new Request('http://localhost/v/pub_1'),
+        request: new Request('http://localhost/s/tau~pub_1'),
         params: { id: 'pub_1' },
       }),
     );
@@ -142,7 +140,7 @@ describe('public viewer loader', () => {
   it('marks private publication responses as private and non-cacheable', async () => {
     const result = await loader(
       loaderArgs({
-        request: new Request('http://localhost/v/pub_1'),
+        request: new Request('http://localhost/s/tau~pub_1'),
         params: { id: 'pub_1' },
       }),
     );
@@ -166,7 +164,7 @@ describe('public viewer loader', () => {
 
     const result = await loader(
       loaderArgs({
-        request: new Request('http://localhost/v/pub_1'),
+        request: new Request('http://localhost/s/tau~pub_1'),
         params: { id: 'pub_1' },
       }),
     );
@@ -189,7 +187,7 @@ describe('public viewer loader', () => {
 
     const result = await loader(
       loaderArgs({
-        request: new Request('http://localhost/v/pub_1'),
+        request: new Request('http://localhost/s/tau~pub_1'),
         params: { id: 'pub_1' },
       }),
     );
@@ -203,7 +201,7 @@ describe('public viewer loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/v/pub_1'),
+            request: new Request('http://localhost/s/tau~pub_1'),
             params: { id: 'pub_1' },
           }),
         ),
@@ -216,7 +214,7 @@ describe('public viewer loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/v/pub_1'),
+            request: new Request('http://localhost/s/tau~pub_1'),
             params: { id: 'pub_1' },
           }),
         ),
@@ -229,7 +227,7 @@ describe('public viewer loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/v/pub_1'),
+            request: new Request('http://localhost/s/tau~pub_1'),
             params: { id: 'pub_1' },
           }),
         ),
@@ -249,7 +247,7 @@ describe('public viewer loader', () => {
     try {
       await loader(
         loaderArgs({
-          request: new Request('http://localhost/v/pub_1'),
+          request: new Request('http://localhost/s/tau~pub_1'),
           params: { id: 'pub_1' },
         }),
       );
@@ -277,7 +275,7 @@ describe('public viewer loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/v/pub_1'),
+            request: new Request('http://localhost/s/tau~pub_1'),
             params: { id: 'pub_1' },
           }),
         ),
@@ -293,7 +291,7 @@ describe('public viewer loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/v/pub_1'),
+            request: new Request('http://localhost/s/tau~pub_1'),
             params: { id: 'pub_1' },
           }),
         ),
@@ -309,7 +307,7 @@ describe('public viewer loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/v/pub_1'),
+            request: new Request('http://localhost/s/tau~pub_1'),
             params: { id: 'pub_1' },
           }),
         ),
@@ -330,7 +328,7 @@ describe('public viewer loader', () => {
       async () =>
         loader(
           loaderArgs({
-            request: new Request('http://localhost/v/pub_1'),
+            request: new Request('http://localhost/s/tau~pub_1'),
             params: { id: 'pub_1' },
           }),
         ),
@@ -340,7 +338,7 @@ describe('public viewer loader', () => {
   });
 });
 
-describe('public viewer meta', () => {
+describe('Tau publication metadata', () => {
   it('emits social image metadata only when the canonical thumbnail is present in files', () => {
     const thumbnail = 'https://cdn.example/blobs/thumb.webp';
     const loaderData = {

@@ -173,6 +173,7 @@ export function ProjectProvider({
   provide,
   input,
   kernelOptionsFactory = defaultKernelOptions,
+  profile = 'editor',
 }: {
   readonly children: ReactNode;
   readonly projectId: string;
@@ -184,6 +185,7 @@ export function ProjectProvider({
     'projectId' | 'fileManagerRef' | 'fileSystemRoot' | 'kernelOptionsFactory'
   >;
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
+  readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
   const queryClient = useQueryClient();
   // Create the project machine actor - it will auto-load based on projectId
@@ -232,7 +234,8 @@ export function ProjectProvider({
             }
           }
 
-          const library = await projectManager.getProjectLibraryState(input.projectId);
+          const library =
+            profile === 'editor' ? await projectManager.getProjectLibraryState(input.projectId) : undefined;
           return {
             type: 'projectRetrieved',
             project,
@@ -298,15 +301,24 @@ export function ProjectProvider({
     editorMachine.provide({
       actors: {
         loadEditorStateActor: fromSafeAsync(async ({ input }) => {
+          if (profile === 'shared') {
+            return { type: 'editorStateRetrieved', state: undefined };
+          }
           const worker = await getReadiedWorker();
           const state = await worker.getEditorState(input.projectId);
           return { type: 'editorStateRetrieved', state };
         }),
         saveEditorStateActor: fromSafeAsync(async ({ input }) => {
+          if (profile === 'shared') {
+            return;
+          }
           const worker = await getReadiedWorker();
           await worker.updateEditorState(input.editorState);
         }),
         ensureFocusedChatActor: fromSafeAsync(async ({ input }) => {
+          if (profile === 'shared') {
+            return { type: 'focusedChatEnsured', focusedChatId: `shared:${input.projectId}` };
+          }
           const worker = await getReadiedWorker();
           return ensureFocusedChatForProject({
             projectId: input.projectId,
@@ -393,6 +405,9 @@ export function ProjectProvider({
   }, [focusedChatId, focusedChatResolved, onFocusedChatResolved]);
 
   useEffect(() => {
+    if (profile === 'shared') {
+      return;
+    }
     const subscription = actorRef.on('projectUpdated', () => {
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
     });
@@ -400,9 +415,12 @@ export function ProjectProvider({
     return () => {
       subscription.unsubscribe();
     };
-  }, [actorRef, queryClient]);
+  }, [actorRef, profile, queryClient]);
 
   useEffect(() => {
+    if (profile === 'shared') {
+      return;
+    }
     const activity = actorRef.on('projectActivity', async () => {
       await projectManager.touchProject(projectId);
       await queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -414,7 +432,7 @@ export function ProjectProvider({
       activity.unsubscribe();
       revision.unsubscribe();
     };
-  }, [actorRef, projectId, projectManager, queryClient]);
+  }, [actorRef, profile, projectId, projectManager, queryClient]);
 
   useEffect(() => {
     const { contentService } = fileManager;
@@ -606,7 +624,7 @@ export function ProjectProvider({
  * Find the graphics actor for the viewer panel displaying the main entry path.
  * Falls back to the first available graphics actor from viewGraphics.
  * Returns undefined when no viewGraphics exist (e.g. before any viewer panel mounts).
- * Used by external consumers (screenshot, RPC handlers, parameters) that are NOT inside a GraphicsProvider.
+ * Used by external consumers (headless capture, RPC handlers, parameters) that are NOT inside a GraphicsProvider.
  */
 export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefined {
   const context = useContext(ProjectContext);

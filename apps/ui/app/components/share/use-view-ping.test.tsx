@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import { act } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useViewPing } from '#routes/v.$id/use-view-ping.js';
+import { useViewPing } from '#components/share/use-view-ping.js';
 
 const cadPreviewMocks = vi.hoisted(() => {
   const parameters: Record<string, unknown> = {};

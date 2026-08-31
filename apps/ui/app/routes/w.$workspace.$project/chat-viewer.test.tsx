@@ -130,7 +130,7 @@ function createMockCadActor(): ActorRefFrom<typeof cadMachine> {
     getSnapshot: vi.fn(() => ({
       context: {
         geometry: mockGeometry,
-        units: { length: { symbol: 'mm', factor: 1 } },
+        displayUnits: { length: { symbol: 'mm', metersPerUnit: 0.001, system: 'si' } },
         kernelClient: undefined,
         renderTimeout: defaultRenderTimeout,
       },
@@ -423,6 +423,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
   it('passes the persisted camera view to the provider for the current entry', () => {
     const cameraView = {
+      frameId: 'tau:root',
       target: [3, 4, 5],
       direction: [1, 0, 0],
       up: [0, 0, 1],
@@ -445,6 +446,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
   it('clears geometry-dependent camera state when the pane switches files', () => {
     const cameraView = {
+      frameId: 'tau:root',
       target: [3, 4, 5],
       direction: [1, 0, 0],
       up: [0, 0, 1],

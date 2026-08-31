@@ -19,7 +19,7 @@ const mockProject: ProjectListItem = {
     assets: { main: { entryPath: 'main.scad' } },
   }),
   lastActivityAt: 0,
-  locator: { backend: 'indexeddb', storageRootKey: 'indexeddb:tau-', relativeDirectory: '/library' },
+  locator: { backend: 'indexeddb', storageRootKey: 'indexeddb:tau-', relativeDirectory: 'library' },
   slugs: { workspaceSlug: 'home', projectSlug: 'library' },
 };
 
@@ -173,7 +173,7 @@ describe('ProjectLibraryCard live preview', () => {
         locator: {
           backend: 'webaccess',
           storageRootKey: 'webaccess:wsp_workshop',
-          relativeDirectory: '/library',
+          relativeDirectory: 'library',
           workspaceId: 'wsp_workshop',
         },
         slugs: { workspaceSlug: 'workshop', projectSlug: 'library' },

@@ -89,7 +89,7 @@ export const publishMachineForUiTests = setup({
             target: 'success',
             actions: assign({
               publicationId: ({ context }) => context.projectId,
-              shareUrl: ({ context }) => `https://tau.example/v/${context.projectId}`,
+              shareUrl: ({ context }) => `https://tau.example/s/tau~${context.projectId}`,
             }),
           },
         ],

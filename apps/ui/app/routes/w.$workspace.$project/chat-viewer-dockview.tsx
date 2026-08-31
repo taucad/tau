@@ -39,6 +39,7 @@ type ViewerPanelParameters = {
 };
 
 type ViewerNewTabParameters = { mode: 'launcher' };
+type ViewerProfile = 'editor' | 'shared';
 
 const isViewerPanelParameters = (parameters: unknown): parameters is ViewerPanelParameters =>
   typeof (parameters as Partial<ViewerPanelParameters> | undefined)?.viewId === 'string';
@@ -50,9 +51,15 @@ function getDragDataTransfer(event: DragEvent | PointerEvent): DataTransfer | un
 /**
  * Viewer panel component rendered inside each Dockview panel.
  */
-function ViewerPanel(properties: IDockviewPanelProps<ViewerPanelParameters>): React.JSX.Element {
+function ViewerPanel({
+  properties,
+  profile,
+}: {
+  readonly properties: IDockviewPanelProps<ViewerPanelParameters>;
+  readonly profile: ViewerProfile;
+}): React.JSX.Element {
   const { viewId, entryPath } = properties.params;
-  return <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} />;
+  return <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />;
 }
 
 export function createViewerNewTab({
@@ -350,11 +357,6 @@ function ViewerNewTabPanel(properties: IDockviewPanelProps<ViewerNewTabParameter
   );
 }
 
-const components = {
-  viewer: ViewerPanel,
-  newTab: ViewerNewTabPanel,
-};
-
 export const createInheritedGraphicsSettings = (
   activeSettings: GraphicsViewSettings | undefined,
 ): GraphicsViewSettings => {
@@ -393,8 +395,21 @@ function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.E
  * - External file drops from the file tree
  * - Actor reconciliation on layout restore
  */
-export const ViewerDockview = memo(function (): React.JSX.Element {
+export const ViewerDockview = memo(function ({
+  profile = 'editor',
+}: {
+  readonly profile?: ViewerProfile;
+} = {}): React.JSX.Element {
   const { projectRef, editorRef, mainEntryPath } = useProject();
+  const components = useMemo(
+    () => ({
+      viewer: (properties: IDockviewPanelProps<ViewerPanelParameters>) => (
+        <ViewerPanel properties={properties} profile={profile} />
+      ),
+      newTab: ViewerNewTabPanel,
+    }),
+    [profile],
+  );
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
   // Track the active (focused) viewer panel for settings inheritance
@@ -443,7 +458,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
     }
 
     const disposable = api.onDidActivePanelChange((event) => {
-      const panel = event.panel;
+      const { panel } = event;
       setActiveViewerPanelId(panel && isViewerPanelParameters(panel.params) ? panel.id : undefined);
     });
 
@@ -767,7 +782,7 @@ export const ViewerDockview = memo(function (): React.JSX.Element {
           tabLeadingIcon='viewer'
           watermarkComponent={ViewerWatermark}
           leftHeaderActionsComponent={ViewerLeftActions}
-          rightHeaderActionsComponent={ProjectWorkspaceActions}
+          rightHeaderActionsComponent={profile === 'editor' ? ProjectWorkspaceActions : undefined}
           onReady={onReady}
           onDidDrop={onDidDrop}
         />

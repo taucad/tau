@@ -5,6 +5,7 @@ import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js
 import { ChatEditorLayout } from '#routes/w.$workspace.$project/chat-editor-layout.js';
 import { ChatDetails } from '#routes/w.$workspace.$project/chat-details.js';
 import { ChatConverter } from '#routes/w.$workspace.$project/chat-converter.js';
+import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { cn } from '#utils/ui.utils.js';
 import { ChatInterfaceNav } from '#routes/w.$workspace.$project/chat-interface-nav.js';
@@ -103,6 +104,9 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
               </TabsContent>
               <TabsContent enableAnimation={false} value='converter' className='flex h-full flex-col'>
                 <ChatConverter />
+              </TabsContent>
+              <TabsContent enableAnimation={false} value='share' className='flex h-full flex-col'>
+                <ProjectShareWorkbenchPanel />
               </TabsContent>
             </Tabs>
           </DrawerContent>

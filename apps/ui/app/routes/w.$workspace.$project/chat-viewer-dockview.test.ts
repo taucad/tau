@@ -41,13 +41,16 @@ describe('viewer split launchers', () => {
       ...defaultGraphicsSettings,
       cameraFovAngle: 42,
       cameraView: {
+        frameId: 'tau:root',
         target: [3, 4, 5],
         direction: [1, 0, 0],
         up: [0, 0, 1],
         verticalSpan: 12,
         perspectiveZoom: 1,
       },
-      pinnedMeasurements: [{ id: 'measurement-1', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
+      pinnedMeasurements: [
+        { id: 'measurement-1', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 },
+      ],
     });
 
     expect(inherited.cameraFovAngle).toBe(42);

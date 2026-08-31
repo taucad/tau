@@ -17,7 +17,7 @@ describe('publishMachine', () => {
   it('should transition idle → collectingFiles → uploading → success when API returns 200', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
-        JSON.stringify({ id: 'pub_ok', urls: { share: 'https://app/v/pub_ok', view: 'https://app/v/pub_ok' } }),
+        JSON.stringify({ id: 'pub_ok', urls: { share: 'https://app/s/tau~pub_ok', view: 'https://app/s/tau~pub_ok' } }),
         {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -47,7 +47,7 @@ describe('publishMachine', () => {
     actor.send({ type: 'publish', visibility: 'private', title: 'Hello' });
 
     await waitFor(actor, (s) => s.matches('success'));
-    expect(actor.getSnapshot().context.shareUrl).toBe('https://app/v/pub_ok');
+    expect(actor.getSnapshot().context.shareUrl).toBe('https://app/s/tau~pub_ok');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     actor.stop();
   });
@@ -57,7 +57,7 @@ describe('publishMachine', () => {
       new Response(
         JSON.stringify({
           id: 'pub_shared',
-          urls: { share: 'https://app/v/pub_shared', view: 'https://app/v/pub_shared' },
+          urls: { share: 'https://app/s/tau~pub_shared', view: 'https://app/s/tau~pub_shared' },
         }),
         {
           status: 200,
@@ -96,7 +96,11 @@ describe('publishMachine', () => {
     const requestInit = fetchSpy.mock.calls[0]?.[1];
     const formData = requestInit?.body;
     expect(formData).toBeInstanceOf(FormData);
-    const manifest = JSON.parse(String((formData as FormData).get('manifest'))) as { sharedEmails?: string[] };
+    const manifestEntry = (formData as FormData).get('manifest');
+    if (typeof manifestEntry !== 'string') {
+      throw new TypeError('Expected a string publication manifest');
+    }
+    const manifest = JSON.parse(manifestEntry) as { sharedEmails?: string[] };
     expect(manifest.sharedEmails).toEqual(['friend@example.com', 'team@example.com']);
     actor.stop();
   });
@@ -328,7 +332,10 @@ describe('publishMachine', () => {
   it('should retain shareUrl on success until reset', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
-        JSON.stringify({ id: 'pub_keep', urls: { share: 'https://app/v/pub_keep', view: 'https://app/v/pub_keep' } }),
+        JSON.stringify({
+          id: 'pub_keep',
+          urls: { share: 'https://app/s/tau~pub_keep', view: 'https://app/s/tau~pub_keep' },
+        }),
         {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -357,7 +364,7 @@ describe('publishMachine', () => {
     actor.start();
     actor.send({ type: 'publish', visibility: 'private', title: 'Hello' });
     await waitFor(actor, (s) => s.matches('success'));
-    expect(actor.getSnapshot().context.shareUrl).toBe('https://app/v/pub_keep');
+    expect(actor.getSnapshot().context.shareUrl).toBe('https://app/s/tau~pub_keep');
 
     actor.send({ type: 'reset' });
     await waitFor(actor, (s) => s.matches('idle'));

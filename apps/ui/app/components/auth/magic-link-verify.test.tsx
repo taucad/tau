@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+// oxlint-disable-next-line import/no-unassigned-import -- installs Vitest DOM matchers.
 import '@testing-library/jest-dom/vitest';
 import { act, render, screen } from '@testing-library/react';
 import type React from 'react';
@@ -59,12 +60,12 @@ describe('MagicLinkVerify', () => {
   it('verifies the token and redirects to a sanitized app path', async () => {
     authMocks.verifyMagicLink.mockResolvedValue({ data: {}, error: null });
 
-    renderMagicLinkVerify('/auth/magic-link/verify?token=abc&redirectTo=%2Fv%2Fpub_123');
+    renderMagicLinkVerify('/auth/magic-link/verify?token=abc&redirectTo=%2Fs%2Ftau%7Epub_123');
 
     await flushAsyncEffects();
 
     expect(authMocks.verifyMagicLink).toHaveBeenCalledWith({
-      query: { token: 'abc', callbackURL: '/v/pub_123' },
+      query: { token: 'abc', callbackURL: '/s/tau~pub_123' },
     });
     expect(screen.getByText('Magic link verified')).toBeInTheDocument();
 
@@ -72,7 +73,7 @@ describe('MagicLinkVerify', () => {
       vi.advanceTimersByTime(900);
     });
 
-    expect(authMocks.navigate).toHaveBeenCalledWith({ to: '/v/pub_123', replace: true });
+    expect(authMocks.navigate).toHaveBeenCalledWith({ to: '/s/tau~pub_123', replace: true });
   });
 
   it('falls back to home when redirectTo is external', async () => {
@@ -98,7 +99,7 @@ describe('MagicLinkVerify', () => {
   it('shows a recovery state when verification fails', async () => {
     authMocks.verifyMagicLink.mockResolvedValue({ data: null, error: { message: 'expired' } });
 
-    renderMagicLinkVerify('/auth/magic-link/verify?token=abc&redirectTo=%2Fv%2Fpub_123');
+    renderMagicLinkVerify('/auth/magic-link/verify?token=abc&redirectTo=%2Fs%2Ftau%7Epub_123');
 
     await flushAsyncEffects();
 

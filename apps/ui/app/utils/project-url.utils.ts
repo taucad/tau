@@ -73,6 +73,3 @@ export const projectSlugsOf = (locator: ProjectLocator, workspaces: readonly Wor
   const workspaceSlug = workspaceSlugOf(locator, workspaces);
   return workspaceSlug === undefined ? undefined : { workspaceSlug, projectSlug: projectSlugOf(locator) };
 };
-
-/** Static community/sample project preview (blueprint D4 examples namespace). */
-export const exampleUrl = (exampleId: string): string => `/examples/${encodeURIComponent(exampleId)}`;

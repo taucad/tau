@@ -20,8 +20,7 @@ function buildTreeFromFiles(files: FileInfo[]): TreeViewElement[] {
   const folderMap = new Map<string, TreeViewElement>();
 
   for (const file of files) {
-    // Remove leading slash and split into parts
-    const parts = file.path.replace(/^\//, '').split('/');
+    const parts = file.path.split('/');
     let currentLevel = root;
     let currentPath = '';
 

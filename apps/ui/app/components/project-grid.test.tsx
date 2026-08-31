@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectsWithFiles } from '#constants/project-examples.js';
+import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import { TooltipProvider } from '#components/ui/tooltip.js';
 
@@ -53,9 +53,12 @@ vi.mock('#components/cad-preview.js', () => ({
 const mainFile = 'main.ts';
 const files = {
   [mainFile]: { content: new TextEncoder().encode('export default {};') },
+  'tau.json': { content: new TextEncoder().encode('{"name":"Community Demo"}') },
 };
 
-const project: ProjectsWithFiles = {
+const project: BuiltinProjectCardModel = {
+  locator: 'replicad.community-demo',
+  kernel: 'replicad',
   id: 'community-project',
   name: 'Community Demo',
   description: 'Description retained for Remix payload only',
@@ -64,7 +67,10 @@ const project: ProjectsWithFiles = {
   thumbnail: '/thumbnail.png',
   createdAt: 1,
   assets: { main: { entryPath: mainFile } },
-  files,
+  fileAssets: [
+    { path: mainFile, load: async () => files[mainFile].content },
+    { path: 'tau.json', load: async () => files['tau.json'].content },
+  ],
 };
 
 function LocationProbe(): React.JSX.Element {
@@ -86,6 +92,14 @@ function renderGrid(): void {
 describe('CommunityProjectGrid', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const path = url.endsWith('tau.json') ? 'tau.json' : mainFile;
+        return new Response(files[path].content);
+      }),
+    );
     presentLocationErrorMock.mockReturnValue(false);
     createProjectMock.mockResolvedValue({
       id: 'remixed-project',
@@ -98,7 +112,7 @@ describe('CommunityProjectGrid', () => {
 
     expect(screen.getAllByRole('link')).toHaveLength(1);
     const cardLink = screen.getByRole('link', { name: 'Preview Community Demo' });
-    expect(cardLink).toHaveAttribute('href', '/examples/community-project');
+    expect(cardLink).toHaveAttribute('href', '/s/builtin~replicad.community-demo');
     expect(cardLink.parentElement).toHaveClass('hover:border-primary/60');
     expect(screen.getByText('Community Demo')).toBeInTheDocument();
     expect(screen.getByText('Tau Team')).toBeInTheDocument();
@@ -113,10 +127,10 @@ describe('CommunityProjectGrid', () => {
     expect(screen.queryByTestId('cad-preview-provider')).not.toBeInTheDocument();
 
     await userEvent.click(previewToggle);
-    const provider = screen.getByTestId('cad-preview-provider');
+    const provider = await screen.findByTestId('cad-preview-provider');
     expect(provider).toHaveAttribute('data-project-id', 'community-project');
     expect(provider).toHaveAttribute('data-main-file', 'main.ts');
-    expect(provider).toHaveAttribute('data-file-count', '1');
+    expect(provider).toHaveAttribute('data-file-count', '2');
     expect(screen.getByTestId('location')).toHaveTextContent('/community');
 
     await userEvent.click(previewToggle);

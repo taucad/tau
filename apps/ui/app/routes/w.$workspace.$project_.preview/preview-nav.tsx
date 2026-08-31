@@ -47,10 +47,10 @@ export function PreviewNav({ className }: PreviewNavProps): React.JSX.Element {
           className={cn(
             'flex flex-col items-center justify-center gap-0.5 pb-0.5 text-[10px]',
             'rounded-lg border border-transparent transition-[color,background-color,border-color] duration-200 ease-linear',
-            'data-[state=active]:text-primary',
-            'data-[state=active]:bg-primary/20',
-            'data-[state=active]:border-primary/50',
-            'data-[state=active]:[&_svg]:text-primary',
+            'data-[state=active]:border-border',
+            'data-[state=active]:bg-accent',
+            'data-[state=active]:text-accent-foreground',
+            'data-[state=active]:[&_svg]:text-accent-foreground',
             tab.id === 'model' && 'border-sidebar-primary/20 data-[state=inactive]:bg-neutral/20',
           )}
         >

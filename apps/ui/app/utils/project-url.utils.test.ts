@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { Workspace } from '#filesystem/handle-store.js';
 import {
-  exampleUrl,
   projectChatIdFromSearch,
   projectChatUrl,
   projectPreviewUrl,
@@ -69,9 +68,5 @@ describe('project URL grammar', () => {
 
   it('has no slugs when the owning workspace row is unknown', () => {
     expect(projectSlugsOf(webaccessLocator, [])).toBeUndefined();
-  });
-
-  it('namespaces static examples away from the project id space', () => {
-    expect(exampleUrl('proj_hollow_box')).toBe('/examples/proj_hollow_box');
   });
 });

@@ -58,7 +58,7 @@ function FileSystemInfo({
   );
 }
 
-export function DetailsPanelBody(): React.JSX.Element {
+export function DetailsPanelBody({ readOnly = false }: { readonly readOnly?: boolean } = {}): React.JSX.Element {
   const { projectRef, updateName, updateDescription, updateTags } = useProject();
 
   const projectName = useSelector(projectRef, (state) => state.context.project?.name ?? '');
@@ -98,6 +98,7 @@ export function DetailsPanelBody(): React.JSX.Element {
                 <Input
                   id='project-name'
                   value={projectName}
+                  disabled={readOnly}
                   placeholder='Enter your project name...'
                   onChange={(event) => {
                     updateName(event.target.value);
@@ -112,6 +113,7 @@ export function DetailsPanelBody(): React.JSX.Element {
                 <Textarea
                   id='project-description'
                   value={projectDescription}
+                  disabled={readOnly}
                   placeholder="Describe what you're building..."
                   className='min-h-20'
                   onChange={(event) => {
@@ -122,9 +124,13 @@ export function DetailsPanelBody(): React.JSX.Element {
 
               <div className='space-y-2'>
                 <label className='text-sm font-medium text-foreground'>Tags</label>
-                <Tags tags={projectTags} onTagsChange={handleTagsChange}>
-                  <TagsTrigger placeholder='Add tags...' />
-                </Tags>
+                {readOnly ? (
+                  <p className='text-sm text-muted-foreground'>{projectTags.join(', ') || 'No tags'}</p>
+                ) : (
+                  <Tags tags={projectTags} onTagsChange={handleTagsChange}>
+                    <TagsTrigger placeholder='Add tags...' />
+                  </Tags>
+                )}
               </div>
 
               <div className='space-y-2'>
@@ -135,6 +141,7 @@ export function DetailsPanelBody(): React.JSX.Element {
                   title='Select Main File'
                   description='Choose the main file for your project'
                   emptyMessage='No files available'
+                  isDisabled={readOnly}
                   onSelect={handleMainFileChange}
                 />
               </div>
@@ -142,7 +149,7 @@ export function DetailsPanelBody(): React.JSX.Element {
           </section>
 
           <FileSystemInfo backendType={backendType} activeWorkspaceName={activeWorkspaceName} />
-          <ChatDetailsUsage />
+          {readOnly ? null : <ChatDetailsUsage />}
         </div>
       </div>
     </div>

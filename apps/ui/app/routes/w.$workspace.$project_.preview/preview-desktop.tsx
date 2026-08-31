@@ -10,8 +10,6 @@ import { downloadBlob } from '@taucad/utils/file';
 import { toast } from '#components/ui/sonner.js';
 import { cn } from '#utils/ui.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 import { CadPreviewViewer, CadPreviewStatus } from '#components/cad-preview.js';
 import { usePreviewProject } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
@@ -20,23 +18,19 @@ import { PreviewCodeActions } from '#routes/w.$workspace.$project_.preview/previ
 import { PreviewFiles } from '#routes/w.$workspace.$project_.preview/preview-files.js';
 import { PreviewParameters } from '#routes/w.$workspace.$project_.preview/preview-parameters.js';
 import { usePreviewFileList } from '#routes/w.$workspace.$project_.preview/use-preview-file-list.js';
-import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectUrl } from '#hooks/use-project-slug-route.js';
 
 export const PreviewDesktop = memo(function (): React.JSX.Element {
   const navigate = useNavigate();
-  const { project, isStaticProject, staticProjectFiles } = usePreviewProject();
+  const { project } = usePreviewProject();
   const { geometry, jsonSchema, cadRef } = useCadPreview();
   const fileManager = useFileManager();
-  const projectManager = useProjectManager();
-  const presentLocationError = useProjectCreationLocationError();
   const files = usePreviewFileList();
 
   const hasParameters = Boolean(jsonSchema);
   // "Edit online" on an owned project's preview goes to its canonical editor URL.
   const editorUrl = useProjectUrl(project?.id);
 
-  const [isCloning, setIsCloning] = useState(false);
   const [activeTab, setActiveTab] = useState('3d');
   const [showParameters, setShowParameters] = useState(true);
 
@@ -61,47 +55,9 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
     );
   }, [project, fileManager]);
 
-  const handleEditOnline = useCallback(async () => {
-    if (!isStaticProject || !staticProjectFiles || !project) {
-      void navigate(editorUrl);
-      return;
-    }
-
-    if (isCloning) {
-      return;
-    }
-
-    setIsCloning(true);
-
-    try {
-      const createProject = await projectManager.createProject({
-        project: {
-          name: `${project.name} (Remixed)`,
-          description: project.description,
-          tags: [...project.tags],
-          assets: project.assets,
-        },
-        files: staticProjectFiles,
-      });
-
-      await navigate(projectUrl(createProject.slugs));
-    } catch (error) {
-      console.error('Failed to remix project:', error);
-      if (!presentLocationError(error)) {
-        toast.error('Failed to remix project');
-      }
-      setIsCloning(false);
-    }
-  }, [
-    isStaticProject,
-    staticProjectFiles,
-    project,
-    isCloning,
-    editorUrl,
-    projectManager,
-    navigate,
-    presentLocationError,
-  ]);
+  const handleEditOnline = useCallback(() => {
+    void navigate(editorUrl);
+  }, [editorUrl, navigate]);
 
   const toggleParameters = useCallback(() => {
     setShowParameters((previous) => !previous);
@@ -133,13 +89,8 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
           </div>
         </div>
         <div className='flex items-center gap-2'>
-          <PreviewCodeActions
-            isStaticProject={isStaticProject}
-            isCloning={isCloning}
-            onRemix={handleEditOnline}
-            onDownloadZip={handleDownloadZip}
-          />
-          {isStaticProject ? null : <ProjectSettingsDialog />}
+          <PreviewCodeActions onEdit={handleEditOnline} onDownloadZip={handleDownloadZip} />
+          <ProjectSettingsDialog />
         </div>
       </div>
 

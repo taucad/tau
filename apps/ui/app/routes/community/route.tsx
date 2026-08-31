@@ -5,7 +5,6 @@ import type { KernelProvider } from '@taucad/runtime';
 import { kernelProviders } from '@taucad/types/constants';
 import { Button } from '#components/ui/button.js';
 import { SearchInput } from '#components/search-input.js';
-import { getFileExtension } from '#utils/filesystem.utils.js';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,8 +45,7 @@ export default function CadCommunity(): React.JSX.Element {
       project.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       project.tags.some((tag) => tag.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const matchesKernel =
-      selectedKernel === 'all' || getFileExtension(project.assets.main.entryPath) === selectedKernel;
+    const matchesKernel = selectedKernel === 'all' || project.kernel === selectedKernel;
 
     return matchesSearch && matchesKernel;
   });

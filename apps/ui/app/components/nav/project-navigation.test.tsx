@@ -10,6 +10,7 @@ const mockSetProjectDisclosure = vi.fn();
 const mockNavigate = vi.fn();
 const mockInvalidateQueries = vi.fn();
 let pathname = '/';
+let search = '';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-projects.js', () => ({
@@ -46,7 +47,7 @@ vi.mock('react-router', () => ({
       {children}
     </a>
   ),
-  useLocation: () => ({ pathname }),
+  useLocation: () => ({ pathname, search }),
   useNavigate: () => mockNavigate,
   useNavigation: () => ({ location: pendingLocation, state: pendingLocation ? 'loading' : 'idle' }),
 }));
@@ -91,13 +92,17 @@ vi.mock('#components/ui/tooltip.js', () => ({
   TooltipTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   TooltipContent: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
 }));
+type DropdownMenuItemMockProps = Pick<React.ButtonHTMLAttributes<HTMLButtonElement>, 'disabled'> & {
+  readonly children: ReactNode;
+  readonly onSelect?: () => void;
+};
 vi.mock('#components/ui/dropdown-menu.js', () => ({
   DropdownMenu: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   DropdownMenuContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
-  DropdownMenuItem: ({ children, onSelect }: { readonly children: ReactNode; readonly onSelect?: () => void }) => (
-    <button type='button' onClick={onSelect}>
+  DropdownMenuItem: ({ children, disabled: isDisabled, onSelect }: DropdownMenuItemMockProps) => (
+    <button type='button' disabled={isDisabled} onClick={onSelect}>
       {children}
     </button>
   ),
@@ -107,7 +112,6 @@ vi.mock('#components/inline-text-editor.js', () => ({
     <input aria-label={`Rename ${value}`} value={value} readOnly />
   ),
 }));
-vi.mock('#components/publish/project-share-dialog.js', () => ({ ProjectShareDialog: () => null }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: { success: vi.fn() } }));
 
 const firstProject = {
@@ -142,6 +146,7 @@ describe('ProjectNavigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     pathname = '/';
+    search = '';
     pendingLocation = undefined;
     mockUseProjects.mockReturnValue(projectsResult);
     mockIsProjectExpanded.mockImplementation((_projectId: string, active: boolean) => active);
@@ -213,5 +218,35 @@ describe('ProjectNavigation', () => {
       expect(mockCreateChat).toHaveBeenCalledWith('proj_two', { name: 'New chat', messages: [] });
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?chat=chat%2Ftwo');
     });
+  });
+
+  it('opens Share for the active project without discarding its chat', () => {
+    pathname = '/w/home/one';
+    search = '?chat=chat_1&keep=1';
+    render(<ProjectNavigation />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[1]!);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/w/home/one?chat=chat_1&keep=1&workbench=share');
+  });
+
+  it('opens Share for another project without carrying the active project chat', () => {
+    pathname = '/w/home/one';
+    search = '?chat=chat_1';
+    render(<ProjectNavigation />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Share project' })[0]!);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/w/home/Two%20space?workbench=share');
+  });
+
+  it('disables Share while a project has no canonical slugs', () => {
+    mockUseProjects.mockReturnValue({
+      ...projectsResult,
+      projects: [{ ...firstProject, slugs: undefined }],
+    });
+    render(<ProjectNavigation />);
+
+    expect(screen.getByRole('button', { name: 'Share project' })).toBeDisabled();
   });
 });

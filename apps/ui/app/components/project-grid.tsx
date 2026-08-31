@@ -1,5 +1,5 @@
 import { ArrowRight } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
@@ -9,14 +9,16 @@ import { Loader } from '#components/ui/loader.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
-import type { ProjectsWithFiles } from '#constants/project-examples.js';
+import type { BuiltinProjectCardModel, ProjectFiles } from '#constants/project-examples.js';
+import { loadBuiltinProjectFiles } from '#constants/project-examples.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
-import { exampleUrl, projectUrl } from '#utils/project-url.utils.js';
+import { projectUrl } from '#utils/project-url.utils.js';
+import { formatSharePath } from '@taucad/share/locator';
 
 export const communityGridClassName = 'grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5';
 
 export type CommunityProjectGridProperties = {
-  readonly projects: ProjectsWithFiles[];
+  readonly projects: readonly BuiltinProjectCardModel[];
   readonly hasMore?: boolean;
   readonly onLoadMore?: () => void;
   readonly limit?: number;
@@ -49,25 +51,26 @@ export function CommunityProjectGrid({
   );
 }
 
-function CommunityProjectCard({
-  id,
-  name,
-  description,
-  thumbnail,
-  author,
-  tags,
-  assets,
-  files,
-}: ProjectsWithFiles): React.JSX.Element {
+function CommunityProjectCard(project: BuiltinProjectCardModel): React.JSX.Element {
+  const { id, name, description, thumbnail, author, tags, assets, locator } = project;
   const [activated, setActivated] = useState(false);
   const [visible, setVisible] = useState(false);
   const [isForking, setIsForking] = useState(false);
+  const [files, setFiles] = useState<ProjectFiles>();
+  const filesPromise = useRef<Promise<ProjectFiles> | undefined>(undefined);
   const projectManager = useProjectManager();
   const presentLocationError = useProjectCreationLocationError();
   const navigate = useNavigate();
 
   const thumbnailSource = thumbnail;
   const mainFile = assets.main.entryPath;
+
+  const ensureFiles = useCallback(async (): Promise<ProjectFiles> => {
+    filesPromise.current ??= loadBuiltinProjectFiles({ project });
+    const loaded = await filesPromise.current;
+    setFiles(loaded);
+    return loaded;
+  }, [project]);
 
   const handleFork = useCallback(async () => {
     if (isForking) {
@@ -77,36 +80,47 @@ function CommunityProjectCard({
     setIsForking(true);
 
     try {
+      const projectFiles = await ensureFiles();
       const createProject = await projectManager.createProject({
         project: {
           name: `${name} (Remixed)`,
           description,
-          tags,
+          tags: [...tags],
           assets,
         },
-        files,
+        files: projectFiles,
       });
       await navigate(projectUrl(createProject.slugs));
     } catch (error) {
       presentLocationError(error);
       setIsForking(false);
     }
-  }, [isForking, name, description, tags, assets, projectManager, files, navigate, presentLocationError]);
+  }, [isForking, name, description, tags, assets, projectManager, ensureFiles, navigate, presentLocationError]);
 
-  const handlePreviewVisibilityChange = useCallback((isVisible: boolean) => {
-    setActivated(true);
-    setVisible(isVisible);
-  }, []);
+  const handlePreviewVisibilityChange = useCallback(
+    (isVisible: boolean) => {
+      setActivated(true);
+      setVisible(isVisible);
+      if (isVisible) {
+        void ensureFiles();
+      }
+    },
+    [ensureFiles],
+  );
 
   return (
-    <ProjectCard to={exampleUrl(id)} linkLabel={`Preview ${name}`} className='flex flex-col pb-0'>
+    <ProjectCard
+      to={formatSharePath({ providerId: 'builtin', reference: locator })}
+      linkLabel={`Preview ${name}`}
+      className='flex flex-col pb-0'
+    >
       <ProjectCardMedia
         name={name}
         thumbnailSource={thumbnailSource}
         isPreviewVisible={visible}
         onPreviewVisibilityChange={handlePreviewVisibilityChange}
       >
-        {activated ? (
+        {activated && files ? (
           <CadPreviewProvider projectId={id} mainFile={mainFile} files={files}>
             <ProjectCardCadPreview />
           </CadPreviewProvider>

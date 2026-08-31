@@ -193,6 +193,21 @@ describe('/w/{workspace}/{project}', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/w/tau-workspace/cube-design?chat=chat_resolved');
   });
 
+  it('preserves Share and OAuth return intent while resolving the focused chat', async () => {
+    renderAt(
+      '/w/tau-workspace/cube-design?chat=missing&workbench=share&shareAuth=github-gist&shareProvider=github-gist',
+    );
+    await screen.findByTestId('project-route');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve chat' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent(
+        '/w/tau-workspace/cube-design?chat=chat_resolved&workbench=share&shareAuth=github-gist&shareProvider=github-gist',
+      );
+    });
+  });
+
   it.each([
     ['/w/wsp_live/proj_aaaaaaaaaaaaaaaaaaaaa', '/w/tau-workspace/cube-design'],
     ['/w/tau-workspace/proj_aaaaaaaaaaaaaaaaaaaaa', '/w/tau-workspace/cube-design'],

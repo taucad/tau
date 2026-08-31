@@ -24,7 +24,16 @@ export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
 export const defaultRenderTimeout = 60_000;
 
 /** Existing mobile drawer surfaces; desktop utilities are Workbench tabs. */
-export const mobilePanelIds = ['chat', 'files', 'viewer', 'parameters', 'editor', 'converter', 'details'] as const;
+export const mobilePanelIds = [
+  'chat',
+  'files',
+  'viewer',
+  'parameters',
+  'editor',
+  'converter',
+  'details',
+  'share',
+] as const;
 
 // ============================================================================
 // Graphics View Settings

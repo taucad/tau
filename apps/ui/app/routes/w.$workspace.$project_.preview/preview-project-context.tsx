@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 
-/** Project metadata shared by portable manifests and built-in examples. */
+/** Project metadata loaded from the owned project authority. */
 export type PreviewProjectMetadata = {
   readonly id: string;
   readonly name: string;
@@ -12,7 +12,7 @@ export type PreviewProjectMetadata = {
 
 /**
  * Context for project metadata in the preview route.
- * Populated from the static project object (for sample projects) or loaded from storage (for dynamic projects).
+ * Populated from project storage.
  *
  * Extracted to a separate file to avoid module identity issues with React Router's
  * route module loading system, which can cause `createContext()` objects defined in
@@ -20,8 +20,6 @@ export type PreviewProjectMetadata = {
  */
 export type PreviewProjectContextValue = {
   project: PreviewProjectMetadata | undefined;
-  isStaticProject: boolean;
-  staticProjectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> | undefined;
   updateName: (name: string) => void;
   updateDescription: (description: string) => void;
 };

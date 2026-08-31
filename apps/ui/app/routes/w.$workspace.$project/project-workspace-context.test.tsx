@@ -74,6 +74,24 @@ describe('ProjectWorkspaceProvider', () => {
     expect(opener).toHaveBeenCalledExactlyOnceWith('files');
   });
 
+  it('opens Share in the desktop Workbench', () => {
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    const opener = vi.fn();
+    act(() => {
+      workspace.connectWorkbench(opener);
+      workspace.openPanel('share');
+    });
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { desktopLayout: { workbenchOpen: true, compactAuxiliary: 'workbench' } },
+    });
+    expect(opener).toHaveBeenCalledExactlyOnceWith('share');
+  });
+
   it('keeps only the latest queued utility request before the Workbench connects', () => {
     render(
       <ProjectWorkspaceProvider>
@@ -108,6 +126,14 @@ describe('ProjectWorkspaceProvider', () => {
     expect(send).toHaveBeenCalledExactlyOnceWith({
       type: 'setPanelState',
       panelState: { mobileActiveTab: 'converter' },
+    });
+
+    act(() => {
+      workspace.openPanel('share');
+    });
+    expect(send).toHaveBeenLastCalledWith({
+      type: 'setPanelState',
+      panelState: { mobileActiveTab: 'share' },
     });
   });
 

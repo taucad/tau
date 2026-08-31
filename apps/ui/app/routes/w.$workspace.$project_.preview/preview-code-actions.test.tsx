@@ -39,22 +39,9 @@ beforeEach(() => {
 });
 
 describe('PreviewCodeActions', () => {
-  it('should render a standalone Remix button when isStaticProject is true', () => {
+  it('renders the owned-project Edit action', () => {
     try {
-      render(<PreviewCodeActions isStaticProject isCloning={false} onRemix={vi.fn()} onDownloadZip={vi.fn()} />);
-
-      expect(screen.getByRole('button', { name: 'Remix' })).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
-    } finally {
-      cleanup();
-    }
-  });
-
-  it('should render an Edit label when isStaticProject is false', () => {
-    try {
-      render(
-        <PreviewCodeActions isStaticProject={false} isCloning={false} onRemix={vi.fn()} onDownloadZip={vi.fn()} />,
-      );
+      render(<PreviewCodeActions onEdit={vi.fn()} onDownloadZip={vi.fn()} />);
 
       expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Remix' })).toBeNull();
@@ -63,26 +50,14 @@ describe('PreviewCodeActions', () => {
     }
   });
 
-  it('should render Remixing... and disable the primary button while cloning', () => {
+  it('calls onEdit when the primary button is clicked', () => {
+    const onEdit = vi.fn();
     try {
-      render(<PreviewCodeActions isStaticProject isCloning onRemix={vi.fn()} onDownloadZip={vi.fn()} />);
+      render(<PreviewCodeActions onEdit={onEdit} onDownloadZip={vi.fn()} />);
 
-      const button = screen.getByRole('button', { name: 'Remixing...' });
-      expect(button).toBeInTheDocument();
-      expect(button).toBeDisabled();
-    } finally {
-      cleanup();
-    }
-  });
+      fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
 
-  it('should call onRemix when the primary button is clicked', () => {
-    const onRemix = vi.fn();
-    try {
-      render(<PreviewCodeActions isStaticProject isCloning={false} onRemix={onRemix} onDownloadZip={vi.fn()} />);
-
-      fireEvent.click(screen.getByRole('button', { name: 'Remix' }));
-
-      expect(onRemix).toHaveBeenCalledTimes(1);
+      expect(onEdit).toHaveBeenCalledTimes(1);
     } finally {
       cleanup();
     }
@@ -90,7 +65,7 @@ describe('PreviewCodeActions', () => {
 
   it('should expose Download ZIP through the icon menu rather than as a top-level button', () => {
     try {
-      render(<PreviewCodeActions isStaticProject isCloning={false} onRemix={vi.fn()} onDownloadZip={vi.fn()} />);
+      render(<PreviewCodeActions onEdit={vi.fn()} onDownloadZip={vi.fn()} />);
 
       const downloadItem = screen.getByRole('menuitem', { name: /download zip/i });
       expect(downloadItem).toBeInTheDocument();
@@ -103,7 +78,7 @@ describe('PreviewCodeActions', () => {
   it('should call onDownloadZip when the Download ZIP menu item is clicked', () => {
     const onDownloadZip = vi.fn();
     try {
-      render(<PreviewCodeActions isStaticProject isCloning={false} onRemix={vi.fn()} onDownloadZip={onDownloadZip} />);
+      render(<PreviewCodeActions onEdit={vi.fn()} onDownloadZip={onDownloadZip} />);
 
       fireEvent.click(screen.getByRole('menuitem', { name: /download zip/i }));
 

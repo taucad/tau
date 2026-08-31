@@ -27,7 +27,6 @@ import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { useProjectShare } from '#routes/w.$workspace.$project/project-share-action.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages } from '#services/headless-capture.js';
@@ -37,7 +36,6 @@ import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
   const { projectRef, geometryUnits, mainEntryPath } = useProject();
   const { openPanel } = useProjectWorkspace();
-  const { openShare } = useProjectShare();
   const isTauDebugEnabled = useFeature('tauDebug');
   const mainGraphicsRef = useMainGraphics();
   const { regenerate: regenerateThumbnail } = useThumbnailGenerator();
@@ -95,12 +93,11 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
       graphicsRef: mainGraphicsRef,
       cameraState: getGraphicsCameraState(mainGraphicsRef),
       imageService,
-      fileSystem: fileManager.runtimeFileSystem,
       recipe: { purpose: 'utility', mode: 'current' },
     });
     const file = files[0]!;
     return new Blob([file.bytes], { type: file.mimeType });
-  }, [fileManager.runtimeFileSystem, imageService, mainCadRef, mainGraphicsRef]);
+  }, [imageService, mainCadRef, mainGraphicsRef]);
 
   const handleDownloadPng = useCallback(
     async (filename: string) => {
@@ -153,7 +150,9 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
         label: 'Share project',
         group: 'Project',
         icon: <Share2 />,
-        action: openShare,
+        action: () => {
+          openPanel('share');
+        },
       },
       {
         id: 'open-parameters',
@@ -271,7 +270,6 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
     ],
     [
       handleUpdateThumbnail,
-      openShare,
       openPanel,
       isTauDebugEnabled,
       mainCadRef,

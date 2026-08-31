@@ -50,7 +50,7 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/v/pub_panel'
+        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[
           {
@@ -76,7 +76,7 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/v/pub_panel'
+        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[
           {
@@ -104,7 +104,7 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/v/pub_panel'
+        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[]}
         onVisibilityChange={vi.fn()}
@@ -132,7 +132,7 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/v/pub_panel'
+        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='private'
         grants={[
           {
@@ -166,7 +166,7 @@ describe('PublicationAccessPanel', () => {
       <PublicationAccessPanel
         apiBaseUrl='https://api.example'
         publicationId='pub_panel'
-        shareUrl='https://tau.example/v/pub_panel'
+        shareUrl='https://tau.example/s/tau~pub_panel'
         visibility='public'
         grants={[
           {

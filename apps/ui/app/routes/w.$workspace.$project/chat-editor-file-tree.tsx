@@ -310,25 +310,27 @@ export const ChatEditorFileTree = memo(function ({
     // machine intents. UI components must NOT dispatch
     // renameFile/closeFile in response to filesystem mutations — the
     // participant does it once, centrally.
-    const participantDispose = contentService
-      ? mountFileOperationParticipants({ contentService, editorRef, projectRef })
-      : undefined;
+    const participantDispose =
+      contentService && !readOnly
+        ? mountFileOperationParticipants({ contentService, editorRef, projectRef })
+        : undefined;
 
     return () => {
       fileOpenedSub.unsubscribe();
       participantDispose?.();
     };
-  }, [projectRef, editorRef, contentService, readFile]);
+  }, [projectRef, editorRef, contentService, readFile, readOnly]);
 
   const requestOpenFile = useCallback(
-    (path: string, readOnly?: boolean) => {
+    (path: string, fileReadOnly?: boolean) => {
+      const shouldReadOnly = readOnly || fileReadOnly;
       if (onOpenFile) {
-        onOpenFile(path, readOnly);
+        onOpenFile(path, shouldReadOnly || undefined);
         return;
       }
-      editorRef.send({ type: 'openFile', path, source: 'user', readOnly });
+      editorRef.send({ type: 'openFile', path, source: 'user', readOnly: shouldReadOnly || undefined });
     },
-    [editorRef, onOpenFile],
+    [editorRef, onOpenFile, readOnly],
   );
 
   const { treeService } = fileManager;
@@ -647,6 +649,9 @@ export const ChatEditorFileTree = memo(function ({
 
   const handleRename = useCallback(
     async (item: ItemInstance<TreeItemData>, newName: string): Promise<void> => {
+      if (readOnly) {
+        return;
+      }
       const oldPath = item.getId();
       if (oldPath === rootId || isBundledTypesWorkspacePath(oldPath)) {
         return;
@@ -677,7 +682,7 @@ export const ChatEditorFileTree = memo(function ({
         toast.error(`Rename failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     },
-    [canRename, renameFile, surfacePreflightError],
+    [canRename, readOnly, renameFile, surfacePreflightError],
   );
 
   // Initialize headless-tree
@@ -699,9 +704,12 @@ export const ChatEditorFileTree = memo(function ({
         setFocusedItem(value ?? undefined);
       }
     },
-    canReorder: true,
+    canReorder: !readOnly,
     indent: 16,
     async onDrop(draggedItems, target) {
+      if (readOnly) {
+        return;
+      }
       // Handle drag-and-drop by moving items into the target folder.
       // Preflight and then execute truthful sequential moves:
       //   1. Compute the (source → target) edit set, skipping bundled-types and no-ops.
@@ -752,25 +760,26 @@ export const ChatEditorFileTree = memo(function ({
       }
     },
     onRename(item, newName) {
-      void handleRename(item, newName);
+      if (!readOnly) {
+        void handleRename(item, newName);
+      }
     },
     onPrimaryAction(item) {
       if (!item.isFolder()) {
         const path = item.getId();
-        const readOnly = isBundledTypesWorkspacePath(path);
-        requestOpenFile(path, readOnly);
+        requestOpenFile(path, readOnly || isBundledTypesWorkspacePath(path));
       }
     },
     hotkeys: {
       startDrag: {
         hotkey: keyboardDragStartHotkey,
         preventDefault: true,
-        isEnabled: (treeInstance) => !treeInstance.getState().dnd,
+        isEnabled: (treeInstance) => !readOnly && !treeInstance.getState().dnd,
       },
       customStartDragRightShift: {
         hotkey: keyboardDragStartRightShiftHotkey,
         preventDefault: true,
-        isEnabled: (treeInstance) => !treeInstance.getState().dnd,
+        isEnabled: (treeInstance) => !readOnly && !treeInstance.getState().dnd,
         handler(_event, treeInstance) {
           startFileTreeKeyboardDrag(treeInstance);
         },
@@ -778,6 +787,9 @@ export const ChatEditorFileTree = memo(function ({
       customDelete: {
         hotkey: 'Delete',
         handler(_event, treeInstance) {
+          if (readOnly) {
+            return;
+          }
           const selected = treeInstance.getSelectedItems();
           if (selected.length > 0) {
             handleDelete(selected);
@@ -808,6 +820,9 @@ export const ChatEditorFileTree = memo(function ({
     // those into zero edits; returning false here lets the tree choose a nearby
     // ancestor target and can accidentally move files out of their folder.
     canDrop(draggedItems, target) {
+      if (readOnly) {
+        return false;
+      }
       const targetPath = target.item.getId();
       const targetDirectory = resolveFileTreeTargetDirectory({
         targetPath,
@@ -834,6 +849,9 @@ export const ChatEditorFileTree = memo(function ({
     },
     // Allow file drops from computer on writable folders, root, or file-parent targets.
     canDropForeignDragObject(dataTransfer, target) {
+      if (readOnly) {
+        return false;
+      }
       const targetId = target.item.getId();
       const targetDirectory = resolveFileTreeTargetDirectory({
         targetPath: targetId,
@@ -851,6 +869,9 @@ export const ChatEditorFileTree = memo(function ({
     },
     // Handle file drops from computer (supports folders with directory structure)
     async onDropForeignDragObject(dataTransfer, target) {
+      if (readOnly) {
+        return;
+      }
       const targetPath = target.item.getId();
       const targetDirectory = resolveFileTreeTargetDirectory({
         targetPath,
@@ -1044,19 +1065,25 @@ export const ChatEditorFileTree = memo(function ({
     setPendingFolder({ parentPath, error: undefined });
   }, [allPaths, focusedItem, selectedItems, tree]);
 
-  const handleDelete = useCallback((items: Array<ItemInstance<TreeItemData>>) => {
-    const candidatePaths = items.map((item) => item.getId()).filter((path) => path !== rootId);
-    const paths = candidatePaths.filter((path) => !isBundledTypesWorkspacePath(path));
-    if (paths.length === 0) {
-      if (candidatePaths.length > 0) {
-        toast.error('This path is read-only.');
+  const handleDelete = useCallback(
+    (items: Array<ItemInstance<TreeItemData>>) => {
+      if (readOnly) {
+        return;
       }
-      return;
-    }
+      const candidatePaths = items.map((item) => item.getId()).filter((path) => path !== rootId);
+      const paths = candidatePaths.filter((path) => !isBundledTypesWorkspacePath(path));
+      if (paths.length === 0) {
+        if (candidatePaths.length > 0) {
+          toast.error('This path is read-only.');
+        }
+        return;
+      }
 
-    setItemsToDelete(paths);
-    setDeleteDialogOpen(true);
-  }, []);
+      setItemsToDelete(paths);
+      setDeleteDialogOpen(true);
+    },
+    [readOnly],
+  );
 
   const runConfirmDelete = useCallback(async (): Promise<void> => {
     const deletedPaths = new Set<string>();
@@ -1395,6 +1422,9 @@ export const ChatEditorFileTree = memo(function ({
 
   const handleForeignDrop = useCallback(
     async ({ path, isFolder, dataTransfer }: ForeignDropTarget): Promise<void> => {
+      if (readOnly) {
+        return;
+      }
       const targetDirectory = resolveFileTreeTargetDirectory({
         targetPath: path,
         getTargetData: (targetPath) => (targetPath === path ? { isFolder } : undefined),
@@ -1421,7 +1451,7 @@ export const ChatEditorFileTree = memo(function ({
 
       await processDroppedEntries(ingestion, targetDirectory);
     },
-    [processDroppedEntries],
+    [processDroppedEntries, readOnly],
   );
 
   const setTreeContainerElement: React.RefCallback<HTMLDivElement> = useCallback(
@@ -1455,7 +1485,9 @@ export const ChatEditorFileTree = memo(function ({
       event.preventDefault();
       event.stopPropagation();
       dataTransfer.dropEffect =
-        isBundledTypesWorkspacePath(target.path) || isBundledTypesWorkspacePath(targetDirectory) ? 'none' : 'copy';
+        readOnly || isBundledTypesWorkspacePath(target.path) || isBundledTypesWorkspacePath(targetDirectory)
+          ? 'none'
+          : 'copy';
     };
 
     const handleDrop = (event: DragEvent): void => {
@@ -1466,7 +1498,9 @@ export const ChatEditorFileTree = memo(function ({
 
       event.preventDefault();
       event.stopPropagation();
-      void handleForeignDrop({ ...getForeignDropTargetFromEvent(event), dataTransfer });
+      if (!readOnly) {
+        void handleForeignDrop({ ...getForeignDropTargetFromEvent(event), dataTransfer });
+      }
     };
 
     container.addEventListener('dragenter', handleDragEnterOrOver, true);
@@ -1477,7 +1511,7 @@ export const ChatEditorFileTree = memo(function ({
       container.removeEventListener('dragover', handleDragEnterOrOver, true);
       container.removeEventListener('drop', handleDrop, true);
     };
-  }, [handleForeignDrop]);
+  }, [handleForeignDrop, readOnly]);
 
   // Get display name for delete dialog
   const deleteItemName = useMemo(() => {
@@ -1740,6 +1774,7 @@ export const ChatEditorFileTree = memo(function ({
                           <div key={itemId}>
                             <TreeItem
                               item={item}
+                              readOnly={readOnly}
                               isActive={activeFilePath === itemId}
                               isOpen={openFiles.some((f) => f.path === itemId)}
                               searchQuery={tree.getState().search ?? ''}
@@ -1817,6 +1852,7 @@ export const ChatEditorFileTree = memo(function ({
 
 type TreeItemProps = {
   readonly item: ItemInstance<TreeItemData>;
+  readonly readOnly?: boolean;
   readonly isActive: boolean;
   readonly isOpen: boolean;
   readonly searchQuery: string;
@@ -1835,6 +1871,7 @@ type TreeItemProps = {
 // oxlint-disable-next-line complexity -- UI rendering with many conditional states
 function TreeItem({
   item,
+  readOnly: parentReadOnly = false,
   isActive,
   isOpen,
   searchQuery,
@@ -1854,7 +1891,7 @@ function TreeItem({
   const isSelected = item.isSelected();
   const isRenaming = item.isRenaming();
   const isFolder = item.isFolder();
-  const readOnly = isBundledTypesWorkspacePath(item.getId());
+  const readOnly = parentReadOnly || isBundledTypesWorkspacePath(item.getId());
   const downloadPolicy = getFileTreeDownloadPolicy(item.getId());
 
   // Rename input - NOT wrapped by ContextMenu to avoid focus interference

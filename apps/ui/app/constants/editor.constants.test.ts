@@ -14,7 +14,16 @@ const coverComponentId = 'component:Cover';
 
 describe('editor constants – panel consistency', () => {
   it('keeps desktop lanes separate from the mobile navigation IDs', () => {
-    expect(mobilePanelIds).toEqual(['chat', 'files', 'viewer', 'parameters', 'editor', 'converter', 'details']);
+    expect(mobilePanelIds).toEqual([
+      'chat',
+      'files',
+      'viewer',
+      'parameters',
+      'editor',
+      'converter',
+      'details',
+      'share',
+    ]);
     expect(defaultPanelState.desktopLayout).toEqual({
       chatOpen: true,
       workbenchOpen: true,

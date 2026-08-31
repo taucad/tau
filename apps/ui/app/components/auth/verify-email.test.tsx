@@ -53,7 +53,7 @@ describe('VerifyEmail', () => {
   it('verifies the token and redirects to a sanitized app path', async () => {
     authMocks.verifyEmail.mockResolvedValue({ data: {}, error: null });
 
-    renderVerifyEmail('/auth/verify-email?token=abc&redirectTo=%2Fv%2Fpub_123');
+    renderVerifyEmail('/auth/verify-email?token=abc&redirectTo=%2Fs%2Ftau%7Epub_123');
 
     await flushAsyncEffects();
 
@@ -64,7 +64,7 @@ describe('VerifyEmail', () => {
       vi.advanceTimersByTime(900);
     });
 
-    expect(authMocks.navigate).toHaveBeenCalledWith({ to: '/v/pub_123', replace: true });
+    expect(authMocks.navigate).toHaveBeenCalledWith({ to: '/s/tau~pub_123', replace: true });
   });
 
   it('shows a recovery state when the token is missing', () => {
@@ -78,7 +78,7 @@ describe('VerifyEmail', () => {
   it('shows a recovery state when verification fails', async () => {
     authMocks.verifyEmail.mockResolvedValue({ data: null, error: { message: 'expired' } });
 
-    renderVerifyEmail('/auth/verify-email?token=abc&redirectTo=%2Fv%2Fpub_123');
+    renderVerifyEmail('/auth/verify-email?token=abc&redirectTo=%2Fs%2Ftau%7Epub_123');
 
     await flushAsyncEffects();
 
@@ -89,7 +89,7 @@ describe('VerifyEmail', () => {
 
 describe('sanitizeVerifyEmailRedirectTo', () => {
   it('keeps relative app paths and rejects external URLs', () => {
-    expect(sanitizeVerifyEmailRedirectTo('/v/pub_123?pane=share')).toBe('/v/pub_123?pane=share');
+    expect(sanitizeVerifyEmailRedirectTo('/s/tau~pub_123?pane=share')).toBe('/s/tau~pub_123?pane=share');
     expect(sanitizeVerifyEmailRedirectTo('https://example.com/steal')).toBe('/');
     expect(sanitizeVerifyEmailRedirectTo('//example.com/steal')).toBe('/');
   });

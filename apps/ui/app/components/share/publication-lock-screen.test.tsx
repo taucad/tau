@@ -2,15 +2,15 @@ import type { ReactElement } from 'react';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi } from 'vitest';
-import { PublicationLockScreen, parsePublicationLockPayload } from '#routes/v.$id/publication-lock-screen.js';
-import type { PublicationLockScreenVariant } from '#routes/v.$id/publication-lock-screen.js';
+import { PublicationLockScreen, parsePublicationLockPayload } from '#components/share/publication-lock-screen.js';
+import type { PublicationLockScreenVariant } from '#components/share/publication-lock-screen.js';
 
 vi.mock('#hooks/use-auth-links.js', () => ({
   useAuthLinks: () => ({
-    signIn: '/auth/sign-in?redirectTo=%2Fv',
-    magicLink: '/auth/magic-link?redirectTo=%2Fv',
-    signUp: '/auth/sign-up?redirectTo=%2Fv',
-    signOut: '/auth/sign-out?redirectTo=%2Fv',
+    signIn: '/auth/sign-in?redirectTo=%2Fs%2Ftau~pub',
+    magicLink: '/auth/magic-link?redirectTo=%2Fs%2Ftau~pub',
+    signUp: '/auth/sign-up?redirectTo=%2Fs%2Ftau~pub',
+    signOut: '/auth/sign-out?redirectTo=%2Fs%2Ftau~pub',
   }),
 }));
 
@@ -47,7 +47,10 @@ describe('PublicationLockScreen', () => {
 
   it('routes private-publication sign-in through the magic-link auth surface', () => {
     renderLock(<PublicationLockScreen variant='signInRequired' />);
-    expect(screen.getByRole('link', { name: /sign in/i })).toHaveAttribute('href', '/auth/magic-link?redirectTo=%2Fv');
+    expect(screen.getByRole('link', { name: /sign in/i })).toHaveAttribute(
+      'href',
+      '/auth/magic-link?redirectTo=%2Fs%2Ftau~pub',
+    );
   });
 });
 

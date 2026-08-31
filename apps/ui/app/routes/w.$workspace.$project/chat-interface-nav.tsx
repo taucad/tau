@@ -1,4 +1,4 @@
-import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal, Download, Files } from 'lucide-react';
+import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal, Download, Files, Share2 } from 'lucide-react';
 import { TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { cn } from '#utils/ui.utils.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
@@ -39,6 +39,11 @@ export const chatTabs = [
     label: 'Export',
     icon: <Download />,
   },
+  {
+    id: 'share',
+    label: 'Share',
+    icon: <Share2 />,
+  },
 ] as const satisfies Array<{ id: MobilePanelId; label: string; icon: React.ReactNode }>;
 
 export function ChatInterfaceNav({ className }: { readonly className?: string }): React.ReactNode {
@@ -59,10 +64,10 @@ export function ChatInterfaceNav({ className }: { readonly className?: string })
           className={cn(
             'flex flex-col items-center justify-center gap-0.5 pb-0.5 text-[10px]',
             'rounded-lg border border-transparent transition-[color,background-color,border-color] duration-200 ease-linear',
-            'data-[state=active]:text-primary',
-            'data-[state=active]:bg-primary/20',
-            'data-[state=active]:border-primary/50',
-            'data-[state=active]:[&_svg]:text-primary',
+            'data-[state=active]:border-border',
+            'data-[state=active]:bg-accent',
+            'data-[state=active]:text-accent-foreground',
+            'data-[state=active]:[&_svg]:text-accent-foreground',
             tab.id === 'viewer' && 'border-sidebar-primary/20 data-[state=inactive]:bg-neutral/20',
           )}
         >

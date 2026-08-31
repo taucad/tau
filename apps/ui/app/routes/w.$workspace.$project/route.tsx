@@ -17,7 +17,7 @@ import {
   projectRouteHandle,
 } from '#routes/w.$workspace.$project/project-route.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
-import { projectChatIdFromSearch, projectChatUrl } from '#utils/project-url.utils.js';
+import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
 
 // Module-level for a stable component identity across HMR.
 function RouteProvider({ children }: { readonly children?: React.ReactNode }): React.JSX.Element {
@@ -38,7 +38,10 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
   currentUrlRef.current = `${location.pathname}${location.search}`;
   const handleFocusedChatResolved = useCallback(
     (chatId: string) => {
-      const target = projectChatUrl(canonicalSlugs ?? { workspaceSlug: workspace, projectSlug: project }, chatId);
+      const parameters = new URLSearchParams(currentUrlRef.current.split('?')[1] ?? '');
+      parameters.set('chat', chatId);
+      const path = projectUrl(canonicalSlugs ?? { workspaceSlug: workspace, projectSlug: project });
+      const target = `${path}?${parameters.toString()}`;
       if (currentUrlRef.current !== target) {
         void navigate(target, { replace: true });
       }

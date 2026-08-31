@@ -7,7 +7,7 @@ import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import type { Handle } from '#types/matches.types.js';
 import { ProjectChatRpcBindings } from '#routes/w.$workspace.$project/project-chat-rpc-bindings.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { ProjectShareProvider } from '#routes/w.$workspace.$project/project-share-action.js';
+import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ProjectCommandPaletteItems } from '#routes/w.$workspace.$project/project-command-items.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
@@ -74,9 +74,10 @@ function ProjectSession({
             <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
             <MonacoModelServiceProvider>
               <RevisionProvider>
-                <ProjectShareProvider>
-                  <ProjectWorkspaceProvider>{children}</ProjectWorkspaceProvider>
-                </ProjectShareProvider>
+                <ProjectWorkspaceProvider>
+                  <ProjectShareRouteIntent />
+                  {children}
+                </ProjectWorkspaceProvider>
               </RevisionProvider>
             </MonacoModelServiceProvider>
           </ProjectProvider>

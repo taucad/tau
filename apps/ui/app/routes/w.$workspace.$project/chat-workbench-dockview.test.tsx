@@ -248,6 +248,7 @@ const {
   handleWorkbenchPanelRemoved,
   isWorkbenchPanelFilesContext,
   openWorkbenchUtility,
+  isWorkbenchSurfaceAllowed,
   openWorkbenchFiles,
   openFilesFromPlaceholder,
   createWorkbenchNewTab,
@@ -1078,6 +1079,16 @@ describe('Workbench file reconciliation', () => {
     );
   });
 
+  it('seeds the shared profile directly into Parameters', () => {
+    const dockview = createTestDockview();
+
+    seedFreshWorkbench({ api: dockview.api, profile: 'shared' });
+
+    expect(dockview.addPanel).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: 'workbench:parameters', component: 'parameters', title: 'Parameters' }),
+    );
+  });
+
   it('offers the guided selector only in the seeded launcher', async () => {
     const user = userEvent.setup();
     const launcher = panel('workbench-tab-test', { mode: 'launcher' });
@@ -1196,6 +1207,7 @@ describe('Workbench file reconciliation', () => {
     render(<WorkbenchEmptyGroupWatermark containerApi={dockview.api} group={group} />);
 
     expect(screen.getByRole('button', { name: /Parameters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Share/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close split' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Parameters/ }));
     expect(dockview.addPanel).toHaveBeenCalledWith(
@@ -1241,11 +1253,19 @@ describe('Workbench file reconciliation', () => {
       'model',
       'revisions',
       'export',
+      'share',
       'details',
       'files',
       'kernel',
       'console',
     ]);
+    expect(workbenchSurfaces.find(({ id }) => id === 'share')?.shortcut).toBeUndefined();
+  });
+
+  it('keeps Share editor-only while retaining shared viewer utilities', () => {
+    expect(isWorkbenchSurfaceAllowed('share', 'editor')).toBe(true);
+    expect(isWorkbenchSurfaceAllowed('share', 'shared')).toBe(false);
+    expect(isWorkbenchSurfaceAllowed('export', 'shared')).toBe(true);
   });
 
   it('clears corrupt layouts and removes restored debug panels when the flag is off', () => {
@@ -1273,6 +1293,16 @@ describe('Workbench file reconciliation', () => {
     restoreWorkbenchLayout({ api: dockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
 
     expect(dockview.removePanel).toHaveBeenCalledExactlyOnceWith(legacyFiles);
+  });
+
+  it('keeps Share in a restored editor layout', () => {
+    const share = panel(workbenchPanels.share.id);
+    const dockview = createTestDockview([share]);
+
+    restoreWorkbenchLayout({ api: dockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
+
+    expect(dockview.restoreJson).toHaveBeenCalledOnce();
+    expect(dockview.removePanel).not.toHaveBeenCalledWith(share);
   });
 
   it('removes stale launchers when a restored layout already has substantive tabs', () => {
@@ -1402,6 +1432,20 @@ describe('Workbench file reconciliation', () => {
     const existing = dockview.panels[0]!;
     dockview.addPanel.mockClear();
     openWorkbenchUtility(dockview.api, 'parameters');
+    expect(existing.api.setActive).toHaveBeenCalledOnce();
+    expect(dockview.addPanel).not.toHaveBeenCalled();
+  });
+
+  it('opens Share as a fixed-ID singleton', () => {
+    const dockview = createTestDockview();
+    openWorkbenchUtility(dockview.api, 'share');
+    expect(dockview.addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'workbench:share', component: 'share', title: 'Share' }),
+    );
+
+    const existing = dockview.panels[0]!;
+    dockview.addPanel.mockClear();
+    openWorkbenchUtility(dockview.api, 'share');
     expect(existing.api.setActive).toHaveBeenCalledOnce();
     expect(dockview.addPanel).not.toHaveBeenCalled();
   });

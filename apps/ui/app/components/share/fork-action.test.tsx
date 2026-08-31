@@ -2,22 +2,14 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import type * as ReactRouterModule from 'react-router';
-import type * as XStateReactModule from '@xstate/react';
 import { parameterEntryPath } from '@taucad/types';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CreatedProject, CreateProjectOptions } from '#hooks/use-project-manager.js';
-import { ForkAction } from '#routes/v.$id/fork-action.js';
+import { ForkAction } from '#components/share/fork-action.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { parseParameterEntry } from '#utils/parameter-config.utils.js';
 
 const navigateMock = vi.fn();
-
-type ParameterRecord = Record<string, unknown>;
-const forkCadMocks = vi.hoisted(() => {
-  const defaultParameters: ParameterRecord = {};
-  const parameterOverrides: ParameterRecord = {};
-  return { defaultParameters, parameterOverrides };
-});
 
 vi.mock('react-router', async (importOriginal) => {
   const actual = await importOriginal<typeof ReactRouterModule>();
@@ -39,26 +31,17 @@ vi.mock('#hooks/use-project-creation-location-error.js', () => ({
   useProjectCreationLocationError: () => presentLocationError,
 }));
 
-vi.mock('#hooks/use-cad-preview.js', () => ({
-  useCadPreview: () => ({
-    cadRef: {},
-    get defaultParameters(): Record<string, unknown> {
-      return forkCadMocks.defaultParameters;
-    },
+const refreshLocation = vi.fn(async () => undefined);
+vi.mock('#hooks/use-project-creation-location.js', () => ({
+  useProjectCreationLocation: () => ({
+    phase: 'ready',
+    value: { kind: 'home' },
+    canCreate: true,
+    shouldShowPicker: false,
+    hasWebAccessCapability: false,
+    refresh: refreshLocation,
   }),
 }));
-
-vi.mock('@xstate/react', async (importOriginal) => {
-  const actual = await importOriginal<typeof XStateReactModule>();
-  return {
-    ...actual,
-    useSelector: vi.fn(
-      (_actorRef: unknown, selector: (s: { context: { parameters: Record<string, unknown> } }) => unknown) => {
-        return selector({ context: { parameters: forkCadMocks.parameterOverrides } });
-      },
-    ),
-  };
-});
 
 vi.mock('#components/ui/sonner.js', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -71,8 +54,6 @@ describe('ForkAction', () => {
     presentLocationError.mockClear();
     presentLocationError.mockReturnValue(false);
     createProject.mockResolvedValue({ id: 'new_proj', slugs: { workspaceSlug: 'home', projectSlug: 'new-proj' } });
-    forkCadMocks.defaultParameters = {};
-    forkCadMocks.parameterOverrides = {};
   });
 
   it('uses the creation preference and navigates to the returned canonical URL', async () => {
@@ -80,33 +61,40 @@ describe('ForkAction', () => {
 
     render(
       <MemoryRouter>
-        <ForkAction publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }} files={files} />
+        <ForkAction
+          publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }}
+          files={files}
+          parameters={{}}
+        />
       </MemoryRouter>,
     );
 
     await userEvent.click(screen.getByRole('button', { name: /^remix$/iu }));
+    await userEvent.click(screen.getByRole('button', { name: /create remix/i }));
 
     await waitFor(() => {
       expect(createProject).toHaveBeenCalledTimes(1);
     });
 
     expect(navigateMock).toHaveBeenCalledWith('/w/home/new-proj');
-    expect(createProject.mock.calls[0]?.[0]).not.toHaveProperty('location');
+    expect(createProject.mock.calls[0]?.[0]).toHaveProperty('location', { kind: 'home' });
   });
 
-  it('writes deepmerged defaultParameters and cad overrides to the parameter file', async () => {
-    forkCadMocks.defaultParameters = { width: 10, height: 20 };
-    forkCadMocks.parameterOverrides = { height: 99 };
-
+  it('writes the current in-memory parameters to the parameter file', async () => {
     const files = new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1, 2, 3]) }]]);
 
     render(
       <MemoryRouter>
-        <ForkAction publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }} files={files} />
+        <ForkAction
+          publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }}
+          files={files}
+          parameters={{ width: 10, height: 99 }}
+        />
       </MemoryRouter>,
     );
 
     await userEvent.click(screen.getByRole('button', { name: /^remix$/iu }));
+    await userEvent.click(screen.getByRole('button', { name: /create remix/i }));
 
     await waitFor(() => {
       expect(createProject).toHaveBeenCalledTimes(1);
@@ -135,15 +123,20 @@ describe('ForkAction', () => {
 
     render(
       <MemoryRouter>
-        <ForkAction publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }} files={files} />
+        <ForkAction
+          publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }}
+          files={files}
+          parameters={{}}
+        />
       </MemoryRouter>,
     );
     await userEvent.click(screen.getByRole('button', { name: /^remix$/iu }));
+    await userEvent.click(screen.getByRole('button', { name: /create remix/i }));
 
     await waitFor(() => {
       expect(presentLocationError).toHaveBeenCalledWith(error);
     });
-    expect(screen.getByRole('button', { name: /^remix$/iu })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /create remix/i })).toBeEnabled();
     expect(navigateMock).not.toHaveBeenCalled();
   });
 });

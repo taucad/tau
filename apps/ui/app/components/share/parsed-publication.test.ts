@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePublicationRecord, publicationFileFetchInit } from '#routes/v.$id/parsed-publication.js';
+import { parsePublicationRecord, publicationFileFetchInit } from '#components/share/parsed-publication.js';
 
 describe('publicationFileFetchInit', () => {
   it('should include session credentials for private publications (authenticated file proxy)', () => {

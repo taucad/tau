@@ -109,7 +109,7 @@ vi.mock('#routes/w.$workspace.$project/project-chat-rpc-bindings.js', () => ({ P
 vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ ProjectCommandPaletteItems: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
-  ProjectShareProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  ProjectShareRouteIntent: () => null,
 }));
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,

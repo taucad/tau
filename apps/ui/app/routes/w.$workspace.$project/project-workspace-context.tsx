@@ -19,6 +19,7 @@ export type WorkbenchPanelId =
   | 'files'
   | 'model'
   | 'revisions'
+  | 'share'
   | 'export'
   | 'details'
   | 'kernel'
@@ -60,6 +61,7 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
   parameters: 'parameters',
   files: 'files',
   export: 'converter',
+  share: 'share',
   details: 'details',
 };
 

@@ -1,8 +1,5 @@
 /**
- * Shared internals of every project-preview route. The static (community
- * examples) and dynamic (owned projects) branches share nothing but this file,
- * so blueprint D4 splits them across `/examples/:id` and
- * `/w/{workspace}/{project}/preview`.
+ * Shared internals of the owned-project preview route.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
@@ -13,8 +10,6 @@ import { Loader } from '#components/ui/loader.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import type { ProjectsWithFiles } from '#constants/project-examples.js';
-import { sampleProjects } from '#constants/project-examples.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { PreviewDesktop } from '#routes/w.$workspace.$project_.preview/preview-desktop.js';
 import { PreviewMobile } from '#routes/w.$workspace.$project_.preview/preview-mobile.js';
@@ -23,49 +18,6 @@ import {
   usePreviewProject,
 } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
 import type { PreviewProjectContextValue } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
-
-export function findStaticProject(projectId: string): ProjectsWithFiles | undefined {
-  return sampleProjects.find((project) => project.id === projectId);
-}
-
-/**
- * Provider for static projects (from sampleProjects). Metadata is available immediately.
- */
-export function StaticPreviewProvider({
-  children,
-  projectId,
-  staticProject,
-}: {
-  readonly children?: React.ReactNode;
-  readonly projectId: string;
-  readonly staticProject: ProjectsWithFiles;
-}): React.JSX.Element {
-  const projectData = staticProject;
-  const mainFile = staticProject.assets.main.entryPath;
-
-  const noopUpdate = useCallback(() => {
-    // Static projects are read-only
-  }, []);
-
-  const metadataValue = useMemo<PreviewProjectContextValue>(
-    () => ({
-      project: projectData,
-      isStaticProject: true,
-      staticProjectFiles: staticProject.files,
-      updateName: noopUpdate,
-      updateDescription: noopUpdate,
-    }),
-    [projectData, staticProject.files, noopUpdate],
-  );
-
-  return (
-    <PreviewProjectContext.Provider value={metadataValue}>
-      <CadPreviewProvider projectId={projectId} mainFile={mainFile} files={staticProject.files}>
-        {children}
-      </CadPreviewProvider>
-    </PreviewProjectContext.Provider>
-  );
-}
 
 /**
  * Provider for dynamic projects (from storage). Loads project metadata and defers rendering
@@ -129,8 +81,6 @@ export function DynamicPreviewProvider({
   const metadataValue = useMemo<PreviewProjectContextValue>(
     () => ({
       project,
-      isStaticProject: false,
-      staticProjectFiles: undefined,
       updateName,
       updateDescription,
     }),
@@ -175,8 +125,7 @@ export function DynamicPreviewProvider({
 }
 
 /**
- * The preview shell. `projectId` is the identity every preview pane is keyed
- * by: a `proj_` id for owned projects, the sample id for community examples.
+ * The preview shell. `projectId` is the owned-project identity every preview pane is keyed by.
  */
 export function PreviewSession({
   children,
@@ -185,18 +134,10 @@ export function PreviewSession({
   readonly children?: React.ReactNode;
   readonly projectId: string;
 }): React.JSX.Element {
-  const staticProject = findStaticProject(projectId);
-
   return (
     <SharedWorkerGate>
       <HomeFileManagerProvider key={projectId} projectId={projectId} rootDirectory={`/projects/${projectId}`}>
-        {staticProject ? (
-          <StaticPreviewProvider projectId={projectId} staticProject={staticProject}>
-            {children}
-          </StaticPreviewProvider>
-        ) : (
-          <DynamicPreviewProvider projectId={projectId}>{children}</DynamicPreviewProvider>
-        )}
+        <DynamicPreviewProvider projectId={projectId}>{children}</DynamicPreviewProvider>
       </HomeFileManagerProvider>
     </SharedWorkerGate>
   );

@@ -19,6 +19,7 @@ export const FileTreePanelBody = memo(function ({
   borderless = false,
   onOpenFile,
   shouldHandleReveal,
+  readOnly = false,
 }: {
   readonly actionsContainer?: Element | DocumentFragment | null;
   readonly className?: string;
@@ -30,6 +31,7 @@ export const FileTreePanelBody = memo(function ({
   readonly borderless?: boolean;
   readonly onOpenFile?: (path: string, readOnly?: boolean) => void;
   readonly shouldHandleReveal?: () => boolean;
+  readonly readOnly?: boolean;
 }): React.JSX.Element {
   return (
     <FloatingPanel isOpen={isOpen} side='right' className={className} onOpenChange={onOpenChange}>
@@ -41,6 +43,7 @@ export const FileTreePanelBody = memo(function ({
         onRequestOpen={onRequestOpen}
         onOpenFile={onOpenFile}
         shouldHandleReveal={shouldHandleReveal}
+        readOnly={readOnly}
       />
     </FloatingPanel>
   );

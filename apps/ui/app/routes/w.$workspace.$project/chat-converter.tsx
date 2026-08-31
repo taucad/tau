@@ -9,7 +9,6 @@ import type { ExportFile, FileExtension } from '@taucad/types';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
 import type { IChangeEvent } from '@rjsf/core';
-import deepmerge from 'deepmerge';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   FloatingPanel,
@@ -45,7 +44,13 @@ import { groupExportFormatsByFidelity } from '#components/files/export-format-gr
 import type { cadMachine } from '#machines/cad.machine.js';
 import { widgets, templates as rjsfTemplates } from '#components/geometry/parameters/rjsf-theme.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
-import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
+import {
+  mergeFormDefaults,
+  normalizeRjsfFormData,
+  rjsfDefaultFormStateBehavior,
+  rjsfIdPrefix,
+  rjsfIdSeparator,
+} from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath, extractModifiedProperties } from '#utils/object.utils.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
@@ -135,7 +140,7 @@ function schemaDefaults(schema: JSONSchema7): Record<string, unknown> {
   );
 }
 
-function resolveActiveSchema(
+export function resolveActiveSchema(
   schema: JSONSchema7,
   input: Record<string, unknown>,
   defaults: Record<string, unknown> = {},
@@ -145,7 +150,11 @@ function resolveActiveSchema(
     return { schema, defaults };
   }
 
-  const modes = branches.map((branch) => modeForSchema(branch)).filter((mode): mode is string => mode !== undefined);
+  const branchModes = branches.map((branch) => modeForSchema(branch));
+  if (branchModes.some((mode) => mode === undefined) || new Set(branchModes).size !== branches.length) {
+    return { schema, defaults };
+  }
+  const modes = branchModes as string[];
   const requestedMode =
     typeof input['mode'] === 'string'
       ? input['mode']
@@ -226,6 +235,38 @@ function runtimeContentFromRecord(input: Record<string, unknown>): RuntimeConten
   return {
     ...(typeof input['includeEdges'] === 'boolean' ? { includeEdges: input['includeEdges'] } : {}),
     ...(typeof input['includeTopology'] === 'boolean' ? { includeTopology: input['includeTopology'] } : {}),
+  };
+}
+
+function fillMissingBatchViewIds(schema: JSONSchema7, input: Record<string, unknown>): Record<string, unknown> {
+  const viewsSchema = schemaObject(schema.properties?.['views']);
+  const itemsSchema = viewsSchema?.items;
+  const itemSchema = Array.isArray(itemsSchema) ? undefined : schemaObject(itemsSchema);
+  const { mode, views } = input;
+  if (mode !== 'batch' || !itemSchema?.required?.includes('id') || !Array.isArray(views)) {
+    return input;
+  }
+  const batchViews = views as unknown[];
+
+  const usedIds = new Set(
+    batchViews.flatMap((view) =>
+      isRecordObject(view) && typeof view['id'] === 'string' && view['id'] ? [view['id']] : [],
+    ),
+  );
+  let nextId = 1;
+  return {
+    ...input,
+    views: batchViews.map((view) => {
+      if (!isRecordObject(view) || (typeof view['id'] === 'string' && view['id'])) {
+        return view;
+      }
+      while (usedIds.has(`view-${nextId}`)) {
+        nextId++;
+      }
+      const id = `view-${nextId++}`;
+      usedIds.add(id);
+      return { ...view, id };
+    }),
   };
 }
 
@@ -438,18 +479,19 @@ const exportFormContextBase: Pick<
   searchTerm: '',
   allExpanded: false,
   shouldShowField: () => true,
-  units: { length: { symbol: 'mm', factor: 1 } },
+  units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
   displayDescriptors: {
     width: { descriptor: 'count', unit: 'px' },
     height: { descriptor: 'count', unit: 'px' },
-    phi: { descriptor: 'angle', unit: 'deg' },
-    theta: { descriptor: 'angle', unit: 'deg' },
+    lineWidth: { descriptor: 'count', unit: 'px' },
+    verticalFieldOfView: { descriptor: 'angle', unit: 'deg' },
+    zoom: { descriptor: 'unitless', unit: '' },
     quality: { descriptor: 'count', unit: '' },
     margin: { descriptor: 'count', unit: '' },
   } as const,
 };
 
-function ExportSchemaForm({
+export function ExportSchemaForm({
   idPrefix,
   label,
   shouldShowLabel,
@@ -465,26 +507,28 @@ function ExportSchemaForm({
   readonly resolved: ResolvedSchema;
   readonly value: Record<string, unknown>;
   readonly onChange: (value: Record<string, unknown>) => void;
-}) {
-  const formData = useMemo(
-    () => deepmerge(resolved.defaults, value) as Record<string, unknown>,
-    [resolved.defaults, value],
-  );
+}): ReactElement {
+  const formData = useMemo(() => mergeFormDefaults(resolved.defaults, value), [resolved.defaults, value]);
   const activeResolved = useMemo(
     () => resolveActiveSchema(resolved.schema, formData, resolved.defaults),
     [resolved.defaults, resolved.schema, formData],
   );
   const activeFormData = useMemo(
-    () => sanitizeFormDelta(activeResolved.schema, deepmerge(activeResolved.defaults, value)),
+    () => sanitizeFormDelta(activeResolved.schema, mergeFormDefaults(activeResolved.defaults, value)),
     [activeResolved, value],
   );
 
   const handleChange = useCallback(
     (event: IChangeEvent<Record<string, unknown>>) => {
-      const newData = event.formData ?? {};
-      const nextResolved = resolveActiveSchema(resolved.schema, newData, resolved.defaults);
+      const normalized = normalizeRjsfFormData(resolved.schema, event.formData ?? {}) as Record<string, unknown>;
+      const nextResolved = resolveActiveSchema(resolved.schema, normalized, resolved.defaults);
+      const newData = fillMissingBatchViewIds(nextResolved.schema, normalized);
       const sanitized = sanitizeFormDelta(nextResolved.schema, newData);
-      const delta = extractModifiedProperties(sanitized, nextResolved.defaults);
+      const delta = Object.fromEntries(
+        Object.entries(extractModifiedProperties(sanitized, nextResolved.defaults)).filter(
+          ([key, entry]) => !Array.isArray(entry) || entry.length > 0 || Object.hasOwn(nextResolved.defaults, key),
+        ),
+      );
       const { mode } = sanitized;
       onChange(typeof mode === 'string' && mode !== resolved.defaults['mode'] ? { ...delta, mode } : delta);
     },
@@ -523,6 +567,7 @@ function ExportSchemaForm({
         idPrefix={idPrefix}
         idSeparator={rjsfIdSeparator}
         formContext={formContext}
+        experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
         onChange={handleChange}
         liveValidate
         noHtml5Validate
@@ -742,7 +787,9 @@ function useExportPreferences(fileManager: ReturnType<typeof useFileManager>) {
 // Main component
 // =============================================================================
 
-export const ConverterPanelBody = function (): ReactElement {
+export const ConverterPanelBody = function ({
+  downloadOnly = false,
+}: { readonly downloadOnly?: boolean } = {}): ReactElement {
   const { geometryUnits, mainEntryPath, projectRef } = useProject();
   const fileManager = useFileManager();
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'model';
@@ -780,8 +827,9 @@ export const ConverterPanelBody = function (): ReactElement {
   const [preferences, persistPreferences] = useExportPreferences(fileManager);
   const [isExporting, setIsExporting] = useState(false);
 
-  const { selectedFormats, shouldDownload, shouldSaveToProject, zipMultiple, formatContent, formatOptions } =
-    preferences;
+  const { selectedFormats, zipMultiple, formatContent, formatOptions } = preferences;
+  const shouldDownload = downloadOnly || preferences.shouldDownload;
+  const shouldSaveToProject = !downloadOnly && preferences.shouldSaveToProject;
 
   const hasDestination = shouldDownload || shouldSaveToProject;
 
@@ -1015,7 +1063,12 @@ export const ConverterPanelBody = function (): ReactElement {
                   <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Destination</h2>
                   <div className='divide-y divide-border'>
                     <div className='flex min-h-9 items-center gap-2 px-3 py-2 transition-colors hover:bg-accent/50'>
-                      <Checkbox id='download-to-disk' checked={shouldDownload} onCheckedChange={handleDownloadToggle} />
+                      <Checkbox
+                        id='download-to-disk'
+                        checked={shouldDownload}
+                        disabled={downloadOnly}
+                        onCheckedChange={handleDownloadToggle}
+                      />
                       <Label
                         htmlFor='download-to-disk'
                         className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
@@ -1024,15 +1077,21 @@ export const ConverterPanelBody = function (): ReactElement {
                       </Label>
                     </div>
 
-                    <div className='flex min-h-9 items-center gap-2 px-3 py-2 transition-colors hover:bg-accent/50'>
-                      <Checkbox id='save-to-project' checked={shouldSaveToProject} onCheckedChange={handleSaveToggle} />
-                      <Label
-                        htmlFor='save-to-project'
-                        className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
-                      >
-                        Save to project
-                      </Label>
-                    </div>
+                    {downloadOnly ? null : (
+                      <div className='flex min-h-9 items-center gap-2 px-3 py-2 transition-colors hover:bg-accent/50'>
+                        <Checkbox
+                          id='save-to-project'
+                          checked={shouldSaveToProject}
+                          onCheckedChange={handleSaveToggle}
+                        />
+                        <Label
+                          htmlFor='save-to-project'
+                          className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                        >
+                          Save to project
+                        </Label>
+                      </div>
+                    )}
 
                     {shouldDownload && selectedFormats.length > 1 ? (
                       <div className='flex min-h-9 items-center gap-2 px-3 py-2 transition-colors hover:bg-accent/50'>

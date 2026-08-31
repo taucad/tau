@@ -8,12 +8,14 @@ import type {
   IconButtonProps,
   WidgetProps,
   ArrayFieldTemplateProps,
+  ArrayFieldTemplateItemType,
   ErrorListProps,
   RJSFSchema,
 } from '@rjsf/utils';
-import { ChevronDown } from 'lucide-react';
-import { Fragment, useEffect, useState } from 'react';
+import { ChevronDown, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Input } from '#components/ui/input.js';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
@@ -27,19 +29,166 @@ import {
   rjsfIdToJsonPath,
   isSchemaMatchingSearch,
   getFieldDefaultValue,
+  getDiscriminatedUnionInfo,
+  isObjectLikeSchema,
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { hasCustomValue } from '#utils/object.utils.js';
 import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { InlineCode } from '#components/code/code-block.js';
-import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
+import {
+  emptyRjsfLayoutContext,
+  rjsfLayoutContext,
+  useRjsfLayoutContext,
+} from '#components/geometry/parameters/rjsf-context.js';
+import type { RJSFContext, RjsfLayoutContextValue } from '#components/geometry/parameters/rjsf-context.js';
+
+const ArrayItemRemoveAction = ({ action }: { readonly action: RjsfLayoutContextValue['arrayItemAction'] }) => {
+  if (!action) {
+    return null;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-sm'
+          className='mr-1 text-muted-foreground hover:text-foreground'
+          aria-label={action.label}
+          onClick={(event) => {
+            event.stopPropagation();
+            action.onRemove();
+          }}
+        >
+          <Trash2 aria-hidden='true' />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side='left'>{action.label}</TooltipContent>
+    </Tooltip>
+  );
+};
+
+function CompositeFieldTemplate({
+  children,
+  formData,
+  label,
+  schema,
+  formContext,
+  action,
+}: {
+  readonly children: React.ReactNode;
+  readonly formData: unknown;
+  readonly label: string;
+  readonly schema: RJSFSchema;
+  readonly formContext: RJSFContext;
+  readonly action?: RjsfLayoutContextValue['arrayItemAction'];
+}): React.ReactNode {
+  const union = getDiscriminatedUnionInfo(schema);
+  const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
+  const selectedBranchContext = useMemo(
+    () => ({ embeddedDiscriminator: union?.discriminator }),
+    [union?.discriminator],
+  );
+
+  useEffect(() => {
+    setIsOpen(formContext.allExpanded);
+  }, [formContext.allExpanded]);
+
+  useEffect(() => {
+    if (formContext.searchTerm.trim().length > 0) {
+      setIsOpen(true);
+    }
+  }, [formContext.searchTerm]);
+
+  if (!union) {
+    return children;
+  }
+
+  const selectedValue =
+    typeof formData === 'object' && formData !== null
+      ? (formData as Record<string, unknown>)[union.discriminator]
+      : undefined;
+  const selectedIndex = union.values.findIndex((value) => Object.is(value, selectedValue));
+  const selectedBranch = union.branches[Math.max(0, selectedIndex)];
+  const propertyCount = Object.keys(selectedBranch?.properties ?? {}).length;
+  const prettyTitle = formatDisplayLabel(label);
+  const discriminatorLabel = formatDisplayLabel(union.discriminator);
+
+  return (
+    <Collapsible
+      data-slot='parameter-group'
+      open={isOpen}
+      className='group/parameter-group w-full overflow-hidden rounded-lg border border-transparent transition-colors duration-150 data-[state=open]:border-border data-[state=open]:bg-background motion-reduce:transition-none'
+      onOpenChange={setIsOpen}
+    >
+      <div
+        data-slot='parameter-group-header'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 hover:bg-accent motion-reduce:transition-none'
+      >
+        <CollapsibleTrigger
+          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+          aria-label={`Group: ${prettyTitle}`}
+        >
+          <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+            <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
+          </h3>
+          <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>({propertyCount})</span>
+          <ChevronDown
+            aria-hidden='true'
+            className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
+          />
+        </CollapsibleTrigger>
+        <ArrayItemRemoveAction action={action} />
+      </div>
+
+      <CollapsibleContent
+        data-slot='parameter-group-content'
+        className='grid grid-cols-[minmax(0,40%)_minmax(0,1fr)] items-center border-t border-border/70 py-1 [&>.panel]:contents [&>.panel>.field-group]:col-span-2 [&>.panel>.form-group]:col-start-2 [&>.panel>.form-group]:row-start-1 [&>.panel>.form-group]:flex [&>.panel>.form-group]:justify-end [&>.panel>.form-group]:py-1.5 [&>.panel>.form-group]:pr-2.5'
+      >
+        <span className='col-start-1 row-start-1 truncate px-2.5 text-sm text-muted-foreground'>
+          {discriminatorLabel}
+        </span>
+        <rjsfLayoutContext.Provider value={selectedBranchContext}>{children}</rjsfLayoutContext.Provider>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
 
 // Custom Field Template with Reset Button and Search Filtering
 // oxlint-disable-next-line complexity -- consider refactoring.
 function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSchema, RJSFContext>): React.ReactNode {
   const { label, help, required, description, errors, children, schema, formData, id, registry } = props;
   const { formContext } = registry;
+  const layoutContext = useRjsfLayoutContext();
+  const fieldPath = rjsfIdToJsonPath(id, formContext.idPrefix);
 
-  if (schema.type === 'object' || schema.type === 'array') {
+  if (layoutContext.embeddedDiscriminator !== undefined && layoutContext.embeddedDiscriminator === fieldPath.at(-1)) {
+    return null;
+  }
+
+  const discriminatedUnion = getDiscriminatedUnionInfo(schema);
+  if (discriminatedUnion) {
+    if (formContext.searchTerm && !isSchemaMatchingSearch(schema, formContext.searchTerm, label)) {
+      return null;
+    }
+
+    return (
+      <div data-slot='field-group' className='field-group group/field-group [&+.field-group]:mt-2'>
+        <CompositeFieldTemplate
+          formData={formData}
+          label={label}
+          schema={schema}
+          formContext={formContext}
+          action={layoutContext.arrayItemAction}
+        >
+          {children}
+        </CompositeFieldTemplate>
+      </div>
+    );
+  }
+
+  if (isObjectLikeSchema(schema) || schema.type === 'array') {
     const isRoot = id === formContext.idPrefix;
 
     // If we're searching and this object/array has no matching nested properties, don't render it
@@ -89,9 +238,6 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
       return null;
     }
   }
-
-  // Convert RJSF ID to JSON path using schema-aware parsing
-  const fieldPath = rjsfIdToJsonPath(id, formContext.idPrefix);
 
   // Get the appropriate default value (handles array items specially)
   const defaultValue = formContext.defaultParameters
@@ -154,6 +300,7 @@ function ObjectFieldTemplate(
   const { title, description, properties, idSchema, registry, schema } = props;
 
   const { formContext } = registry;
+  const layoutContext = useRjsfLayoutContext();
 
   const [isOpen, setIsOpen] = useState<boolean | undefined>(() => formContext.allExpanded);
   const isRoot = idSchema.$id === formContext.idPrefix;
@@ -198,11 +345,24 @@ function ObjectFieldTemplate(
         </CollectionEmptyState>
         <div
           data-slot='parameter-catalog'
-          className='properties m-2 overflow-hidden rounded-xl border border-border bg-card p-1 empty:hidden'
+          className='properties m-2 overflow-hidden rounded-md border border-border bg-card p-1 empty:hidden'
         >
           {properties.map((element) => element.content)}
         </div>
       </div>
+    );
+  }
+
+  const isEmbeddedUnionBranch =
+    layoutContext.embeddedDiscriminator !== undefined &&
+    Object.hasOwn(schema.properties ?? {}, layoutContext.embeddedDiscriminator);
+
+  if (isEmbeddedUnionBranch) {
+    return (
+      <>
+        {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
+        {properties.map((element) => element.content)}
+      </>
     );
   }
 
@@ -242,28 +402,36 @@ function ObjectFieldTemplate(
       className='group/parameter-group w-full overflow-hidden rounded-lg border border-transparent transition-colors duration-150 data-[state=open]:border-border data-[state=open]:bg-background motion-reduce:transition-none'
       onOpenChange={setIsOpen}
     >
-      <CollapsibleTrigger
-        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
-        aria-label={`Group: ${prettyTitle}`}
+      <div
+        data-slot='parameter-group-header'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 hover:bg-accent motion-reduce:transition-none'
       >
-        <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
-          <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
-        </h3>
-        <span className={cn('shrink-0 text-xs tabular-nums text-muted-foreground', isCountFiltered && 'italic')}>
-          {countDisplay}
-        </span>
-        <ChevronDown
-          aria-hidden='true'
-          className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
-        />
-      </CollapsibleTrigger>
+        <CollapsibleTrigger
+          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+          aria-label={`Group: ${prettyTitle}`}
+        >
+          <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
+            <HighlightText text={prettyTitle} searchTerm={formContext.searchTerm} />
+          </h3>
+          <span className={cn('shrink-0 text-xs tabular-nums text-muted-foreground', isCountFiltered && 'italic')}>
+            {countDisplay}
+          </span>
+          <ChevronDown
+            aria-hidden='true'
+            className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-180 motion-reduce:transition-none'
+          />
+        </CollapsibleTrigger>
+        <ArrayItemRemoveAction action={layoutContext.arrayItemAction} />
+      </div>
 
       <CollapsibleContent
         data-slot='parameter-group-content'
         className='border-t border-border/70 px-0 py-1 [&>.field-group]:mx-1'
       >
-        {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
-        {properties.map((element) => element.content)}
+        <rjsfLayoutContext.Provider value={emptyRjsfLayoutContext}>
+          {description ? <div className='px-2.5 py-1.5 text-xs text-muted-foreground'>{description}</div> : null}
+          {properties.map((element) => element.content)}
+        </rjsfLayoutContext.Provider>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -297,14 +465,6 @@ function ArrayFieldTemplate(
     }
   }, [formContext.searchTerm, shouldShowArray]);
 
-  if (Array.isArray(schema.items)) {
-    return (
-      <div aria-label={`Invalid Field: ${title}`} className='rounded-md border border-warning bg-warning/10 p-2.5'>
-        Fixed-length tuple fields are not supported.
-      </div>
-    );
-  }
-
   // Don't render the array if it wouldn't be visible
   if (!shouldShowArray) {
     return null;
@@ -334,15 +494,12 @@ function ArrayFieldTemplate(
         />
       </CollapsibleTrigger>
 
-      <CollapsibleContent
-        data-slot='parameter-group-content'
-        className='border-t border-border/70 px-0 py-1 [&>.field-group]:mx-1'
-      >
+      <CollapsibleContent data-slot='parameter-group-content' className='border-t border-border/70 px-2.5 py-1'>
         {items.map((item) => (
-          <Fragment key={item.key}>{item.children}</Fragment>
+          <ScopedArrayFieldItem key={item.key} item={item} title={prettyTitle} />
         ))}
         {canAdd ? (
-          <Button type='button' variant='outline' size='sm' className='mx-2.5 my-1.5' onClick={onAddClick}>
+          <Button type='button' variant='outline' size='sm' className='my-1.5' onClick={onAddClick}>
             Add item ({prettyTitle})
           </Button>
         ) : null}
@@ -351,10 +508,42 @@ function ArrayFieldTemplate(
   );
 }
 
+function ScopedArrayFieldItem({
+  item,
+  title,
+}: {
+  readonly item: ArrayFieldTemplateItemType<Record<string, unknown>, RJSFSchema, RJSFContext>;
+  readonly title: string;
+}): React.ReactNode {
+  const layoutContext = useMemo<RjsfLayoutContextValue>(
+    () => ({
+      objectArrayItem: isObjectLikeSchema(item.schema),
+      arrayItemAction: item.hasRemove
+        ? {
+            label: `Remove ${title} ${item.index + 1}`,
+            onRemove: item.onDropIndexClick(item.index),
+          }
+        : undefined,
+    }),
+    [item, title],
+  );
+
+  return (
+    <rjsfLayoutContext.Provider value={layoutContext}>
+      <ArrayFieldItemTemplate {...item} />
+    </rjsfLayoutContext.Provider>
+  );
+}
+
 // Custom Select Widget for Enums
 function SelectWidget(props: WidgetProps): React.ReactNode {
-  // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-  const { options, value, onChange, placeholder, name } = props;
+  const { id, options, onChange, onBlur, onFocus, placeholder, name, disabled, readonly, autofocus } = props;
+  const layoutContext = useRjsfLayoutContext();
+  // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- RJSF leaves widget values untyped.
+  const { value } = props;
+  const isDisabled = disabled === true || readonly === true;
+  const selectedValue =
+    typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';
 
   const { enumOptions, enumDisabled } = options;
 
@@ -363,6 +552,9 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
   }
 
   const handleChange = (newValue: string) => {
+    if (isDisabled) {
+      return;
+    }
     if (newValue === '') {
       onChange(undefined);
       return;
@@ -371,14 +563,26 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
     onChange(matched ? matched.value : newValue);
   };
 
-  const prettyLabel = name ? formatDisplayLabel(name) : '';
+  const prettyLabel = layoutContext.embeddedDiscriminator
+    ? formatDisplayLabel(layoutContext.embeddedDiscriminator)
+    : name
+      ? formatDisplayLabel(name)
+      : '';
 
   return (
-    <Select value={String(value ?? '')} onValueChange={handleChange}>
+    <Select value={selectedValue} disabled={isDisabled} onValueChange={handleChange}>
       <SelectTrigger
+        id={id}
+        autoFocus={autofocus}
         size='sm'
         className='h-(--param-field-h) min-w-0 flex-1 rounded-(--param-field-radius) border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
         aria-label={prettyLabel ? `Select for ${prettyLabel}` : undefined}
+        onFocus={() => {
+          onFocus(id, value);
+        }}
+        onBlur={() => {
+          onBlur(id, value);
+        }}
       >
         <SelectValue placeholder={placeholder ?? 'Choose an option'} />
       </SelectTrigger>
@@ -404,26 +608,76 @@ function SelectWidget(props: WidgetProps): React.ReactNode {
   );
 }
 
+function ArrayFieldItemTemplate(
+  props: ArrayFieldTemplateItemType<Record<string, unknown>, RJSFSchema, RJSFContext>,
+): React.ReactNode {
+  const { children } = props;
+  const layoutContext = useRjsfLayoutContext();
+
+  if (layoutContext.objectArrayItem) {
+    return <div className='w-full'>{children}</div>;
+  }
+
+  return (
+    <div className='flex items-center gap-2'>
+      <div className='min-w-0 flex-1'>{children}</div>
+      <ArrayItemRemoveAction action={layoutContext.arrayItemAction} />
+    </div>
+  );
+}
+
 function CustomCheckboxWidget(props: WidgetProps): React.ReactNode {
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-  const { value, onChange, name } = props;
-  return <ParametersBoolean value={Boolean(value)} name={name} onChange={onChange} />;
+  const { id, value, onChange, onBlur, onFocus, name, disabled, readonly, autofocus } = props;
+  const isDisabled = disabled === true || readonly === true;
+  const prettyLabel = name ? formatDisplayLabel(name) : '';
+  return (
+    <ParametersBoolean
+      id={id}
+      value={Boolean(value)}
+      name={name}
+      disabled={isDisabled}
+      autoFocus={autofocus}
+      aria-label={`Toggle for ${prettyLabel}`}
+      onFocus={() => {
+        onFocus(id, value);
+      }}
+      onBlur={() => {
+        onBlur(id, value);
+      }}
+      onChange={(nextValue) => {
+        if (!isDisabled) {
+          onChange(nextValue);
+        }
+      }}
+    />
+  );
 }
 
 function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }): React.ReactNode {
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-  const { value, onChange, inputType, schema, name } = props;
+  const { id, value, onChange, onBlur, onFocus, inputType, name, disabled, readonly, autofocus } = props;
   const prettyLabel = name ? formatDisplayLabel(name) : '';
   return (
     <Input
+      id={id}
       type={inputType}
-      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-      value={value}
-      defaultValue={schema.default as string}
+      value={typeof value === 'string' || typeof value === 'number' ? value : ''}
+      disabled={disabled}
+      readOnly={readonly}
+      autoFocus={autofocus}
       className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted pr-6 pl-2 text-right text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
       aria-label={prettyLabel ? `Input for ${prettyLabel}` : undefined}
+      onFocus={() => {
+        onFocus(id, value);
+      }}
+      onBlur={() => {
+        onBlur(id, value);
+      }}
       onChange={(event) => {
-        onChange(event.target.value);
+        if (!disabled && !readonly) {
+          onChange(event.target.value);
+        }
       }}
     />
   );
@@ -464,7 +718,7 @@ export const templates: TemplatesType = {
       </Button>
     ),
     RemoveButton: (props: IconButtonProps) => (
-      <Button type='button' variant='destructive' size='sm' disabled={props.disabled} onClick={props.onClick}>
+      <Button type='button' variant='outline' size='sm' disabled={props.disabled} onClick={props.onClick}>
         Remove
       </Button>
     ),
@@ -474,25 +728,26 @@ export const templates: TemplatesType = {
   ArrayFieldTemplate,
   ArrayFieldDescriptionTemplate: ({ description }) =>
     description ? <div className='mb-2 text-sm text-muted-foreground'>{description}</div> : null,
-  ArrayFieldItemTemplate: ({ children, hasRemove, onDropIndexClick, index }) => (
-    <div className='flex items-center gap-2'>
-      <div className='flex-1'>{children}</div>
-      {hasRemove ? (
-        <Button type='button' variant='destructive' size='sm' onClick={onDropIndexClick(index)}>
-          Remove
-        </Button>
-      ) : null}
-    </div>
-  ),
+  ArrayFieldItemTemplate,
   ArrayFieldTitleTemplate: ({ title }) => (title ? <h3 className='mb-2 font-medium'>{title}</h3> : null),
-  BaseInputTemplate: ({ value, onChange, schema }) => (
+  BaseInputTemplate: ({ id, value, onChange, onBlur, onFocus, disabled, readonly, autofocus }) => (
     <Input
-      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
-      value={value}
-      defaultValue={schema.default as string}
+      id={id}
+      value={typeof value === 'string' || typeof value === 'number' ? value : ''}
+      disabled={disabled}
+      readOnly={readonly}
+      autoFocus={autofocus}
       className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted pr-6 pl-2 text-right text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
+      onFocus={() => {
+        onFocus(id, value);
+      }}
+      onBlur={() => {
+        onBlur(id, value);
+      }}
       onChange={(event) => {
-        onChange(event.target.value);
+        if (!disabled && !readonly) {
+          onChange(event.target.value);
+        }
       }}
     />
   ),
@@ -501,7 +756,10 @@ export const templates: TemplatesType = {
   ErrorListTemplate: ({ errors }: ErrorListProps) => (
     <div className='space-y-1 px-3'>
       {errors.map((error) => (
-        <div key={error.property} className='text-sm text-destructive'>
+        <div
+          key={`${error.schemaPath}-${error.property}-${error.name}-${JSON.stringify(error.params)}`}
+          className='text-sm text-destructive'
+        >
           {error.stack}
         </div>
       ))}
@@ -550,13 +808,12 @@ export const templates: TemplatesType = {
       </div>
     );
   },
-  WrapIfAdditionalTemplate: async ({ children }) => children,
+  // oxlint-disable-next-line typescript/promise-function-async -- RJSF's ReactNode includes Promise, but this wrapper is synchronous.
+  WrapIfAdditionalTemplate: ({ children }) => children,
 };
 
 export const uiSchema: UiSchema = {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for ui:globalOptions
   'ui:widget': 'ParametersWidget',
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for ui:globalOptions
   'ui:globalOptions': {
     addable: true,
     copyable: true,
@@ -564,7 +821,6 @@ export const uiSchema: UiSchema = {
     removable: true,
     label: true,
   },
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for ui:options
   'ui:options': {
     hideError: false,
     submitButtonOptions: {

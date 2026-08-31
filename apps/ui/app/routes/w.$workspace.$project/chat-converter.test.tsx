@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
 import type { FileExtension } from '@taucad/types';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 vi.mock('@xstate/react', () => ({
@@ -211,7 +212,7 @@ vi.mock('#components/geometry/parameters/rjsf-theme.js', () => ({
   templates: {},
 }));
 
-const { ChatConverter } = await import('./chat-converter.js');
+const { ChatConverter, resolveActiveSchema } = await import('./chat-converter.js');
 
 function createCapabilities(overrides?: Partial<CapabilitiesManifest>): CapabilitiesManifest {
   return {
@@ -293,13 +294,12 @@ const imageRoute = (): ExportRoute => ({
             width: { type: 'number', default: 768 },
             height: { type: 'number', default: 432 },
             quality: { type: 'number', default: 1 },
-            margin: { type: 'number', default: 0.1 },
-            projection: { type: 'string', enum: ['perspective', 'orthographic'], default: 'perspective' },
+            lineWidth: { type: 'number', default: 3 },
+            background: { type: 'string' },
             label: { type: 'string' },
             axes: { type: 'boolean', default: false },
             scaleBar: { type: 'boolean', default: false },
-            phi: { type: 'number', default: 60 },
-            theta: { type: 'number', default: -45 },
+            camera: { type: 'object' },
           },
           required: ['mode'],
           additionalProperties: false,
@@ -312,8 +312,8 @@ const imageRoute = (): ExportRoute => ({
             width: { type: 'number', default: 768 },
             height: { type: 'number', default: 432 },
             quality: { type: 'number', default: 1 },
-            margin: { type: 'number', default: 0.1 },
-            projection: { type: 'string', enum: ['perspective', 'orthographic'], default: 'perspective' },
+            lineWidth: { type: 'number', default: 3 },
+            background: { type: 'string' },
             axes: { type: 'boolean', default: false },
             scaleBar: { type: 'boolean', default: false },
             views: { type: 'array', items: { type: 'object' } },
@@ -323,11 +323,20 @@ const imageRoute = (): ExportRoute => ({
         },
       ],
     },
-    defaults: { mode: 'single', width: 768, phi: 60, theta: -45 },
+    defaults: { mode: 'single', width: 768, lineWidth: 3 },
   },
 });
 
 describe('ChatConverter', () => {
+  it('should preserve non-mode root unions instead of treating them as image modes', () => {
+    const schema = {
+      type: 'object',
+      anyOf: [{ properties: { value: { type: 'string' } } }, { properties: { value: { type: 'number' } } }],
+    } satisfies JSONSchema7;
+
+    expect(resolveActiveSchema(schema, {}, {})).toEqual({ schema, defaults: {} });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockGeometry = { format: 'gltf', content: new Uint8Array([1]) };
@@ -570,8 +579,9 @@ describe('ChatConverter', () => {
               properties: {
                 width: { type: 'number' },
                 height: { type: 'number' },
-                phi: { type: 'number' },
-                theta: { type: 'number' },
+                lineWidth: { type: 'number' },
+                verticalFieldOfView: { type: 'number' },
+                zoom: { type: 'number' },
                 quality: { type: 'number' },
                 margin: { type: 'number' },
               },
@@ -588,8 +598,9 @@ describe('ChatConverter', () => {
     expect(JSON.parse(screen.getByTestId('rjsf-form').dataset['displayDescriptors'] ?? '{}')).toEqual({
       width: { descriptor: 'count', unit: 'px' },
       height: { descriptor: 'count', unit: 'px' },
-      phi: { descriptor: 'angle', unit: 'deg' },
-      theta: { descriptor: 'angle', unit: 'deg' },
+      lineWidth: { descriptor: 'count', unit: 'px' },
+      verticalFieldOfView: { descriptor: 'angle', unit: 'deg' },
+      zoom: { descriptor: 'unitless', unit: '' },
       quality: { descriptor: 'count', unit: '' },
       margin: { descriptor: 'count', unit: '' },
     });
@@ -601,12 +612,12 @@ describe('ChatConverter', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
     expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
-      'mode,width,height,quality,margin,projection,label,axes,scaleBar,phi,theta',
+      'mode,width,height,quality,lineWidth,background,label,axes,scaleBar,camera',
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch mode' }));
     expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
-      'mode,width,height,quality,margin,projection,axes,scaleBar,views',
+      'mode,width,height,quality,lineWidth,background,axes,scaleBar,views',
     );
 
     fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
@@ -681,6 +692,10 @@ describe('ChatConverter', () => {
       expect(screen.queryByRole('button', { name: /stl/i })).toBeNull();
       expect(screen.queryByRole('button', { name: /step/i })).toBeNull();
       expect(screen.getByText('Export formats are still loading')).toBeDefined();
+      expect(screen.getByRole('status', { name: 'Export formats are still loading' })).toHaveAttribute(
+        'aria-busy',
+        'true',
+      );
       expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('main.ts');
     });
 
@@ -902,7 +917,7 @@ describe('ChatConverter', () => {
       });
     });
 
-    it('should restore a persisted batch image branch without reviving single-view angles', async () => {
+    it('should restore a persisted batch image branch without reviving a single-view camera', async () => {
       mockCapabilities = createCapabilities({
         routes: [
           {
@@ -927,13 +942,22 @@ describe('ChatConverter', () => {
                 mode: 'batch',
                 width: 768,
                 height: 576,
-                margin: 0.1,
-                projection: 'orthographic',
+                lineWidth: 1,
                 axes: true,
                 scaleBar: true,
-                views: [{ id: 'front', label: 'Front', phi: 90, theta: 0 }],
-                phi: 12,
-                theta: 34,
+                views: [
+                  {
+                    id: 'front',
+                    label: 'Front',
+                    camera: {
+                      framing: 'fit',
+                      direction: [0, -1, 0],
+                      up: [0, 0, 1],
+                      projection: { kind: 'orthographic' },
+                    },
+                  },
+                ],
+                camera: { framing: 'fit' },
               },
             },
             formatContent: { webp: { includeEdges: true } },
@@ -947,7 +971,7 @@ describe('ChatConverter', () => {
       });
 
       const exportForm = screen.getAllByTestId('rjsf-form').find((form) => form.dataset['fields']?.startsWith('mode,'));
-      expect(exportForm?.dataset['fields']).toBe('mode,width,height,quality,margin,projection,axes,scaleBar,views');
+      expect(exportForm?.dataset['fields']).toBe('mode,width,height,quality,lineWidth,background,axes,scaleBar,views');
       fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
       await vi.waitFor(() => {
         expect(mockKernelClient.export).toHaveBeenCalledWith('webp', {
@@ -956,11 +980,21 @@ describe('ChatConverter', () => {
             mode: 'batch',
             width: 768,
             height: 576,
-            margin: 0.1,
-            projection: 'orthographic',
+            lineWidth: 1,
             axes: true,
             scaleBar: true,
-            views: [{ id: 'front', label: 'Front', phi: 90, theta: 0 }],
+            views: [
+              {
+                id: 'front',
+                label: 'Front',
+                camera: {
+                  framing: 'fit',
+                  direction: [0, -1, 0],
+                  up: [0, 0, 1],
+                  projection: { kind: 'orthographic' },
+                },
+              },
+            ],
           },
         });
       });

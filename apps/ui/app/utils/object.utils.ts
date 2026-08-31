@@ -313,6 +313,15 @@ export function extractModifiedProperties<T extends Record<string, unknown>>(
   for (const [key, value] of Object.entries(formData)) {
     const defaultValue = defaultProperties[key];
 
+    if (
+      (typeof value === 'number' && !Number.isFinite(value)) ||
+      (Array.isArray(value) &&
+        ((value.length > 0 && value.every((item) => item === null)) ||
+          value.some((item) => typeof item === 'number' && !Number.isFinite(item))))
+    ) {
+      continue;
+    }
+
     // Handle nested objects recursively
     if (
       typeof value === 'object' &&

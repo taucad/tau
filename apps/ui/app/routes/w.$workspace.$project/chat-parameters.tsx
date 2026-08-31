@@ -405,9 +405,9 @@ function GeometryUnitParameters({
 
   const defaultParameters = useSelector(cadRef, (state) => state.context.defaultParameters);
   const jsonSchema = useSelector(cadRef, (state) => state.context.jsonSchema);
-  const units = useSelector(graphicsActor, (state) => state?.context.units) ?? {
-    length: { symbol: 'mm', factor: 1 },
-  };
+  const sourceSymbol = useSelector(cadRef, (state) => state.context.units.length);
+  const displaySymbol = useSelector(graphicsActor, (state) => state?.context.displayUnits.length.symbol) ?? 'mm';
+  const units = { length: { sourceSymbol, displaySymbol } } as const;
 
   const handleParametersChange = useCallback(
     (newParams: Record<string, unknown>) => {

@@ -23,9 +23,11 @@ export function ParametersString({
     return (
       <StringColorPicker
         value={value}
+        className={className}
         onChange={(newValue) => {
           onChange(newValue);
         }}
+        {...properties}
       />
     );
   }

@@ -12,6 +12,13 @@ type StringColorPickerProperties = {
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly className?: string;
+  readonly id?: string;
+  readonly disabled?: boolean;
+  readonly readOnly?: boolean;
+  readonly autoFocus?: boolean;
+  readonly 'aria-label'?: string;
+  readonly onFocus?: React.FocusEventHandler<HTMLInputElement>;
+  readonly onBlur?: React.FocusEventHandler<HTMLInputElement>;
 };
 
 const rgbConverter = converter('rgb');
@@ -110,7 +117,18 @@ const baseIndicatorClass =
  * String Color Picker Component
  * Uses react-colorful for color selection with RGB values (no alpha)
  */
-export function StringColorPicker({ value, onChange, className }: StringColorPickerProperties): React.JSX.Element {
+export function StringColorPicker({
+  value,
+  onChange,
+  className,
+  id,
+  disabled,
+  readOnly,
+  autoFocus,
+  'aria-label': ariaLabel,
+  onFocus,
+  onBlur,
+}: StringColorPickerProperties): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [temporaryColor, setTemporaryColor] = useState(value);
 
@@ -162,6 +180,7 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
         <PopoverTrigger asChild>
           <Button
             variant='outline'
+            disabled={disabled || readOnly}
             className='h-(--param-field-h) w-(--param-field-h) shrink-0 rounded-(--param-field-radius) border-border/50 p-0 opacity-70 shadow-none transition-opacity hover:border-border hover:opacity-100'
             style={{ backgroundColor: isValid ? value : 'transparent' }}
             aria-label='Open color picker'
@@ -186,6 +205,8 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
               <Input
                 type='text'
                 value={temporaryColor}
+                disabled={disabled}
+                readOnly={readOnly}
                 placeholder='Pick a color'
                 className='h-7 pr-8 pl-10 font-mono'
                 onChange={handlePopoverInputChange}
@@ -208,11 +229,18 @@ export function StringColorPicker({ value, onChange, className }: StringColorPic
 
       <div className='group relative flex min-w-0 flex-1 flex-row items-center'>
         <Input
+          id={id}
+          autoFocus={autoFocus}
           autoComplete='off'
           type='text'
           value={value}
+          disabled={disabled}
+          readOnly={readOnly}
+          aria-label={ariaLabel}
           className='h-(--param-field-h) w-full rounded-(--param-field-radius) border-border/50 bg-muted px-2 pr-6 text-right font-mono text-sm text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)'
           placeholder='Color value'
+          onFocus={onFocus}
+          onBlur={onBlur}
           onChange={handleMainInputChange}
         />
         {colorFormat ? (

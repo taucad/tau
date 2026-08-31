@@ -4,12 +4,17 @@ import { Info } from 'lucide-react';
 import React, { useCallback, useMemo, useState } from 'react';
 import Form from '@rjsf/core';
 import type { RJSFSchema } from '@rjsf/utils';
-import deepmerge from 'deepmerge';
 import { SearchInput } from '#components/search-input.js';
 import { cn } from '#utils/ui.utils.js';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
 import type { RJSFContext, Units } from '#components/geometry/parameters/rjsf-context.js';
-import { rjsfIdPrefix, rjsfIdSeparator } from '#components/geometry/parameters/rjsf-utils.js';
+import {
+  mergeFormDefaults,
+  normalizeRjsfFormData,
+  rjsfDefaultFormStateBehavior,
+  rjsfIdPrefix,
+  rjsfIdSeparator,
+} from '#components/geometry/parameters/rjsf-utils.js';
 import { deleteValueAtPath, extractModifiedProperties, getValueAtPath, setValueAtPath } from '#utils/object.utils.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 
@@ -137,13 +142,7 @@ export function Parameters({
     [allExpanded, activeFilterTerm, resetSingleParameter, defaultParameters, units],
   );
 
-  const mergedData = useMemo(
-    () =>
-      deepmerge(defaultParameters, parameters, {
-        arrayMerge: (_target: unknown[], source: unknown[]) => source,
-      }),
-    [defaultParameters, parameters],
-  );
+  const mergedData = useMemo(() => mergeFormDefaults(defaultParameters, parameters), [defaultParameters, parameters]);
   const hasParameters = jsonSchema && Object.keys(jsonSchema.properties ?? {}).length > 0;
 
   // Initialize the ref with the current edited parameters when component mounts or data changes
@@ -152,7 +151,10 @@ export function Parameters({
   }, [mergedData]);
 
   const handleChange = (event: IChangeEvent<Record<string, unknown>, RJSFSchema, RJSFContext>) => {
-    const formData = event.formData ?? {};
+    if (!jsonSchema) {
+      return;
+    }
+    const formData = normalizeRjsfFormData(jsonSchema, event.formData ?? {}) as Record<string, unknown>;
     setParameters(formData);
   };
 
@@ -197,6 +199,7 @@ export function Parameters({
             widgets={widgets}
             formData={mergedData}
             formContext={formContext}
+            experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
             className='flex flex-1 scroll-shadows-y flex-col overflow-x-hidden px-0 py-0 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'
             onChange={handleChange}
           />

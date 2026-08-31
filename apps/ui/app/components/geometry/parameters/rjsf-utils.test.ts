@@ -1,11 +1,142 @@
 import type { RJSFSchema } from '@rjsf/utils';
 import { describe, expect, it } from 'vitest';
 import {
+  getFieldDefaultValue,
   isSchemaMatchingSearch,
+  mergeFormDefaults,
+  normalizeRjsfFormData,
   rjsfIdToJsonPath,
   rjsfIdPrefix,
   rjsfIdSeparator,
 } from '#components/geometry/parameters/rjsf-utils.js';
+
+describe('getFieldDefaultValue', () => {
+  it.each([
+    ['boolean', ['includeEdges'], false],
+    ['number', ['count'], 0],
+    ['string', ['label'], ''],
+    ['null', ['selection'], null],
+    ['nested discriminator', ['camera', 'framing'], 'fit'],
+    ['array object property', ['views', '0', 'camera', 'framing'], 'fixed'],
+    ['tuple item', ['origin', '1'], 2],
+  ] as const)('should prefer a present authoritative %s default', (_label, fieldPath, expected) => {
+    const defaultParameters = {
+      includeEdges: false,
+      count: 0,
+      label: '',
+      selection: null,
+      camera: { framing: 'fit' },
+      views: [{ camera: { framing: 'fixed' } }],
+      origin: [1, 2, 3],
+    };
+
+    expect(
+      getFieldDefaultValue({
+        fieldPath,
+        formData: expected,
+        schemaDefault: 'schema-default',
+        defaultParameters,
+      }),
+    ).toBe(expected);
+  });
+
+  it('should preserve an explicitly undefined default and fall back only for an absent path', () => {
+    const defaultParameters = { optional: undefined };
+
+    expect(
+      getFieldDefaultValue({
+        fieldPath: ['optional'],
+        formData: undefined,
+        schemaDefault: 'schema-default',
+        defaultParameters,
+      }),
+    ).toBeUndefined();
+    expect(
+      getFieldDefaultValue({
+        fieldPath: ['missing'],
+        formData: undefined,
+        schemaDefault: 'schema-default',
+        defaultParameters,
+      }),
+    ).toBe('schema-default');
+  });
+});
+
+describe('mergeFormDefaults', () => {
+  it('should replace edited arrays while preserving nested object defaults', () => {
+    expect(
+      mergeFormDefaults(
+        { sections: { planes: [{ point: [0, 0, 0] }], clipLines: true } },
+        { sections: { planes: [{ point: [1, 2, 3] }] } },
+      ),
+    ).toEqual({ sections: { planes: [{ point: [1, 2, 3] }], clipLines: true } });
+  });
+
+  it('should replace a changed discriminated branch instead of retaining fields from the old branch', () => {
+    expect(
+      mergeFormDefaults(
+        { camera: { framing: 'fit', direction: [1, 0, 0], margin: 0.1 } },
+        { camera: { framing: 'fixed', position: [3, -3, 2], target: [0, 0, 0] } },
+      ),
+    ).toEqual({ camera: { framing: 'fixed', position: [3, -3, 2], target: [0, 0, 0] } });
+  });
+});
+
+describe('normalizeRjsfFormData', () => {
+  it('should clean transient data created while switching a discriminated object branch', () => {
+    const schema: RJSFSchema = {
+      oneOf: [
+        {
+          type: 'object',
+          properties: { kind: { const: 'fit' }, direction: { type: 'array', items: { type: 'number' } } },
+          required: ['kind'],
+        },
+        {
+          type: 'object',
+          properties: {
+            kind: { const: 'fixed' },
+            position: { type: 'array', items: { type: 'number' } },
+            clipping: {
+              type: 'object',
+              properties: { near: { type: 'number' }, far: { type: 'number' } },
+              required: ['near', 'far'],
+            },
+          },
+          required: ['kind'],
+        },
+      ],
+    };
+
+    expect(
+      normalizeRjsfFormData(schema, {
+        kind: 'fixed',
+        direction: undefined,
+        position: [3, -3, 2],
+        clipping: {},
+      }),
+    ).toEqual({ kind: 'fixed', position: [3, -3, 2] });
+  });
+
+  it('should preserve valid empty objects and invalid required objects for validation', () => {
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        metadata: { type: 'object', properties: {} },
+        requiredSettings: {
+          type: 'object',
+          properties: { value: { type: 'number' } },
+          required: ['value'],
+        },
+      },
+      required: ['requiredSettings'],
+    };
+
+    expect(normalizeRjsfFormData(schema, { metadata: {}, requiredSettings: {} })).toEqual({
+      metadata: {},
+      requiredSettings: {},
+    });
+  });
+});
 
 describe('isSchemaMatchingSearch', () => {
   describe('Empty search term', () => {
@@ -193,6 +324,29 @@ describe('isSchemaMatchingSearch', () => {
   });
 
   describe('Nested properties matching', () => {
+    it('should match fields inside oneOf and anyOf branches', () => {
+      const schema: RJSFSchema = {
+        oneOf: [
+          { type: 'object', properties: { direction: { type: 'array', title: 'Direction vector' } } },
+          {
+            type: 'object',
+            properties: {
+              projection: {
+                anyOf: [
+                  { type: 'object', properties: { verticalSpan: { type: 'number', title: 'Vertical span' } } },
+                  { type: 'object', properties: { zoom: { type: 'number', title: 'Zoom' } } },
+                ],
+              },
+            },
+          },
+        ],
+      };
+
+      expect(isSchemaMatchingSearch(schema, 'direction vector')).toBe(true);
+      expect(isSchemaMatchingSearch(schema, 'vertical span')).toBe(true);
+      expect(isSchemaMatchingSearch(schema, 'missing')).toBe(false);
+    });
+
     it('should match nested property name', () => {
       const schema: RJSFSchema = {
         type: 'object',

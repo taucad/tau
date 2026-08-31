@@ -11,7 +11,9 @@ import { useCadPreview } from '#hooks/use-cad-preview.js';
 export function PreviewParameters(): React.JSX.Element {
   const { cadRef, graphicsRef, defaultParameters, jsonSchema, setParameters } = useCadPreview();
   const parameters = useSelector(cadRef, (snapshot) => snapshot.context.parameters);
-  const units = useSelector(graphicsRef, (state) => state.context.units);
+  const sourceSymbol = useSelector(cadRef, (snapshot) => snapshot.context.units.length);
+  const displaySymbol = useSelector(graphicsRef, (state) => state.context.displayUnits.length.symbol);
+  const units = { length: { sourceSymbol, displaySymbol } } as const;
 
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isAllExpanded, setIsAllExpanded] = useState(true);

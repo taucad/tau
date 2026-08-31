@@ -13,8 +13,8 @@ function createDefaultInput(overrides?: Partial<ParameterInput>): ParameterInput
     defaultValue: 50,
     descriptor: 'length',
     enableContinualOnChange: false,
-    initialUnitFactor: 1,
-    initialUnitSymbol: 'mm',
+    initialSourceSymbol: 'mm',
+    initialDisplaySymbol: 'mm',
     ...overrides,
   };
 }
@@ -56,6 +56,19 @@ describe('parameterMachine', () => {
   // Context initialization
   // =========================================================================
   describe('context initialization', () => {
+    it('does not reinterpret a millimetre source value as metres when the viewer displays millimetres', () => {
+      const actor = createTestActor({
+        initialValue: 0.5,
+        defaultValue: 0.5,
+        initialSourceSymbol: 'mm',
+        initialDisplaySymbol: 'mm',
+      });
+      actor.start();
+      expect(actor.getSnapshot().context.localValue).toBe(0.5);
+      expect(actor.getSnapshot().context.isApproximation).toBe(false);
+      actor.stop();
+    });
+
     it('should initialize with correct defaults for length descriptor', () => {
       const actor = createTestActor({ initialValue: 50, defaultValue: 50, descriptor: 'length' });
       actor.start();
@@ -65,8 +78,8 @@ describe('parameterMachine', () => {
       expect(context.isFocused).toBe(false);
       expect(context.isDragging).toBe(false);
       expect(context.descriptor).toBe('length');
-      expect(context.currentUnitFactor).toBe(1);
-      expect(context.currentUnitSymbol).toBe('mm');
+      expect(context.currentSourceSymbol).toBe('mm');
+      expect(context.currentDisplaySymbol).toBe('mm');
       expect(context.displayUnit).toBe('mm');
       expect(context.isShiftHeld).toBe(false);
       expect(context.lastEmittedValue).toBeUndefined();
@@ -74,36 +87,55 @@ describe('parameterMachine', () => {
     });
 
     it('should initialize with unit conversion for length in inches', () => {
-      const inchFactor = 25.4;
       const actor = createTestActor({
         initialValue: 25.4,
         defaultValue: 25.4,
-        descriptor: 'length',
-        initialUnitFactor: inchFactor,
-        initialUnitSymbol: 'in',
+        initialSourceSymbol: 'mm',
+        initialDisplaySymbol: 'in',
       });
       actor.start();
       const { context } = actor.getSnapshot();
       expect(context.committedValue).toBe(25.4);
       expect(context.localValue).toBe(1);
-      expect(context.currentUnitFactor).toBe(inchFactor);
-      expect(context.currentUnitSymbol).toBe('in');
+      expect(context.currentSourceSymbol).toBe('mm');
+      expect(context.currentDisplaySymbol).toBe('in');
       expect(context.displayUnit).toBe('in');
       actor.stop();
     });
+
+    it.each([
+      { sourceSymbol: 'm', displaySymbol: 'mm', sourceValue: 0.5, displayValue: 500 },
+      { sourceSymbol: 'mm', displaySymbol: 'm', sourceValue: 500, displayValue: 0.5 },
+    ] as const)(
+      'converts $sourceSymbol source values to $displaySymbol without changing source semantics',
+      ({ sourceSymbol, displaySymbol, sourceValue, displayValue }) => {
+        const actor = createTestActor({
+          initialValue: sourceValue,
+          defaultValue: sourceValue,
+          initialSourceSymbol: sourceSymbol,
+          initialDisplaySymbol: displaySymbol,
+        });
+        actor.start();
+        expect(actor.getSnapshot().context.localValue).toBe(displayValue);
+        const emitted = collectEmitted(actor);
+        actor.send({ type: 'inputChanged', value: displayValue });
+        expect(emitted[0]!.value).toBe(sourceValue);
+        actor.stop();
+      },
+    );
 
     it('should ignore unit factor for non-length descriptors', () => {
       const actor = createTestActor({
         initialValue: 45,
         defaultValue: 45,
         descriptor: 'angle',
-        initialUnitFactor: 25.4,
-        initialUnitSymbol: 'in',
+        initialSourceSymbol: 'mm',
+        initialDisplaySymbol: 'in',
       });
       actor.start();
       const { context } = actor.getSnapshot();
       expect(context.localValue).toBe(45);
-      expect(context.currentUnitFactor).toBe(1);
+      expect(context.currentSourceSymbol).toBe('mm');
       expect(context.displayUnit).toBe('');
       actor.stop();
     });
@@ -205,13 +237,12 @@ describe('parameterMachine', () => {
       actor.stop();
     });
 
-    it('should convert slider value to baseline units for length with unit factor', () => {
-      const inchFactor = 25.4;
+    it('should convert a slider edit from display units to source units', () => {
       const actor = createTestActor({
         initialValue: 25.4,
         defaultValue: 25.4,
-        initialUnitFactor: inchFactor,
-        initialUnitSymbol: 'in',
+        initialSourceSymbol: 'mm',
+        initialDisplaySymbol: 'in',
       });
       actor.start();
       const emitted = collectEmitted(actor);
@@ -277,14 +308,29 @@ describe('parameterMachine', () => {
         initialValue: 50,
         defaultValue: 50,
         descriptor: 'length',
-        initialUnitFactor: 1,
-        initialUnitSymbol: 'mm',
+        initialSourceSymbol: 'mm',
+        initialDisplaySymbol: 'mm',
       });
       actor.start();
       const emitted = collectEmitted(actor);
       actor.send({ type: 'textInputChanged', text: '100mm' });
       expect(emitted).toHaveLength(1);
       expect(emitted[0]!.value).toBeCloseTo(100);
+      actor.stop();
+    });
+
+    it('should commit explicit typed units into the declared source unit', () => {
+      const actor = createTestActor({
+        initialValue: 0,
+        defaultValue: 0,
+        initialSourceSymbol: 'mm',
+        initialDisplaySymbol: 'm',
+      });
+      actor.start();
+      const emitted = collectEmitted(actor);
+      actor.send({ type: 'textInputChanged', text: '2in' });
+      expect(emitted[0]!.value).toBeCloseTo(50.8);
+      expect(actor.getSnapshot().context.localValue).toBeCloseTo(0.0508);
       actor.stop();
     });
   });
@@ -370,17 +416,17 @@ describe('parameterMachine', () => {
         initialValue: 25.4,
         defaultValue: 25.4,
         descriptor: 'length',
-        initialUnitFactor: 1,
-        initialUnitSymbol: 'mm',
+        initialSourceSymbol: 'mm',
+        initialDisplaySymbol: 'mm',
       });
       actor.start();
       expect(actor.getSnapshot().context.localValue).toBe(25.4);
 
-      actor.send({ type: 'unitChanged', unitFactor: 25.4, unitSymbol: 'in' });
+      actor.send({ type: 'unitChanged', sourceSymbol: 'mm', displaySymbol: 'in' });
       const { context } = actor.getSnapshot();
       expect(context.localValue).toBeCloseTo(1);
-      expect(context.currentUnitFactor).toBe(25.4);
-      expect(context.currentUnitSymbol).toBe('in');
+      expect(context.currentSourceSymbol).toBe('mm');
+      expect(context.currentDisplaySymbol).toBe('in');
       expect(context.displayUnit).toBe('in');
       actor.stop();
     });
@@ -392,9 +438,9 @@ describe('parameterMachine', () => {
         descriptor: 'angle',
       });
       actor.start();
-      actor.send({ type: 'unitChanged', unitFactor: 25.4, unitSymbol: 'in' });
+      actor.send({ type: 'unitChanged', sourceSymbol: 'mm', displaySymbol: 'in' });
       expect(actor.getSnapshot().context.localValue).toBe(90);
-      expect(actor.getSnapshot().context.currentUnitFactor).toBe(1);
+      expect(actor.getSnapshot().context.currentSourceSymbol).toBe('mm');
       actor.stop();
     });
   });
@@ -419,8 +465,8 @@ describe('parameterMachine', () => {
         initialValue: 50,
         defaultValue: 50,
         descriptor: 'length',
-        initialUnitFactor: 25.4,
-        initialUnitSymbol: 'in',
+        initialSourceSymbol: 'mm',
+        initialDisplaySymbol: 'in',
       });
       actor.start();
       expect(actor.getSnapshot().context.displayUnit).toBe('in');
@@ -458,7 +504,7 @@ describe('parameterMachine', () => {
   // Duplicate emission prevention
   // =========================================================================
   describe('duplicate emission prevention', () => {
-    it('should not emit duplicate valueCommit for same baseline value', () => {
+    it('should not emit duplicate valueCommit for the same source value', () => {
       const actor = createTestActor();
       actor.start();
       const emitted = collectEmitted(actor);

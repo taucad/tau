@@ -29,6 +29,8 @@ type ComboBoxResponsiveProperties<T> = Omit<
   readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
   readonly children: ReactNode;
   readonly getValue: (item: T) => string;
+  /** Additional human-readable search terms that are distinct from the stable item value. */
+  readonly getKeywords?: (item: T) => readonly string[];
   /** Controlled selection (`selectedItem` in `renderLabel` + checkmark alignment). Mirrors parent source of truth — no internal snapshot stalemate. */
   readonly value?: T | undefined;
   readonly onSelect?: (value: string) => void;
@@ -75,6 +77,7 @@ export function ComboBoxResponsive<T>({
   renderLabel,
   children,
   getValue,
+  getKeywords,
   value,
   onSelect,
   onClose,
@@ -170,6 +173,7 @@ export function ComboBoxResponsive<T>({
               selectedItem={value}
               renderLabel={renderLabel}
               getValue={getValue}
+              getKeywords={getKeywords}
               searchPlaceHolder={searchPlaceHolder}
               asChildLabel={asChildLabel}
               labelClassName={labelClassName}
@@ -203,6 +207,7 @@ export function ComboBoxResponsive<T>({
             selectedItem={value}
             renderLabel={renderLabel}
             getValue={getValue}
+            getKeywords={getKeywords}
             searchPlaceHolder={searchPlaceHolder}
             asChildLabel={asChildLabel}
             labelClassName={labelClassName}
@@ -227,6 +232,7 @@ function ItemList<T>({
   selectedItem,
   renderLabel,
   getValue,
+  getKeywords,
   searchPlaceHolder,
   asChildLabel: labelAsChild,
   labelClassName,
@@ -243,6 +249,7 @@ function ItemList<T>({
   readonly selectedItem: T | undefined;
   readonly renderLabel: (item: T, selectedItem: T | undefined) => ReactNode;
   readonly getValue: (item: T) => string;
+  readonly getKeywords?: (item: T) => readonly string[];
   readonly searchPlaceHolder: string;
   readonly asChildLabel?: boolean;
   readonly labelClassName?: ClassValue;
@@ -256,7 +263,9 @@ function ItemList<T>({
 }) {
   const [search, setSearch] = React.useState('');
 
-  type FlatItem = { type: 'item'; item: T; groupName: string; value: string } | { type: 'header'; groupName: string };
+  type FlatItem =
+    | { type: 'item'; item: T; groupName: string; value: string; keywords: readonly string[] }
+    | { type: 'header'; groupName: string };
 
   // Flatten all items from all groups for virtualization, including group headers
   const flattenedItems = React.useMemo((): FlatItem[] => {
@@ -269,10 +278,11 @@ function ItemList<T>({
             item,
             groupName: group.name,
             value: getValue(item),
+            keywords: getKeywords?.(item) ?? [],
           }) as const,
       ),
     ]);
-  }, [groupedItems, getValue]);
+  }, [groupedItems, getKeywords, getValue]);
 
   // Filter items based on search
   const filteredItems = React.useMemo((): FlatItem[] => {
@@ -286,7 +296,9 @@ function ItemList<T>({
     const filteredItemEntries = flattenedItems.filter(
       (entry) =>
         entry.type === 'item' &&
-        (entry.value.toLowerCase().includes(searchLower) || entry.groupName.toLowerCase().includes(searchLower)),
+        (entry.value.toLowerCase().includes(searchLower) ||
+          entry.groupName.toLowerCase().includes(searchLower) ||
+          entry.keywords.some((keyword) => keyword.toLowerCase().includes(searchLower))),
     );
 
     // Get unique group names that have matching items
@@ -297,7 +309,9 @@ function ItemList<T>({
       (entry) =>
         (entry.type === 'header' && groupsWithItems.has(entry.groupName)) ||
         (entry.type === 'item' &&
-          (entry.value.toLowerCase().includes(searchLower) || entry.groupName.toLowerCase().includes(searchLower))),
+          (entry.value.toLowerCase().includes(searchLower) ||
+            entry.groupName.toLowerCase().includes(searchLower) ||
+            entry.keywords.some((keyword) => keyword.toLowerCase().includes(searchLower)))),
     );
   }, [flattenedItems, search, withVirtualization]);
 
@@ -318,14 +332,14 @@ function ItemList<T>({
         );
       }
 
-      const { item, value } = itemData;
+      const { item, value, keywords } = itemData;
 
       return (
         <CommandItem
           key={value}
           asChild={labelAsChild}
           value={value}
-          keywords={[itemData.groupName]}
+          keywords={[itemData.groupName, ...keywords]}
           className={cn(labelClassName)}
           disabled={isDisabled?.(item)}
           onSelect={() => {
@@ -390,7 +404,7 @@ function ItemList<T>({
                   key={value}
                   asChild={labelAsChild}
                   value={value}
-                  keywords={[group.name]}
+                  keywords={[group.name, ...(getKeywords?.(item) ?? [])]}
                   className={cn(labelClassName)}
                   disabled={isDisabled?.(item)}
                   onSelect={() => {

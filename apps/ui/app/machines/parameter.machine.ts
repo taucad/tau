@@ -107,7 +107,7 @@ function calculateSliderMax(defaultValue: number): number {
  * Manages state for a single parameter input with unit conversion support
  */
 export type ParameterContext = {
-  /** The committed value in baseline units (mm for length) */
+  /** The committed value in the CAD parameter's declared source unit. */
   committedValue: number;
   /** The local value in display units (used during interaction) */
   localValue: number;
@@ -119,19 +119,19 @@ export type ParameterContext = {
   descriptor: MeasurementDescriptor;
   /** Whether to commit continually on every slider change (vs. only on release) */
   enableContinualOnChange: boolean;
-  /** Current unit factor (cached for comparison) */
-  currentUnitFactor: number;
-  /** Current unit symbol (for parsing) */
-  currentUnitSymbol: LengthSymbol;
+  /** CAD parameter source symbol. */
+  currentSourceSymbol: LengthSymbol;
+  /** Human-selected display symbol. */
+  currentDisplaySymbol: LengthSymbol;
   /** Display unit string (for UI display) */
   displayUnit: string;
-  /** Default value in baseline units (for range calculations) */
+  /** Default value in the CAD parameter's source unit. */
   defaultValue: number;
-  /** Optional minimum value in baseline units */
+  /** Optional minimum value in the source unit. */
   min: number | undefined;
-  /** Optional maximum value in baseline units */
+  /** Optional maximum value in the source unit. */
   max: number | undefined;
-  /** Optional original step value from input (in baseline units) */
+  /** Optional original step value from input in the source unit. */
   originalStep: number | undefined;
   /** Formatted value string (only when conversion occurred) */
   formattedValue: string | undefined;
@@ -155,23 +155,23 @@ export type ParameterContext = {
  * Parameter Machine Input
  */
 export type ParameterInput = {
-  /** Initial value in baseline units (mm for length) */
+  /** Initial value in the CAD parameter's source unit. */
   initialValue: number;
-  /** Default value in baseline units (for slider calculations) */
+  /** Default value in the CAD parameter's source unit. */
   defaultValue: number;
   /** Measurement descriptor */
   descriptor: MeasurementDescriptor;
   /** Whether to commit continually on every slider change (vs. only on release) */
   enableContinualOnChange: boolean;
-  /** Initial unit factor */
-  initialUnitFactor: number;
-  /** Initial unit symbol */
-  initialUnitSymbol: LengthSymbol;
-  /** Optional minimum value in baseline units */
+  /** CAD parameter source symbol. */
+  initialSourceSymbol: LengthSymbol;
+  /** Initial human-selected display symbol. */
+  initialDisplaySymbol: LengthSymbol;
+  /** Optional minimum value in the source unit. */
   min?: number;
-  /** Optional maximum value in baseline units */
+  /** Optional maximum value in the source unit. */
   max?: number;
-  /** Optional step value in baseline units */
+  /** Optional step value in the source unit. */
   step?: number;
 };
 
@@ -180,7 +180,8 @@ export type ParameterInput = {
  */
 function calculateParameterRange(parameters: {
   defaultValue: number;
-  unitFactor: number;
+  sourceSymbol: LengthSymbol;
+  displaySymbol: LengthSymbol;
   isLength: boolean;
   min: number | undefined;
   max: number | undefined;
@@ -190,22 +191,22 @@ function calculateParameterRange(parameters: {
   rangeMax: number;
   baseStep: number;
 } {
-  const { defaultValue, unitFactor, isLength, min, max, step } = parameters;
-  // Convert default value to display units
-  const defaultValueInDisplayUnit = defaultValue / unitFactor;
+  const { defaultValue, sourceSymbol, displaySymbol, isLength, min, max, step } = parameters;
+  const toDisplay = (value: number): number => (isLength ? convertLength(value, sourceSymbol, displaySymbol) : value);
+  const defaultValueInDisplayUnit = toDisplay(defaultValue);
 
   // Round to 4 sig fig if conversion occurred
-  const hasConversion = isLength && unitFactor !== 1;
+  const hasConversion = isLength && sourceSymbol !== displaySymbol;
   const defaultValueForCalculations = hasConversion
     ? roundToSignificantFigures(defaultValueInDisplayUnit, 4)
     : defaultValueInDisplayUnit;
 
   // Calculate or convert step
-  const baseStep = step === undefined ? calculateSliderStep(defaultValueForCalculations) : step / unitFactor;
+  const baseStep = step === undefined ? calculateSliderStep(defaultValueForCalculations) : toDisplay(step);
 
   // Calculate or convert min/max
-  const rangeMin = min === undefined ? calculateSliderMin(defaultValueForCalculations) : min / unitFactor;
-  const rangeMax = max === undefined ? calculateSliderMax(defaultValueForCalculations) : max / unitFactor;
+  const rangeMin = min === undefined ? calculateSliderMin(defaultValueForCalculations) : toDisplay(min);
+  const rangeMax = max === undefined ? calculateSliderMax(defaultValueForCalculations) : toDisplay(max);
 
   return {
     rangeMin,
@@ -219,19 +220,21 @@ function calculateParameterRange(parameters: {
  */
 function calculateFormatting({
   committedValue,
-  unitFactor,
+  sourceSymbol,
+  displaySymbol,
   isLength,
   isInteracting,
 }: {
   committedValue: number;
-  unitFactor: number;
+  sourceSymbol: LengthSymbol;
+  displaySymbol: LengthSymbol;
   isLength: boolean;
   isInteracting: boolean;
 }): {
   formattedValue: string | undefined;
   isApproximation: boolean;
 } {
-  const hasConversion = isLength && unitFactor !== 1;
+  const hasConversion = isLength && sourceSymbol !== displaySymbol;
 
   if (!hasConversion || isInteracting) {
     return {
@@ -240,7 +243,7 @@ function calculateFormatting({
     };
   }
 
-  const converted = committedValue / unitFactor;
+  const converted = convertLength(committedValue, sourceSymbol, displaySymbol);
   const formatted = formatUnitDisplay(converted, {
     significantFigures: 4,
     preserveTrailingZeros: false,
@@ -264,7 +267,7 @@ type ParameterEventInternal =
   | { type: 'sliderReleased'; value: number }
   | { type: 'inputChanged'; value: number }
   | { type: 'textInputChanged'; text: string }
-  | { type: 'unitChanged'; unitFactor: number; unitSymbol: string }
+  | { type: 'unitChanged'; sourceSymbol: LengthSymbol; displaySymbol: LengthSymbol }
   | {
       type: 'configChanged';
       defaultValue?: number;
@@ -324,18 +327,20 @@ export const parameterMachine = setup({
       }
 
       const isLength = context.descriptor === 'length';
-      const unitFactor = isLength ? context.currentUnitFactor : 1;
-      const displayValue = event.value / unitFactor;
+      const displayValue = isLength
+        ? convertLength(event.value, context.currentSourceSymbol, context.currentDisplaySymbol)
+        : event.value;
 
       // Apply rounding if conversion occurred
-      const hasConversion = isLength && unitFactor !== 1;
+      const hasConversion = isLength && context.currentSourceSymbol !== context.currentDisplaySymbol;
       const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
 
       // Recalculate formatting (preserve precision if actively editing)
       const isEditing = context.isFocused || context.isDragging;
       const formatting = calculateFormatting({
         committedValue: event.value,
-        unitFactor,
+        sourceSymbol: context.currentSourceSymbol,
+        displaySymbol: context.currentDisplaySymbol,
         isLength,
         isInteracting: isEditing,
       });
@@ -362,23 +367,24 @@ export const parameterMachine = setup({
         return;
       }
 
-      // Convert from display units to baseline units (mm for length)
       const isLength = context.descriptor === 'length';
-      const unitFactor = isLength ? context.currentUnitFactor : 1;
-      const baselineValue = event.value * unitFactor;
+      const sourceValue = isLength
+        ? convertLength(event.value, context.currentDisplaySymbol, context.currentSourceSymbol)
+        : event.value;
 
       // Check if this value is different from the last emitted value
-      if (context.lastEmittedValue !== undefined && Math.abs(baselineValue - context.lastEmittedValue) < 1e-10) {
+      if (context.lastEmittedValue !== undefined && Math.abs(sourceValue - context.lastEmittedValue) < 1e-10) {
         // Value hasn't changed, don't emit (but still update local state for UI)
         const isEditing = context.isFocused || context.isDragging;
         const formatting = calculateFormatting({
-          committedValue: baselineValue,
-          unitFactor,
+          committedValue: sourceValue,
+          sourceSymbol: context.currentSourceSymbol,
+          displaySymbol: context.currentDisplaySymbol,
           isLength,
           isInteracting: isEditing,
         });
         enqueue.assign({
-          committedValue: baselineValue,
+          committedValue: sourceValue,
           ...formatting,
         });
         return;
@@ -387,21 +393,22 @@ export const parameterMachine = setup({
       // Recalculate formatting with new committed value
       const isEditing = context.isFocused || context.isDragging;
       const formatting = calculateFormatting({
-        committedValue: baselineValue,
-        unitFactor,
+        committedValue: sourceValue,
+        sourceSymbol: context.currentSourceSymbol,
+        displaySymbol: context.currentDisplaySymbol,
         isLength,
         isInteracting: isEditing,
       });
 
       enqueue.assign({
-        committedValue: baselineValue,
-        lastEmittedValue: baselineValue,
+        committedValue: sourceValue,
+        lastEmittedValue: sourceValue,
         ...formatting,
       });
 
       enqueue.emit({
         type: 'valueCommit',
-        value: baselineValue,
+        value: sourceValue,
       });
     }),
 
@@ -418,40 +425,41 @@ export const parameterMachine = setup({
         return {};
       }
 
-      // Only apply unit conversion for length measurements
       const isLength = context.descriptor === 'length';
-      const newUnitFactor = isLength ? event.unitFactor : 1;
-      const newUnit = isLength ? event.unitSymbol : 'mm';
-      const displayUnit = isLength ? event.unitSymbol : '';
-      const displayValue = context.committedValue / newUnitFactor;
+      const sourceSymbol = isLength ? event.sourceSymbol : context.currentSourceSymbol;
+      const displaySymbol = isLength ? event.displaySymbol : context.currentDisplaySymbol;
+      const displayUnit = isLength ? displaySymbol : '';
+      const displayValue = isLength
+        ? convertLength(context.committedValue, sourceSymbol, displaySymbol)
+        : context.committedValue;
 
       // Apply rounding if conversion occurred
-      const hasConversion = isLength && newUnitFactor !== 1;
+      const hasConversion = isLength && sourceSymbol !== displaySymbol;
       const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
 
-      // Recalculate range with new unit factor
       const range = calculateParameterRange({
         defaultValue: context.defaultValue,
-        unitFactor: newUnitFactor,
+        sourceSymbol,
+        displaySymbol,
         isLength,
         min: context.min,
         max: context.max,
         step: context.originalStep,
       });
 
-      // Recalculate formatting with new unit factor (preserve precision if actively editing)
       const isEditing = context.isFocused || context.isDragging;
       const formatting = calculateFormatting({
         committedValue: context.committedValue,
-        unitFactor: newUnitFactor,
+        sourceSymbol,
+        displaySymbol,
         isLength,
         isInteracting: isEditing,
       });
 
       return {
         localValue,
-        currentUnitFactor: newUnitFactor,
-        currentUnitSymbol: newUnit,
+        currentSourceSymbol: sourceSymbol,
+        currentDisplaySymbol: displaySymbol,
         displayUnit,
         ...range,
         ...formatting,
@@ -476,19 +484,22 @@ export const parameterMachine = setup({
 
       // Check if descriptor changed - if so, we may need to update unit handling
       const isLength = newDescriptor === 'length';
-      const unitFactor = isLength ? context.currentUnitFactor : 1;
-      const unitSymbol = isLength ? context.currentUnitSymbol : 'mm';
-      const displayUnit = isLength ? context.currentUnitSymbol : '';
+      const sourceSymbol = context.currentSourceSymbol;
+      const displaySymbol = context.currentDisplaySymbol;
+      const displayUnit = isLength ? displaySymbol : '';
 
       // Recalculate display value based on new descriptor
-      const displayValue = context.committedValue / unitFactor;
-      const hasConversion = isLength && unitFactor !== 1;
+      const displayValue = isLength
+        ? convertLength(context.committedValue, sourceSymbol, displaySymbol)
+        : context.committedValue;
+      const hasConversion = isLength && sourceSymbol !== displaySymbol;
       const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
 
       // Recalculate range with new config values
       const range = calculateParameterRange({
         defaultValue: newDefaultValue,
-        unitFactor,
+        sourceSymbol,
+        displaySymbol,
         isLength,
         min: newMin,
         max: newMax,
@@ -499,7 +510,8 @@ export const parameterMachine = setup({
       const isEditing = context.isFocused || context.isDragging;
       const formatting = calculateFormatting({
         committedValue: context.committedValue,
-        unitFactor,
+        sourceSymbol,
+        displaySymbol,
         isLength,
         isInteracting: isEditing,
       });
@@ -511,8 +523,6 @@ export const parameterMachine = setup({
         max: newMax,
         originalStep: newStep,
         enableContinualOnChange: newEnableContinualOnChange,
-        currentUnitFactor: unitFactor,
-        currentUnitSymbol: unitSymbol,
         displayUnit,
         localValue,
         ...range,
@@ -556,7 +566,6 @@ export const parameterMachine = setup({
       }
 
       const isLength = context.descriptor === 'length';
-      const unitFactor = isLength ? context.currentUnitFactor : 1;
       let valueInDisplayUnit: number | undefined;
 
       // For length parameters, try to parse with units and fractions
@@ -565,9 +574,9 @@ export const parameterMachine = setup({
         if (parsed) {
           // If a unit was specified and differs from current unit, convert
           // oxlint-disable-next-line unicorn/prefer-ternary -- ternary is not as readable as if/else
-          if (parsed.symbol && parsed.symbol !== context.currentUnitSymbol) {
+          if (parsed.symbol && parsed.symbol !== context.currentDisplaySymbol) {
             // Convert from parsed unit to current display unit
-            valueInDisplayUnit = convertLength(parsed.value, parsed.symbol, context.currentUnitSymbol);
+            valueInDisplayUnit = convertLength(parsed.value, parsed.symbol, context.currentDisplaySymbol);
           } else {
             valueInDisplayUnit = parsed.value;
           }
@@ -585,57 +594,59 @@ export const parameterMachine = setup({
         return;
       }
 
-      // Convert to baseline units (mm for length)
-      const baselineValue = valueInDisplayUnit * unitFactor;
+      const sourceValue = isLength
+        ? convertLength(valueInDisplayUnit, context.currentDisplaySymbol, context.currentSourceSymbol)
+        : valueInDisplayUnit;
 
       // Check if this value is different from the last emitted value
-      if (context.lastEmittedValue !== undefined && Math.abs(baselineValue - context.lastEmittedValue) < 1e-10) {
+      if (context.lastEmittedValue !== undefined && Math.abs(sourceValue - context.lastEmittedValue) < 1e-10) {
         // Value hasn't changed, don't emit
         return;
       }
 
       // Apply rounding if conversion occurred
-      const hasConversion = isLength && unitFactor !== 1;
+      const hasConversion = isLength && context.currentSourceSymbol !== context.currentDisplaySymbol;
       const localValue = hasConversion ? roundToSignificantFigures(valueInDisplayUnit, 4) : valueInDisplayUnit;
 
       // Recalculate formatting with new committed value (preserve precision if actively editing)
       const isEditing = context.isFocused || context.isDragging;
       const formatting = calculateFormatting({
-        committedValue: baselineValue,
-        unitFactor,
+        committedValue: sourceValue,
+        sourceSymbol: context.currentSourceSymbol,
+        displaySymbol: context.currentDisplaySymbol,
         isLength,
         isInteracting: isEditing,
       });
 
       enqueue.assign({
-        committedValue: baselineValue,
+        committedValue: sourceValue,
         localValue,
-        lastEmittedValue: baselineValue,
+        lastEmittedValue: sourceValue,
         ...formatting,
       });
 
       enqueue.emit({
         type: 'valueCommit',
-        value: baselineValue,
+        value: sourceValue,
       });
     }),
   },
 }).createMachine({
   id: 'parameter',
   context({ input }) {
-    // Only apply unit conversion for length measurements
     const isLength = input.descriptor === 'length';
-    const unitFactor = isLength ? input.initialUnitFactor : 1;
-    const unitSymbol = isLength ? input.initialUnitSymbol : 'mm';
-    const displayUnit = isLength ? input.initialUnitSymbol : '';
-    const displayValue = input.initialValue / unitFactor;
-    const hasConversion = isLength && unitFactor !== 1;
+    const sourceSymbol = input.initialSourceSymbol;
+    const displaySymbol = input.initialDisplaySymbol;
+    const displayUnit = isLength ? displaySymbol : '';
+    const displayValue = isLength ? convertLength(input.initialValue, sourceSymbol, displaySymbol) : input.initialValue;
+    const hasConversion = isLength && sourceSymbol !== displaySymbol;
     const localValue = hasConversion ? roundToSignificantFigures(displayValue, 4) : displayValue;
 
     // Calculate parameter range (min, max, step)
     const range = calculateParameterRange({
       defaultValue: input.defaultValue,
-      unitFactor,
+      sourceSymbol,
+      displaySymbol,
       isLength,
       min: input.min,
       max: input.max,
@@ -645,7 +656,8 @@ export const parameterMachine = setup({
     // Calculate formatting
     const formatting = calculateFormatting({
       committedValue: input.initialValue,
-      unitFactor,
+      sourceSymbol,
+      displaySymbol,
       isLength,
       isInteracting: false,
     });
@@ -657,8 +669,8 @@ export const parameterMachine = setup({
       isDragging: false,
       descriptor: input.descriptor,
       enableContinualOnChange: input.enableContinualOnChange,
-      currentUnitFactor: unitFactor,
-      currentUnitSymbol: unitSymbol,
+      currentSourceSymbol: sourceSymbol,
+      currentDisplaySymbol: displaySymbol,
       displayUnit,
       defaultValue: input.defaultValue,
       min: input.min,

@@ -16,8 +16,8 @@ function TestWrapper({ children }: { readonly children: React.ReactNode }): Reac
 // Default units (mm)
 const defaultUnits: Units = {
   length: {
-    factor: 1,
-    symbol: 'mm',
+    sourceSymbol: 'mm',
+    displaySymbol: 'mm',
   },
 };
 
@@ -3143,8 +3143,8 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Start with mm units
     const mmUnits: Units = {
       length: {
-        factor: 1, // Mm
-        symbol: 'mm',
+        sourceSymbol: 'mm',
+        displaySymbol: 'mm',
       },
     };
 
@@ -3167,8 +3167,8 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Change to cm units (10mm = 1cm, so 100mm = 10cm)
     const cmUnits: Units = {
       length: {
-        factor: 10, // Cm (1cm = 10mm)
-        symbol: 'cm',
+        sourceSymbol: 'mm',
+        displaySymbol: 'cm',
       },
     };
 
@@ -3207,8 +3207,8 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Start with mm units
     const mmUnits: Units = {
       length: {
-        factor: 1, // Mm
-        symbol: 'mm',
+        sourceSymbol: 'mm',
+        displaySymbol: 'mm',
       },
     };
 
@@ -3231,8 +3231,8 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Change to cm units
     const cmUnits: Units = {
       length: {
-        factor: 10, // Cm
-        symbol: 'cm',
+        sourceSymbol: 'mm',
+        displaySymbol: 'cm',
       },
     };
 
@@ -3271,8 +3271,8 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Start with mm units
     const mmUnits: Units = {
       length: {
-        factor: 1,
-        symbol: 'mm',
+        sourceSymbol: 'mm',
+        displaySymbol: 'mm',
       },
     };
 
@@ -3295,8 +3295,8 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Change to cm units
     const cmUnits: Units = {
       length: {
-        factor: 10,
-        symbol: 'cm',
+        sourceSymbol: 'mm',
+        displaySymbol: 'cm',
       },
     };
 
@@ -3335,8 +3335,8 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Start with mm units
     const mmUnits: Units = {
       length: {
-        factor: 1,
-        symbol: 'mm',
+        sourceSymbol: 'mm',
+        displaySymbol: 'mm',
       },
     };
 
@@ -3359,8 +3359,8 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Change to cm units
     const cmUnits: Units = {
       length: {
-        factor: 10,
-        symbol: 'cm',
+        sourceSymbol: 'mm',
+        displaySymbol: 'cm',
       },
     };
 

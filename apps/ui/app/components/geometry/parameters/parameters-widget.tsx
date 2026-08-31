@@ -11,19 +11,40 @@ export function ParametersWidget(
   props: WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
 ): React.JSX.Element {
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- RJSF is untyped
-  const { value, onChange, name, schema, registry } = props;
+  const { id, value, onChange, onBlur, onFocus, name, schema, registry, disabled, readonly, autofocus } = props;
 
   const { formContext } = registry;
 
   const prettyLabel = name ? formatDisplayLabel(name) : '';
   const defaultValue = schema.default as string | number | boolean | undefined;
   const type = schema.type as 'boolean' | 'integer' | 'number' | 'string';
+  const isDisabled = disabled === true || readonly === true;
+  const handleChange = (newValue: unknown) => {
+    if (!isDisabled) {
+      onChange(newValue);
+    }
+  };
 
   switch (type) {
     case 'boolean': {
       const booleanValue = Boolean(value);
 
-      return <ParametersBoolean value={booleanValue} aria-label={`Toggle for ${prettyLabel}`} onChange={onChange} />;
+      return (
+        <ParametersBoolean
+          id={id}
+          value={booleanValue}
+          disabled={isDisabled}
+          autoFocus={autofocus}
+          aria-label={`Toggle for ${prettyLabel}`}
+          onFocus={() => {
+            onFocus(id, value);
+          }}
+          onBlur={() => {
+            onBlur(id, value);
+          }}
+          onChange={handleChange}
+        />
+      );
     }
 
     case 'number':
@@ -39,13 +60,23 @@ export function ParametersWidget(
       if (!Number.isFinite(numericValue)) {
         return (
           <Input
+            id={id}
             type='number'
             value=''
+            disabled={disabled}
+            readOnly={readonly}
+            autoFocus={autofocus}
             placeholder={Number.isFinite(defaultNumericValue) ? String(defaultNumericValue) : undefined}
             aria-label={`Input for ${prettyLabel}`}
+            onFocus={() => {
+              onFocus(id, value);
+            }}
+            onBlur={() => {
+              onBlur(id, value);
+            }}
             onChange={(event) => {
               const next = event.target.valueAsNumber;
-              onChange(Number.isFinite(next) ? next : undefined);
+              handleChange(Number.isFinite(next) ? next : undefined);
             }}
           />
         );
@@ -61,22 +92,42 @@ export function ParametersWidget(
           max={max}
           step={step}
           units={formContext.units}
+          id={id}
+          disabled={disabled}
+          readOnly={readonly}
+          autoFocus={autofocus}
           aria-label={`Input for ${prettyLabel}`}
-          onChange={onChange}
+          onFocus={() => {
+            onFocus(id, value);
+          }}
+          onBlur={() => {
+            onBlur(id, value);
+          }}
+          onChange={handleChange}
         />
       );
     }
 
     case 'string': {
-      const stringValue = String(value);
-      const defaultStringValue = String(defaultValue);
+      const stringValue = typeof value === 'string' ? value : '';
+      const defaultStringValue = typeof defaultValue === 'string' ? defaultValue : '';
 
       return (
         <ParametersString
           value={stringValue}
           defaultValue={defaultStringValue}
+          id={id}
+          disabled={disabled}
+          readOnly={readonly}
+          autoFocus={autofocus}
           aria-label={`Input for ${prettyLabel}`}
-          onChange={onChange}
+          onFocus={() => {
+            onFocus(id, value);
+          }}
+          onBlur={() => {
+            onBlur(id, value);
+          }}
+          onChange={handleChange}
         />
       );
     }

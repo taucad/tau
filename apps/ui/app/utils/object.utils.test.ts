@@ -1190,6 +1190,19 @@ describe('extractModifiedProperties', () => {
   });
 
   describe('Complex scenarios', () => {
+    it('should exclude non-finite numbers and null-filled tuple remnants', () => {
+      const result = extractModifiedProperties(
+        { width: Number.NaN, height: Number.POSITIVE_INFINITY, background: [null, null, null, null], quality: 0 },
+        { width: 10, height: 10, background: ['#fff'], quality: 1 },
+      );
+
+      expect(result).toEqual({ quality: 0 });
+    });
+
+    it('should exclude arrays containing non-finite numbers', () => {
+      expect(extractModifiedProperties({ values: [1, Number.NaN] }, { values: [] })).toEqual({});
+    });
+
     it('should handle mixed primitive and nested modifications', () => {
       const formData = {
         name: 'modified',

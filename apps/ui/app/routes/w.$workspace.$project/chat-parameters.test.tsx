@@ -18,6 +18,7 @@ const mockCadRef = {
   getSnapshot: vi.fn(() => ({
     context: {
       defaultParameters: { width: 10, height: 20 },
+      units: { length: 'mm' },
       jsonSchema: {
         type: 'object',
         properties: {
@@ -33,6 +34,7 @@ const mockCadRef2 = {
   getSnapshot: vi.fn(() => ({
     context: {
       defaultParameters: { radius: 5 },
+      units: { length: 'm' },
       jsonSchema: {
         type: 'object',
         properties: {
@@ -79,7 +81,7 @@ vi.mock('#hooks/use-project.js', () => ({
   }),
   useMainGraphics: () => ({
     getSnapshot: vi.fn(() => ({
-      context: { units: { length: { symbol: 'mm', factor: 1 } } },
+      context: { displayUnits: { length: { symbol: 'mm', metersPerUnit: 0.001, system: 'si' } } },
     })),
     subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
     on: vi.fn(() => ({ unsubscribe: vi.fn() })),
@@ -159,12 +161,14 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
     enableSearch,
     filterTerm,
     onParametersChange,
+    units,
   }: {
     parameters: Record<string, unknown>;
     className?: string;
     enableSearch?: boolean;
     filterTerm?: string;
     onParametersChange: (params: Record<string, unknown>) => void;
+    units: { length: { sourceSymbol: string; displaySymbol: string } };
   }) => (
     <div
       data-testid='parameters-component'
@@ -172,6 +176,8 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
       data-class-name={className}
       data-enable-search={String(enableSearch)}
       data-filter-term={filterTerm}
+      data-source-symbol={units.length.sourceSymbol}
+      data-display-symbol={units.length.displaySymbol}
     >
       <button
         type='button'
@@ -371,6 +377,20 @@ describe('ChatParameters', () => {
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getByTestId('paneview')).toBeInTheDocument();
+  });
+
+  it('passes each CAD source unit separately from the shared display unit', async () => {
+    mockGeometryUnits.set('main.ts', mockCadRef);
+    mockGeometryUnits.set('helper.ts', mockCadRef2);
+
+    const { ChatParameters } = await import('./chat-parameters.js');
+    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+
+    const parameters = screen.getAllByTestId('parameters-component');
+    expect(parameters[0]).toHaveAttribute('data-source-symbol', 'mm');
+    expect(parameters[0]).toHaveAttribute('data-display-symbol', 'mm');
+    expect(parameters[1]).toHaveAttribute('data-source-symbol', 'm');
+    expect(parameters[1]).toHaveAttribute('data-display-symbol', 'mm');
   });
 
   it('filters every geometry unit from one persistent input', async () => {

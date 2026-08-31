@@ -1,7 +1,7 @@
 import { createCookieSessionStorage } from 'react-router';
-import { createThemeSessionResolver } from 'remix-themes';
-import type { ThemeSessionResolver } from 'remix-themes';
 import { metaConfig } from '#constants/meta.constants.js';
+import { isTheme } from '#hooks/use-theme.js';
+import type { Theme, ThemeWithSystem } from '#hooks/use-theme.js';
 
 export type ThemeCookieOptionsInput = {
   requestUrl: string;
@@ -29,11 +29,28 @@ export const buildThemeCookieOptions = ({ requestUrl }: ThemeCookieOptionsInput)
   };
 };
 
-export const themeSessionResolver: ThemeSessionResolver = async (request) => {
+type ThemeSession = {
+  getTheme: () => ThemeWithSystem;
+  setTheme: (theme: Theme) => void;
+  commit: () => Promise<string>;
+  destroy: () => Promise<string>;
+};
+
+export const themeSessionResolver = async (request: Request): Promise<ThemeSession> => {
   const sessionStorage = createCookieSessionStorage({
     cookie: buildThemeCookieOptions({ requestUrl: request.url }),
   });
+  const session = await sessionStorage.getSession(request.headers.get('Cookie'));
 
-  const resolveThemeSession = createThemeSessionResolver(sessionStorage);
-  return resolveThemeSession(request);
+  return {
+    getTheme: (): ThemeWithSystem => {
+      const theme: unknown = session.get('theme');
+      return isTheme(theme) ? theme : null;
+    },
+    setTheme: (theme: Theme): void => {
+      session.set('theme', theme);
+    },
+    commit: async (): Promise<string> => sessionStorage.commitSession(session),
+    destroy: async (): Promise<string> => sessionStorage.destroySession(session),
+  };
 };

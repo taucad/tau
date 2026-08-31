@@ -1,9 +1,9 @@
 ---
 title: 'Graphics Backend Policy'
-description: 'Dual WebGL/WebGPU Three.js stacks, TSL materials, snapshots, and e2e parity'
+description: 'Dual WebGL/WebGPU Three.js stacks, portable shaders, executable evidence, and backend parity'
 status: active
 created: '2026-05-07'
-updated: '2026-08-21'
+updated: '2026-08-30'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -11,6 +11,7 @@ related:
   - docs/research/screenshot-viewport-shared-material-state-bleed.md
   - docs/research/webgpu-gltf-edge-near-orthographic-occlusion.md
   - docs/policy/webgpu-rendering-pipeline.md
+  - docs/research/threejs-shader-foundation-and-testing-blueprint.md
 ---
 
 # Graphics Backend Policy
@@ -56,11 +57,11 @@ Inside a **`Fn(...)`** arrow/function value that **is not** wrapped in **`Fn(...
 
 **Why**: TSL inlines reusable `Fn` bodies at each call site. Named **`.toVar('x')`** registers into **`NodeBuilder.declarations`**, so a second inlined copy emits **`Declaration name 'x' already in use`** and auto-renames while warning.
 
-### 4. Shader graph snapshots are mandatory for new nodal materials
+### 4. Shader graph snapshots are supplementary evidence
 
-For each **`NodeMaterial` factory**, add **`// @vitest-environment node`** tests that **`await expect(serialiseStrippedTslGraph(material.toJSON())).toMatchFileSnapshot(...)`** with golden files under a co-located **`__shader-snapshots__/`** directory. Use **`apps/ui/app/components/geometry/graphics/three/utils/tsl-node-graph-snapshot.ts`** so snapshots strip **`uuid`**, substitute UUID-shaped node cross-references with a stable placeholder, and sort keys recursively.
+For each **`NodeMaterial` factory**, add **`// @vitest-environment node`** tests that **`await expect(serialiseStrippedTslGraph(material.toJSON())).toMatchFileSnapshot(...)`** with golden files under a co-located **`__shader-snapshots__/`** directory. Use **`apps/ui/app/components/geometry/graphics/three/utils/tsl-node-graph-snapshot.ts`** so snapshots strip **`uuid`**, substitute UUID-shaped node cross-references with a stable placeholder, and sort keys recursively. Also register the site and its named evidence in **`shader-policy.ts`**. A snapshot does not replace CPU semantics, generated-source inspection, real backend compilation/validation, deterministic pixels, or performance evidence when those risks apply.
 
-**Why**: Deterministic graphs catch regressions without a GPU in CI.
+**Why**: Deterministic graphs catch structural drift without a GPU, but they cannot prove that Three.js generated valid WGSL/GLSL or that the resulting pipeline renders the intended pixels.
 
 ### 5. Vitest Browser parity for viewport-visible differences
 
@@ -177,11 +178,11 @@ screenshotRenderer.render(screenshotScene, screenshotCamera);
 
 **Why**: Sharing a TSL-graph-baked material across renderers with divergent flags causes the secondary renderer to inherit the primary's depth-encoder choice, color-attachment expectations, and PassNode-level filtering assumptions — the canonical reason for grainy fat-line edges in WebGPU screenshot output documented in `docs/research/screenshot-viewport-shared-material-state-bleed.md`. Guards: **`apps/ui/app/machines/screenshot-capability.utils.test.ts`** (`R6 (WebGL/WebGPU): applyEdgeMaterialsToClonedScene replaces the LineSegments2's material with a fresh allocation`).
 
-### 11a. GLTF edge depth bias remains FOV-adaptive under reversed-Z
+### 11a. GLTF lines preserve geometric depth; surfaces own bounded coplanar separation
 
-WebGPU GLTF edge overlays must never apply a fixed `positionView.z * 0.999` pull. `reversedDepthBuffer: true` improves precision and preserves MSAA, but it does not make a view-space multiplier invariant under Tau's low-FOV perspective camera distance compensation. The WebGPU path must derive `tan(fov/2)` from `cameraProjectionMatrix[1][1]`, compute `pow(depthBias, tan(fov/2) / tan(30deg))`, and apply that adjusted multiplier before the renderer-aware reversed/log/standard depth encoder dispatch in Tau's `Line2NodeMaterial.setupDepth`.
+GLTF edge overlays must encode exact geometric line depth on both backends. Never pull a line toward the camera in view/clip/depth space: any such pull can promote a genuinely hidden edge through an opaque surface, and FOV compensation only changes the failure threshold. Coplanar separation belongs to the owning triangle material through bounded rasterizer polygon offset, leaving hidden-line ordering intact.
 
-The shared base constants live in `apps/ui/app/components/geometry/graphics/three/materials/edge-depth-bias.ts`; `gltf-edges.ts` chooses the base policy, WebGL injects the matching shader expression, and WebGPU owns the TSL expression inside the Tau subclass. Guards: **`edge-depth-bias.test.ts`**, **`line2.material.test.ts`**, **`gltf-edges-webgpu.material.test.ts`**, **`gltf-edges-webgl.material.test.ts`**, and the low-FOV fixture check in **`apps/ui-e2e/src/graphics-backend.spec.ts`**.
+Tau's `Line2NodeMaterial.setupDepth` still dispatches to the renderer-correct reversed/log/standard encoder, but every encoder receives unchanged `positionView.z`. Guards: **`edge-depth-bias.test.ts`**, **`line2.material.test.ts`**, **`gltf-edges-webgpu.material.test.ts`**, **`gltf-edges-webgl.material.test.ts`**, and backend pixel checks in **`apps/ui-e2e/src/graphics-backend.spec.ts`**.
 
 ### 7b. Interactive overlay tools must `invalidate()` after every user-driven state change
 
@@ -318,7 +319,7 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 - **Drei `<Line>`** (or any third-party material wrapper) **without explicit `transparent`** when `opacity < 1` — opacity is silently dropped on WebGL, brightness diverges from WebGPU (CB-1).
 - **Pinning overlay color hex/RGB constants** to perceptual readouts produced by a known-broken pipeline state — locks the bug into the design contract (CB-2).
 - **Backend-specific color overrides** introduced to compensate for the residual gamma-vs-linear blend delta — band-aid that breaks as soon as either backend is touched. The delta is deferred work for non-line overlays (CB-3); for fat lines the architecturally correct fix is the in-shader sRGB blend (CB-4), not per-backend hex values.
-- **Stock `three/webgpu` `Line2NodeMaterial`** imported for any line drawn into the viewport canvas — bypasses Tau's renderer-aware depth encoder, FOV-adaptive GLTF edge bias, hardware-clipping override, and the CB-4 in-shader gamma blend. Always import from `#components/geometry/graphics/three/materials/line2.material.js`.
+- **Stock `three/webgpu` `Line2NodeMaterial`** imported for any line drawn into the viewport canvas — bypasses Tau's renderer-aware depth encoder, exact geometric-depth contract, hardware-clipping override, and the CB-4 in-shader gamma blend. Always import from `#components/geometry/graphics/three/materials/line2.material.js`.
 - **Snapshot tests** that omit **`await`** on **`toMatchFileSnapshot`** (Vitest forwards will fail later).
 - **E2e** that asserts only DOM structure for GPU-heavy regressions without an opt-in screenshot in **`graphics-backend.spec.ts`**.
 - **Named `.toVar('…')` inside reusable `Fn` bodies** invoked more than once per shader stage — see §3.
@@ -333,7 +334,7 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 ## Summary Checklist
 
 - [ ] New material: WebGL sibling + WebGPU **`NodeMaterial`**, factory branches on **`resolvedGraphicsBackend`**
-- [ ] **`__shader-snapshots__`** + node env Vitest **`await`** snapshot
+- [ ] **`shader-policy.ts`** inventory + risk evidence; graph snapshot is present but not treated as compile/pixel proof
 - [ ] If user-visible parity matters: harness query + Vitest Browser remote-canvas screenshot/pixel assertion
 - [ ] Renderer construction routed through **`createTauRenderer`** unless a sanctioned exception lands in **`tau-renderer.ts`**
 - [ ] Custom WebGL **`ShaderMaterial`**: **`#include <colorspace_fragment>`** on manual **`gl_FragColor`** writes (§9)
@@ -342,7 +343,7 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 - [ ] Saturated transparent fat-line overlay: routed through Tau **`Line2NodeMaterial`** (NOT stock `three/webgpu`) so CB-4's in-shader sRGB blend closes S7
 - [ ] Clone-and-render surface (screenshot, offscreen, exporter): allocator returns **`Set<Material>`**, teardown calls **`disposeCloneOwnedMaterials(set)`** — never traverses by **`isMesh`** (§10)
 - [ ] Material that branches on **`reversedDepthBuffer`** / **`logarithmicDepthBuffer`** / **`samples`** / **`outputColorSpace`**: fresh-allocated per renderer instance via the §10 allocator pattern, never reference-shared (§11)
-- [ ] GLTF edge overlays: base bias constants from **`edge-depth-bias.ts`** and WebGPU FOV-adaptive bias inside Tau **`Line2NodeMaterial.setupDepth`** (§11a)
+- [ ] GLTF edge overlays encode exact geometric depth; owning surfaces provide bounded coplanar separation (§11a)
 - [ ] Interactive overlay under demand frameloop: **`invalidate()`** after every user-driven state change (§7b)
 - [ ] Derived label/background geometry: module-scope LRU + dispose-on-evict; callers treat outputs as non-owned (§12)
 - [ ] Internal `useMemo` materials/geometries: `useEffect` dispose with caller-vs-internal discriminator (§13)
@@ -356,7 +357,7 @@ S1-S4 are unconditional rules (pixels match within ~10-15 sRGB/channel once alig
 - Research: **`docs/research/webgpu-migration-graphics-stack.md`**
 - Research: **`docs/research/measure-tool-performance-audit.md`**
 - Research: **`docs/research/screenshot-viewport-shared-material-state-bleed.md`** (§10 + §11 root cause and architectural fix)
-- Research: **`docs/research/webgpu-gltf-edge-near-orthographic-occlusion.md`** (§11a FOV-adaptive GLTF edge bias)
+- Research: **`docs/research/webgpu-gltf-edge-near-orthographic-occlusion.md`** (§11a historical line-bias failure)
 - E2e harness route: **`apps/ui/app/routes/e2e.graphics-backend/route.tsx`**
 - Stability helper: **`apps/ui/app/components/geometry/graphics/three/utils/tsl-node-graph-snapshot.ts`**
 - Overlay color tuning point: **`apps/ui/app/components/geometry/graphics/three/overlay-colors.constants.ts`**

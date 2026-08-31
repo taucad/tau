@@ -31,7 +31,7 @@ Each fixture directory holds exactly two files:
 One command per fixture, via the runtime CLI (model frame / z-up is the default — never pass `y-up`):
 
 ```bash
-node packages/cli/dist/bin/taucad.mjs export packages/geospec/fixtures/scripts/contact/flange-face/main.ts \
+node packages/cli/dist/bin/tau.mjs export packages/geospec/fixtures/scripts/contact/flange-face/main.ts \
   --ext=step --output=packages/geospec/fixtures/contact/flange-face-gap-negative/model.step \
   --params='{"gap":0.5}'
 ```

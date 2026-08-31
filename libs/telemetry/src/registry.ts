@@ -62,6 +62,34 @@ export const TauMetrics = {
     }),
   }),
 
+  rpcDeliveryEvents: defineCounter({
+    name: 'rpc.delivery.events',
+    unit: '{event}',
+    description: 'Durable chat RPC delivery transitions by plane and outcome',
+    attributes: z.object({
+      'rpc.delivery.stage': z.string(),
+      'rpc.delivery.outcome': z.string().optional(),
+      'rpc.delivery.transport': z.string().optional(),
+    }),
+  }),
+
+  rpcDeliveryWakeDuration: defineHistogram({
+    name: 'rpc.delivery.wake.duration',
+    unit: 's',
+    description: 'Time spent waiting for a durable RPC response wake-up',
+    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+    attributes: z.object({
+      'rpc.delivery.transport': z.string(),
+    }),
+  }),
+
+  rpcActiveRunRooms: defineUpDownCounter({
+    name: 'rpc.delivery.rooms.active',
+    unit: '{room}',
+    description: 'Run rooms currently retained by authenticated RPC sockets',
+    attributes: z.object({}),
+  }),
+
   // --- AI / LLM (GenAI semantic conventions) ---
 
   genAiTokenUsage: defineHistogram({

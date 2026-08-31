@@ -16,10 +16,9 @@
 
 /* eslint-disable @typescript-eslint/naming-convention -- default pool limits use conventional UPPER_SNAKE names */
 
-import { SharedMemoryArena, ARENA_ENTRY_STATE } from '#shared-memory-arena.js';
+import { SharedMemoryArena, ARENA_ENTRY_STATE, resetSharedMemoryArena } from '#shared-memory-arena.js';
 import { fnv1a64 } from '#fnv1a64.js';
 
-const DEFAULT_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES = 4096;
 
 /**
@@ -29,7 +28,7 @@ const DEFAULT_MAX_ENTRIES = 4096;
 export type SharedPoolOptions = {
   /** Maximum number of cached entries. */
   maxEntries?: number;
-  /** Entries larger than this are skipped (default 10 MB). */
+  /** Entries larger than this are skipped (default: the arena's payload capacity). */
   maxEntryBytes?: number;
   /** Eviction policy. `'none'` (default) rejects when full; `'lru'` evicts least-recently-used. */
   eviction?: 'none' | 'lru';
@@ -58,6 +57,8 @@ export class SharedPool {
   private readonly _keyToIndex = new Map<string, number>();
   /** Reverse mapping from entry index to key, kept in sync with {@link _keyToIndex} for eviction cleanup. */
   private readonly _indexToKey = new Map<number, string>();
+  /** Writer-side delivery reference counts awaiting reader materialisation acknowledgements. */
+  private readonly _unacknowledged = new Map<string, number>();
 
   /**
    * Create or attach to a shared pool.
@@ -71,7 +72,7 @@ export class SharedPool {
       maxEntries: options?.maxEntries ?? DEFAULT_MAX_ENTRIES,
       eviction: options?.eviction,
     });
-    this._maxEntryBytes = options?.maxEntryBytes ?? DEFAULT_MAX_ENTRY_BYTES;
+    this._maxEntryBytes = options?.maxEntryBytes ?? this._arena.dataCapacityBytes;
   }
 
   /**
@@ -109,6 +110,44 @@ export class SharedPool {
     this._indexToKey.set(entryIndex, key);
 
     return true;
+  }
+
+  /**
+   * Publish one delivery and retain its arena entry until every matching reader
+   * acknowledgement arrives. When the arena is quiescent, a full reset safely
+   * reclaims bump-allocated bytes before retrying a failed publication.
+   */
+  // oxlint-disable-next-line enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- accepts content from kernels that may use ArrayBuffer or SharedArrayBuffer
+  public publish(key: string, data: Uint8Array): boolean {
+    const existing = this._keyToIndex.has(key);
+    if (!existing && !this.store(key, data)) {
+      if (this._unacknowledged.size > 0) {
+        return false;
+      }
+      this._reset();
+      if (!this.store(key, data)) {
+        return false;
+      }
+    }
+    this._unacknowledged.set(key, (this._unacknowledged.get(key) ?? 0) + 1);
+    return true;
+  }
+
+  /** Release one published delivery after the reader has copied its bytes. */
+  public acknowledge(key: string): void {
+    const outstanding = this._unacknowledged.get(key);
+    if (outstanding === undefined) {
+      return;
+    }
+    if (outstanding > 1) {
+      this._unacknowledged.set(key, outstanding - 1);
+      return;
+    }
+    this._unacknowledged.delete(key);
+    this.invalidate(key);
+    if (this._unacknowledged.size === 0) {
+      this._reset();
+    }
   }
 
   /**
@@ -189,6 +228,7 @@ export class SharedPool {
     }
     this._keyToIndex.clear();
     this._indexToKey.clear();
+    this._unacknowledged.clear();
   }
 
   /**
@@ -221,5 +261,11 @@ export class SharedPool {
    */
   public get buffer(): SharedArrayBuffer {
     return this._buffer;
+  }
+
+  private _reset(): void {
+    this._arena[resetSharedMemoryArena]();
+    this._keyToIndex.clear();
+    this._indexToKey.clear();
   }
 }

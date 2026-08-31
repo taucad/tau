@@ -62,6 +62,9 @@ const ENTRY_FIELD_LRU_SEQ = 5;
 
 const ALIGNMENT = 8;
 
+/** Writer-only arena reset hook. Deliberately omitted from the package barrel. @internal */
+export const resetSharedMemoryArena = Symbol('resetSharedMemoryArena');
+
 /**
  * Readable snapshot of a single arena index entry.
  * @public
@@ -270,6 +273,18 @@ export class SharedMemoryArena {
     Atomics.store(this._index, slotBase + ENTRY_FIELD_STATE, ARENA_ENTRY_STATE.STALE);
   }
 
+  /** Reset the bump allocator after the writer proves that no readers retain published entries. @internal */
+  public [resetSharedMemoryArena](): void {
+    const count = Atomics.load(this._header, HEADER_ENTRY_COUNT_OFFSET);
+    for (let index = 0; index < count; index++) {
+      const slotBase = index * (ARENA_ENTRY_BYTES / 4);
+      Atomics.store(this._index, slotBase + ENTRY_FIELD_STATE, ARENA_ENTRY_STATE.FREE);
+    }
+    Atomics.store(this._header, HEADER_ENTRY_COUNT_OFFSET, 0);
+    Atomics.store(this._header, HEADER_DATA_WRITE_HEAD_OFFSET, this._dataRegionStart);
+    this._lruSeq = 0;
+  }
+
   /**
    * Find the best candidate for eviction: prefer STALE slots, then the READY
    * entry with the lowest LRU sequence counter.
@@ -322,6 +337,11 @@ export class SharedMemoryArena {
    */
   public get capacityBytes(): number {
     return this._buffer.byteLength;
+  }
+
+  /** Bytes available for payloads after the fixed header and index. */
+  public get dataCapacityBytes(): number {
+    return this._buffer.byteLength - this._dataRegionStart;
   }
 
   /**

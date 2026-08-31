@@ -46,6 +46,36 @@ describe('SharedPool', () => {
     expect(stored).toBe(false);
   });
 
+  it('should default maxEntryBytes to the arena data capacity', () => {
+    const bytes = new Uint8Array(11 * 1024 * 1024);
+    const totalBytes = ARENA_HEADER_BYTES + ARENA_ENTRY_BYTES + bytes.byteLength;
+    const pool = new SharedPool(new SharedArrayBuffer(totalBytes), { maxEntries: 1 });
+
+    expect(pool.store('large.glb', bytes)).toBe(true);
+  });
+
+  it('should reclaim delivery storage only after every publication is acknowledged', () => {
+    const totalBytes = ARENA_HEADER_BYTES + ARENA_ENTRY_BYTES * 2 + 16;
+    const buffer = new SharedArrayBuffer(totalBytes);
+    const writer = new SharedPool(buffer, { maxEntries: 2 });
+    const reader = new SharedPool(buffer, { maxEntries: 2 });
+
+    expect(writer.publish('first', encoder.encode('12345678'))).toBe(true);
+    expect(writer.publish('first', encoder.encode('12345678'))).toBe(true);
+    expect(writer.publish('blocked', encoder.encode('1234567890123456'))).toBe(false);
+
+    writer.acknowledge('first');
+    expect(decoder.decode(reader.resolveCopy('first'))).toBe('12345678');
+    expect(writer.usedBytes).toBeGreaterThan(0);
+
+    writer.acknowledge('first');
+    expect(reader.resolve('first')).toBeUndefined();
+    expect(writer.entryCount).toBe(0);
+    expect(writer.usedBytes).toBe(0);
+    expect(writer.publish('reused', encoder.encode('12345678'))).toBe(true);
+    expect(decoder.decode(reader.resolveCopy('reused'))).toBe('12345678');
+  });
+
   it('should store and resolve multiple independent entries', () => {
     const pool = createPool();
 

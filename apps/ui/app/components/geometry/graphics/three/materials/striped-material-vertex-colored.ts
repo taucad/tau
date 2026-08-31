@@ -8,7 +8,7 @@ const materialCache = new Map<string, THREE.Material>();
 const recencyGenerationByKey = new Map<string, number>();
 // Keys pinned by a live mesh; eviction must skip these or it disposes a
 // material that is still rendering.
-const inUseKeys = new Set<string>();
+const inUseCountByKey = new Map<string, number>();
 let recencyCounter = 0;
 
 const keyForVertexColoredStripedMaterial = (
@@ -30,7 +30,7 @@ const evictStaleMaterialIfNeeded = (forNewKey: string): void => {
   let oldestKey: string | undefined;
   let oldestGeneration = Infinity;
   for (const key of materialCache.keys()) {
-    if (inUseKeys.has(key)) {
+    if ((inUseCountByKey.get(key) ?? 0) > 0) {
       continue;
     }
     const generation = recencyGenerationByKey.get(key);
@@ -81,9 +81,15 @@ export const markVertexColoredSectionCapMaterialInUse = (
 ): void => {
   const key = keyForVertexColoredStripedMaterial(backend, properties);
   if (inUse) {
-    inUseKeys.add(key);
+    inUseCountByKey.set(key, (inUseCountByKey.get(key) ?? 0) + 1);
+    return;
+  }
+
+  const nextCount = (inUseCountByKey.get(key) ?? 0) - 1;
+  if (nextCount > 0) {
+    inUseCountByKey.set(key, nextCount);
   } else {
-    inUseKeys.delete(key);
+    inUseCountByKey.delete(key);
   }
 };
 
@@ -94,6 +100,6 @@ export const disposeVertexColoredSectionCapMaterialCache = (): void => {
 
   materialCache.clear();
   recencyGenerationByKey.clear();
-  inUseKeys.clear();
+  inUseCountByKey.clear();
   recencyCounter = 0;
 };

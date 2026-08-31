@@ -58,6 +58,21 @@ describe('createVertexColoredSectionCapMaterial', () => {
     expect(disposeStale).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a shared material pinned until every live mesh releases it', () => {
+    const properties = { stripeFrequency: 0, stripeWidth: 0 };
+    const shared = createVertexColoredSectionCapMaterial('webgl', properties);
+    markVertexColoredSectionCapMaterialInUse('webgl', properties, true);
+    markVertexColoredSectionCapMaterialInUse('webgl', properties, true);
+    markVertexColoredSectionCapMaterialInUse('webgl', properties, false);
+    const disposeShared = vi.spyOn(shared, 'dispose');
+
+    for (let index = 1; index <= 16; index++) {
+      createVertexColoredSectionCapMaterial('webgl', { stripeFrequency: index, stripeWidth: index });
+    }
+
+    expect(disposeShared).not.toHaveBeenCalled();
+  });
+
   it('should create opaque depth-owned WebGL cap materials with vertex-color attributes', () => {
     const material = createVertexColoredStripedMaterial({ stripeFrequency: 2, stripeWidth: 0.2 });
     const bias = getSectionCapDepthBias('webgl');

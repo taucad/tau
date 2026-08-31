@@ -11,6 +11,7 @@ type ObjectWithTag = Object3D & { tag?: string };
 type GizmoMaps = {
   readonly gizmo: Record<'translate' | 'rotate' | 'scale', Object3D>;
   readonly picker: Record<'translate' | 'rotate' | 'scale', Object3D>;
+  readonly helper: Record<'translate' | 'rotate' | 'scale', Object3D>;
 };
 
 function getGizmoMaps(gizmo: TransformControlsGizmo): GizmoMaps {
@@ -49,12 +50,13 @@ function collectTransformControlBodyMeshesForMode(
 
 type AttachedControlsFixture = {
   readonly controls: TransformControls<PerspectiveCamera>;
+  readonly camera: PerspectiveCamera;
   readonly domElement: HTMLElement;
 };
 
-function createAttachedControlsFixture(): AttachedControlsFixture {
+function createAttachedControlsFixture(cameraDistance = 5): AttachedControlsFixture {
   const camera = new PerspectiveCamera(50, 1, 0.1, 1000);
-  camera.position.set(0, 0, 5);
+  camera.position.set(0, 0, cameraDistance);
   const scene = new Scene();
   const target = new Object3D();
   const domElement = document.createElement('div');
@@ -79,7 +81,7 @@ function createAttachedControlsFixture(): AttachedControlsFixture {
   controls.setMode('translate');
   controls.setSpace('world');
 
-  return { controls, domElement };
+  return { controls, camera, domElement };
 }
 
 function createAttachedControls(): TransformControls<PerspectiveCamera> {
@@ -148,6 +150,30 @@ describe('TransformControlsGizmo section controls rendering contract', () => {
 
     expect(bodyMeshes.map((mesh) => mesh.material.color.getHexString())).toEqual(initialColors);
     expect(bodyMeshes.some((mesh) => mesh.material.opacity < 1)).toBe(true);
+  });
+
+  it('sizes the active-axis helper only from the native camera scale', () => {
+    const ordinary = createAttachedControlsFixture(5);
+    const microscopic = createAttachedControlsFixture(5e-6);
+
+    ordinary.controls.setMode('rotate');
+    microscopic.controls.setMode('rotate');
+    ordinary.controls.axis = 'X';
+    microscopic.controls.axis = 'X';
+    ordinary.controls.updateMatrixWorld();
+    microscopic.controls.updateMatrixWorld();
+
+    const ordinaryAxis = getGizmoMaps(
+      (ordinary.controls as unknown as { readonly gizmo: TransformControlsGizmo }).gizmo,
+    ).helper.rotate.getObjectByName('AXIS');
+    const microscopicAxis = getGizmoMaps(
+      (microscopic.controls as unknown as { readonly gizmo: TransformControlsGizmo }).gizmo,
+    ).helper.rotate.getObjectByName('AXIS');
+
+    expect(ordinaryAxis).toBeDefined();
+    expect(microscopicAxis).toBeDefined();
+    expect(ordinaryAxis!.scale.x / microscopicAxis!.scale.x).toBeCloseTo(1e6, 6);
+    expect(microscopicAxis!.scale.x).toBeLessThan(0.001);
   });
 
   it('should dim non-highlighted arrow axes from a visual-only shared highlight axis', () => {

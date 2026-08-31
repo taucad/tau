@@ -1565,7 +1565,7 @@ class TransformControlsGizmo extends Object3D {
               .set(1, 0, 0)
               .applyQuaternion(handle.quaternion)
               .normalize();
-            const axisHelperLength = Math.max(factor * 10, 1); // World units, camera-relative
+            const axisHelperLength = factor * 10; // Native render units, camera-relative.
             const halfLength = axisHelperLength * 0.5;
 
             // Center around pivot
@@ -1579,7 +1579,7 @@ class TransformControlsGizmo extends Object3D {
             const dashedMaterial = (handle as Line).material as LineDashedMaterial;
             // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ensure existence
             if (dashedMaterial) {
-              // Compensate for object scale so dashes stay constant in world units,
+              // Compensate for object scale so dashes stay constant in native render units,
               // then scale dash/gap with camera factor so they stay constant on screen.
               dashedMaterial.scale = axisHelperLength;
 

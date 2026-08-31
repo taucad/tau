@@ -1,5 +1,5 @@
 /* oxlint-disable max-params, tau-lint/no-bare-time-identifier, typescript/consistent-type-definitions, typescript/no-restricted-types, typescript/promise-function-async, unicorn/no-await-expression-member, unicorn/prefer-ternary -- This thin pass-through adapter mirrors stable Vitest selector and external browser evidence fields without inventing replacement shapes or redundant async frames. */
-import { expect } from 'vitest';
+import { expect, inject } from 'vitest';
 import type { Locator } from 'vitest/browser';
 import { locators, server } from 'vitest/browser';
 
@@ -42,6 +42,41 @@ export type TargetDiagnostics = {
   readonly tracePath?: string;
   readonly url: string;
 };
+export type TargetWebGpuProfile = 'disabled' | 'hardware' | 'software';
+export type TargetWebGpuQualificationReport = Readonly<{
+  profile: TargetWebGpuProfile;
+  secureContext: boolean;
+  targetUrl: string;
+  browserVersion: string;
+  hostPlatform: string;
+  userAgent: string;
+  hasNavigatorGpu: boolean;
+  adapterAvailable: boolean;
+  adapter?: Readonly<{
+    vendor: string;
+    architecture: string;
+    device: string;
+    description: string;
+    fallback: boolean | undefined;
+  }>;
+  adapterClass: 'ambiguous' | 'hardware' | 'software' | undefined;
+  deviceAvailable: boolean;
+  validShaderErrors: number;
+  invalidShaderErrors: number;
+  expectedValidationError: string | undefined;
+  computeReadback: number | undefined;
+  expectedDeviceLossReason: string | undefined;
+  uncapturedErrors: readonly string[];
+  qualificationErrors: readonly string[];
+  browserGpuDiagnostics: string | undefined;
+  launchFingerprint: string;
+}>;
+
+declare module 'vitest' {
+  export interface ProvidedContext {
+    webGpuProfile: TargetWebGpuProfile;
+  }
+}
 
 declare module 'vitest/browser' {
   interface LocatorSelectors {
@@ -83,6 +118,7 @@ declare module 'vitest/browser' {
     uiOpenSecondaryTarget(path: string): Promise<void>;
     uiOpenTarget(): Promise<void>;
     uiPressTarget(selector: string, key: string, surface?: TargetSurface): Promise<void>;
+    uiQualifyWebGpu(profile: TargetWebGpuProfile): Promise<TargetWebGpuQualificationReport>;
     uiReadTarget(selector: string, options?: TargetReadOptions, surface?: TargetSurface): Promise<TargetState>;
     uiReadTargetEvents(): Promise<{
       readonly consoleMessages: ReadonlyArray<{ readonly text: string; readonly type: string }>;
@@ -184,15 +220,15 @@ export const waitFor = <Argument>(
 export const keyboardPress = (key: string, surface?: TargetSurface): Promise<void> =>
   server.commands.uiKeyboardPress(key, surface);
 export const mouseMove = (x: number, y: number, options?: TargetMouseOptions, surface?: TargetSurface): Promise<void> =>
-  server.commands.uiMouseMove(x, y, options, surface);
+  server.commands.uiMouseMove(x, y, options ?? {}, surface);
 export const mouseDown = (
   options?: { readonly button?: 'left' | 'middle' | 'right' },
   surface?: TargetSurface,
-): Promise<void> => server.commands.uiMouseDown(options, surface);
+): Promise<void> => server.commands.uiMouseDown(options ?? {}, surface);
 export const mouseUp = (
   options?: { readonly button?: 'left' | 'middle' | 'right' },
   surface?: TargetSurface,
-): Promise<void> => server.commands.uiMouseUp(options, surface);
+): Promise<void> => server.commands.uiMouseUp(options ?? {}, surface);
 export const mouseClick = (
   x: number,
   y: number,
@@ -219,7 +255,8 @@ export const chooseFile = (
   trigger: TargetSelector,
   file: { readonly base64: string; readonly mimeType: string; readonly name: string },
 ): Promise<void> => server.commands.uiChooseTargetFile(selectorFor(trigger), file);
-export const events = (): ReturnType<typeof server.commands.uiReadTargetEvents> => server.commands.uiReadTargetEvents();
+export const events = (): Promise<Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors'>> =>
+  server.commands.uiReadTargetEvents();
 export const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
@@ -227,6 +264,64 @@ export const delay = (milliseconds: number): Promise<void> =>
 export const writeArtifact = (name: string, content: string): Promise<void> =>
   server.commands.writeFile(`../../out/test-results/vitest-browser/apps/ui-e2e/test-output/${name}`, content);
 export const currentUrl = (): Promise<string> => evaluate(() => location.href);
+export const currentWebGpuProfile = (): TargetWebGpuProfile => inject('webGpuProfile');
+export const qualifyWebGpu = (profile = currentWebGpuProfile()): Promise<TargetWebGpuQualificationReport> =>
+  server.commands.uiQualifyWebGpu(profile);
+export const expectGraphicsBackend = async (backend: 'webgl' | 'webgpu'): Promise<void> => {
+  await expect
+    .poll(() =>
+      evaluate(() =>
+        (
+          globalThis as typeof globalThis & {
+            __TAU_SECTION_VIEW_TEST__?: { getGraphicsBackend(): 'webgl' | 'webgpu' };
+          }
+        ).__TAU_SECTION_VIEW_TEST__?.getGraphicsBackend(),
+      ),
+    )
+    .toBe(backend);
+};
+export const expectGeometryFramed = async (): Promise<void> => {
+  try {
+    await expect
+      .poll(
+        () =>
+          evaluate(() => {
+            const bridges = (
+              globalThis as typeof globalThis & {
+                __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{ isGeometryFramed(): boolean }>;
+              }
+            ).__TAU_SECTION_VIEW_TEST_BRIDGES__;
+            return Boolean(bridges && bridges.length > 0 && bridges.every((bridge) => bridge.isGeometryFramed()));
+          }),
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+  } catch (error) {
+    const [diagnostics, targetEvents] = await Promise.all([
+      evaluate(() => {
+        const bridges = (
+          globalThis as typeof globalThis & {
+            __TAU_SECTION_VIEW_TEST_BRIDGES__?: ReadonlyArray<{
+              getCamera(): { actorError?: string; actorStatus: string };
+              getGraphicsBackend(): 'webgl' | 'webgpu';
+              isGeometryFramed(): boolean;
+            }>;
+          }
+        ).__TAU_SECTION_VIEW_TEST_BRIDGES__;
+        return bridges?.map((bridge) => ({
+          actorError: bridge.getCamera().actorError,
+          actorStatus: bridge.getCamera().actorStatus,
+          backend: bridge.getGraphicsBackend(),
+          isGeometryFramed: bridge.isGeometryFramed(),
+        }));
+      }),
+      events(),
+    ]);
+    throw new Error(`Geometry did not reach a framed camera state: ${JSON.stringify({ diagnostics, targetEvents })}`, {
+      cause: error,
+    });
+  }
+};
 
 export const expectVisible = async (
   selector: TargetSelector,

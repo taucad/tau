@@ -1,5 +1,6 @@
 /* oxlint-disable max-params, no-await-in-loop, no-restricted-imports, tau-lint/no-bare-time-identifier, typescript/no-restricted-types -- Vitest command callbacks add their context parameter to the explicit external-target contract, and config-time modules cannot use test aliases. */
 import { mkdir, writeFile } from 'node:fs/promises';
+import { release } from 'node:os';
 import { resolve } from 'node:path';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
 import type {
@@ -11,8 +12,11 @@ import type {
   TargetState,
   TargetSurface,
   TargetViewport,
+  TargetWebGpuProfile,
+  TargetWebGpuQualificationReport,
 } from './external-target.ts';
 import { testBaseURL } from './base-url.ts';
+import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
 
 type ProviderContext = BrowserCommandContext['context'];
 type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;
@@ -149,6 +153,254 @@ export const uiNavigateTarget: BrowserCommand<
 
 export const uiReloadTarget: BrowserCommand<[surface?: TargetSurface]> = async (commandContext, surface) => {
   await pageFor(sessionFor(commandContext), surface).reload();
+};
+export const uiQualifyWebGpu: BrowserCommand<[profile: TargetWebGpuProfile], TargetWebGpuQualificationReport> = async (
+  commandContext,
+  profile,
+) => {
+  const session = sessionFor(commandContext);
+  const page = session.primary;
+  const pageReport = await page.evaluate(async (expectedProfile) => {
+    type CompilationMessage = { readonly message?: string; readonly type: string };
+    type GpuBuffer = {
+      destroy(): void;
+      getMappedRange(): ArrayBuffer;
+      mapAsync(mode: number): Promise<void>;
+      unmap(): void;
+    };
+    type GpuDevice = {
+      readonly lost: Promise<{ readonly message?: string; readonly reason: string }>;
+      readonly queue: { onSubmittedWorkDone(): Promise<void>; submit(commands: readonly unknown[]): void };
+      addEventListener(
+        type: 'uncapturederror',
+        listener: (event: { readonly error?: { readonly message?: string } }) => void,
+      ): void;
+      removeEventListener(
+        type: 'uncapturederror',
+        listener: (event: { readonly error?: { readonly message?: string } }) => void,
+      ): void;
+      createBindGroup(descriptor: unknown): unknown;
+      createBuffer(descriptor: { readonly size: number; readonly usage: number }): GpuBuffer;
+      createCommandEncoder(): {
+        beginComputePass(): {
+          dispatchWorkgroups(count: number): void;
+          end(): void;
+          setBindGroup(index: number, bindGroup: unknown): void;
+          setPipeline(pipeline: unknown): void;
+        };
+        copyBufferToBuffer(
+          source: GpuBuffer,
+          sourceOffset: number,
+          target: GpuBuffer,
+          targetOffset: number,
+          size: number,
+        ): void;
+        finish(): unknown;
+      };
+      createComputePipeline(descriptor: unknown): { getBindGroupLayout(index: number): unknown };
+      createShaderModule(descriptor: { readonly code: string }): {
+        getCompilationInfo(): Promise<{ readonly messages: readonly CompilationMessage[] }>;
+      };
+      destroy(): void;
+      popErrorScope(): Promise<{ readonly message?: string } | null>;
+      pushErrorScope(filter: 'validation'): void;
+    };
+    type GpuAdapter = {
+      readonly info?: {
+        readonly architecture?: string;
+        readonly description?: string;
+        readonly device?: string;
+        readonly vendor?: string;
+      };
+      readonly isFallbackAdapter?: boolean;
+      requestDevice(): Promise<GpuDevice>;
+    };
+    type GpuNavigator = Navigator & {
+      readonly gpu?: { requestAdapter(): Promise<GpuAdapter | null> };
+    };
+    type GpuConstants = typeof globalThis & {
+      readonly GPUBufferUsage?: {
+        readonly COPY_DST: number;
+        readonly COPY_SRC: number;
+        readonly MAP_READ: number;
+        readonly STORAGE: number;
+      };
+      readonly GPUMapMode?: { readonly READ: number };
+    };
+
+    const qualificationErrors: string[] = [];
+    const uncapturedErrors: string[] = [];
+    const targetUrl = location.href;
+    if (targetUrl === 'about:blank') {
+      qualificationErrors.push('WebGPU qualification cannot run against about:blank.');
+    }
+    if (!isSecureContext) {
+      qualificationErrors.push(`WebGPU qualification requires a secure context; received ${targetUrl}.`);
+    }
+
+    const { gpu } = navigator as GpuNavigator;
+    const adapter = await gpu?.requestAdapter();
+    const adapterInfo = adapter?.info;
+    const explicitAdapter = adapter
+      ? {
+          architecture: adapterInfo?.architecture ?? '',
+          description: adapterInfo?.description ?? '',
+          device: adapterInfo?.device ?? '',
+          fallback: adapter.isFallbackAdapter,
+          vendor: adapterInfo?.vendor ?? '',
+        }
+      : undefined;
+    const base = {
+      profile: expectedProfile,
+      secureContext: isSecureContext,
+      targetUrl,
+      userAgent: navigator.userAgent,
+      hasNavigatorGpu: gpu !== undefined,
+      adapterAvailable: adapter !== null && adapter !== undefined,
+      adapter: explicitAdapter,
+      deviceAvailable: false,
+      validShaderErrors: 0,
+      invalidShaderErrors: 0,
+      expectedValidationError: undefined as string | undefined,
+      computeReadback: undefined as number | undefined,
+      expectedDeviceLossReason: undefined as string | undefined,
+      uncapturedErrors,
+      qualificationErrors,
+    };
+
+    if (expectedProfile === 'disabled') {
+      if (adapter) {
+        qualificationErrors.push('Disabled WebGPU profile returned an adapter.');
+      }
+      return base;
+    }
+    if (!gpu) {
+      qualificationErrors.push('navigator.gpu is unavailable.');
+      return base;
+    }
+    if (!adapter) {
+      qualificationErrors.push('navigator.gpu.requestAdapter() returned null.');
+      return base;
+    }
+
+    const device = await adapter.requestDevice();
+    const onUncapturedError = (event: { readonly error?: { readonly message?: string } }): void => {
+      uncapturedErrors.push(event.error?.message ?? 'Unknown WebGPU uncaptured error.');
+    };
+    device.addEventListener('uncapturederror', onUncapturedError);
+    const loss = device.lost;
+    let storage: GpuBuffer | undefined;
+    let readback: GpuBuffer | undefined;
+    try {
+      const valid = device.createShaderModule({
+        code: `@group(0) @binding(0) var<storage, read_write> output: array<u32>;
+@compute @workgroup_size(1) fn main() { output[0] = 42u; }`,
+      });
+      device.pushErrorScope('validation');
+      const invalid = device.createShaderModule({ code: '@compute fn broken(' });
+      const [validInfo, invalidInfo] = await Promise.all([valid.getCompilationInfo(), invalid.getCompilationInfo()]);
+      const expectedValidationError = await device.popErrorScope();
+      base.validShaderErrors = validInfo.messages.filter(({ type }) => type === 'error').length;
+      base.invalidShaderErrors = invalidInfo.messages.filter(({ type }) => type === 'error').length;
+      base.expectedValidationError = expectedValidationError?.message;
+      if (base.validShaderErrors !== 0) {
+        qualificationErrors.push(`Valid WGSL emitted ${base.validShaderErrors} compilation errors.`);
+      }
+      if (base.invalidShaderErrors === 0) {
+        qualificationErrors.push('Invalid WGSL emitted no compilation errors.');
+      }
+      if (!base.expectedValidationError) {
+        qualificationErrors.push('Invalid WGSL did not produce a scoped validation error.');
+      }
+
+      const constants = globalThis as GpuConstants;
+      const usage = constants.GPUBufferUsage;
+      const mapMode = constants.GPUMapMode;
+      if (!usage || !mapMode) {
+        qualificationErrors.push('WebGPU buffer constants are unavailable.');
+      } else {
+        storage = device.createBuffer({ size: 4, usage: usage.STORAGE + usage.COPY_SRC });
+        readback = device.createBuffer({ size: 4, usage: usage.MAP_READ + usage.COPY_DST });
+        const pipeline = device.createComputePipeline({
+          compute: { entryPoint: 'main', module: valid },
+          layout: 'auto',
+        });
+        const bindGroup = device.createBindGroup({
+          entries: [{ binding: 0, resource: { buffer: storage } }],
+          layout: pipeline.getBindGroupLayout(0),
+        });
+        const encoder = device.createCommandEncoder();
+        const pass = encoder.beginComputePass();
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bindGroup);
+        pass.dispatchWorkgroups(1);
+        pass.end();
+        encoder.copyBufferToBuffer(storage, 0, readback, 0, 4);
+        device.queue.submit([encoder.finish()]);
+        await device.queue.onSubmittedWorkDone();
+        await readback.mapAsync(mapMode.READ);
+        base.computeReadback = new Uint32Array(readback.getMappedRange())[0];
+        readback.unmap();
+        if (base.computeReadback !== 42) {
+          qualificationErrors.push(`WebGPU compute returned ${String(base.computeReadback)} instead of 42.`);
+        }
+      }
+    } catch (error) {
+      qualificationErrors.push(error instanceof Error ? error.message : String(error));
+    } finally {
+      storage?.destroy();
+      readback?.destroy();
+      device.destroy();
+      const lost = await loss;
+      base.expectedDeviceLossReason = lost.reason;
+      if (lost.reason !== 'destroyed') {
+        qualificationErrors.push(`WebGPU device loss reason was '${lost.reason}', expected 'destroyed'.`);
+      }
+      device.removeEventListener('uncapturederror', onUncapturedError);
+    }
+
+    return { ...base, deviceAvailable: true };
+  }, profile);
+
+  const adapterClass = pageReport.adapter ? classifyWebGpuAdapter(pageReport.adapter) : undefined;
+  const qualificationErrors = [...pageReport.qualificationErrors];
+  if (profile !== 'disabled' && adapterClass !== profile) {
+    qualificationErrors.push(`Expected ${profile} WebGPU, received ${adapterClass ?? 'no'} adapter.`);
+  }
+  const browser = commandContext.context.browser();
+  const browserVersion = browser?.version() ?? 'unknown';
+  let browserGpuDiagnostics: string | undefined;
+  try {
+    const cdpBrowser = browser as unknown as {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Playwright's public API uses this initialism.
+      newBrowserCDPSession(): Promise<{ detach(): Promise<void>; send(method: string): Promise<unknown> }>;
+    };
+    const cdp = await cdpBrowser.newBrowserCDPSession();
+    browserGpuDiagnostics = JSON.stringify(await cdp.send('SystemInfo.getInfo'));
+    await cdp.detach();
+  } catch {
+    // CDP diagnostics are supplementary; adapter/device execution remains the qualification authority.
+  }
+  const launchFingerprint = JSON.stringify({
+    adapter: pageReport.adapter,
+    args: webGpuLaunchArguments(profile),
+    browserVersion,
+    platform: `${process.platform}-${process.arch}-${release()}`,
+    profile,
+  });
+  const report = {
+    ...pageReport,
+    adapterClass,
+    browserGpuDiagnostics,
+    browserVersion,
+    hostPlatform: `${process.platform}-${process.arch}-${release()}`,
+    launchFingerprint,
+    qualificationErrors,
+  } as const;
+  const directory = resolve(outputRoot, commandContext.sessionId);
+  await mkdir(directory, { recursive: true });
+  await writeFile(resolve(directory, `webgpu-qualification-${profile}.json`), `${JSON.stringify(report, null, 2)}\n`);
+  return report;
 };
 
 export const uiSetViewport: BrowserCommand<[viewport: TargetViewport, surface?: TargetSurface]> = async (
@@ -470,6 +722,7 @@ export const uiBrowserCommands = {
   uiNavigateTarget,
   uiOpenSecondaryTarget,
   uiOpenTarget,
+  uiQualifyWebGpu,
   uiPressTarget,
   uiReadTarget,
   uiReadTargetEvents,

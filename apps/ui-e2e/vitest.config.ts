@@ -4,8 +4,13 @@ import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 // oxlint-disable-next-line no-restricted-imports -- Vitest config bootstraps this server-side command before test aliases exist.
 import { uiBrowserCommands } from './src/support/browser-command.ts';
+// oxlint-disable-next-line no-restricted-imports -- Vitest config owns the browser launch profile before aliases exist.
+import { resolveRequiredWebGpuProfile, webGpuLaunchArguments } from './src/support/webgpu-profile.ts';
 
 const isCi = Boolean(process.env['CI']);
+const requiredWebGpuProfile = resolveRequiredWebGpuProfile(process.env['TAU_E2E_WEBGPU_PROFILE']);
+const chromiumArguments = webGpuLaunchArguments(requiredWebGpuProfile);
+const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
 
 export default defineConfig({
   root: import.meta.dirname,
@@ -43,7 +48,26 @@ export default defineConfig({
         '../../out/test-results/vitest-browser/apps/ui-e2e/screenshots',
       ),
       instances: [
-        { browser: 'chromium', name: 'chromium' },
+        {
+          browser: 'chromium',
+          name: 'chromium',
+          exclude: ['src/headless-chat-image-capture.no-webgpu.spec.ts'],
+          provider: playwright({
+            actionTimeout: 10_000,
+            launchOptions: { args: [...chromiumArguments], channel: 'chromium' },
+          }),
+          provide: { webGpuProfile: requiredWebGpuProfile },
+        },
+        {
+          browser: 'chromium',
+          name: 'chromium-no-webgpu',
+          include: ['src/headless-chat-image-capture.no-webgpu.spec.ts'],
+          provider: playwright({
+            actionTimeout: 10_000,
+            launchOptions: { args: [...chromiumDisabledArguments], channel: 'chromium' },
+          }),
+          provide: { webGpuProfile: 'disabled' },
+        },
         {
           browser: 'webkit',
           name: 'webkit-smoke',

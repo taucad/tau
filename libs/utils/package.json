@@ -83,7 +83,8 @@
   "dependencies": {
     "@taucad/json-schema": "workspace:*",
     "@taucad/types": "workspace:*",
-    "cdn-resolve": "catalog:"
+    "cdn-resolve": "catalog:",
+    "nanoid": "catalog:"
   },
   "imports": {
     "#*.js": "./src/*.ts",

@@ -1,6 +1,5 @@
 import type { RuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import type { RuntimeKernels, RuntimeMiddleware, RuntimeTranscoders } from '@taucad/runtime/worker';
 import { deriveExportTargets, deriveImportExtensions } from '@taucad/runtime/plugin';
 import { assimp } from '@taucad/assimp';
 import { brep } from '@taucad/brep';
@@ -12,11 +11,7 @@ export const converterRuntime = defineRuntime({
   plugins: [gltf(), brep(), rhino(), assimp({ preset: 'all' }), image()],
 });
 
-export type ConverterRuntimeClient = RuntimeClient<
-  RuntimeKernels<typeof converterRuntime>,
-  RuntimeMiddleware<typeof converterRuntime>,
-  RuntimeTranscoders<typeof converterRuntime>
->;
+export type ConverterRuntimeClient = RuntimeClient<typeof converterRuntime>;
 
 export const converterImportFormats = deriveImportExtensions(converterRuntime);
 export const converterExportFormats = deriveExportTargets(converterRuntime);

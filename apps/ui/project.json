@@ -9,8 +9,8 @@
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/build"],
       "inputs": [
-        "default",
-        "^default",
+        "production",
+        "^production",
         {
           "env": "TAU_API_URL"
         },
@@ -76,17 +76,6 @@
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
           "TAU_FRONTEND_URL": "http://localhost:3000"
         }
-      }
-    },
-    "size": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["build"],
-      "cache": true,
-      "inputs": ["{projectRoot}/build/server/**", "{projectRoot}/scripts/check-ssr-bundle-budget.mts"],
-      "outputs": [],
-      "options": {
-        "cwd": "{projectRoot}",
-        "command": "node --import @oxc-node/core/register scripts/check-ssr-bundle-budget.mts"
       }
     },
     "bench-section-cap-boolean-backends": {

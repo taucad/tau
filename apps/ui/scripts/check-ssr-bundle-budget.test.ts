@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { findSsrFilesWithForbiddenDreiCoreImport } from '#scripts/check-ssr-bundle-budget.mts';
+import { findSsrFilesWithForbiddenDreiCoreImport } from '#scripts/check-ssr-bundle-budget.mjs';
 
 let serverDirectory: string | undefined;
 

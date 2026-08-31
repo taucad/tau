@@ -1,11 +1,12 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { groupItemsByTimeHorizon } from '#utils/temporal.utils.js';
-import type { TimestampItem } from '#utils/temporal.utils.js';
+
+type UpdatedAtItem = { readonly updatedAt: number };
 
 // Mock date to have consistent tests
 const mockToday = new Date('2024-01-15T12:00:00Z');
 
-function createItem(updatedAt: number): TimestampItem {
+function createItem(updatedAt: number): UpdatedAtItem {
   return { updatedAt };
 }
 
@@ -483,7 +484,7 @@ describe('groupItemsByTimeHorizon', () => {
       ];
 
       // Custom comparator: oldest first (by original timestamp)
-      const customComparator = (a: TimestampItem, b: TimestampItem) => a.updatedAt - b.updatedAt;
+      const customComparator = (a: UpdatedAtItem, b: UpdatedAtItem) => a.updatedAt - b.updatedAt;
 
       const groups = groupItemsByTimeHorizon(items, customComparator);
 

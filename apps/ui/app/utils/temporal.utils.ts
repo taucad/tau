@@ -1,6 +1,6 @@
-export type TimestampItem = {
-  readonly updatedAt: number;
-};
+export type TimestampItem = { readonly updatedAt: number } | { readonly lastActivityAt: number };
+
+const getTimestamp = (item: TimestampItem): number => ('lastActivityAt' in item ? item.lastActivityAt : item.updatedAt);
 
 export type TimeHorizonName = string;
 
@@ -115,11 +115,11 @@ export function groupItemsByTimeHorizon<T extends TimestampItem>(
   const groupsMap = new Map<string, T[]>();
 
   // Default sort by most recent first, or use provided comparator
-  const defaultSortByMostRecent = (a: T, b: T) => b.updatedAt - a.updatedAt;
+  const defaultSortByMostRecent = (a: T, b: T) => getTimestamp(b) - getTimestamp(a);
   const sortFunction = sortComparator ?? defaultSortByMostRecent;
 
   for (const item of items) {
-    const itemDate = new Date(item.updatedAt);
+    const itemDate = new Date(getTimestamp(item));
     itemDate.setHours(0, 0, 0, 0);
 
     const groupName = getGranularGroupName(itemDate, today);

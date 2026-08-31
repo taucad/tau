@@ -1,25 +1,39 @@
 #!/usr/bin/env node
-// Wait on and collect Codex lanes. Encodes the polling, zombie detection and
-// payload-path handling that are easy to get wrong when retyped inline.
+// Codex lane supervisor — dispatch, wait on, and report Codex companion jobs so a
+// lane behaves like a Claude subagent: one call per lane, one wake per lane, and
+// the wake's output file IS the lane's report.
 //
-//   node lanes.mjs wait    <lanes-file> [--deadline-min 45] [--interval-sec 10]
-//   node lanes.mjs collect <lanes-file>
+//   lane <name> <cwd> "<brief>" [flags]   dispatch one lane, supervise, print its report
+//   lane --attach <job-id> [--cwd DIR]    supervise an existing job (skip dispatch)
+//   redispatch <job-id> [--cwd DIR]       re-dispatch a dead lane's stored prompt, then supervise
+//   wait <lanes-file> [flags]             wave recovery: supervise several known jobs
+//   collect <lanes-file>                  re-print reports for known jobs
 //
-// lanes-file: one lane per line — "<lane-name> <job-id> [cwd]"
-// Lines that are blank or start with # are ignored. cwd defaults to $PWD.
+// lanes-file: "<lane-name> <job-id> [cwd]" per line; blank lines and # comments ignored.
 //
-// Exit codes for `wait`: 0 every lane completed, 1 any lane failed, cancelled,
-// zombied or still running at the deadline. It always exits.
+// Dispatch flags: --review [--scope auto|working-tree|branch] [--base REF] (brief = focus text),
+//   --read-only (task without --write), --model M (default gpt-5.6-sol),
+//   --effort E (default: inherit ~/.codex/config.toml), --ledger FILE (append "name id cwd").
+//
+// Supervision model (parity with Claude subagents — no wall-clock deadline):
+//   worker alive + log/state advancing        -> keep waiting, however long it takes
+//   worker dead (failed/cancelled/zombie)     -> exit 1 immediately
+//   worker alive, no output for --stall-min   -> exit 3, advisory (default 15; nothing is killed)
+//   --deadline-min N                          -> OPT-IN time box, off by default; hitting it exits 3
+//
+// Exit codes: 0 completed · 1 dead · 2 usage · 3 alive (stalled or time-boxed)
 
 import { execFile } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { globSync } from 'node:fs';
-import { promisify } from 'node:util';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+const SELF = path.resolve(process.argv[1]);
+const JOB_ID_RE = /(task|review)-[a-z0-9]+-[a-z0-9]+/;
 
 function resolveCompanion() {
   const pattern = path.join(os.homedir(), '.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs');
@@ -27,6 +41,54 @@ function resolveCompanion() {
   if (!hits.length) throw new Error(`codex-plugin-cc not found at ${pattern}`);
   return hits[hits.length - 1];
 }
+
+// Jobs must never be owned by a Claude session: an owned job is torn down —
+// worker killed, record erased — by that session's SessionEnd hook.
+function strippedEnv() {
+  const env = { ...process.env };
+  delete env.CODEX_COMPANION_SESSION_ID;
+  return env;
+}
+
+async function companion(CC, args, cwd, maxBuffer = 64 * 1024 * 1024) {
+  return run(process.execPath, [CC, ...args], { cwd, env: strippedEnv(), maxBuffer });
+}
+
+// A worker that died mid-turn leaves status "running" behind a dead pid forever.
+function pidAlive(pid) {
+  if (!Number.isFinite(pid)) return null; // unknown, not proof of death
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM'; // alive but not ours
+  }
+}
+
+async function getJob(CC, jobId, cwd) {
+  const { stdout } = await companion(CC, ['status', jobId, '--json'], cwd, 32 * 1024 * 1024);
+  return JSON.parse(stdout).job ?? null;
+}
+
+// terminal state name, 'zombie', or the live status ('running', 'queued', ...)
+function classify(job) {
+  if (TERMINAL.has(job.status)) return job.status;
+  if (pidAlive(job.pid) === false) return 'zombie';
+  return job.status;
+}
+
+// Newest evidence of forward progress: state-record heartbeat or log growth.
+function progressStamp(job) {
+  let stamp = Date.parse(job.updatedAt ?? '') || 0;
+  try {
+    if (job.logFile) stamp = Math.max(stamp, statSync(job.logFile).mtimeMs);
+  } catch {
+    // log not written yet
+  }
+  return stamp;
+}
+
+const fmtMin = (ms) => `${(ms / 60000).toFixed(1)}m`;
 
 function parseLanes(file) {
   if (!existsSync(file)) throw new Error(`lanes file not found: ${file}`);
@@ -41,135 +103,375 @@ function parseLanes(file) {
     });
 }
 
-// A worker that died mid-turn leaves status "running" behind a dead pid forever.
-function pidAlive(pid) {
-  if (!Number.isFinite(pid)) return null; // unknown, not proof of death
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === 'EPERM'; // alive but not ours
-  }
-}
-
-async function statusOf(CC, lane) {
-  const env = { ...process.env };
-  delete env.CODEX_COMPANION_SESSION_ID; // jobs must not be owned by this session
-  try {
-    const { stdout } = await run(process.execPath, [CC, 'status', lane.jobId, '--json'], {
-      cwd: lane.cwd,
-      env,
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    const job = JSON.parse(stdout).job;
-    if (!job) return { state: 'unknown', pid: null };
-    if (!TERMINAL.has(job.status) && pidAlive(job.pid) === false) {
-      return { state: 'zombie', pid: job.pid, since: job.startedAt ?? job.createdAt };
+function parseFlags(args) {
+  const VALUE = new Set([
+    '--attach',
+    '--cwd',
+    '--name',
+    '--model',
+    '--effort',
+    '--scope',
+    '--base',
+    '--ledger',
+    '--stall-min',
+    '--deadline-min',
+    '--interval-sec',
+  ]);
+  const BOOL = new Set(['--review', '--read-only']);
+  const opts = {};
+  const positionals = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (VALUE.has(a)) {
+      opts[a.slice(2)] = args[++i];
+      if (opts[a.slice(2)] === undefined) throw new Error(`${a} needs a value`);
+    } else if (BOOL.has(a)) {
+      opts[a.slice(2)] = true;
+    } else if (a.startsWith('--')) {
+      throw new Error(`unknown flag: ${a}`);
+    } else {
+      positionals.push(a);
     }
-    return { state: job.status, pid: job.pid ?? null, since: job.startedAt ?? job.createdAt };
-  } catch (err) {
-    return { state: 'unreadable', pid: null, error: err.message.split('\n')[0] };
+  }
+  return { opts, positionals };
+}
+
+function supervisionOpts(opts) {
+  return {
+    stallMin: Number(opts['stall-min'] ?? 15),
+    deadlineMin: opts['deadline-min'] != null ? Number(opts['deadline-min']) : null,
+    intervalSec: Number(opts['interval-sec'] ?? 10),
+  };
+}
+
+async function dispatch(CC, { name, cwd, brief, review, readOnly, model, effort, scope, base }) {
+  const args = review
+    ? ['adversarial-review', '--background', ...(scope ? ['--scope', scope] : []), ...(base ? ['--base', base] : [])]
+    : ['task', '--background', ...(readOnly ? [] : ['--write'])];
+  args.push('--model', model ?? 'gpt-5.6-sol');
+  if (effort) args.push('--effort', effort);
+  args.push(brief);
+  const { stdout } = await companion(CC, args, cwd);
+  const jobId = stdout.match(JOB_ID_RE)?.[0];
+  if (!jobId) throw new Error(`dispatch printed no job id. stdout:\n${stdout}`);
+  console.log(`dispatched ${jobId} (${name}) in ${cwd}`);
+  return jobId;
+}
+
+// The lane's report: task summary, or review verdict + findings. Returns the job.
+async function printResult(CC, lane) {
+  const { stdout } = await companion(CC, ['result', lane.jobId, '--json'], lane.cwd);
+  const payload = JSON.parse(stdout);
+  const job = payload.job ?? {};
+  // A backgrounded review buries its schema-validated payload here, not at .result.
+  const review = payload.result ?? payload.storedJob?.result?.result ?? null;
+  console.log(`\n=== ${lane.name} report (${job.status ?? '?'}) ===`);
+  if (review?.findings) {
+    console.log(`verdict: ${review.verdict}  findings: ${review.findings.length}`);
+    for (const f of review.findings) {
+      console.log(`  [${f.severity}] ${f.file}:${f.line_start}-${f.line_end} conf=${f.confidence} :: ${f.title}`);
+    }
+  } else if (job.summary) {
+    console.log(job.summary);
+  } else {
+    console.log('(no summary)');
+  }
+  return job;
+}
+
+// Best-effort: what effort did Codex actually run at? (config-inherited when
+// dispatched without --effort, so the transcript is the only truth.)
+function observedEffort(threadId) {
+  try {
+    if (!threadId) return 'unknown';
+    const hits = globSync(path.join(os.homedir(), `.codex/sessions/*/*/*/rollout-*${threadId}*.jsonl`));
+    if (!hits.length) return 'unknown';
+    const head = readFileSync(hits[0], 'utf8').slice(0, 65536);
+    return head.match(/"reasoning_effort"\s*:\s*"([a-z]+)"/)?.[1] ?? 'unknown';
+  } catch {
+    return 'unknown';
   }
 }
 
-async function cmdWait(file, opts) {
-  const CC = resolveCompanion();
-  const lanes = parseLanes(file);
-  const deadline = Date.now() + opts.deadlineMin * 60_000;
-  const started = Date.now();
-  const seen = new Map();
-  const el = () => `${Math.round((Date.now() - started) / 1000)}s`;
+function printAliveExit(CC, lane, { reason, quietMs, job }) {
+  console.log(`\n--- ${reason} — worker ${job.pid} ALIVE, phase ${job.phase ?? '?'}; nothing was killed`);
+  if (job.logFile) console.log(`--- Peek:    tail -40 '${job.logFile}'`);
+  console.log(
+    `--- Re-arm:  node '${SELF}' lane --attach ${lane.jobId} --cwd '${lane.cwd}' --name ${lane.name} --stall-min 30`,
+  );
+  console.log(`--- Abandon: env -u CODEX_COMPANION_SESSION_ID node '${CC}' cancel ${lane.jobId}`);
+  console.log(`--- Do NOT re-dispatch: the worker is still running inside this lane's path budget.`);
+}
 
-  console.log(`waiting on ${lanes.length} lane(s), deadline ${opts.deadlineMin}m`);
+function printDeadExit(CC, lane, state, job) {
+  const detail = state === 'zombie' ? `worker pid ${job?.pid} is gone; record stuck at '${job?.status}'` : state;
+  console.log(`\n--- DEAD: ${detail}`);
+  if (job?.logFile) console.log(`--- Log:         tail -60 '${job.logFile}'`);
+  console.log(`--- Re-dispatch: node '${SELF}' redispatch ${lane.jobId} --cwd '${lane.cwd}' --name ${lane.name}`);
+}
+
+// Supervise one job until terminal/dead, or until it goes quiet (advisory exit 3).
+async function superviseLane(CC, lane, sup) {
+  const started = Date.now();
+  const deadline = sup.deadlineMin != null ? started + sup.deadlineMin * 60000 : Infinity;
+  const el = () => fmtMin(Date.now() - started);
+  let lastPhase;
+  let strikes = 0;
+  let ticks = 0;
+
   for (;;) {
-    let pending = 0;
+    let job;
+    try {
+      job = await getJob(CC, lane.jobId, lane.cwd);
+    } catch (err) {
+      job = null;
+      console.log(`[${el()}] ${lane.name} unreadable: ${err.message.split('\n')[0]}`);
+    }
+    if (!job) {
+      // With no deadline, an unresolvable job must not spin forever.
+      if (++strikes >= 6) {
+        console.log(
+          `\n--- DEAD: job ${lane.jobId} unreadable ${strikes} times — wrong id, wrong --cwd, or erased record`,
+        );
+        return 1;
+      }
+      await new Promise((r) => setTimeout(r, sup.intervalSec * 1000));
+      continue;
+    }
+    strikes = 0;
+    const state = classify(job);
+
+    if (state === 'completed') {
+      const full = await printResult(CC, lane).catch(() => job);
+      console.log(`observed reasoning_effort=${observedEffort(full.threadId)}`);
+      console.log(`\n--- COMPLETED in ${el()} (${lane.name}, ${lane.jobId})`);
+      return 0;
+    }
+    if (TERMINAL.has(state) || state === 'zombie') {
+      await printResult(CC, lane).catch(() => {});
+      printDeadExit(CC, lane, state, job);
+      return 1;
+    }
+
+    if (job.phase !== lastPhase) {
+      console.log(`[${el()}] ${lane.name} phase: ${lastPhase ?? 'start'} -> ${job.phase ?? '?'}`);
+      lastPhase = job.phase;
+    }
+    const quietMs = Date.now() - Math.max(progressStamp(job), started);
+    if (quietMs >= sup.stallMin * 60000) {
+      printAliveExit(CC, lane, { reason: `STALLED: no output for ${fmtMin(quietMs)}`, quietMs, job });
+      return 3;
+    }
+    if (Date.now() >= deadline) {
+      printAliveExit(CC, lane, { reason: `TIME BOX: still running at ${sup.deadlineMin}m`, quietMs, job });
+      return 3;
+    }
+    if (++ticks % 30 === 0) {
+      console.log(`[${el()}] ${lane.name} ${state}, phase ${job.phase ?? '?'}, last output ${fmtMin(quietMs)} ago`);
+    }
+    await new Promise((r) => setTimeout(r, sup.intervalSec * 1000));
+  }
+}
+
+async function cmdLane(rest) {
+  const CC = resolveCompanion();
+  const { opts, positionals } = parseFlags(rest);
+  const sup = supervisionOpts(opts);
+  let lane;
+  if (opts.attach) {
+    lane = { name: opts.name ?? opts.attach, jobId: opts.attach, cwd: path.resolve(opts.cwd ?? process.cwd()) };
+    console.log(`attached to ${lane.jobId} (${lane.name}) in ${lane.cwd}`);
+  } else {
+    const [name, cwd, ...briefParts] = positionals;
+    const brief = briefParts.join(' ');
+    if (!name || !cwd || !brief) throw new UsageError('lane needs: <name> <cwd> "<brief>" (or --attach <job-id>)');
+    const jobId = await dispatch(CC, {
+      name,
+      cwd: path.resolve(cwd),
+      brief,
+      review: opts.review,
+      readOnly: opts['read-only'],
+      model: opts.model,
+      effort: opts.effort,
+      scope: opts.scope,
+      base: opts.base,
+    });
+    lane = { name, jobId, cwd: path.resolve(cwd) };
+    if (opts.ledger) appendFileSync(opts.ledger, `${name} ${jobId} ${lane.cwd}\n`);
+  }
+  process.exit(await superviseLane(CC, lane, sup));
+}
+
+async function cmdRedispatch(rest) {
+  const CC = resolveCompanion();
+  const { opts, positionals } = parseFlags(rest);
+  const [oldId] = positionals;
+  if (!oldId) throw new UsageError('redispatch needs a job id');
+  if (oldId.startsWith('review-')) throw new UsageError('redispatch supports task jobs; re-run reviews directly');
+  const probeCwd = path.resolve(opts.cwd ?? process.cwd());
+  const old = await getJob(CC, oldId, probeCwd);
+  const req = old?.request;
+  if (!req?.prompt) throw new Error(`job ${oldId} has no stored prompt (probed from ${probeCwd})`);
+  const name = opts.name ?? `${oldId}-redo`;
+  const cwd = path.resolve(opts.cwd ?? req.cwd ?? process.cwd());
+  console.log(
+    `redispatching ${oldId}: model=${req.model ?? 'gpt-5.6-sol'} effort=${req.effort ?? '(config)'} write=${!!req.write}`,
+  );
+  const jobId = await dispatch(CC, {
+    name,
+    cwd,
+    brief: req.prompt,
+    readOnly: !req.write,
+    model: opts.model ?? req.model,
+    effort: opts.effort ?? req.effort,
+  });
+  if (opts.ledger) appendFileSync(opts.ledger, `${name} ${jobId} ${cwd}\n`);
+  process.exit(await superviseLane(CC, { name, jobId, cwd }, supervisionOpts(opts)));
+}
+
+// Wave recovery: supervise several known jobs at once. Terminal/dead states latch;
+// "stalled" is recomputed every tick so a lane that resumes progress un-stalls.
+async function cmdWait(file, rest) {
+  const CC = resolveCompanion();
+  const { opts } = parseFlags(rest);
+  const sup = supervisionOpts(opts);
+  const lanes = parseLanes(file);
+  const started = Date.now();
+  const deadline = sup.deadlineMin != null ? started + sup.deadlineMin * 60000 : Infinity;
+  const el = () => fmtMin(Date.now() - started);
+  const seen = new Map(); // latched terminal/dead states
+  const meta = new Map(lanes.map((l) => [l.name, { lastPhase: undefined, strikes: 0 }]));
+
+  console.log(
+    `waiting on ${lanes.length} lane(s); stall threshold ${sup.stallMin}m${sup.deadlineMin != null ? `, time box ${sup.deadlineMin}m` : ', no deadline'}`,
+  );
+  for (;;) {
+    const alive = [];
+    let pendingUnreadable = 0;
     for (const lane of lanes) {
       if (seen.has(lane.name)) continue;
-      const { state, pid, error } = await statusOf(CC, lane);
-      if (TERMINAL.has(state) || state === 'zombie') {
+      const m = meta.get(lane.name);
+      let job;
+      try {
+        job = await getJob(CC, lane.jobId, lane.cwd);
+      } catch {
+        job = null;
+      }
+      if (!job) {
+        if (++m.strikes >= 6) {
+          seen.set(lane.name, 'unreadable');
+          console.log(`[${el()}] ${lane.name} -> unreadable (giving up after ${m.strikes} attempts)`);
+        } else {
+          pendingUnreadable++;
+        }
+        continue;
+      }
+      m.strikes = 0;
+      const state = classify(job);
+      if (state === 'completed') {
         seen.set(lane.name, state);
-        const note = state === 'zombie' ? ` (worker pid ${pid} is gone; record stuck at running)` : '';
+        console.log(`[${el()}] ${lane.name} -> completed`);
+        await printResult(CC, lane).catch(() => {});
+      } else if (TERMINAL.has(state) || state === 'zombie') {
+        seen.set(lane.name, state);
+        const note = state === 'zombie' ? ` (worker pid ${job.pid} is gone; record stuck at running)` : '';
         console.log(`[${el()}] ${lane.name} -> ${state}${note}`);
+        printDeadExit(CC, lane, state, job);
       } else {
-        if (state === 'unreadable') console.log(`[${el()}] ${lane.name} -> unreadable: ${error}`);
-        pending++;
+        if (job.phase !== m.lastPhase) {
+          console.log(`[${el()}] ${lane.name} phase: ${m.lastPhase ?? 'start'} -> ${job.phase ?? '?'}`);
+          m.lastPhase = job.phase;
+        }
+        const quietMs = Date.now() - Math.max(progressStamp(job), started);
+        alive.push({ lane, job, quietMs, stalled: quietMs >= sup.stallMin * 60000 });
       }
     }
-    if (!pending) break;
-    if (Date.now() >= deadline) {
-      for (const lane of lanes)
-        if (!seen.has(lane.name)) {
-          seen.set(lane.name, 'timeout');
-          console.log(`[${el()}] ${lane.name} -> still running at deadline`);
-        }
+    const blocking = alive.filter((a) => !a.stalled);
+    if (!blocking.length && !pendingUnreadable && Date.now() < deadline) {
+      if (!alive.length) break; // every lane latched terminal/dead
+      // all remaining lanes are quiet: wake the orchestrator instead of sitting on them
+      for (const a of alive) {
+        seen.set(a.lane.name, 'stalled');
+        printAliveExit(CC, a.lane, {
+          reason: `STALLED: no output for ${fmtMin(a.quietMs)}`,
+          quietMs: a.quietMs,
+          job: a.job,
+        });
+      }
       break;
     }
-    await new Promise((r) => setTimeout(r, opts.intervalSec * 1000));
+    if (Date.now() >= deadline) {
+      for (const a of alive) {
+        seen.set(a.lane.name, a.stalled ? 'stalled' : 'time-boxed');
+        printAliveExit(CC, a.lane, {
+          reason: `TIME BOX: still running at ${sup.deadlineMin}m`,
+          quietMs: a.quietMs,
+          job: a.job,
+        });
+      }
+      for (const lane of lanes) if (!seen.has(lane.name)) seen.set(lane.name, 'unreadable');
+      break;
+    }
+    await new Promise((r) => setTimeout(r, sup.intervalSec * 1000));
   }
 
   console.log('\n--- summary ---');
-  for (const lane of lanes) console.log(`${String(seen.get(lane.name) ?? '?').padEnd(10)} ${lane.name}`);
-  const bad = [...seen.values()].filter((s) => s !== 'completed');
-  console.log(bad.length ? `\n${bad.length} lane(s) need attention` : '\nall lanes completed');
-  process.exit(bad.length ? 1 : 0);
+  for (const lane of lanes) console.log(`${String(seen.get(lane.name) ?? '?').padEnd(11)} ${lane.name}`);
+  const states = [...seen.values()];
+  const dead = states.filter((s) => ['failed', 'cancelled', 'zombie', 'unreadable'].includes(s)).length;
+  const aliveQuiet = states.filter((s) => s === 'stalled' || s === 'time-boxed').length;
+  if (dead) console.log(`\n${dead} lane(s) dead — see Re-dispatch lines above`);
+  else if (aliveQuiet)
+    console.log(`\n${aliveQuiet} lane(s) alive but quiet — re-arm to keep waiting; do NOT re-dispatch`);
+  else console.log('\nall lanes completed');
+  process.exit(dead ? 1 : aliveQuiet ? 3 : 0);
 }
 
 async function cmdCollect(file) {
   const CC = resolveCompanion();
-  const lanes = parseLanes(file);
-  const env = { ...process.env };
-  delete env.CODEX_COMPANION_SESSION_ID;
-  for (const lane of lanes) {
-    let payload;
+  for (const lane of parseLanes(file)) {
     try {
-      const { stdout } = await run(process.execPath, [CC, 'result', lane.jobId, '--json'], {
-        cwd: lane.cwd,
-        env,
-        maxBuffer: 64 * 1024 * 1024,
-      });
-      payload = JSON.parse(stdout);
+      const job = await printResult(CC, lane);
+      if (job.status === 'completed') console.log(`observed reasoning_effort=${observedEffort(job.threadId)}`);
     } catch {
       // `result` refuses a job that never reached a terminal state; say why.
-      const { state, pid } = await statusOf(CC, lane);
-      const why =
-        state === 'zombie'
-          ? `worker pid ${pid} is gone; no result was ever written`
-          : TERMINAL.has(state)
-            ? 'result unreadable'
-            : `still ${state}; no result yet`;
-      console.log(`\n=== ${lane.name} === ${why}`);
-      continue;
-    }
-    const job = payload.job ?? {};
-    // A backgrounded review buries its schema-validated payload here, not at .result.
-    const review = payload.result ?? payload.storedJob?.result?.result ?? null;
-    console.log(`\n=== ${lane.name} (${job.status ?? '?'}) ===`);
-    if (review?.findings) {
-      console.log(`verdict: ${review.verdict}  findings: ${review.findings.length}`);
-      for (const f of review.findings) {
-        console.log(`  [${f.severity}] ${f.file}:${f.line_start}-${f.line_end} conf=${f.confidence} :: ${f.title}`);
+      let why = 'result unreadable';
+      try {
+        const job = await getJob(CC, lane.jobId, lane.cwd);
+        const state = job ? classify(job) : 'unknown';
+        why =
+          state === 'zombie'
+            ? `worker pid ${job.pid} is gone; no result was ever written`
+            : TERMINAL.has(state)
+              ? 'result unreadable'
+              : `still ${state}; no result yet`;
+      } catch {
+        // keep default
       }
-    } else if (job.summary) {
-      console.log(job.summary);
-    } else {
-      console.log('(no summary)');
+      console.log(`\n=== ${lane.name} === ${why}`);
     }
   }
 }
 
-const [, , cmd, file, ...rest] = process.argv;
-const opts = {
-  deadlineMin: Number(rest[rest.indexOf('--deadline-min') + 1]) || 45,
-  intervalSec: Number(rest[rest.indexOf('--interval-sec') + 1]) || 10,
-};
-if (!cmd || !file || !['wait', 'collect'].includes(cmd)) {
-  console.error('usage: lanes.mjs <wait|collect> <lanes-file> [--deadline-min N] [--interval-sec N]');
-  process.exit(2);
-}
+class UsageError extends Error {}
+
+const USAGE = [
+  'usage: lanes.mjs lane <name> <cwd> "<brief>" [--review] [--read-only] [--model M] [--effort E] [--scope S] [--base R] [--ledger FILE]',
+  '       lanes.mjs lane --attach <job-id> [--cwd DIR] [--name NAME]',
+  '       lanes.mjs redispatch <job-id> [--cwd DIR] [--name NAME]',
+  '       lanes.mjs wait <lanes-file>',
+  '       lanes.mjs collect <lanes-file>',
+  '       supervision flags: [--stall-min 15] [--deadline-min N] [--interval-sec 10]',
+].join('\n');
+
+const [, , cmd, ...rest] = process.argv;
 try {
-  if (cmd === 'wait') await cmdWait(file, opts);
-  else await cmdCollect(file);
+  if (cmd === 'lane') await cmdLane(rest);
+  else if (cmd === 'redispatch') await cmdRedispatch(rest);
+  else if (cmd === 'wait' && rest[0]) await cmdWait(rest[0], rest.slice(1));
+  else if (cmd === 'collect' && rest[0]) await cmdCollect(rest[0]);
+  else throw new UsageError(USAGE);
 } catch (err) {
-  console.error(`error: ${err.message}`);
+  console.error(err instanceof UsageError ? err.message : `error: ${err.message}`);
   process.exit(2);
 }

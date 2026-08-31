@@ -14,6 +14,7 @@ const mockGetWorkspace =
   >();
 const mockRequestPermission = vi.fn<(handle: TestHandle) => Promise<boolean>>(async () => true);
 const mockSyncProjectRoots = vi.fn(async () => undefined);
+const mockRefreshWorkspaceCatalog = vi.fn(async () => undefined);
 const mockBlocked = vi.fn();
 const mockToastError = vi.fn<(message: string, options?: ToastOptions) => void>();
 const mockToastSuccess = vi.fn();
@@ -24,6 +25,9 @@ vi.mock('#filesystem/handle-store.js', () => ({
 }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({ workspace: { syncProjectRoots: mockSyncProjectRoots } }),
+}));
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => ({ refreshWorkspaceCatalog: mockRefreshWorkspaceCatalog }),
 }));
 vi.mock('#utils/workspace-telemetry.utils.js', () => ({
   useWorkspaceTelemetry: () => ({ projectCreateWebaccessBlocked: mockBlocked }),
@@ -61,6 +65,7 @@ describe('useProjectCreationLocationError', () => {
     });
     expect(mockRequestPermission).toHaveBeenCalledWith(handle);
     expect(mockSyncProjectRoots).toHaveBeenCalledOnce();
+    expect(mockRefreshWorkspaceCatalog).toHaveBeenCalledOnce();
     expect(mockToastSuccess).toHaveBeenCalledWith('Folder access restored. Try creating the project again.');
   });
 

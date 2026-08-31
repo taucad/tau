@@ -11,15 +11,14 @@ const makeAnalyticsStub = () => {
 };
 
 describe('buildWorkspaceTelemetry', () => {
-  it('emits workspace.created with workspaceId + isDefault', () => {
+  it('emits workspace.created with the workspace identity', () => {
     const { analytics, capture } = makeAnalyticsStub();
     const telemetry = buildWorkspaceTelemetry(analytics);
 
-    telemetry.workspaceCreated({ workspaceId: 'wsp_abc', isDefault: true });
+    telemetry.workspaceCreated({ workspaceId: 'wsp_abc' });
 
     expect(capture).toHaveBeenCalledWith(workspaceEventName.created, {
       workspaceId: 'wsp_abc',
-      isDefault: true,
     });
   });
 
@@ -90,6 +89,7 @@ describe('buildWorkspaceTelemetry', () => {
       p95: 9,
     });
   });
+
   it('emits a path-free workspace connection trace', () => {
     const { analytics, capture } = makeAnalyticsStub();
     const trace = {
@@ -110,7 +110,6 @@ describe('buildWorkspaceTelemetry', () => {
 
     expect(capture).toHaveBeenCalledWith(workspaceEventName.connection, trace);
   });
-
   // Audit Finding 10: explicit `unmount` is a fire-and-forget operation —
   // when it rejects (e.g. the worker crashed mid-call) the failure must still
   // surface as telemetry so we can track silent unmount loss in production.
@@ -133,7 +132,7 @@ describe('buildWorkspaceTelemetry', () => {
     const noopAnalytics = {} as Analytics;
     const telemetry = buildWorkspaceTelemetry(noopAnalytics);
     expect(() => {
-      telemetry.workspaceCreated({ workspaceId: 'wsp_x', isDefault: false });
+      telemetry.workspaceCreated({ workspaceId: 'wsp_x' });
       telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unsupported' });
       telemetry.workspaceExternalPoll({
         count: 1,

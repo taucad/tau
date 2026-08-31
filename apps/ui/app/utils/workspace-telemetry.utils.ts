@@ -28,10 +28,10 @@ export const workspaceEventName = {
 
 export type WorkspaceEventName = (typeof workspaceEventName)[keyof typeof workspaceEventName];
 
-type WorkspaceFailureReason = 'missing' | 'permission' | 'unsupported' | 'aborted' | 'unknown';
+type WorkspaceFailureReason = 'missing' | 'disconnected' | 'permission' | 'unsupported' | 'aborted' | 'unknown';
 
 export type WorkspaceTelemetry = {
-  readonly workspaceCreated: (input: { readonly workspaceId: string; readonly isDefault: boolean }) => void;
+  readonly workspaceCreated: (input: { readonly workspaceId: string }) => void;
   readonly workspaceConnected: (input: { readonly workspaceId: string }) => void;
   readonly workspacePermissionRevoked: (input: { readonly workspaceId: string }) => void;
   readonly workspaceSwap: (input: {
@@ -87,8 +87,8 @@ const emit = (analytics: Analytics, name: WorkspaceEventName, properties: Record
 };
 
 export const buildWorkspaceTelemetry = (analytics: Analytics): WorkspaceTelemetry => ({
-  workspaceCreated: ({ workspaceId, isDefault }) => {
-    emit(analytics, workspaceEventName.created, { workspaceId, isDefault });
+  workspaceCreated: ({ workspaceId }) => {
+    emit(analytics, workspaceEventName.created, { workspaceId });
   },
   workspaceConnected: ({ workspaceId }) => {
     emit(analytics, workspaceEventName.connected, { workspaceId });

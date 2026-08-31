@@ -8,7 +8,7 @@
  */
 
 /** Discriminated status used by `WorkspaceDirectoryPanel`. */
-export type WorkspaceDirectoryStatus = 'connected' | 'permission' | 'missing' | 'unsupported';
+export type WorkspaceDirectoryStatus = 'connected' | 'permission' | 'disconnected' | 'missing' | 'unsupported';
 
 /**
  * Title + description copy keyed by status. Components pick the right
@@ -24,23 +24,28 @@ export const workspaceDirectoryCopy: Record<
     description: 'Projects in this workspace are stored as folders on your computer.',
   },
   permission: {
-    title: 'Workspace access revoked',
-    description: 'The browser revoked permission for this folder. Grant access again to continue.',
+    title: 'Folder access required',
+    description: 'Grant access to this folder before continuing.',
+  },
+  disconnected: {
+    title: 'Folder disconnected',
+    description: 'Reconnect this folder before continuing.',
   },
   missing: {
-    title: 'No workspace connected',
-    description: 'Pick a folder on your computer to store File System projects as native files.',
+    title: 'No folder connected',
+    description: 'Connect a folder to create projects as files on your disk.',
   },
   unsupported: {
-    title: 'File System Access not available',
-    description: 'This browser cannot open local folders. Use IndexedDB or OPFS storage instead.',
+    title: 'Home only',
+    description: 'Home is the only project location available in this browser.',
   },
 } as const;
 
 /** CTA labels used by the panel + recovery overlay. */
 export const workspaceDirectoryActions = {
   connect: 'Connect Folder',
-  reconnect: 'Grant Access',
-  change: 'Change Folder',
-  forget: 'Forget Workspace',
+  reconnect: 'Reconnect',
+  grantAccess: 'Grant access',
+  change: 'Change folder',
+  disconnect: 'Disconnect workspace',
 } as const;

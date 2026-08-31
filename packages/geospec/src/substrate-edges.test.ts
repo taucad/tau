@@ -182,7 +182,7 @@ const filesystemOf = (paths: readonly string[]): GeoSpecDiscoveryFileSystem => {
 };
 
 describe('discovery path edges', () => {
-  it('should accept roots at the filesystem root', async () => {
+  it('should accept rooted paths at a host filesystem root', async () => {
     const result = await discoverGeoSpecFiles({
       filesystem: filesystemOf(['/specs/a.geospec.ts']),
       projectPath: '/',
@@ -192,14 +192,11 @@ describe('discovery path edges', () => {
     expect(result.files).toStrictEqual(['specs/a.geospec.ts']);
   });
 
-  it('should accept an absolute root outside the project path', async () => {
-    const result = await discoverGeoSpecFiles({
-      filesystem: filesystemOf(['/outside/a.geospec.ts']),
-      projectPath: '/project',
-      files: ['/outside'],
-    });
-
-    expect(result.files).toStrictEqual(['/outside/a.geospec.ts']);
+  it('should reject an absolute selection root before filesystem access', async () => {
+    const filesystem = filesystemOf(['/outside/a.geospec.ts']);
+    await expect(
+      discoverGeoSpecFiles({ filesystem, projectPath: '/project', files: ['/outside'] }),
+    ).rejects.toMatchObject({ name: 'VirtualPathError' });
   });
 
   it('should report an empty root as the dot root', async () => {
@@ -212,15 +209,15 @@ describe('discovery path edges', () => {
     expect(result.unmatchedRoots).toStrictEqual(['.']);
   });
 
-  it('should ignore a directory named with a trailing slash', async () => {
-    const result = await discoverGeoSpecFiles({
-      filesystem: filesystemOf(['/project/skipme/a.geospec.ts']),
-      projectPath: '/project',
-      files: ['skipme/'],
-      ignoredDirectories: ['skipme'],
-    });
-
-    expect(result.files).toStrictEqual([]);
+  it('should reject a directory root with a trailing slash', async () => {
+    await expect(
+      discoverGeoSpecFiles({
+        filesystem: filesystemOf(['/project/skipme/a.geospec.ts']),
+        projectPath: '/project',
+        files: ['skipme/'],
+        ignoredDirectories: ['skipme'],
+      }),
+    ).rejects.toMatchObject({ name: 'VirtualPathError' });
   });
 });
 
@@ -231,7 +228,7 @@ describe('concurrent module runs', () => {
     const run = async () =>
       runGeoSpecModule({
         filesystem: filesystemOf([]) as unknown as VmFileSystem,
-        entryPath: '/spec.geospec.ts',
+        entryPath: 'spec.geospec.ts',
         builtinModules: {},
       });
 
@@ -253,11 +250,11 @@ describe('concurrent module runs', () => {
     const [first, second] = await Promise.all([
       runGeoSpecModule({
         filesystem: filesystem as unknown as VmFileSystem,
-        entryPath: '/a.geospec.ts',
+        entryPath: 'a.geospec.ts',
       }),
       runGeoSpecModule({
         filesystem: filesystem as unknown as VmFileSystem,
-        entryPath: '/b.geospec.ts',
+        entryPath: 'b.geospec.ts',
       }),
     ]);
 
@@ -292,7 +289,7 @@ describe('serial runner edges', () => {
       runner.abort('');
     });
 
-    const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
 
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted.');
   });
@@ -314,7 +311,7 @@ describe('serial runner edges', () => {
       internalProfile: mock<GeoSpecRunProfile>(),
     });
 
-    const result = await runner.run({ files: ['/a.geospec.ts'] });
+    const result = await runner.run({ files: ['a.geospec.ts'] });
 
     expect(result.success).toBe(true);
   });

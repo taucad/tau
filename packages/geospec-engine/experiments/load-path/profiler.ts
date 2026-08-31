@@ -266,7 +266,7 @@ export const profileCanonicalPerTestLoadPath = async (options: {
 
   for (let iteration = 0; iteration < iterations; iteration++) {
     const filesystem = new MemoryProfileFileSystem();
-    filesystem.setText('/project/main.geospec.ts', canonicalPerTestGeoSpecSource);
+    filesystem.setText('main.geospec.ts', canonicalPerTestGeoSpecSource);
     const runner = createSerialGeoSpecRunner({
       filesystem,
       modelLoader: async () => {
@@ -276,7 +276,7 @@ export const profileCanonicalPerTestLoadPath = async (options: {
     });
     const result = await measure('geospecRun', samples, async () => {
       try {
-        return await runner.run({ files: ['/project/main.geospec.ts'] });
+        return await runner.run({ files: ['main.geospec.ts'] });
       } finally {
         await runner.close();
       }

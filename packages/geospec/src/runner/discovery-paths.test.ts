@@ -2,22 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { discoverGeoSpecFiles, isGeoSpecTestFile } from '#runner/discovery.js';
 import type { GeoSpecDiscoveryFileSystem } from '#runner/discovery.js';
 
-/** Filesystem over a flat map of absolute paths; directories are inferred. */
+/** Filesystem over a flat path map; directories are inferred in the same namespace. */
 const filesystemOf = (paths: readonly string[]): GeoSpecDiscoveryFileSystem => {
   const files = new Set(paths);
-  const directories = new Set<string>(['/']);
+  const rooted = paths.every((path) => !path.startsWith('/'));
+  const root = rooted ? '' : '/';
+  const directories = new Set<string>([root]);
   for (const path of paths) {
-    const segments = path.split('/').slice(1, -1);
-    let current = '';
+    const segments = path.split('/').slice(rooted ? 0 : 1, -1);
+    let current = root === '/' ? '' : root;
     for (const segment of segments) {
-      current = `${current}/${segment}`;
+      current = current === '' ? segment : `${current}/${segment}`;
+      if (!rooted) {
+        current = `/${current.replace(/^\//u, '')}`;
+      }
       directories.add(current);
     }
   }
 
   return {
     async readdir(path) {
-      const prefix = path === '/' ? '/' : `${path}/`;
+      const prefix = path === '' || path === '/' ? root : `${path}/`;
       const entries = new Set<string>();
       for (const candidate of [...files, ...directories]) {
         if (candidate === path || !candidate.startsWith(prefix)) {
@@ -68,15 +73,15 @@ describe('discoverGeoSpecFiles path handling', () => {
     });
   });
 
-  it.each([['project'], ['/project/'], ['./project']])('should normalize the project path %s', async (projectPath) => {
-    const result = await discoverGeoSpecFiles({ filesystem: filesystemOf(tree), projectPath });
+  it('should normalize a trailing slash on an absolute host project path', async () => {
+    const result = await discoverGeoSpecFiles({ filesystem: filesystemOf(tree), projectPath: '/project/' });
 
     expect(result.files).toStrictEqual(['specs/a.geospec.ts', 'specs/nested/b.geospec.js']);
   });
 
   it('should treat an empty project path as the filesystem root', async () => {
     const result = await discoverGeoSpecFiles({
-      filesystem: filesystemOf(['/a.geospec.ts']),
+      filesystem: filesystemOf(['a.geospec.ts']),
       projectPath: '',
     });
 
@@ -84,17 +89,12 @@ describe('discoverGeoSpecFiles path handling', () => {
   });
 
   it('should treat a dot project path as the filesystem root', async () => {
-    const result = await discoverGeoSpecFiles({ filesystem: filesystemOf(['/a.geospec.ts']), projectPath: '.' });
+    const result = await discoverGeoSpecFiles({ filesystem: filesystemOf(['a.geospec.ts']), projectPath: '.' });
 
     expect(result.files).toStrictEqual(['a.geospec.ts']);
   });
 
-  it.each([
-    ['a relative root', 'specs'],
-    ['an absolute root', '/project/specs'],
-    ['a windows-separated root', String.raw`specs\nested`],
-    ['a dot-prefixed root', './specs'],
-  ])('should expand %s', async (_label, root) => {
+  it.each([['a relative root', 'specs']])('should expand %s', async (_label, root) => {
     const result = await discoverGeoSpecFiles({
       filesystem: filesystemOf(tree),
       projectPath: '/project',
@@ -103,6 +103,15 @@ describe('discoverGeoSpecFiles path handling', () => {
 
     expect(result.files.length).toBeGreaterThan(0);
   });
+
+  it.each(['/project/specs', String.raw`specs\nested`, './specs'])(
+    'should reject non-canonical root %s',
+    async (root) => {
+      await expect(
+        discoverGeoSpecFiles({ filesystem: filesystemOf(tree), projectPath: '/project', files: [root] }),
+      ).rejects.toMatchObject({ name: 'VirtualPathError' });
+    },
+  );
 
   it('should accept an exact file root', async () => {
     const result = await discoverGeoSpecFiles({
@@ -134,11 +143,11 @@ describe('discoverGeoSpecFiles path handling', () => {
     expect(result).toStrictEqual({ files: [], unmatchedRoots: ['nowhere'] });
   });
 
-  it('should report a dot root that selects nothing as unmatched', async () => {
+  it('should report the canonical empty root that selects nothing as unmatched', async () => {
     const result = await discoverGeoSpecFiles({
       filesystem: filesystemOf(['/project/notes.md']),
       projectPath: '/project',
-      files: ['.'],
+      files: [''],
     });
 
     expect(result).toStrictEqual({ files: [], unmatchedRoots: ['.'] });

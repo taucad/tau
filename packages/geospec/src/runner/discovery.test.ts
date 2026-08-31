@@ -9,6 +9,11 @@ type InMemoryNode = GeoSpecDiscoveryFileStat & {
 const createInMemoryNodes = (entries: ReadonlyArray<readonly [string, InMemoryNode]>): Record<string, InMemoryNode> =>
   Object.fromEntries(entries);
 
+const missingPathError = (path: string): Error => {
+  const error = Object.assign(new Error(`Cannot stat path: ${path}`), { code: 'ENOENT' });
+  return error;
+};
+
 const createInMemoryDiscoveryFileSystem = (nodes: Record<string, InMemoryNode>): GeoSpecDiscoveryFileSystem => ({
   async readdir(path: string): Promise<readonly string[]> {
     const node = nodes[path];
@@ -20,7 +25,7 @@ const createInMemoryDiscoveryFileSystem = (nodes: Record<string, InMemoryNode>):
   async stat(path: string): Promise<GeoSpecDiscoveryFileStat> {
     const node = nodes[path];
     if (!node) {
-      throw new Error(`Cannot stat path: ${path}`);
+      throw missingPathError(path);
     }
     return { kind: node.kind };
   },
@@ -88,6 +93,22 @@ describe('discoverGeoSpecFiles', () => {
     });
   });
 
+  it('should rethrow filesystem authority failures instead of reporting a missing test root', async () => {
+    const unavailable = Object.assign(new Error('The requested filesystem root is unavailable.'), {
+      code: 'ROOT_UNAVAILABLE',
+    });
+    const filesystem: GeoSpecDiscoveryFileSystem = {
+      async readdir() {
+        return [];
+      },
+      async stat() {
+        throw unavailable;
+      },
+    };
+
+    await expect(discoverGeoSpecFiles({ filesystem, projectPath: '/project' })).rejects.toBe(unavailable);
+  });
+
   it('should apply include globs after directory-root expansion', async () => {
     const filesystem = createInMemoryDiscoveryFileSystem(
       createInMemoryNodes([
@@ -101,7 +122,7 @@ describe('discoverGeoSpecFiles', () => {
     const result = await discoverGeoSpecFiles({
       filesystem,
       projectPath: '/project',
-      files: ['.'],
+      files: [''],
       include: ['lib/**/*.geospec.ts'],
     });
 
@@ -145,7 +166,7 @@ describe('discoverGeoSpecFiles', () => {
     const result = await discoverGeoSpecFiles({
       filesystem,
       projectPath: '/project',
-      files: ['lib', '.', 'lib/a.geospec.ts'],
+      files: ['lib', '', 'lib/a.geospec.ts'],
       include: ['**/*.geospec.ts'],
       exclude: ['**/b.geospec.ts'],
     });

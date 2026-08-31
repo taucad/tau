@@ -54,7 +54,7 @@ const filesystemWith = (entries: readonly SourceEntry[]): MemoryFileSystem => {
 const runModule = async (entries: readonly SourceEntry[], options: Record<string, unknown> = {}) =>
   runGeoSpecModule({
     filesystem: filesystemWith(entries),
-    entryPath: entries[0]?.[0] ?? '/spec.geospec.ts',
+    entryPath: entries[0]?.[0] ?? 'spec.geospec.ts',
     ...options,
   });
 
@@ -68,7 +68,7 @@ describe('runGeoSpecModule', () => {
     const result = await runModule(
       [
         [
-          '/spec.geospec.ts',
+          'spec.geospec.ts',
           `
         import { describe, it, test, expectGeo } from 'geospec';
         describe('suite', () => {
@@ -94,20 +94,20 @@ describe('runGeoSpecModule', () => {
   });
 
   it('should reject an invalid test-name pattern before compiling', async () => {
-    const result = await runModule([['/spec.geospec.ts', 'export const noop = 1;']], { testNamePattern: '(' });
+    const result = await runModule([['spec.geospec.ts', 'export const noop = 1;']], { testNamePattern: '(' });
 
     expect(result.success).toBe(false);
     expect(!result.success && result.issues[0]?.code).toBe('INVALID_GEOSPEC_TEST_NAME_PATTERN');
   });
 
   it('should surface bundle issues', async () => {
-    const result = await runModule([['/spec.geospec.ts', "import 'missing-module';"]]);
+    const result = await runModule([['spec.geospec.ts', "import 'missing-module';"]]);
 
     expect(result.success).toBe(false);
   });
 
   it('should surface execution issues', async () => {
-    const result = await runModule([['/spec.geospec.ts', 'throw new Error("module exploded");']]);
+    const result = await runModule([['spec.geospec.ts', 'throw new Error("module exploded");']]);
 
     expect(result.success).toBe(false);
   });
@@ -116,7 +116,7 @@ describe('runGeoSpecModule', () => {
     const result = await runModule(
       [
         [
-          '/spec.geospec.ts',
+          'spec.geospec.ts',
           `
           import { it } from 'geospec';
           it('body', () => { globalThis.__RAN__ = true; });
@@ -132,18 +132,18 @@ describe('runGeoSpecModule', () => {
 
   it('should reuse a successful bundle while keeping each invocation fresh', async () => {
     const filesystem = filesystemWith([
-      ['/spec.geospec.ts', `import { it } from 'geospec'; it('first', () => {}); it('second', () => {});`],
+      ['spec.geospec.ts', `import { it } from 'geospec'; it('first', () => {}); it('second', () => {});`],
     ]);
     const bundleCache = new Map();
     const collected = await runGeoSpecModule({
       filesystem,
-      entryPath: '/spec.geospec.ts',
+      entryPath: 'spec.geospec.ts',
       collectOnly: true,
       bundleCache,
     });
     const shard = await runGeoSpecModule({
       filesystem,
-      entryPath: '/spec.geospec.ts',
+      entryPath: 'spec.geospec.ts',
       testNamePattern: 'second$',
       bundleCache,
     });
@@ -156,8 +156,8 @@ describe('runGeoSpecModule', () => {
     expect(shard.bundle).toBe(collected.bundle);
     expect(shard.tests.map(({ name }) => name)).toStrictEqual(['second']);
 
-    filesystem.setText('/spec.geospec.ts', `import { it } from 'geospec'; it('changed', () => {});`);
-    const changed = await runGeoSpecModule({ filesystem, entryPath: '/spec.geospec.ts', bundleCache });
+    filesystem.setText('spec.geospec.ts', `import { it } from 'geospec'; it('changed', () => {});`);
+    const changed = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
     expect(changed.success).toBe(true);
     if (!changed.success) {
       return;
@@ -170,7 +170,7 @@ describe('runGeoSpecModule', () => {
     const result = await runModule(
       [
         [
-          '/spec.geospec.ts',
+          'spec.geospec.ts',
           `
           import { it } from 'geospec';
           import { loadModel, createModelLoader } from 'geospec/model';
@@ -202,7 +202,7 @@ describe('runGeoSpecModule', () => {
   it('should fail authored loads when no loader is bound', async () => {
     const result = await runModule([
       [
-        '/spec.geospec.ts',
+        'spec.geospec.ts',
         `
         import { it } from 'geospec';
         import { loadModel } from 'geospec/model';
@@ -222,7 +222,7 @@ describe('runGeoSpecModule', () => {
     const result = await runModule(
       [
         [
-          '/spec.geospec.ts',
+          'spec.geospec.ts',
           `
           import { it } from 'geospec';
           import { answer } from 'custom-builtin';
@@ -246,7 +246,7 @@ describe('runGeoSpecModule', () => {
       host: { flushEvidenceStore } satisfies Partial<GeoSpecEngineHostBindings>,
     });
 
-    await runModule([['/spec.geospec.ts', 'export const noop = 1;']]);
+    await runModule([['spec.geospec.ts', 'export const noop = 1;']]);
 
     expect(flushEvidenceStore).toHaveBeenCalledTimes(1);
   });
@@ -260,8 +260,8 @@ const passing = (name: string): string => `
 describe('serial runner shell', () => {
   const runnerOptions = () => ({
     filesystem: filesystemWith([
-      ['/first.geospec.ts', passing('first')],
-      ['/second.geospec.ts', passing('second')],
+      ['first.geospec.ts', passing('first')],
+      ['second.geospec.ts', passing('second')],
     ]),
   });
 
@@ -274,7 +274,7 @@ describe('serial runner shell', () => {
     }
     unsubscribe();
 
-    const result = await runner.run({ files: ['/first.geospec.ts', '/second.geospec.ts'] });
+    const result = await runner.run({ files: ['first.geospec.ts', 'second.geospec.ts'] });
     await runner.close();
     await runner.close();
 
@@ -296,7 +296,7 @@ describe('serial runner shell', () => {
     const runner = createSerialGeoSpecRunner(runnerOptions());
     await runner.close();
 
-    const result = await runner.run({ files: ['/first.geospec.ts'] });
+    const result = await runner.run({ files: ['first.geospec.ts'] });
 
     expect(result.issues?.[0]?.code).toBe('GEOSPEC_RUNNER_CLOSED');
   });
@@ -309,7 +309,7 @@ describe('serial runner shell', () => {
       runner.abort('operator');
     });
 
-    const result = await runner.run({ files: ['/first.geospec.ts', '/second.geospec.ts'] });
+    const result = await runner.run({ files: ['first.geospec.ts', 'second.geospec.ts'] });
 
     expect(result.issues?.[0]?.code).toBe('GEOSPEC_RUNNER_ABORTED');
     expect(result.issues?.[0]?.message).toContain('operator');
@@ -323,7 +323,7 @@ describe('serial runner shell', () => {
       runner.abort();
     });
 
-    const result = await runner.run({ files: ['/first.geospec.ts', '/second.geospec.ts'] });
+    const result = await runner.run({ files: ['first.geospec.ts', 'second.geospec.ts'] });
 
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted: requested');
   });
@@ -331,12 +331,12 @@ describe('serial runner shell', () => {
   it('should bail after the first failing file', async () => {
     const runner = createSerialGeoSpecRunner({
       filesystem: filesystemWith([
-        ['/a.geospec.ts', 'throw new Error("boom");'],
-        ['/b.geospec.ts', passing('second')],
+        ['a.geospec.ts', 'throw new Error("boom");'],
+        ['b.geospec.ts', passing('second')],
       ]),
     });
 
-    const result = await runner.run({ files: ['/a.geospec.ts', '/b.geospec.ts'], bail: true });
+    const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'], bail: true });
 
     expect(result.issues?.some((issue) => issue.code === 'GEOSPEC_RUNNER_BAILED')).toBe(true);
     expect(result.files).toHaveLength(1);
@@ -345,7 +345,7 @@ describe('serial runner shell', () => {
   it('should report when filters select nothing', async () => {
     const runner = createSerialGeoSpecRunner(runnerOptions());
 
-    const result = await runner.run({ files: ['/first.geospec.ts'], testNamePattern: 'no-such-test' });
+    const result = await runner.run({ files: ['first.geospec.ts'], testNamePattern: 'no-such-test' });
 
     expect(result.issues?.[0]?.code).toBe('NO_MATCHING_GEOSPEC_TESTS');
   });

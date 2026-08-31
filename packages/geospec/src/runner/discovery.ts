@@ -1,3 +1,5 @@
+import { assertRootedPath } from '@taucad/runtime/kernel';
+
 /**
  * Default file globs used by GeoSpec test discovery.
  *
@@ -90,29 +92,26 @@ const normalizeGeoSpecPath = (path: string): string =>
   path.replaceAll('\\', '/').replaceAll(/\/+/gu, '/').replace(/^\.\//u, '');
 
 const normalizeProjectPath = (path: string): string => {
-  const normalized = normalizeGeoSpecPath(path).replace(/\/$/u, '');
+  const normalized = normalizeGeoSpecPath(path);
   if (!normalized || normalized === '.') {
-    return '/';
+    return '';
   }
-  return normalized.startsWith('/') ? normalized : `/${normalized}`;
+  return normalized === '/' ? normalized : normalized.replace(/\/$/u, '');
 };
 
 const toProjectAbsolutePath = (path: string, projectPath: string): string => {
-  const normalized = normalizeGeoSpecPath(path);
-  if (!normalized || normalized === '.') {
+  const rooted = assertRootedPath(path);
+  if (rooted === '') {
     return projectPath;
   }
-  if (normalized === projectPath || normalized.startsWith(`${projectPath}/`)) {
-    return normalized;
-  }
-  if (normalized.startsWith('/')) {
-    return normalized;
-  }
-  return projectPath === '/' ? `/${normalized}` : `${projectPath}/${normalized}`;
+  return projectPath === '' ? rooted : `${projectPath.replace(/\/$/u, '')}/${rooted}`;
 };
 
 const toProjectRelativePath = (path: string, projectPath: string): string => {
-  const absolutePath = toProjectAbsolutePath(path, projectPath);
+  const absolutePath = normalizeGeoSpecPath(path).replace(/\/$/u, '');
+  if (projectPath === '') {
+    return absolutePath;
+  }
   const projectPrefix = projectPath.endsWith('/') ? projectPath : `${projectPath}/`;
   if (absolutePath === projectPath) {
     return '';
@@ -187,6 +186,22 @@ const isIgnoredDirectory = (path: string, ignoredDirectories: ReadonlySet<string
   return ignoredDirectories.has(normalizedPath) || ignoredDirectories.has(directoryName);
 };
 
+const isMissingPathError = (error: unknown): boolean => {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const code = 'code' in error ? error.code : undefined;
+  const name = 'name' in error ? error.name : undefined;
+  const message = error instanceof Error ? error.message : '';
+  return (
+    code === 'ENOENT' ||
+    code === 'ENOTDIR' ||
+    name === 'NotFoundError' ||
+    message.startsWith('ENOENT:') ||
+    message.startsWith('ENOTDIR:')
+  );
+};
+
 /**
  * Return true when a project-relative path names a GeoSpec test file.
  *
@@ -207,7 +222,7 @@ const collectGeoSpecFiles = async (options: {
   const directories: string[] = [];
 
   for (const entry of entries) {
-    const absolutePath = options.directoryPath === '/' ? `/${entry}` : `${options.directoryPath}/${entry}`;
+    const absolutePath = options.directoryPath === '' ? entry : `${options.directoryPath}/${entry}`;
     const relativePath = toProjectRelativePath(absolutePath, options.projectPath);
     // oxlint-disable-next-line no-await-in-loop -- deterministic serial traversal avoids host-specific ordering races.
     const stat = await options.filesystem.stat(absolutePath);
@@ -243,8 +258,11 @@ const discoverFromRoot = async (options: {
   let rootStat: GeoSpecDiscoveryFileStat;
   try {
     rootStat = await options.filesystem.stat(absoluteRoot);
-  } catch {
-    return [];
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return [];
+    }
+    throw error;
   }
 
   if (rootStat.kind === 'file') {
@@ -285,7 +303,7 @@ export const discoverGeoSpecFiles = async (options: DiscoverGeoSpecFilesOptions)
   const include = options.include && options.include.length > 0 ? options.include : defaultGeoSpecInclude;
   const exclude = options.exclude ?? [];
   const ignoredDirectories = new Set(options.ignoredDirectories ?? defaultGeoSpecIgnoredDirectories);
-  const roots = options.files && options.files.length > 0 ? options.files : ['.'];
+  const roots = options.files && options.files.length > 0 ? options.files : [''];
   const discoveredFiles = new Set<string>();
   const unmatchedRoots: string[] = [];
 

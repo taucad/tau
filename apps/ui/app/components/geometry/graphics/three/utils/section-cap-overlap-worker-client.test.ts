@@ -15,10 +15,10 @@ class FakeSectionCapWorker extends EventTarget {
   }
 }
 
-const minimalRequest = (): SectionCapWorkerRequest => ({
+const minimalRequest = (sequence = 1): SectionCapWorkerRequest => ({
   type: 'compute',
-  sequence: 1,
-  requestKey: 'request',
+  sequence,
+  requestKey: `request-${sequence}`,
   planeKey: 'plane',
   sourceSetKey: 'sources',
   basis: {
@@ -75,5 +75,38 @@ describe('createSectionCapOverlapWorkerClient', () => {
     );
     expect(onError).not.toHaveBeenCalled();
     expect(worker.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('should keep only the latest request while the worker is busy', () => {
+    const worker = new FakeSectionCapWorker();
+    const onResponse = vi.fn();
+    const client = createSectionCapOverlapWorkerClient({
+      createWorker: () => worker as unknown as Worker,
+      onResponse,
+      onError: vi.fn(),
+    });
+    const first = minimalRequest(1);
+    const replaced = minimalRequest(2);
+    const latest = minimalRequest(3);
+
+    client.post(first, [first.points.buffer]);
+    client.post(replaced, [replaced.points.buffer]);
+    client.post(latest, [latest.points.buffer]);
+
+    expect(worker.postMessage).toHaveBeenCalledOnce();
+    expect(worker.postMessage).toHaveBeenLastCalledWith(first, [first.points.buffer]);
+
+    worker.dispatchResponse({
+      type: 'error',
+      sequence: first.sequence,
+      requestKey: first.requestKey,
+      planeKey: first.planeKey,
+      sourceSetKey: first.sourceSetKey,
+      message: 'expected test response',
+    });
+
+    expect(worker.postMessage).toHaveBeenCalledTimes(2);
+    expect(worker.postMessage).toHaveBeenLastCalledWith(latest, [latest.points.buffer]);
+    expect(onResponse).toHaveBeenCalledOnce();
   });
 });

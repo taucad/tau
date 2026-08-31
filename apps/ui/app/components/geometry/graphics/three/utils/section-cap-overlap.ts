@@ -29,7 +29,8 @@ export type SectionCapOverlapResult = Readonly<{
   diagnostics: SectionCapDiagnostic[];
 }>;
 
-export const sectionCapMinimumOverlapArea = 1e-7;
+/** Numerical floor in normalized section-plane area, never physical square metres. */
+export const sectionCapMinimumOverlapArea = Number.EPSILON * 64;
 
 const boxesOverlap = (first: SectionCapBbox, second: SectionCapBbox): boolean =>
   first.minX <= second.maxX && first.maxX >= second.minX && first.minY <= second.maxY && first.maxY >= second.minY;

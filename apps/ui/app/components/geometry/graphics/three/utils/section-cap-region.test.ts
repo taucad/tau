@@ -4,9 +4,7 @@ import * as THREE from 'three';
 import {
   buildSectionCapPolygon,
   collectSectionCapWorldPoints,
-  computeSectionTrueCut,
   createSectionCutPlaneBasis,
-  deriveSectionTrueCut,
   sanitizeCapRing,
 } from '#components/geometry/graphics/three/utils/section-cap-region.js';
 
@@ -62,79 +60,5 @@ describe('section cap region projection', () => {
       [1, 1],
       [0, 1],
     ]);
-  });
-});
-
-describe('computeSectionTrueCut', () => {
-  it('should classify crossing cuts as true cuts and tangent cuts as non-overlap diagnostics', () => {
-    const geometry = new THREE.BoxGeometry(2, 2, 2);
-    const meshWorldMatrix = new THREE.Matrix4();
-
-    expect(
-      computeSectionTrueCut({
-        geometry,
-        meshWorldMatrix,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-      }),
-    ).toBe(true);
-
-    expect(
-      computeSectionTrueCut({
-        geometry,
-        meshWorldMatrix,
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), -1),
-      }),
-    ).toBe(false);
-
-    expect(
-      computeSectionTrueCut({
-        geometry,
-        meshWorldMatrix: new THREE.Matrix4().makeTranslation(0, 0, 3),
-        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
-      }),
-    ).toBe(false);
-  });
-
-  it('should derive common true-cut evidence from bounds and contours before triangle fallback', () => {
-    const geometry = new THREE.BoxGeometry(2, 2, 2);
-    const meshWorldMatrix = new THREE.Matrix4();
-    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-
-    expect(
-      deriveSectionTrueCut({
-        geometry,
-        meshWorldMatrix,
-        worldPlane: plane,
-        closedContourCount: 1,
-        closedContourArea: 1,
-      }),
-    ).toEqual({
-      trueCut: true,
-      method: 'contour-evidence',
-    });
-
-    expect(
-      deriveSectionTrueCut({
-        geometry,
-        meshWorldMatrix: new THREE.Matrix4().makeTranslation(0, 0, 3),
-        worldPlane: plane,
-        closedContourCount: 0,
-      }),
-    ).toEqual({
-      trueCut: false,
-      method: 'bounds-reject',
-    });
-
-    expect(
-      deriveSectionTrueCut({
-        geometry,
-        meshWorldMatrix,
-        worldPlane: plane,
-        closedContourCount: 0,
-      }),
-    ).toEqual({
-      trueCut: true,
-      method: 'triangle-fallback',
-    });
   });
 });

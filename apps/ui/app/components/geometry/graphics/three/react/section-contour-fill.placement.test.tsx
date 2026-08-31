@@ -25,10 +25,6 @@ import {
 } from '#components/geometry/graphics/three/utils/plane-mesh-contour.js';
 import { mergeTriangulatedContours } from '#components/geometry/graphics/three/utils/earcut-contour.js';
 import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
-import {
-  configureSectionSourceOnlyMaterial,
-  markSectionSourceOnlyObject,
-} from '#components/geometry/graphics/three/utils/section-source-only.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
 import type { SectionCapWorkerInputSource } from '#components/geometry/graphics/three/utils/section-cap-overlap-worker-protocol.js';
 import type { CapMultiPolygon } from '#components/geometry/graphics/three/utils/section-cap-polygon-types.js';
@@ -37,6 +33,7 @@ const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const stageSource = readFileSync(join(currentDirectory, '..', 'stage.tsx'), 'utf8');
 const sectionViewControlsSource = readFileSync(join(currentDirectory, 'section-view-controls.tsx'), 'utf8');
 const sectionContourFillSource = readFileSync(join(currentDirectory, 'section-contour-fill.tsx'), 'utf8');
+const gltfMeshSource = readFileSync(join(currentDirectory, 'gltf-mesh.tsx'), 'utf8');
 
 function createModelInteractionContext({
   unitId,
@@ -161,7 +158,7 @@ describe('SectionContourFills source records', () => {
     expect(records[0]!.baseTintHex).toBe(0x00_ff_00);
   });
 
-  it('splits multi-material geometry groups by source material color', () => {
+  it('keeps multi-material geometry as one logical topology source', () => {
     const root = new THREE.Group();
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
@@ -179,12 +176,11 @@ describe('SectionContourFills source records', () => {
 
     const records = collectSectionSourceRecords(root);
 
-    expect(records).toHaveLength(2);
-    expect(records.map((record) => record.baseTintHex)).toEqual([0xff_00_00, 0x00_00_ff]);
-    expect(records.map((record) => record.group?.materialIndex)).toEqual([0, 1]);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.baseTintHex).toBe(0xff_00_00);
   });
 
-  it('uses material-group source identity for overlap owners when a packed mesh shares one component owner', () => {
+  it('uses one component owner for a packed multi-material source', () => {
     const root = new THREE.Group();
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
@@ -203,11 +199,8 @@ describe('SectionContourFills source records', () => {
 
     const records = collectSectionSourceRecords(root);
 
-    expect(records).toHaveLength(2);
-    expect(new Set(records.map((record) => ownerKeyForRecord(record))).size).toBe(2);
-    expect(records.map((record) => ownerKeyForRecord(record))).toEqual(
-      records.map((record) => `unit:main:component:packed:${record.key}`),
-    );
+    expect(records).toHaveLength(1);
+    expect(ownerKeyForRecord(records[0]!)).toBe('unit:main:component:packed');
   });
 
   it('carries unit-scoped component ownership from source mesh hierarchy', () => {
@@ -225,27 +218,9 @@ describe('SectionContourFills source records', () => {
     expect(records[0]!.baseTintHex).toBe(0xaa_bb_cc);
   });
 
-  it('prefers section-source-only body aggregates over split face patches for the same owner', () => {
-    const root = new THREE.Group();
-    const unitId = 'unit:main';
-    const componentId = 'component:zoo-solid-0';
-    const firstFace = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ color: 0xff_00_00 }));
-    const secondFace = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ color: 0x00_ff_00 }));
-    const aggregateMaterial = new THREE.MeshBasicMaterial({ color: 0x00_00_ff, opacity: 0, transparent: true });
-    configureSectionSourceOnlyMaterial(aggregateMaterial);
-    const aggregate = new THREE.Mesh(new THREE.BoxGeometry(), aggregateMaterial);
-    markSectionSourceOnlyObject(aggregate);
-
-    setModelComponentOwner(firstFace, { unitId, componentId });
-    setModelComponentOwner(secondFace, { unitId, componentId });
-    setModelComponentOwner(aggregate, { unitId, componentId });
-    root.add(firstFace, secondFace, aggregate);
-
-    const records = collectSectionSourceRecords(root);
-
-    expect(records).toHaveLength(1);
-    expect(records[0]!.mesh).toBe(aggregate);
-    expect(ownerKeyForRecord(records[0]!)).toBe(`${unitId}:${componentId}`);
+  it('does not install invisible section-source-only proxy geometry', () => {
+    expect(gltfMeshSource.includes('installSectionSourceProxies')).toBe(false);
+    expect(gltfMeshSource.includes('markSectionSourceOnlyObject')).toBe(false);
   });
 
   it('skips section-view helpers from source ownership', () => {

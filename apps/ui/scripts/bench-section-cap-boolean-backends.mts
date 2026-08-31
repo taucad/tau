@@ -462,7 +462,7 @@ const parseIterations = (raw: string | undefined): number | undefined => {
 };
 
 const main = async (): Promise<void> => {
-  const cacheDirectory = process.env.TAU_SECTION_CAP_BENCH_CACHE_DIR;
+  const cacheDirectory = process.env['TAU_SECTION_CAP_BENCH_CACHE_DIR'];
   if (!cacheDirectory) {
     throw new Error(
       [
@@ -475,8 +475,8 @@ const main = async (): Promise<void> => {
 
   const report = await buildSectionCapBooleanBenchmarkReport({
     cacheDirectory,
-    glb: process.env.TAU_SECTION_CAP_BENCH_GLB,
-    iterations: parseIterations(process.env.TAU_SECTION_CAP_BENCH_ITERATIONS),
+    glb: process.env['TAU_SECTION_CAP_BENCH_GLB'],
+    iterations: parseIterations(process.env['TAU_SECTION_CAP_BENCH_ITERATIONS']),
   });
   console.info(JSON.stringify(report, null, 2));
 };

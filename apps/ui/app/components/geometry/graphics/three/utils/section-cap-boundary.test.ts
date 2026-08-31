@@ -78,7 +78,7 @@ describe('section cap boundary positions', () => {
     });
 
     expect(
-      [...result.positions].filter((value, index) => index % 3 === 2).map((value) => Number(value.toFixed(4))),
+      [...result.positions].filter((_, index) => index % 3 === 2).map((value) => Number(value.toFixed(4))),
     ).toEqual([0.01, 0.01, 0.01, 0.01, 0.01, 0.01]);
   });
 });

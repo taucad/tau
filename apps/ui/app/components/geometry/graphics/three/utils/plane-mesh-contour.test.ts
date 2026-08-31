@@ -48,6 +48,47 @@ function triangulatedArea(result: ReturnType<typeof mergeTriangulatedContours>):
 }
 
 describe('extractSectionContours', () => {
+  it.each([1e-12, 1e-6, 1, 1e6, 1e12])(
+    'keeps forced BVH fallback contour topology scale-covariant at local extent %s',
+    (scale) => {
+      const geometry = new THREE.BoxGeometry(2, 2, 2).scale(scale, scale, scale);
+      const result = extractSectionContours({
+        geometry,
+        bvh: new MeshBVH(geometry),
+        worldPlane: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0),
+        meshWorldMatrix: new THREE.Matrix4(),
+        segmentScratch: createSegmentScratch(256),
+        triangleFilter: () => true,
+      });
+
+      expect(result.closedContours).toHaveLength(1);
+      expect(result.closedContours[0]).toHaveLength(8);
+      expect(result.openPolylines).toEqual([]);
+      expect(result.diagnostics).toEqual([]);
+      const bounds = new THREE.Box3().setFromPoints([...result.closedContours[0]!]);
+      expect(bounds.getSize(new THREE.Vector3()).x / scale).toBeCloseTo(2, 5);
+    },
+  );
+
+  it('closes an exact symmetric cut through shared vertices', () => {
+    const geometry = new THREE.SphereGeometry(1, 16, 8);
+    const bvh = new MeshBVH(geometry);
+    const worldPlane = new THREE.Plane(new THREE.Vector3(1, 0, 1).normalize(), 0);
+    const scratch = createSegmentScratch(256);
+
+    const result = extractSectionContours({
+      geometry,
+      bvh,
+      worldPlane,
+      meshWorldMatrix: new THREE.Matrix4(),
+      segmentScratch: scratch,
+    });
+
+    expect(result.closedContours).toHaveLength(1);
+    expect(result.openPolylines.length).toBeGreaterThan(0);
+    expect(result.diagnostics).toEqual([]);
+  });
+
   it('should return one rectangular loop for a centered box cut by an axis plane', () => {
     const geometry = new THREE.BoxGeometry(2, 2, 2);
     const bvh = new MeshBVH(geometry);
@@ -63,7 +104,7 @@ describe('extractSectionContours', () => {
       segmentScratch: scratch,
     });
 
-    expect(scratch.count).toBeGreaterThan(0);
+    expect(result.segmentCount).toBeGreaterThan(0);
     expect(result.closedContours.length).toBe(1);
     expect(result.closedContours[0]!.length).toBeGreaterThanOrEqual(4);
     expect(result.openPolylines).toEqual([]);

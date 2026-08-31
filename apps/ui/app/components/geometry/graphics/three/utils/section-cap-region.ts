@@ -9,14 +9,13 @@ import type {
   SectionCapDiagnostic,
 } from '#components/geometry/graphics/three/utils/section-cap-polygon-types.js';
 
+// Section rings are normalized to unit extent before these dimensionless guards apply.
 const ringEpsilon = 1e-8;
 const areaEpsilon = 1e-10;
 
 const _worldPoint = /* @__PURE__ */ new THREE.Vector3();
 const _delta = /* @__PURE__ */ new THREE.Vector3();
 const _normalizedPlane = /* @__PURE__ */ new THREE.Plane();
-const _transformedBounds = /* @__PURE__ */ new THREE.Box3();
-const _boundsSize = /* @__PURE__ */ new THREE.Vector3();
 
 export type SectionCutPlaneBasis = Readonly<{
   origin: THREE.Vector3;
@@ -70,26 +69,6 @@ type BuildSectionCapPolygonOptions = Readonly<{
   planeBasis: SectionCutPlaneBasis;
   trueCut: boolean;
 }>;
-
-type ComputeSectionTrueCutOptions = Readonly<{
-  geometry: THREE.BufferGeometry;
-  meshWorldMatrix: THREE.Matrix4;
-  worldPlane: THREE.Plane;
-  triangleFilter?: (triangleIndex: number) => boolean;
-}>;
-
-export type SectionTrueCutEvidenceMethod = 'bounds-reject' | 'contour-evidence' | 'triangle-fallback';
-
-export type SectionTrueCutEvidence = Readonly<{
-  trueCut: boolean;
-  method: SectionTrueCutEvidenceMethod;
-}>;
-
-type DeriveSectionTrueCutOptions = ComputeSectionTrueCutOptions &
-  Readonly<{
-    closedContourCount: number;
-    closedContourArea?: number;
-  }>;
 
 const numericKey = (value: number): string => (Number.isFinite(value) ? value.toFixed(6) : String(value));
 
@@ -460,139 +439,5 @@ export const buildSectionCapPolygon = (options: BuildSectionCapPolygonOptions): 
     polygon,
     sanitizedPlanePolygon: multiPolygon,
     diagnostics,
-  };
-};
-
-const getIndexedVertex = (
-  position: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
-  index: number,
-  target: THREE.Vector3,
-): THREE.Vector3 => target.fromBufferAttribute(position, index);
-
-const forEachTriangle = (
-  geometry: THREE.BufferGeometry,
-  triangleFilter: ((triangleIndex: number) => boolean) | undefined,
-  callback: (a: number, b: number, c: number) => void,
-): void => {
-  const position = geometry.getAttribute('position');
-  const index = geometry.getIndex();
-  const drawStart = Math.max(0, geometry.drawRange.start);
-  const drawCount = Number.isFinite(geometry.drawRange.count)
-    ? Math.max(0, geometry.drawRange.count)
-    : (index?.count ?? position.count) - drawStart;
-  const drawEnd = Math.min(index?.count ?? position.count, drawStart + drawCount);
-
-  if (index) {
-    for (let cursor = drawStart; cursor + 2 < drawEnd; cursor += 3) {
-      const triangleIndex = Math.floor(cursor / 3);
-      if (triangleFilter && !triangleFilter(triangleIndex)) {
-        continue;
-      }
-
-      callback(index.getX(cursor), index.getX(cursor + 1), index.getX(cursor + 2));
-    }
-    return;
-  }
-
-  for (let cursor = drawStart; cursor + 2 < drawEnd; cursor += 3) {
-    const triangleIndex = Math.floor(cursor / 3);
-    if (triangleFilter && !triangleFilter(triangleIndex)) {
-      continue;
-    }
-
-    callback(cursor, cursor + 1, cursor + 2);
-  }
-};
-
-export const computeSectionTrueCut = (options: ComputeSectionTrueCutOptions): boolean => {
-  const position = options.geometry.getAttribute('position');
-  _normalizedPlane.copy(options.worldPlane).normalize();
-  const scratchA = new THREE.Vector3();
-  const scratchB = new THREE.Vector3();
-  const scratchC = new THREE.Vector3();
-  let minDistance = Infinity;
-  let maxDistance = -Infinity;
-  const bounds = new THREE.Box3();
-  let visitedVertices = 0;
-
-  forEachTriangle(options.geometry, options.triangleFilter, (a, b, c) => {
-    for (const [vertexIndex, target] of [
-      [a, scratchA],
-      [b, scratchB],
-      [c, scratchC],
-    ] as const) {
-      getIndexedVertex(position, vertexIndex, target).applyMatrix4(options.meshWorldMatrix);
-      bounds.expandByPoint(target);
-      const distance = _normalizedPlane.distanceToPoint(target);
-      minDistance = Math.min(minDistance, distance);
-      maxDistance = Math.max(maxDistance, distance);
-      visitedVertices++;
-    }
-  });
-
-  if (visitedVertices === 0 || !Number.isFinite(minDistance) || !Number.isFinite(maxDistance)) {
-    return false;
-  }
-
-  const diagonal = bounds.isEmpty() ? 1 : bounds.getSize(scratchA).length();
-  const distanceEpsilon = Math.max(1e-7, diagonal * 1e-7);
-  return minDistance < -distanceEpsilon && maxDistance > distanceEpsilon;
-};
-
-const getGeometryBounds = (geometry: THREE.BufferGeometry): THREE.Box3 | undefined => {
-  if (!geometry.boundingBox) {
-    geometry.computeBoundingBox();
-  }
-
-  return geometry.boundingBox ?? undefined;
-};
-
-const classifyBoundsAgainstPlane = (
-  geometry: THREE.BufferGeometry,
-  meshWorldMatrix: THREE.Matrix4,
-  worldPlane: THREE.Plane,
-): 'crossing-or-ambiguous' | 'one-sided' => {
-  const geometryBounds = getGeometryBounds(geometry);
-  if (!geometryBounds || geometryBounds.isEmpty()) {
-    return 'one-sided';
-  }
-
-  _transformedBounds.copy(geometryBounds).applyMatrix4(meshWorldMatrix);
-  _normalizedPlane.copy(worldPlane).normalize();
-
-  let minDistance = Infinity;
-  let maxDistance = -Infinity;
-  for (let xIndex = 0; xIndex < 2; xIndex++) {
-    for (let yIndex = 0; yIndex < 2; yIndex++) {
-      for (let zIndex = 0; zIndex < 2; zIndex++) {
-        _worldPoint.set(
-          xIndex === 0 ? _transformedBounds.min.x : _transformedBounds.max.x,
-          yIndex === 0 ? _transformedBounds.min.y : _transformedBounds.max.y,
-          zIndex === 0 ? _transformedBounds.min.z : _transformedBounds.max.z,
-        );
-        const distance = _normalizedPlane.distanceToPoint(_worldPoint);
-        minDistance = Math.min(minDistance, distance);
-        maxDistance = Math.max(maxDistance, distance);
-      }
-    }
-  }
-
-  const diagonal = _transformedBounds.getSize(_boundsSize).length();
-  const distanceEpsilon = Math.max(1e-7, diagonal * 1e-7);
-  return minDistance < -distanceEpsilon && maxDistance > distanceEpsilon ? 'crossing-or-ambiguous' : 'one-sided';
-};
-
-export const deriveSectionTrueCut = (options: DeriveSectionTrueCutOptions): SectionTrueCutEvidence => {
-  if (classifyBoundsAgainstPlane(options.geometry, options.meshWorldMatrix, options.worldPlane) === 'one-sided') {
-    return { trueCut: false, method: 'bounds-reject' };
-  }
-
-  if (options.closedContourCount > 0 && (options.closedContourArea ?? 1) > areaEpsilon) {
-    return { trueCut: true, method: 'contour-evidence' };
-  }
-
-  return {
-    trueCut: computeSectionTrueCut(options),
-    method: 'triangle-fallback',
   };
 };

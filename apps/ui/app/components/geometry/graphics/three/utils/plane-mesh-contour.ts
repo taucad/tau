@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { INTERSECTED, NOT_INTERSECTED } from 'three-mesh-bvh';
 import type { MeshBVH } from 'three-mesh-bvh';
+import { sliceSectionSurfaceTopologyForGeometry } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 
 /**
  * Ordered loop of 3D points in mesh-local space (first point is not repeated at the end).
@@ -46,8 +47,8 @@ export type SegmentScratch = {
 };
 
 const segmentScratchInitialCapacity = 50_000;
-const faceAreaEpsilon = 1e-9;
 const directedEdgeSeparator = '->';
+const float32Epsilon = 2 ** -23;
 
 function allocateSegmentSlots(targetCount: number): MutableSegment[] {
   const out: MutableSegment[] = [];
@@ -228,6 +229,9 @@ function extractBoundedFacesFromBranchedComponent(input: BoundedFaceExtractionIn
     const point = keyToPoint.get(key)!;
     projectedPoints.set(key, new THREE.Vector2(point.dot(u), point.dot(v)));
   }
+  const projectedBounds = new THREE.Box2().setFromPoints([...projectedPoints.values()]);
+  const projectedExtent = projectedBounds.getSize(new THREE.Vector2());
+  const faceAreaTolerance = Math.max(projectedExtent.x, projectedExtent.y) ** 2 * Number.EPSILON * 64;
 
   for (const key of component) {
     const origin = projectedPoints.get(key)!;
@@ -292,7 +296,7 @@ function extractBoundedFacesFromBranchedComponent(input: BoundedFaceExtractionIn
         continue;
       }
 
-      if (faceSignedArea(faceKeys, projectedPoints) <= faceAreaEpsilon) {
+      if (faceSignedArea(faceKeys, projectedPoints) <= faceAreaTolerance) {
         continue;
       }
 
@@ -312,13 +316,14 @@ function extractBoundedFacesFromBranchedComponent(input: BoundedFaceExtractionIn
 export function stitchContoursFromSegments(
   segmentCount: number,
   segments: readonly MutableSegment[],
-  planeNormal: THREE.Vector3 = defaultPlaneNormal,
+  options: Readonly<{ planeNormal?: THREE.Vector3; coordinateTolerance?: number }> = {},
 ): ExtractSectionContoursResult {
+  const { planeNormal = defaultPlaneNormal, coordinateTolerance = float32Epsilon * 4 } = options;
   if (segmentCount === 0) {
     return { closedContours: [], openPolylines: [], diagnostics: [], segmentCount };
   }
 
-  const pointKey = (point: THREE.Vector3) => quantizedPointKey(point);
+  const pointKey = (point: THREE.Vector3) => quantizedPointKey(point, coordinateTolerance);
   const keyToPoint = new Map<string, THREE.Vector3>();
   const adjacency = new Map<string, Set<string>>();
 
@@ -533,14 +538,14 @@ export function stitchContoursFromSegments(
   return { closedContours, openPolylines, diagnostics, segmentCount };
 }
 
-function dedupePlaneSegments(scratch: SegmentScratch): void {
+function dedupePlaneSegments(scratch: SegmentScratch, coordinateTolerance: number): void {
   const seen = new Set<string>();
   let writeIndex = 0;
   const { slots } = scratch;
 
   for (let readIndex = 0; readIndex < scratch.count; readIndex++) {
     const segment = slots[readIndex]!;
-    const key = quantizedSegmentLookupKey(segment.a, segment.b);
+    const key = quantizedSegmentLookupKey(segment.a, segment.b, coordinateTolerance);
     if (seen.has(key)) {
       continue;
     }
@@ -558,8 +563,8 @@ function dedupePlaneSegments(scratch: SegmentScratch): void {
   scratch.count = writeIndex;
 }
 
-function snapScratchSegmentEndpoints(scratch: SegmentScratch): void {
-  const snapCoordinate = (value: number) => Math.round(value * 1000) / 1000;
+function snapScratchSegmentEndpoints(scratch: SegmentScratch, coordinateTolerance: number): void {
+  const snapCoordinate = (value: number) => Math.round(value / coordinateTolerance) * coordinateTolerance;
 
   for (let index = 0; index < scratch.count; index++) {
     const segment = scratch.slots[index]!;
@@ -568,20 +573,55 @@ function snapScratchSegmentEndpoints(scratch: SegmentScratch): void {
   }
 }
 
-function roundCoordinateForContourKey(coordinate: number): number {
-  return Math.round(coordinate * 1000) / 1000;
+function quantizedPointKey(point: THREE.Vector3, coordinateTolerance: number): string {
+  return `${Math.round(point.x / coordinateTolerance)},${Math.round(point.y / coordinateTolerance)},${Math.round(point.z / coordinateTolerance)}`;
 }
 
-function quantizedPointKey(point: THREE.Vector3): string {
-  return `${roundCoordinateForContourKey(point.x)},${roundCoordinateForContourKey(point.y)},${roundCoordinateForContourKey(point.z)}`;
-}
-
-function quantizedSegmentLookupKey(edgeA: THREE.Vector3, edgeB: THREE.Vector3): string {
+function quantizedSegmentLookupKey(edgeA: THREE.Vector3, edgeB: THREE.Vector3, coordinateTolerance: number): string {
   // Collapses float noise from neighbouring triangles intersecting the same cut edge.
-  const first = quantizedPointKey(edgeA);
-  const second = quantizedPointKey(edgeB);
+  const first = quantizedPointKey(edgeA, coordinateTolerance);
+  const second = quantizedPointKey(edgeB, coordinateTolerance);
   return first <= second ? `${first}@@${second}` : `${second}@@${first}`;
 }
+
+const normalizeScratchSegments = (
+  scratch: SegmentScratch,
+  origin: THREE.Vector3,
+  characteristicLength: number,
+): void => {
+  for (let index = 0; index < scratch.count; index++) {
+    const segment = scratch.slots[index]!;
+    segment.a.sub(origin).divideScalar(characteristicLength);
+    segment.b.sub(origin).divideScalar(characteristicLength);
+  }
+};
+
+const resolveContourNormalization = (geometry: THREE.BufferGeometry) => {
+  const position = geometry.getAttribute('position');
+  const bounds = new THREE.Box3();
+  for (let index = 0; index < position.count; index++) {
+    bounds.expandByPoint(new THREE.Vector3(position.getX(index), position.getY(index), position.getZ(index)));
+  }
+  const origin = bounds.getCenter(new THREE.Vector3());
+  const characteristicLength = bounds.getSize(new THREE.Vector3()).length();
+  const storage = position.array;
+  const coordinateTolerance = (storage instanceof Float32Array ? float32Epsilon : Number.EPSILON) * 4;
+  return { origin, characteristicLength, coordinateTolerance };
+};
+
+const denormalizeContourResult = (
+  result: ExtractSectionContoursResult,
+  origin: THREE.Vector3,
+  characteristicLength: number,
+): ExtractSectionContoursResult => ({
+  ...result,
+  closedContours: result.closedContours.map((contour) =>
+    contour.map((point) => point.clone().multiplyScalar(characteristicLength).add(origin)),
+  ),
+  openPolylines: result.openPolylines.map((polyline) =>
+    polyline.map((point) => point.clone().multiplyScalar(characteristicLength).add(origin)),
+  ),
+});
 
 export type ExtractSectionContoursInput = Readonly<{
   geometry: THREE.BufferGeometry;
@@ -593,7 +633,22 @@ export type ExtractSectionContoursInput = Readonly<{
 }>;
 
 export function extractSectionContours(input: ExtractSectionContoursInput): ExtractSectionContoursResult {
-  void input.geometry;
+  if (!input.triangleFilter) {
+    const topologySlice = sliceSectionSurfaceTopologyForGeometry({
+      geometry: input.geometry,
+      worldPlane: input.worldPlane,
+      meshWorldMatrix: input.meshWorldMatrix,
+    });
+    if (topologySlice.status === 'complete') {
+      return {
+        closedContours: topologySlice.closedContours.map((contour) => [...contour]),
+        openPolylines: topologySlice.openPolylines.map((polyline) => [...polyline]),
+        diagnostics: [],
+        segmentCount: topologySlice.segmentCount,
+      };
+    }
+  }
+
   _inverseMatrix.copy(input.meshWorldMatrix).invert();
   _localPlane.copy(input.worldPlane).applyMatrix4(_inverseMatrix);
 
@@ -604,9 +659,17 @@ export function extractSectionContours(input: ExtractSectionContoursInput): Extr
     scratch: input.segmentScratch,
     triangleFilter: input.triangleFilter,
   });
-  dedupePlaneSegments(input.segmentScratch);
-  snapScratchSegmentEndpoints(input.segmentScratch);
-  dedupePlaneSegments(input.segmentScratch);
+  const normalization = resolveContourNormalization(input.geometry);
+  if (!(normalization.characteristicLength > 0)) {
+    return { closedContours: [], openPolylines: [], diagnostics: [], segmentCount: 0 };
+  }
+  normalizeScratchSegments(input.segmentScratch, normalization.origin, normalization.characteristicLength);
+  snapScratchSegmentEndpoints(input.segmentScratch, normalization.coordinateTolerance);
+  dedupePlaneSegments(input.segmentScratch, normalization.coordinateTolerance);
 
-  return stitchContoursFromSegments(input.segmentScratch.count, input.segmentScratch.slots, _localPlane.normal);
+  const normalizedResult = stitchContoursFromSegments(input.segmentScratch.count, input.segmentScratch.slots, {
+    planeNormal: _localPlane.normal,
+    coordinateTolerance: normalization.coordinateTolerance,
+  });
+  return denormalizeContourResult(normalizedResult, normalization.origin, normalization.characteristicLength);
 }

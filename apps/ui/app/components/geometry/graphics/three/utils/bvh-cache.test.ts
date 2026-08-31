@@ -21,4 +21,13 @@ describe('getOrBuildBvh', () => {
     const second = getOrBuildBvh(geometry);
     expect(second).not.toBe(first);
   });
+
+  it('preserves source triangle indices used by topology mappings', () => {
+    const geometry = new THREE.SphereGeometry(1, 16, 8);
+    const before = [...(geometry.index!.array as Uint16Array)];
+
+    getOrBuildBvh(geometry);
+
+    expect([...(geometry.index!.array as Uint16Array)]).toEqual(before);
+  });
 });

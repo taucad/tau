@@ -1,5 +1,6 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 
 const hoistedMocks = vi.hoisted(() => {
   let revision = 0;
@@ -60,16 +61,33 @@ describe('SectionContourFills reactivity', () => {
     const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
     const { Plane, Vector3 } = await import('three');
     const innerRef = { current: null };
+    const snapshotRef = { current: createSectionViewSafeSnapshotStore() };
     const plane = new Plane(new Vector3(0, 0, 1), 0);
 
     const { rerender } = render(
-      <SectionContourFills enabled innerRef={innerRef} plane={plane} stripeFrequency={2} stripeWidth={0.2} />,
+      <SectionContourFills
+        enabled
+        innerRef={innerRef}
+        plane={plane}
+        snapshotRef={snapshotRef}
+        stripeFrequency={2}
+        stripeWidth={0.2}
+      />,
     );
 
     expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(1);
 
     hoistedMocks.setRevision(1);
-    rerender(<SectionContourFills enabled innerRef={innerRef} plane={plane} stripeFrequency={2} stripeWidth={0.2} />);
+    rerender(
+      <SectionContourFills
+        enabled
+        innerRef={innerRef}
+        plane={plane}
+        snapshotRef={snapshotRef}
+        stripeFrequency={2}
+        stripeWidth={0.2}
+      />,
+    );
 
     expect(hoistedMocks.invalidate).toHaveBeenCalledTimes(2);
   });
@@ -78,17 +96,32 @@ describe('SectionContourFills reactivity', () => {
     const { SectionContourFills } = await import('#components/geometry/graphics/three/react/section-contour-fill.js');
     const { Plane, Vector3 } = await import('three');
     const innerRef = { current: null };
+    const snapshotRef = { current: createSectionViewSafeSnapshotStore() };
     const plane = new Plane(new Vector3(0, 0, 1), 0);
 
     const { rerender } = render(
-      <SectionContourFills enabled={false} innerRef={innerRef} plane={plane} stripeFrequency={2} stripeWidth={0.2} />,
+      <SectionContourFills
+        enabled={false}
+        innerRef={innerRef}
+        plane={plane}
+        snapshotRef={snapshotRef}
+        stripeFrequency={2}
+        stripeWidth={0.2}
+      />,
     );
 
     expect(hoistedMocks.invalidate).not.toHaveBeenCalled();
 
     hoistedMocks.setRevision(1);
     rerender(
-      <SectionContourFills enabled={false} innerRef={innerRef} plane={plane} stripeFrequency={2} stripeWidth={0.2} />,
+      <SectionContourFills
+        enabled={false}
+        innerRef={innerRef}
+        plane={plane}
+        snapshotRef={snapshotRef}
+        stripeFrequency={2}
+        stripeWidth={0.2}
+      />,
     );
 
     expect(hoistedMocks.invalidate).not.toHaveBeenCalled();

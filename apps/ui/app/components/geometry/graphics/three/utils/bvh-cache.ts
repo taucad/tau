@@ -41,7 +41,7 @@ export function getOrBuildBvh(geometry: THREE.BufferGeometry): MeshBVH {
     return cached.bvh;
   }
 
-  const bvh = new MeshBVH(geometry);
+  const bvh = new MeshBVH(geometry, { indirect: true });
   bvhWeakCache.set(geometry, { bvh, positionVersion });
   return bvh;
 }

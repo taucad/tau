@@ -24,7 +24,8 @@ const toClipperPaths = (multiPolygon: CapMultiPolygon): PathsD =>
     polygon.map((ring) => ring.map((point) => pathPoint(point))),
   );
 
-const ringFromClipperPath = (path: PathD | undefined): CapPoint2[] =>
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Clipper's `PolyPathD.poly` returns null for empty paths
+const ringFromClipperPath = (path: PathD | null | undefined): CapPoint2[] =>
   (path ?? [])
     .filter(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))
     .map(({ x, y }) => [x, y] satisfies CapPoint2);

@@ -8,6 +8,9 @@ export const sectionCapPerformanceTimingPhaseNames = [
   'frameTotal',
   'sourceCollection',
   'sourceExtraction',
+  'topologyBuild',
+  'candidateBroadphase',
+  'topologySlice',
   'trueCut',
   'borderWrite',
   'worldPointBasis',
@@ -27,6 +30,16 @@ export type SectionCapPerformanceTimings = Record<SectionCapPerformanceTimingPha
 
 export type SectionCapPerformanceCounters = {
   sourceCount: number;
+  admittedSourceCount: number;
+  extensionSourceCount: number;
+  fallbackSourceCount: number;
+  trueCutComponentCount: number;
+  cappedTrueCutComponentCount: number;
+  unresolvedTrueCutEdgeCount: number;
+  unsupportedSourceCount: number;
+  safeSnapshotCurrentCount: number;
+  topologyCacheHitCount: number;
+  topologyCacheMissCount: number;
   helperCacheHitCount: number;
   helperCacheMissCount: number;
   changedGeometryKeyCount: number;
@@ -138,6 +151,9 @@ export const createSectionCapPerformanceTimings = (): SectionCapPerformanceTimin
   frameTotal: 0,
   sourceCollection: 0,
   sourceExtraction: 0,
+  topologyBuild: 0,
+  candidateBroadphase: 0,
+  topologySlice: 0,
   trueCut: 0,
   borderWrite: 0,
   worldPointBasis: 0,
@@ -153,6 +169,16 @@ export const createSectionCapPerformanceTimings = (): SectionCapPerformanceTimin
 
 export const createSectionCapPerformanceCounters = (): SectionCapPerformanceCounters => ({
   sourceCount: 0,
+  admittedSourceCount: 0,
+  extensionSourceCount: 0,
+  fallbackSourceCount: 0,
+  trueCutComponentCount: 0,
+  cappedTrueCutComponentCount: 0,
+  unresolvedTrueCutEdgeCount: 0,
+  unsupportedSourceCount: 0,
+  safeSnapshotCurrentCount: 0,
+  topologyCacheHitCount: 0,
+  topologyCacheMissCount: 0,
   helperCacheHitCount: 0,
   helperCacheMissCount: 0,
   changedGeometryKeyCount: 0,

@@ -57,8 +57,6 @@ Inline `source.files` calls are staged into the transport-owned filesystem. Use 
 
 **geometryCache()** -- Caches `createGeometry` results. Skips kernel computation when code and parameters are unchanged. Stores MessagePack-serialized geometry under `.tau/cache/geometry/`. Requires a filesystem that supports writing (e.g., `fromNodeFs`, not `fromMemoryFs` for persistent cache).
 
-**gltfCoordinateTransform()** -- Transforms glTF from Y-up/meters (common in CAD) to Z-up/millimeters for web viewers like Three.js. Applies to geometry produced by `createGeometry`.
-
 **gltfEdgeDetection()** -- Adds edge primitives to glTF meshes for sharp-edge rendering. Improves visual quality when displaying CAD models with hard edges.
 
 ### 4. Use a Writable Filesystem for Caching
@@ -143,7 +141,7 @@ const client = createRuntimeClient({
 ```
 
 - **Selective middleware**: Omit middleware you do not need. For example, skip `gltfEdgeDetection()` if your viewer does not use edge rendering.
-- **Middleware order**: Place caches (parameterCache, geometryCache) before transforms (gltfCoordinateTransform, gltfEdgeDetection) so cached results still flow through transforms on the return path.
+- **Middleware order**: Place caches (parameterCache, geometryCache) before `gltfEdgeDetection` so cached results still flow through edge generation on the return path.
 
 ## Related
 

@@ -117,6 +117,7 @@ Invalid config fails during `connect()` with `RuntimeConnectionError.causeKind =
 | `setOptions`       | `(renderOptions) => Promise<RenderOutcome>`                                              | Replace kernel render options for the active source and render. Full replace, not patch — absent keys are dropped.                            |
 | `setRenderTimeout` | `(renderTimeout: number) => void`                                                        | Set the wall-clock deadline for later previews. Milliseconds. Zero disables it. Requires a connected client and an isolated, terminable host. |
 | `export`           | `(format, { source?, parameters?, content?, exportOptions? }?) => Promise<ExportResult>` | Export through the best route. With `source`, self-renders; without, reuses the latest compatible native result.                              |
+| `transcode`        | `({ from, to, files, options }) => Promise<ExportResult>`                                | Run a registered transcoder directly over caller-owned artifacts, without loading a kernel source.                                            |
 | `on`               | `(event, handler) => () => void`                                                         | Subscribe to a worker event. Returns an unsubscribe function.                                                                                 |
 | `terminate`        | `() => void`                                                                             | Tear down the worker, transport, and event subscriptions.                                                                                     |
 
@@ -155,12 +156,15 @@ const renderedImage = await client.export('webp', {
   exportOptions: {
     width: 1920,
     height: 1080,
+    lineWidth: 3,
     quality: 0.9,
   },
 });
 ```
 
 WebP quality defaults to `1` (lossless); values below `1` request lossy encoding.
+
+For fitted cameras, exact viewer placement, annotations, and ordered view batches, see [Capture Camera Views](../guides/headless-camera-capture).
 
 The initial content properties are `includeEdges` and `includeTopology`. Support is property-specific and belongs to a concrete route, not globally to a format or kernel. Typed runtime definitions therefore expose only reachable properties: an image route may accept edges, a Replicad GLB route may accept edges and topology, and STEP/STL routes expose no `content` field.
 

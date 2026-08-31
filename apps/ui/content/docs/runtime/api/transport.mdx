@@ -73,6 +73,8 @@ The host serves one kernel worker per connection, so two clients never collide. 
 
 Pass a `fileSystem` on the **client** instead (and start the host without one) to keep the project on the consumer's side. The transport then opens a second socket, `/fs`, on which the consumer is the bridge server: the remote kernel reads, writes and watches through it, and the descriptor reports `fileSystem: 'bridged'`. There is no multiplexer; the two sockets are correlated by a transport-private session id.
 
+Both inline adapters such as `fromMemoryFs()` and channel handles returned by `fromFileSystemBridge()` are supported. A channel handle is materialized into a fresh bridge for each connection attempt, so a failed initialization never reuses a transferred `MessagePort`. Closing the runtime client closes the `/runtime` socket, `/fs` socket, and bridge together.
+
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
@@ -92,7 +94,7 @@ const client = createRuntimeClient({
 
 Pass `server` to attach to an HTTP (or HTTPS) server you already run, and `pathPrefix` to move both routes under a path. Matching is exact — `${pathPrefix}/runtime` and `${pathPrefix}/fs` — and on a server the host does not own every other upgrade is **ignored**, so another `WebSocketServer` on the same server keeps its own paths in either registration order. A host that owns its server still answers an unknown path with a raw `404`.
 
-`authorize` runs after the origin check and before the upgrade completes. Returning `false` or throwing refuses the upgrade with a raw `401`. There is no client→server hello frame, so a credential travels on the URL or in `Sec-WebSocket-Protocol`; the client's `url` search params are preserved on both sockets, so `webSocketTransport({ url: 'ws://127.0.0.1:8080/?token=…' })` reaches the hook unchanged.
+`authorize` runs after the origin check and before the upgrade completes. Returning `false` or throwing refuses the upgrade with a raw `401`. There is no client→server hello frame. Node hosts can send an authorization header; browser deployments should authenticate the browser upgrade with its existing cookie/session and use a short-lived non-secret session URL. Do not put durable bearer credentials in browser WebSocket URLs. The client's ordinary search params are preserved on both sockets.
 
 ```typescript
 import type { Server } from 'node:http';

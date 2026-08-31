@@ -7,7 +7,7 @@ import type { CodeLanguage } from '#types/code.types.js';
 export type KernelDimensions = 2 | 3;
 
 /** @public */
-export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad';
+export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'picovoxel';
 
 /**
  * Product catalog entry for a kernel offering, not an engine registry.
@@ -143,6 +143,28 @@ export default function main(p = defaultParams) {}
       'Browser & CLI support',
       'ES module architecture',
     ],
+  },
+  {
+    id: 'picovoxel',
+    name: 'Picovoxel',
+    dimensions: [3],
+    language: 'typescript',
+    description: 'Voxel and implicit geometry in TypeScript',
+    mainFile: 'main.ts',
+    backendProvider: 'picovoxel',
+    longDescription:
+      'Browser-native voxel and implicit modeling with deterministic booleans, lattices, ShapeKernel utilities, and mesh/STL output backed by WebAssembly.',
+    emptyCode: `import type { Pico } from 'picovoxel';
+
+export const defaultParams = { voxelSize: 0.5 };
+
+export default function main(pico: Pico, params = defaultParams) {
+  return pico.createVoxels({ shape: 'sphere', radius: 10 });
+}
+`,
+    recommended: 'Voxel, Lattice & Implicit CAD',
+    tags: ['TypeScript', 'Voxels', 'Implicit Geometry', 'Lattices', 'WASM'],
+    features: ['Voxel booleans', 'Implicit modeling', 'Lattice generation', 'GLB and STL export'],
   },
   {
     id: 'opencascadejs',

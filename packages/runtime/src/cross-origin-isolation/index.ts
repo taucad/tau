@@ -25,8 +25,9 @@ export {
   applyApiHeaders,
   applyDocumentHeaders,
   applySubresourceHeaders,
+  detectMultiThreadSupport,
   documentHeaders,
   getIsolationStatus,
   subresourceHeaders,
 } from '#cross-origin-isolation/headers.js';
-export type { IsolationFailureReason, IsolationStatus } from '#cross-origin-isolation/headers.js';
+export type { IsolationFailureReason, IsolationStatus, MultiThreadSupport } from '#cross-origin-isolation/headers.js';

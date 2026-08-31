@@ -96,6 +96,388 @@
     "files": ["main.scad"]
   },
   {
+    "kernel": "picovoxel",
+    "name": "base-box",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-box.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "base-cylinder",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-cylinder.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "base-lens",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-lens.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "base-pipe",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-pipe.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "base-pipe-segment",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-pipe-segment.ts",
+      "ex-base-pipe.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "base-ring",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-ring.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "base-sphere",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-base-sphere.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "basic-lattices",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-basic-lattices.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "boolean-showcase",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "boolean-showcase.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "gear",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "gear.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "gyroid-sdf",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "helix-heat-x",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "helixHeatX.ts",
+      "helpers.ts",
+      "main.ts",
+      "run.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "hello-world",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "hello-world.ts",
+      "main.geospec.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "implicit-gyroid-genus",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-gyroid-genus.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "implicit-gyroid-sphere",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-gyroid-sphere.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "implicit-logic-split",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-logic-split.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "implicit-modular",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-modular.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "implicit-radial",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-radial.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "implicit-random",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-random.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "implicit-regular",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-regular.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "implicit-super-ellipsoid",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-implicit-super-ellipsoid.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "lattice-conformal",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-lattice-conformal.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "lattice-manifold",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-lattice-manifold.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "lattice-pipe",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-lattice-pipe.ts",
+      "example-spline.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "lattice-regular",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-lattice-regular.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "mesh-painter",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-mesh-painter.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "mesh-trafo",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-mesh-trafo.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "over-offset",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "ex-over-offset.ts",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "quasicrystal",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "icosahedralFace.ts",
+      "main.ts",
+      "quasiCrystal.ts",
+      "quasiTile.ts",
+      "quasiTileInflation.ts",
+      "run.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "rover-wheel",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "randomWheel.ts",
+      "run.ts",
+      "tau.json",
+      "treadPatterns.ts",
+      "wheelContext.ts",
+      "wheelElements.ts",
+      "wheelTread.ts",
+      "wheels.ts"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "simple-fluid-simulation",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "run.ts",
+      "simpleFlowDevice.ts",
+      "simpleFluidSimulationInput.ts",
+      "simpleFluidSimulationOutput.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "sphere-minus-beams",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
+    "kernel": "picovoxel",
+    "name": "torus-knot-round-trip",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "main.ts",
+      "tau.json"
+    ]
+  },
+  {
     "kernel": "replicad",
     "name": "bambu-plate",
     "mainFile": "main.ts",

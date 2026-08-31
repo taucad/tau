@@ -21,6 +21,7 @@ export type ExampleManifest = {
   occt: 'v8-engine-brep';
   opencascade: 'v8-engine-brep';
   openscad: 'kitchen-sink';
+  picovoxel: 'base-box' | 'base-cylinder' | 'base-lens' | 'base-pipe' | 'base-pipe-segment' | 'base-ring' | 'base-sphere' | 'basic-lattices' | 'boolean-showcase' | 'gear' | 'gyroid-sdf' | 'helix-heat-x' | 'hello-world' | 'implicit-gyroid-genus' | 'implicit-gyroid-sphere' | 'implicit-logic-split' | 'implicit-modular' | 'implicit-radial' | 'implicit-random' | 'implicit-regular' | 'implicit-super-ellipsoid' | 'lattice-conformal' | 'lattice-manifold' | 'lattice-pipe' | 'lattice-regular' | 'mesh-painter' | 'mesh-trafo' | 'over-offset' | 'quasicrystal' | 'rover-wheel' | 'simple-fluid-simulation' | 'sphere-minus-beams' | 'torus-knot-round-trip';
   replicad:
     | 'bambu-plate'
     | 'birdhouse'

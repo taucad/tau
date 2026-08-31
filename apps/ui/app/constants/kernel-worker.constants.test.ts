@@ -42,6 +42,7 @@ describe('kernel-worker constants', () => {
       'openrscad',
       'jscad',
       'manifold',
+      'picovoxel',
       'gltf',
       'brep',
       'rhino',
@@ -53,6 +54,7 @@ describe('kernel-worker constants', () => {
       expect(typeof kernel.id).toBe('string');
       expect(Array.isArray(kernel.extensions)).toBe(true);
     }
+    expect(resolvedRuntime.kernels.find((kernel) => kernel.id === 'picovoxel')?.options).toEqual({ wasm: 'multi' });
     expect(resolvedRuntime.middleware.map((middleware) => middleware.id)).toEqual([
       'observability',
       'parameterFileResolver',

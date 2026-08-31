@@ -1957,6 +1957,9 @@ importers:
       '@taucad/openrscad-native':
         specifier: workspace:*
         version: link:../../packages/plugins/openrscad-native
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../../packages/plugins/picovoxel
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../../packages/plugins/replicad
@@ -2071,6 +2074,9 @@ importers:
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../../packages/plugins/openrscad
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../../packages/plugins/picovoxel
       '@taucad/react':
         specifier: workspace:*
         version: link:../../packages/react
@@ -2479,6 +2485,9 @@ importers:
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../../packages/plugins/openrscad
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../../packages/plugins/picovoxel
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../../packages/plugins/replicad
@@ -2486,12 +2495,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime
     devDependencies:
+      '@taucad/geometry-core':
+        specifier: workspace:*
+        version: link:../../packages/core/geometry
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec
+      picovoxel:
+        specifier: file:../../packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz
+        version: file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz(three@0.184.0)
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
+      three:
+        specifier: 'catalog:'
+        version: 0.184.0
 
   libs/telemetry:
     dependencies:
@@ -2566,6 +2584,9 @@ importers:
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../plugins/openrscad
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../plugins/picovoxel
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../plugins/replicad
@@ -2674,6 +2695,9 @@ importers:
       '@taucad/opencascade':
         specifier: workspace:*
         version: link:../plugins/opencascade
+      '@taucad/picovoxel':
+        specifier: workspace:*
+        version: link:../plugins/picovoxel
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../plugins/replicad
@@ -2990,6 +3014,34 @@ importers:
         specifier: link:../../../repos/openrscad/packages/npm-native
         version: link:../../../repos/openrscad/packages/npm-native
     devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+
+  packages/plugins/picovoxel:
+    dependencies:
+      '@taucad/geometry-core':
+        specifier: workspace:*
+        version: link:../../core/geometry
+      picovoxel:
+        specifier: file:./vendor/picovoxel-0.1.0.tgz
+        version: file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz(three@0.184.0)
+      three:
+        specifier: 'catalog:'
+        version: 0.184.0
+    devDependencies:
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../esbuild
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../middleware
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
@@ -20881,6 +20933,16 @@ packages:
   picospinner@3.0.0:
     resolution: {integrity: sha512-lGA1TNsmy2bxvRsTI2cV01kfTwKzZjnZSDmF9llYNyMHMrU4sP87lQ5taiIKm88L3cbswjl008nwyGc3WpNvzg==}
     engines: {node: '>=18.0.0'}
+
+  picovoxel@file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz:
+    resolution: {integrity: sha512-OeU3Lrfg+BdwVmlBbgGRRLBGd7kNRJYAI29yuU8fh98j1A6WV/NJYRYZwyXaMkbC2XARtIyvO/i+Odt9Pc6Vfg==, tarball: file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz}
+    version: 0.1.0
+    engines: {node: '>=20'}
+    peerDependencies:
+      three: '>=0.160'
+    peerDependenciesMeta:
+      three:
+        optional: true
 
   pidtree@0.6.1:
     resolution: {integrity: sha512-e0F9AOF1JMrCfBsyJOwU9lNvQ0WtXTq0j/4jk0BQ5JSI9VAybPXmDpPRw/2FQ3e5d3ZFN1mLh7jW99m/jjaptw==}
@@ -45223,6 +45285,10 @@ snapshots:
   picoquery@2.5.0: {}
 
   picospinner@3.0.0: {}
+
+  picovoxel@file:packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz(three@0.184.0):
+    optionalDependencies:
+      three: 0.184.0
 
   pidtree@0.6.1: {}
 

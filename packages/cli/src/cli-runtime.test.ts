@@ -19,6 +19,7 @@ const builtInKernelIds = [
   'openrscad',
   'jscad',
   'manifold',
+  'picovoxel',
   'gltf',
   'brep',
   'rhino',
@@ -87,6 +88,12 @@ describe('createCliRuntime', () => {
 
     expect(extensions).toContain('ts');
     expect(extensions).toContain('obj');
+  });
+
+  it('pins the built-in PicoVoxel kernel to pthread WASM', async () => {
+    const runtime = await composeCli();
+
+    expect(runtime.kernels.find(({ id }) => id === 'picovoxel')?.options).toEqual({ wasm: 'multi' });
   });
 
   it('rejects an explicit plugin that duplicates a built-in', async () => {

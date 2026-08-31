@@ -54,3 +54,6 @@ pnpm nx run ui:generate-svg-sprite
 
 - `kimi.svg` is sourced from Lobe Icons' `kimi-color.svg` at commit
   `fbd2d56e3f734e889f1373e71c8368cc4e60e0d7`, licensed under MIT (Copyright 2023 LobeHub).
+- `picovoxel.svg` is the canonical project-owned Picovoxel logo from
+  `repos/picovoxel/assets/logo.svg` at commit `802d86da6e6120a472b045fddb306ce0dfa5d5f8`,
+  used under the explicitly approved local-logo exception.

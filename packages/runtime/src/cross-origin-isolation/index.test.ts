@@ -4,6 +4,7 @@ import {
   applyApiHeaders,
   applyDocumentHeaders,
   applySubresourceHeaders,
+  detectMultiThreadSupport,
   documentHeaders,
   getIsolationStatus,
   subresourceHeaders,
@@ -114,5 +115,39 @@ describe('getIsolationStatus', () => {
 
   it('treats the unstubbed Node globals as isolated (absent flags are not a gate)', () => {
     expect(getIsolationStatus()).toEqual({ crossOriginIsolated: true, sharedArrayBuffer: true });
+  });
+});
+
+describe('detectMultiThreadSupport', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    [
+      'reports an insecure context',
+      { isSecureContext: false, crossOriginIsolated: false, sharedArrayBuffer: undefined },
+      'crossOriginIsolated=false (insecure context)',
+    ],
+    [
+      'reports missing isolation headers',
+      { isSecureContext: true, crossOriginIsolated: false, sharedArrayBuffer: SharedArrayBuffer },
+      'crossOriginIsolated=false (missing COOP/COEP headers)',
+    ],
+    [
+      'reports a missing SharedArrayBuffer constructor',
+      { isSecureContext: true, crossOriginIsolated: true, sharedArrayBuffer: undefined },
+      'SharedArrayBuffer unavailable',
+    ],
+  ] as const)('%s', (_label, globals, reason) => {
+    vi.stubGlobal('isSecureContext', globals.isSecureContext);
+    vi.stubGlobal('crossOriginIsolated', globals.crossOriginIsolated);
+    vi.stubGlobal('SharedArrayBuffer', globals.sharedArrayBuffer);
+
+    expect(detectMultiThreadSupport()).toEqual({ supported: false, reason });
+  });
+
+  it('supports the unstubbed Node realm', () => {
+    expect(detectMultiThreadSupport()).toEqual({ supported: true, reason: 'SAB available' });
   });
 });

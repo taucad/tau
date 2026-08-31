@@ -56,6 +56,15 @@
       },
       "cache": true
     },
+    "verify-picovoxel": {
+      "command": "tsx scripts/verify-picovoxel.mts",
+      "dependsOn": ["generate-manifest"],
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": true,
+      "inputs": ["default", "^default"]
+    },
     "generate-logo": {
       "command": "tsx src/kernels/replicad/logo/generate-logo.ts",
       "inputs": ["default", "^default"],

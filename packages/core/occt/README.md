@@ -12,8 +12,8 @@ Shared OpenCascade lifecycle, threading, error, and tracing helpers
 
 - **One OCCT lifecycle** — `@taucad/opencascade` and `@taucad/replicad` load, thread, scope, and trace
   the same way instead of each carrying a copy.
-- **Threading you can inspect** — `detectMultiThreadSupport()` reports _why_ a pthread build is
-  unavailable (no `SharedArrayBuffer`, no COOP/COEP, insecure context), so a host can degrade knowingly.
+- **OCCT parallel activation** — `activateOccParallelism()` enables OCCT's global parallel defaults
+  after the runtime-owned pthread capability probe selects a multi build.
 - **Handles that get freed** — `createOcScope()` tracks OCCT handles and deletes them on exit.
 - **Not a plugin** — no capabilities, no backend at module scope; kernels call it from their own
   `initialize()`.
@@ -31,7 +31,8 @@ npm i @taucad/occt-core @taucad/runtime
 Call it from a kernel's `initialize()`, never at module scope:
 
 ```typescript
-import { createOcScope, detectMultiThreadSupport, initOcct } from '@taucad/occt-core';
+import { createOcScope, initOcct } from '@taucad/occt-core';
+import { detectMultiThreadSupport } from '@taucad/runtime/cross-origin-isolation';
 import type { OcctModuleFactory } from '@taucad/occt-core';
 
 // The caller resolves both — this package never reaches for a WASM build itself.
@@ -54,7 +55,6 @@ try {
 | Export                                     | Kind      | Purpose                                                                                                                                      |
 | ------------------------------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `initOcct`                                 | function  | `(wasmUrl, initializer, options?)` — pure: the caller resolves URL and bindings. `InitOcctOptions`, `OcctModuleFactory`, `OcctModuleOptions` |
-| `detectMultiThreadSupport`                 | function  | `{ supported, reason }` — why a pthread build is or is not usable. `MultiThreadSupport`                                                      |
 | `activateOccParallelism`                   | function  | `(oc, logger)` — enable OCCT global parallelism; returns the thread count                                                                    |
 | `createOcScope`                            | function  | handle scope with deterministic release; `OcScope`, `OcHandle`                                                                               |
 | `runOcMain`                                | function  | run user code against the module and normalise its result; `OcRunMainResult`                                                                 |
@@ -67,7 +67,7 @@ try {
 | Host           | Supported | Notes                                                                               |
 | -------------- | --------- | ----------------------------------------------------------------------------------- |
 | Browser worker | Yes       | pure JavaScript; no WASM of its own, no Node built-ins in the payload               |
-| Node.js        | Yes       | `>=24`; SAB is unconditional, so `detectMultiThreadSupport()` needs no headers here |
+| Node.js        | Yes       | `>=24`; SAB is unconditional, so the runtime capability probe needs no headers here |
 
 The OCCT payload belongs to the calling kernel: this package never bundles one.
 

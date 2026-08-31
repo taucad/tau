@@ -77,6 +77,20 @@ export type IsolationStatus =
   | { crossOriginIsolated: true; sharedArrayBuffer: true }
   | { crossOriginIsolated: false; sharedArrayBuffer: boolean; reason: IsolationFailureReason };
 
+/** Result of probing the current realm for pthread WebAssembly support. @public */
+export type MultiThreadSupport = {
+  /** Whether a pthread WebAssembly build can run in this realm. */
+  readonly supported: boolean;
+  /** Human-readable reason suitable for selection logs and capability errors. */
+  readonly reason: string;
+};
+
+const multiThreadReasons: Readonly<Record<IsolationFailureReason, string>> = {
+  'no-sab-constructor': 'SharedArrayBuffer unavailable',
+  'no-coep': 'crossOriginIsolated=false (missing COOP/COEP headers)',
+  'no-secure-context': 'crossOriginIsolated=false (insecure context)',
+};
+
 /**
  * Snapshot this realm's cross-origin isolation readiness.
  *
@@ -120,6 +134,24 @@ export function getIsolationStatus(): IsolationStatus {
     return { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-sab-constructor' };
   }
   return { crossOriginIsolated: true, sharedArrayBuffer: true };
+}
+
+/**
+ * Detect whether the current realm can instantiate a pthread WebAssembly build.
+ *
+ * Browsers require cross-origin isolation plus `SharedArrayBuffer`; Node exposes
+ * shared memory without document headers. Plugin packages own variant loading,
+ * while this function is the single runtime-owned capability probe.
+ *
+ * @returns Support flag plus a stable human-readable reason.
+ * @public
+ */
+export function detectMultiThreadSupport(): MultiThreadSupport {
+  const status = getIsolationStatus();
+  if (status.crossOriginIsolated) {
+    return { supported: true, reason: 'SAB available' };
+  }
+  return { supported: false, reason: multiThreadReasons[status.reason] };
 }
 
 /**

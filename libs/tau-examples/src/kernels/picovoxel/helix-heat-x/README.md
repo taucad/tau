@@ -1,0 +1,9 @@
+# Helix Heat X
+
+Tau adapter for the Picovoxel community example from `repos/picovoxel` at commit `802d86da6e6120a472b045fddb306ce0dfa5d5f8`.
+
+- Upstream source: `examples/helixheatx/helixHeatX.ts`, `examples/helixheatx/helpers.ts`, `examples/helixheatx/run.ts`
+- License: Apache-2.0; the copied source headers remain authoritative.
+- Adaptation: `main.ts` supplies Tau's injected `Pico` session and returns only renderable geometry.
+- Expected cost: heavy; increase `voxelSize` for a faster coarse preview.
+

@@ -2,58 +2,16 @@
  * Shared OCCT multi-threading helpers.
  *
  * Both OC-based kernels (Replicad and OpenCascade) ship a single-threaded and a
- * pthread (multi-threaded) OCJS WASM build. The logic for (1) detecting whether
- * the host can run the pthread build and (2) activating OCCT's global parallel
- * defaults once a multi-threaded instance is live is identical across kernels,
- * so it lives here and is consumed by both — there is no per-kernel threading
- * setup.
+ * pthread (multi-threaded) OCJS WASM build. Runtime-owned feature detection
+ * lives in `@taucad/runtime/cross-origin-isolation`; this module owns only the
+ * OCCT-specific activation performed after a multi-threaded instance is live.
  *
  * The activation helper is structurally typed (`object`) so neither kernel has
  * to import the other's WASM bindings; each keeps its concrete `oc` type at the
  * call site.
  */
 
-import { getIsolationStatus } from '@taucad/runtime/cross-origin-isolation';
-import type { IsolationFailureReason } from '@taucad/runtime/cross-origin-isolation';
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
-
-/** Result of probing the host for multi-threaded (pthread) WASM support. @public */
-export type MultiThreadSupport = {
-  /** Whether the pthread build can run in this environment. */
-  supported: boolean;
-  /** Human-readable reason for the decision (used in auto-selection logs). */
-  reason: string;
-};
-
-/** Auto-selection log vocabulary, keyed by the isolation producer's reasons. */
-const multiThreadReasons: Readonly<Record<IsolationFailureReason, string>> = {
-  'no-sab-constructor': 'SharedArrayBuffer unavailable',
-  'no-coep': 'crossOriginIsolated=false (missing COOP/COEP headers)',
-  'no-secure-context': 'crossOriginIsolated=false (insecure context)',
-};
-
-/**
- * Detect whether the runtime can host the multi-threaded (pthread) build.
- *
- * Pthread WASM requires `SharedArrayBuffer`. Browsers gate `SharedArrayBuffer`
- * behind cross-origin isolation (`Cross-Origin-Opener-Policy: same-origin` +
- * `Cross-Origin-Embedder-Policy: require-corp`). Node 22+ exposes SAB
- * unconditionally — no headers needed.
- *
- * Derived from {@link getIsolationStatus} so the runtime has exactly one
- * detector of this fact; only the human-readable vocabulary lives here.
- *
- * @returns flag plus a human-readable reason for the chosen variant.
- * @public
- * @see https://github.com/taucad/opencascade.js/blob/main/docs-site/content/docs/package/guides/multi-threading.mdx
- */
-export function detectMultiThreadSupport(): MultiThreadSupport {
-  const status = getIsolationStatus();
-  if (status.crossOriginIsolated) {
-    return { supported: true, reason: 'SAB available' };
-  }
-  return { supported: false, reason: multiThreadReasons[status.reason] };
-}
 
 /**
  * Activate OCCT-wide parallel defaults for APIs that consult OCCT's global

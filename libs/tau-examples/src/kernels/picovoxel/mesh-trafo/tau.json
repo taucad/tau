@@ -1,0 +1,17 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_picovoxel000000000018",
+  "name": "Picovoxel Mesh Trafo",
+  "description": "Picovoxel Mesh Trafo community example, adapted to Tau's injected-session runtime.",
+  "tags": [
+    "picovoxel",
+    "typescript",
+    "community-example"
+  ],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+[
+  {
+    "name": "browser plugin entry (Picovoxel remains external)",
+    "path": "dist/**/*.mjs",
+    "limit": "100 kB"
+  }
+]

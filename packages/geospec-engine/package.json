@@ -106,6 +106,7 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "@taucad/opencascade": "workspace:*",
+    "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",

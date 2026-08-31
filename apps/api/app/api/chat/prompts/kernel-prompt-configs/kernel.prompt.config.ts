@@ -4,6 +4,7 @@ import { jscadConfig } from '#api/chat/prompts/kernel-prompt-configs/jscad.promp
 import { manifoldConfig } from '#api/chat/prompts/kernel-prompt-configs/manifold.prompt.config.js';
 import { opencascadejsConfig } from '#api/chat/prompts/kernel-prompt-configs/opencascadejs.prompt.config.js';
 import { openscadConfig } from '#api/chat/prompts/kernel-prompt-configs/openscad.prompt.config.js';
+import { picovoxelConfig } from '#api/chat/prompts/kernel-prompt-configs/picovoxel.prompt.config.js';
 import { replicadConfig } from '#api/chat/prompts/kernel-prompt-configs/replicad.prompt.config.js';
 import { zooConfig } from '#api/chat/prompts/kernel-prompt-configs/zoo.prompt.config.js';
 
@@ -13,6 +14,7 @@ const kernelConfigs: Record<KernelProvider, KernelConfig> = {
   manifold: manifoldConfig,
   zoo: zooConfig,
   jscad: jscadConfig,
+  picovoxel: picovoxelConfig,
   opencascadejs: opencascadejsConfig,
 };
 

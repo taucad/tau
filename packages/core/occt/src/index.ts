@@ -3,8 +3,7 @@ export { initOcct, resolveOcctModuleFactory } from '#oc-init.js';
 export type { InitOcctOptions, OcctModuleFactory, OcctModuleOptions } from '#oc-init.js';
 
 // Threading
-export { activateOccParallelism, detectMultiThreadSupport } from '#oc-threading.js';
-export type { MultiThreadSupport } from '#oc-threading.js';
+export { activateOccParallelism } from '#oc-threading.js';
 
 // Schemas
 export { occtGltfExportSchema, occtRenderOptionSchema, occtStlExportSchema } from '#occt-schemas.js';

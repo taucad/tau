@@ -25,7 +25,19 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
    * Array order is kernel-selection precedence. Zoo is deliberately absent because it
    * needs credential configuration. Extensions and routes stay owned by the packages.
    */
-  const modules = await Promise.all([
+  const [
+    middlewareModule,
+    esbuildModule,
+    replicadModule,
+    opencascadeModule,
+    openrscadModule,
+    jscadModule,
+    manifoldModule,
+    picovoxelModule,
+    gltfModule,
+    brepModule,
+    rhinoModule,
+  ] = await Promise.all([
     import('@taucad/middleware'),
     import('@taucad/esbuild'),
     import('@taucad/replicad'),
@@ -33,12 +45,27 @@ export const createCliRuntime = async (options: CliRuntimeOptions = {}): Promise
     import('@taucad/openrscad'),
     import('@taucad/jscad'),
     import('@taucad/manifold'),
+    import('@taucad/picovoxel'),
     import('@taucad/gltf'),
     import('@taucad/brep'),
     import('@taucad/rhino'),
   ]);
   const [{ assimp }, { image }] = await Promise.all([import('@taucad/assimp'), import('@taucad/image')]);
-  const builtIns = [...modules.map(({ plugin }) => plugin()), assimp({ preset: 'all' }), image()];
+  const builtIns = [
+    middlewareModule.plugin(),
+    esbuildModule.plugin(),
+    replicadModule.plugin(),
+    opencascadeModule.plugin(),
+    openrscadModule.plugin(),
+    jscadModule.plugin(),
+    manifoldModule.plugin(),
+    picovoxelModule.picovoxel({ kernels: { default: { wasm: 'multi' } } }),
+    gltfModule.plugin(),
+    brepModule.plugin(),
+    rhinoModule.plugin(),
+    assimp({ preset: 'all' }),
+    image(),
+  ];
   const builtInNames = new Set(builtIns.map(({ meta }) => meta.name));
   const plugins: PluginInstance[] = [...builtIns];
   const indexByName = new Map(plugins.map(({ meta }, index) => [meta.name, index]));

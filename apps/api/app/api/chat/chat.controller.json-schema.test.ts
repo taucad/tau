@@ -222,6 +222,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                 "manifold",
                 "zoo",
                 "jscad",
+                "picovoxel",
                 "opencascadejs",
               ],
               "type": "string",

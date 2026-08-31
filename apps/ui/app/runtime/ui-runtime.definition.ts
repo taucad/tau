@@ -16,6 +16,7 @@ import {
   parameterFileResolver,
 } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
+import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { zoo } from '@taucad/zoo';
@@ -39,6 +40,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     openrscad(),
     jscad(),
     manifold(),
+    picovoxel({ kernels: { default: { wasm: 'multi' } } }),
     gltf(),
     brep(),
     rhino(),

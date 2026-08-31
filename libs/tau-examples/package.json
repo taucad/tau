@@ -24,11 +24,15 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
+    "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*"
   },
   "devDependencies": {
+    "@taucad/geometry-core": "workspace:*",
     "geospec": "workspace:*",
-    "sharp": "^0.34.5"
+    "picovoxel": "file:../../packages/plugins/picovoxel/vendor/picovoxel-0.1.0.tgz",
+    "sharp": "^0.34.5",
+    "three": "catalog:"
   }
 }

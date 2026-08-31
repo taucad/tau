@@ -88,6 +88,20 @@
         "sharedGlobals"
       ],
       "outputs": ["{projectRoot}/src/generated/opencascade"]
+    },
+    "extract-picovoxel": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/extract-picovoxel-types.ts",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/extract-picovoxel-types.ts",
+        "{workspaceRoot}/packages/plugins/picovoxel/node_modules/picovoxel/dist/**/*.d.ts",
+        "sharedGlobals"
+      ],
+      "outputs": ["{projectRoot}/src/generated/picovoxel"]
     }
   }
 }

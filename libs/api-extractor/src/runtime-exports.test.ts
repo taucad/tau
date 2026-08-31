@@ -9,6 +9,7 @@ import {
   kernelTypePackageMaps,
   manifoldTypes,
   opencascadeTypes,
+  picovoxelTypes,
   replicadTypes,
 } from '#kernel-types.js';
 import { kclStdlibReference } from '#kcl-reference.js';
@@ -28,7 +29,9 @@ describe('@taucad/api-extractor runtime subpaths', () => {
         packages[packageName] = packageTypes;
       }
     }
-    expect(Object.keys(packages).sort()).toEqual(['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d'].sort());
+    expect(Object.keys(packages).sort()).toEqual(
+      ['libcascade', 'replicad', '@jscad/modeling', 'manifold-3d', 'picovoxel'].sort(),
+    );
 
     const jscadPackage = packages['@jscad/modeling'];
     const manifoldPackage = packages['manifold-3d'];
@@ -48,6 +51,36 @@ describe('@taucad/api-extractor runtime subpaths', () => {
     expect(Object.keys(opencascadePackage?.files ?? {})).toEqual([]);
     expect(replicadPackage?.content).toBe(replicadTypes['replicad']);
     expect(Object.keys(replicadPackage?.files ?? {})).toEqual([]);
+    const picovoxelPackage = picovoxelTypes['picovoxel'];
+    const picovoxelSubpaths = ['latticelibrary', 'multi', 'numerics', 'raw', 'shapekernel', 'slicing', 'three'];
+    expect(picovoxelPackage?.content).toContain('createPico');
+    for (const subpath of picovoxelSubpaths) {
+      expect(picovoxelPackage?.files?.[`${subpath}.d.ts`], subpath).toBeTypeOf('string');
+    }
+    expect(Object.keys(picovoxelPackage?.files ?? {})).toEqual([
+      'dispose.d.ts',
+      'errors-DXf6-DZ_.d.ts',
+      'fields-_29bPm81.d.ts',
+      'frame-BJ-gW1HI.d.ts',
+      'implicitUtility-Ihy7S0Uw.d.ts',
+      'latticelibrary.d.ts',
+      'multi.d.ts',
+      'numerics.d.ts',
+      'raw.d.ts',
+      'session-C3vEcmta.d.ts',
+      'shapekernel.d.ts',
+      'slicing.d.ts',
+      'three.d.ts',
+      'types-a7F3gUD0.d.ts',
+    ]);
+    expect(picovoxelPackage?.files?.['shapekernel.d.ts']).toContain('BaseBox');
+    expect(picovoxelPackage?.files?.['fields-_29bPm81.d.ts']).toContain('meshToStlBytes');
+    expect(picovoxelPackage?.packageJson?.['exports']).toEqual(
+      Object.fromEntries([
+        ['.', { types: './index.d.ts' }],
+        ...picovoxelSubpaths.map((subpath) => [`./${subpath}`, { types: `./${subpath}.d.ts` }]),
+      ]),
+    );
   });
 
   it('should expose bundled KCL markdown text', () => {

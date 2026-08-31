@@ -36,6 +36,7 @@
     "@taucad/react": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
+    "@taucad/picovoxel": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@taucad/replicad": "workspace:*",

@@ -5,12 +5,13 @@ import { manifold } from '@taucad/manifold';
 import { gltfCoordinateTransform, gltfEdgeDetection, parameterCache, parameterFileResolver } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
+import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 /** Runtime composition used to generate and verify checked-in example thumbnails. */
 export const exampleRuntime = defineRuntime({
-  plugins: [replicad(), opencascade(), manifold(), jscad(), openrscad(), esbuild(), image()],
+  plugins: [replicad(), opencascade(), manifold(), jscad(), openrscad(), picovoxel(), esbuild(), image()],
   middleware: [parameterFileResolver(), parameterCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
 });
 

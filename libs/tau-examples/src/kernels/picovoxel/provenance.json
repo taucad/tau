@@ -1,0 +1,503 @@
+{
+  "repository": "https://github.com/leap71/PicoGKRuntime",
+  "localRepository": "repos/picovoxel",
+  "commit": "802d86da6e6120a472b045fddb306ce0dfa5d5f8",
+  "package": "picovoxel@0.1.0",
+  "inventory": [
+    {
+      "sha256": "6aee498a61ea3cb0d9831841a7823c3d99c14e5349a6c6d17fa0ca2a9774382b",
+      "source": "examples/helixheatx/helixHeatX.ts",
+      "destinations": [
+        "helix-heat-x/helixHeatX.ts"
+      ]
+    },
+    {
+      "sha256": "fcd25df85db7cdfbf68e47cbd596f34549ccbceeb69d329843f7200eddf52fbd",
+      "source": "examples/helixheatx/helpers.ts",
+      "destinations": [
+        "helix-heat-x/helpers.ts"
+      ]
+    },
+    {
+      "sha256": "24a7151744108c3c27577ab22f081f6a3ebd31cb10cc50f6dce58affaa5e28b7",
+      "source": "examples/helixheatx/run.ts",
+      "destinations": [
+        "helix-heat-x/run.ts"
+      ]
+    },
+    {
+      "sha256": "08ce97eb57c134d68dc76d2e5172141e2950c3d565f2a0398e408d62bedff0f7",
+      "source": "examples/latticelibrary/ex-implicit-logic-split.ts",
+      "destinations": [
+        "implicit-logic-split/ex-implicit-logic-split.ts"
+      ]
+    },
+    {
+      "sha256": "c6bdaa13246484e4deb5b683cf7f8bcc842f4e49143e54953b78e2ab47461e53",
+      "source": "examples/latticelibrary/ex-implicit-modular.ts",
+      "destinations": [
+        "implicit-modular/ex-implicit-modular.ts"
+      ]
+    },
+    {
+      "sha256": "c6d28d0c100553fea1d9e7d6541a2365f156f037dcb1472c86b246ff1b4e4a39",
+      "source": "examples/latticelibrary/ex-implicit-radial.ts",
+      "destinations": [
+        "implicit-radial/ex-implicit-radial.ts"
+      ]
+    },
+    {
+      "sha256": "f6c8e62fea1364397c399ead27b9c1c66e5c7ebdcf18ac543780a0aeebb0cf2a",
+      "source": "examples/latticelibrary/ex-implicit-random.ts",
+      "destinations": [
+        "implicit-random/ex-implicit-random.ts"
+      ]
+    },
+    {
+      "sha256": "ec60e0e55117aa7b1f34ae75bfe5c6eb18431606560e20d916bb4bab891681f4",
+      "source": "examples/latticelibrary/ex-implicit-regular.ts",
+      "destinations": [
+        "implicit-regular/ex-implicit-regular.ts"
+      ]
+    },
+    {
+      "sha256": "5ed796cff0f09fa31c23fd7b7b1885aff1117d8850e7a7665db097556d42aef2",
+      "source": "examples/latticelibrary/ex-lattice-conformal.ts",
+      "destinations": [
+        "lattice-conformal/ex-lattice-conformal.ts"
+      ]
+    },
+    {
+      "sha256": "86d39036363e46286fce9f0d9beaef62d038a7119efa56fd8a392d8590f90861",
+      "source": "examples/latticelibrary/ex-lattice-regular.ts",
+      "destinations": [
+        "lattice-regular/ex-lattice-regular.ts"
+      ]
+    },
+    {
+      "sha256": "8c970f830ceb95ed8e00e62ed7ac8a8a9feb0cc76ce5d8f9f71fa03fdb231ae0",
+      "source": "examples/pico/boolean-showcase.ts",
+      "destinations": [
+        "boolean-showcase/boolean-showcase.ts"
+      ]
+    },
+    {
+      "sha256": "13da6f67d80a22f5c3f6ce1cc08cd33f23ddf0215251215b440a0f88917336ac",
+      "source": "examples/pico/gear.ts",
+      "destinations": [
+        "gear/gear.ts"
+      ]
+    },
+    {
+      "sha256": "aa737cd1e7aba73beb47c2391f21be4204c095256d96474e0559840b5e256364",
+      "source": "examples/pico/hello-world.ts",
+      "destinations": [
+        "hello-world/hello-world.ts"
+      ]
+    },
+    {
+      "sha256": "e07891f15fff76a1f46b83d127ec247317cc2b25e28ffa83c952a6f741ab3e2b",
+      "source": "examples/quasicrystals/icosahedralFace.ts",
+      "destinations": [
+        "quasicrystal/icosahedralFace.ts"
+      ]
+    },
+    {
+      "sha256": "b5a4f5b735412a35090531fef23a97a420194ea3e7e3ee3b35eb609063cca8e0",
+      "source": "examples/quasicrystals/quasiCrystal.ts",
+      "destinations": [
+        "quasicrystal/quasiCrystal.ts"
+      ]
+    },
+    {
+      "sha256": "e31647bd9d1de01cde765fb8461fdcbe19d1520398787342fce9126bc72bfcc1",
+      "source": "examples/quasicrystals/quasiTile.ts",
+      "destinations": [
+        "quasicrystal/quasiTile.ts"
+      ]
+    },
+    {
+      "sha256": "7ef5a69d3eedcbbbf822746440e657c0722be5c8707fd5aaa248f4647b02e12f",
+      "source": "examples/quasicrystals/quasiTileInflation.ts",
+      "destinations": [
+        "quasicrystal/quasiTileInflation.ts"
+      ]
+    },
+    {
+      "sha256": "755502fda77543d5ae459cac1d05a8b00d59d46f7fb11628641d5c56a252fa38",
+      "source": "examples/quasicrystals/run.ts",
+      "destinations": [
+        "quasicrystal/run.ts"
+      ]
+    },
+    {
+      "sha256": "09e7588439ec23052c1663cd4c848d5f2c51adcddf66f90f944d0fde3db2735b",
+      "source": "examples/roverwheel/randomWheel.ts",
+      "destinations": [
+        "rover-wheel/randomWheel.ts"
+      ]
+    },
+    {
+      "sha256": "c4542b9de898885492c3bcbcb400e082ad28096c3bc442c3deb21561fceb9ced",
+      "source": "examples/roverwheel/run.ts",
+      "destinations": [
+        "rover-wheel/run.ts"
+      ]
+    },
+    {
+      "sha256": "b29f093062d06a432c1e2071d834dfc8552150c3daef8f1cb85b24df1167e421",
+      "source": "examples/roverwheel/treadPatterns.ts",
+      "destinations": [
+        "rover-wheel/treadPatterns.ts"
+      ]
+    },
+    {
+      "sha256": "3fd8146a788f3f1c31daca106454b5b7e2cc9c7ccc917f43d5667acfbfa5d7ca",
+      "source": "examples/roverwheel/wheelContext.ts",
+      "destinations": [
+        "rover-wheel/wheelContext.ts"
+      ]
+    },
+    {
+      "sha256": "e2b45f7f2f8c9c5d2e72168a553fb1a719fb1d3eea71373422e8ffd99b184cc9",
+      "source": "examples/roverwheel/wheelElements.ts",
+      "destinations": [
+        "rover-wheel/wheelElements.ts"
+      ]
+    },
+    {
+      "sha256": "bb8135020040d1d164dc832de39b92a0e43181b68977f65f0e48ed8f83d236d4",
+      "source": "examples/roverwheel/wheelTread.ts",
+      "destinations": [
+        "rover-wheel/wheelTread.ts"
+      ]
+    },
+    {
+      "sha256": "2c99d2c2cb7f4641ec5ad70ae99f26bbb1195665bbb77a277663ac37751f0b79",
+      "source": "examples/roverwheel/wheels.ts",
+      "destinations": [
+        "rover-wheel/wheels.ts"
+      ]
+    },
+    {
+      "sha256": "52eb7aee0088bbbeea5804bf5a440faf92e588b328aceaddb5a3eb6651c0b8cd",
+      "source": "examples/shapekernel/ex-base-box.ts",
+      "destinations": [
+        "base-box/ex-base-box.ts"
+      ]
+    },
+    {
+      "sha256": "d5f44d07c715449639657363660380a4feefd20ced20fe9470ff55d8dce6914e",
+      "source": "examples/shapekernel/ex-base-cylinder.ts",
+      "destinations": [
+        "base-cylinder/ex-base-cylinder.ts"
+      ]
+    },
+    {
+      "sha256": "46760ac85eee25eff05a3bf4d8bcc0c950841fd52ee87c8a11dece683341de8a",
+      "source": "examples/shapekernel/ex-base-lens.ts",
+      "destinations": [
+        "base-lens/ex-base-lens.ts"
+      ]
+    },
+    {
+      "sha256": "b3e9510cc1dbaf6f4c1dcd0a0285dcec193c996e0def1e09d282c9a964940439",
+      "source": "examples/shapekernel/ex-base-pipe-segment.ts",
+      "destinations": [
+        "base-pipe-segment/ex-base-pipe-segment.ts"
+      ]
+    },
+    {
+      "sha256": "91ac01ae514a459c1d3fc7907450b75ecc44491e9c091b5d63f018953f1b03b9",
+      "source": "examples/shapekernel/ex-base-pipe.ts",
+      "destinations": [
+        "base-pipe/ex-base-pipe.ts",
+        "base-pipe-segment/ex-base-pipe.ts"
+      ]
+    },
+    {
+      "sha256": "c0a0c20ef419223d26dd6d56f6dad2f7803d7e1752697d6df92b84a28975e9c3",
+      "source": "examples/shapekernel/ex-base-ring.ts",
+      "destinations": [
+        "base-ring/ex-base-ring.ts"
+      ]
+    },
+    {
+      "sha256": "f791bbdfa28faf2d2c8a2a0d9c092e0efaae7f951b0ea8df9c86132082f2dba9",
+      "source": "examples/shapekernel/ex-base-sphere.ts",
+      "destinations": [
+        "base-sphere/ex-base-sphere.ts"
+      ]
+    },
+    {
+      "sha256": "8ffba835e9eed185c12f986a2efed8738f31d9d053aaadb4dbeb821f2692b7ee",
+      "source": "examples/shapekernel/ex-basic-lattices.ts",
+      "destinations": [
+        "basic-lattices/ex-basic-lattices.ts"
+      ]
+    },
+    {
+      "sha256": "b181d493bf4f8ad1f6604f8de8feb6c8a6bb5ef69c0d1b4fb74fd8c90f10d509",
+      "source": "examples/shapekernel/ex-implicit-gyroid-genus.ts",
+      "destinations": [
+        "implicit-gyroid-genus/ex-implicit-gyroid-genus.ts"
+      ]
+    },
+    {
+      "sha256": "902d0657c0fe65f1dff3764d3fd8fe1c16b8fbb36b342b6b7622a30b4544210a",
+      "source": "examples/shapekernel/ex-implicit-gyroid-sphere.ts",
+      "destinations": [
+        "implicit-gyroid-sphere/ex-implicit-gyroid-sphere.ts"
+      ]
+    },
+    {
+      "sha256": "3457163a0dfa784419c894603b50f3133555c204d2031c26502f761bbda73ae5",
+      "source": "examples/shapekernel/ex-implicit-super-ellipsoid.ts",
+      "destinations": [
+        "implicit-super-ellipsoid/ex-implicit-super-ellipsoid.ts"
+      ]
+    },
+    {
+      "sha256": "d94d52f54d885e95ee8f5a2a71f2bfaa5cada320705021b1d1652f8bf2a40913",
+      "source": "examples/shapekernel/ex-lattice-manifold.ts",
+      "destinations": [
+        "lattice-manifold/ex-lattice-manifold.ts"
+      ]
+    },
+    {
+      "sha256": "d52162a709488e932c7a69ae5a49ab5bfb7ce707cb87858e0f982135959067a8",
+      "source": "examples/shapekernel/ex-lattice-pipe.ts",
+      "destinations": [
+        "lattice-pipe/ex-lattice-pipe.ts"
+      ]
+    },
+    {
+      "sha256": "39df6158a1e824715352ce8d78cb00330a2b41eaa09c965b04a4f50f4cddf660",
+      "source": "examples/shapekernel/ex-mesh-painter.ts",
+      "destinations": [
+        "mesh-painter/ex-mesh-painter.ts"
+      ]
+    },
+    {
+      "sha256": "67630c8f820868ee422f5975c054edac1aaf230579d6695aa9e79b89d36b8f29",
+      "source": "examples/shapekernel/ex-mesh-trafo.ts",
+      "destinations": [
+        "mesh-trafo/ex-mesh-trafo.ts"
+      ]
+    },
+    {
+      "sha256": "3b150d6c1c8ee580091b3320c0a86b907efaddbdbc08acf95071a80f62fc4568",
+      "source": "examples/shapekernel/ex-over-offset.ts",
+      "destinations": [
+        "over-offset/ex-over-offset.ts"
+      ]
+    },
+    {
+      "sha256": "e84ae61a1348b898f8f6431917657f695165c07e989adb52680f6a1bac43fcac",
+      "source": "examples/shapekernel/example-spline.ts",
+      "destinations": [
+        "base-box/example-spline.ts",
+        "base-cylinder/example-spline.ts",
+        "base-pipe/example-spline.ts",
+        "base-pipe-segment/example-spline.ts",
+        "lattice-pipe/example-spline.ts"
+      ]
+    },
+    {
+      "sha256": "b28abc00824f4b232d5294b28926f4dda3a77b7d8292f53d6248d71a1ce4d4f8",
+      "source": "examples/simulation/run.ts",
+      "destinations": [
+        "simple-fluid-simulation/run.ts"
+      ]
+    },
+    {
+      "sha256": "38edceff38938c3350f4e198af08753c04949a95adf14861197e2209c545559d",
+      "source": "examples/simulation/simpleFlowDevice.ts",
+      "destinations": [
+        "simple-fluid-simulation/simpleFlowDevice.ts"
+      ]
+    },
+    {
+      "sha256": "c355e7f45c9b514fe12e34babeb720dd98db1be69fe7629f4808c3dfc0a86c48",
+      "source": "examples/simulation/simpleFluidSimulationInput.ts",
+      "destinations": [
+        "simple-fluid-simulation/simpleFluidSimulationInput.ts"
+      ]
+    },
+    {
+      "sha256": "1ad222f44003821956b975ba05f9cfa8142316765599dd28ef5f77862286ea67",
+      "source": "examples/simulation/simpleFluidSimulationOutput.ts",
+      "destinations": [
+        "simple-fluid-simulation/simpleFluidSimulationOutput.ts"
+      ]
+    }
+  ],
+  "demoSources": [
+    {
+      "source": "demo/main.ts#buildGyroid",
+      "destination": "gyroid-sdf/main.ts"
+    },
+    {
+      "source": "demo/main.ts#buildCsg",
+      "destination": "sphere-minus-beams/main.ts"
+    },
+    {
+      "source": "demo/main.ts#buildKnot",
+      "destination": "torus-knot-round-trip/main.ts"
+    }
+  ],
+  "visualCases": [
+    {
+      "project": "hello-world",
+      "parameters": {}
+    },
+    {
+      "project": "boolean-showcase",
+      "parameters": {}
+    },
+    {
+      "project": "gear",
+      "parameters": {}
+    },
+    {
+      "project": "base-box",
+      "parameters": {}
+    },
+    {
+      "project": "base-cylinder",
+      "parameters": {}
+    },
+    {
+      "project": "base-lens",
+      "parameters": {}
+    },
+    {
+      "project": "base-pipe-segment",
+      "parameters": {}
+    },
+    {
+      "project": "base-pipe",
+      "parameters": {}
+    },
+    {
+      "project": "base-ring",
+      "parameters": {}
+    },
+    {
+      "project": "base-sphere",
+      "parameters": {}
+    },
+    {
+      "project": "basic-lattices",
+      "parameters": {}
+    },
+    {
+      "project": "implicit-gyroid-genus",
+      "parameters": {}
+    },
+    {
+      "project": "implicit-gyroid-sphere",
+      "parameters": {}
+    },
+    {
+      "project": "implicit-super-ellipsoid",
+      "parameters": {}
+    },
+    {
+      "project": "lattice-manifold",
+      "parameters": {}
+    },
+    {
+      "project": "lattice-pipe",
+      "parameters": {}
+    },
+    {
+      "project": "mesh-painter",
+      "parameters": {}
+    },
+    {
+      "project": "mesh-trafo",
+      "parameters": {}
+    },
+    {
+      "project": "over-offset",
+      "parameters": {}
+    },
+    {
+      "project": "implicit-logic-split",
+      "parameters": {}
+    },
+    {
+      "project": "implicit-modular",
+      "parameters": {}
+    },
+    {
+      "project": "implicit-radial",
+      "parameters": {}
+    },
+    {
+      "project": "implicit-random",
+      "parameters": {}
+    },
+    {
+      "project": "implicit-regular",
+      "parameters": {}
+    },
+    {
+      "project": "lattice-conformal",
+      "parameters": {}
+    },
+    {
+      "project": "lattice-regular",
+      "parameters": {}
+    },
+    {
+      "project": "helix-heat-x",
+      "parameters": {}
+    },
+    {
+      "project": "quasicrystal",
+      "parameters": {}
+    },
+    {
+      "project": "rover-wheel",
+      "parameters": {}
+    },
+    {
+      "project": "simple-fluid-simulation",
+      "parameters": {}
+    },
+    {
+      "project": "gyroid-sdf",
+      "parameters": {}
+    },
+    {
+      "project": "sphere-minus-beams",
+      "parameters": {}
+    },
+    {
+      "project": "torus-knot-round-trip",
+      "parameters": {}
+    },
+    {
+      "project": "quasicrystal",
+      "parameters": {
+        "generations": 1
+      }
+    },
+    {
+      "project": "quasicrystal",
+      "parameters": {
+        "generations": 2
+      }
+    },
+    {
+      "project": "rover-wheel",
+      "parameters": {
+        "random": true,
+        "seed": 1
+      }
+    }
+  ]
+}
+

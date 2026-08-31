@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { wrapMessagePort } from '@taucad/rpc';
 import type { Port } from '@taucad/rpc';
 import { createBridgeServer } from '@taucad/rpc/bridge';
-import { createFileSystemBridgeHello, fileSystemBridgeSchemas } from '@taucad/fs-bridge';
+import {
+  createFileSystemBridgeHello,
+  fileSystemBridgeProtocolVersion,
+  fileSystemBridgeSchemas,
+} from '@taucad/fs-bridge';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
@@ -114,7 +118,7 @@ describe('createWorkerFileSystemProxy', () => {
     await expect(createWorkerFileSystemProxy(channel.port2)).rejects.toMatchObject({
       name: 'FileSystemBridgeProtocolVersionError',
       code: 'FILESYSTEM_BRIDGE_PROTOCOL_VERSION_MISMATCH',
-      expected: 2,
+      expected: fileSystemBridgeProtocolVersion,
       received: undefined,
     });
 
@@ -125,7 +129,7 @@ describe('createWorkerFileSystemProxy', () => {
     const channel = new MessageChannel();
     const server = createBridgeServer({}, wrapMessagePort(channel.port1), {
       hello: {
-        v: 1,
+        v: fileSystemBridgeProtocolVersion + 1,
         capabilities: { persistent: false, writable: true, quotaBased: false },
         watchable: false,
       },
@@ -134,8 +138,8 @@ describe('createWorkerFileSystemProxy', () => {
     await expect(createWorkerFileSystemProxy(channel.port2)).rejects.toMatchObject({
       name: 'FileSystemBridgeProtocolVersionError',
       code: 'FILESYSTEM_BRIDGE_PROTOCOL_VERSION_MISMATCH',
-      expected: 2,
-      received: 1,
+      expected: fileSystemBridgeProtocolVersion,
+      received: fileSystemBridgeProtocolVersion + 1,
     });
 
     server.dispose();

@@ -24,7 +24,34 @@ CC=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.
 env -u CODEX_COMPANION_SESSION_ID node "$CC" setup --json
 ```
 
-Requires `ready: true`. If Codex is missing or logged out, stop and report — do not try to install or authenticate.
+Gate on `codex.available` and `auth.loggedIn`. **Do not gate on the aggregate `ready` field.**
+
+`setup` verifies auth through the shared broker, so while any Codex turn is in flight — including one
+started by another Claude session on this repository — it returns:
+
+```jsonc
+{ "ready": false, "auth": { "verified": null, "detail": "Shared Codex broker is busy." } }
+```
+
+That is a **healthy** state proving a lane is running, not a fault. Dispatch is unaffected: `task` and
+`review` catch the busy code and fall back to a private app-server automatically. Gating a wave on
+`ready: true` will stall a program behind a concurrent session for no reason.
+
+Run `setup` once before the first dispatch, not as a per-wave gate. If Codex is missing or logged out,
+stop and report — do not try to install or authenticate.
+
+### Concurrency across sessions
+
+The plugin runs **one broker per workspace root** (git toplevel), shared by every client in that
+repository including other Claude sessions, and it is strict single-flight: one in-flight request or
+stream at a time, others rejected with `-32001 Shared Codex broker is busy`. The automatic fallback to
+a private app-server means lanes still run concurrently — measured: a second lane dispatched and
+completed while a long turn held the broker.
+
+Two consequences worth knowing. A session ending tears down the shared broker, so a concurrent
+session's next call takes the direct-fallback path — a wobble, not a failure. And if you want brokers
+that are genuinely independent across sessions, give each its own workspace root via the opt-in
+worktree mode below.
 
 ## Workflow
 

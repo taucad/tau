@@ -27,10 +27,11 @@ export type InfiniteGridMaterialProperties = {
   readonly color?: Color;
   readonly axes?: 'xyz' | 'xzy' | 'zyx';
   readonly lineOpacity?: number;
-  readonly minGridDistance?: number;
-  readonly gridDistanceMultiplier?: number;
-  readonly alphaThreshold?: number;
+  readonly gridDistance?: number;
   readonly fadeStart?: number;
   readonly fadeEnd?: number;
-  readonly normalOffset?: number;
+  readonly planeOffset?: number;
+  readonly smallPhase?: readonly [number, number];
+  readonly largePhase?: readonly [number, number];
+  readonly alphaThreshold?: number;
 };

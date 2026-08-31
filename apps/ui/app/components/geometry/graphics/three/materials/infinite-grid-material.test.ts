@@ -1,9 +1,11 @@
 // @vitest-environment node
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { createCameraView } from '@taucad/camera';
-import { createThreeCameraRig } from '@taucad/three/camera';
 import { createInfiniteGridGlMaterial } from '#components/geometry/graphics/three/materials/infinite-grid-material.js';
+import {
+  infiniteGridFadeEndRatio,
+  infiniteGridFadeStartRatio,
+} from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 
 describe('createInfiniteGridGlMaterial', () => {
   it('includes colorspace_fragment after writing gl_FragColor so WebGL matches WebGPU NodeMaterial output encoding', () => {
@@ -38,6 +40,10 @@ describe('createInfiniteGridGlMaterial', () => {
       largeSize: 100,
       color: overrideColor,
       lineOpacity: 0.7,
+      gridDistance: 800,
+      planeOffset: -42,
+      smallPhase: [0.25, 0.75],
+      largePhase: [0.125, 0.625],
     });
 
     expect(material.uniforms['uSmallSize']!.value).toBe(2);
@@ -45,51 +51,50 @@ describe('createInfiniteGridGlMaterial', () => {
     expect(material.uniforms['uColor']!.value).toBeInstanceOf(THREE.Color);
     expect((material.uniforms['uColor']!.value as THREE.Color).getHex()).toBe(0xaa_bb_cc);
     expect(material.uniforms['uLineOpacity']!.value).toBe(0.7);
+    expect(material.uniforms['uGridDistance']!.value).toBe(800);
+    expect(material.uniforms['uPlaneOffset']!.value).toBe(-42);
+    expect((material.uniforms['uSmallPhase']!.value as THREE.Vector2).toArray()).toEqual([0.25, 0.75]);
+    expect((material.uniforms['uLargePhase']!.value as THREE.Vector2).toArray()).toEqual([0.125, 0.625]);
   });
 
-  it('keeps fully opaque on-screen grid samples inside both endpoint camera depth ranges', () => {
+  it('uses backend depth bias instead of displacing the physical plane', () => {
     const { material } = createInfiniteGridGlMaterial();
-    const distanceMultiplier = Number(material.uniforms['uGridDistanceMultiplier']!.value);
-    const fadeStart = Number(material.uniforms['uFadeStart']!.value);
-    const rig = createThreeCameraRig({
-      initialView: createCameraView({
-        requestedVerticalFieldOfView: 60,
-        perspectiveZoom: 1,
-        target: [0, 0, 0],
-        direction: [1, -1, 0.7],
-        up: [0, 0, 1],
-        verticalSpan: 600,
-        viewport: { width: 1536, height: 900, pixelRatio: 2 },
-        bounds: { min: [-220, -180, -55], max: [220, 180, 55] },
-      }),
-    });
-    rig.actorRef.start();
-    rig.setClipPlanes({
-      near: 1e-3,
-      minimumPerspectiveFar: 10_000_000_000,
-      orthographicFarMultiplier: 5,
-    });
 
-    expect(rig.orthographicCamera.far).toBeLessThan(rig.perspectiveCamera.far);
+    expect(material.polygonOffset).toBe(true);
+    expect(material.polygonOffsetFactor).toBe(1);
+    expect(material.polygonOffsetUnits).toBe(1);
+    expect(material.uniforms).not.toHaveProperty('uNormalOffset');
+    expect(material.vertexShader).not.toContain('uNormalOffset');
+  });
 
-    for (const camera of [rig.perspectiveCamera, rig.orthographicCamera]) {
-      const cameraDistance = camera.position.length();
-      const planarCameraDirection = new THREE.Vector3(camera.position.x, camera.position.y, 0).normalize();
-      const samples = [
-        planarCameraDirection.clone().multiplyScalar(-cameraDistance * distanceMultiplier * fadeStart * 0.7),
-        planarCameraDirection.clone().multiplyScalar(cameraDistance * distanceMultiplier * fadeStart * 0.4),
-      ];
+  it('centres the proxy in one render-world coordinate frame', () => {
+    const { material } = createInfiniteGridGlMaterial();
 
-      for (const sample of samples) {
-        const projected = sample.project(camera);
-        expect(Math.abs(projected.x)).toBeLessThanOrEqual(1);
-        expect(Math.abs(projected.y)).toBeLessThanOrEqual(1);
-        expect(projected.z).toBeGreaterThanOrEqual(-1);
-        expect(projected.z).toBeLessThanOrEqual(1);
-      }
-    }
+    expect(material.vertexShader).toContain('renderPlanePosition = cameraPlane + position.xy * uGridDistance');
+    expect(material.vertexShader).toContain('projectionMatrix * viewMatrix * vec4(renderPosition, 1.0)');
+    expect(material.fragmentShader).not.toContain('distance(cameraPlane, renderPlanePosition)');
+    expect(material.vertexShader).not.toContain('modelViewMatrix');
+    expect(material.fragmentShader).not.toContain('length(cameraPosition)');
+  });
 
-    rig.dispose();
-    material.dispose();
+  it('fades radially before the camera-sized proxy boundary and renders a double-sided plane in one pass', () => {
+    const { material } = createInfiniteGridGlMaterial();
+
+    expect(material.uniforms['uFadeStart']!.value).toBe(infiniteGridFadeStartRatio);
+    expect(material.uniforms['uFadeEnd']!.value).toBe(infiniteGridFadeEndRatio);
+    expect(material.fragmentShader).toContain('float radialDistanceRatio = length(gridProxyPosition)');
+    expect(material.fragmentShader).toContain('1.0 - smoothstep(uFadeStart, uFadeEnd, radialDistanceRatio)');
+    expect(material.fragmentShader).toContain('grid * fadeFactor * uLineOpacity');
+    expect(material.side).toBe(THREE.DoubleSide);
+    expect(material.forceSinglePass).toBe(true);
+  });
+
+  it('derives the camera-plane footprint once and scales it for both grid levels', () => {
+    const { material } = createInfiniteGridGlMaterial();
+
+    expect(material.fragmentShader.match(/dFdx\(renderPlanePosition\)/g)).toHaveLength(1);
+    expect(material.fragmentShader.match(/dFdy\(renderPlanePosition\)/g)).toHaveLength(1);
+    expect(material.fragmentShader).toContain('planeDeriv / uSmallSize');
+    expect(material.fragmentShader).toContain('planeDeriv / uLargeSize');
   });
 });

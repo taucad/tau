@@ -6,6 +6,10 @@ import type {
   InfiniteGridMaterialProperties,
   InfiniteGridVisualOverrides,
 } from '#components/geometry/graphics/three/materials/infinite-grid-material.types.js';
+import {
+  infiniteGridFadeEndRatio,
+  infiniteGridFadeStartRatio,
+} from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- `infinite-grid-material.ts` façade re-exports public types beside implementations */
 export type {
@@ -43,12 +47,13 @@ export function createInfiniteGridGlMaterial(
     smallThickness = 1.25,
     largeThickness = 2,
     lineOpacity = 0.3,
-    minGridDistance = 10,
-    gridDistanceMultiplier = 20,
-    fadeStart = 0.05,
-    fadeEnd = 0.2,
+    gridDistance = 20,
+    fadeStart = infiniteGridFadeStartRatio,
+    fadeEnd = infiniteGridFadeEndRatio,
+    planeOffset = 0,
+    smallPhase = [0, 0],
+    largePhase = [0, 0],
     alphaThreshold = 0.01,
-    normalOffset = 0.001,
   } = properties ?? {};
 
   // Validate and convert axes parameter to numeric index
@@ -62,6 +67,9 @@ export function createInfiniteGridGlMaterial(
     side: THREE.DoubleSide,
     transparent: true,
     depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
     uniforms: {
       uSmallSize: {
         value: smallSize,
@@ -81,14 +89,8 @@ export function createInfiniteGridGlMaterial(
       uLineOpacity: {
         value: lineOpacity,
       },
-      uMinGridDistance: {
-        value: minGridDistance,
-      },
-      uGridDistanceMultiplier: {
-        value: gridDistanceMultiplier,
-      },
-      uAlphaThreshold: {
-        value: alphaThreshold,
+      uGridDistance: {
+        value: gridDistance,
       },
       uFadeStart: {
         value: fadeStart,
@@ -96,54 +98,56 @@ export function createInfiniteGridGlMaterial(
       uFadeEnd: {
         value: fadeEnd,
       },
+      uPlaneOffset: {
+        value: planeOffset,
+      },
+      uSmallPhase: {
+        value: new THREE.Vector2(...smallPhase),
+      },
+      uLargePhase: {
+        value: new THREE.Vector2(...largePhase),
+      },
+      uAlphaThreshold: {
+        value: alphaThreshold,
+      },
       uAxes: {
         value: axesIndex,
-      },
-      uNormalOffset: {
-        value: normalOffset,
       },
     },
 
     vertexShader: `
       #include <common>
       #include <logdepthbuf_pars_vertex>
-      varying vec3 worldPosition;
-  
-      uniform float uGridDistanceMultiplier;
-      uniform float uMinGridDistance;
-      uniform float uNormalOffset;
+      varying vec2 renderPlanePosition;
+      varying vec2 gridProxyPosition;
+
+      uniform float uGridDistance;
+      uniform float uPlaneOffset;
       uniform int uAxes;
       
       void main() {
-        // Calculate the camera distance
-        float cameraDistance = length(cameraPosition);
-        
-        // Calculate grid distance without distance normalization
-        float gridDistance = cameraDistance * uGridDistanceMultiplier;
-        
-        // Always ensure a reasonable minimum distance
-        gridDistance = max(gridDistance, uMinGridDistance);
-        
-        // Scale the grid based on the calculated distance
-        // Use conditional logic instead of string interpolation for security
-        vec3 pos;
+        gridProxyPosition = position.xy;
+        vec2 cameraPlane;
         if (uAxes == 0) {
-          // xyz: Grid on XY plane with Z as normal
-          pos = position.xyz * gridDistance;
-          pos.z -= uNormalOffset;
+          cameraPlane = cameraPosition.xy;
         } else if (uAxes == 1) {
-          // xzy: Grid on XZ plane with Y as normal
-          pos = position.xzy * gridDistance;
-          pos.y -= uNormalOffset;
+          cameraPlane = cameraPosition.xz;
         } else {
-          // zyx: Grid on ZY plane with X as normal
-          pos = position.zyx * gridDistance;
-          pos.x -= uNormalOffset;
+          cameraPlane = cameraPosition.zy;
         }
-        
-        worldPosition = pos;
-        
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+
+        renderPlanePosition = cameraPlane + position.xy * uGridDistance;
+
+        vec3 renderPosition;
+        if (uAxes == 0) {
+          renderPosition = vec3(renderPlanePosition, uPlaneOffset);
+        } else if (uAxes == 1) {
+          renderPosition = vec3(renderPlanePosition.x, uPlaneOffset, renderPlanePosition.y);
+        } else {
+          renderPosition = vec3(uPlaneOffset, renderPlanePosition.y, renderPlanePosition.x);
+        }
+
+        gl_Position = projectionMatrix * viewMatrix * vec4(renderPosition, 1.0);
         
         #include <logdepthbuf_vertex>
       }
@@ -153,7 +157,8 @@ export function createInfiniteGridGlMaterial(
       #include <common>
       #include <logdepthbuf_pars_fragment>
       
-      varying vec3 worldPosition;
+      varying vec2 renderPlanePosition;
+      varying vec2 gridProxyPosition;
       
       uniform float uSmallSize;
       uniform float uLargeSize;
@@ -161,24 +166,17 @@ export function createInfiniteGridGlMaterial(
       uniform float uLargeThickness;
       uniform vec3 uColor;
       uniform float uLineOpacity;
-      uniform float uGridDistanceMultiplier;
-      uniform float uMinGridDistance;
-      uniform float uAlphaThreshold;
       uniform float uFadeStart;
       uniform float uFadeEnd;
-      uniform int uAxes;
+      uniform vec2 uSmallPhase;
+      uniform vec2 uLargePhase;
+      uniform float uAlphaThreshold;
 
       // Pristine Grid — based on Ben Golus's "The Best Darn Grid Shader (Yet)"
       // https://bgolus.medium.com/the-best-darn-grid-shader-yet-727f9278b9d8
       // Adapted for constant-pixel-width lines with phone-wire AA,
       // draw width clamping, Moire suppression, and premultiplied alpha blending.
-      float pristineGrid(vec2 uv, float thickness) {
-        // Per-axis screen-space derivatives using length() instead of fwidth().
-        // fwidth() = abs(dFdx) + abs(dFdy) overestimates on diagonals;
-        // length() gives the geometrically correct derivative magnitude per axis.
-        vec4 uvDDXY = vec4(dFdx(uv), dFdy(uv));
-        vec2 uvDeriv = vec2(length(uvDDXY.xz), length(uvDDXY.yw));
-        
+      float pristineGrid(vec2 uv, vec2 uvDeriv, float thickness) {
         // Convert pixel thickness to UV-space line width (fraction of cell).
         // Clamp to [0, 1] since a line cannot be wider than the cell itself.
         vec2 targetWidth = clamp(uvDeriv * thickness, 0.0, 1.0);
@@ -221,66 +219,43 @@ export function createInfiniteGridGlMaterial(
       
       void main() {
         #include <logdepthbuf_fragment>
-        
-        // Extract plane axes based on configuration
-        // Use conditional logic instead of string interpolation for security
-        vec2 worldPlane;
-        vec2 cameraPlane;
-        
-        if (uAxes == 0) {
-          // xyz: Grid on XY plane
-          worldPlane = worldPosition.xy;
-          cameraPlane = cameraPosition.xy;
-        } else if (uAxes == 1) {
-          // xzy: Grid on XZ plane
-          worldPlane = worldPosition.xz;
-          cameraPlane = cameraPosition.xz;
-        } else {
-          // zyx: Grid on ZY plane
-          worldPlane = worldPosition.zy;
-          cameraPlane = cameraPosition.zy;
-        }
-        
-        // Calculate planar distance - distance in the grid plane
-        float planarDistance = distance(cameraPlane, worldPlane);
-        
-        // Calculate the camera distance
-        float cameraDistance = length(cameraPosition);
-        
-        // Calculate grid distance with scaling factors
-        float gridDistance = cameraDistance * uGridDistanceMultiplier;
-        
-        // Ensure minimum distance
-        gridDistance = max(gridDistance, uMinGridDistance);
-        
-        // Calculate distance ratio
-        float distanceRatio = planarDistance / gridDistance;
-        
-        // Calculate fade factor using smoothstep for cleaner fade
-        float fadeFactor = smoothstep(uFadeEnd, uFadeStart, distanceRatio);
+
+        // Screen-space footprint is linear in the reciprocal cell size, so derive
+        // the camera-plane footprint once and scale it for both grid levels.
+        vec4 planeDDXY = vec4(dFdx(renderPlanePosition), dFdy(renderPlanePosition));
+        vec2 planeDeriv = vec2(length(planeDDXY.xz), length(planeDDXY.yw));
+        vec2 smallDeriv = planeDeriv / uSmallSize;
+        vec2 largeDeriv = planeDeriv / uLargeSize;
         
         // Compute grid for both scales using Pristine Grid algorithm.
         // Each grid gets its own UV space (worldPlane / size) so the
         // derivative-based antialiasing is computed per-scale.
-        float gridSmall = pristineGrid(worldPlane / uSmallSize, uSmallThickness);
-        float gridLarge = pristineGrid(worldPlane / uLargeSize, uLargeThickness);
+        float gridSmall = pristineGrid(renderPlanePosition / uSmallSize + uSmallPhase, smallDeriv, uSmallThickness);
+        float gridLarge = pristineGrid(renderPlanePosition / uLargeSize + uLargePhase, largeDeriv, uLargeThickness);
         
         // Combine grids using premultiplied alpha blend (large over small).
         // Where large grid lines exist, they take priority; elsewhere the
         // small grid shows through. This is equivalent to layered alpha
         // compositing and produces correct brightness at intersections.
         float grid = mix(gridSmall, 1.0, gridLarge);
+        float radialDistanceRatio = length(gridProxyPosition);
+        float fadeFactor = 1.0 - smoothstep(uFadeStart, uFadeEnd, radialDistanceRatio);
         
         // Apply final color with basic opacity (linear working space)
         gl_FragColor = vec4(uColor.rgb, grid * fadeFactor * uLineOpacity);
         
         // Use a simple alpha threshold
         if (gl_FragColor.a < uAlphaThreshold) discard;
+
+        #ifdef USE_LOGARITHMIC_DEPTH_BUFFER
+          gl_FragDepth = min(1.0, gl_FragDepth + 1.1920929665620903e-7);
+        #endif
         
         #include <colorspace_fragment>
       }
       `,
   });
+  material.forceSinglePass = true;
 
   const applyVisualOverrides = (overrides: InfiniteGridVisualOverrides): void => {
     if (overrides.smallSize !== undefined) {
@@ -297,6 +272,22 @@ export function createInfiniteGridGlMaterial(
 
     if (overrides.lineOpacity !== undefined) {
       material.uniforms['uLineOpacity']!.value = overrides.lineOpacity;
+    }
+
+    if (overrides.gridDistance !== undefined) {
+      material.uniforms['uGridDistance']!.value = overrides.gridDistance;
+    }
+
+    if (overrides.planeOffset !== undefined) {
+      material.uniforms['uPlaneOffset']!.value = overrides.planeOffset;
+    }
+
+    if (overrides.smallPhase !== undefined) {
+      (material.uniforms['uSmallPhase']!.value as THREE.Vector2).set(...overrides.smallPhase);
+    }
+
+    if (overrides.largePhase !== undefined) {
+      (material.uniforms['uLargePhase']!.value as THREE.Vector2).set(...overrides.largePhase);
     }
   };
 

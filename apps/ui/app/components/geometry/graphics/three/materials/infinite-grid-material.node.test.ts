@@ -15,8 +15,10 @@ describe('infiniteGridNodeMaterial TSL snapshots', () => {
       axes: 'xzy',
       smallThickness: 1.25,
       largeThickness: 2,
-      minGridDistance: 8,
-      gridDistanceMultiplier: 18,
+      gridDistance: 80,
+      planeOffset: -12,
+      smallPhase: [0.25, 0.75],
+      largePhase: [0.125, 0.625],
     });
 
     const serialised = serialiseStrippedTslGraph(material.toJSON());

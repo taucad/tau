@@ -3,6 +3,7 @@
   "color": 16777215,
   "depthWrite": false,
   "envMapRotation": [0, 0, 0, "XYZ"],
+  "forceSinglePass": true,
   "inputNodes": {
     "colorNode": "<nodeRef>",
     "vertexNode": "<nodeRef>"
@@ -44,6 +45,9 @@
       "type": "Node"
     }
   ],
+  "polygonOffset": true,
+  "polygonOffsetFactor": -1,
+  "polygonOffsetUnits": -1,
   "reflectivity": 1,
   "refractionRatio": 0.98,
   "side": 2,

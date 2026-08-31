@@ -1,16 +1,16 @@
-/* oxlint-disable eslint(new-cap) -- three/tsl `Fn`/`If`/`ElseIf`/`Else` are shader graph factories */
+/* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`ElseIf`/`Else` are shader graph factories */
 
-import { Color, DoubleSide } from 'three';
+import { Color, DoubleSide, Vector2 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
   abs,
   add,
   cameraPosition,
   cameraProjectionMatrix,
+  cameraViewMatrix,
   clamp,
   dFdx,
   dFdy,
-  distance,
   div,
   float,
   Fn,
@@ -19,7 +19,6 @@ import {
   length,
   max,
   mix,
-  modelViewMatrix,
   mul,
   positionLocal,
   smoothstep,
@@ -28,6 +27,7 @@ import {
   vec2,
   vec3,
   vec4,
+  varying,
   varyingProperty,
 } from 'three/tsl';
 
@@ -36,6 +36,10 @@ import type {
   InfiniteGridMaterialProperties,
   InfiniteGridVisualOverrides,
 } from '#components/geometry/graphics/three/materials/infinite-grid-material.types.js';
+import {
+  infiniteGridFadeEndRatio,
+  infiniteGridFadeStartRatio,
+} from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 
 const mapAxesToIndex = (axes: 'xyz' | 'xzy' | 'zyx'): number => {
   if (axes === 'xyz') {
@@ -55,16 +59,10 @@ const mapAxesToIndex = (axes: 'xyz' | 'xzy' | 'zyx'): number => {
  * `NodeBuilder` declaration names would collide (see `docs/policy/graphics-backend-policy.md`).
  */
 /* oxlint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument -- TSL `Fn` shader ports omit stable `vec2`/`float` generics in `@types/three` */
-const pristineGridIntensity = Fn(({ uv, thickness }: { uv: any; thickness: any }) => {
-  const ddxUv = dFdx(uv).toVar();
-  const ddyUv = dFdy(uv).toVar();
-  const uvDdxyPacked = vec4(ddxUv.x, ddxUv.y, ddyUv.x, ddyUv.y).toVar();
-
-  const uvDeriv = vec2(length(uvDdxyPacked.xz), length(uvDdxyPacked.yw)).toVar();
-
+const pristineGridIntensity = Fn(({ uv, uvDeriv, thickness }: { uv: any; uvDeriv: any; thickness: any }) => {
   const targetWidth = clamp(mul(uvDeriv, thickness), float(0), float(1)).toVar();
   const drawWidth = clamp(targetWidth, uvDeriv, vec2(float(0.5), float(0.5))).toVar();
-  const lineAntiAliasScale = mul(max(uvDeriv, float(1e-6)), float(1.5)).toVar();
+  const lineAntiAliasScale = mul(max(uvDeriv, vec2(float(1e-6), float(1e-6))), float(1.5)).toVar();
 
   const planarUv = vec2(uv.x, uv.y);
   const gridUv = sub(float(1), abs(sub(mul(fract(planarUv), float(2)), float(1)))).toVar();
@@ -102,12 +100,13 @@ export function createInfiniteGridNodeMaterial(
     smallThickness = 1.25,
     largeThickness = 2,
     lineOpacity = 0.3,
-    minGridDistance = 10,
-    gridDistanceMultiplier = 20,
-    fadeStart = 0.05,
-    fadeEnd = 0.2,
+    gridDistance = 20,
+    fadeStart = infiniteGridFadeStartRatio,
+    fadeEnd = infiniteGridFadeEndRatio,
+    planeOffset = 0,
+    smallPhase = [0, 0],
+    largePhase = [0, 0],
     alphaThreshold = 0.01,
-    normalOffset = 0.001,
   } = properties ?? {};
 
   if (!['xyz', 'xzy', 'zyx'].includes(axes)) {
@@ -115,7 +114,8 @@ export function createInfiniteGridNodeMaterial(
   }
 
   const axesIndexUniform = uniform(mapAxesToIndex(axes));
-  const worldPosition = varyingProperty('vec3', 'worldPositionTauInfGrid');
+  const renderPlanePosition = varyingProperty('vec2', 'renderPlanePositionTauInfGrid');
+  const gridProxyPosition = varying(positionLocal.xy, 'gridProxyPositionTauInfGrid');
 
   const uSmallSize = uniform(smallSize);
   const uLargeSize = uniform(largeSize);
@@ -123,85 +123,82 @@ export function createInfiniteGridNodeMaterial(
   const uSmallThickness = uniform(smallThickness);
   const uLargeThickness = uniform(largeThickness);
   const uLineOpacity = uniform(lineOpacity);
-  const uMinGridDistance = uniform(minGridDistance);
-  const uGridDistanceMultiplier = uniform(gridDistanceMultiplier);
-  const uFadeStart = uniform(fadeStart);
-  const uFadeEnd = uniform(fadeEnd);
+  const uGridDistance = uniform(gridDistance);
+  const uPlaneOffset = uniform(planeOffset);
+  const uSmallPhase = uniform(new Vector2(...smallPhase));
+  const uLargePhase = uniform(new Vector2(...largePhase));
   const uAlphaThreshold = uniform(alphaThreshold);
-  const uNormalOffset = uniform(normalOffset);
 
   const material = new MeshBasicNodeMaterial({
     side: DoubleSide,
     transparent: true,
     depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   });
 
   material.lights = false;
+  material.forceSinglePass = true;
 
   material.vertexNode = Fn(() => {
-    const vertexCameraDistanceScalar = length(cameraPosition).toVar('tauCamDist');
+    const cameraPlane = vec2().toVar('tauGridCameraPlane');
 
-    const scaledCameraDistance = mul(vertexCameraDistanceScalar, uGridDistanceMultiplier);
-    const gridDistance = max(scaledCameraDistance, uMinGridDistance).toVar('tauGridDist');
+    If(axesIndexUniform.equal(float(0)), () => {
+      cameraPlane.assign(cameraPosition.xy);
+    })
+      .ElseIf(axesIndexUniform.equal(float(1)), () => {
+        cameraPlane.assign(cameraPosition.xz);
+      })
+      .Else(() => {
+        cameraPlane.assign(cameraPosition.zy);
+      });
 
-    const gx = mul(positionLocal.x, gridDistance).toVar('tauGx');
-    const gy = mul(positionLocal.y, gridDistance).toVar('tauGy');
-    const gz = mul(positionLocal.z, gridDistance).toVar('tauGz');
+    renderPlanePosition.assign(add(cameraPlane, mul(positionLocal.xy, uGridDistance)));
 
     const posWorld = vec3().toVar('tauGridWorld');
 
     If(axesIndexUniform.equal(float(0)), () => {
-      posWorld.assign(vec3(gx, gy, sub(gz, uNormalOffset)));
+      posWorld.assign(vec3(renderPlanePosition.x, renderPlanePosition.y, uPlaneOffset));
     })
       .ElseIf(axesIndexUniform.equal(float(1)), () => {
-        posWorld.assign(vec3(gx, sub(gz, uNormalOffset), gy));
+        posWorld.assign(vec3(renderPlanePosition.x, uPlaneOffset, renderPlanePosition.y));
       })
       .Else(() => {
-        posWorld.assign(vec3(sub(gz, uNormalOffset), gy, gx));
+        posWorld.assign(vec3(uPlaneOffset, renderPlanePosition.y, renderPlanePosition.x));
       });
 
-    worldPosition.assign(posWorld);
+    const viewPosition = mul(cameraViewMatrix, vec4(posWorld, float(1))).toVec4();
 
-    const mvPosition = mul(modelViewMatrix, vec4(posWorld, float(1))).toVec4();
-
-    return cameraProjectionMatrix.mul(mvPosition);
+    return cameraProjectionMatrix.mul(viewPosition);
   })();
 
   material.colorNode = Fn(() => {
-    const worldPlane = vec2().toVar('tauWp');
-    const cameraPlane = vec2().toVar('tauCp');
+    const uvSmall = add(div(renderPlanePosition, uSmallSize), uSmallPhase);
+    const uvLarge = add(div(renderPlanePosition, uLargeSize), uLargePhase);
+    const planeDdx = dFdx(renderPlanePosition).toVar('tauGridPlaneDdx');
+    const planeDdy = dFdy(renderPlanePosition).toVar('tauGridPlaneDdy');
+    const planePackedDerivatives = vec4(planeDdx.x, planeDdx.y, planeDdy.x, planeDdy.y);
+    const planeDerivatives = vec2(length(planePackedDerivatives.xz), length(planePackedDerivatives.yw)).toVar(
+      'tauGridPlaneDerivatives',
+    );
 
-    If(axesIndexUniform.equal(float(0)), () => {
-      worldPlane.assign(worldPosition.xy);
-      cameraPlane.assign(cameraPosition.xy);
-    })
-      .ElseIf(axesIndexUniform.equal(float(1)), () => {
-        worldPlane.assign(worldPosition.xz);
-        cameraPlane.assign(cameraPosition.xz);
-      })
-      .Else(() => {
-        worldPlane.assign(worldPosition.zy);
-        cameraPlane.assign(cameraPosition.zy);
-      });
-
-    const planarDistance = distance(worldPlane, cameraPlane).toVar('tauPlanar');
-
-    const fragmentCameraDistanceScalar = length(cameraPosition).toVar('tauCamDistFrag');
-
-    const scaledCameraDistanceFrag = mul(fragmentCameraDistanceScalar, uGridDistanceMultiplier);
-    const gridDistanceFrag = max(scaledCameraDistanceFrag, uMinGridDistance).toVar('tauGridDistFrag');
-
-    const distanceRatio = div(planarDistance, gridDistanceFrag).toVar('tauRatio');
-
-    const fadeFactor = smoothstep(uFadeEnd, uFadeStart, distanceRatio).toVar('tauFade');
-
-    const uvSmall = div(worldPlane, uSmallSize);
-    const uvLarge = div(worldPlane, uLargeSize);
-
-    const gridSmall = pristineGridIntensity({ uv: uvSmall, thickness: uSmallThickness }).toVar('tauGs');
-    const gridLarge = pristineGridIntensity({ uv: uvLarge, thickness: uLargeThickness }).toVar('tauGl');
+    const gridSmall = pristineGridIntensity({
+      uv: uvSmall,
+      uvDeriv: div(planeDerivatives, uSmallSize),
+      thickness: uSmallThickness,
+    }).toVar('tauGs');
+    const gridLarge = pristineGridIntensity({
+      uv: uvLarge,
+      uvDeriv: div(planeDerivatives, uLargeSize),
+      thickness: uLargeThickness,
+    }).toVar('tauGl');
 
     const gridCombined = mix(gridSmall, float(1), gridLarge).toVar('tauGridCombined');
+    const radialDistanceRatio = length(gridProxyPosition).toVar('tauGridRadialDistanceRatio');
+    const fadeFactor = sub(float(1), smoothstep(float(fadeStart), float(fadeEnd), radialDistanceRatio)).toVar(
+      'tauGridFadeFactor',
+    );
 
     const finalAlpha = mul(mul(gridCombined, fadeFactor), uLineOpacity).toVar('tauAlpha');
 
@@ -225,6 +222,22 @@ export function createInfiniteGridNodeMaterial(
 
     if (overrides.lineOpacity !== undefined) {
       uLineOpacity.value = overrides.lineOpacity;
+    }
+
+    if (overrides.gridDistance !== undefined) {
+      uGridDistance.value = overrides.gridDistance;
+    }
+
+    if (overrides.planeOffset !== undefined) {
+      uPlaneOffset.value = overrides.planeOffset;
+    }
+
+    if (overrides.smallPhase !== undefined) {
+      uSmallPhase.value.set(...overrides.smallPhase);
+    }
+
+    if (overrides.largePhase !== undefined) {
+      uLargePhase.value.set(...overrides.largePhase);
     }
   };
 

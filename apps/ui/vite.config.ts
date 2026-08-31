@@ -97,6 +97,10 @@ export default defineConfig(({ mode }) => {
     cacheDir: '../../node_modules/.vite/apps/ui',
     define: {
       tauBuildFrontendUrl: JSON.stringify(buildFrontendUrl ?? ''),
+      // Ordered build identity for the stale-tab skew guard (blueprint DF20).
+      // Evaluated once per build / dev-server start, which is exactly the
+      // granularity at which a tab's app-logic vintage can diverge.
+      tauBuildId: JSON.stringify(Date.now()),
     },
     plugins: [
       createUiSourceAliasPlugin(),

@@ -8,7 +8,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { jscad } from '@taucad/jscad';
-import { parameterCache, geometryCache, gltfCoordinateTransform } from '@taucad/middleware';
+import { parameterCache, geometryCache } from '@taucad/middleware';
 import { esbuild } from '@taucad/esbuild';
 import { authSplashbackMachine, timing as machineTiming } from '#components/geometry/splash/auth-splashback.machine.js';
 import { UnifiedSplashbackViewer } from '#components/geometry/splash/unified-splashback-viewer.js';
@@ -29,7 +29,7 @@ const gearCode = { 'main.js': gearJscad };
 
 const splashbackRuntime = defineRuntime({
   plugins: [jscad(), esbuild()],
-  middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform()],
+  middleware: [parameterCache(), geometryCache()],
 });
 const splashbackKernelClientOptions = {
   runtime: splashbackRuntime,

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Group, MeshStandardMaterial } from 'three';
 import { GLTFLoader } from 'three/addons';
 import type { Geometry } from '@taucad/types';
+import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 /**
  * Result of loading a GLTF geometry with material.
@@ -53,6 +54,7 @@ export async function loadGltfWithMaterial(options: LoadGltfOptions): Promise<Lo
   try {
     const loader = new GLTFLoader();
     const gltf = await loader.parseAsync(geometry.content.buffer, '');
+    applyCanonicalGltfWorld(gltf.scene);
 
     const material = new THREE.MeshStandardMaterial({
       color,

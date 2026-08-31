@@ -2,15 +2,17 @@ import { useRef, useMemo, useEffect } from 'react';
 import type { RefObject } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import type { Points, Group } from 'three';
+import type { Group, Mesh } from 'three';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { createMorphingPointsNodeMaterial } from '#components/geometry/splash/morphing-points-material.node.js';
 import {
   createMorphingPointsMaterial,
+  createMorphingPointsGeometry,
   updateMorphProgress,
   updateMorphTime,
   updateMorphOpacity,
   updateMorphPointer,
+  updateMorphViewport,
 } from '#components/geometry/splash/morphing-points-material.js';
 import {
   updateMorphAnimation,
@@ -161,7 +163,7 @@ export function MorphingPoints({
   const backend = useThreeGraphicsBackend();
   const nodeHandlesRef = useRef<ReturnType<typeof createMorphingPointsNodeMaterial>['handles'] | undefined>(undefined);
 
-  const pointsRef = useRef<Points>(null);
+  const pointsRef = useRef<Mesh>(null);
   const rotationGroupRef = useRef<Group>(null);
   const currentRotationYaxisRef = useRef(initialRotationY);
   const hasSetInitialRotationRef = useRef(false);
@@ -173,18 +175,11 @@ export function MorphingPoints({
 
   // Create the geometry with morph attributes
   const geometry = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-
-    // Set source positions as the base position attribute
-    geo.setAttribute('position', new THREE.BufferAttribute(sourcePoints.positions, 3));
-
-    // Set target positions as a custom attribute
-    geo.setAttribute('aTargetPosition', new THREE.BufferAttribute(targetPoints.positions, 3));
-
-    // Set random offsets for organic movement
-    geo.setAttribute('aRandomOffset', new THREE.BufferAttribute(sourcePoints.randomOffsets, 1));
-
-    return geo;
+    return createMorphingPointsGeometry({
+      sourcePositions: sourcePoints.positions,
+      targetPositions: targetPoints.positions,
+      randomOffsets: sourcePoints.randomOffsets,
+    });
   }, [sourcePoints, targetPoints]);
 
   // Create the morphing points material — GLSL ShaderMaterial or TSL PointsNodeMaterial.
@@ -288,6 +283,7 @@ export function MorphingPoints({
       updateMorphProgress(shaderMaterial, currentProgress);
       updateMorphTime(shaderMaterial, state.clock.elapsedTime);
       updateMorphOpacity(shaderMaterial, opacity);
+      updateMorphViewport(shaderMaterial, state.size.width, state.size.height);
       if (pointer) {
         updateMorphPointer(shaderMaterial, localPointerScratch, pointer.strength);
         if (shaderMaterial.uniforms['uPointerRadius']) {
@@ -300,7 +296,7 @@ export function MorphingPoints({
   return (
     <group ref={rotationGroupRef}>
       <group rotation={rotation}>
-        <points ref={pointsRef} geometry={geometry} material={material} />
+        <mesh ref={pointsRef} frustumCulled={false} geometry={geometry} material={material} />
       </group>
     </group>
   );

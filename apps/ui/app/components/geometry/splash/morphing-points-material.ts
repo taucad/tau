@@ -38,6 +38,30 @@ const defaultOptions: Required<Omit<MorphingPointsMaterialOptions, 'targetColor'
   opacity: 1,
 };
 
+/** Build one retained instanced quad per particle; WebGPU native points cannot exceed one pixel. */
+export const createMorphingPointsGeometry = ({
+  randomOffsets,
+  sourcePositions,
+  targetPositions,
+}: {
+  readonly randomOffsets: Float32Array;
+  readonly sourcePositions: Float32Array;
+  readonly targetPositions: Float32Array;
+}): THREE.InstancedBufferGeometry => {
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.setIndex(quad.getIndex()!.clone());
+  for (const [name, attribute] of Object.entries(quad.attributes)) {
+    geometry.setAttribute(name, attribute.clone());
+  }
+  quad.dispose();
+  geometry.setAttribute('aSourcePosition', new THREE.InstancedBufferAttribute(sourcePositions, 3));
+  geometry.setAttribute('aTargetPosition', new THREE.InstancedBufferAttribute(targetPositions, 3));
+  geometry.setAttribute('aRandomOffset', new THREE.InstancedBufferAttribute(randomOffsets, 1));
+  geometry.instanceCount = randomOffsets.length;
+  return geometry;
+};
+
 /**
  * Vertex shader for morphing points.
  *
@@ -48,7 +72,9 @@ const defaultOptions: Required<Omit<MorphingPointsMaterialOptions, 'targetColor'
  * - Dynamic point sizing
  */
 const vertexShader = /* glsl */ `
+  #include <common>
   attribute vec3 aTargetPosition;
+  attribute vec3 aSourcePosition;
   attribute float aRandomOffset;
 
   uniform float uProgress;
@@ -58,9 +84,11 @@ const vertexShader = /* glsl */ `
   uniform vec3 uPointer;
   uniform float uPointerStrength;
   uniform float uPointerRadius;
+  uniform vec2 uViewportSize;
 
   varying float vProgress;
   varying float vRandomOffset;
+  varying vec2 vPointUv;
 
   // Simple noise function for organic movement
   float noise(float x) {
@@ -70,12 +98,13 @@ const vertexShader = /* glsl */ `
   void main() {
     vProgress = uProgress;
     vRandomOffset = aRandomOffset;
+    vPointUv = position.xy + vec2(0.5);
 
     // Calculate the midpoint between source and target
-    vec3 midPoint = mix(position, aTargetPosition, 0.5);
+    vec3 midPoint = mix(aSourcePosition, aTargetPosition, 0.5);
 
     // Add explosion effect - particles move outward at midpoint
-    vec3 explosionDir = normalize(position);
+    vec3 explosionDir = normalize(aSourcePosition);
     float explosionAmount = sin(uProgress * 3.14159) * uExplosionStrength;
     midPoint += explosionDir * explosionAmount;
 
@@ -96,7 +125,7 @@ const vertexShader = /* glsl */ `
       float t = uProgress * 2.0;
       // Ease in-out for smoother animation
       t = t * t * (3.0 - 2.0 * t);
-      morphed = mix(position, midPoint, t);
+      morphed = mix(aSourcePosition, midPoint, t);
     } else {
       float t = (uProgress - 0.5) * 2.0;
       // Ease in-out for smoother animation
@@ -129,10 +158,9 @@ const vertexShader = /* glsl */ `
 
     vec4 mvPosition = modelViewMatrix * vec4(morphed, 1.0);
     gl_Position = projectionMatrix * mvPosition;
-
-    // Scale point size based on distance for perspective
-    // Use a smaller base multiplier for reasonable particle sizes
-    gl_PointSize = uPointSize * sizeFactor * (80.0 / -mvPosition.z);
+    float attenuation = isPerspectiveMatrix(projectionMatrix) ? uViewportSize.y * 0.5 / -mvPosition.z : 1.0;
+    vec2 pointSize = vec2(uPointSize * sizeFactor * attenuation);
+    gl_Position.xy += position.xy * pointSize * 2.0 / uViewportSize * gl_Position.w;
   }
 `;
 
@@ -152,10 +180,11 @@ const fragmentShader = /* glsl */ `
 
   varying float vProgress;
   varying float vRandomOffset;
+  varying vec2 vPointUv;
 
   void main() {
     // Create circular points by discarding corners
-    vec2 center = gl_PointCoord - vec2(0.5);
+    vec2 center = vPointUv - vec2(0.5);
     float dist = length(center);
     if (dist > 0.5) {
       discard;
@@ -175,6 +204,7 @@ const fragmentShader = /* glsl */ `
     finalColor *= 0.9 + vRandomOffset * 0.2;
 
     gl_FragColor = vec4(finalColor, alpha);
+    #include <colorspace_fragment>
   }
 `;
 
@@ -206,6 +236,7 @@ export function createMorphingPointsMaterial(options?: MorphingPointsMaterialOpt
       uPointer: { value: new THREE.Vector3(0, 0, 0) },
       uPointerStrength: { value: 0 },
       uPointerRadius: { value: 3 },
+      uViewportSize: { value: new THREE.Vector2(1, 1) },
       uColor: { value: new THREE.Color(color) },
       uTargetColor: { value: new THREE.Color(targetColor ?? color) },
       uHasTargetColor: { value: targetColor !== undefined },
@@ -286,4 +317,9 @@ export function updateMorphPointer(material: THREE.ShaderMaterial, pointer: THRE
   if (material.uniforms['uPointerStrength']) {
     material.uniforms['uPointerStrength'].value = strength;
   }
+}
+
+/** Update the logical CSS viewport used to turn sprite corners into clip-space pixels. */
+export function updateMorphViewport(material: THREE.ShaderMaterial, width: number, height: number): void {
+  (material.uniforms['uViewportSize']?.value as THREE.Vector2 | undefined)?.set(width, height);
 }

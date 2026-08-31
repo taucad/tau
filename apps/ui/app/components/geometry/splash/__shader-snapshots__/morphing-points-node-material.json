@@ -1,4 +1,5 @@
 {
+  "alphaTest": 0.001,
   "blendColor": 0,
   "blending": 2,
   "color": 16777215,
@@ -15,6 +16,20 @@
     "version": 4.7
   },
   "nodes": [
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
     {
       "inputNodes": {
         "node": "<nodeRef>"
@@ -92,6 +107,192 @@
     },
     {
       "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.9,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "_attributeName": "aRandomOffset",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.2,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "-",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 1,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>",
+        "cNode": "<nodeRef>"
+      },
+      "method": "smoothstep",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": null,
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.5,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "length",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "-",
+      "type": "OperatorNode"
+    },
+    {
+      "_attributeName": "uv",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "vec2",
+      "precision": null,
+      "type": "ConstNode",
+      "value": [0.5, 0.5],
+      "valueType": "vec2"
+    },
+    {
+      "inputNodes": {
         "groupNode": "<nodeRef>"
       },
       "nodeType": "float",
@@ -130,6 +331,34 @@
     },
     {
       "inputNodes": {
+        "condNode": "<nodeRef>",
+        "elseNode": "<nodeRef>",
+        "ifNode": "<nodeRef>"
+      },
+      "type": "ConditionalNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "<",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
         "node": "<nodeRef>"
       },
       "type": "VarNode"
@@ -142,6 +371,17 @@
       },
       "method": "mix",
       "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "_attributeName": "aSourcePosition",
+      "global": true,
+      "type": "AttributeNode"
     },
     {
       "inputNodes": {
@@ -179,36 +419,6 @@
       "type": "VarNode"
     },
     {
-      "convertTo": "vec3",
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "ConvertNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VaryingNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "SubBuild"
-    },
-    {
-      "_attributeName": "position",
-      "global": true,
-      "type": "AttributeNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
       "_attributeName": "aTargetPosition",
       "global": true,
       "type": "AttributeNode"
@@ -218,13 +428,6 @@
         "node": "<nodeRef>"
       },
       "type": "VarNode"
-    },
-    {
-      "nodeType": null,
-      "precision": null,
-      "type": "ConstNode",
-      "value": 0.5,
-      "valueType": "float"
     },
     {
       "inputNodes": {
@@ -252,19 +455,6 @@
       },
       "method": "normalize",
       "type": "MathNode"
-    },
-    {
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "VarNode"
-    },
-    {
-      "convertTo": "vec3",
-      "inputNodes": {
-        "node": "<nodeRef>"
-      },
-      "type": "ConvertNode"
     },
     {
       "inputNodes": {
@@ -338,6 +528,323 @@
     },
     {
       "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>",
+        "cNode": "<nodeRef>"
+      },
+      "method": "clamp",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 2,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 1,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "-",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 2,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>",
+        "cNode": "<nodeRef>"
+      },
+      "method": "mix",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>",
+        "cNode": "<nodeRef>"
+      },
+      "method": "clamp",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "-",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 2,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 1,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "-",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 2,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
         "node": "<nodeRef>"
       },
       "type": "VarNode"
@@ -384,6 +891,42 @@
     },
     {
       "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
         "aNode": "<nodeRef>"
       },
       "method": "sin",
@@ -416,11 +959,6 @@
       },
       "op": "*",
       "type": "OperatorNode"
-    },
-    {
-      "_attributeName": "aRandomOffset",
-      "global": true,
-      "type": "AttributeNode"
     },
     {
       "inputNodes": {
@@ -464,6 +1002,182 @@
         "node": "<nodeRef>"
       },
       "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "sin",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 2.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "sin",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 5.7,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.2,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
     },
     {
       "inputNodes": {
@@ -575,6 +1289,182 @@
     },
     {
       "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "sin",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 2.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "sin",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 5.7,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.2,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
         "aNode": "<nodeRef>"
       },
       "method": "sin",
@@ -667,6 +1557,146 @@
       "precision": null,
       "type": "ConstNode",
       "value": 2,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "sin",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 2.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "sin",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 5.7,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.2,
       "valueType": "float"
     },
     {
@@ -796,13 +1826,6 @@
         "node": "<nodeRef>"
       },
       "type": "VarNode"
-    },
-    {
-      "nodeType": "float",
-      "precision": null,
-      "type": "ConstNode",
-      "value": 0.15,
-      "valueType": "float"
     },
     {
       "inputNodes": {
@@ -1119,6 +2142,42 @@
     },
     {
       "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "+",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
         "aNode": "<nodeRef>"
       },
       "method": "sin",
@@ -1190,6 +2249,146 @@
       "precision": null,
       "type": "ConstNode",
       "value": 3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "sin",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 2.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.3,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>"
+      },
+      "method": "sin",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 5.7,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 0.2,
       "valueType": "float"
     },
     {

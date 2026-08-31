@@ -5,6 +5,7 @@ import type { Geometry } from '@taucad/types';
 import { sampleMeshSurface } from '#components/geometry/splash/point-sampler.js';
 import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
 import { sampleAssemblyPoints } from '#components/geometry/splash/assembly-point-sampler.js';
+import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 /**
  * Result of sampling points from gear geometries.
@@ -51,6 +52,7 @@ async function samplePointsFromGeometry(geometry: Geometry, pointCount: number):
   try {
     const loader = new GLTFLoader();
     const gltf = await loader.parseAsync(geometry.content.buffer, '');
+    applyCanonicalGltfWorld(gltf.scene);
 
     // Find the first mesh in the scene
     let foundMesh: THREE.Mesh | undefined;

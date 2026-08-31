@@ -1,14 +1,16 @@
 import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
-import type { Points, Group } from 'three';
+import type * as THREE from 'three';
+import type { Group, Mesh } from 'three';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { createMorphingPointsNodeMaterial } from '#components/geometry/splash/morphing-points-material.node.js';
 import {
   createMorphingPointsMaterial,
+  createMorphingPointsGeometry,
   updateMorphProgress,
   updateMorphTime,
   updateMorphOpacity,
+  updateMorphViewport,
 } from '#components/geometry/splash/morphing-points-material.js';
 import {
   updateMorphAnimation,
@@ -176,8 +178,8 @@ export function SplitMorphingPoints({
     undefined,
   );
 
-  const gear12PointsRef = useRef<Points>(null);
-  const gear8PointsRef = useRef<Points>(null);
+  const gear12PointsRef = useRef<Mesh>(null);
+  const gear8PointsRef = useRef<Mesh>(null);
   const gear12RotationRef = useRef<Group>(null);
   const gear8RotationRef = useRef<Group>(null);
   const containerRef = useRef<Group>(null);
@@ -193,8 +195,6 @@ export function SplitMorphingPoints({
 
   // Create geometry for gear12 points (first pointCountA points)
   const gear12Geometry = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-
     // Extract positions for gear12 subset
     const positions = new Float32Array(pointCountA * 3);
     const targetPositions = new Float32Array(pointCountA * 3);
@@ -214,16 +214,15 @@ export function SplitMorphingPoints({
       randomOffsets[i] = sourcePoints.randomOffsets[i] ?? Math.random();
     }
 
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('aTargetPosition', new THREE.BufferAttribute(targetPositions, 3));
-    geo.setAttribute('aRandomOffset', new THREE.BufferAttribute(randomOffsets, 1));
-
-    return geo;
+    return createMorphingPointsGeometry({
+      sourcePositions: positions,
+      targetPositions,
+      randomOffsets,
+    });
   }, [sourcePoints, targetPointsA, pointCountA, gear12OffsetX]);
 
   // Create geometry for gear8 points (remaining points)
   const gear8Geometry = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
     const pointCountB = pointCount - pointCountA;
 
     // Extract positions for gear8 subset
@@ -246,11 +245,11 @@ export function SplitMorphingPoints({
       randomOffsets[i] = sourcePoints.randomOffsets[sourceIndex] ?? Math.random();
     }
 
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('aTargetPosition', new THREE.BufferAttribute(targetPositions, 3));
-    geo.setAttribute('aRandomOffset', new THREE.BufferAttribute(randomOffsets, 1));
-
-    return geo;
+    return createMorphingPointsGeometry({
+      sourcePositions: positions,
+      targetPositions,
+      randomOffsets,
+    });
   }, [sourcePoints, targetPointsB, pointCount, pointCountA, gear8OffsetX]);
 
   // Create materials for each group
@@ -347,10 +346,12 @@ export function SplitMorphingPoints({
       updateMorphProgress(gear12Material as THREE.ShaderMaterial, progress);
       updateMorphTime(gear12Material as THREE.ShaderMaterial, state.clock.elapsedTime);
       updateMorphOpacity(gear12Material as THREE.ShaderMaterial, opacity);
+      updateMorphViewport(gear12Material as THREE.ShaderMaterial, state.size.width, state.size.height);
 
       updateMorphProgress(gear8Material as THREE.ShaderMaterial, progress);
       updateMorphTime(gear8Material as THREE.ShaderMaterial, state.clock.elapsedTime);
       updateMorphOpacity(gear8Material as THREE.ShaderMaterial, opacity);
+      updateMorphViewport(gear8Material as THREE.ShaderMaterial, state.size.width, state.size.height);
     }
 
     // Animate group positions and rotations based on progress
@@ -373,12 +374,12 @@ export function SplitMorphingPoints({
     <group ref={containerRef}>
       {/* Gear12 points - positioned and rotating */}
       <group ref={gear12RotationRef}>
-        <points ref={gear12PointsRef} geometry={gear12Geometry} material={gear12Material} />
+        <mesh ref={gear12PointsRef} frustumCulled={false} geometry={gear12Geometry} material={gear12Material} />
       </group>
 
       {/* Gear8 points - positioned and counter-rotating */}
       <group ref={gear8RotationRef}>
-        <points ref={gear8PointsRef} geometry={gear8Geometry} material={gear8Material} />
+        <mesh ref={gear8PointsRef} frustumCulled={false} geometry={gear8Geometry} material={gear8Material} />
       </group>
     </group>
   );

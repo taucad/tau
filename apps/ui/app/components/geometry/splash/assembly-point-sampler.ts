@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons';
 import type { Geometry } from '@taucad/types';
 import { sampleMeshSurface } from '#components/geometry/splash/point-sampler.js';
 import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
+import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 /**
  * Gear assembly constants calculated from circularPitch = 5
@@ -51,6 +52,7 @@ async function sampleFromGeometry(geometry: Geometry, pointCount: number): Promi
   try {
     const loader = new GLTFLoader();
     const gltf = await loader.parseAsync(geometry.content.buffer, '');
+    applyCanonicalGltfWorld(gltf.scene);
 
     // Find the first mesh in the scene
     let foundMesh: THREE.Mesh | undefined;

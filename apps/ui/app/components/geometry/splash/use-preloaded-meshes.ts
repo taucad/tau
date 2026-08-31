@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { Group, MeshStandardMaterial } from 'three';
 import { GLTFLoader } from 'three/addons';
 import type { Geometry } from '@taucad/types';
+import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 /** Default material properties for gear meshes */
 const defaultMaterialProperties = {
@@ -61,6 +62,7 @@ async function loadMesh(geometry: Geometry, color: string): Promise<LoadedMesh |
   try {
     const loader = new GLTFLoader();
     const gltf = await loader.parseAsync(geometry.content.buffer, '');
+    applyCanonicalGltfWorld(gltf.scene);
 
     const material = new THREE.MeshStandardMaterial({
       color,

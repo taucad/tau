@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { GLTFLoader } from 'three/addons';
 import * as THREE from 'three';
 import type { Group } from 'three';
+import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 type PreviewGltfMeshProperties = {
   /**
@@ -62,6 +63,7 @@ export function PreviewGltfMesh({
       try {
         const loader = new GLTFLoader();
         const gltf = await loader.parseAsync(gltfFile.buffer, '');
+        applyCanonicalGltfWorld(gltf.scene);
 
         // Apply metallic standard material to all meshes (no lines)
         const metallicMaterial = new THREE.MeshStandardMaterial({

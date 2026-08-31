@@ -102,3 +102,34 @@ test('keeps export option roots flat, disclosures independent, and the action re
   await target.expectVisible(exportAction);
   await target.screenshot(panel, 'export-pane-dark-narrow.png');
 });
+
+test('keeps PNG composite options semantic, valid, and independently editable', async () => {
+  await target.emulateColorScheme('light');
+  await target.setViewport({ width: 1440, height: 900 });
+  await openSeededProject();
+  await openCommand('Export');
+
+  const panel = selectors.getByCss('[data-slot="export-panel-body"]');
+  await target.expectVisible(panel, 15_000);
+  await selectFormat('PNG');
+  await target.expectVisible(optionsDisclosure('PNG'), 15_000);
+  await target.expectCount(panel.getByText(/must be|is a required property/iu), 0);
+  await target.expectCount(panel.getByText(/^Option \d+$/u), 0);
+
+  await target.click(panel.getByRole('button', { name: 'Group: Camera' }));
+  const framing = panel.getByRole('combobox', { name: 'Select for Framing' });
+  await target.expectVisible(framing);
+  await target.click(framing);
+  await target.click(selectors.getByRole('option', { name: 'Fixed' }));
+  await target.expectCount(panel.getByText(/must be|is a required property/iu), 0);
+
+  await target.click(panel.getByRole('button', { name: 'Group: Visible Primitives' }));
+  await target.click(panel.getByRole('button', { name: 'Add item (Visible Primitives)' }));
+  const remove = panel.getByRole('button', { name: 'Remove Visible Primitives 1' });
+  await target.expectVisible(remove);
+  await target.expectCount(panel.getByText(/must be|is a required property/iu), 0);
+  await target.click(remove);
+  await target.expectCount(remove, 0);
+
+  await target.screenshot(panel, 'export-pane-png-composite-options.png');
+});

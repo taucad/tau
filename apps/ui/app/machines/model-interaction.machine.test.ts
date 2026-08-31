@@ -156,6 +156,32 @@ describe('modelInteractionMachine', () => {
     actor.stop();
   });
 
+  it('should clamp typed opacity values at the model interaction boundary', () => {
+    const actor = createActor(modelInteractionMachine, { input: {} }).start();
+    actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
+
+    actor.send({
+      type: 'setComponentOpacity',
+      unitId: mainUnitId,
+      componentId: housingComponentId,
+      opacity: 1.5,
+      source: 'viewer',
+    });
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).opacityByComponentId).toEqual({});
+
+    actor.send({
+      type: 'setComponentOpacity',
+      unitId: mainUnitId,
+      componentId: housingComponentId,
+      opacity: -0.1,
+      source: 'viewer',
+    });
+    expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).opacityByComponentId).toEqual({
+      [housingComponentId]: 0,
+    });
+    actor.stop();
+  });
+
   it('should keep selection/highlight separate from explicit focus', () => {
     const actor = createActor(modelInteractionMachine, { input: {} });
     actor.start();

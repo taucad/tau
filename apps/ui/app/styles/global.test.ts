@@ -354,3 +354,15 @@ describe('global corner shape', () => {
     });
   });
 });
+
+describe('scroll-shadow-right', () => {
+  it('provides a static CSS-only inline-end fade', () => {
+    const style = readRuleStyle(globalStyles.indexOf('@utility scroll-shadow-right'));
+
+    expect(style.getPropertyValue('--scroll-fade-size')).toBe('14px');
+    expect(style.getPropertyValue('mask-image')).toBe(
+      'linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), transparent)',
+    );
+    expect(style.getPropertyValue('animation')).toBe('');
+  });
+});

@@ -4,8 +4,7 @@ import { cn } from '#utils/ui.utils.js';
 /**
  * Positioning constants for floating sidebar routes.
  */
-const sidebarOffsetPadding =
-  'transition-[padding-left] duration-200 ease-linear md:pl-[calc(var(--sidebar-width-current)-var(--spacing)*2)]';
+const sidebarOffsetPadding = 'transition-[padding-left] duration-200 ease-linear md:pl-(--sidebar-padding-offset)';
 
 const sidebarOffsetMargin =
   'transition-[margin] duration-200 ease-linear md:ml-[calc(var(--sidebar-width-current)-var(--spacing)*2)]';

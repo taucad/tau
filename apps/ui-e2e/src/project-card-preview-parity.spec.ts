@@ -6,10 +6,12 @@ import { measureProjectCardForeground } from '#support/project-card-framing.js';
 test('project card thumbnail and preview parity', async () => {
   await target.setViewport({ width: 1440, height: 1000 });
   await target.navigate('/community');
-  await target.fill(selectors.getByPlaceholder('Search projects...'), 'Involute Gear');
+  const search = selectors.getByPlaceholder('Search projects...');
+  await target.expectVisible(search, 60_000);
+  await target.fill(search, 'Involute Gear');
 
   const card = '[data-slot="card"]:has(img[alt="Involute Gear"])';
-  const thumbnail = selectors.getByRole('img', { name: 'Involute Gear' });
+  const thumbnail = selectors.getByCss(`${card} img[alt="Involute Gear"]`);
   await target.expectVisible(thumbnail);
   await expect
     .poll(async () =>

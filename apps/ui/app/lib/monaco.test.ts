@@ -1,18 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
-import { registerCompletion } from 'monacopilot';
+import { describe, it, expect } from 'vitest';
 import { registerCompletions } from '#lib/monaco.lib.client.js';
-import type * as Monaco from 'monaco-editor';
-
-vi.mock('monacopilot', () => ({ registerCompletion: vi.fn() }));
 
 describe('registerCompletions', () => {
   it('should be a no-op while AI autocomplete is disabled', () => {
-    const registration = registerCompletions({} as Monaco.editor.IStandaloneCodeEditor, {} as typeof Monaco);
+    const registration = registerCompletions();
 
-    registration.trigger();
-    registration.deregister();
-    registration.updateOptions(() => ({}));
-
-    expect(registerCompletion).not.toHaveBeenCalled();
+    expect(() => {
+      registration.trigger();
+      registration.deregister();
+      registration.updateOptions(() => ({}));
+    }).not.toThrow();
   });
 });

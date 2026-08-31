@@ -138,8 +138,8 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
     );
   }, [monacoBaseTheme]);
 
-  const handleMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
-    completionRef.current = registerCompletions(editor, monaco);
+  const handleMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor) => {
+    completionRef.current = registerCompletions();
 
     // Force immediate tokenization of visible lines.
     // Monaco schedules background tokenization via requestIdleCallback, which

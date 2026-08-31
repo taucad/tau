@@ -3,10 +3,8 @@ import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 import { shikiToMonaco, textmateThemeToMonacoTheme } from '@shikijs/monaco';
-import { registerCompletion } from 'monacopilot';
-import type { CompletionRegistration, CompletionCopilot } from 'monacopilot';
+import type { CompletionRegistration } from 'monacopilot';
 import type * as Monaco from 'monaco-editor';
-import { ENV } from '#environment.config.js';
 import {
   createJsonTokensProvider,
   generateJsonBracketHighlightColors,
@@ -217,56 +215,12 @@ export const configureMonaco = async (): Promise<void> => {
 };
 
 /**
- * Languages that should use monacopilot AI code completion.
+ * Return the disabled AI-completion lifecycle registration.
  *
  * @returns A no-op registration while AI completion is disabled.
  */
-export const completionLanguages = [
-  monacoLanguages.typescript,
-  monacoLanguages.typescriptreact,
-  monacoLanguages.javascript,
-  monacoLanguages.javascriptreact,
-  monacoLanguages.json,
-] as const;
-
-/**
- * Register completions for languages that use monacopilot AI code completion.
- *
- * One completion provider is registered per language defined in
- * {@link completionLanguages}. The returned {@link CompletionRegistration}
- * aggregates every individual registration so the caller can
- * deregister, trigger, or update options for all of them at once.
- *
- * @param editor - The editor instance.
- * @param monaco - The Monaco instance.
- * @returns A combined completion registration for all languages.
- */
-export const registerCompletions = (
-  editor: Monaco.editor.IStandaloneCodeEditor,
-  monaco: typeof Monaco,
-): CompletionRegistration => {
+export const registerCompletions = (): CompletionRegistration => {
   const registrations: CompletionRegistration[] = [];
-  // oxlint-disable-next-line capitalized-comments -- UI kill switch while /v1/code-completion points at an unmaintained model.
-  // const registrations: CompletionRegistration[] = completionLanguages.map((language) =>
-  //   registerCompletion(monaco, editor, {
-  //     endpoint: `${ENV.TAU_API_URL}/v1/code-completion`,
-  //     language,
-  //     trigger: 'onTyping',
-  //     async requestHandler(request) {
-  //       const response = await fetch(`${ENV.TAU_API_URL}/v1/code-completion`, {
-  //         method: 'POST',
-  //         headers: {
-  //           'Content-Type': 'application/json',
-  //         },
-  //         body: JSON.stringify(request.body),
-  //         credentials: 'include',
-  //       });
-  //       const data = (await response.json()) as Awaited<ReturnType<CompletionCopilot['complete']>>;
-
-  //       return data;
-  //     },
-  //   }),
-  // );
 
   return {
     trigger() {

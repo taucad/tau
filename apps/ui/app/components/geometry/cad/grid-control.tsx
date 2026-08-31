@@ -47,8 +47,8 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   const graphicsRef = useGraphics();
   const gridSizes = useGraphicsSelector((state) => state.context.gridSizes);
   const isGridSizeLocked = useGraphicsSelector((state) => state.context.isGridSizeLocked);
-  const gridFactor = useGraphicsSelector((state) => state.context.units.length.factor);
-  const unit = useGraphicsSelector((state) => state.context.units.length.symbol);
+  const metersPerDisplayUnit = useGraphicsSelector((state) => state.context.displayUnits.length.metersPerUnit);
+  const unit = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
 
   const [isOpen, setIsOpen] = useState(false);
 
@@ -74,7 +74,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
   }, []);
 
   // Convert the display size based on the unit
-  const displaySize = gridSizes.smallSize / gridFactor;
+  const displaySize = gridSizes.smallSize / metersPerDisplayUnit;
 
   const localizedSmallGridSize = useMemo(
     () => formatNumberEngineeringNotation(displaySize, maxGridDigits),

@@ -6,9 +6,13 @@ import { createRoot, extend, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
+import { axesProxyLengthRenderUnits } from '#components/geometry/graphics/three/react/axes-helper.js';
 
-const { dreiLineSpy } = vi.hoisted(() => ({
+const { dreiLineSpy, renderFrameState } = vi.hoisted(() => ({
   dreiLineSpy: vi.fn((_properties: Record<string, unknown>) => null),
+  renderFrameState: {
+    current: { anchorFrameId: 'tau:root', originMeters: [0, 0, 0] as [number, number, number], metersPerRenderUnit: 1 },
+  },
 }));
 
 vi.mock('@react-three/drei', () => ({
@@ -17,6 +21,17 @@ vi.mock('@react-three/drei', () => ({
     return null;
   },
 }));
+
+vi.mock('#hooks/use-graphics.js', async () => {
+  const three = await import('three');
+  return {
+    useCameraRig: () => ({
+      orthographicCamera: new three.OrthographicCamera(),
+      perspectiveCamera: new three.PerspectiveCamera(),
+    }),
+    useRenderFrame: () => renderFrameState.current,
+  };
+});
 
 const line2WebGpuSpy = vi.fn();
 
@@ -62,9 +77,11 @@ describe('AxesHelper', () => {
   beforeEach(() => {
     dreiLineSpy.mockClear();
     line2WebGpuSpy.mockClear();
+    renderFrameState.current = { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 };
   });
 
   async function mountAxes(backend: 'webgl' | 'webgpu'): Promise<{
+    getAxesPosition: () => ActualThree.Vector3 | undefined;
     getInteractionCount: () => number;
     unmountScene: () => void;
   }> {
@@ -101,6 +118,7 @@ describe('AxesHelper', () => {
     });
 
     return {
+      getAxesPosition: () => rootState?.scene.children.find(({ type }) => type === 'Group')?.position.clone(),
       getInteractionCount: () => rootState?.internal.interaction.length ?? 0,
       unmountScene: (): void => {
         act(() => {
@@ -136,6 +154,31 @@ describe('AxesHelper', () => {
 
     expect(dreiLineSpy).toHaveBeenCalledTimes(3);
     expect(line2WebGpuSpy).not.toHaveBeenCalled();
+    const positiveEnds = dreiLineSpy.mock.calls.map(
+      ([properties]) => (properties['points'] as [ActualThree.Vector3, ActualThree.Vector3])[1],
+    );
+    expect(positiveEnds.map((point) => point.length())).toEqual([
+      axesProxyLengthRenderUnits,
+      axesProxyLengthRenderUnits,
+      axesProxyLengthRenderUnits,
+    ]);
+
+    harness.unmountScene();
+  });
+
+  it('keeps the finite proxy beyond the supported normalized render span', () => {
+    expect(axesProxyLengthRenderUnits).toBeGreaterThan(1000);
+  });
+
+  it('places physical zero in the active render frame', async () => {
+    renderFrameState.current = {
+      anchorFrameId: 'tau:root',
+      originMeters: [10, -20, 30],
+      metersPerRenderUnit: 0.001,
+    };
+    const harness = await mountAxes('webgl');
+
+    expect(harness.getAxesPosition()?.toArray()).toEqual([-10_000, 20_000, -30_000]);
 
     harness.unmountScene();
   });

@@ -15,7 +15,6 @@ type SceneProperties = {
   readonly secondaryMouseButtonMode?: SecondaryMouseButtonMode;
   readonly upDirection?: 'x' | 'y' | 'z';
   readonly stageOptions?: StageOptions;
-  readonly enableCentering?: boolean;
   readonly zoomSpeed: number;
   readonly gizmoContainer?: HTMLElement | string;
 };
@@ -29,7 +28,6 @@ export function Scene({
   secondaryMouseButtonMode = 'camera-pan',
   upDirection = 'z',
   stageOptions,
-  enableCentering = false,
   zoomSpeed,
   gizmoContainer,
 }: SceneProperties): React.JSX.Element {
@@ -46,9 +44,7 @@ export function Scene({
           zoomSpeed={zoomSpeed}
           gizmoContainer={gizmoContainer}
         />
-        <Stage stageOptions={stageOptions} enableCentering={enableCentering}>
-          {children}
-        </Stage>
+        <Stage stageOptions={stageOptions}>{children}</Stage>
       </ViewportGizmoInteractionLockProvider>
     </>
   );

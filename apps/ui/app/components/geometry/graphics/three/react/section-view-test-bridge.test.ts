@@ -9,6 +9,7 @@ import {
   getSectionViewTestCapPerformanceDiagnostics,
   getSectionViewTestHelperSummary,
   getSectionViewTestSelectorLabels,
+  projectSectionViewTestTransformHandle,
 } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
 import { sectionCapOverlapDebugUserDataKey } from '#components/geometry/graphics/three/utils/section-cap-overlap-debug.js';
 import {
@@ -87,6 +88,28 @@ describe('getSectionViewTestControlState', () => {
         }),
       ]),
     );
+  });
+
+  it('projects the visible tagged transform handle center into viewport coordinates', () => {
+    const scene = new THREE.Scene();
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    handle.name = 'X';
+    handle.userData = sceneTagData(sceneTag.sectionViewHelper);
+    scene.add(handle);
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.position.z = 10;
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+
+    expect(
+      projectSectionViewTestTransformHandle({
+        axis: 'X',
+        camera,
+        rect: { height: 200, left: 10, top: 20, width: 200 },
+        scene,
+      }),
+    ).toEqual({ x: 110, y: 120, visible: true });
   });
 
   it('should report exact-only section cap overlap diagnostics from the debug scene', () => {

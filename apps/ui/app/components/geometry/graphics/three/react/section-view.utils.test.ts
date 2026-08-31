@@ -198,8 +198,8 @@ describe('collectClippableTargets', () => {
       plane: testPlane,
     });
 
-    expect(result.meshes).toHaveLength(0);
-    expect(result.lines).toHaveLength(0);
+    expect(result.meshes).toHaveLength(2);
+    expect(result.lines).toHaveLength(1);
 
     for (const mesh of [mesh1, mesh2]) {
       const mat = mesh.material as THREE.MeshStandardMaterial;

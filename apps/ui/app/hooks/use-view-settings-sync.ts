@@ -12,6 +12,7 @@ const cameraVectorEqual = (left: PersistedCameraView['target'], right: Persisted
   left[0] === right[0] && left[1] === right[1] && left[2] === right[2];
 
 const cameraViewEqual = (left: PersistedCameraView, right: PersistedCameraView): boolean =>
+  left.frameId === right.frameId &&
   cameraVectorEqual(left.target, right.target) &&
   cameraVectorEqual(left.direction, right.direction) &&
   cameraVectorEqual(left.up, right.up) &&
@@ -64,6 +65,7 @@ export function useViewSettingsSync({
   const cameraFovAngle = useCameraSelector((state) => state.context.view.requestedVerticalFieldOfView);
   const cameraView = useCameraSelector(
     (state): PersistedCameraView => ({
+      frameId: state.context.view.frameId,
       target: state.context.view.target,
       direction: state.context.view.direction,
       up: state.context.view.up,
@@ -91,6 +93,7 @@ export function useViewSettingsSync({
       .filter((m) => m.isPinned)
       .map((m) => ({
         id: m.id,
+        frameId: m.frameId,
         startPoint: m.startPoint,
         endPoint: m.endPoint,
         distance: m.distance,
@@ -112,7 +115,7 @@ export function useViewSettingsSync({
       graphicsBackend: graphicsBackendPreference,
       pinnedMeasurements,
       renderTimeout,
-      schemaVersion: 9,
+      schemaVersion: 10,
     };
 
     // Skip the first 3D emission to avoid overwriting restored state. A

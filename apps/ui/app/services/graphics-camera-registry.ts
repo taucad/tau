@@ -1,8 +1,6 @@
 import type { ActorRefFrom } from 'xstate';
 import type { CameraState } from '@taucad/camera';
-import { readThreeCameraState } from '@taucad/three/camera';
 import type { ThreeCameraRig } from '@taucad/three/camera';
-import { Vector3 } from 'three';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
@@ -43,8 +41,7 @@ export const getGraphicsCameraState = (graphicsRef: GraphicsActorRef | undefined
   if (!rig) {
     return undefined;
   }
-  const { target } = rig.actorRef.getSnapshot().context.view;
-  return readThreeCameraState({ camera: rig.activeCamera, target: new Vector3(...target) });
+  return rig.readState();
 };
 
 export const hasGraphicsCameraRig = (graphicsRef: GraphicsActorRef | undefined): boolean =>

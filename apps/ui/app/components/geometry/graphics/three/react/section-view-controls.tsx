@@ -21,10 +21,12 @@ import {
 import { adjustHexColorBrightness } from '#utils/color.utils.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { SceneOverlay } from '#components/geometry/graphics/three/scene-overlay.js';
 
 // Module-scope scratch vectors for PlaneSelector useFrame (avoids per-frame allocations)
 // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- dir refers to direction vector, not directory
 const _normalizedDir = new THREE.Vector3();
+const _selectorPosition = new THREE.Vector3();
 const _baseOffset = new THREE.Vector3();
 const _depthOffset = new THREE.Vector3();
 /* oxlint-disable tau-lint/no-hardcoded-color -- Three.js section control vertex colors */
@@ -32,52 +34,6 @@ const sectionControlCoreColor = '#ffffff';
 /* oxlint-enable tau-lint/no-hardcoded-color */
 const sectionSelectorBorderWidth = 0.06;
 const sectionSelectorLabelSurfaceGap = 0.004;
-
-export type SectionControlDepthRenderer = {
-  readonly info?: {
-    readonly frame?: number;
-    readonly render?: {
-      readonly frame?: number;
-      readonly frameCalls?: number;
-    };
-  };
-  clearDepth?: () => void;
-};
-
-const sectionControlDepthClearFrames = new WeakMap<SectionControlDepthRenderer, number>();
-
-export function getSectionControlRendererFrameId(renderer: SectionControlDepthRenderer): number | undefined {
-  const webGlFrame = renderer.info?.render?.frame;
-  if (typeof webGlFrame === 'number') {
-    return webGlFrame;
-  }
-
-  const commonFrame = renderer.info?.frame;
-  if (typeof commonFrame === 'number') {
-    return commonFrame;
-  }
-
-  return undefined;
-}
-
-export function clearSectionControlDepthOnce(renderer: SectionControlDepthRenderer): void {
-  if (typeof renderer.clearDepth !== 'function') {
-    return;
-  }
-
-  const frame = getSectionControlRendererFrameId(renderer);
-  if (typeof frame !== 'number') {
-    renderer.clearDepth();
-    return;
-  }
-
-  if (sectionControlDepthClearFrames.get(renderer) === frame) {
-    return;
-  }
-
-  renderer.clearDepth();
-  sectionControlDepthClearFrames.set(renderer, frame);
-}
 
 export type PlaneId = 'xy' | 'xz' | 'yz';
 export type PlaneSelectorId = 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
@@ -278,6 +234,7 @@ function getBaseFromSelector(id: PlaneSelectorId): PlaneId {
 
 type PlaneSelectorProperties = {
   readonly planeId: PlaneSelectorId;
+  readonly anchor: readonly [number, number, number];
   readonly position: [number, number, number];
   readonly color: string;
   readonly onClick: (planeId: PlaneSelectorId) => void;
@@ -294,6 +251,7 @@ type PlaneSelectorProperties = {
 
 function PlaneSelector({
   planeId,
+  anchor,
   position,
   color,
   onClick,
@@ -314,7 +272,11 @@ function PlaneSelector({
     () => new THREE.Vector3(position[0], position[1], position[2]),
     [position],
   );
-  const origin = useMemo<THREE.Vector3>(() => new THREE.Vector3(0, 0, 0), []);
+  const anchorPoint = useMemo<THREE.Vector3>(() => new THREE.Vector3(...anchor), [anchor]);
+  const initialPosition = useMemo<[number, number, number]>(
+    () => [anchor[0] + position[0], anchor[1] + position[1], anchor[2] + position[2]],
+    [anchor, position],
+  );
 
   // Keep the selector a constant screen size and screen offset by updating each frame
   useFrame(() => {
@@ -327,14 +289,14 @@ function PlaneSelector({
       viewport,
       camera,
       size: threeSize,
-      at: origin,
+      at: anchorPoint,
       pixels: size,
     });
     const desiredWorldOffset = pixelsToWorldUnits({
       viewport,
       camera,
       size: threeSize,
-      at: origin,
+      at: anchorPoint,
       pixels: offset,
     });
 
@@ -355,10 +317,11 @@ function PlaneSelector({
       }
 
       if (planeId === 'xz' || planeId === 'zx') {
-        currentGroup.position.copy(_baseOffset.sub(_depthOffset));
+        _selectorPosition.copy(anchorPoint).add(_baseOffset).sub(_depthOffset);
       } else {
-        currentGroup.position.copy(_baseOffset.add(_depthOffset));
+        _selectorPosition.copy(anchorPoint).add(_baseOffset).add(_depthOffset);
       }
+      currentGroup.position.copy(_selectorPosition);
     }
   });
 
@@ -474,7 +437,7 @@ function PlaneSelector({
     <group
       ref={groupRef}
       renderOrder={viewportRenderTiers.sectionControlBody}
-      position={position}
+      position={initialPosition}
       rotation={rotation}
       userData={sectionSelectorUserData}
       dispose={null}
@@ -482,7 +445,6 @@ function PlaneSelector({
       <mesh
         renderOrder={viewportRenderTiers.sectionControlBody}
         userData={sectionSelectorUserData}
-        onBeforeRender={clearSectionControlDepthOnce}
         onClick={handleClick}
         onPointerOver={handlePointerOver}
         onPointerOut={handlePointerOut}
@@ -542,7 +504,8 @@ type SectionViewControlsProperties = {
   readonly isActive: boolean;
   readonly selectedPlaneId: PlaneId | undefined;
   readonly availablePlanes: AvailablePlane[];
-  readonly pivot?: [number, number, number];
+  /** Native Three render-local pivot. Physical metre conversion belongs to Controls. */
+  readonly renderPivot?: [number, number, number];
   readonly rotation: [number, number, number];
   readonly planeName: 'cartesian' | 'face';
   readonly hoveredSectionViewId: PlaneSelectorId | undefined;
@@ -550,7 +513,7 @@ type SectionViewControlsProperties = {
   readonly onSelectPlane: (planeId: PlaneSelectorId) => void;
   readonly onHover: (planeId: PlaneSelectorId | undefined) => void;
   readonly onSetRotation: (rotation: THREE.Euler) => void;
-  readonly onSetPivot?: (value: [number, number, number]) => void;
+  readonly onSetRenderPivot?: (value: [number, number, number]) => void;
   readonly onTransformDragStart?: () => void;
   readonly onTransformDragMove?: () => void;
   readonly onTransformDragEnd?: () => void;
@@ -566,7 +529,7 @@ export function SectionViewControls({
   isActive,
   selectedPlaneId,
   availablePlanes,
-  pivot,
+  renderPivot,
   rotation,
   planeName,
   hoveredSectionViewId,
@@ -574,7 +537,7 @@ export function SectionViewControls({
   onSelectPlane,
   onHover,
   onSetRotation,
-  onSetPivot,
+  onSetRenderPivot,
   onTransformDragStart,
   onTransformDragMove,
   onTransformDragEnd,
@@ -582,7 +545,7 @@ export function SectionViewControls({
   const transformControlsRef = useRef<THREE.Object3D>(undefined);
   // Track the latest rotation locally to project translation along the rotated plane normal
   const rotationRef = useRef<THREE.Euler>(new THREE.Euler(0, 0, 0));
-  // Keep an optional world-space anchor so the gizmo doesn't "jump" after rotations
+  // Keep an optional render-local anchor so the gizmo doesn't "jump" after rotations.
   const anchorPositionRef = useRef<THREE.Vector3 | undefined>(undefined);
   const matcapTexture = useMemo(() => matcapMaterial(), []);
   // Track whether the user is actively dragging translate/rotate so we don't override the position mid-drag
@@ -594,7 +557,7 @@ export function SectionViewControls({
   const [hoveredTransformAxis, setHoveredTransformAxisState] = React.useState<HoveredTransformAxis | undefined>(
     undefined,
   );
-  // World-space pivot point to keep the plane anchored during rotation
+  // Render-local pivot point to keep the plane anchored during rotation.
   const pivotPointRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
   onTransformDragStartRef.current = onTransformDragStart;
@@ -646,9 +609,9 @@ export function SectionViewControls({
       return;
     }
 
-    // Controlled position from pivot
-    if (pivot) {
-      current.position.set(pivot[0], pivot[1], pivot[2]);
+    // Controlled native position from the renderer boundary.
+    if (renderPivot) {
+      current.position.set(renderPivot[0], renderPivot[1], renderPivot[2]);
     }
   });
 
@@ -662,7 +625,7 @@ export function SectionViewControls({
     }
 
     anchorPositionRef.current = undefined;
-  }, [selectedPlaneId, rotation, pivot]);
+  }, [selectedPlaneId, rotation, renderPivot]);
 
   const endActiveTransformDrag = React.useCallback((): void => {
     let hadActiveDrag = false;
@@ -736,50 +699,55 @@ export function SectionViewControls({
   // Constants for depth calculations - extracted to allow precise back-to-back positioning
   const labelDepth = 0.02;
   const offsetPx = 40;
+  const selectorAnchor = renderPivot ?? [0, 0, 0];
   if (!selectedPlane) {
     return (
-      <group>
-        {planes.map(({ idPos, idNeg, color }) => {
-          // Use coordinate-aware position based on up direction
-          const baseId = getBaseFromSelector(idPos);
-          const position = getPlanePositionForUpDirection(baseId, upDirection);
+      <SceneOverlay shouldClearDepth overlayActive renderPriority={3}>
+        <group>
+          {planes.map(({ idPos, idNeg, color }) => {
+            // Use coordinate-aware position based on up direction
+            const baseId = getBaseFromSelector(idPos);
+            const position = getPlanePositionForUpDirection(baseId, upDirection);
 
-          return (
-            <group key={idPos}>
-              <PlaneSelector
-                isInverse
-                matcapTexture={matcapTexture}
-                planeId={idPos}
-                position={position}
-                color={color}
-                size={60}
-                offset={offsetPx}
-                naming={planeName}
-                isExternallyHovered={hoveredSectionViewId === idPos}
-                labelDepth={labelDepth}
-                upDirection={upDirection}
-                onClick={onSelectPlane}
-                onHover={onHover}
-              />
-              <PlaneSelector
-                isInverse={false}
-                matcapTexture={matcapTexture}
-                planeId={idNeg}
-                position={position}
-                color={color}
-                size={60}
-                offset={offsetPx}
-                naming={planeName}
-                isExternallyHovered={hoveredSectionViewId === idNeg}
-                labelDepth={labelDepth}
-                upDirection={upDirection}
-                onClick={onSelectPlane}
-                onHover={onHover}
-              />
-            </group>
-          );
-        })}
-      </group>
+            return (
+              <group key={idPos}>
+                <PlaneSelector
+                  anchor={selectorAnchor}
+                  isInverse
+                  matcapTexture={matcapTexture}
+                  planeId={idPos}
+                  position={position}
+                  color={color}
+                  size={60}
+                  offset={offsetPx}
+                  naming={planeName}
+                  isExternallyHovered={hoveredSectionViewId === idPos}
+                  labelDepth={labelDepth}
+                  upDirection={upDirection}
+                  onClick={onSelectPlane}
+                  onHover={onHover}
+                />
+                <PlaneSelector
+                  anchor={selectorAnchor}
+                  isInverse={false}
+                  matcapTexture={matcapTexture}
+                  planeId={idNeg}
+                  position={position}
+                  color={color}
+                  size={60}
+                  offset={offsetPx}
+                  naming={planeName}
+                  isExternallyHovered={hoveredSectionViewId === idNeg}
+                  labelDepth={labelDepth}
+                  upDirection={upDirection}
+                  onClick={onSelectPlane}
+                  onHover={onHover}
+                />
+              </group>
+            );
+          })}
+        </group>
+      </SceneOverlay>
     );
   }
 
@@ -809,8 +777,8 @@ export function SectionViewControls({
           const currentObject = transformControlsRef.current;
           if (currentObject) {
             const { position } = currentObject;
-            if (onSetPivot) {
-              onSetPivot([position.x, position.y, position.z]);
+            if (onSetRenderPivot) {
+              onSetRenderPivot([position.x, position.y, position.z]);
             }
           }
         }}

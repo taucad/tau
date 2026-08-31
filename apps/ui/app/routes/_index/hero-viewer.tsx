@@ -5,7 +5,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { openrscad } from '@taucad/openrscad';
-import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/middleware';
+import { parameterCache, geometryCache, gltfEdgeDetection } from '@taucad/middleware';
 import { esbuild } from '@taucad/esbuild';
 import { assimp } from '@taucad/assimp';
 import { parameterEntryPath } from '@taucad/types';
@@ -32,11 +32,11 @@ const heroMainFile = 'main.scad';
 
 const heroCode = { [heroMainFile]: qrcodeScad };
 
-const heroUnits: Units = { length: { symbol: 'mm', factor: 1 } };
+const heroUnits: Units = { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } };
 
 const heroRuntime = defineRuntime({
   plugins: [assimp(), openrscad(), esbuild()],
-  middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
+  middleware: [parameterCache(), geometryCache(), gltfEdgeDetection()],
 });
 const heroKernelClientOptions = {
   runtime: heroRuntime,

@@ -56,8 +56,8 @@ export function FovOverflowControl(): React.JSX.Element {
 export function GridOverflowControl(): React.ReactNode {
   const graphicsRef = useGraphics();
   const gridSizes = useGraphicsSelector((state) => state.context.gridSizes);
-  const gridFactor = useGraphicsSelector((state) => state.context.units.length.factor);
-  const unit = useGraphicsSelector((state) => state.context.units.length.symbol);
+  const metersPerDisplayUnit = useGraphicsSelector((state) => state.context.displayUnits.length.metersPerUnit);
+  const unit = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
 
   const handleUnitChange = useCallback(
     (selectedUnit: string) => {
@@ -73,7 +73,7 @@ export function GridOverflowControl(): React.ReactNode {
     event.preventDefault();
   }, []);
 
-  const displaySize = gridSizes.smallSize / gridFactor;
+  const displaySize = gridSizes.smallSize / metersPerDisplayUnit;
   const localizedSmallGridSize = useMemo(
     () => formatNumberEngineeringNotation(displaySize, maxGridDigits),
     [displaySize],

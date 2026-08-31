@@ -2,7 +2,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { jscad } from '@taucad/jscad';
-import { parameterCache, geometryCache, gltfCoordinateTransform } from '@taucad/middleware';
+import { parameterCache, geometryCache } from '@taucad/middleware';
 import { esbuild } from '@taucad/esbuild';
 import { assimp } from '@taucad/assimp';
 import gearJscad from '#components/geometry/splash/gear.jscad.js?raw';
@@ -17,7 +17,7 @@ const gearMainFile = 'main.js';
 // parameters" actually feels live (OQ3).
 const gearRuntime = defineRuntime({
   plugins: [assimp(), jscad(), esbuild()],
-  middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform()],
+  middleware: [parameterCache(), geometryCache()],
 });
 
 const gearClientOptions = {
@@ -25,7 +25,7 @@ const gearClientOptions = {
   transport: inProcessTransport({ runtime: gearRuntime, fileSystem: fromMemoryFs() }),
 };
 
-const gearUnits: Units = { length: { symbol: 'mm', factor: 1 } };
+const gearUnits: Units = { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } };
 
 export function GearDemo(): React.JSX.Element {
   return (

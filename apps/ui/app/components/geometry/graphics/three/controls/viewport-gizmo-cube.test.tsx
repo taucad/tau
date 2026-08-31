@@ -74,6 +74,7 @@ const createDriverSnapshot = (requestedVerticalFieldOfView: number, revision: nu
       ? { kind: 'orthographic' }
       : { kind: 'perspective', verticalFieldOfView: requestedVerticalFieldOfView },
   view: createCameraView({
+    frameId: 'test-root',
     requestedVerticalFieldOfView,
     perspectiveZoom: 1,
     target: [0, 0, 0],

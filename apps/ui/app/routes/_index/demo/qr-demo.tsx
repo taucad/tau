@@ -2,7 +2,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { openrscad } from '@taucad/openrscad';
-import { parameterCache, geometryCache, gltfCoordinateTransform, gltfEdgeDetection } from '@taucad/middleware';
+import { parameterCache, geometryCache, gltfEdgeDetection } from '@taucad/middleware';
 import { esbuild } from '@taucad/esbuild';
 import { assimp } from '@taucad/assimp';
 import qrcodeScad from '#routes/_index/qrcode.scad?raw';
@@ -15,7 +15,7 @@ const qrMainFile = 'main.scad';
 // lazily by the demo section, so the WASM kernel never enters the default chunk.
 const qrRuntime = defineRuntime({
   plugins: [assimp(), openrscad(), esbuild()],
-  middleware: [parameterCache(), geometryCache(), gltfCoordinateTransform(), gltfEdgeDetection()],
+  middleware: [parameterCache(), geometryCache(), gltfEdgeDetection()],
 });
 
 const qrClientOptions = {
@@ -23,7 +23,7 @@ const qrClientOptions = {
   transport: inProcessTransport({ runtime: qrRuntime, fileSystem: fromMemoryFs() }),
 };
 
-const qrUnits: Units = { length: { symbol: 'mm', factor: 1 } };
+const qrUnits: Units = { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } };
 
 export function QrDemo(): React.JSX.Element {
   return (

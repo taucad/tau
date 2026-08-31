@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import * as THREE from 'three';
-import { useGraphicsSelector } from '#hooks/use-graphics.js';
-import { defaultRaycastClipEpsilon } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import type * as THREE from 'three';
+import { toThreeRenderPlane } from '@taucad/three/spatial';
+import { useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import { resolveSectionViewPlane } from '#components/geometry/graphics/section-view-plane.js';
 
 export type SectionViewState = {
   /** The computed clipping plane for the active section view. */
@@ -26,8 +27,6 @@ export type SectionViewState = {
   readonly stripeWidth: number;
 };
 
-const defaultPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-
 export function createSectionViewRaycastClipState(
   sectionView: Pick<SectionViewState, 'enableMesh' | 'isActive' | 'plane'>,
 ): RaycastClipState | undefined {
@@ -38,7 +37,6 @@ export function createSectionViewRaycastClipState(
   return {
     enabled: true,
     planes: [sectionView.plane],
-    epsilon: defaultRaycastClipEpsilon,
   };
 }
 
@@ -47,6 +45,7 @@ export function createSectionViewRaycastClipState(
  * plus stripe parameters for tinted contour-cap materials.
  */
 export function useSectionView(): SectionViewState {
+  const renderFrame = useRenderFrame();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const selectedSectionViewId = useGraphicsSelector((state) => state.context.selectedSectionViewId);
   const sectionViewRotation = useGraphicsSelector((state) => state.context.sectionViewRotation);
@@ -60,38 +59,46 @@ export function useSectionView(): SectionViewState {
   // Compute the clipping plane from the selected section view configuration
   const plane = useMemo(() => {
     if (!selectedSectionViewId) {
-      return defaultPlane;
+      return toThreeRenderPlane({
+        renderFrame,
+        plane: { pointMeters: [0, 0, 0], normal: [0, 0, 1] },
+      });
     }
 
     const selectedPlane = availableSectionViews.find((p) => p.id === selectedSectionViewId);
     if (!selectedPlane) {
-      return defaultPlane;
+      return toThreeRenderPlane({
+        renderFrame,
+        plane: { pointMeters: [0, 0, 0], normal: [0, 0, 1] },
+      });
     }
 
-    const normal = new THREE.Vector3(...selectedPlane.normal);
-
-    // Apply rotation to the normal if rotation is set
-    const [rotX, rotY, rotZ] = sectionViewRotation;
-    if (rotX !== 0 || rotY !== 0 || rotZ !== 0) {
-      const euler = new THREE.Euler(rotX, rotY, rotZ);
-      normal.applyEuler(euler);
-    }
-
-    // Apply direction after rotation
-    normal.multiplyScalar(-sectionViewDirection);
-
-    const constant = -normal.dot(new THREE.Vector3(...sectionViewPivot));
-
-    return new THREE.Plane(normal, constant);
-  }, [selectedSectionViewId, sectionViewPivot, sectionViewRotation, sectionViewDirection, availableSectionViews]);
+    const resolved = resolveSectionViewPlane({
+      baseNormal: selectedPlane.normal,
+      pivot: sectionViewPivot,
+      rotation: sectionViewRotation,
+      direction: sectionViewDirection,
+    });
+    return toThreeRenderPlane({
+      renderFrame,
+      plane: { pointMeters: resolved.point, normal: resolved.normal },
+    });
+  }, [
+    selectedSectionViewId,
+    sectionViewPivot,
+    sectionViewRotation,
+    sectionViewDirection,
+    availableSectionViews,
+    renderFrame,
+  ]);
 
   const { stripeFrequency, stripeWidth } = useMemo(() => {
-    const stripeSpacing = gridSizesComputed.largeSize * 0.1;
+    const stripeSpacing = gridSizesComputed.largeSize / renderFrame.metersPerRenderUnit / 10;
     return {
       stripeFrequency: stripeSpacing,
       stripeWidth: stripeSpacing * 0.2,
     };
-  }, [gridSizesComputed.largeSize]);
+  }, [gridSizesComputed.largeSize, renderFrame.metersPerRenderUnit]);
 
   return {
     plane,

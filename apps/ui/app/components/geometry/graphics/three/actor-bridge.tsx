@@ -6,11 +6,20 @@ import { OrthographicCamera, Vector3 } from 'three';
 import { perspectiveVerticalSpan } from '@taucad/camera';
 import { selectCameraDriverSnapshot } from '@taucad/camera/machine';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
+import { resolveMetersPerRenderUnit, shouldRebaseRenderFrame, shouldRescaleRenderFrame } from '@taucad/spatial';
 import type { ThreeCamera } from '@taucad/three/camera';
+import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { ControlsListenerBridge } from '#components/geometry/graphics/three/controls-listener-bridge.js';
 import { retargetCameraControls } from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 import { syncControlsLookAt } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
-import { useCameraConnectorRef, useCameraConsumersRef, useCameraRig, useGraphics } from '#hooks/use-graphics.js';
+import {
+  useCameraConnectorRef,
+  useCameraConsumersRef,
+  useCameraRig,
+  useGraphics,
+  useRenderFrame,
+  useSetRenderFrame,
+} from '#hooks/use-graphics.js';
 import type { CameraControlsAdapter } from '#machines/controls-listener.machine.js';
 
 const getPixelRatio = (): number => {
@@ -29,6 +38,8 @@ export function ActorBridge(): ReactNode {
   const rig = useCameraRig();
   const connectorRef = useCameraConnectorRef();
   const consumersRef = useCameraConsumersRef();
+  const renderFrame = useRenderFrame();
+  const setRenderFrame = useSetRenderFrame();
   const synchronizingControlsRef = useRef(false);
   const lastPublicationRef = useRef<{ camera: ThreeCamera; revision: number; near: number; far: number } | undefined>(
     undefined,
@@ -57,7 +68,7 @@ export function ActorBridge(): ReactNode {
           syncControlsLookAt({
             camera,
             controls: currentControls,
-            target: new Vector3(targetX, targetY, targetZ),
+            target: toThreeRenderPoint({ renderFrame: rig.renderFrame, pointMeters: [targetX, targetY, targetZ] }),
             transition: false,
           });
           currentControls.update(0);
@@ -111,32 +122,43 @@ export function ActorBridge(): ReactNode {
       const { camera } = controls;
       const target = controls.getTarget(new Vector3(), false);
       const offset = camera.position.clone().sub(target);
-      if (offset.lengthSq() <= 1e-12) {
+      if (offset.lengthSq() === 0) {
         return;
       }
+      const physicalTarget = fromThreeRenderPoint({ renderFrame, point: target });
       const verticalSpan =
         camera instanceof OrthographicCamera
-          ? (camera.top - camera.bottom) / camera.zoom
+          ? ((camera.top - camera.bottom) / camera.zoom) * renderFrame.metersPerRenderUnit
           : perspectiveVerticalSpan({
-              distance: offset.length(),
+              distance: offset.length() * renderFrame.metersPerRenderUnit,
               verticalFieldOfView: camera.fov,
               zoom: camera.zoom,
             });
       rig.actorRef.send({
         type: 'setView',
-        target: [target.x, target.y, target.z],
+        target: physicalTarget,
         direction: [offset.x / offset.length(), offset.y / offset.length(), offset.z / offset.length()],
         up: [camera.up.x, camera.up.y, camera.up.z],
         verticalSpan,
         ...(camera instanceof OrthographicCamera ? {} : { perspectiveZoom: camera.zoom }),
       });
+      const rescale = shouldRescaleRenderFrame({ renderFrame, visibleSpanMeters: verticalSpan });
+      if (rescale || shouldRebaseRenderFrame({ renderFrame, targetMeters: physicalTarget })) {
+        setRenderFrame({
+          anchorFrameId: renderFrame.anchorFrameId,
+          originMeters: physicalTarget,
+          metersPerRenderUnit: rescale
+            ? resolveMetersPerRenderUnit({ characteristicLengthMeters: verticalSpan })
+            : renderFrame.metersPerRenderUnit,
+        });
+      }
     };
 
     controls.addEventListener('update', handleControlsUpdate);
     return () => {
       controls.removeEventListener('update', handleControlsUpdate);
     };
-  }, [controls, rig]);
+  }, [controls, renderFrame, rig, setRenderFrame]);
 
   if (!controls) {
     return null;

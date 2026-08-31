@@ -61,8 +61,8 @@ export function ParametersNumber({
       defaultValue,
       descriptor,
       enableContinualOnChange,
-      initialUnitFactor: units.length.factor,
-      initialUnitSymbol: units.length.symbol,
+      initialSourceSymbol: units.length.sourceSymbol,
+      initialDisplaySymbol: units.length.displaySymbol,
       min,
       max,
       step,
@@ -89,10 +89,10 @@ export function ParametersNumber({
   React.useEffect(() => {
     parameterRef.send({
       type: 'unitChanged',
-      unitFactor: units.length.factor,
-      unitSymbol: units.length.symbol,
+      sourceSymbol: units.length.sourceSymbol,
+      displaySymbol: units.length.displaySymbol,
     });
-  }, [units.length.factor, units.length.symbol, parameterRef]);
+  }, [units.length.displaySymbol, units.length.sourceSymbol, parameterRef]);
 
   // Send config updates to parameter machine when config props change
   React.useEffect(() => {

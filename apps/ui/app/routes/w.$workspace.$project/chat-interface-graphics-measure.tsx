@@ -9,16 +9,16 @@ import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
   const graphicsActor = useGraphics();
 
-  const lengthSymbol = useGraphicsSelector((state) => state.context.units.length.symbol);
-  const { measurements, lengthFactor, hoveredMeasurementId } = useGraphicsSelector((state) => {
-    const lengthFactor = state.context.units.length.factor;
+  const lengthSymbol = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
+  const { measurements, metersPerDisplayUnit, hoveredMeasurementId } = useGraphicsSelector((state) => {
+    const metersPerDisplayUnit = state.context.displayUnits.length.metersPerUnit;
     const { measurements: ms, hoveredMeasurementId: hoveredId } = state.context;
 
     return {
       measurements: ms.map((m) => {
-        const deltaX = Math.abs((m.endPoint[0] - m.startPoint[0]) / lengthFactor).toFixed(1);
-        const deltaY = Math.abs((m.endPoint[1] - m.startPoint[1]) / lengthFactor).toFixed(1);
-        const deltaZ = Math.abs((m.endPoint[2] - m.startPoint[2]) / lengthFactor).toFixed(1);
+        const deltaX = Math.abs((m.endPoint[0] - m.startPoint[0]) / metersPerDisplayUnit).toFixed(1);
+        const deltaY = Math.abs((m.endPoint[1] - m.startPoint[1]) / metersPerDisplayUnit).toFixed(1);
+        const deltaZ = Math.abs((m.endPoint[2] - m.startPoint[2]) / metersPerDisplayUnit).toFixed(1);
 
         return {
           ...m,
@@ -27,7 +27,7 @@ export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
           deltaZ,
         };
       }),
-      lengthFactor,
+      metersPerDisplayUnit,
       hoveredMeasurementId: hoveredId,
     };
   });
@@ -58,7 +58,7 @@ export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
         ) : null}
 
         {sorted.map((m) => {
-          const value = (m.distance / lengthFactor).toFixed(1);
+          const value = (m.distance / metersPerDisplayUnit).toFixed(1);
           const label = m.name?.trim() ? m.name : `${value} ${lengthSymbol}`;
           const isExternallyHovered = hoveredMeasurementId === m.id;
 

@@ -1,6 +1,8 @@
 import React from 'react';
 import type { ReactNode } from 'react';
 import type * as THREE from 'three';
+import { resolveMetersPerRenderUnit } from '@taucad/spatial';
+import { createThreeRenderMatrix } from '@taucad/three/spatial';
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
 import { SectionContourFills } from '#components/geometry/graphics/three/react/section-contour-fill.js';
 import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
@@ -9,22 +11,10 @@ import { useFeature } from '#flags/use-feature.js';
 import { useSectionView } from '#components/geometry/graphics/three/use-section-view.js';
 import { useGeometryBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
-import { useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useGraphicsSelector, useRenderFrame, useRenderFrameRetarget, useSetRenderFrame } from '#hooks/use-graphics.js';
+import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 
 export type StageOptions = {
-  /**
-   * The near plane of the camera.
-   */
-  nearPlane?: number;
-  /**
-   * The minimum far plane of the logarithmic-depth perspective endpoint.
-   */
-  minimumFarPlane?: number;
-  /**
-   * The geometry-envelope multiplier used for perspective coverage and the
-   * bounds-derived orthographic far plane.
-   */
-  farPlaneRadiusMultiplier?: number;
   /** Fractional outer margin applied by projected-corner fitting. */
   fitMargin?: number;
   rotation?: {
@@ -42,9 +32,6 @@ export type StageOptions = {
 
 // Default configuration constants
 export const defaultStageOptions = {
-  nearPlane: 1e-3,
-  minimumFarPlane: 10_000_000_000,
-  farPlaneRadiusMultiplier: 5,
   fitMargin: 0.1,
   rotation: {
     side: -Math.PI / 4, // Default rotation is 45 degrees counter-clockwise
@@ -54,21 +41,21 @@ export const defaultStageOptions = {
 
 type StageProperties = {
   readonly children: ReactNode;
-  readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'id'>;
 
 export function Stage({
   children,
-  enableCentering = false,
   stageOptions = defaultStageOptions,
   ...properties
 }: StageProperties): React.JSX.Element {
   const outer = React.useRef<THREE.Group>(null);
   // oxlint-disable-next-line typescript/no-restricted-types -- valid React ref type
   const innerRef = React.useRef<THREE.Group | null>(null);
+  const sectionSnapshotRef = React.useRef(createSectionViewSafeSnapshotStore());
 
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
+  const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
   const environmentPreset = useGraphicsSelector((state) => state.context.environmentPreset);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
@@ -78,23 +65,52 @@ export function Stage({
   const isTauDebugEnabled = useFeature('tauDebug');
 
   const sectionView = useSectionView();
-
-  const { geometryRadius, geometryCenter, geometryBounds } = useGeometryBounds(innerRef, outer, {
-    enableCentering,
+  const renderFrame = useRenderFrame();
+  const setRenderFrame = useSetRenderFrame();
+  const initializedGeometryRef = React.useRef<{ key: string | undefined; initialized: boolean }>({
+    key: undefined,
+    initialized: false,
   });
+  const retargetScene = React.useCallback((nextRenderFrame: typeof renderFrame): void => {
+    if (!outer.current) {
+      return;
+    }
+    outer.current.matrix.copy(createThreeRenderMatrix(nextRenderFrame));
+    outer.current.matrixWorldNeedsUpdate = true;
+    outer.current.updateWorldMatrix(true, true);
+  }, []);
+  useRenderFrameRetarget(retargetScene);
+
+  const { geometryRadius, geometryCenter, geometryBounds } = useGeometryBounds(innerRef, outer);
+
+  React.useLayoutEffect(() => {
+    if (
+      geometryRadius <= 0 ||
+      (initializedGeometryRef.current.initialized && initializedGeometryRef.current.key === geometryKey)
+    ) {
+      return;
+    }
+    initializedGeometryRef.current = { key: geometryKey, initialized: true };
+    setRenderFrame({
+      anchorFrameId: renderFrame.anchorFrameId,
+      originMeters: [geometryCenter.x, geometryCenter.y, geometryCenter.z],
+      metersPerRenderUnit: resolveMetersPerRenderUnit({ characteristicLengthMeters: geometryRadius * 2 }),
+    });
+  }, [geometryCenter, geometryKey, geometryRadius, renderFrame.anchorFrameId, setRenderFrame]);
 
   useCameraFraming({ geometryRadius, geometryCenter, geometryBounds, stageOptions });
 
   return (
     <group {...properties}>
-      {isTauDebugEnabled ? <SectionViewTestBridge /> : undefined}
-      <group ref={outer}>
+      {isTauDebugEnabled ? <SectionViewTestBridge isGeometryFramed={geometryRadius > 0} /> : undefined}
+      <group ref={outer} matrixAutoUpdate={false}>
         <SectionClippingGroup
           enableLines={sectionView.enableLines}
           enableMesh={sectionView.enableMesh}
           enabled={sectionView.isActive}
           innerRef={innerRef}
           plane={sectionView.plane}
+          snapshotRef={sectionSnapshotRef}
         >
           <group ref={innerRef}>{children}</group>
         </SectionClippingGroup>
@@ -102,6 +118,7 @@ export function Stage({
           enabled={sectionView.isActive && sectionView.enableMesh}
           innerRef={innerRef}
           plane={sectionView.plane}
+          snapshotRef={sectionSnapshotRef}
           stripeFrequency={sectionView.stripeFrequency}
           stripeWidth={sectionView.stripeWidth}
         />
@@ -109,7 +126,7 @@ export function Stage({
       <Lights
         enableMatcap={enableMatcap}
         environmentPreset={environmentPreset}
-        sceneRadius={geometryRadius}
+        sceneRadius={geometryRadius > 0 ? geometryRadius / renderFrame.metersPerRenderUnit : 0}
         upDirection={upDirection}
       />
     </group>

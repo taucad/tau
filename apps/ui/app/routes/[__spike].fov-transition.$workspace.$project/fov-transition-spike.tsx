@@ -11,6 +11,7 @@ import { selectCameraDriverSnapshot } from '@taucad/camera/machine';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { createThreeCameraRig } from '@taucad/three/camera';
 import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
+import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { OrthographicCamera, PerspectiveCamera, Vector3, WebGLRenderer } from 'three';
 import type { Box3, Euler, Group } from 'three';
 import { GltfMesh } from '#components/geometry/graphics/three/react/gltf-mesh.js';
@@ -27,6 +28,7 @@ import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-t
 import { useSectionView } from '#components/geometry/graphics/three/use-section-view.js';
 import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { useGeometryBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
+import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import { WebglErrorBoundary } from '#components/geometry/cad/webgl-error-boundary.js';
 import { WebglErrorFallback } from '#components/geometry/cad/webgl-fallback.js';
 import { mergeGraphicsBackendWithQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
@@ -38,6 +40,7 @@ import {
   useGraphics,
   useGraphicsSelector,
   useModelInteractionSelector,
+  useRenderFrame,
 } from '#hooks/use-graphics.js';
 import { MeasureControl } from '#components/geometry/cad/measure-control.js';
 import { SectionViewControl } from '#components/geometry/cad/section-view-control.js';
@@ -69,6 +72,7 @@ const createSpikeCameraRig = (onUpdate: SpikeCameraConnector): ThreeCameraRig =>
     pixelBudget: 0.25,
     onUpdate,
     initialView: createCameraView({
+      frameId: 'tau:root',
       requestedVerticalFieldOfView: initialFov,
       perspectiveZoom: 1,
       target: [0, 0, 0],
@@ -551,6 +555,11 @@ function SpikeInteractionTools({ upDirection }: { readonly upDirection: 'y' | 'z
   const selectedPlaneId = useGraphicsSelector((state) => state.context.selectedSectionViewId);
   const rotation = useGraphicsSelector((state) => state.context.sectionViewRotation);
   const pivot = useGraphicsSelector((state) => state.context.sectionViewPivot);
+  const renderFrame = useRenderFrame();
+  const renderPivot = useMemo((): [number, number, number] => {
+    const point = toThreeRenderPoint({ renderFrame, pointMeters: pivot });
+    return [point.x, point.y, point.z];
+  }, [pivot, renderFrame]);
   const availablePlanes = useGraphicsSelector((state) => state.context.availableSectionViews);
   const planeName = useGraphicsSelector((state) => state.context.planeName);
   const hoveredSectionViewId = useGraphicsSelector((state) => state.context.hoveredSectionViewId);
@@ -570,7 +579,7 @@ function SpikeInteractionTools({ upDirection }: { readonly upDirection: 'y' | 'z
         selectedPlaneId={selectedPlaneId}
         availablePlanes={availablePlanes}
         rotation={rotation}
-        pivot={pivot}
+        renderPivot={renderPivot}
         planeName={planeName}
         hoveredSectionViewId={hoveredSectionViewId}
         upDirection={upDirection}
@@ -584,8 +593,9 @@ function SpikeInteractionTools({ upDirection }: { readonly upDirection: 'y' | 'z
             payload: [nextRotation.x, nextRotation.y, nextRotation.z],
           });
         }}
-        onSetPivot={(nextPivot) => {
-          graphicsActor.send({ type: 'setSectionViewPivot', payload: nextPivot });
+        onSetRenderPivot={(nextPivot) => {
+          const pointMeters = fromThreeRenderPoint({ renderFrame, point: new Vector3(...nextPivot) });
+          graphicsActor.send({ type: 'setSectionViewPivot', payload: [...pointMeters] });
         }}
         onTransformDragStart={() => {
           graphicsActor.send({
@@ -637,6 +647,7 @@ function SpikeScene({
 }): React.JSX.Element {
   const outerRef = useRef<Group>(null);
   const innerRef = useRef<Group>(null);
+  const sectionSnapshotRef = useRef(createSectionViewSafeSnapshotStore());
   const { geometryBounds, geometryRadius } = useGeometryBounds(innerRef, outerRef);
   const sectionView = useSectionView();
 
@@ -658,6 +669,7 @@ function SpikeScene({
           enabled={sectionView.isActive}
           innerRef={innerRef}
           plane={sectionView.plane}
+          snapshotRef={sectionSnapshotRef}
         >
           <group ref={innerRef}>
             <GltfMesh
@@ -674,6 +686,7 @@ function SpikeScene({
           enabled={sectionView.isActive && sectionView.enableMesh}
           innerRef={innerRef}
           plane={sectionView.plane}
+          snapshotRef={sectionSnapshotRef}
           stripeFrequency={sectionView.stripeFrequency}
           stripeWidth={sectionView.stripeWidth}
         />

@@ -4,11 +4,9 @@ import { Box3, Vector3 } from 'three';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 
 const send = vi.fn();
-const setClipPlanes = vi.fn();
 let resetListener: (() => void) | undefined;
 const size = { width: 800, height: 600 };
 const rig = {
-  setClipPlanes,
   actorRef: {
     getSnapshot: () => ({
       context: {
@@ -46,7 +44,6 @@ vi.mock('#hooks/use-graphics.js', () => ({
 describe('useCameraFraming portable camera events', () => {
   beforeEach(() => {
     send.mockClear();
-    setClipPlanes.mockClear();
     unsubscribe.mockClear();
     graphicsActor.on.mockClear();
     beginCameraViewInitialization.mockReset();
@@ -70,11 +67,6 @@ describe('useCameraFraming portable camera events', () => {
 
     const setView = send.mock.calls[0]?.[0] as { direction: [number, number, number]; up: [number, number, number] };
     expect(new Vector3(...setView.direction).cross(new Vector3(...setView.up)).lengthSq()).toBeGreaterThan(1e-8);
-    expect(setClipPlanes).toHaveBeenCalledWith({
-      near: 1e-3,
-      minimumPerspectiveFar: 10_000_000_000,
-      orthographicFarMultiplier: 5,
-    });
     expect(send).toHaveBeenCalledWith({ type: 'setBounds', bounds: { min: [-10, -5, -2], max: [10, 5, 2] } });
     expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
     expect(send).toHaveBeenLastCalledWith({ type: 'saveHome' });
@@ -140,33 +132,6 @@ describe('useCameraFraming portable camera events', () => {
       useCameraFraming({ geometryRadius: 0, geometryCenter: new Vector3(), geometryBounds: new Box3() }),
     );
     expect(send).not.toHaveBeenCalled();
-    expect(setClipPlanes).not.toHaveBeenCalled();
     expect(beginCameraViewInitialization).not.toHaveBeenCalled();
-  });
-
-  it('keeps the broad perspective envelope without applying it to the precision-sensitive orthographic endpoint', () => {
-    const bounds = new Box3(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
-    const hook = renderHook(
-      ({ minimumFarPlane }) =>
-        useCameraFraming({
-          geometryRadius: 2,
-          geometryCenter: new Vector3(),
-          geometryBounds: bounds,
-          stageOptions: { nearPlane: 0.1, minimumFarPlane, farPlaneRadiusMultiplier: 5 },
-        }),
-      { initialProps: { minimumFarPlane: 100 } },
-    );
-
-    expect(setClipPlanes).toHaveBeenLastCalledWith({
-      near: 0.1,
-      minimumPerspectiveFar: 100,
-      orthographicFarMultiplier: 5,
-    });
-    hook.rerender({ minimumFarPlane: 200 });
-    expect(setClipPlanes).toHaveBeenLastCalledWith({
-      near: 0.1,
-      minimumPerspectiveFar: 200,
-      orthographicFarMultiplier: 5,
-    });
   });
 });

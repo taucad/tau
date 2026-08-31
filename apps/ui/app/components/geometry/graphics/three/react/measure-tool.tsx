@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useMemo, useCallback, useReducer } from 'r
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { createActor } from 'xstate';
+import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import {
   LabelTextGeometry,
   LabelBackgroundGeometry,
@@ -20,7 +21,7 @@ import {
   hasSceneTagInHierarchy,
 } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
-import { useGraphics, useGraphicsSelector, useModelInteractionSelector } from '#hooks/use-graphics.js';
+import { useGraphics, useGraphicsSelector, useModelInteractionSelector, useRenderFrame } from '#hooks/use-graphics.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import type { RafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
@@ -118,6 +119,7 @@ type MeasurePointerSnapshot = {
 export function MeasureTool(): React.JSX.Element {
   const { camera, gl, scene, invalidate } = useThree();
   const graphicsActor = useGraphics();
+  const renderFrame = useRenderFrame();
   const sectionView = useSectionView();
   const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
   const pickableMeshesVersion = useGraphicsSelector((state) => state.context.pickableMeshesVersion);
@@ -125,8 +127,8 @@ export function MeasureTool(): React.JSX.Element {
   const measurements = useGraphicsSelector((state) => state.context.measurements);
   const currentStart = useGraphicsSelector((state) => state.context.currentMeasurementStart);
   const snapDistance = useGraphicsSelector((state) => state.context.measureSnapDistance);
-  const lengthFactor = useGraphicsSelector((state) => state.context.units.length.factor);
-  const lengthSymbol = useGraphicsSelector((state) => state.context.units.length.symbol);
+  const metersPerDisplayUnit = useGraphicsSelector((state) => state.context.displayUnits.length.metersPerUnit);
+  const lengthSymbol = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
   const hoveredMeasurementId = useGraphicsSelector((state) => state.context.hoveredMeasurementId);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
   const cameraInteracting = useGraphicsSelector((state) => state.context.cameraInteracting);
@@ -316,10 +318,12 @@ export function MeasureTool(): React.JSX.Element {
         clientY: event.clientY,
       });
       const { hasActiveSnapTarget, hasTarget, point } = pointerSnapshot;
-      const pointArray: [number, number, number] | undefined = point ? [point.x, point.y, point.z] : undefined;
+      const pointArray: [number, number, number] | undefined = point
+        ? [...fromThreeRenderPoint({ renderFrame, point })]
+        : undefined;
       const isZeroLength =
         pointArray !== undefined && currentStartRef.current !== undefined
-          ? new THREE.Vector3(...currentStartRef.current).distanceTo(new THREE.Vector3(...pointArray)) <= 1e-4
+          ? new THREE.Vector3(...currentStartRef.current).distanceTo(new THREE.Vector3(...pointArray)) === 0
           : false;
 
       measureInputActor.send({
@@ -369,15 +373,23 @@ export function MeasureTool(): React.JSX.Element {
       gl.domElement.removeEventListener('pointerup', handlePointerUp);
       gl.domElement.removeEventListener('contextmenu', handleContextMenu);
     };
-  }, [cameraInteracting, gl.domElement, isMeasureActive, graphicsActor, measureInputActor, updatePointerSnapshot]);
+  }, [
+    cameraInteracting,
+    gl.domElement,
+    isMeasureActive,
+    graphicsActor,
+    measureInputActor,
+    renderFrame,
+    updatePointerSnapshot,
+  ]);
 
   // Choose which measurements to display: all during measure mode, otherwise only pinned
   const visibleMeasurements = isMeasureActive ? measurements : measurements.filter((m) => m.isPinned);
 
   // Memoize currentStart Vector3 to avoid per-render allocation
   const currentStartVec3 = useMemo(
-    () => (currentStart ? new THREE.Vector3(...currentStart) : undefined),
-    [currentStart],
+    () => (currentStart ? toThreeRenderPoint({ renderFrame, pointMeters: currentStart }) : undefined),
+    [currentStart, renderFrame],
   );
 
   return (
@@ -412,10 +424,10 @@ export function MeasureTool(): React.JSX.Element {
         <MeasurementLine
           key={measurement.id}
           id={measurement.id}
-          start={measurement.startPoint}
-          end={measurement.endPoint}
+          start={toThreeRenderPoint({ renderFrame, pointMeters: measurement.startPoint })}
+          end={toThreeRenderPoint({ renderFrame, pointMeters: measurement.endPoint })}
           distance={measurement.distance}
-          lengthFactor={lengthFactor}
+          metersPerDisplayUnit={metersPerDisplayUnit}
           lengthSymbol={lengthSymbol}
           isExternallyHovered={hoveredMeasurementId === measurement.id}
           isPinned={Boolean(measurement.isPinned)}
@@ -509,7 +521,7 @@ type MeasurementLineProps = {
   readonly start: THREE.Vector3 | readonly [number, number, number];
   readonly end: THREE.Vector3 | readonly [number, number, number];
   readonly distance?: number;
-  readonly lengthFactor?: number;
+  readonly metersPerDisplayUnit?: number;
   readonly lengthSymbol?: string;
   readonly isPreview?: boolean;
   readonly isExternallyHovered?: boolean;
@@ -547,7 +559,7 @@ function MeasurementLine({
   start,
   end,
   distance,
-  lengthFactor = 1,
+  metersPerDisplayUnit = 1,
   lengthSymbol = 'mm',
   isPreview = false,
   isExternallyHovered = false,
@@ -646,8 +658,8 @@ function MeasurementLine({
 
   // Calculate distance if not provided
   const calculatedDistance = distance ?? startVec.distanceTo(endVec);
-  const distanceInMm = calculatedDistance / lengthFactor;
-  const numericText = distanceInMm.toFixed(decimals);
+  const distanceInDisplayUnits = calculatedDistance / metersPerDisplayUnit;
+  const numericText = distanceInDisplayUnits.toFixed(decimals);
   const unitsText = enableUnits ? lengthSymbol : '';
   const labelText = `${numericText}${enableUnits ? ` ${unitsText}` : ''}`;
 

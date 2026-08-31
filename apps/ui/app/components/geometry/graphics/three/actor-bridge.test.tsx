@@ -19,11 +19,14 @@ const mockConnectorRef: { current: ((camera: ThreeCamera, snapshot: CameraDriver
 const mockConsumersRef = {
   current: new Set<(camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void>(),
 };
+const mockRenderFrame = { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 } as const;
+const mockSetRenderFrame = vi.fn();
 let mockRig: ThreeCameraRig;
 
 const createDriverSnapshot = (projection: CameraProjection, revision: number): CameraDriverSnapshot => ({
   projection,
   view: createCameraView({
+    frameId: 'test-root',
     requestedVerticalFieldOfView: projection.kind === 'orthographic' ? 0 : projection.verticalFieldOfView,
     perspectiveZoom: 1,
     target: [0, 0, 0],
@@ -51,6 +54,8 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => mockRig,
   useCameraConnectorRef: () => mockConnectorRef,
   useCameraConsumersRef: () => mockConsumersRef,
+  useRenderFrame: () => mockRenderFrame,
+  useSetRenderFrame: () => mockSetRenderFrame,
 }));
 
 describe('ActorBridge', () => {
@@ -61,6 +66,8 @@ describe('ActorBridge', () => {
       perspectiveCamera,
       orthographicCamera,
       activeCamera: perspectiveCamera,
+      renderFrame: mockRenderFrame,
+      setRenderFrame: mockSetRenderFrame,
       actorRef: {
         getSnapshot: () => ({
           context: {
@@ -83,6 +90,7 @@ describe('ActorBridge', () => {
     mockConsumersRef.current.clear();
     mockGraphicsSend.mockReset();
     mockCameraSend.mockReset();
+    mockSetRenderFrame.mockReset();
   });
 
   it('retargets retained consumers before publishing one camera and invalidating once', () => {

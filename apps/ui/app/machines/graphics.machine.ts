@@ -31,13 +31,11 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
 
 // Context type definition
 export type GraphicsContext = {
-  /**
-   * The units that are currently being used for the graphics.
-   */
-  graphicsUnits: {
+  /** Human-selected display units; lengths remain stored physically in metres. */
+  displayUnits: {
     length: {
       symbol: LengthSymbol;
-      factor: number;
+      metersPerUnit: number;
       system: UnitSystem;
     };
   };
@@ -47,18 +45,6 @@ export type GraphicsContext = {
   cadUnits: {
     length: {
       symbol: LengthSymbol;
-      factor: number;
-    };
-  };
-  /**
-   * Relative units for display (computed from graphicsUnits / cadUnits)
-   * This represents the conversion factor from CAD coordinate space to display units
-   */
-  units: {
-    length: {
-      symbol: LengthSymbol;
-      factor: number;
-      system: UnitSystem;
     };
   };
 
@@ -74,8 +60,10 @@ export type GraphicsContext = {
   initialCameraFovAngle: number;
   /** Projection-neutral visible vertical span supplied by the active renderer. */
   cameraVisibleSpan: number;
+  /** Physical bounding-sphere radius in metres. */
   geometryRadius: number;
-  sceneRadius: number | undefined;
+  /** Physical geometry-bounds center in the Tau root frame, measured in metres. */
+  geometryCenter: [number, number, number];
 
   // Visibility state
   enableSurfaces: boolean;
@@ -112,10 +100,11 @@ export type GraphicsContext = {
     stripeSpacing: number;
     stripeWidth: number;
   };
-  sectionViewTranslation: number; // Current translation offset
+  /** Current section translation in physical metres. */
+  sectionViewTranslation: number;
   sectionViewRotation: [number, number, number]; // Euler rotation as tuple [x, y, z]
   sectionViewDirection: 1 | -1; // Normal direction multiplier
-  /** World-space pivot point that the clipping plane passes through */
+  /** Physical Tau-root pivot in metres that the clipping plane passes through. */
   sectionViewPivot: [number, number, number];
   enableClippingLines: boolean; // Whether to cut lines
   enableClippingMesh: boolean; // Whether to cut meshes
@@ -124,6 +113,7 @@ export type GraphicsContext = {
   isMeasureActive: boolean;
   measurements: Array<{
     id: string;
+    frameId: string;
     startPoint: [number, number, number];
     endPoint: [number, number, number];
     distance: number;
@@ -217,7 +207,8 @@ export type GraphicsEvent =
       source?: ModelInteractionSource;
     }
   | { type: 'markModelPointerGestureMoved' }
-  | { type: 'clearModelPointerClickGuard' } // Geometry updates from CAD
+  | { type: 'clearModelPointerClickGuard' }
+  // Geometry updates from CAD
   | {
       type: 'updateGeometry';
       geometry: Geometry;
@@ -257,7 +248,7 @@ export type GraphicsEvent =
   | { type: 'focusModelComponent'; unitId: string; componentId: string; source?: ModelInteractionSource }
   | { type: 'clearModelComponentFocus'; unitId: string; source?: ModelInteractionSource }
   // Scene radius update from Three.js bounding sphere (sent by Stage)
-  | { type: 'sceneRadiusUpdated'; radius: number };
+  | { type: 'sceneRadiusUpdated'; radius: number; centerMeters: [number, number, number] };
 
 // Emitted events
 export type GraphicsEmitted =
@@ -335,7 +326,7 @@ function getLengthUnitData(symbol: LengthSymbol): LengthUnitData {
  * Metric Units (mm, cm, m, etc.):
  * - Visual grid spacing is ALWAYS the same baseline calculation regardless of unit
  * - Returned GridSizes values are in base metric units (no factor applied)
- * - Display layer must apply units.length.factor when showing grid labels to user
+ * - Display layers divide physical metre sizes by `displayUnits.length.metersPerUnit`
  * - Grid recalculation only happens on camera/controls changes, not unit factor changes
  *
  * Imperial Units (inches, feet):
@@ -374,7 +365,7 @@ function calculateGridSizes({
   const exponent = Math.floor(Math.log10(baseGridSize));
   const mantissa = baseGridSize / 10 ** exponent;
   const largeSize = mantissa < Math.sqrt(10) ? 10 ** exponent : 5 * 10 ** exponent;
-  const safeSize = Math.max(1e-6, largeSize) * scalingFactor;
+  const safeSize = largeSize * scalingFactor;
   const smallSize = safeSize / 10;
 
   // For metric: visual spacing stays the same, factor is just metadata for display
@@ -493,8 +484,7 @@ function rotateVectorByEuler(v: [number, number, number], euler: [number, number
 }
 
 // Round a translation value to a given number of decimals in the current unit,
-// then convert it back to the base unit (mm). For example, with unitFactor=1000 (m),
-// 6262 mm -> 6.262 m -> 6.26 m -> 6260 mm.
+// then convert it back to the metre world unit.
 function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number, decimals = 2): number {
   const factor = unitFactor === 0 ? 1 : unitFactor;
   const valueInUnit = valueInBase / factor;
@@ -509,6 +499,7 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
  * Manages all graphics-related state including:
  * - Grid sizing and units
  * - Camera position and controls
+ * - Screenshot capabilities
  * - Geometry rendering from CAD
  *
  * State Architecture:
@@ -525,7 +516,7 @@ function roundTranslationToUnitDecimals(valueInBase: number, unitFactor: number,
  * Future modes can be added as siblings:
  *   ├── annotation (future)
  *
- * Common events (grid, camera, visibility) are handled
+ * Common events (grid, camera, visibility, screenshots) are handled
  * once at the operational parent level to avoid duplication.
  */
 export const graphicsMachine = setup({
@@ -575,27 +566,17 @@ export const graphicsMachine = setup({
       assertEvent(event, 'setGridUnit');
 
       const unitData = getLengthUnitData(event.payload.unit);
-      const previousUnitData = getLengthUnitData(context.graphicsUnits.length.symbol);
+      const previousUnitData = getLengthUnitData(context.displayUnits.length.symbol);
 
       const isSystemChange = previousUnitData.system !== unitData.system;
       const isImperialFactorChange =
-        unitData.system === 'imperial' && context.graphicsUnits.length.factor !== unitData.factor;
-
-      // Calculate relative factor for display (displayFactor / cadFactor)
-      const relativeFactor = unitData.factor / context.cadUnits.length.factor;
+        unitData.system === 'imperial' && context.displayUnits.length.metersPerUnit !== unitData.factor;
 
       enqueue.assign({
-        graphicsUnits: {
+        displayUnits: {
           length: {
             symbol: unitData.symbol,
-            factor: unitData.factor,
-            system: unitData.system,
-          },
-        },
-        units: {
-          length: {
-            symbol: unitData.symbol,
-            factor: relativeFactor,
+            metersPerUnit: unitData.factor,
             system: unitData.system,
           },
         },
@@ -606,12 +587,10 @@ export const graphicsMachine = setup({
       // 2. Changing factor in imperial units (affects visual spacing)
       // For si units, factor changes only affect display numbers, not visual spacing
       if (isSystemChange || isImperialFactorChange) {
-        // Use relative factor × 1000 for grid calculations
-        const gridUnitFactor = relativeFactor * 1000;
         const newGridSizes = calculateGridSizes({
           visibleSpan: context.cameraVisibleSpan,
           gridUnitSystem: unitData.system,
-          unitFactor: gridUnitFactor,
+          unitFactor: unitData.factor,
         });
 
         enqueue.sendTo(({ self }) => self, {
@@ -631,11 +610,11 @@ export const graphicsMachine = setup({
         cameraVisibleSpan: event.verticalSpan,
       });
 
-      const gridUnitFactor = context.units.length.factor * 1000;
+      // Recalculate grid sizes based on new controls state
       const newGridSizes = calculateGridSizes({
         visibleSpan: event.verticalSpan,
-        gridUnitSystem: context.units.length.system,
-        unitFactor: gridUnitFactor,
+        gridUnitSystem: context.displayUnits.length.system,
+        unitFactor: context.displayUnits.length.metersPerUnit,
       });
 
       enqueue.sendTo(({ self }) => self, {
@@ -748,14 +727,10 @@ export const graphicsMachine = setup({
     updateGeometry: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'updateGeometry');
 
-      const cadUnitData = getLengthUnitData(event.units.length);
       const componentManifestUpdate = extractComponentManifestUpdates({
         geometry: event.geometry,
         sourceFile: event.sourceFile,
       });
-
-      // Calculate relative factor for display (displayFactor / cadFactor)
-      const relativeFactor = context.graphicsUnits.length.factor / cadUnitData.factor;
 
       enqueue.assign({
         geometry: event.geometry,
@@ -767,14 +742,6 @@ export const graphicsMachine = setup({
         cadUnits: {
           length: {
             symbol: event.units.length,
-            factor: cadUnitData.factor,
-          },
-        },
-        units: {
-          length: {
-            symbol: context.graphicsUnits.length.symbol,
-            factor: relativeFactor,
-            system: context.graphicsUnits.length.system,
           },
         },
       });
@@ -799,7 +766,7 @@ export const graphicsMachine = setup({
 
     updateSceneRadius: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'sceneRadiusUpdated');
-      enqueue.assign({ geometryRadius: event.radius });
+      enqueue.assign({ geometryRadius: event.radius, geometryCenter: event.centerMeters });
       enqueue.emit({
         type: 'geometryRadiusCalculated',
         radius: event.radius,
@@ -921,13 +888,16 @@ export const graphicsMachine = setup({
         return event.payload;
       },
       // Reset translation and pivot when changing planes
-      sectionViewTranslation({ event }) {
+      sectionViewTranslation({ event, context }) {
         assertEvent(event, 'selectSectionView');
-        return event.payload === undefined ? 0 : 0;
+        if (event.payload === undefined) {
+          return 0;
+        }
+        return dot(getBaseAxis(event.payload), context.geometryCenter);
       },
-      sectionViewPivot({ event }): [number, number, number] {
+      sectionViewPivot({ event, context }): [number, number, number] {
         assertEvent(event, 'selectSectionView');
-        return [0, 0, 0];
+        return event.payload === undefined ? [0, 0, 0] : [...context.geometryCenter];
       },
       // Reset rotation when changing planes
       sectionViewRotation({ event }): [number, number, number] {
@@ -949,8 +919,8 @@ export const graphicsMachine = setup({
       // translation as the rounded requested value.
       sectionViewPivot({ event, context }): [number, number, number] {
         assertEvent(event, 'setSectionViewTranslation');
-        // Convert from display units to CAD coordinate space using relative factor
-        const desired = roundTranslationToUnitDecimals(event.payload, context.units.length.factor, 2);
+        // Round the physical metre value at the selected display-unit precision.
+        const desired = roundTranslationToUnitDecimals(event.payload, context.displayUnits.length.metersPerUnit, 2);
 
         const a = getBaseAxis(context.selectedSectionViewId); // Base axis
         const r = normalize(rotateVectorByEuler(a, context.sectionViewRotation)); // Rotated normal
@@ -968,8 +938,8 @@ export const graphicsMachine = setup({
       sectionViewTranslation({ context }) {
         const axis = getBaseAxis(context.selectedSectionViewId);
         const projected = dot(axis, context.sectionViewPivot);
-        // Convert from CAD coordinate space to display units using relative factor
-        return roundTranslationToUnitDecimals(projected, context.units.length.factor, 2);
+        // Round the physical metre value at the selected display-unit precision.
+        return roundTranslationToUnitDecimals(projected, context.displayUnits.length.metersPerUnit, 2);
       },
     }),
 
@@ -984,8 +954,8 @@ export const graphicsMachine = setup({
       sectionViewTranslation({ context }) {
         const axis = getBaseAxis(context.selectedSectionViewId);
         const projected = dot(axis, context.sectionViewPivot);
-        // Convert from CAD coordinate space to display units using relative factor
-        return roundTranslationToUnitDecimals(projected, context.units.length.factor, 2);
+        // Round the physical metre value at the selected display-unit precision.
+        return roundTranslationToUnitDecimals(projected, context.displayUnits.length.metersPerUnit, 2);
       },
     }),
 
@@ -1004,8 +974,8 @@ export const graphicsMachine = setup({
         assertEvent(event, 'setSectionViewPivot');
         const axis = getBaseAxis(context.selectedSectionViewId);
         const projected = dot(axis, event.payload);
-        // Convert from CAD coordinate space to display units using relative factor
-        return roundTranslationToUnitDecimals(projected, context.units.length.factor, 2);
+        // Round the physical metre value at the selected display-unit precision.
+        return roundTranslationToUnitDecimals(projected, context.displayUnits.length.metersPerUnit, 2);
       },
     }),
 
@@ -1088,6 +1058,7 @@ export const graphicsMachine = setup({
           ...context.measurements,
           {
             id: generatePrefixedId(idPrefix.measurement),
+            frameId: 'tau:root',
             startPoint: start,
             endPoint: end,
             distance,
@@ -1339,37 +1310,27 @@ export const graphicsMachine = setup({
 
     return {
       // Grid state
-      gridSizes: { smallSize: 1, largeSize: 10 },
-      gridSizesComputed: { smallSize: 1, largeSize: 10 },
+      gridSizes: { smallSize: 0.001, largeSize: 0.01 },
+      gridSizesComputed: { smallSize: 0.001, largeSize: 0.01 },
       isGridSizeLocked: false,
-      graphicsUnits: {
+      displayUnits: {
         length: {
           symbol: 'mm',
-          factor: 1e-3,
+          metersPerUnit: 1e-3,
           system: 'si',
         },
       },
       cadUnits: {
         length: {
           symbol: 'mm', // Default to mm
-          factor: 1e-3,
-        },
-      },
-      // Relative units = display units / CAD units
-      // When both are mm: 1 / 1 = 1
-      units: {
-        length: {
-          symbol: 'mm',
-          factor: 1, // 1 / 1 = 1
-          system: 'si',
         },
       },
 
       // Camera state
       initialCameraFovAngle: input.defaultCameraFovAngle ?? 60,
-      cameraVisibleSpan: 2,
+      cameraVisibleSpan: 0.002,
       geometryRadius: 0,
-      sceneRadius: undefined,
+      geometryCenter: [0, 0, 0],
 
       // Visibility state (from per-view settings or defaults)
       enableSurfaces: input.enableSurfaces ?? true,
@@ -1398,8 +1359,8 @@ export const graphicsMachine = setup({
       hoveredSectionViewId: undefined,
       sectionViewVisualization: {
         stripeColor: '#00ff00',
-        stripeSpacing: 10,
-        stripeWidth: 1,
+        stripeSpacing: 0.01,
+        stripeWidth: 0.001,
       },
       sectionViewTranslation: 0,
       sectionViewRotation: [0, 0, 0],
@@ -1576,7 +1537,7 @@ export const graphicsMachine = setup({
         clearModelComponentFocus: {
           actions: 'clearModelComponentFocus',
         },
-        // Section view pivot updates (world-space anchor)
+        // Section view physical pivot updates.
         setSectionViewPivot: {
           actions: 'setSectionViewPivot',
         },

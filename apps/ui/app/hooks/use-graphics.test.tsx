@@ -4,7 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActor, fromPromise } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { ThreeCameraRig } from '@taucad/three/camera';
-import { GraphicsProvider, useCameraRig, useCameraViewInitialization } from '#hooks/use-graphics.js';
+import type { RenderFrame } from '@taucad/spatial';
+import {
+  GraphicsProvider,
+  useCameraRig,
+  useCameraViewInitialization,
+  useRenderFrame,
+  useRenderFrameRetarget,
+  useSetRenderFrame,
+} from '#hooks/use-graphics.js';
 import type { CameraViewInitialization } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -37,6 +45,25 @@ function InitializationProbe({
   useLayoutEffect(() => {
     onBegin(initialization.begin);
   }, [initialization, onBegin]);
+  return undefined;
+}
+
+function RenderFrameProbe({
+  onFrame,
+  onSet,
+  onRetarget,
+}: {
+  readonly onFrame: (frame: RenderFrame) => void;
+  readonly onSet: (set: (frame: RenderFrame) => void) => void;
+  readonly onRetarget: (frame: RenderFrame) => void;
+}): undefined {
+  const frame = useRenderFrame();
+  const set = useSetRenderFrame();
+  useRenderFrameRetarget(onRetarget);
+  useLayoutEffect(() => {
+    onFrame(frame);
+    onSet(set);
+  }, [frame, onFrame, onSet, set]);
   return undefined;
 }
 
@@ -98,17 +125,17 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(rig?.perspectiveCamera.fov).toBe(45);
   });
 
-  it('unregisters and disposes the committed rig once after StrictMode unmount', async () => {
+  it('unregisters and stops the committed rig after StrictMode unmount', async () => {
     const graphicsActor = createGraphicsActor();
     let rig: ThreeCameraRig | undefined;
-    let dispose: ReturnType<typeof vi.spyOn> | undefined;
+    let stop: ReturnType<typeof vi.spyOn> | undefined;
     const mounted = render(
       <StrictMode>
         <GraphicsProvider graphicsRef={graphicsActor}>
           <RigProbe
             onRig={(value) => {
               rig = value;
-              dispose ??= vi.spyOn(value, 'dispose');
+              stop ??= vi.spyOn(value.actorRef, 'stop');
             }}
           />
         </GraphicsProvider>
@@ -119,11 +146,10 @@ describe('GraphicsProvider camera rig ownership', () => {
     await waitFor(() => {
       expect(hasGraphicsCameraRig(graphicsActor)).toBe(false);
     });
-    expect(dispose).toHaveBeenCalledOnce();
-    expect(rig!.actorRef.getSnapshot().status).toBe('stopped');
+    expect(stop).toHaveBeenCalled();
   });
 
-  it('isolates graphics-actor replacement and disposes the previous rig', async () => {
+  it('isolates graphics-actor replacement and stops the previous rig', async () => {
     const firstActor = createGraphicsActor();
     const secondActor = createGraphicsActor();
     const rigs: ThreeCameraRig[] = [];
@@ -144,6 +170,7 @@ describe('GraphicsProvider camera rig ownership', () => {
       </GraphicsProvider>,
     );
     const firstRig = rigs[0]!;
+    const stop = vi.spyOn(firstRig.actorRef, 'stop');
     expect(begin?.()).toEqual({ initialize: true, cameraView: undefined });
 
     mounted.rerender(
@@ -157,7 +184,7 @@ describe('GraphicsProvider camera rig ownership', () => {
       </GraphicsProvider>,
     );
     await waitFor(() => {
-      expect(firstRig.actorRef.getSnapshot().status).toBe('stopped');
+      expect(stop).toHaveBeenCalledOnce();
     });
 
     expect(rigs).toHaveLength(2);
@@ -170,6 +197,7 @@ describe('GraphicsProvider camera rig ownership', () => {
   it('consumes one saved view per entry identity without recreating the rig', () => {
     const graphicsActor = createGraphicsActor();
     const cameraView = {
+      frameId: 'tau:root',
       target: [3, 4, 5],
       direction: [1, 0, 0],
       up: [0, 0, 1],
@@ -231,6 +259,7 @@ describe('GraphicsProvider camera rig ownership', () => {
     const firstActor = createGraphicsActor();
     const secondActor = createGraphicsActor();
     const firstView = {
+      frameId: 'tau:root',
       target: [3, 4, 5],
       direction: [1, 0, 0],
       up: [0, 0, 1],
@@ -238,6 +267,7 @@ describe('GraphicsProvider camera rig ownership', () => {
       perspectiveZoom: 1,
     } as const;
     const secondView = {
+      frameId: 'tau:root',
       target: [-3, -4, -5],
       direction: [0, 1, 0],
       up: [0, 0, 1],
@@ -265,5 +295,43 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(rigs.get('second')?.actorRef.getSnapshot().context.view).toMatchObject(secondView);
     expect(initializers.get('first')?.()).toEqual({ initialize: true, cameraView: firstView });
     expect(initializers.get('second')?.()).toEqual({ initialize: true, cameraView: secondView });
+  });
+
+  it('retargets one viewport scene and camera without changing its sibling', () => {
+    const firstActor = createGraphicsActor();
+    const secondActor = createGraphicsActor();
+    const frames = new Map<string, RenderFrame>();
+    const setters = new Map<string, (frame: RenderFrame) => void>();
+    const retargeted: RenderFrame[] = [];
+    render(
+      <>
+        {[
+          ['first', firstActor],
+          ['second', secondActor],
+        ].map(([id, actor]) => (
+          <GraphicsProvider key={id as string} graphicsRef={actor as ActorRefFrom<typeof graphicsMachine>}>
+            <RenderFrameProbe
+              onFrame={(frame) => frames.set(id as string, frame)}
+              onSet={(set) => setters.set(id as string, set)}
+              onRetarget={(frame) => retargeted.push(frame)}
+            />
+          </GraphicsProvider>
+        ))}
+      </>,
+    );
+    const next: RenderFrame = {
+      anchorFrameId: 'tau:root',
+      originMeters: [1e12, -2e12, 3e12],
+      metersPerRenderUnit: 1e9,
+    };
+    act(() => setters.get('first')?.(next));
+
+    expect(frames.get('first')).toEqual(next);
+    expect(frames.get('second')).toEqual({
+      anchorFrameId: 'tau:root',
+      originMeters: [0, 0, 0],
+      metersPerRenderUnit: 1,
+    });
+    expect(retargeted).toContainEqual(next);
   });
 });

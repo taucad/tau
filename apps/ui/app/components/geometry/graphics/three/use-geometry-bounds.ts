@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { fromThreeRenderBounds } from '@taucad/three/spatial';
+import { useGraphics, useGraphicsSelector, useRenderFrame } from '#hooks/use-graphics.js';
 
 // Reusable temporaries for per-frame bounding calculations (avoids GC pressure).
 // Safe for multi-Canvas use because JavaScript is single-threaded and each
@@ -11,11 +12,6 @@ import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 const _box3 = new THREE.Box3();
 const _centerPoint = new THREE.Vector3();
 const _sphere = new THREE.Sphere();
-
-type GeometryBoundsOptions = {
-  /** When true, the outer group is translated to center geometry at the origin. */
-  enableCentering?: boolean;
-};
 
 type GeometryBoundsResult = {
   /** The bounding sphere radius of the geometry. */
@@ -36,19 +32,17 @@ type GeometryBoundsResult = {
  * when new geometry loads (key change) and until the radius converges, then
  * skipped entirely during orbit/pan/zoom.
  *
- * Optionally applies a centering transform to `outerRef` so the geometry's
- * bounding box center sits at the world origin.
+ * Native render-local bounds are inverted through the current render frame;
+ * callers therefore always receive physical metres.
  */
 export function useGeometryBounds(
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   innerRef: RefObject<THREE.Group | null>,
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   outerRef: RefObject<THREE.Group | null>,
-  options: GeometryBoundsOptions = {},
 ): GeometryBoundsResult {
-  const { enableCentering = false } = options;
-
   const geometryKey = useGraphicsSelector((state) => state.context.geometryKey);
+  const renderFrame = useRenderFrame();
 
   const [{ geometryRadius, geometryCenter, geometryBounds }, set] = useState<{
     geometryRadius: number;
@@ -85,9 +79,6 @@ export function useGeometryBounds(
       return;
     }
 
-    if (enableCentering && outerRef.current) {
-      outerRef.current.position.set(0, 0, 0);
-    }
     if (outerRef.current) {
       outerRef.current.updateWorldMatrix(true, true);
     }
@@ -100,21 +91,14 @@ export function useGeometryBounds(
       return;
     }
 
-    // Read the bounding box center and sphere from a single traversal.
-    // The center is captured first for camera targeting, then the sphere
-    // for radius. This avoids a redundant O(n) setFromObject call.
-    _box3.getCenter(_centerPoint);
-    _box3.getBoundingSphere(_sphere);
-
-    let snapshotCenter = _centerPoint.clone();
-    const snapshotBounds = _box3.clone();
-    if (enableCentering && outerRef.current) {
-      // Snap to the negated center directly rather than accumulating deltas,
-      // so repeated frames are idempotent and don't drift from floating-point error.
-      outerRef.current.position.set(-_centerPoint.x, -_centerPoint.y, -_centerPoint.z);
-      snapshotBounds.translate(_centerPoint.clone().negate());
-      snapshotCenter = new THREE.Vector3();
-    }
+    const physicalBounds = fromThreeRenderBounds({ renderFrame, bounds: _box3 });
+    const snapshotBounds = new THREE.Box3(
+      new THREE.Vector3(...physicalBounds.min),
+      new THREE.Vector3(...physicalBounds.max),
+    );
+    snapshotBounds.getCenter(_centerPoint);
+    snapshotBounds.getBoundingSphere(_sphere);
+    const snapshotCenter = _centerPoint.clone();
 
     // Snapshot values from shared temporaries BEFORE the state updater runs,
     // to guard against cross-contamination if React batches updates across
@@ -146,9 +130,13 @@ export function useGeometryBounds(
   const graphicsActor = useGraphics();
   useEffect(() => {
     if (geometryRadius > 0) {
-      graphicsActor.send({ type: 'sceneRadiusUpdated', radius: geometryRadius });
+      graphicsActor.send({
+        type: 'sceneRadiusUpdated',
+        radius: geometryRadius,
+        centerMeters: [geometryCenter.x, geometryCenter.y, geometryCenter.z],
+      });
     }
-  }, [graphicsActor, geometryRadius]);
+  }, [geometryCenter, graphicsActor, geometryRadius]);
 
   return { geometryRadius, geometryCenter, geometryBounds };
 }

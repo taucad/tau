@@ -39,39 +39,16 @@ export type ClippableTargets = {
 
 /**
  * Traverses a root group, applies WebGL-local clipping planes, and returns
- * solid meshes plus line objects for downstream `enforceMaterialClipping` (meshes only).
+ * solid meshes plus line objects for downstream `enforceMaterialClipping`.
  *
  * Skips objects tagged {@link sceneTag.sectionViewHelper} (contour-fill helpers etc.).
  *
  * - `LineSegments` / `LineSegments2`: clipped via `enableLines`; listed in `lines`.
  * - `THREE.Mesh`: clipped via `enableMesh`; listed in `meshes`.
- * - When `enableSection` is false, clears clipping planes on all traversed materials.
+ * - When `enableSection` is false, clears clipping planes but still returns the targets.
  */
 export function collectClippableTargets(rootGroup: THREE.Group, options: CollectClippableOptions): ClippableTargets {
   const { enableSection, enableLines, enableMesh, plane } = options;
-
-  if (!enableSection) {
-    rootGroup.traverse((child: THREE.Object3D) => {
-      if (hasSceneTag(child, sceneTag.sectionViewHelper)) {
-        return;
-      }
-
-      const isMeshOrLine =
-        child instanceof THREE.Mesh || child instanceof THREE.LineSegments || child instanceof LineSegments2;
-
-      if (isMeshOrLine && child.material) {
-        if (Array.isArray(child.material)) {
-          for (const mat of child.material) {
-            mat.clippingPlanes = [];
-          }
-        } else {
-          child.material.clippingPlanes = [];
-        }
-      }
-    });
-
-    return { meshes: [], lines: [] };
-  }
 
   const meshChildren: THREE.Mesh[] = [];
   const lineChildren: Array<THREE.LineSegments | LineSegments2> = [];
@@ -85,10 +62,10 @@ export function collectClippableTargets(rootGroup: THREE.Group, options: Collect
       if (child.material) {
         if (Array.isArray(child.material)) {
           for (const mat of child.material) {
-            mat.clippingPlanes = enableLines ? [plane] : [];
+            mat.clippingPlanes = enableSection && enableLines ? [plane] : [];
           }
         } else {
-          child.material.clippingPlanes = enableLines ? [plane] : [];
+          child.material.clippingPlanes = enableSection && enableLines ? [plane] : [];
         }
       }
 
@@ -100,10 +77,10 @@ export function collectClippableTargets(rootGroup: THREE.Group, options: Collect
     if (child instanceof LineSegments2) {
       if (Array.isArray(child.material)) {
         for (const mat of child.material) {
-          mat.clippingPlanes = enableLines ? [plane] : [];
+          mat.clippingPlanes = enableSection && enableLines ? [plane] : [];
         }
       } else {
-        child.material.clippingPlanes = enableLines ? [plane] : [];
+        child.material.clippingPlanes = enableSection && enableLines ? [plane] : [];
       }
 
       lineChildren.push(child);
@@ -118,7 +95,7 @@ export function collectClippableTargets(rootGroup: THREE.Group, options: Collect
     child.matrixAutoUpdate = false;
 
     applyMeshClipping(child, {
-      enable: enableMesh,
+      enable: enableSection && enableMesh,
       plane,
     });
 
@@ -135,12 +112,16 @@ export function collectClippableTargets(rootGroup: THREE.Group, options: Collect
  * that lack `clippingPlanes`. This function detects the mismatch and re-applies them.
  * When clipping is already correct, the reference identity check makes this a no-op.
  */
-export function enforceMaterialClipping(meshes: THREE.Mesh[], plane: THREE.Plane, enableMesh: boolean): void {
-  for (const mesh of meshes) {
-    const materials: THREE.Material[] = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+export function enforceMaterialClipping(
+  objects: ReadonlyArray<THREE.Mesh | THREE.LineSegments | LineSegments2>,
+  plane: THREE.Plane,
+  enabled: boolean,
+): void {
+  for (const object of objects) {
+    const materials: THREE.Material[] = Array.isArray(object.material) ? object.material : [object.material];
 
     for (const mat of materials) {
-      if (enableMesh) {
+      if (enabled) {
         if (!mat.clippingPlanes?.length || mat.clippingPlanes[0] !== plane) {
           mat.clippingPlanes = [plane];
         }

@@ -5,11 +5,7 @@ import { describe, expect, it, beforeAll, vi } from 'vitest';
 import * as THREE from 'three';
 import type { WebGLRenderer } from 'three';
 import { TransformControls as TransformControlsImpl } from '#components/geometry/graphics/three/controls/transform-controls.js';
-import {
-  clearSectionControlDepthOnce,
-  getSectionControlRendererFrameId,
-  SectionViewControls,
-} from '#components/geometry/graphics/three/react/section-view-controls.js';
+import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
 import { sceneTag, hasSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
 
@@ -43,6 +39,11 @@ vi.mock('#hooks/use-graphics.js', async () => {
     },
   };
 });
+
+vi.mock('#components/geometry/graphics/three/scene-overlay.js', () => ({
+  SceneOverlay: ({ children }: { readonly children: React.ReactNode }): React.ReactElement =>
+    React.createElement(React.Fragment, null, children),
+}));
 
 function createStubWebGlRenderer(): WebGLRenderer {
   const canvas = document.createElement('canvas');
@@ -221,12 +222,46 @@ describe('SectionViewControls', () => {
     }
   });
 
+  it('should anchor unselected plane selectors at the render-local section pivot', async () => {
+    const { scene, cleanup } = await renderSectionViewControls(
+      <SectionViewControls {...baseProperties()} renderPivot={[11, 22, 33]} />,
+    );
+
+    try {
+      const positions: number[][] = [];
+      scene.traverse((child) => {
+        const mesh: THREE.Mesh<THREE.BufferGeometry, THREE.Material> = child as THREE.Mesh<
+          THREE.BufferGeometry,
+          THREE.Material
+        >;
+        if (
+          child instanceof THREE.Mesh &&
+          mesh.geometry.hasAttribute('color') &&
+          mesh.material instanceof THREE.MeshMatcapMaterial
+        ) {
+          positions.push(mesh.parent!.position.toArray());
+        }
+      });
+
+      const anchor = [11, 22, 33];
+      const directions = positions.map((position) => {
+        const delta = position.map((value, index) => value - anchor[index]!);
+        expect(delta.filter((value) => Math.abs(value) < 1e-10)).toHaveLength(2);
+        const axis = delta.findIndex((value) => Math.abs(value) >= 1e-10);
+        return `${axis}:${Math.sign(delta[axis]!)}`;
+      });
+      expect(directions.sort()).toEqual(['0:-1', '0:-1', '1:1', '1:1', '2:-1', '2:-1']);
+    } finally {
+      cleanup();
+    }
+  });
+
   it('should mount both selected-plane transform controls as visible tagged section helpers', async () => {
     const { scene, cleanup } = await renderSectionViewControls(
       <SectionViewControls
         {...baseProperties()}
         availablePlanes={[{ id: 'xy', normal: [0, 0, 1], constant: 0 }]}
-        pivot={[0, 0, 0]}
+        renderPivot={[0, 0, 0]}
         selectedPlaneId='xy'
       />,
     );
@@ -256,7 +291,7 @@ describe('SectionViewControls', () => {
       <SectionViewControls
         {...baseProperties()}
         availablePlanes={[{ id: 'xy', normal: [0, 0, 1], constant: 0 }]}
-        pivot={[0, 0, 0]}
+        renderPivot={[0, 0, 0]}
         selectedPlaneId='xy'
       />,
     );
@@ -297,7 +332,7 @@ describe('SectionViewControls', () => {
       <SectionViewControls
         {...baseProperties()}
         availablePlanes={[{ id: 'xy', normal: [0, 0, 1], constant: 0 }]}
-        pivot={[0, 0, 0]}
+        renderPivot={[0, 0, 0]}
         selectedPlaneId='xy'
       />,
     );
@@ -349,35 +384,5 @@ describe('SectionViewControls', () => {
     } finally {
       cleanup();
     }
-  });
-
-  it('should read WebGL and WebGPU renderer frame ids for section control depth clears', () => {
-    expect(getSectionControlRendererFrameId({ info: { render: { frame: 42 } } })).toBe(42);
-    expect(getSectionControlRendererFrameId({ info: { frame: 17, render: { frameCalls: 3 } } })).toBe(17);
-    expect(getSectionControlRendererFrameId({ info: { render: { frameCalls: 3 } } })).toBeUndefined();
-  });
-
-  it('should clear section control depth once per renderer frame', () => {
-    const clearDepth = vi.fn();
-    const renderer = {
-      info: { render: { frame: 1 } },
-      clearDepth,
-    };
-
-    clearSectionControlDepthOnce(renderer);
-    clearSectionControlDepthOnce(renderer);
-    expect(clearDepth).toHaveBeenCalledOnce();
-
-    renderer.info.render.frame = 2;
-    clearSectionControlDepthOnce(renderer);
-    expect(clearDepth).toHaveBeenCalledTimes(2);
-
-    const webGpuRenderer = {
-      info: { frame: 9 },
-      clearDepth,
-    };
-    clearSectionControlDepthOnce(webGpuRenderer);
-    clearSectionControlDepthOnce(webGpuRenderer);
-    expect(clearDepth).toHaveBeenCalledTimes(3);
   });
 });

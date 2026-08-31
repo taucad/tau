@@ -4,11 +4,12 @@ import { useThree } from '@react-three/fiber';
 import React from 'react';
 import { LineGeometry } from 'three/addons';
 import { Line2 as Line2WebGpu } from 'three/addons/lines/webgpu/Line2.js';
+import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import { axesHelperColors, axesHelperOpacity } from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { viewportRenderTiers } from '#components/geometry/graphics/three/utils/render-order.utils.js';
-import { useCameraRig } from '#hooks/use-graphics.js';
+import { useCameraRig, useRenderFrame } from '#hooks/use-graphics.js';
 
 /**
  * Shared origin used as one endpoint of the drei `<Line>` points array on the WebGL
@@ -17,11 +18,6 @@ import { useCameraRig } from '#hooks/use-graphics.js';
 const axisOrigin = new THREE.Vector3(0, 0, 0);
 
 type CustomAxesHelperProps = {
-  /**
-   * The size of the axes
-   * @default 5000
-   */
-  readonly size?: number;
   /**
    * The color of the X axis
    * @default 'red'
@@ -43,6 +39,9 @@ type CustomAxesHelperProps = {
    */
   readonly thickness?: number;
 };
+
+/** Finite render-local proxy long enough to leave every supported normalized viewport. */
+export const axesProxyLengthRenderUnits = 50_000;
 
 type AxisSegmentDefinition = Readonly<{
   color: string;
@@ -168,13 +167,17 @@ export function AxesWebGpuFatLine({
 }
 
 export function AxesHelper({
-  size = 50_000,
   xAxisColor = axesHelperColors.x,
   yAxisColor = axesHelperColors.y,
   zAxisColor = axesHelperColors.z,
   thickness = 1.25,
 }: CustomAxesHelperProps): React.JSX.Element {
   const graphicsBackend = useThreeGraphicsBackend();
+  const renderFrame = useRenderFrame();
+  const physicalOrigin = React.useMemo(
+    () => toThreeRenderPoint({ renderFrame, pointMeters: [0, 0, 0] }),
+    [renderFrame],
+  );
 
   // Single allocation site for the axis descriptor table. Keyed only on `size` and the
   // three colors.
@@ -183,23 +186,23 @@ export function AxesHelper({
       {
         color: xAxisColor,
         id: 'x',
-        positiveEnd: new THREE.Vector3(size, 0, 0),
+        positiveEnd: new THREE.Vector3(axesProxyLengthRenderUnits, 0, 0),
       },
       {
         color: yAxisColor,
         id: 'y',
-        positiveEnd: new THREE.Vector3(0, size, 0),
+        positiveEnd: new THREE.Vector3(0, axesProxyLengthRenderUnits, 0),
       },
       {
         color: zAxisColor,
         id: 'z',
-        positiveEnd: new THREE.Vector3(0, 0, size),
+        positiveEnd: new THREE.Vector3(0, 0, axesProxyLengthRenderUnits),
       },
     ];
-  }, [size, xAxisColor, yAxisColor, zAxisColor]);
+  }, [xAxisColor, yAxisColor, zAxisColor]);
 
   return (
-    <group>
+    <group position={physicalOrigin}>
       {axes.map((axis) => {
         return (
           <React.Fragment key={axis.id}>

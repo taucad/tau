@@ -1,12 +1,19 @@
 import CameraControlsImpl from 'camera-controls';
 import React, { useMemo } from 'react';
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import { selectCameraProjection } from '@taucad/camera/machine';
+import { fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { TauCameraControls } from '#components/geometry/graphics/three/controls/tau-camera-controls.js';
 import { ViewportGizmoCube } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube.js';
 import { SectionViewControls } from '#components/geometry/graphics/three/react/section-view-controls.js';
 import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
-import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import {
+  useCameraRig,
+  useCameraSelector,
+  useGraphics,
+  useGraphicsSelector,
+  useRenderFrame,
+} from '#hooks/use-graphics.js';
 import type { SecondaryMouseButtonMode } from '#components/geometry/graphics/three/three-viewer-properties.js';
 
 type ControlsProperties = {
@@ -48,6 +55,7 @@ export const Controls = React.memo(function ({
   const dollySpeed = zoomSpeed * 0.5;
   const graphicsActor = useGraphics();
   const cameraRig = useCameraRig();
+  const renderFrame = useRenderFrame();
   const isActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const selectedPlaneId = useGraphicsSelector((state) => state.context.selectedSectionViewId);
   const rotation = useGraphicsSelector((state) => state.context.sectionViewRotation);
@@ -57,6 +65,10 @@ export const Controls = React.memo(function ({
   const hoveredSectionViewId = useGraphicsSelector((state) => state.context.hoveredSectionViewId);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const projectionKind = useCameraSelector((state) => selectCameraProjection(state).kind);
+  const renderPivot = useMemo((): [number, number, number] => {
+    const point = toThreeRenderPoint({ renderFrame, pointMeters: pivot });
+    return [point.x, point.y, point.z];
+  }, [pivot, renderFrame]);
   const mouseButtons = useMemo(
     () => resolveCameraControlMouseButtons({ enablePan, enableZoom, secondaryMouseButtonMode, projectionKind }),
     [enablePan, enableZoom, projectionKind, secondaryMouseButtonMode],
@@ -90,8 +102,9 @@ export const Controls = React.memo(function ({
     });
   };
 
-  const handleSetPivot = (value: [number, number, number]): void => {
-    graphicsActor.send({ type: 'setSectionViewPivot', payload: value });
+  const handleSetRenderPivot = (value: [number, number, number]): void => {
+    const pointMeters = fromThreeRenderPoint({ renderFrame, point: new THREE.Vector3(...value) });
+    graphicsActor.send({ type: 'setSectionViewPivot', payload: [...pointMeters] });
   };
 
   const handleHover = (planeId: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy' | undefined): void => {
@@ -135,14 +148,14 @@ export const Controls = React.memo(function ({
         selectedPlaneId={selectedPlaneId}
         availablePlanes={availablePlanes}
         rotation={rotation}
-        pivot={pivot}
+        renderPivot={renderPivot}
         planeName={planeName}
         hoveredSectionViewId={hoveredSectionViewId}
         upDirection={upDirection}
         onSelectPlane={handleSelectPlane}
         onHover={handleHover}
         onSetRotation={handleSetRotation}
-        onSetPivot={handleSetPivot}
+        onSetRenderPivot={handleSetRenderPivot}
         onTransformDragStart={handleSectionTransformDragStart}
         onTransformDragMove={handleSectionTransformDragMove}
         onTransformDragEnd={handleSectionTransformDragEnd}

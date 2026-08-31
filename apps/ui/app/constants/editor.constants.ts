@@ -42,6 +42,7 @@ export type EnvironmentPreset = 'studio' | 'performance';
  */
 export type PinnedMeasurement = {
   id: string;
+  frameId: string;
   startPoint: [number, number, number];
   endPoint: [number, number, number];
   distance: number;
@@ -65,7 +66,10 @@ export type PersistedModelComponentDisplayState = {
   unitsById: Record<string, PersistedModelComponentDisplayUnitState>;
 };
 
-export type PersistedCameraView = Pick<CameraView, 'target' | 'direction' | 'up' | 'verticalSpan' | 'perspectiveZoom'>;
+export type PersistedCameraView = Pick<
+  CameraView,
+  'frameId' | 'target' | 'direction' | 'up' | 'verticalSpan' | 'perspectiveZoom'
+>;
 
 export type GraphicsViewSettings = {
   enableSurfaces: boolean;
@@ -100,8 +104,9 @@ export type GraphicsViewSettings = {
    * `7` = moves component display state to project-level EditorState.
    * `8` = migrates persisted world-space lengths from millimetres to metres.
    * `9` = adds perspective magnification to the canonical camera view.
+   * `10` = names the physical frame of cameras and measurements.
    */
-  schemaVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  schemaVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 };
 
 // ============================================================================
@@ -111,6 +116,7 @@ export type GraphicsViewSettings = {
 const vector3Schema = z.tuple([z.number(), z.number(), z.number()]);
 
 const persistedCameraViewSchema = z.object({
+  frameId: z.string().optional(),
   target: vector3Schema,
   direction: vector3Schema,
   up: vector3Schema,
@@ -120,6 +126,7 @@ const persistedCameraViewSchema = z.object({
 
 const pinnedMeasurementSchema = z.object({
   id: z.string(),
+  frameId: z.string().optional(),
   startPoint: vector3Schema,
   endPoint: vector3Schema,
   distance: z.number(),
@@ -165,6 +172,7 @@ export const graphicsViewSettingsSchema = z.object({
    * `7` = moves component display state to project-level EditorState.
    * `8` = metre world-space camera and measurement lengths.
    * `9` = adds perspective magnification to the canonical camera view.
+   * `10` = names physical frames.
    */
   schemaVersion: z
     .union([
@@ -177,6 +185,7 @@ export const graphicsViewSettingsSchema = z.object({
       z.literal(7),
       z.literal(8),
       z.literal(9),
+      z.literal(10),
     ])
     .optional(),
 });
@@ -197,12 +206,13 @@ const parsePersistedCameraView = (
   if (!result.success) {
     return undefined;
   }
-  if (schemaVersion === 9 && result.data.perspectiveZoom === undefined) {
+  if ((schemaVersion === 9 || schemaVersion === 10) && result.data.perspectiveZoom === undefined) {
     return undefined;
   }
 
   try {
     const view = createCameraView({
+      frameId: result.data.frameId ?? 'tau:root',
       ...result.data,
       target: result.data.target.map((coordinate) => coordinate * lengthScale) as [number, number, number],
       verticalSpan: result.data.verticalSpan * lengthScale,
@@ -212,6 +222,7 @@ const parsePersistedCameraView = (
       bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
     });
     return {
+      frameId: view.frameId,
       target: view.target,
       direction: view.direction,
       up: view.up,
@@ -264,7 +275,7 @@ export function parseLegacyModelComponentDisplay(raw: unknown): PersistedModelCo
  *
  * Backward-compat migration: persisted settings without a schema version are
  * interpreted as v1 (seconds) and multiplied by 1000. Every valid version is
- * returned as v9. Versions before v8 stored world-space lengths in millimetres.
+ * returned as v10. Versions before v8 stored world-space lengths in millimetres.
  */
 export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   const result = graphicsViewSettingsSchema.safeParse(raw);
@@ -273,7 +284,8 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   }
 
   const parsed = result.data;
-  const lengthScale = parsed.schemaVersion === 8 || parsed.schemaVersion === 9 ? 1 : 0.001;
+  const lengthScale =
+    parsed.schemaVersion === 8 || parsed.schemaVersion === 9 || parsed.schemaVersion === 10 ? 1 : 0.001;
   const cameraView = parsePersistedCameraView(parsed.cameraView, {
     requestedVerticalFieldOfView: parsed.cameraFovAngle,
     lengthScale,
@@ -282,6 +294,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   const { componentDisplay: _legacyComponentDisplay, ...settings } = parsed;
   const pinnedMeasurements = parsed.pinnedMeasurements?.map((measurement) => ({
     ...measurement,
+    frameId: measurement.frameId ?? 'tau:root',
     startPoint: measurement.startPoint.map((coordinate) => coordinate * lengthScale) as [number, number, number],
     endPoint: measurement.endPoint.map((coordinate) => coordinate * lengthScale) as [number, number, number],
     distance: measurement.distance * lengthScale,
@@ -296,7 +309,7 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
         ? parsed.renderTimeout * 1000
         : parsed.renderTimeout,
     graphicsBackend: 'webgl',
-    schemaVersion: 9,
+    schemaVersion: 10,
   };
 }
 
@@ -317,7 +330,7 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   renderTimeout: defaultRenderTimeout,
   environmentPreset: 'performance',
   graphicsBackend: 'webgl',
-  schemaVersion: 9,
+  schemaVersion: 10,
 };
 
 // ============================================================================

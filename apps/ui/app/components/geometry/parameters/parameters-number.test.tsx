@@ -6,18 +6,17 @@ import { ParametersNumber } from '#components/geometry/parameters/parameters-num
 import { TooltipProvider } from '#components/ui/tooltip.js';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 
-// Helper to create units from graphics state
-function createUnits(factor: number, symbol: LengthSymbol): Units {
+function createUnits(sourceSymbol: LengthSymbol, displaySymbol: LengthSymbol): Units {
   return {
     length: {
-      factor,
-      symbol,
+      sourceSymbol,
+      displaySymbol,
     },
   };
 }
 
 // Default units (mm)
-const defaultUnits = createUnits(1, 'mm');
+const defaultUnits = createUnits('mm', 'mm');
 
 const fireSliderPointerEvent = (
   element: HTMLElement,
@@ -114,9 +113,34 @@ describe('ParametersNumber', () => {
   });
 
   describe('Unit Conversion', () => {
+    it('commits one displayed millimetre keyboard step as 0.001 source metres', async () => {
+      const mockOnChange = vi.fn();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={0.016}
+            defaultValue={0}
+            descriptor='length'
+            units={createUnits('m', 'mm')}
+            step={0.001}
+            onChange={mockOnChange}
+          />
+        </TestWrapper>,
+      );
+
+      const input = screen.getByDisplayValue('16');
+      await user.click(input);
+      await user.keyboard('{ArrowUp}');
+
+      expect(input).toHaveValue('17');
+      expect(mockOnChange).toHaveBeenCalledWith(0.017);
+    });
+
     it('should convert from mm to inches and back', () => {
       const mockOnChange = vi.fn();
-      const inchUnits = createUnits(25.4, 'in');
+      const inchUnits = createUnits('mm', 'in');
 
       render(
         <TestWrapper>
@@ -139,7 +163,7 @@ describe('ParametersNumber', () => {
 
     it('should show approximation indicator when conversion results in rounding', () => {
       const mockOnChange = vi.fn();
-      const inchUnits = createUnits(25.4, 'in');
+      const inchUnits = createUnits('mm', 'in');
 
       render(
         <TestWrapper>
@@ -162,7 +186,7 @@ describe('ParametersNumber', () => {
 
     it('should not show approximation indicator for exact conversions', () => {
       const mockOnChange = vi.fn();
-      const inchUnits = createUnits(25.4, 'in');
+      const inchUnits = createUnits('mm', 'in');
 
       render(
         <TestWrapper>
@@ -185,7 +209,7 @@ describe('ParametersNumber', () => {
     it('should always call onChange with mm values regardless of display unit', async () => {
       const mockOnChange = vi.fn();
       const user = userEvent.setup();
-      const inchUnits = createUnits(25.4, 'in');
+      const inchUnits = createUnits('mm', 'in');
 
       render(
         <TestWrapper>
@@ -212,7 +236,7 @@ describe('ParametersNumber', () => {
 
     it('should format values with 4 significant figures during conversion', () => {
       const mockOnChange = vi.fn();
-      const inchUnits = createUnits(25.4, 'in');
+      const inchUnits = createUnits('mm', 'in');
 
       render(
         <TestWrapper>
@@ -449,7 +473,7 @@ describe('ParametersNumber', () => {
     it('should not commit approximated value on blur without edit', async () => {
       const mockOnChange = vi.fn();
       const user = userEvent.setup();
-      const inchUnits = createUnits(25.4, 'in');
+      const inchUnits = createUnits('mm', 'in');
 
       render(
         <TestWrapper>

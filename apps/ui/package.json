@@ -15,6 +15,7 @@
     "@tanstack/react-query": "catalog:",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/billing": "workspace:*",
+    "@taucad/camera": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/assimp": "workspace:*",
     "@taucad/esbuild": "workspace:*",
@@ -41,6 +42,7 @@
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
     "@taucad/telemetry": "workspace:*",
+    "@taucad/three": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
@@ -69,6 +71,7 @@
   "devDependencies": {
     "@taucad/geometry-core": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/spatial": "workspace:*",
     "@taucad/vite": "workspace:*",
     "@types/express": "^5.0.6",
     "draco3dgltf": "^1.5.7"

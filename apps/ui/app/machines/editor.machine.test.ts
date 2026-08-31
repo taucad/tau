@@ -353,7 +353,7 @@ describe('editorMachine', () => {
       expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty(
         'componentDisplay',
       );
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(9);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(10);
       actor.stop();
     });
 

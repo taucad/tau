@@ -12,13 +12,12 @@ import { Loader } from '#components/ui/loader.js';
 import { useSharedRenderer } from '#components/docs/shared-renderer.js';
 import { useRuntime } from '@taucad/react';
 import { cn } from '#utils/ui.utils.js';
-import { gltfCoordinateTransform } from '@taucad/middleware';
+import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 const gltfLoader = new GLTFLoader();
 
 const kernelModelViewRuntime = defineRuntime({
   plugins: [replicad(), esbuild()],
-  middleware: [gltfCoordinateTransform()],
 });
 const kernelModelViewClientOptions = {
   runtime: kernelModelViewRuntime,
@@ -74,9 +73,7 @@ export function KernelModelView({ code, className }: KernelModelViewProps): Reac
 
   // Scene + camera setup
   useEffect(() => {
-    // Geometry from `gltfCoordinateTransform` middleware is Z-up (CAD convention).
-    // Three.js defaults to Y-up; align the camera/OrbitControls to Z-up so models
-    // render right-side-up and orbit around the vertical axis correctly.
+    // Loaded glTF is adapted once into Tau's Z-up presentation world.
     const zUp = new Vector3(0, 0, 1);
     Object3D.DEFAULT_UP.copy(zUp);
 
@@ -153,6 +150,7 @@ export function KernelModelView({ code, className }: KernelModelViewProps): Reac
     // oxlint-disable-next-line tau-lint/no-async-iife -- async IIFE is unavoidable here
     void (async () => {
       const gltf = await gltfLoader.parseAsync(geometry.content.buffer, '');
+      applyCanonicalGltfWorld(gltf.scene);
 
       // oxlint-disable-next-line eslint/no-constant-condition, typescript/no-unnecessary-condition -- cancelled is mutated by cleanup after await
       if (cancelled) {

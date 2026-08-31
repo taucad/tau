@@ -61,6 +61,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => mocks.cameraRig,
   useGraphics: () => mocks.graphicsActor,
   useGraphicsSelector: () => false,
+  useRenderFrame: () => ({ anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 }),
   useModelInteractionRef: () => mocks.graphicsActor,
   useModelInteractionSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: {} }),

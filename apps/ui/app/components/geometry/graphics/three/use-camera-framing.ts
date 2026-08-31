@@ -68,20 +68,6 @@ export function useCameraFraming({
     hasHomeRef.current = false;
   }
 
-  useLayoutEffect(() => {
-    if (geometryRadius <= 0) {
-      return;
-    }
-    rig.setClipPlanes({
-      near: resolvedOptions.nearPlane,
-      minimumPerspectiveFar: Math.max(
-        resolvedOptions.minimumFarPlane,
-        geometryRadius * resolvedOptions.farPlaneRadiusMultiplier,
-      ),
-      orthographicFarMultiplier: resolvedOptions.farPlaneRadiusMultiplier,
-    });
-  }, [geometryRadius, resolvedOptions, rig]);
-
   const frame = useCallback(
     (options?: { enableConfiguredAngles?: boolean }) => {
       if (geometryRadius <= 0 || geometryBounds.isEmpty()) {
@@ -121,7 +107,7 @@ export function useCameraFraming({
         ? Infinity
         : Math.abs((geometryRadius - previousRadius) / previousRadius);
     const previousBounds = previousBoundsRef.current;
-    const scale = Math.max(previousRadius ?? 0, geometryRadius, 1e-9);
+    const scale = Math.max(previousRadius ?? 0, geometryRadius);
     const boundsChange = previousBounds
       ? Math.max(
           Math.abs(previousBounds.min.x - geometryBounds.min.x),

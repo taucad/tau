@@ -11,6 +11,7 @@ import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js
 import { Scene } from '#components/geometry/graphics/three/scene.js';
 import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
 vi.mock('#components/geometry/graphics/three/up-direction-handler.js', () => ({
   UpDirectionHandler: () => undefined,
@@ -162,15 +163,16 @@ describe('Scene camera lifecycle', () => {
       const expectedTarget = new THREE.Vector3(10, 20, 30);
       const target = controls.getTarget(new THREE.Vector3());
       const { distance } = controls;
-      expect(target).toEqual(expectedTarget);
-      expect(distance).toBeCloseTo(finalCamera.position.distanceTo(expectedTarget), 10);
+      expect(getGraphicsCameraState(graphicsActor)?.target).toEqual(expectedTarget.toArray());
+      expect(target).toEqual(new THREE.Vector3());
+      expect(distance).toBeCloseTo(finalCamera.position.length(), 10);
 
       const framedPosition = finalCamera.position.clone();
       const framedZoom = finalCamera.zoom;
       controls.update(1 / 60);
       expect(finalCamera.position.distanceTo(framedPosition)).toBeLessThan(1e-10);
       expect(finalCamera.zoom).toBeCloseTo(framedZoom, 10);
-      expect(controls.getTarget(new THREE.Vector3())).toEqual(expectedTarget);
+      expect(controls.getTarget(new THREE.Vector3())).toEqual(new THREE.Vector3());
 
       const visibleSpan = perspectiveVerticalSpan({
         distance: controls.distance,

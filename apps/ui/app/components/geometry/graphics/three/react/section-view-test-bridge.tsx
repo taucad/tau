@@ -2,14 +2,21 @@ import React, { useEffect } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { perspectiveVerticalSpan } from '@taucad/camera';
+import type { RenderFrame } from '@taucad/spatial';
+import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
-import { useCameraRig, useGraphics, useModelInteractionRef } from '#hooks/use-graphics.js';
+import {
+  useCameraConnectorRef,
+  useCameraRig,
+  useGraphics,
+  useModelInteractionRef,
+  useSetRenderFrame,
+} from '#hooks/use-graphics.js';
 import { getModelComponentIdInHierarchy } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
   getControlsDistance,
   resolveCameraUp,
-  resolveControlsTarget,
 } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 import { hasSceneTag, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import { sectionCapOverlapDebugUserDataKey } from '#components/geometry/graphics/three/utils/section-cap-overlap-debug.js';
@@ -18,6 +25,8 @@ import { sectionCapPerformanceDebugUserDataKey } from '#components/geometry/grap
 import type { SectionCapPerformanceDebugSummary } from '#components/geometry/graphics/three/utils/section-cap-performance-debug.js';
 import { useViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
 import type { ViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
+import { getSceneRenderRoots } from '#components/geometry/graphics/three/scene-overlay.js';
+import { infiniteGridFadeEndVisibleSpans } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 
 type SectionPlaneId = 'xy' | 'xz' | 'yz';
 
@@ -38,6 +47,8 @@ export type SectionViewTestCamera = Readonly<{
 }>;
 
 export type SectionViewTestCameraState = Readonly<{
+  actorStatus: string;
+  actorError?: string;
   projection: 'orthographic' | 'perspective';
   requestedFov: number;
   handoffFov?: number;
@@ -51,6 +62,8 @@ export type SectionViewTestCameraState = Readonly<{
   controlsDistance: number;
   controlsEnabled: boolean;
   viewportGizmoLockActive: boolean;
+  clipping: Readonly<{ near: number; far: number }>;
+  nativeClipping: Readonly<{ near: number; far: number }>;
 }>;
 
 export type SectionViewTestCameraTransitionDiagnostics = Readonly<{
@@ -110,12 +123,42 @@ export type SectionViewTestRenderedModelComponentState = Readonly<{
   materialOpacities: readonly number[];
 }>;
 
+export type SectionViewTestPresentationState = Readonly<{
+  isSectionViewActive: boolean;
+  selectedSectionViewId: string | undefined;
+  sectionViewDirection: 1 | -1;
+  sectionViewPivot: readonly [number, number, number];
+  sectionViewRotation: readonly [number, number, number];
+  enableClippingLines: boolean;
+  enableClippingMesh: boolean;
+}>;
+
+export type SectionViewTestCapCompleteness =
+  | Readonly<{
+      status: 'complete';
+      admittedSourceCount: number;
+      extensionSourceCount: number;
+      fallbackSourceCount: number;
+      trueCutComponentCount: number;
+      cappedTrueCutComponentCount: number;
+      unresolvedTrueCutEdgeCount: number;
+      unsupportedSourceCount: number;
+    }>
+  | Readonly<{
+      status: 'unsupported' | 'failed';
+      failure: Readonly<{ sourceKey: string; code: string; message: string }>;
+    }>;
+
 export type SectionViewTestBridgeApi = Readonly<{
+  getGraphicsBackend(): 'webgl' | 'webgpu';
+  isGeometryFramed(): boolean;
   showPlaneSelectors(): void;
   setSectionView(state: SectionViewTestState): void;
   clearSectionView(): void;
   setPresentation(presentation: Readonly<{ surfaces: boolean; lines: boolean }>): void;
+  getPresentation(): SectionViewTestPresentationState;
   setPostProcessingEnabled(enabled: boolean): void;
+  setGridPresentationClipPolicy(policy: Readonly<{ far: boolean; near: boolean }>): void;
   getModelComponents(): SectionViewTestModelComponent[];
   getModelVisibility(): SectionViewTestModelVisibility;
   getRenderedModelComponentState(componentId: string): SectionViewTestRenderedModelComponentState;
@@ -128,10 +171,14 @@ export type SectionViewTestBridgeApi = Readonly<{
   getCamera(): SectionViewTestCameraState;
   getCameraTransitionDiagnostics(): SectionViewTestCameraTransitionDiagnostics;
   resetCameraTransitionDiagnostics(): void;
+  getRenderFrame(): RenderFrame;
+  setRenderFrame(renderFrame: RenderFrame): void;
   projectWorldPoint(point: readonly [number, number, number]): SectionViewTestProjectedPoint;
+  projectSectionTransformHandle(axis: 'X' | 'Y' | 'Z'): SectionViewTestProjectedPoint | undefined;
   getModelHoverState(): SectionViewTestModelHoverState;
   getSelectorLabels(): string[];
   getSectionHelperSummary(): SectionViewTestHelperSummary;
+  getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
   getSectionCapOverlapDiagnostics(): SectionCapOverlapDebugSummary | undefined;
   getSectionCapPerformanceDiagnostics(): SectionCapPerformanceDebugSummary | undefined;
 }>;
@@ -190,16 +237,18 @@ export const getSectionViewTestControlState = ({
 export const getSectionViewTestSelectorLabels = (scene: THREE.Object3D): string[] => {
   const labels = new Set<string>();
 
-  scene.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) {
-      return;
-    }
+  for (const root of getSceneRenderRoots(scene as THREE.Scene)) {
+    root.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) {
+        return;
+      }
 
-    const label = (child.geometry.userData as Record<string, unknown>)['selectorLabel'];
-    if (typeof label === 'string') {
-      labels.add(label);
-    }
-  });
+      const label = (child.geometry.userData as Record<string, unknown>)['selectorLabel'];
+      if (typeof label === 'string') {
+        labels.add(label);
+      }
+    });
+  }
 
   return [...labels];
 };
@@ -232,7 +281,7 @@ export const getSectionViewTestHelperSummary = (scene: THREE.Object3D): SectionV
   const lineSegments2RenderOrders: number[] = [];
   const sectionHelperMaterialStates: SectionViewTestHelperMaterialState[] = [];
 
-  scene.traverse((child) => {
+  const visitSectionHelper = (child: THREE.Object3D): void => {
     if (!hasSceneTag(child, sceneTag.sectionViewHelper)) {
       return;
     }
@@ -256,7 +305,10 @@ export const getSectionViewTestHelperSummary = (scene: THREE.Object3D): SectionV
         depthWrite: material.depthWrite,
       });
     }
-  });
+  };
+  for (const root of getSceneRenderRoots(scene as THREE.Scene)) {
+    root.traverse(visitSectionHelper);
+  }
 
   return {
     sectionHelperMeshCount,
@@ -268,6 +320,53 @@ export const getSectionViewTestHelperSummary = (scene: THREE.Object3D): SectionV
     },
     sectionHelperMaterialStates,
   };
+};
+
+export const projectSectionViewTestTransformHandle = ({
+  axis,
+  camera,
+  rect,
+  scene,
+}: {
+  readonly axis: 'X' | 'Y' | 'Z';
+  readonly camera: THREE.Camera;
+  readonly rect: Pick<DOMRect, 'height' | 'left' | 'top' | 'width'>;
+  readonly scene: THREE.Object3D;
+}): SectionViewTestProjectedPoint | undefined => {
+  let result: SectionViewTestProjectedPoint | undefined;
+  const projectTransformHandle = (child: THREE.Object3D): void => {
+    if (
+      result !== undefined ||
+      !(child instanceof THREE.Mesh) ||
+      child.name !== axis ||
+      !hasSceneTag(child, sceneTag.sectionViewHelper) ||
+      !isActuallyVisible(child)
+    ) {
+      return;
+    }
+
+    const bounds = new THREE.Box3().setFromObject(child);
+    if (bounds.isEmpty()) {
+      return;
+    }
+    const projected = bounds.getCenter(new THREE.Vector3()).project(camera);
+    result = {
+      x: rect.left + ((projected.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - projected.y) / 2) * rect.height,
+      visible:
+        projected.x >= -1 &&
+        projected.x <= 1 &&
+        projected.y >= -1 &&
+        projected.y <= 1 &&
+        projected.z >= -1 &&
+        projected.z <= 1,
+    };
+  };
+  for (const root of getSceneRenderRoots(scene as THREE.Scene)) {
+    root.updateMatrixWorld(true);
+    root.traverse(projectTransformHandle);
+  }
+  return result;
 };
 
 export const getSectionViewTestCapOverlapDiagnostics = (
@@ -300,10 +399,12 @@ export const getSectionViewTestCapPerformanceDiagnostics = (
   return summary;
 };
 
-export function SectionViewTestBridge(): React.ReactNode {
+export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometryFramed: boolean }): React.ReactNode {
   const isTauDebugEnabled = useFeature('tauDebug');
   const graphicsActor = useGraphics();
   const cameraRig = useCameraRig();
+  const cameraConnectorRef = useCameraConnectorRef();
+  const setRenderFrame = useSetRenderFrame();
   const modelInteractionRef = useModelInteractionRef();
   const get = useThree((state) => state.get);
   const interactionLock = useViewportGizmoInteractionLock();
@@ -372,6 +473,21 @@ export function SectionViewTestBridge(): React.ReactNode {
       };
     };
     const bridge: SectionViewTestBridgeApi = {
+      getGraphicsBackend() {
+        const renderer = get().gl as unknown as { readonly backend?: { readonly isWebGPUBackend?: boolean } };
+        return renderer.backend?.isWebGPUBackend === true ? 'webgpu' : 'webgl';
+      },
+      isGeometryFramed() {
+        const { size } = get();
+        const cameraSnapshot = cameraRig.actorRef.getSnapshot();
+        return (
+          isGeometryFramed &&
+          cameraConnectorRef.current !== undefined &&
+          cameraSnapshot.status === 'active' &&
+          cameraSnapshot.context.view.viewport.width === size.width &&
+          cameraSnapshot.context.view.viewport.height === size.height
+        );
+      },
       showPlaneSelectors() {
         graphicsActor.send({ type: 'setSectionViewActive', payload: true });
         graphicsActor.send({ type: 'selectSectionView', payload: undefined });
@@ -399,8 +515,30 @@ export function SectionViewTestBridge(): React.ReactNode {
         graphicsActor.send({ type: 'setSurfaceVisibility', payload: presentation.surfaces });
         graphicsActor.send({ type: 'setLinesVisibility', payload: presentation.lines });
       },
+      getPresentation() {
+        const { context } = graphicsActor.getSnapshot();
+        return {
+          isSectionViewActive: context.isSectionViewActive,
+          selectedSectionViewId: context.selectedSectionViewId,
+          sectionViewDirection: context.sectionViewDirection,
+          sectionViewPivot: [...context.sectionViewPivot],
+          sectionViewRotation: [...context.sectionViewRotation],
+          enableClippingLines: context.enableClippingLines,
+          enableClippingMesh: context.enableClippingMesh,
+        };
+      },
       setPostProcessingEnabled(enabled) {
         graphicsActor.send({ type: 'setPostProcessingVisibility', payload: enabled });
+      },
+      setGridPresentationClipPolicy(policy) {
+        cameraRig.setClipPlanes(
+          policy.far || policy.near
+            ? {
+                farPaddingVerticalSpans: policy.far ? infiniteGridFadeEndVisibleSpans : 0,
+                ...(policy.near ? { presentationPlaneOffsetMeters: 0 } : {}),
+              }
+            : undefined,
+        );
       },
       getModelComponents() {
         const { context } = modelInteractionRef.getSnapshot();
@@ -527,19 +665,27 @@ export function SectionViewTestBridge(): React.ReactNode {
       },
       getCamera() {
         const { camera, controls } = get();
-        const cameraContext = cameraRig.actorRef.getSnapshot().context;
+        const actorSnapshot = cameraRig.actorRef.getSnapshot();
+        const cameraContext = actorSnapshot.context;
         const cameraView = cameraContext.view;
-        const target = resolveControlsTarget({ camera, controls: controls ?? undefined });
+        const physicalCamera = cameraRig.readState();
         const controlState = getSectionViewTestControlState({ controls, interactionLock });
         const state: SectionViewTestCameraState = {
+          actorStatus: actorSnapshot.status,
+          actorError:
+            actorSnapshot.error instanceof Error
+              ? `${actorSnapshot.error.name}: ${actorSnapshot.error.message}`
+              : undefined,
           projection: camera instanceof THREE.OrthographicCamera ? 'orthographic' : 'perspective',
           requestedFov: cameraView.requestedVerticalFieldOfView,
           handoffFov: cameraContext.handoffVerticalFieldOfView,
           verticalSpan: cameraView.verticalSpan,
-          position: [camera.position.x, camera.position.y, camera.position.z],
+          position: physicalCamera.position,
           quaternion: [camera.quaternion.x, camera.quaternion.y, camera.quaternion.z, camera.quaternion.w],
-          target: [target.x, target.y, target.z],
-          controlsDistance: getControlsDistance({ camera, controls: controls ?? undefined }),
+          target: physicalCamera.target,
+          controlsDistance:
+            getControlsDistance({ camera, controls: controls ?? undefined }) *
+            cameraRig.renderFrame.metersPerRenderUnit,
           fov: camera instanceof THREE.PerspectiveCamera ? camera.fov : undefined,
           zoom:
             camera instanceof THREE.PerspectiveCamera || camera instanceof THREE.OrthographicCamera
@@ -551,6 +697,8 @@ export function SectionViewTestBridge(): React.ReactNode {
               : camera instanceof THREE.OrthographicCamera
                 ? (camera.right - camera.left) / (camera.top - camera.bottom)
                 : 1,
+          clipping: physicalCamera.clipping,
+          nativeClipping: { near: camera.near, far: camera.far },
           ...controlState,
         };
 
@@ -571,16 +719,39 @@ export function SectionViewTestBridge(): React.ReactNode {
           staleFrames: 0,
         };
       },
+      getRenderFrame() {
+        return cameraRig.renderFrame;
+      },
+      setRenderFrame(nextRenderFrame) {
+        setRenderFrame(nextRenderFrame);
+      },
       projectWorldPoint(point) {
         const { camera, gl } = get();
         const rect = gl.domElement.getBoundingClientRect();
-        const projected = new THREE.Vector3(...point).project(camera);
+        const projected = toThreeRenderPoint({ renderFrame: cameraRig.renderFrame, pointMeters: point }).project(
+          camera,
+        );
 
         return {
           x: rect.left + ((projected.x + 1) / 2) * rect.width,
           y: rect.top + ((1 - projected.y) / 2) * rect.height,
-          visible: projected.z >= -1 && projected.z <= 1,
+          visible:
+            projected.x >= -1 &&
+            projected.x <= 1 &&
+            projected.y >= -1 &&
+            projected.y <= 1 &&
+            projected.z >= -1 &&
+            projected.z <= 1,
         };
+      },
+      projectSectionTransformHandle(axis) {
+        const { camera, gl } = get();
+        return projectSectionViewTestTransformHandle({
+          axis,
+          camera,
+          rect: gl.domElement.getBoundingClientRect(),
+          scene,
+        });
       },
       getModelHoverState() {
         const { context } = modelInteractionRef.getSnapshot();
@@ -596,6 +767,14 @@ export function SectionViewTestBridge(): React.ReactNode {
       },
       getSectionHelperSummary() {
         return getSectionViewTestHelperSummary(scene);
+      },
+      getSectionCapCompleteness() {
+        let completeness: SectionViewTestCapCompleteness | undefined;
+        scene.traverse((child) => {
+          completeness =
+            (child.userData['sectionCapCompleteness'] as SectionViewTestCapCompleteness | undefined) ?? completeness;
+        });
+        return completeness;
       },
       getSectionCapOverlapDiagnostics() {
         return getSectionViewTestCapOverlapDiagnostics(scene);
@@ -623,7 +802,17 @@ export function SectionViewTestBridge(): React.ReactNode {
         delete bridgeGlobal.__TAU_SECTION_VIEW_TEST_BRIDGES__;
       }
     };
-  }, [cameraRig, get, graphicsActor, interactionLock, isTauDebugEnabled, modelInteractionRef]);
+  }, [
+    cameraConnectorRef,
+    cameraRig,
+    get,
+    graphicsActor,
+    interactionLock,
+    isGeometryFramed,
+    isTauDebugEnabled,
+    modelInteractionRef,
+    setRenderFrame,
+  ]);
 
   return undefined;
 }

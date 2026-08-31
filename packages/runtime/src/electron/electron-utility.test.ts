@@ -14,7 +14,7 @@ describe('Electron utility runtime helper', () => {
     const hostModule: typeof RuntimeHostModule = await import('#host/create-runtime-host.js');
     const utilityModule: typeof ElectronUtilityModule = await import('#electron/utility.js');
     const runtime = defineRuntime({ kernels: [] });
-    const sourcePath = '/main.scad';
+    const sourcePath = 'main.scad';
 
     const host = utilityModule.serveElectronRuntime({
       fileSystem: fromMemoryFs({ [sourcePath]: 'cube(10);' }),

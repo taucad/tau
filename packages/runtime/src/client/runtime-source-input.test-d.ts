@@ -15,6 +15,7 @@ import type {
   RuntimeSource,
   RuntimeSourceContent,
   RuntimeSourceFiles,
+  RuntimeSourceSnapshotResult,
 } from '#client/runtime-client.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
@@ -192,6 +193,27 @@ describe('RuntimeClient.render input types', () => {
       // @ts-expect-error -- this render route advertises edges only.
       content: { includeTopology: true },
     });
+  });
+});
+
+describe('RuntimeClient.snapshotSource input types', () => {
+  it('uses the canonical source input and returns the owned source-closure result', () => {
+    expectTypeOf(
+      client.snapshotSource({
+        source: { files: { 'main.ts': bytes } },
+        additionalPaths: [{ path: 'tau.json', required: true }],
+      }),
+    ).toEqualTypeOf<Promise<RuntimeSourceSnapshotResult>>();
+    void client.snapshotSource({ source: { path: 'main.ts' }, signal: new AbortController().signal });
+  });
+
+  it('requires an entry for inferred multi-file inline sources', () => {
+    // @ts-expect-error -- inference must keep both literal keys and require entry
+    void client.snapshotSource({ source: { files: { 'a.ts': code, 'b.ts': code } } });
+    void client.snapshotSource({ source: { files: { 'a.ts': code, 'b.ts': code }, entry: 'a.ts' } });
+
+    // @ts-expect-error -- additional path policy must be explicit
+    void client.snapshotSource({ source: { path: 'main.ts' }, additionalPaths: [{ path: 'tau.json' }] });
   });
 });
 

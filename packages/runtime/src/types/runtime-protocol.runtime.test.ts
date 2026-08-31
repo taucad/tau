@@ -23,8 +23,15 @@ import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import { runtimeAbortArgsSchema, runtimeStateChangedArgsSchema } from '#types/runtime-protocol.schemas.js';
 
 describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
-  it('should expose exactly four acknowledged calls', () => {
-    expect([...runtimeProtocolCallNames]).toEqual(['initialize', 'export', 'exportModel', 'cleanup']);
+  it('should expose exactly six acknowledged calls', () => {
+    expect([...runtimeProtocolCallNames]).toEqual([
+      'initialize',
+      'export',
+      'exportModel',
+      'snapshotSource',
+      'transcode',
+      'cleanup',
+    ]);
   });
 
   it('exposes exactly 7 client → worker notify commands (T18)', () => {

@@ -28,7 +28,7 @@ import { createMockKernelRuntime } from '@taucad/runtime-testing';
 
 import { openrscadNativeKernel } from '#openrscad-native.kernel.js';
 
-const entryPath = '/project/model.scad';
+const entryPath = 'project/model.scad';
 const options = { tessellation: { segments: 32, minimumAngle: 12, minimumSize: 2 } } as const;
 
 /**

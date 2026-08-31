@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-import { asBuffer, downloadBlob } from '#file.utils.js';
+import { asBuffer, downloadBlob, sourcePathMatchesExtensions } from '#file.utils.js';
+
+describe('sourcePathMatchesExtensions', () => {
+  it('matches full dotted suffixes case-insensitively', () => {
+    expect(sourcePathMatchesExtensions('models/part.MESH.XML', ['mesh.xml'])).toBe(true);
+    expect(sourcePathMatchesExtensions('models/notes.xml', ['mesh.xml'])).toBe(false);
+    expect(sourcePathMatchesExtensions('models/partts', ['ts'])).toBe(false);
+    expect(sourcePathMatchesExtensions('models/no-extension', ['*'])).toBe(true);
+  });
+});
 
 describe('asBuffer', () => {
   it('should return Uint8Array unchanged', () => {

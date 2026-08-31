@@ -42,6 +42,13 @@ export const unitSchema = z.object({
     .describe('Output unit convention'),
 });
 
+/** Canonical glTF 2.0 Y-up, metre export convention. @public */
+export const gltfExportConventionSchema = coordinateSystemSchema
+  .extend({
+    coordinateSystem: coordinateSystemSchema.shape.coordinateSystem.default('y-up'),
+  })
+  .extend(unitSchema.shape);
+
 /**
  * Inferred type for export unit options.
  * @public

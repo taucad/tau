@@ -3,7 +3,7 @@ title: 'Tool Output Location Policy'
 description: 'Rules for placing caches, temporary work, reports, artifacts, and persistent machine state created by Tau workspace tooling.'
 status: active
 created: '2026-08-22'
-updated: '2026-08-23'
+updated: '2026-08-28'
 related:
   - docs/research/workspace-root-generated-output-hygiene-blueprint.md
   - docs/policy/npm-policy.md
@@ -20,7 +20,7 @@ Machine-created top-level entries make the workspace root unstable for people, f
 
 ## Scope
 
-This policy applies to host-workspace tooling and CI jobs that write into or beside the Tau checkout. It does not rename paths inside Tau's virtual project filesystem, such as project-local `/.tau/cache` or `/node_modules`.
+This policy applies to host-workspace tooling and CI jobs that write into or beside the Tau checkout. It does not rename paths inside a rooted Tau project capability, such as `.tau/cache` or `node_modules`; authority-global `/node_modules` remains a separate host-composition route.
 
 ## Rules
 

@@ -4,12 +4,7 @@ import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { fromNodeFs } from '#filesystem/from-node-fs.js';
-import type {
-  AnyRuntimeDefinition,
-  RuntimeKernels,
-  RuntimeMiddleware,
-  RuntimeTranscoders,
-} from '#worker/runtime-definition.js';
+import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
 export { isSafeRelativePath } from '@taucad/utils/path';
 
@@ -67,14 +62,7 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
 export async function createNodeClient<const Runtime extends AnyRuntimeDefinition>(
   projectPath: string | undefined,
   options: NodeRuntimeClientOptions<Runtime>,
-): Promise<
-  RuntimeClient<
-    RuntimeKernels<Runtime>,
-    RuntimeMiddleware<Runtime>,
-    RuntimeTranscoders<Runtime>,
-    InProcessTransportFor<Runtime>
-  >
-> {
+): Promise<RuntimeClient<Runtime, InProcessTransportFor<Runtime>>> {
   const fileSystem: RuntimeFileSystem = projectPath ? fromNodeFs(projectPath) : fromMemoryFs();
   const { runtime, ...clientOptions } = options;
   const transport = inProcessTransport({ runtime, fileSystem });
@@ -82,10 +70,5 @@ export async function createNodeClient<const Runtime extends AnyRuntimeDefinitio
   return createRuntimeClient({
     ...clientOptions,
     transport,
-  } as RuntimeClientOptions<Runtime, typeof transport>) as RuntimeClient<
-    RuntimeKernels<Runtime>,
-    RuntimeMiddleware<Runtime>,
-    RuntimeTranscoders<Runtime>,
-    InProcessTransportFor<Runtime>
-  >;
+  } as RuntimeClientOptions<Runtime, typeof transport>) as RuntimeClient<Runtime, InProcessTransportFor<Runtime>>;
 }

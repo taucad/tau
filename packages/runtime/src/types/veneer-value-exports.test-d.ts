@@ -1,10 +1,11 @@
 import { expectTypeOf, test } from 'vitest';
 import {
   asBuffer,
+  assertRootedPath,
   hashString,
-  joinPath,
+  joinRelativePath,
   resolveImportPath,
-  resolveVirtualPath,
+  resolveRootedPath,
   sha256Bytes,
   sha256String,
 } from '@taucad/runtime/kernel';
@@ -17,9 +18,10 @@ test('runtime owns the explicit veneer value contract', () => {
   void expectTypeOf(createExportFile).toBeFunction;
   void expectTypeOf(asBuffer).toBeFunction;
   void expectTypeOf(hashString).toBeFunction;
-  void expectTypeOf(joinPath).toBeFunction;
+  void expectTypeOf(assertRootedPath).toBeFunction;
+  void expectTypeOf(joinRelativePath).toBeFunction;
   void expectTypeOf(resolveImportPath).toBeFunction;
-  void expectTypeOf(resolveVirtualPath).toBeFunction;
+  void expectTypeOf(resolveRootedPath).toBeFunction;
   void expectTypeOf(sha256Bytes).toBeFunction;
   void expectTypeOf(sha256String).toBeFunction;
   void expectTypeOf(isSafeRelativePath).toBeFunction;

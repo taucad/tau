@@ -5,14 +5,14 @@
  * The main thread aggregates data from all workers with timestamp correlation.
  *
  * Flushing is explicit only -- the dispatcher calls flush() after each render
- * and export operation. No timers are used, so the collector adds zero overhead
+ * and export/transcode operation. No timers are used, so the collector adds zero overhead
  * when idle and does not keep the event loop alive.
  *
  * See docs/policy/runtime-telemetry-policy.md for the full telemetry policy.
  *
  * Naming convention: {subsystem}.{operation} (OTel-inspired)
  *
- * Root spans:          kernel.bootstrap, kernel.render, kernel.export
+ * Root spans:          kernel.bootstrap, kernel.render, kernel.export, kernel.transcode
  * Framework lifecycle: kernel.init, kernel.select, kernel.detect-import, kernel.compute, kernel.extract-params
  * Framework infra:     kernel.bundle, kernel.execute, kernel.bundler-init, kernel.resolve-deps, kernel.load-middleware
  * Dependency pipeline: deps.discover, deps.read, deps.hash, deps.content-hash

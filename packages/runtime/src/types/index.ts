@@ -81,6 +81,7 @@ export type {
 } from '#types/runtime-bundler.types.js';
 export type * from '#types/runtime-middleware.types.js';
 export type * from '#types/runtime-content.types.js';
+export type * from '#types/runtime-source-snapshot.types.js';
 export {
   contentDefault,
   normalizeRuntimeContent,
@@ -120,5 +121,5 @@ export type {
 } from '#types/runtime-transcoder.types.js';
 export * from '#types/runtime-protocol.types.js';
 export type * from '#types/bridge.types.js';
-export { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
+export { coordinateSystemSchema, gltfExportConventionSchema, unitSchema } from '#types/export-option-schemas.js';
 export type { CoordinateSystemOptions, UnitOptions } from '#types/export-option-schemas.js';

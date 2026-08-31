@@ -70,6 +70,8 @@ import type {
   TelemetryEntry,
   RenderPhase,
   RuntimeExportModelArgs,
+  RuntimeSourceSnapshotArgs,
+  RuntimeTranscodeArgs,
   RuntimePreviewIdentity,
   RuntimeOpenFileArgs,
   RuntimeStageAndRenderArgs,
@@ -83,6 +85,10 @@ import type {
   WireAbortReasonCode,
   WorkerState,
 } from '#types/runtime-protocol.types.js';
+import type {
+  RuntimeSourceSnapshotFileRole,
+  RuntimeSourceSnapshotResult,
+} from '#types/runtime-source-snapshot.types.js';
 import { signalSlot, abortReason as abortReasonEnum } from '#types/runtime-protocol.types.js';
 import type { TranscoderDefinition, TranscoderEdge, TranscoderRuntime } from '#types/runtime-transcoder.types.js';
 import { isRenderAbortedError, renderTimeoutIssue, RenderAbortedError } from '#framework/runtime-worker-client.js';
@@ -149,6 +155,14 @@ type RenderCancellationRecord = {
 };
 
 const neverAbortedSignal = new AbortController().signal;
+
+const mergeParameterDefaults = (
+  defaults: Record<string, unknown>,
+  parameters: Record<string, unknown>,
+): Record<string, unknown> =>
+  deepmerge(defaults, parameters, {
+    arrayMerge: (_target: unknown[], source: unknown[]) => source,
+  });
 
 type TranscoderPluginEntry = TranscoderPlugin<Record<string, unknown>> &
   RuntimePluginDefinitionCarrier<TranscoderDefinition>;
@@ -1470,6 +1484,230 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return this.enqueueOperation(async () => this.exportModelInLane(request), signal);
   }
 
+  /**
+   * Collect the selected entry's coherent source closure without evaluating geometry.
+   *
+   * @param request - Entry, optional staged files, and explicitly approved extra paths.
+   * @param signal - Request-scoped cancellation signal.
+   * @returns Source files, hashes, roles, unresolved diagnostics, and selected kernel id.
+   */
+  public async snapshotSource(
+    request: RuntimeSourceSnapshotArgs,
+    signal?: AbortSignal,
+  ): Promise<RuntimeSourceSnapshotResult> {
+    return this.enqueueOperation(async () => this.snapshotSourceInLane(request), signal);
+  }
+
+  private async snapshotSourceInLane(request: RuntimeSourceSnapshotArgs): Promise<RuntimeSourceSnapshotResult> {
+    const signal = this.operationSignal ?? neverAbortedSignal;
+    signal.throwIfAborted();
+    this.prepareUnobservedFileSystem(false);
+    if (request.stage) {
+      await this.writeFilesAndInvalidate(request.stage);
+    }
+    const owner = await this.createOperationOwner(request.file, 'request');
+    const entryPath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
+    const discover = async (): Promise<{
+      readonly kernelPaths: readonly string[];
+      readonly unresolvedPaths: readonly string[];
+      readonly middlewarePaths: readonly string[];
+    }> => {
+      const result = await this.onGetDependenciesForOwner(owner, { entryPath }, this.createRuntime());
+      const kernelPaths = [...new Set([entryPath, ...result.resolved].map((path) => assertRootedPath(path)))].sort();
+      const unresolvedPaths = [...new Set(result.unresolved.map((path) => assertRootedPath(path)))].sort();
+      const middlewarePaths = await this.discoverSnapshotMiddlewarePaths(owner);
+      return { kernelPaths, unresolvedPaths, middlewarePaths };
+    };
+    const initial = await discover();
+    signal.throwIfAborted();
+    const roles = new Map<string, RuntimeSourceSnapshotFileRole>();
+    const rolePriority: Record<RuntimeSourceSnapshotFileRole, number> = {
+      entry: 0,
+      'kernel-dependency': 1,
+      'middleware-dependency': 2,
+      additional: 3,
+    };
+    const addRole = (path: string, role: RuntimeSourceSnapshotFileRole): void => {
+      const canonical = assertRootedPath(path);
+      const existing = roles.get(canonical);
+      if (existing === undefined || rolePriority[role] < rolePriority[existing]) {
+        roles.set(canonical, role);
+      }
+    };
+    for (const path of initial.kernelPaths) {
+      addRole(path, path === entryPath ? 'entry' : 'kernel-dependency');
+    }
+    for (const path of initial.middlewarePaths) {
+      addRole(path, 'middleware-dependency');
+    }
+    const additionalRequired = new Set<string>();
+    for (const additional of request.additionalPaths ?? []) {
+      const path = assertRootedPath(additional.path);
+      addRole(path, 'additional');
+      if (additional.required) {
+        additionalRequired.add(path);
+      }
+    }
+
+    const selectedPaths = [...roles.keys()].sort();
+    const exists = await Promise.all(
+      selectedPaths.map(async (path) => [path, await this.filesystem.exists(path)] as const),
+    );
+    const missingPaths = exists.filter(([, present]) => !present).map(([path]) => path);
+    const missingRequired = missingPaths.filter((path) => additionalRequired.has(path) || path === entryPath);
+    if (missingRequired.length > 0) {
+      return createKernelError([
+        {
+          code: 'SOURCE_SNAPSHOT_INVALID',
+          message: 'A required source snapshot file is unavailable.',
+          severity: 'error',
+          type: 'runtime',
+          details: { paths: missingRequired },
+        },
+      ]);
+    }
+    const readablePaths = exists.filter(([, present]) => present).map(([path]) => path);
+    const contentByPath = await this.filesystem.readFiles(readablePaths);
+    signal.throwIfAborted();
+    const hashesByPath = new Map<string, string>();
+    const files = [];
+    for (const path of readablePaths) {
+      const content = contentByPath[path];
+      if (!content) {
+        return createKernelError([
+          {
+            code: 'SOURCE_SNAPSHOT_INVALID',
+            message: 'A selected source snapshot file could not be read.',
+            severity: 'error',
+            type: 'runtime',
+            details: { path },
+          },
+        ]);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- file order and hash publication remain deterministic.
+      const sha256 = await this.hashContent(content);
+      hashesByPath.set(path, sha256);
+      files.push({ path, content: new Uint8Array(content), sha256, role: roles.get(path)! });
+    }
+
+    const revalidated = await discover();
+    signal.throwIfAborted();
+    const initialGraph = new Set([...initial.kernelPaths, ...initial.middlewarePaths, ...initial.unresolvedPaths]);
+    const finalGraph = new Set([
+      ...revalidated.kernelPaths,
+      ...revalidated.middlewarePaths,
+      ...revalidated.unresolvedPaths,
+    ]);
+    if (!setsEqual(initialGraph, finalGraph)) {
+      return createKernelError([
+        {
+          code: 'SOURCE_SNAPSHOT_CHANGED',
+          message: 'The source dependency graph changed while the snapshot was being collected.',
+          severity: 'error',
+          type: 'runtime',
+        },
+      ]);
+    }
+
+    const verifiedExists = await Promise.all(
+      selectedPaths.map(async (path) => [path, await this.filesystem.exists(path)] as const),
+    );
+    if (verifiedExists.some(([path, present], index) => exists[index]![0] !== path || exists[index]![1] !== present)) {
+      return createKernelError([
+        {
+          code: 'SOURCE_SNAPSHOT_CHANGED',
+          message: 'The selected source files changed while the snapshot was being collected.',
+          severity: 'error',
+          type: 'runtime',
+        },
+      ]);
+    }
+    const verifiedContent = await this.filesystem.readFiles(readablePaths);
+    signal.throwIfAborted();
+    const changedPaths = await Promise.all(
+      readablePaths.map(async (path) => {
+        const content = verifiedContent[path];
+        return !content || (await this.hashContent(content)) !== hashesByPath.get(path) ? path : undefined;
+      }),
+    );
+    const changedPath = changedPaths.find((path) => path !== undefined);
+    if (changedPath) {
+      return createKernelError([
+        {
+          code: 'SOURCE_SNAPSHOT_CHANGED',
+          message: 'The selected source files changed while the snapshot was being collected.',
+          severity: 'error',
+          type: 'runtime',
+          details: { path: changedPath },
+        },
+      ]);
+    }
+
+    const missingDependencies = missingPaths.filter((path) => roles.get(path) !== 'additional');
+    const unresolvedPaths = [...new Set([...initial.unresolvedPaths, ...missingDependencies])].sort();
+    const issues: KernelIssue[] =
+      unresolvedPaths.length === 0
+        ? []
+        : [
+            {
+              code: 'SOURCE_SNAPSHOT_INVALID',
+              message: 'Some source dependencies are unresolved.',
+              severity: 'warning',
+              type: 'runtime',
+              details: { paths: unresolvedPaths },
+            },
+          ];
+    return {
+      success: true,
+      data: {
+        entryPath,
+        files,
+        unresolvedPaths,
+        kernelId: owner.binding?.kernelId ?? 'unknown',
+      },
+      issues,
+    };
+  }
+
+  private async discoverSnapshotMiddlewarePaths(owner: OperationOwner): Promise<readonly string[]> {
+    const input: GetDependenciesInput = {
+      entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
+    };
+    const paths: string[] = [];
+    for (const { middleware, options, enabled, id } of this.getMiddleware()) {
+      if (!enabled || !middleware.getDependencies) {
+        continue;
+      }
+      const getDependencies = middleware.getDependencies as unknown as (
+        request: GetDependenciesInput,
+        runtime: MiddlewareDependencyRuntime<Record<string, unknown>>,
+      ) => MiddlewareDependencyDeclaration[] | Promise<MiddlewareDependencyDeclaration[]>;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- middleware declaration order is part of runtime semantics.
+        const declarations = await getDependencies(input, {
+          signal: this.operationSignal ?? neverAbortedSignal,
+          logger: this.getMiddlewareLogger(id, middleware.name),
+          filesystem: this.filesystem,
+          options,
+        });
+        paths.push(...declarations.map(({ path }) => assertRootedPath(path)));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw Object.assign(new Error(`Middleware dependency error in ${middleware.name}: ${message}`), {
+          issues: [
+            {
+              message: `Middleware dependency error in ${middleware.name}: ${message}`,
+              code: 'MIDDLEWARE_FAILED',
+              type: 'kernel',
+              severity: 'error',
+            } satisfies KernelIssue,
+          ],
+        });
+      }
+    }
+    return [...new Set(paths)].sort();
+  }
+
   private async exportModelInLane(request: RuntimeExportModelArgs): Promise<ExportGeometryResult> {
     this.prepareUnobservedFileSystem(false);
     const exportSpan = this.tracer.startSpan('kernel.export-model', {
@@ -1503,7 +1741,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               defaultParameters?: Record<string, unknown>;
             };
             if (extracted.defaultParameters) {
-              mergedParameters = deepmerge(extracted.defaultParameters, request.parameters);
+              mergedParameters = mergeParameterDefaults(extracted.defaultParameters, request.parameters);
             }
           }
 
@@ -1593,6 +1831,76 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
+  /** Runs a registered transcoder directly, without a kernel render or filesystem. */
+  public async transcode(request: RuntimeTranscodeArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
+    return this.enqueueOperation(async () => this.transcodeInLane(request), signal);
+  }
+
+  private async transcodeInLane(request: RuntimeTranscodeArgs): Promise<ExportGeometryResult> {
+    const transcoder = [...this.loadedTranscoders.values()].find(({ edges }) =>
+      edges.some(({ from, to }) => from === request.from && to === request.to),
+    );
+    const edge = transcoder?.edges.find(({ from, to }) => from === request.from && to === request.to);
+    if (!transcoder || !edge) {
+      return createKernelError([
+        {
+          message: `No loaded transcoder for ${request.from} → ${request.to}.`,
+          code: 'KERNEL_CAPABILITY_MISSING',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]);
+    }
+
+    const span = this.tracer.startSpan('kernel.transcode', {
+      from: request.from,
+      to: request.to,
+      transcoder: transcoder.id,
+    });
+
+    let options: Record<string, unknown>;
+    try {
+      options = edge.optionsSchema
+        ? (edge.optionsSchema.parse(request.options) as Record<string, unknown>)
+        : request.options;
+    } catch (error) {
+      span.end({ success: false });
+      return createKernelError([
+        {
+          message: `Transcoder option validation failed (${request.from} → ${request.to}): ${error instanceof Error ? error.message : String(error)}`,
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]);
+    }
+
+    try {
+      const context = await this.initializeTranscoder(transcoder);
+      const result = await transcoder.definition.transcode(
+        { ...request, options },
+        {
+          logger: this.logger,
+          tracer: this.tracer,
+          signal: this.operationSignal ?? neverAbortedSignal,
+        },
+        context,
+      );
+      span.end({ success: result.success });
+      return finalizeExportArtifactSet(result);
+    } catch (error) {
+      span.end({ success: false });
+      return createKernelError([
+        {
+          message: `Transcoder "${transcoder.id}" failed: ${error instanceof Error ? error.message : String(error)}`,
+          code: 'KERNEL_BINDING_FAILED',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]);
+    }
+  }
+
   /**
    * Get the resolved middleware array for this worker.
    * Override in subclasses to customize middleware (e.g., for testing).
@@ -1650,7 +1958,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           defaultParameters?: Record<string, unknown>;
         };
         if (extracted.defaultParameters) {
-          mergedParameters = deepmerge(extracted.defaultParameters, input.parameters);
+          mergedParameters = mergeParameterDefaults(extracted.defaultParameters, input.parameters);
         }
       }
 
@@ -3693,7 +4001,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             defaultParameters?: Record<string, unknown>;
           };
           if (extracted.defaultParameters) {
-            mergedParameters = deepmerge(extracted.defaultParameters, this.currentParameters);
+            mergedParameters = mergeParameterDefaults(extracted.defaultParameters, this.currentParameters);
           }
         }
 
@@ -4151,7 +4459,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): { schema: JSONSchema7; defaults: Record<string, unknown> } {
     let schema: JSONSchema7;
     try {
-      schema = toJSONSchema(zodSchema, { target: 'draft-7' }) as JSONSchema7 & { $schema?: unknown };
+      schema = toJSONSchema(zodSchema, { target: 'draft-7', io: 'input' }) as JSONSchema7 & { $schema?: unknown };
       delete schema.$schema;
     } catch {
       this.logger.warn(`Failed to derive JSON Schema for ${label}`);

@@ -144,7 +144,7 @@ const observePreview = (
 function createConfiguredWorker(overrides?: Partial<MockKernelWorkerOptions>) {
   const filesystem = createMockFileSystem();
   filesystem.mocks.readFiles.mockResolvedValue({
-    '/main.ts': new Uint8Array([1, 2, 3]),
+    'main.ts': new Uint8Array([1, 2, 3]),
   });
 
   return new MockKernelWorker({
@@ -185,7 +185,19 @@ class DependencyKernelWorker extends MockKernelWorker {
     { entryPath }: GetDependenciesInput,
     _runtime: KernelRuntime,
   ): Promise<GetDependenciesResult> {
-    return { resolved: [entryPath, '/dep.ts'], unresolved: [] };
+    return { resolved: [entryPath, 'dep.ts'], unresolved: [] };
+  }
+}
+
+class VolatileDependencyKernelWorker extends MockKernelWorker {
+  private dependencyCalls = 0;
+
+  protected override async onGetDependencies(
+    { entryPath }: GetDependenciesInput,
+    _runtime: KernelRuntime,
+  ): Promise<GetDependenciesResult> {
+    this.dependencyCalls++;
+    return { resolved: [entryPath, this.dependencyCalls === 1 ? 'first.ts' : 'second.ts'], unresolved: [] };
   }
 }
 
@@ -222,10 +234,147 @@ class DisposingKernelWorker extends MockKernelWorker {
 // =============================================================================
 
 describe('KernelWorker lifecycle', () => {
+  it('should replace parameter arrays across direct, interactive, and export merges', async () => {
+    const capturedParameters: Array<Record<string, unknown>> = [];
+    class ArrayParameterWorker extends MockKernelWorker {
+      protected override async onGetParameters(): Promise<GetParametersResult> {
+        return {
+          success: true,
+          data: {
+            defaultParameters: {
+              sections: { planes: [{ point: [0, 0, 0] }], clipLines: true },
+            },
+            jsonSchema: { type: 'object', properties: {} },
+          },
+          issues: [],
+        };
+      }
+
+      protected override async onCreateGeometry(
+        input: CreateGeometryInput,
+        runtime: KernelRuntime,
+      ): Promise<CreateGeometryResult> {
+        capturedParameters.push(input.parameters);
+        return super.onCreateGeometry(input, runtime);
+      }
+    }
+
+    const worker = new ArrayParameterWorker({ middleware: [], onLog: noopLog });
+    const file = createGeometryFile('main.ts');
+    const parameters = { sections: { planes: [{ point: [1, 2, 3] }] } };
+    await worker.render({
+      file,
+      parameters,
+    });
+    await openAndWaitForRender(worker, file, parameters);
+    await worker.exportModel({ file, parameters, format: 'gltf' });
+
+    expect(capturedParameters).toEqual(
+      Array.from({ length: 3 }, () => ({
+        sections: { planes: [{ point: [1, 2, 3] }], clipLines: true },
+      })),
+    );
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  describe('source snapshots', () => {
+    it('returns the coherent relevant closure with owned bytes without evaluating geometry', async () => {
+      const contents = {
+        'main.ts': new Uint8Array([1, 2]),
+        'dep.ts': new Uint8Array([3, 4]),
+        'tau.json': new Uint8Array([5, 6]),
+      };
+      const filesystem = createMockFileSystem({ existsResult: (path) => path in contents });
+      filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+        Object.fromEntries(paths.map((path) => [path, contents[path as keyof typeof contents]])),
+      );
+      const worker = new DependencyKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+
+      const result = await worker.snapshotSource({
+        file: createGeometryFile('main.ts'),
+        additionalPaths: [
+          { path: 'tau.json', required: true },
+          { path: 'package.json', required: false },
+        ],
+      });
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        return;
+      }
+      expect(result.data.files.map(({ path, role }) => [path, role])).toEqual([
+        ['dep.ts', 'kernel-dependency'],
+        ['main.ts', 'entry'],
+        ['tau.json', 'additional'],
+      ]);
+      expect(result.data.files.every(({ sha256 }) => /^[0-9a-f]{64}$/u.test(sha256))).toBe(true);
+      expect(result.data.unresolvedPaths).toEqual([]);
+      expect(worker.createGeometryCalls).toBe(0);
+      result.data.files[0]!.content[0] = 99;
+      expect(contents['dep.ts'][0]).toBe(3);
+
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        worker.snapshotSource({ file: createGeometryFile('main.ts') }, controller.signal),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('fails closed when a required file is absent or the dependency graph changes', async () => {
+      const missingFilesystem = createMockFileSystem({ existsResult: (path) => path !== 'tau.json' });
+      missingFilesystem.mocks.readFiles.mockResolvedValue({
+        'main.ts': new Uint8Array([1]),
+        'dep.ts': new Uint8Array([2]),
+      });
+      const missingWorker = new DependencyKernelWorker({
+        middleware: [],
+        onLog: noopLog,
+        filesystem: missingFilesystem,
+      });
+      await expect(
+        missingWorker.snapshotSource({
+          file: createGeometryFile('main.ts'),
+          additionalPaths: [{ path: 'tau.json', required: true }],
+        }),
+      ).resolves.toMatchObject({ success: false, issues: [{ code: 'SOURCE_SNAPSHOT_INVALID' }] });
+
+      const changingFilesystem = createMockFileSystem({ existsResult: true });
+      changingFilesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+        Object.fromEntries(paths.map((path) => [path, new Uint8Array([1])])),
+      );
+      const changingWorker = new VolatileDependencyKernelWorker({
+        middleware: [],
+        onLog: noopLog,
+        filesystem: changingFilesystem,
+      });
+      await expect(changingWorker.snapshotSource({ file: createGeometryFile('main.ts') })).resolves.toMatchObject({
+        success: false,
+        issues: [{ code: 'SOURCE_SNAPSHOT_CHANGED' }],
+      });
+
+      const changingContentFilesystem = createMockFileSystem({ existsResult: true });
+      let readCount = 0;
+      changingContentFilesystem.mocks.readFiles.mockImplementation(async (paths: string[]) => {
+        readCount++;
+        return Object.fromEntries(paths.map((path) => [path, new Uint8Array([readCount])]));
+      });
+      const changingContentWorker = new DependencyKernelWorker({
+        middleware: [],
+        onLog: noopLog,
+        filesystem: changingContentFilesystem,
+      });
+      await expect(
+        changingContentWorker.snapshotSource({ file: createGeometryFile('main.ts') }),
+      ).resolves.toMatchObject({
+        success: false,
+        issues: [{ code: 'SOURCE_SNAPSHOT_CHANGED' }],
+      });
+    });
   });
 
   it('should warn exactly once per initialize when cross-origin isolation is degraded', async () => {
@@ -258,7 +407,7 @@ describe('KernelWorker lifecycle', () => {
     it('should retain the entry subscription when createGeometry fails', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
 
       const worker = new FailingKernelWorker({
@@ -278,7 +427,7 @@ describe('KernelWorker lifecycle', () => {
       worker.handleOpenFile({ renderId: previewId(201), file: createGeometryFile('main.ts'), parameters: {} });
       await renderComplete;
 
-      expect(worker.getWatchedPaths()).toContain('/main.ts');
+      expect(worker.getWatchedPaths()).toContain('main.ts');
     });
 
     it('should include entry path in watch set when build produces empty dependencies', async () => {
@@ -294,18 +443,18 @@ describe('KernelWorker lifecycle', () => {
       worker.handleOpenFile({ renderId: previewId(202), file: createGeometryFile('main.ts'), parameters: {} });
       await settled;
 
-      expect(worker.getWatchedPaths()).toContain('/main.ts');
+      expect(worker.getWatchedPaths()).toContain('main.ts');
     });
 
     it('does not publish when an added dependency changes during acknowledged watch replacement', async () => {
       const filesystem = createMockFileSystem();
       let dependencyBytes = new Uint8Array([2]);
       filesystem.mocks.readFiles.mockImplementation(async () => ({
-        '/main.ts': new Uint8Array([1]),
-        '/dep.ts': dependencyBytes,
+        'main.ts': new Uint8Array([1]),
+        'dep.ts': dependencyBytes,
       }));
       filesystem.mocks.readFile.mockImplementation(async (path) =>
-        path === '/dep.ts' ? dependencyBytes : new Uint8Array([1]),
+        path === 'dep.ts' ? dependencyBytes : new Uint8Array([1]),
       );
 
       let registrationCount = 0;
@@ -355,13 +504,13 @@ describe('KernelWorker lifecycle', () => {
       worker.handleOpenFile({ renderId: previewId(203), file: createGeometryFile('main.ts'), parameters: {} });
       await replacementStarted;
       dependencyBytes = new Uint8Array([3]);
-      replacementHandler!({ type: 'change', path: '/dep.ts' });
+      replacementHandler!({ type: 'change', path: 'dep.ts' });
       acknowledgeReplacement();
       await replacementUnsubscribed.promise;
 
       expect(unsubscriptions[1]).toHaveBeenCalledOnce();
       expect(onGeometry).not.toHaveBeenCalled();
-      expect(worker.getWatchedPaths()).toEqual(new Set(['/main.ts']));
+      expect(worker.getWatchedPaths()).toEqual(new Set(['main.ts']));
       expect(unsubscriptions[0]).not.toHaveBeenCalled();
       await worker.cleanup();
     });
@@ -403,7 +552,7 @@ describe('KernelWorker lifecycle', () => {
 
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
 
       const worker = new GatedKernelWorker({
@@ -531,7 +680,7 @@ describe('KernelWorker lifecycle', () => {
       const worker = createConfiguredWorker();
 
       // @ts-expect-error - accessing private for test verification
-      worker.bundleResultCache.set('/main.ts', {
+      worker.bundleResultCache.set('main.ts', {
         code: '',
         dependencies: [],
         unresolvedPaths: [],
@@ -546,10 +695,10 @@ describe('KernelWorker lifecycle', () => {
         success: false,
       });
 
-      await worker.notifyFileChanged(['/main.ts']);
+      await worker.notifyFileChanged(['main.ts']);
 
       // @ts-expect-error - accessing private for test verification
-      expect(worker.bundleResultCache.has('/main.ts')).toBe(false);
+      expect(worker.bundleResultCache.has('main.ts')).toBe(false);
     });
 
     it('should invalidate bundleResultCache via watch handler when changed path matches entry key', async () => {
@@ -559,7 +708,7 @@ describe('KernelWorker lifecycle', () => {
       worker.setActiveFile(createGeometryFile('main.ts'));
 
       // @ts-expect-error - accessing private for test verification
-      worker.bundleResultCache.set('/main.ts', {
+      worker.bundleResultCache.set('main.ts', {
         code: '',
         dependencies: [],
         unresolvedPaths: [],
@@ -581,16 +730,16 @@ describe('KernelWorker lifecycle', () => {
       worker.fileSystem = { watch: mockWatch, dispose: vi.fn(), listen: vi.fn() };
 
       // @ts-expect-error - exercising the private observation handoff seam
-      void worker.reconcileWatchSet(new Map([['/main.ts', 50]]));
+      void worker.reconcileWatchSet(new Map([['main.ts', 50]]));
       await vi.waitFor(() => {
         expect(capturedWatchCallback).toBeDefined();
       });
 
-      capturedWatchCallback!({ type: 'change', path: '/main.ts' });
+      capturedWatchCallback!({ type: 'change', path: 'main.ts' });
 
       await vi.waitFor(() => {
         // @ts-expect-error - accessing private for test verification
-        expect(worker.bundleResultCache.has('/main.ts')).toBe(false);
+        expect(worker.bundleResultCache.has('main.ts')).toBe(false);
       });
     });
 
@@ -601,11 +750,11 @@ describe('KernelWorker lifecycle', () => {
       worker.fileSystem = { dispose: vi.fn(), listen: vi.fn() };
 
       // @ts-expect-error - exercising the private observation handoff seam
-      await worker.reconcileWatchSet(new Map([['/main.ts', 50]]));
+      await worker.reconcileWatchSet(new Map([['main.ts', 50]]));
 
       // The watcherless arm still records the desired set (explicit operations
       // reread through it) but must leave no subscription to dispose.
-      expect(worker.getWatchedPaths()).toEqual(new Set(['/main.ts']));
+      expect(worker.getWatchedPaths()).toEqual(new Set(['main.ts']));
       // @ts-expect-error - accessing private for test verification
       expect(worker.watchUnsubscribe).toBeUndefined();
     });
@@ -635,7 +784,7 @@ describe('KernelWorker lifecycle', () => {
       let settled = false;
       const reconciled = (async () => {
         // @ts-expect-error - exercising the private observation handoff seam
-        await worker.reconcileWatchSet(new Map([['/main.ts', 50]]));
+        await worker.reconcileWatchSet(new Map([['main.ts', 50]]));
         settled = true;
       })();
       await flushMicrotasks();
@@ -646,21 +795,21 @@ describe('KernelWorker lifecycle', () => {
       armed.resolve();
       await reconciled;
 
-      expect(worker.getWatchedPaths()).toEqual(new Set(['/main.ts']));
+      expect(worker.getWatchedPaths()).toEqual(new Set(['main.ts']));
       await worker.cleanup();
     });
 
     it('does not supersede the arming render when the watch replays a pre-arm write', async () => {
       /* Measured on macOS: `fs.watch` delivers a `change` for the entry a few
        * milliseconds after the arm, replaying the write that created the file
-       * just before the client connected. Nothing has hashed `/main.ts` yet, so
+       * just before the client connected. Nothing has hashed `main.ts` yet, so
        * without a baseline recorded at arm time the replay reads as a change
        * against `undefined`, schedules an autonomous re-render, and aborts the
        * explicit render that armed the watch — which then reaches terminal
        * `idle` with no geometry and settles as `{ superseded: true }`. */
       const entryBytes = new Uint8Array([1, 2, 3]);
       const filesystem = createMockFileSystem();
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': entryBytes });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': entryBytes });
       filesystem.mocks.readFile.mockResolvedValue(entryBytes);
 
       let deliverWatchEvent!: (event: WatchEvent) => void;
@@ -681,7 +830,7 @@ describe('KernelWorker lifecycle', () => {
       /* Dependency discovery is the first step of the render that follows the
        * arm, so holding it open puts the replay exactly where the measured
        * failure put it: after the watch is live, before anything has hashed the
-       * entry (`cachedHashes=[["/main.ts", null]]`). */
+       * entry (`cachedHashes=[["main.ts", null]]`). */
       const discovering = Promise.withResolvers<void>();
       const releaseDiscovery = Promise.withResolvers<void>();
       class GatedKernelWorker extends MockKernelWorker {
@@ -701,7 +850,7 @@ describe('KernelWorker lifecycle', () => {
 
       worker.handleOpenFile({ renderId, file: createGeometryFile('main.ts'), parameters: {} });
       await discovering.promise;
-      deliverWatchEvent({ type: 'change', path: '/main.ts' });
+      deliverWatchEvent({ type: 'change', path: 'main.ts' });
       await flushMicrotasks();
       releaseDiscovery.resolve();
 
@@ -720,11 +869,11 @@ describe('KernelWorker lifecycle', () => {
         const states: string[] = [];
         worker.onStateChanged = ({ state }) => states.push(state);
 
-        await worker.notifyFileChanged(['/thumbnail.webp']);
-        await worker.notifyFileChanged(['/main.geospec.ts']);
+        await worker.notifyFileChanged(['thumbnail.webp']);
+        await worker.notifyFileChanged(['main.geospec.ts']);
         expect(states).toEqual([]);
 
-        await worker.notifyFileChanged(['/main.ts']);
+        await worker.notifyFileChanged(['main.ts']);
         expect(states).toEqual(['buffering']);
       } finally {
         await worker.cleanup();
@@ -739,7 +888,7 @@ describe('KernelWorker lifecycle', () => {
         worker.onStateChanged = ({ state }) => states.push(state);
 
         const result = await worker.exportModel({
-          stage: { '/main.geospec.ts': new Uint8Array([1]) },
+          stage: { 'main.geospec.ts': new Uint8Array([1]) },
           file: createGeometryFile('main.ts'),
           parameters: {},
           format: 'glb',
@@ -755,7 +904,7 @@ describe('KernelWorker lifecycle', () => {
     it('should invalidate changed dependencies and schedule one recovery for reset', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
@@ -776,9 +925,9 @@ describe('KernelWorker lifecycle', () => {
           expect(watchHandler).toBeDefined();
         });
         // @ts-expect-error - seed volatile state to verify conservative loss recovery
-        worker.bundleResultCache.set('/cached.ts', {
+        worker.bundleResultCache.set('cached.ts', {
           code: '',
-          dependencies: ['/main.ts'],
+          dependencies: ['main.ts'],
           unresolvedPaths: [],
           issues: [],
           success: true,
@@ -801,7 +950,7 @@ describe('KernelWorker lifecycle', () => {
     it('should ignore an exact event and reset when watched bytes are unchanged', async () => {
       const bytes = new Uint8Array([1, 2, 3]);
       const filesystem = createMockFileSystem({ readFileResult: bytes });
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': bytes });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': bytes });
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
         watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
@@ -817,7 +966,7 @@ describe('KernelWorker lifecycle', () => {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
         const states: string[] = [];
         worker.onStateChanged = ({ state }) => states.push(state);
-        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
         watchHandler!({ type: 'reset' });
         await vi.waitFor(() => {
           expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(2);
@@ -833,7 +982,7 @@ describe('KernelWorker lifecycle', () => {
       const initial = new Uint8Array([1]);
       const changed = new Uint8Array([2]);
       const filesystem = createMockFileSystem({ readFileResult: changed });
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': initial });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': initial });
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
         watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
@@ -847,8 +996,8 @@ describe('KernelWorker lifecycle', () => {
 
       try {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
-        watchHandler!({ type: 'change', path: '/main.ts' });
-        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
         await vi.waitFor(() => {
           expect(worker.createGeometryCalls).toBe(2);
         });
@@ -864,7 +1013,7 @@ describe('KernelWorker lifecycle', () => {
 
     it('should conservatively render after an observer read failure', async () => {
       const filesystem = createMockFileSystem();
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
       filesystem.mocks.readFile.mockRejectedValue(new Error('read failed'));
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
@@ -879,7 +1028,7 @@ describe('KernelWorker lifecycle', () => {
 
       try {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
-        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
         await vi.waitFor(() => {
           expect(worker.createGeometryCalls).toBe(2);
         });
@@ -891,7 +1040,7 @@ describe('KernelWorker lifecycle', () => {
 
     it('should render both present-to-missing and missing-to-present revisions', async () => {
       const filesystem = createMockFileSystem();
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
       let missing = false;
       let bytes = new Uint8Array([1]);
       filesystem.mocks.readFile.mockImplementation(async () => {
@@ -914,14 +1063,14 @@ describe('KernelWorker lifecycle', () => {
       try {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
         missing = true;
-        watchHandler!({ type: 'delete', path: '/main.ts' });
+        watchHandler!({ type: 'delete', path: 'main.ts' });
         await vi.waitFor(() => {
           expect(worker.createGeometryCalls).toBe(2);
         });
 
         missing = false;
         bytes = new Uint8Array([2]);
-        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
         await vi.waitFor(() => {
           expect(worker.createGeometryCalls).toBe(3);
         });
@@ -935,7 +1084,7 @@ describe('KernelWorker lifecycle', () => {
       const local = new Uint8Array([2]);
       const external = new Uint8Array([3]);
       const filesystem = createMockFileSystem();
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': initial });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': initial });
       filesystem.mocks.readFile
         .mockResolvedValueOnce(local)
         .mockResolvedValueOnce(external)
@@ -953,9 +1102,9 @@ describe('KernelWorker lifecycle', () => {
 
       try {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
-        watchHandler!({ type: 'change', path: '/main.ts' });
-        watchHandler!({ type: 'change', path: '/main.ts' });
-        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
 
         await vi.waitFor(() => {
           expect(worker.createGeometryCalls).toBe(2);
@@ -965,7 +1114,7 @@ describe('KernelWorker lifecycle', () => {
         });
         expect(worker.createGeometryCalls).toBe(2);
         // @ts-expect-error - verify the existing runtime revision cache owns the final authoritative bytes
-        expect(worker.fileHashCache.get('/main.ts')).toBe(await worker.hashContent(external));
+        expect(worker.fileHashCache.get('main.ts')).toBe(await worker.hashContent(external));
       } finally {
         await worker.cleanup();
       }
@@ -983,7 +1132,7 @@ describe('KernelWorker lifecycle', () => {
       filesystem.mocks.readFiles.mockImplementation(async () => {
         const snapshot = new Uint8Array(diskBytes);
         renderReads.push([...snapshot]);
-        return { '/main.ts': snapshot };
+        return { 'main.ts': snapshot };
       });
       filesystem.mocks.readFile.mockImplementation(async () => {
         if (parkNextRead) {
@@ -1016,26 +1165,26 @@ describe('KernelWorker lifecycle', () => {
       try {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
         parkNextRead = true;
-        watchHandler!({ type: 'change', path: '/main.ts' });
+        watchHandler!({ type: 'change', path: 'main.ts' });
         await watchReadStarted.promise;
 
         // @ts-expect-error - drive the production staged-write path during the parked observer reread
-        await worker.writeFilesAndInvalidate({ '/main.ts': latest });
+        await worker.writeFilesAndInvalidate({ 'main.ts': latest });
         // @ts-expect-error - verify the staged revision owns the cache before the stale read settles
-        expect(worker.fileHashCache.get('/main.ts')).toBe(await worker.hashContent(latest));
+        expect(worker.fileHashCache.get('main.ts')).toBe(await worker.hashContent(latest));
 
         staleRead.resolve(initial);
         // @ts-expect-error - wait for the production routeWatchEvent reconciliation lane to settle
         await worker.watchReconciliationTail;
         // @ts-expect-error - the stale observer revision must never be installed
-        expect(worker.fileHashCache.get('/main.ts')).not.toBe(await worker.hashContent(initial));
+        expect(worker.fileHashCache.get('main.ts')).not.toBe(await worker.hashContent(initial));
 
         await vi.waitFor(() => {
           expect(worker.createGeometryCalls).toBeGreaterThan(1);
           expect(renderReads.at(-1)).toEqual([2]);
         });
         // @ts-expect-error - the recovery render restores the current staged revision
-        expect(worker.fileHashCache.get('/main.ts')).toBe(await worker.hashContent(latest));
+        expect(worker.fileHashCache.get('main.ts')).toBe(await worker.hashContent(latest));
       } finally {
         await worker.cleanup();
       }
@@ -1044,20 +1193,20 @@ describe('KernelWorker lifecycle', () => {
     it('should discard a stale observed revision when a newer same-path revision already owns the cache', () => {
       const worker = createConfiguredWorker();
       // @ts-expect-error - pin the private revision-commit guard at its single install site
-      worker.fileHashCache.set('/main.ts', 'newer');
+      worker.fileHashCache.set('main.ts', 'newer');
       // @ts-expect-error - pin the paired content cache behavior at the same private seam
-      worker.fileContentCache.set('/main.ts', new Uint8Array([2]));
+      worker.fileContentCache.set('main.ts', new Uint8Array([2]));
 
       // @ts-expect-error - exercise the private compare-and-set commit used by observer reconciliation
       worker._applyObservedRevisions(
-        ['/main.ts'],
-        new Map([['/main.ts', { hash: 'stale', content: new Uint8Array([1]), expectedPrior: { hash: 'older' } }]]),
+        ['main.ts'],
+        new Map([['main.ts', { hash: 'stale', content: new Uint8Array([1]), expectedPrior: { hash: 'older' } }]]),
       );
 
       // @ts-expect-error - verify stale observer data was conservatively evicted, not installed
-      expect(worker.fileHashCache.has('/main.ts')).toBe(false);
+      expect(worker.fileHashCache.has('main.ts')).toBe(false);
       // @ts-expect-error - verify the paired stale content was also evicted
-      expect(worker.fileContentCache.has('/main.ts')).toBe(false);
+      expect(worker.fileContentCache.has('main.ts')).toBe(false);
     });
   });
 
@@ -1083,7 +1232,7 @@ describe('KernelWorker lifecycle', () => {
     it('should clear the internal onProgress phase callback when render() throws', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
 
       const worker = new FailingKernelWorker({
@@ -1113,7 +1262,7 @@ describe('KernelWorker lifecycle', () => {
     it('should reconcile observed paths when render() throws', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
 
       const worker = new FailingKernelWorker({
@@ -1129,13 +1278,13 @@ describe('KernelWorker lifecycle', () => {
         }),
       ).rejects.toThrow();
 
-      expect(worker.getWatchedPaths()).toContain('/main.ts');
+      expect(worker.getWatchedPaths()).toContain('main.ts');
     });
 
     it('should refresh filesystem watches after request-scoped exportModel()', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
       const unsubscribe = vi.fn();
       const watch = vi.fn((_request: { paths: readonly string[] }, _handler: unknown) => unsubscribe);
@@ -1159,13 +1308,13 @@ describe('KernelWorker lifecycle', () => {
       expect(result.success).toBe(true);
       expect(watch).toHaveBeenCalledOnce();
       const watchRequest = watch.mock.calls[0]?.[0] as { paths: readonly string[] } | undefined;
-      expect(watchRequest?.paths).toContain('/main.ts');
+      expect(watchRequest?.paths).toContain('main.ts');
     });
 
     it('should clear onProgress when executeRender fails via handleOpenFile', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
 
       const worker = new FailingKernelWorker({
@@ -1203,11 +1352,11 @@ describe('KernelWorker lifecycle', () => {
       // @ts-expect-error - accessing private method for test verification
       worker.setActiveFile(createGeometryFile('main.ts'));
 
-      const expectedDependencies = ['/main.ts', '/lib/box.ts'];
+      const expectedDependencies = ['main.ts', 'lib/box.ts'];
 
       // Pre-populate the bundle cache with a known result
       // @ts-expect-error - accessing private for test verification
-      worker.bundleResultCache.set('/main.ts', {
+      worker.bundleResultCache.set('main.ts', {
         code: 'bundled-code',
         dependencies: expectedDependencies,
         unresolvedPaths: [],
@@ -1232,7 +1381,7 @@ describe('KernelWorker lifecycle', () => {
 
       // @ts-expect-error - accessing private for test verification
       const facade = worker.createBundlerFacade(new AbortController().signal);
-      const result = await facade.resolveDependencies('/main.ts');
+      const result = await facade.resolveDependencies('main.ts');
 
       expect(result).toEqual({ resolved: expectedDependencies, unresolved: [] });
     });
@@ -1317,7 +1466,7 @@ describe('KernelWorker lifecycle', () => {
       const file = createGeometryFile('main.ts');
       await worker.render({ file, parameters: {} });
 
-      await worker.notifyFileChanged(['/main.ts']);
+      await worker.notifyFileChanged(['main.ts']);
       await worker.render({ file, parameters: {} });
 
       expect(worker.dependencyCalls).toBe(2);
@@ -1455,7 +1604,7 @@ describe('KernelWorker lifecycle', () => {
 
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
 
       const worker = new GatedKernelWorker({ middleware: [], onLog: noopLog, filesystem });
@@ -1535,7 +1684,7 @@ describe('KernelWorker lifecycle', () => {
     it('writes every staged byte payload to the worker filesystem before opening the entry', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
       const callOrder: string[] = [];
       class RecordingWorker extends MockKernelWorker {
@@ -1553,8 +1702,8 @@ describe('KernelWorker lifecycle', () => {
       });
 
       const stage: Record<string, Uint8Array<ArrayBuffer>> = {
-        '/main.ts': new Uint8Array([10, 20, 30]),
-        '/lib.ts': new Uint8Array([40, 50]),
+        'main.ts': new Uint8Array([10, 20, 30]),
+        'lib.ts': new Uint8Array([40, 50]),
       };
 
       await worker.handleStageAndOpenFile({
@@ -1566,11 +1715,11 @@ describe('KernelWorker lifecycle', () => {
       });
 
       expect(filesystem.mocks.writeFile).toHaveBeenCalledTimes(2);
-      expect(filesystem.mocks.writeFile).toHaveBeenCalledWith('/main.ts', new Uint8Array([10, 20, 30]));
-      expect(filesystem.mocks.writeFile).toHaveBeenCalledWith('/lib.ts', new Uint8Array([40, 50]));
+      expect(filesystem.mocks.writeFile).toHaveBeenCalledWith('main.ts', new Uint8Array([10, 20, 30]));
+      expect(filesystem.mocks.writeFile).toHaveBeenCalledWith('lib.ts', new Uint8Array([40, 50]));
 
       // Strict ordering: every write completes before geometry work starts.
-      expect(callOrder).toEqual(['writeFile:/main.ts', 'writeFile:/lib.ts', 'createGeometry']);
+      expect(callOrder).toEqual(['writeFile:main.ts', 'writeFile:lib.ts', 'createGeometry']);
     });
 
     it('creates parent directories (recursive) once per unique parent before staging', async () => {
@@ -1581,22 +1730,22 @@ describe('KernelWorker lifecycle', () => {
       await worker.handleStageAndOpenFile({
         renderId: '550e8400-e29b-41d4-a716-446655440002',
         stage: {
-          '/a.ts': new Uint8Array([1]),
-          '/b.ts': new Uint8Array([2]),
-          '/sub/c.ts': new Uint8Array([3]),
+          'a.ts': new Uint8Array([1]),
+          'b.ts': new Uint8Array([2]),
+          'sub/c.ts': new Uint8Array([3]),
         },
         file: createGeometryFile('a.ts'),
         parameters: {},
       });
 
       expect(filesystem.mocks.mkdir).toHaveBeenCalledTimes(1);
-      expect(filesystem.mocks.mkdir).toHaveBeenCalledWith('/sub', { recursive: true });
+      expect(filesystem.mocks.mkdir).toHaveBeenCalledWith('sub', { recursive: true });
     });
 
     it('opens the entry without staging when the stage map is empty', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
       const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
       const onGeometryComputed = vi.fn();
@@ -1625,7 +1774,7 @@ describe('KernelWorker lifecycle', () => {
 
       await worker.handleStageAndOpenFile({
         renderId: '550e8400-e29b-41d4-a716-446655440004',
-        stage: { '/main.ts': new Uint8Array([1]) },
+        stage: { 'main.ts': new Uint8Array([1]) },
         file: createGeometryFile('main.ts'),
         parameters: {},
       });
@@ -1676,7 +1825,7 @@ describe('KernelWorker lifecycle', () => {
 
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
@@ -1700,12 +1849,12 @@ describe('KernelWorker lifecycle', () => {
       worker.handleOpenFile({ renderId: previewId(1301), file: createGeometryFile('main.ts'), parameters: {} });
       await gateEntered;
 
-      expect(worker.getWatchedPaths()).toContain('/main.ts');
+      expect(worker.getWatchedPaths()).toContain('main.ts');
       if (!watchHandler) {
         throw new Error('Expected the entry watch to be installed before geometry creation');
       }
 
-      watchHandler({ type: 'change', path: '/main.ts' });
+      watchHandler({ type: 'change', path: 'main.ts' });
       await renderAborted.promise;
 
       resolveGate();
@@ -1720,7 +1869,7 @@ describe('KernelWorker lifecycle', () => {
     it('should terminally settle a buffered preview before buffering the next watched successor', async () => {
       let revision = new Uint8Array([1, 2, 3]);
       const filesystem = createMockFileSystem();
-      filesystem.mocks.readFiles.mockImplementation(async () => ({ '/main.ts': revision }));
+      filesystem.mocks.readFiles.mockImplementation(async () => ({ 'main.ts': revision }));
       filesystem.mocks.readFile.mockImplementation(async () => revision);
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
@@ -1749,7 +1898,7 @@ describe('KernelWorker lifecycle', () => {
       }
 
       revision = new Uint8Array([4]);
-      watchHandler({ type: 'change', path: '/main.ts' });
+      watchHandler({ type: 'change', path: 'main.ts' });
       await vi.waitFor(() => {
         expect(states.at(-1)?.state).toBe('buffering');
       });
@@ -1757,7 +1906,7 @@ describe('KernelWorker lifecycle', () => {
       expect(firstBuffered?.state).toBe('buffering');
 
       revision = new Uint8Array([5]);
-      watchHandler({ type: 'change', path: '/main.ts' });
+      watchHandler({ type: 'change', path: 'main.ts' });
       await vi.waitFor(() => {
         expect(states.slice(-3).map(({ state }) => state)).toEqual(['buffering', 'idle', 'buffering']);
       });
@@ -1781,7 +1930,7 @@ describe('KernelWorker lifecycle', () => {
       }
 
       const filesystem = createMockFileSystem();
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1, 2, 3]) });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
       filesystem.mocks.readFile.mockResolvedValueOnce(new Uint8Array([4])).mockResolvedValueOnce(new Uint8Array([5]));
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
@@ -1805,8 +1954,8 @@ describe('KernelWorker lifecycle', () => {
         throw new Error('Expected the entry watch to be installed');
       }
 
-      watchHandler({ type: 'change', path: '/main.ts' });
-      watchHandler({ type: 'change', path: '/main.ts' });
+      watchHandler({ type: 'change', path: 'main.ts' });
+      watchHandler({ type: 'change', path: 'main.ts' });
       gate.resolve();
       await vi.waitFor(() => {
         expect(states.slice(-3).map(({ state }) => state)).toEqual(['buffering', 'idle', 'buffering']);
@@ -1821,7 +1970,7 @@ describe('KernelWorker lifecycle', () => {
 
     it('should acknowledge a buffered timeout without entering geometry', async () => {
       const filesystem = createMockFileSystem();
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1, 2, 3]) });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
       filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([4]));
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
@@ -1853,7 +2002,7 @@ describe('KernelWorker lifecycle', () => {
         throw new Error('Expected the entry watch to be installed');
       }
 
-      watchHandler({ type: 'change', path: '/main.ts' });
+      watchHandler({ type: 'change', path: 'main.ts' });
       await vi.waitFor(() => {
         expect(states.at(-1)?.state).toBe('buffering');
       });
@@ -1885,13 +2034,13 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '/.tau/parameters/main.ts.json' }];
+          return [{ path: '.tau/parameters/main.ts.json' }];
         },
       });
 
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
       filesystem.mocks.readFile.mockResolvedValue(parameterFileContent);
 
@@ -1911,7 +2060,7 @@ describe('KernelWorker lifecycle', () => {
       // (simulates a watch-triggered file change between render cycles)
       filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([99, 99, 99]));
       // @ts-expect-error - accessing private for test verification
-      worker._invalidateCachesForPaths(['/.tau/parameters/main.ts.json']);
+      worker._invalidateCachesForPaths(['.tau/parameters/main.ts.json']);
       // @ts-expect-error - accessing private for test verification
       worker.renderDependencyCache = undefined;
 
@@ -1931,13 +2080,13 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '/.tau/parameters/main.ts.json' }];
+          return [{ path: '.tau/parameters/main.ts.json' }];
         },
       });
 
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
       filesystem.mocks.readFile.mockResolvedValue(parameterFileContent);
 
@@ -1964,13 +2113,13 @@ describe('KernelWorker lifecycle', () => {
         id: 'test-deps',
         name: 'test-deps',
         getDependencies() {
-          return [{ path: '/.tau/missing.json' }];
+          return [{ path: '.tau/missing.json' }];
         },
       });
 
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
       filesystem.mocks.readFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }));
 
@@ -1997,7 +2146,7 @@ describe('KernelWorker lifecycle', () => {
 
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
 
       const middlewareOptions = { parametersFile: '.tau/params.json' };
@@ -2014,7 +2163,7 @@ describe('KernelWorker lifecycle', () => {
 
       expect(getDependenciesSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          entryPath: '/main.ts',
+          entryPath: 'main.ts',
         }),
         expect.objectContaining({
           options: middlewareOptions,
@@ -2035,7 +2184,7 @@ describe('KernelWorker lifecycle', () => {
 
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({
-        '/main.ts': new Uint8Array([1, 2, 3]),
+        'main.ts': new Uint8Array([1, 2, 3]),
       });
 
       const worker = createConfiguredWorker({
@@ -2061,7 +2210,7 @@ describe('KernelWorker lifecycle', () => {
         },
       });
       const filesystem = createMockFileSystem();
-      filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+      filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
       const worker = createConfiguredWorker({ middleware: [middlewareWithInvalidDependency], filesystem });
 
       await expect(worker.runCreateGeometry('main.ts')).rejects.toMatchObject({
@@ -2083,10 +2232,10 @@ describe('KernelWorker lifecycle', () => {
       worker.setActiveFile(createGeometryFile('main.ts'));
 
       // @ts-expect-error - accessing private for test verification
-      worker.bundleResultCache.set('/main.ts', {
+      worker.bundleResultCache.set('main.ts', {
         code: '',
-        dependencies: ['/main.ts'],
-        unresolvedPaths: ['/lib/box.ts', '/lib/cylinder.ts'],
+        dependencies: ['main.ts'],
+        unresolvedPaths: ['lib/box.ts', 'lib/cylinder.ts'],
         issues: [],
         success: false,
       });
@@ -2094,9 +2243,9 @@ describe('KernelWorker lifecycle', () => {
       // @ts-expect-error - accessing private for test verification
       await worker.reconcileObservedPaths();
 
-      expect(worker.getWatchedPaths()).toContain('/lib/box.ts');
-      expect(worker.getWatchedPaths()).toContain('/lib/cylinder.ts');
-      expect(worker.getWatchedPaths()).toContain('/main.ts');
+      expect(worker.getWatchedPaths()).toContain('lib/box.ts');
+      expect(worker.getWatchedPaths()).toContain('lib/cylinder.ts');
+      expect(worker.getWatchedPaths()).toContain('main.ts');
     });
   });
 
@@ -2124,7 +2273,7 @@ describe('KernelWorker lifecycle', () => {
     }
 
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
     const worker = new CleanupWorker({ middleware: [], onLog: noopLog, filesystem });
     const dispose = vi.fn();
     const unsubscribe = vi.fn();
@@ -2133,7 +2282,7 @@ describe('KernelWorker lifecycle', () => {
     // @ts-expect-error - focused verification of post-drain watch teardown
     worker.watchUnsubscribe = unsubscribe;
     // @ts-expect-error - the preview already observes its entry, so reconciliation leaves the subscription alone
-    worker.watchedPaths = new Set(['/main.ts']);
+    worker.watchedPaths = new Set(['main.ts']);
 
     // The active preview record is the only cancellable work: request-scoped `render()`/
     // `exportModel()` calls are drained, not aborted.
@@ -2256,10 +2405,10 @@ describe('preview admission invariants', () => {
     });
     await observed.waitForState((event) => event.renderId === initialId && event.state === 'idle');
     // @ts-expect-error - remove debounce while retaining the production autonomous-watch route
-    worker.currentPreviewWatchPaths.set('/main.ts', 0);
+    worker.currentPreviewWatchPaths.set('main.ts', 0);
 
     const delayedGeneration = Atomics.add(new Uint32Array(signalBuffer), signalSlot.abortGeneration, 1) + 1;
-    const autonomousChange = worker.notifyFileChanged(['/main.ts']);
+    const autonomousChange = worker.notifyFileChanged(['main.ts']);
     await autonomousChange;
     const autonomous = observed.states.find((event) => event.renderId !== initialId && event.state === 'buffering');
     expect(autonomous).toMatchObject({ abortGeneration: 3 });
@@ -2286,7 +2435,7 @@ describe('preview admission invariants', () => {
     const reconcileGate = Promise.withResolvers<void>();
     let gateArmed = false;
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1, 2, 3]) });
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
     filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
     const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
     // @ts-expect-error - install the watch-capable production seam so the terminal push and the record
@@ -2401,7 +2550,7 @@ describe('preview admission invariants', () => {
     }
 
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1, 2, 3]) });
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
     const worker = new GatedWorker({ middleware: [], onLog: noopLog, filesystem });
     const observed = observePreview(worker);
     const previewRenderId = previewId(3601);
@@ -2434,7 +2583,7 @@ describe('preview admission invariants', () => {
     observed.states.length = 0;
     observed.geometries.length = 0;
 
-    await worker.notifyFileChanged(['/unrelated.ts']);
+    await worker.notifyFileChanged(['unrelated.ts']);
 
     expect(observed.states).toEqual([]);
     expect(observed.geometries).toEqual([]);
@@ -2452,7 +2601,7 @@ describe('preview admission invariants', () => {
     const stagedId = previewId(1902);
     await worker.handleStageAndOpenFile({
       renderId: stagedId,
-      stage: { '/main.ts': new Uint8Array([4, 5, 6]) },
+      stage: { 'main.ts': new Uint8Array([4, 5, 6]) },
       file: createGeometryFile('main.ts'),
       parameters: {},
     });
@@ -2475,7 +2624,7 @@ describe('preview admission invariants', () => {
     const stageWriteEntered = Promise.withResolvers<void>();
     const releaseStageWrite = Promise.withResolvers<void>();
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockImplementation(async () => ({ '/main.ts': new Uint8Array(diskBytes) }));
+    filesystem.mocks.readFiles.mockImplementation(async () => ({ 'main.ts': new Uint8Array(diskBytes) }));
     filesystem.mocks.readFile.mockImplementation(async () => new Uint8Array(diskBytes));
     filesystem.mocks.writeFile.mockImplementation(async (_path, data) => {
       if (typeof data === 'string') {
@@ -2483,7 +2632,7 @@ describe('preview admission invariants', () => {
       } else if (data instanceof Uint8Array) {
         diskBytes = Uint8Array.from(data);
       }
-      watchHandler?.({ type: 'change', path: '/main.ts' });
+      watchHandler?.({ type: 'change', path: 'main.ts' });
       stageWriteEntered.resolve();
       await releaseStageWrite.promise;
     });
@@ -2515,7 +2664,7 @@ describe('preview admission invariants', () => {
       await observed.waitForState((event) => event.renderId === bufferedId && event.state === 'buffering');
 
       const result = worker.exportModel({
-        stage: { '/main.ts': staged },
+        stage: { 'main.ts': staged },
         file: createGeometryFile('main.ts'),
         parameters: {},
         format: 'gltf',
@@ -2550,7 +2699,7 @@ describe('preview admission invariants', () => {
     const releaseStageWrite = Promise.withResolvers<void>();
 
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockImplementation(async () => ({ '/main.ts': new Uint8Array(diskBytes) }));
+    filesystem.mocks.readFiles.mockImplementation(async () => ({ 'main.ts': new Uint8Array(diskBytes) }));
     filesystem.mocks.readFile.mockImplementation(async () => {
       const snapshot = new Uint8Array(diskBytes);
       if (revisionGateArmed) {
@@ -2590,13 +2739,13 @@ describe('preview admission invariants', () => {
       // An external write lands first; its reconciliation reads the pre-stage revision.
       diskBytes = new Uint8Array([4, 4, 4]);
       revisionGateArmed = true;
-      watchHandler?.({ type: 'change', path: '/main.ts' });
+      watchHandler?.({ type: 'change', path: 'main.ts' });
       await revisionEntered.promise;
 
       const stagedId = previewId(4002);
       const staged = worker.handleStageAndOpenFile({
         renderId: stagedId,
-        stage: { '/main.ts': new Uint8Array([7, 8, 9]) },
+        stage: { 'main.ts': new Uint8Array([7, 8, 9]) },
         file: createGeometryFile('main.ts'),
         parameters: {},
       });
@@ -2651,10 +2800,10 @@ describe('preview admission invariants', () => {
     expect(() => {
       worker.handleOpenFile({
         renderId: previewId(2602),
-        file: { path: 'relative', filename: 'bad.ts' },
+        file: { path: '/relative', filename: 'bad.ts' },
         parameters: {},
       });
-    }).toThrow('absolute path');
+    }).toThrow('Invalid virtual path');
 
     gate.resolve();
     await observed.waitForState((event) => event.renderId === activeId && event.state === 'idle');
@@ -2705,8 +2854,8 @@ describe('preview admission invariants', () => {
 
     const filesystem = createMockFileSystem();
     filesystem.mocks.readFiles.mockResolvedValue({
-      '/main.ts': new Uint8Array([1, 2, 3]),
-      '/dep.ts': new Uint8Array([4, 5, 6]),
+      'main.ts': new Uint8Array([1, 2, 3]),
+      'dep.ts': new Uint8Array([4, 5, 6]),
     });
     const worker = new GatedDependencyWorker({ middleware: [], onLog: noopLog, filesystem });
     const observed = observePreview(worker);
@@ -2733,7 +2882,7 @@ describe('preview admission invariants', () => {
     await flushMicrotasks();
 
     // @ts-expect-error - accessing private for test verification
-    expect([...worker.currentPreviewWatchPaths.keys()]).not.toContain('/dep.ts');
+    expect([...worker.currentPreviewWatchPaths.keys()]).not.toContain('dep.ts');
   });
 
   it('terminalizes an abandoned SAB reservation at the render early return (T38)', async () => {
@@ -2782,7 +2931,7 @@ describe('preview admission invariants', () => {
     await observed.waitForState((event) => event.renderId === openedId && event.state === 'idle');
 
     const cleanup = worker.cleanup();
-    await expect(worker.notifyFileChanged(['/main.ts'])).rejects.toThrow('Runtime worker is closing');
+    await expect(worker.notifyFileChanged(['main.ts'])).rejects.toThrow('Runtime worker is closing');
     await cleanup;
 
     // @ts-expect-error - accessing private for test verification
@@ -2794,7 +2943,7 @@ describe('preview admission invariants', () => {
     const watchInstalled = Promise.withResolvers<void>();
     let diskBytes = new Uint8Array([1, 2, 3]);
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockImplementation(async () => ({ '/main.ts': new Uint8Array(diskBytes) }));
+    filesystem.mocks.readFiles.mockImplementation(async () => ({ 'main.ts': new Uint8Array(diskBytes) }));
     filesystem.mocks.readFile.mockImplementation(async () => new Uint8Array(diskBytes));
     Object.assign(filesystem, {
       watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
@@ -2830,7 +2979,7 @@ describe('preview admission invariants', () => {
 
     worker.failRouting = true;
     diskBytes = new Uint8Array([9, 9, 9]);
-    watchHandler?.({ type: 'change', path: '/main.ts' });
+    watchHandler?.({ type: 'change', path: 'main.ts' });
     // @ts-expect-error - wait for the production watch reconciliation lane to settle
     await worker.watchReconciliationTail;
     await flushMicrotasks();
@@ -2913,7 +3062,7 @@ describe('abort reason propagation', () => {
     }
 
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
     const worker = new WireSupersessionWorker({ middleware: [], onLog: noopLog, filesystem });
     const firstRenderId = '550e8400-e29b-41d4-a716-446655440001';
     const secondRenderId = '550e8400-e29b-41d4-a716-446655440002';
@@ -2965,7 +3114,7 @@ describe('abort reason propagation', () => {
     }
 
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
     const worker = new SabAdmissionWorker({ middleware: [], onLog: noopLog, filesystem });
     worker.setSignalBuffer(sab);
     const firstRenderId = '550e8400-e29b-41d4-a716-446655440003';
@@ -3028,7 +3177,7 @@ describe('abort reason propagation', () => {
     }
 
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
     const worker = new MismatchedTimeoutWorker({ middleware: [], onLog: noopLog, filesystem });
     const activeRenderId = '550e8400-e29b-41d4-a716-446655440005';
     const mismatchedRenderId = '550e8400-e29b-41d4-a716-446655440006';
@@ -3090,7 +3239,7 @@ describe('abort reason propagation', () => {
     }
 
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1]) });
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
     const worker = new SignalIdentityWorker({ middleware: [middleware], onLog: noopLog, filesystem });
     const bundlerDefinition = {
       name: 'signal bundler',
@@ -3158,7 +3307,7 @@ describe('abort reason propagation', () => {
 
     const filesystem = createMockFileSystem();
     filesystem.mocks.readFiles.mockResolvedValue({
-      '/main.ts': new Uint8Array([1, 2, 3]),
+      'main.ts': new Uint8Array([1, 2, 3]),
     });
 
     const worker = new TimeoutKernelWorker({
@@ -3209,7 +3358,7 @@ describe('abort reason propagation', () => {
 
     const filesystem = createMockFileSystem();
     filesystem.mocks.readFiles.mockResolvedValue({
-      '/main.ts': new Uint8Array([1, 2, 3]),
+      'main.ts': new Uint8Array([1, 2, 3]),
     });
     const worker = new WireTimeoutKernelWorker({
       middleware: [],
@@ -3262,7 +3411,7 @@ describe('abort reason propagation', () => {
 
     const filesystem = createMockFileSystem();
     filesystem.mocks.readFiles.mockResolvedValue({
-      '/main.ts': new Uint8Array([1, 2, 3]),
+      'main.ts': new Uint8Array([1, 2, 3]),
     });
 
     const worker = new SupersededKernelWorker({
@@ -3718,6 +3867,22 @@ describe('transcoder loading', () => {
         coordinateSystem: 'z-up',
       }),
     );
+  });
+
+  it('should mark only truly required input fields as required in capability schemas', async () => {
+    const worker = createConfiguredWorker({
+      exportZodSchemas: {
+        glb: z.object({
+          defaulted: z.boolean().default(true),
+          requiredValue: z.string(),
+        }),
+      },
+    });
+
+    await worker.initialize({ callbacks: { onLog: vi.fn() }, transferables: {}, options: {} });
+
+    const glbRoute = worker.capabilitiesManifest.routes.find((route) => route.targetFormat === 'glb');
+    expect(glbRoute?.exportOptions.schema.required).toEqual(['requiredValue']);
   });
 
   it('should include ALL declared properties on every direct export route (replicad-like scenario)', async () => {
@@ -4449,13 +4614,13 @@ describe('export schema hard-fail', () => {
 
   it('aborts an export at the filesystem checkpoint', async () => {
     const filesystem = createMockFileSystem();
-    filesystem.mocks.readFiles.mockResolvedValue({ '/main.ts': new Uint8Array([1, 2, 3]) });
+    filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
     const readDuringExport = defineMiddleware({
       id: 'readsDuringExport',
       name: 'ReadsDuringExport',
       version: '1.0.0',
       async wrapExportGeometry(input, handler, runtime) {
-        await runtime.filesystem.exists('/main.ts');
+        await runtime.filesystem.exists('main.ts');
         return handler(input);
       },
     });

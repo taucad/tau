@@ -8,14 +8,14 @@ import type { runtime } from '../tau/runtime-definition.js';
 import { ParametersPanel } from './components/parameters-panel.js';
 import { ThreeViewer } from './components/three-viewer.js';
 
-const mainFile = '/main.scad';
+const mainFile = 'main.scad';
 
 const initialSource = `len=200;
 cube([len, len * 5, len ^ 1.5]);
 `;
 
 type SourceMode = 'disk' | 'inline';
-type InlineSourceFiles = { readonly '/main.scad': string };
+type InlineSourceFiles = { readonly 'main.scad': string };
 type ElectronRuntimeOptions = UseRuntimeOptions<typeof runtime, UseRuntimeTransportPlugin, InlineSourceFiles>;
 
 const clientOptions = createElectronClientOptions<typeof runtime>({ renderTimeout: 60_000 });

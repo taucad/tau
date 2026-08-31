@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
 status: active
 created: '2026-02-23'
-updated: '2026-08-24'
+updated: '2026-08-28'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -625,7 +625,7 @@ export type RenderOutcome =
   | { readonly superseded: false; readonly geometry: HashedGeometryResult }
   | { readonly superseded: true };
 
-const outcome = await client.render({ source: { path: '/main.ts' }, parameters });
+const outcome = await client.render({ source: { path: 'main.ts' }, parameters });
 
 if (outcome.superseded) {
   // A newer public command or an autonomous watched-filesystem preview took
@@ -928,7 +928,7 @@ export type RuntimeFileSystem = { readonly [opaqueBrand]: unique symbol };
 export const fromMemoryFs: () => RuntimeFileSystem;
 export const fromNodeFs: (basePath: string) => RuntimeFileSystem;
 export const fromBrowserFs: (...) => RuntimeFileSystem;
-// fsLike is already confined to virtual `/`; raw Node roots use fromNodeFs.
+// fsLike is already confined to one root; raw Node roots use fromNodeFs.
 export const fromFsLike: (fsLike: FsLike) => RuntimeFileSystem;
 export const fromFileSystemBridge: (open: () => FileSystemBridgeConnection) => RuntimeFileSystem;
 
@@ -945,7 +945,7 @@ await client.connect();    // no arguments
 
 A Worker / in-process transport binds the FS bridge via `MessagePort` internally; a WebSocket transport carries it on a second socket (`/fs`) — no multiplexer exists; an Electron IPC transport binds it via `MessagePortMain`. The runtime client never types against any wire primitive — that responsibility lives entirely inside the wired {@link TransportPlugin} callable and its `.materialize()` handle.
 
-The opaque filesystem is also the complete runtime reachability contract. Plugin callbacks accept normalized runtime paths within the supplied filesystem; never add project roots, ids, grants, authorization callbacks, or wire-derived capability objects to kernel, bundler, middleware, or headless-service inputs. A leading `/` names the supplied filesystem's root, not the host OS root. Exact source requests keep their operation ownership local instead of mutating the active preview's public state.
+The opaque filesystem is also the complete runtime reachability contract. Plugin callbacks accept canonical root-relative runtime paths within the supplied filesystem; never add project roots, ids, grants, authorization callbacks, or wire-derived capability objects to kernel, bundler, middleware, or headless-service inputs. The empty path names the supplied filesystem's root. Exact source requests keep their operation ownership local instead of mutating the active preview's public state.
 
 ### Smell tests
 

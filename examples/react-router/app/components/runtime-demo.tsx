@@ -7,7 +7,7 @@ import type { runtime } from '../../tau/runtime-definition';
 import { ParametersPanel } from './parameters-panel';
 import { ThreeViewer } from './three-viewer';
 
-const mainFile = '/main.ts';
+const mainFile = 'main.ts';
 
 const initialSource = `
 import { makeCylinder } from 'replicad';

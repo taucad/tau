@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
+import { coordinateSystemSchema, gltfExportConventionSchema, unitSchema } from '#types/export-option-schemas.js';
 
 describe('unitSchema', () => {
   it('should default length units to meters for general runtime exports', () => {
@@ -27,6 +27,15 @@ describe('coordinateSystemSchema', () => {
 
     expect(parsed).toEqual({
       coordinateSystem: 'z-up',
+      unit: { length: 'meter' },
+    });
+  });
+});
+
+describe('gltfExportConventionSchema', () => {
+  it('defaults to the canonical glTF world', () => {
+    expect(gltfExportConventionSchema.parse({})).toEqual({
+      coordinateSystem: 'y-up',
       unit: { length: 'meter' },
     });
   });

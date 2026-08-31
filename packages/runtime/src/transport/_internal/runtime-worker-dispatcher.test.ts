@@ -231,6 +231,41 @@ describe('createWorkerDispatcher', () => {
       expect(worker.flushTelemetry).toHaveBeenCalledOnce();
     });
 
+    it('transfers source snapshot bytes and forwards the per-call signal', async () => {
+      const content = new Uint8Array([4, 5, 6]);
+      const expected = new Uint8Array(content);
+      const snapshotSource = vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          entryPath: 'main.ts',
+          files: [{ path: 'main.ts', content, sha256: 'hash', role: 'entry' }],
+          unresolvedPaths: [],
+          kernelId: 'mock-kernel',
+        },
+        issues: [],
+      });
+      const worker = createMockWorker({ snapshotSource });
+      fixture = await buildFixture(worker);
+
+      const result = await fixture.client.call('snapshotSource', {
+        file: { path: '', filename: 'main.ts' },
+        additionalPaths: [{ path: 'tau.json', required: true }],
+      });
+
+      expect(snapshotSource).toHaveBeenCalledWith(
+        {
+          file: { path: '', filename: 'main.ts' },
+          additionalPaths: [{ path: 'tau.json', required: true }],
+        },
+        expect.any(AbortSignal),
+      );
+      expect(result).toMatchObject({ success: true });
+      if (result.success) {
+        expect(result.data.files[0]?.content).toEqual(expected);
+      }
+      expect(worker.flushTelemetry).toHaveBeenCalledOnce();
+    });
+
     it('should normalize unknown export issue codes before wire validation', async () => {
       const worker = createMockWorker({
         exportGeometry: vi.fn().mockResolvedValue({
@@ -920,7 +955,7 @@ describe('createWorkerDispatcher', () => {
           success: true,
           data: {
             format: 'svg',
-            content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M0 0"/></svg>',
+            content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M0 0"></svg>',
             name: 'test',
             hash: 'svg-hash',
           },

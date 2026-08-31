@@ -28,6 +28,12 @@ export type {
   RuntimeSource,
   RuntimeSourceContent,
   RuntimeSourceFiles,
+  RuntimeSourceSnapshotAdditionalPath,
+  RuntimeSourceSnapshotData,
+  RuntimeSourceSnapshotFile,
+  RuntimeSourceSnapshotFileRole,
+  RuntimeSourceSnapshotInput,
+  RuntimeSourceSnapshotResult,
   ExportResult,
   RenderOutcome,
   RenderStatus,
@@ -119,6 +125,9 @@ export type {
   TransportHostReady,
 } from '#transport/index.js';
 export { defineRuntimeTransport } from '#transport/index.js';
+
+// Shared runtime capability matching
+export { sourcePathMatchesExtensions } from '@taucad/utils/file';
 
 // Core types (runtime, kernel, bundler, middleware, protocol)
 export * from '#types/index.js';

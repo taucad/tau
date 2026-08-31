@@ -42,6 +42,9 @@ export const exportFidelities = {
   brep: 'brep',
 } as const satisfies Partial<Record<FileExtension, ExportFidelity>>;
 
+/** Supported export-fidelity wire values. @public */
+export const exportFidelityValues = ['brep', 'mesh'] as const satisfies readonly ExportFidelity[];
+
 /**
  * Resolve the canonical {@link ExportFidelity} for a given file extension.
  *

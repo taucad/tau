@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers runtime engine boundaries, plugin toolkits, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-08-24'
+updated: '2026-08-28'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -81,7 +81,7 @@ Concrete option placement MUST be enforced by **per-transport Zod schemas**. The
 
 Third-party transports pick the descriptor row matching their wire. `@taucad/runtime-testing` is a development-only package root; ESLint bans it from production source.
 
-For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus runtime paths. Runtime `/` is the supplied filesystem's root, not the host OS root. None may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, authority-global file-pool buffer, or host filesystem path.
+For persisted browser projects, trusted application composition selects the authority-global route and supplies a writable rooted filesystem. Runtime transports, workers, kernels, bundlers, middleware, GeoSpec, and headless rendering receive only that opaque filesystem plus root-relative runtime paths. The capability's root is `''`; it is not the host OS root. None may receive a project id, `projectRootPath`, global mount table, global `/projects/<id>` path, grant/rights object, authority-global file-pool buffer, or host filesystem path.
 
 ## Entity Model
 
@@ -197,7 +197,7 @@ The `render()` method accepts two input shapes via generic overloads:
 
 **Inline source mode** (`InlineRuntimeSource<Files>`): A runtime-path-to-content map under `source.files`. Keys may include directory segments. When the map has a single key, `entry` is optional (the runtime picks the only key). When multiple keys exist, `entry` is required and selects one key from that map. The runtime stages files into the transport-owned filesystem, then connects and renders. High-level helpers provide a filesystem automatically; raw transports require `fileSystem`.
 
-**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` is a path within that runtime filesystem and may be relative or begin with `/` (for example, `'src/main.ts'` or `'/src/main.ts'`). `RuntimeClient` alone normalizes and splits that path into the runtime-owned worker locator. Plugin authoring APIs then receive the normalized runtime `entryPath`, which begins with `/`. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field. Persisted projects expose source, `/.tau/cache`, generated files, and runtime `/node_modules` through one fully writable rooted tree.
+**Filesystem mode** (`FilesystemRuntimeSource`): Renders from a connected filesystem. `source.path` is a canonical root-relative path such as `'src/main.ts'`. `RuntimeClient` validates and splits that path into the runtime-owned worker locator. Plugin authoring APIs receive the same canonical runtime `entryPath`. File-change invalidation is owned by the worker's filesystem watch path, not a public render-input field. Persisted projects expose source, `.tau/cache`, generated files, and mounted package content through one fully writable rooted tree.
 
 ### Geometry Event
 
@@ -215,7 +215,7 @@ Never place `renderTimeout` in kernel render options, worker runtime definitions
 
 ## RuntimeFileSystem
 
-10 required methods matching Node.js `fs.promises.*`. Every path is a runtime path within the supplied filesystem and begins with `/`; `/` is that filesystem's root, not the host OS root.
+10 required methods matching Node.js `fs.promises.*`. Every path is canonical and root-relative within the supplied filesystem; `''` is that filesystem's root.
 
 | Method      | Signature                                           | Purpose                                 |
 | ----------- | --------------------------------------------------- | --------------------------------------- |
@@ -416,12 +416,12 @@ The kernel machine communicates with the worker via typed MessagePort events thr
 
 The bundler produces a metafile with all resolved module paths:
 
-| Namespace   | Example Key                           | Description                             |
-| ----------- | ------------------------------------- | --------------------------------------- |
-| `zenfs:`    | `zenfs:/main.ts`                      | Runtime path in the supplied filesystem |
-| `zenfs:`    | `zenfs:/node_modules/lodash/index.js` | CDN-cached module                       |
-| `builtin:`  | `builtin:replicad`                    | Runtime-registered kernel module        |
-| `http-url:` | `http-url:https://esm.sh/...`         | HTTP-fetched module                     |
+| Namespace   | Example Key                           | Description                              |
+| ----------- | ------------------------------------- | ---------------------------------------- |
+| `zenfs:`    | `zenfs:/main.ts`                      | Engine-private key for runtime `main.ts` |
+| `zenfs:`    | `zenfs:/node_modules/lodash/index.js` | Engine-private key for cached packages   |
+| `builtin:`  | `builtin:replicad`                    | Runtime-registered kernel module         |
+| `http-url:` | `http-url:https://esm.sh/...`         | HTTP-fetched module                      |
 
 During detection, bare specifiers appear as external imports in `metafile.outputs[chunk].imports` rather than in `metafile.inputs`, since they are not resolved.
 
@@ -575,7 +575,7 @@ A warm exact-match export reuses the artifact's live native slot, restores its s
 | `bundleResultCache` | Dependency-aware exact event; broadly on reset or next source-bearing watcherless operation | Avoid re-bundling when deps haven't changed         |
 | `selectionCache`    | Cleared on relevant exact change, reset, or next source-bearing watcherless operation       | Ensure kernel detection re-runs when imports change |
 
-Watched filesystems retain volatile entries only while the complete cache-observation subscription keeps them coherent. A watcherless filesystem has no evidence that retained bytes are current, so serialized `render()`, autonomous preview execution, and exact `exportModel()` clear volatile file-derived caches before dependency resolution. Kernel/WASM state and durable content-addressed `/.tau/cache/**` entries remain reusable.
+Watched filesystems retain volatile entries only while the complete cache-observation subscription keeps them coherent. A watcherless filesystem has no evidence that retained bytes are current, so serialized `render()`, autonomous preview execution, and exact `exportModel()` clear volatile file-derived caches before dependency resolution. Kernel/WASM state and durable content-addressed `.tau/cache/**` entries remain reusable.
 
 ### Per-Render Caches (cleared each render cycle)
 
@@ -631,7 +631,7 @@ The current preview generation, not retained cache membership and not the last s
 
 Reconciliation opens one complete multi-path replacement subscription while the old request remains live, awaits its acknowledgement, batch rereads and hashes newly added paths, rejects a candidate dirtied or superseded during validation, and atomically swaps only a clean candidate. The old handle is disposed after commitment. This keeps one steady-state bridge stream and closes the subscribe-versus-read window without per-path subscriptions.
 
-All invalidation work remains serialized, but event truth determines the route. Explicit `fileChanged` notifications, staging writes, concrete watch events, and concrete handoff-validation mismatches enter the exact-path route. Only explicit reset, overflow, stale-root, backend-replacement, or summarized-loss signals enter conservative reset recovery. Exact routing invalidates and schedules only when a changed path intersects the active preview dependency set; unrelated project writes cannot supersede or rerender it. Runtime identity is never lowercased or otherwise folded. Concrete `/.tau/cache/**` events are excluded, while `/node_modules/**` stays observable because package files can be live bundle inputs; genuine loss signals cannot be excluded by path.
+All invalidation work remains serialized, but event truth determines the route. Explicit `fileChanged` notifications, staging writes, concrete watch events, and concrete handoff-validation mismatches enter the exact-path route. Only explicit reset, overflow, stale-root, backend-replacement, or summarized-loss signals enter conservative reset recovery. Exact routing invalidates and schedules only when a changed path intersects the active preview dependency set; unrelated project writes cannot supersede or rerender it. Runtime identity is never lowercased or otherwise folded. Concrete `.tau/cache/**` events are excluded, while `node_modules/**` stays observable because package files can be live bundle inputs; genuine loss signals cannot be excluded by path.
 
 ### Lifecycle
 

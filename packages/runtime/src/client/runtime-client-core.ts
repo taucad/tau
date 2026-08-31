@@ -14,7 +14,7 @@
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- public client entrypoint facade */
 
-import type { FileExtension, LogEntry } from '@taucad/types';
+import type { ExportFile, FileExtension, LogEntry } from '@taucad/types';
 import { idPrefix, logLevels } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { Topic } from '@taucad/events';
@@ -61,6 +61,7 @@ import type {
 } from '#worker/runtime-definition.js';
 import type { ContentRequestFor, RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
+import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import { assertRootedPath } from '@taucad/utils/path';
 
 export type { RuntimeConfigInput, RuntimeConfigOutput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
@@ -144,6 +145,26 @@ export type RuntimeSource<Files extends RuntimeSourceFiles = RuntimeSourceFiles>
   | InlineRuntimeSource<Files>
   | FilesystemRuntimeSource;
 
+/** Extra project-relative file considered alongside the execution source closure. @public */
+export type RuntimeSourceSnapshotAdditionalPath = {
+  readonly path: string;
+  readonly required: boolean;
+};
+
+/** Input for collecting a source closure without computing geometry. @public */
+export type RuntimeSourceSnapshotInput<Files extends RuntimeSourceFiles = RuntimeSourceFiles> = {
+  readonly source: RuntimeSource<Files>;
+  readonly additionalPaths?: readonly RuntimeSourceSnapshotAdditionalPath[];
+  readonly signal?: AbortSignal;
+};
+
+export type {
+  RuntimeSourceSnapshotData,
+  RuntimeSourceSnapshotFile,
+  RuntimeSourceSnapshotFileRole,
+  RuntimeSourceSnapshotResult,
+} from '#types/runtime-source-snapshot.types.js';
+
 /**
  * Autonomous render input.
  * @public
@@ -167,6 +188,20 @@ type RuntimeExportSourceInput<Files extends RuntimeSourceFiles = RuntimeSourceFi
       readonly source?: undefined;
       readonly parameters?: never;
     };
+
+type RuntimeTranscodeInput<Transcoders extends readonly TranscoderPlugin[]> = {
+  [Index in keyof Transcoders]: Transcoders[Index] extends TranscoderPlugin<infer EdgeMap, infer From>
+    ? {
+        [To in Extract<keyof EdgeMap, FileExtension>]: {
+          readonly from: Extract<From, FileExtension>;
+          readonly to: To;
+          readonly files: ExportFile[];
+          readonly options: EdgeMap[To];
+          readonly signal?: AbortSignal;
+        };
+      }[Extract<keyof EdgeMap, FileExtension>]
+    : never;
+}[number];
 
 /**
  * Export input. Runtime-owned request fields live at the top level; plugin
@@ -574,6 +609,35 @@ const normalizeRuntimeSource = (source: RuntimeSource | unknown): NormalizedRunt
   throw new TypeError('Runtime source must include either `files` or `path`.');
 };
 
+const normalizeSnapshotAdditionalPaths = (
+  value: readonly RuntimeSourceSnapshotAdditionalPath[] | undefined,
+): readonly RuntimeSourceSnapshotAdditionalPath[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new TypeError('RuntimeClient.snapshotSource additionalPaths must be an array.');
+  }
+  const byPath = new Map<string, boolean>();
+  for (const additional of value) {
+    if (
+      !isRecord(additional) ||
+      typeof additional['path'] !== 'string' ||
+      typeof additional['required'] !== 'boolean'
+    ) {
+      throw new TypeError('RuntimeClient.snapshotSource additionalPaths entries require path and required fields.');
+    }
+    const path = assertRuntimeFilePath(additional['path']);
+    byPath.set(path, additional['required'] || byPath.get(path) === true);
+  }
+  return [...byPath]
+    .sort(([left], [right]) => left.localeCompare(right, 'en'))
+    .map(([path, required]) => ({
+      path,
+      required,
+    }));
+};
+
 const assertExportInputShape = (input: Record<string, unknown>): void => {
   for (const key of Object.keys(input)) {
     if (!exportInputKeys.has(key)) {
@@ -724,7 +788,7 @@ type RuntimeSubscribeOptions = {
  * @public
  */
 // oxlint-disable @typescript-eslint/no-explicit-any -- variance: default accepts any plugin generic
-export type RuntimeClient<
+type RuntimeClientProjection<
   Kernels extends ReadonlyArray<KernelPlugin<any, any, any>> = KernelPlugin[],
   Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
   Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any>> = TranscoderPlugin[],
@@ -867,6 +931,20 @@ export type RuntimeClient<
     options?: RuntimeExportOptions<Kernels, Middleware, Transcoders, F, Files>,
   ): Promise<ExportResult>;
 
+  /** Transcode caller-owned artifacts without rendering a kernel source. */
+  transcode(input: RuntimeTranscodeInput<Transcoders>): Promise<ExportResult>;
+
+  /**
+   * Collect the selected source closure and approved additional files without computing geometry.
+   *
+   * @param input - Runtime source, approved additional paths, and cancellation signal.
+   * @returns Coherent selected source bytes, hashes, roles, and unresolved diagnostics.
+   * @public
+   */
+  snapshotSource<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
+    input: RuntimeSourceSnapshotInput<Files>,
+  ): Promise<RuntimeSourceSnapshotResult>;
+
   /**
    * Render a source through the autonomous render loop.
    *
@@ -996,6 +1074,12 @@ export type RuntimeClient<
 };
 // oxlint-enable @typescript-eslint/no-explicit-any
 
+/** High-level client projected from one complete runtime definition. @public */
+export type RuntimeClient<
+  Runtime extends AnyRuntimeDefinition = AnyRuntimeDefinition,
+  Transport extends AnyTransportPlugin = AnyTransportPlugin,
+> = RuntimeClientProjection<ClientKernels<Runtime>, ClientMiddleware<Runtime>, ClientTranscoders<Runtime>, Transport>;
+
 /**
  * Create a high-level runtime client for an explicit transport.
  *
@@ -1031,22 +1115,23 @@ export function createRuntimeClient<
 >(
   options: RuntimeClientOptionsWithTransport<Runtime, Transport>,
 ): RuntimeClient<
-  ClientKernels<RuntimeForClient<Runtime, Transport>>,
-  ClientMiddleware<RuntimeForClient<Runtime, Transport>>,
-  ClientTranscoders<RuntimeForClient<Runtime, Transport>>,
+  RuntimeForClient<Runtime, Transport> extends AnyRuntimeDefinition
+    ? RuntimeForClient<Runtime, Transport>
+    : AnyRuntimeDefinition,
   Transport
 >;
 // oxlint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-restricted-types
-// The implementation signature returns the wide-default `RuntimeClient`
-// (= `RuntimeClient<KernelPlugin[], TranscoderPlugin[]>`) because the worker
+// The implementation signature returns the wide internal projection because the worker
 // physically emits a wide `CapabilitiesManifest` over `postMessage` — no
 // generic information survives the wire. The public overload narrows the
-// return to `RuntimeClient<Kernels, Transcoders, Transport>`. This is a *witness*
+// return to `RuntimeClient<typeof runtimeDefinition, Transport>`. This is a *witness*
 // narrowing, not a structural lie: every concrete value the worker emits is
 // already a member of the narrower carrier, so the seam is sound by
 // construction. Compile-time proof lives in `define-plugin.test-d.ts`.
 // oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- false positive
-export function createRuntimeClient(options: RuntimeClientOptionsWithTransport<AnyRuntimeDefinition>): RuntimeClient {
+export function createRuntimeClient(
+  options: RuntimeClientOptionsWithTransport<AnyRuntimeDefinition>,
+): RuntimeClientProjection {
   const transportPlugin = (options as { readonly transport?: AnyTransportPlugin }).transport;
   if (!transportPlugin) {
     throw new Error(
@@ -1656,6 +1741,41 @@ export function createRuntimeClient(options: RuntimeClientOptionsWithTransport<A
       } finally {
         pendingExports.delete(exportSlot);
       }
+    },
+
+    async transcode(input: {
+      readonly from: FileExtension;
+      readonly to: FileExtension;
+      readonly files: ExportFile[];
+      readonly options: Record<string, unknown>;
+      readonly signal?: AbortSignal;
+    }): Promise<ExportResult> {
+      assertIntentAdmissionOpen();
+      const client = await ensureConnected();
+      const { signal, ...request } = input;
+      return trackInFlight(client.transcode(request, signal));
+    },
+
+    async snapshotSource<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
+      input: RuntimeSourceSnapshotInput<Files>,
+    ): Promise<RuntimeSourceSnapshotResult> {
+      assertIntentAdmissionOpen();
+      if (!isRecord(input)) {
+        throw new TypeError('RuntimeClient.snapshotSource input must be an object.');
+      }
+      const normalized = normalizeRuntimeSource(input.source);
+      const additionalPaths = normalizeSnapshotAdditionalPaths(input.additionalPaths);
+      const client = await ensureConnected();
+      return trackInFlight(
+        client.snapshotSource(
+          {
+            ...(normalized.stage === undefined ? {} : { stage: normalized.stage }),
+            file: normalized.file,
+            ...(additionalPaths === undefined ? {} : { additionalPaths }),
+          },
+          input.signal,
+        ),
+      );
     },
 
     async render<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(

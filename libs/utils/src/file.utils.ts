@@ -57,3 +57,16 @@ export function downloadBlob(blob: Blob, filename: string): void {
     URL.revokeObjectURL(url);
   }
 }
+
+/**
+ * Match a source path against runtime-declared file extensions.
+ *
+ * @param entryPath - Source path to inspect
+ * @param extensions - Declared extensions, or `*` for all paths
+ * @returns Whether the source path matches a declared extension
+ * @public
+ */
+export const sourcePathMatchesExtensions = (entryPath: string, extensions: readonly string[]): boolean => {
+  const basename = entryPath.slice(entryPath.lastIndexOf('/') + 1).toLowerCase();
+  return extensions.some((extension) => extension === '*' || basename.endsWith(`.${extension.toLowerCase()}`));
+};

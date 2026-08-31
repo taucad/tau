@@ -24,7 +24,7 @@ export type { ElectronUtilityHostOptions } from '#electron/electron-utility-tran
  * @public
  */
 export type ServeElectronRuntimeOptions = {
-  /** Filesystem authority exposed as runtime `/` inside the utility host. */
+  /** Rooted filesystem authority exposed inside the utility host. */
   readonly fileSystem: RuntimeFileSystem;
   /** Install a process-exit disposer. Defaults to true. */
   readonly installProcessTeardown?: boolean;

@@ -50,9 +50,9 @@ const fixture = (name: 'birdhouse' | 'bundler-feature-matrix', entry: string) =>
   const files = Object.fromEntries(
     Object.entries(fixtureModules)
       .filter(([path]) => path.includes(marker))
-      .map(([path, source]) => [`/${path.slice(path.indexOf(marker) + marker.length)}`, source]),
+      .map(([path, source]) => [path.slice(path.indexOf(marker) + marker.length), source]),
   );
-  return { files, entry: `/${entry}` };
+  return { files, entry };
 };
 
 const measure = async <T>(operation: () => Promise<T> | T): Promise<{ ms: number; value: T }> => {

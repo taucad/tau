@@ -107,6 +107,14 @@ const exportFileSchema = z
   })
   .catchall(z.unknown());
 
+const directExportFileSchema = z
+  .object({
+    name: z.string(),
+    bytes: z.instanceof(Uint8Array),
+    mimeType: mimeTypeSchema,
+  })
+  .catchall(z.unknown());
+
 const exportGeometryResultSchema = z.discriminatedUnion('success', [
   z
     .object({
@@ -329,6 +337,58 @@ export const runtimeExportModelArgsSchema = z
   })
   .catchall(z.unknown());
 
+export const runtimeSourceSnapshotArgsSchema = z
+  .object({
+    stage: stageSchema.optional(),
+    file: geometryFileSchema,
+    additionalPaths: z
+      .array(z.object({ path: rootedFilePathSchema, required: z.boolean() }).strict())
+      .readonly()
+      .optional(),
+  })
+  .strict();
+
+export const runtimeSourceSnapshotResultSchema = z.discriminatedUnion('success', [
+  z
+    .object({
+      success: z.literal(true),
+      data: z
+        .object({
+          entryPath: rootedFilePathSchema,
+          files: z.array(
+            z
+              .object({
+                path: rootedFilePathSchema,
+                content: z.instanceof(Uint8Array),
+                sha256: z.string(),
+                role: z.enum(['entry', 'kernel-dependency', 'middleware-dependency', 'additional']),
+              })
+              .strict(),
+          ),
+          unresolvedPaths: z.array(rootedFilePathSchema),
+          kernelId: z.string(),
+        })
+        .strict(),
+      issues: z.array(kernelIssueSchema),
+    })
+    .catchall(z.unknown()),
+  z
+    .object({
+      success: z.literal(false),
+      issues: z.array(kernelIssueSchema),
+    })
+    .catchall(z.unknown()),
+]);
+
+export const runtimeTranscodeArgsSchema = z
+  .object({
+    from: fileExtensionSchema,
+    to: fileExtensionSchema,
+    files: z.array(directExportFileSchema).min(1),
+    options: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
 // ---------- Notifies (consumer → host) ----------
 
 export const runtimeOpenFileArgsSchema = z
@@ -508,6 +568,8 @@ export const runtimeProtocolSchemas = {
     initialize: { args: runtimeInitializeArgsSchema, result: runtimeInitializeResultSchema },
     export: { args: runtimeExportArgsSchema, result: runtimeExportResultSchema },
     exportModel: { args: runtimeExportModelArgsSchema, result: runtimeExportResultSchema },
+    snapshotSource: { args: runtimeSourceSnapshotArgsSchema, result: runtimeSourceSnapshotResultSchema },
+    transcode: { args: runtimeTranscodeArgsSchema, result: runtimeExportResultSchema },
     cleanup: { args: runtimeCleanupArgsSchema, result: runtimeCleanupResultSchema },
   },
   notifies: {

@@ -3,7 +3,7 @@
  *
  * Defines the typed `@taucad/rpc` {@link RuntimeProtocol} contract
  * carried by every runtime transport. Calls (`initialize`, `export`,
- * `exportModel`, `cleanup`) are correlated by the channel envelope;
+ * `exportModel`, `snapshotSource`, `transcode`, `cleanup`) are correlated by the channel envelope;
  * notifies cover the
  * autonomous client→worker commands and worker→client events.
  */
@@ -18,6 +18,7 @@ import type {
   CapabilitiesManifest,
 } from '#types/runtime.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
+import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 
 // =============================================================================
 // Two-Layer Geometry Transport Types
@@ -271,6 +272,14 @@ export type RuntimeExportArgs = {
   readonly content?: RuntimeContentInput;
 };
 
+/** Direct transcoder request over caller-owned source artifacts. @public */
+export type RuntimeTranscodeArgs = {
+  readonly from: FileExtension;
+  readonly to: FileExtension;
+  readonly files: ExportFile[];
+  readonly options: Record<string, unknown>;
+};
+
 /**
  * Args for the request-scoped `exportModel` request.
  *
@@ -288,6 +297,13 @@ export type RuntimeExportModelArgs = {
   readonly format: FileExtension;
   readonly exportOptions?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
+};
+
+/** Request-scoped source-closure collection without geometry evaluation. @public */
+export type RuntimeSourceSnapshotArgs = {
+  readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
+  readonly file: { readonly path: string; readonly filename: string };
+  readonly additionalPaths?: ReadonlyArray<{ readonly path: string; readonly required: boolean }>;
 };
 
 /**
@@ -446,13 +462,20 @@ export const runtimeProtocolNotifyNames = [
 ] as const;
 
 /**
- * Request/response call name inventory — exactly four calls
- * (`initialize`, `export`, `exportModel`, `cleanup`). The legacy `render` call is deleted; the
+ * Request/response call name inventory — exactly six calls
+ * (`initialize`, `export`, `exportModel`, `snapshotSource`, `transcode`, `cleanup`). The legacy `render` call is deleted; the
  * autonomous `openFile` notify + `geometryComputed` correlation by
  * `renderId` replaces it (R18, mirrors LSP `didOpen` + diagnostics).
  * @public
  */
-export const runtimeProtocolCallNames = ['initialize', 'export', 'exportModel', 'cleanup'] as const;
+export const runtimeProtocolCallNames = [
+  'initialize',
+  'export',
+  'exportModel',
+  'snapshotSource',
+  'transcode',
+  'cleanup',
+] as const;
 
 /**
  * Typed `@taucad/rpc` protocol contract for the kernel runtime worker.
@@ -502,6 +525,15 @@ export type RuntimeProtocol = {
     };
     readonly exportModel: {
       readonly args: RuntimeExportModelArgs;
+      readonly result: ExportGeometryResult;
+      readonly wireResult: RuntimeExportResultWire;
+    };
+    readonly snapshotSource: {
+      readonly args: RuntimeSourceSnapshotArgs;
+      readonly result: RuntimeSourceSnapshotResult;
+    };
+    readonly transcode: {
+      readonly args: RuntimeTranscodeArgs;
       readonly result: ExportGeometryResult;
       readonly wireResult: RuntimeExportResultWire;
     };

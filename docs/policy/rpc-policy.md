@@ -3,7 +3,7 @@ title: 'RPC & Filesystem Bridge Policy'
 description: 'MessagePort bridge architecture for connecting filesystem implementations to kernel workers across thread boundaries. Covers RuntimeFileSystemBase, the opaque RuntimeFileSystem, from* constructors, and Bridge RPC primitives.'
 status: active
 created: '2026-03-03'
-updated: '2026-08-22'
+updated: '2026-08-28'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/comlink-rpc-practices.md
@@ -121,13 +121,13 @@ Factory functions that create `RuntimeFileSystemBase` from various sources. Each
 
 All constructors return the opaque {@link RuntimeFileSystem} type — consumers cannot inspect or branch on its internals. The transport plugin reads it through internal helpers in `transport/_internal/` to set up the appropriate channel.
 
-**Naming convention:** All constructors use the `from*` prefix per the library API policy. The name describes _what the source is_, not _what library it comes from_. Each constructor exposes a runtime filesystem whose paths use `/` as that supplied filesystem's root, not the host OS or authority-global root.
+**Naming convention:** All constructors use the `from*` prefix per the library API policy. The name describes _what the source is_, not _what library it comes from_. Each constructor exposes canonical root-relative runtime paths, with `''` representing the supplied filesystem root.
 
 #### `fromNodeFs` vs `fromFsLike`: why both exist
 
 These serve different environments with different constraints:
 
-- **`fromNodeFs(basePath)`** accepts a host filesystem directory and exposes it as runtime `/`. It handles `require('node:fs/promises')` internally via dynamic require, preventing bundlers from including Node.js builtins in browser projects, and uses `path.resolve()` for OS-aware resolution and containment. The host `basePath` is not exposed to runtime plugins.
+- **`fromNodeFs(basePath)`** accepts a host filesystem directory and maps root-relative runtime paths into it. It handles `require('node:fs/promises')` internally via dynamic require, preventing bundlers from including Node.js builtins in browser projects, and uses native path resolution plus realpath checks for lexical and symlink containment. The host `basePath` is not exposed to runtime plugins.
 
 - **`fromFsLike(fsLike)`** accepts an already-rooted/confined object with a `promises` namespace matching the `FsLike` shape. Calls use runtime paths within that supplied object. It normalizes return types and runtime paths but does not claim to sandbox an authority-global host filesystem. Use `fromNodeFs(hostRoot)` for raw Node.js access.
 

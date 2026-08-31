@@ -38,6 +38,8 @@ import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   HashedGeometryResultTransport,
   RuntimeExportModelArgs,
+  RuntimeSourceSnapshotArgs,
+  RuntimeTranscodeArgs,
   RuntimeExportResultTransport,
   RuntimePreviewIdentity,
   RenderPhase,
@@ -45,6 +47,7 @@ import type {
   RuntimeStateChangedArgs,
   TelemetryEntry,
 } from '#types/runtime-protocol.types.js';
+import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeTransportClient, RuntimeTransportTimeoutRecovery } from '#transport/runtime-transport.types.js';
 import { renderTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
@@ -425,6 +428,26 @@ export class RuntimeWorkerClient {
     this.ensureNotTerminated();
     this.ensureChannel();
     const result = await this.channel!.call('exportModel', request, signal);
+    return this.transport.resolveExport
+      ? this.transport.resolveExport(result as unknown as RuntimeExportResultTransport)
+      : result;
+  }
+
+  /** Collect a request-scoped source closure without rendering geometry. */
+  public async snapshotSource(
+    request: RuntimeSourceSnapshotArgs,
+    signal?: AbortSignal,
+  ): Promise<RuntimeSourceSnapshotResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    return this.channel!.call('snapshotSource', request, signal);
+  }
+
+  /** Send a direct transcoder RPC over caller-owned artifacts. */
+  public async transcode(request: RuntimeTranscodeArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    const result = await this.channel!.call('transcode', request, signal);
     return this.transport.resolveExport
       ? this.transport.resolveExport(result as unknown as RuntimeExportResultTransport)
       : result;

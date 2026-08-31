@@ -45,6 +45,7 @@ import { runtimeProtocolSchemas } from '#types/runtime-protocol.schemas.js';
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import type { HashedGeometryResult, ExportGeometryResult } from '#types/runtime.types.js';
+import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type {
   GeometryTransport,
   HashedGeometryResultTransport,
@@ -134,6 +135,22 @@ function prepareExportTransfer(
     return { ...file, bytes: encoded.value };
   });
   return { ...result, data, issues };
+}
+
+function prepareSourceSnapshotTransfer(
+  result: RuntimeSourceSnapshotResult,
+  transferables: Transferable[],
+): RuntimeSourceSnapshotResult {
+  const issues = result.issues.map(normaliseIssueForWire);
+  if (!result.success) {
+    return { ...result, issues };
+  }
+  const files = result.data.files.map((file) => {
+    const content = new Uint8Array(file.content);
+    transferables.push(content.buffer);
+    return { ...file, content };
+  });
+  return { ...result, data: { ...result.data, files }, issues };
 }
 
 /**
@@ -393,6 +410,32 @@ export function createWorkerDispatcher(
     }
   };
 
+  const handleTranscode: (
+    args: RuntimeProtocol['calls']['transcode']['args'],
+    signal?: AbortSignal,
+  ) => Promise<ExportGeometryResult> = async (args, signal) => {
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+    try {
+      return await Promise.race([worker.transcode(args, signal), trapPromise]);
+    } finally {
+      worker.flushTelemetry();
+      cleanupTrap();
+    }
+  };
+
+  const handleSourceSnapshot: (
+    args: RuntimeProtocol['calls']['snapshotSource']['args'],
+    signal?: AbortSignal,
+  ) => Promise<RuntimeSourceSnapshotResult> = async (args, signal) => {
+    const { promise: trapPromise, cleanup: cleanupTrap } = createErrorTrap();
+    try {
+      return await Promise.race([worker.snapshotSource(args, signal), trapPromise]);
+    } finally {
+      worker.flushTelemetry();
+      cleanupTrap();
+    }
+  };
+
   type CallResult = Awaited<ReturnType<ChannelServer<RuntimeProtocol>['call']>>;
 
   const impl: ChannelServer<RuntimeProtocol> = {
@@ -430,6 +473,22 @@ export function createWorkerDispatcher(
             transferables,
           };
           return envelope as unknown as CallResult;
+        }
+        case 'snapshotSource': {
+          const result = await handleSourceSnapshot(args as RuntimeProtocol['calls']['snapshotSource']['args'], signal);
+          const transferables: Transferable[] = [];
+          const value = prepareSourceSnapshotTransfer(result, transferables);
+          return { value, transferables } as unknown as CallResult;
+        }
+        case 'transcode': {
+          const result = await handleTranscode(args as RuntimeProtocol['calls']['transcode']['args'], signal);
+          const transferables: Transferable[] = [];
+          const value = prepareExportTransfer(result, {
+            encode: encodeBinary,
+            publicationId: ++exportPublicationId,
+            transferables,
+          });
+          return { value, transferables } as unknown as CallResult;
         }
         case 'cleanup': {
           if (logFlushTimer) {

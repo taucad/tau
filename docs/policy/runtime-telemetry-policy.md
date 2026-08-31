@@ -3,7 +3,7 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-08-25'
+updated: '2026-08-28'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/first-party-runtime-library-tracing-blueprint.md
@@ -20,7 +20,7 @@ Structured telemetry enables performance debugging and kernel panel visualizatio
 
 ## Design Principles
 
-- Every span must have a parent. No orphan root spans except the three permitted roots (`kernel.bootstrap`, `kernel.render`, `kernel.export`).
+- Every span must have a parent. No orphan root spans except the four permitted roots (`kernel.bootstrap`, `kernel.render`, `kernel.export`, `kernel.transcode`).
 - The worker does the heavy lifting: span hierarchy, timing, and attributes are computed entirely on the worker thread. Consumers (UI, DevTools) receive pre-structured data and never need to reconstruct relationships.
 - Span overhead must be negligible: use monotonic counter IDs (not UUIDs), `performance.now()` timing, direct entry batching, and no string concatenation in hot loops.
 - Do not write runtime spans to the realm-wide Performance Timeline during normal operation. Mirror uniquely named `tau:*` measures only when `devtoolsTelemetry` is explicitly enabled.
@@ -30,16 +30,17 @@ Structured telemetry enables performance debugging and kernel panel visualizatio
 
 All span names follow the pattern `{subsystem}.{operation}`, inspired by OpenTelemetry semantic conventions.
 
-| Subsystem              | Scope                                  | Examples                                                                                                                                                                                                                                                           |
-| ---------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `kernel.*`             | Framework lifecycle and infra          | `kernel.bootstrap`, `kernel.render`, `kernel.init`, `kernel.select`, `kernel.detect-import`, `kernel.bundle`, `kernel.execute`, `kernel.compute`, `kernel.extract-params`, `kernel.export`, `kernel.resolve-deps`, `kernel.load-middleware`, `kernel.bundler-init` |
-| `deps.*`               | Dependency pipeline                    | `deps.discover`, `deps.read`, `deps.hash`, `deps.content-hash`                                                                                                                                                                                                     |
-| `fs.*`                 | Filesystem operations                  | `fs.read`, `fs.readBatch`, `fs.exists`, `fs.readdir`                                                                                                                                                                                                               |
-| `wasm.*`               | WASM compilation                       | `wasm.compile`                                                                                                                                                                                                                                                     |
-| `middleware.*`         | Middleware wrapping                    | `middleware.wrap({MiddlewareName})`                                                                                                                                                                                                                                |
-| `oc.*`                 | OpenCASCADE API calls                  | `oc.summary`, `oc.BRepPrimAPI_MakeBox`, `oc.BRepAlgoAPI_Fuse`                                                                                                                                                                                                      |
-| `{kernelId}.library.*` | First-party kernel library attribution | `replicad.library.summary`, `replicad.library.makeBaseBox`, `replicad.library.cut`, `replicad.library.fuse`                                                                                                                                                        |
-| `{kernelId}.*`         | Kernel-authored spans                  | `replicad.wasm-init`, `replicad.run-main`, `replicad.font-load`, `replicad.render-output`, `replicad.tessellate.faces`, `replicad.tessellate.edges`, `replicad.mesh-to-gltf`, `openrscad.export-3d`, `openrscad.export-3d-edges`                                   |
+| Subsystem              | Scope                                  | Examples                                                                                                                                                                                                                                                                               |
+| ---------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kernel.*`             | Framework lifecycle and infra          | `kernel.bootstrap`, `kernel.render`, `kernel.init`, `kernel.select`, `kernel.detect-import`, `kernel.bundle`, `kernel.execute`, `kernel.compute`, `kernel.extract-params`, `kernel.export`, `kernel.transcode`, `kernel.resolve-deps`, `kernel.load-middleware`, `kernel.bundler-init` |
+| `image.*`              | Image-transcoder rendering             | `image.render`                                                                                                                                                                                                                                                                         |
+| `deps.*`               | Dependency pipeline                    | `deps.discover`, `deps.read`, `deps.hash`, `deps.content-hash`                                                                                                                                                                                                                         |
+| `fs.*`                 | Filesystem operations                  | `fs.read`, `fs.readBatch`, `fs.exists`, `fs.readdir`                                                                                                                                                                                                                                   |
+| `wasm.*`               | WASM compilation                       | `wasm.compile`                                                                                                                                                                                                                                                                         |
+| `middleware.*`         | Middleware wrapping                    | `middleware.wrap({MiddlewareName})`                                                                                                                                                                                                                                                    |
+| `oc.*`                 | OpenCASCADE API calls                  | `oc.summary`, `oc.BRepPrimAPI_MakeBox`, `oc.BRepAlgoAPI_Fuse`                                                                                                                                                                                                                          |
+| `{kernelId}.library.*` | First-party kernel library attribution | `replicad.library.summary`, `replicad.library.makeBaseBox`, `replicad.library.cut`, `replicad.library.fuse`                                                                                                                                                                            |
+| `{kernelId}.*`         | Kernel-authored spans                  | `replicad.wasm-init`, `replicad.run-main`, `replicad.font-load`, `replicad.render-output`, `replicad.tessellate.faces`, `replicad.tessellate.edges`, `replicad.mesh-to-gltf`, `openrscad.export-3d`, `openrscad.export-3d-edges`                                                       |
 
 ### Rules
 
@@ -50,13 +51,14 @@ All span names follow the pattern `{subsystem}.{operation}`, inspired by OpenTel
 
 ## Root Span Policy
 
-Exactly three root spans are permitted per worker lifecycle:
+Exactly four root spans are permitted per worker lifecycle:
 
 | Root Span          | Lifecycle Phase       | Context                                                          |
 | ------------------ | --------------------- | ---------------------------------------------------------------- |
 | `kernel.bootstrap` | Worker initialization | Wraps middleware loading and kernel init                         |
 | `kernel.render`    | Render cycle          | Wraps deps, params, geometry, and middleware for a single render |
 | `kernel.export`    | Geometry export       | Wraps format conversion for file export                          |
+| `kernel.transcode` | Direct transcode      | Wraps a public transcoder operation without a kernel render      |
 
 All other spans MUST be children of one of these roots. If a span appears at root level in the telemetry tree, it is a bug.
 
@@ -112,30 +114,41 @@ kernel.render
 
 The `kernel.select` subtree is absent. The `kernel.bundler-init` subtree is absent (bundler already initialized). Cached middleware results may skip inner spans.
 
+### Direct Image Transcode
+
+```
+kernel.transcode
+└── image.render
+```
+
+`image.render` carries nanoraster's measured stage durations and resource counters as numeric attributes because nanoraster returns them after one atomic plan call; do not fabricate backdated child spans.
+
 ## Attribute Policy
 
 Attributes are `Record<string, string | number | boolean>` only. No objects, no arrays.
 
-| Span                     | Required Attributes                   | Optional Attributes             |
-| ------------------------ | ------------------------------------- | ------------------------------- |
-| `kernel.bootstrap`       | --                                    | `{ kernel }` (constructor name) |
-| `kernel.render`          | `{ file }`                            | --                              |
-| `kernel.export`          | `{ format }`                          | --                              |
-| `kernel.select`          | `{ file }`                            | --                              |
-| `kernel.detect-import`   | `{ kernel }` (kernel ID being tested) | --                              |
-| `kernel.init`            | `{ kernel }`                          | --                              |
-| `kernel.load-middleware` | `{ count }`                           | --                              |
-| `kernel.bundle`          | `{ entryPath }`                       | --                              |
-| `kernel.bundler-init`    | --                                    | --                              |
-| `deps.discover`          | --                                    | --                              |
-| `deps.read`              | `{ fileCount }`                       | --                              |
-| `deps.hash`              | `{ fileCount }`                       | --                              |
-| `fs.read`                | `{ path }`                            | --                              |
-| `fs.readBatch`           | `{ fileCount }`                       | --                              |
-| `fs.exists`              | `{ path }`                            | --                              |
-| `fs.readdir`             | `{ path }`                            | --                              |
-| `wasm.compile`           | `{ url }`                             | --                              |
-| `middleware.wrap(...)`   | `{ middleware, phase }`               | --                              |
+| Span                     | Required Attributes                   | Optional Attributes                                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kernel.bootstrap`       | --                                    | `{ kernel }` (constructor name)                                                                                                                                                                                                                                                                   |
+| `kernel.render`          | `{ file }`                            | --                                                                                                                                                                                                                                                                                                |
+| `kernel.export`          | `{ format }`                          | --                                                                                                                                                                                                                                                                                                |
+| `kernel.transcode`       | `{ from, to, transcoder }`            | `{ success }`                                                                                                                                                                                                                                                                                     |
+| `image.render`           | `{ mode, format, width, height }`     | `{ adapterBackend, adapterName, adapterDeviceType, success, errorCode, outputCount, outputBytes, parseMs, setupMs, capBuildMs, uploadMs, renderMs, overlayMs, encodeMs, peakReadbackBytes, glbParses, adapterDeviceRequests, pipelineSets, presentationBuilds, sceneUploads, targetAllocations }` |
+| `kernel.select`          | `{ file }`                            | --                                                                                                                                                                                                                                                                                                |
+| `kernel.detect-import`   | `{ kernel }` (kernel ID being tested) | --                                                                                                                                                                                                                                                                                                |
+| `kernel.init`            | `{ kernel }`                          | --                                                                                                                                                                                                                                                                                                |
+| `kernel.load-middleware` | `{ count }`                           | --                                                                                                                                                                                                                                                                                                |
+| `kernel.bundle`          | `{ entryPath }`                       | --                                                                                                                                                                                                                                                                                                |
+| `kernel.bundler-init`    | --                                    | --                                                                                                                                                                                                                                                                                                |
+| `deps.discover`          | --                                    | --                                                                                                                                                                                                                                                                                                |
+| `deps.read`              | `{ fileCount }`                       | --                                                                                                                                                                                                                                                                                                |
+| `deps.hash`              | `{ fileCount }`                       | --                                                                                                                                                                                                                                                                                                |
+| `fs.read`                | `{ path }`                            | --                                                                                                                                                                                                                                                                                                |
+| `fs.readBatch`           | `{ fileCount }`                       | --                                                                                                                                                                                                                                                                                                |
+| `fs.exists`              | `{ path }`                            | --                                                                                                                                                                                                                                                                                                |
+| `fs.readdir`             | `{ path }`                            | --                                                                                                                                                                                                                                                                                                |
+| `wasm.compile`           | `{ url }`                             | --                                                                                                                                                                                                                                                                                                |
+| `middleware.wrap(...)`   | `{ middleware, phase }`               | --                                                                                                                                                                                                                                                                                                |
 
 | `{kernelId}.wasm-init` | -- | `{ wasm }` |
 | `{kernelId}.run-main` | -- | `{ stage }` |
@@ -148,7 +161,7 @@ Attributes are `Record<string, string | number | boolean>` only. No objects, no 
 | `oc.summary` | `{ total.calls, total.ms, classes }` | `{ {ClassName}.calls, {ClassName}.ms }` per class |
 | `oc.{ClassName}` | `{ method }` (`constructor` or `apply`) | -- |
 
-`kernel.bundle.entryPath` and filesystem `path` attributes are runtime paths. They may identify `/lib/cube.scad` within the supplied runtime filesystem, but must never contain a host filesystem path or an authority-global `/projects/<id>/...` route. This qualification does not rename telemetry fields or change their schema.
+`kernel.bundle.entryPath` and filesystem `path` attributes are root-relative runtime paths. They may identify `lib/cube.scad` within the supplied runtime filesystem, but must never contain a host filesystem path or an authority-global `/projects/<id>/...` route. This qualification does not rename telemetry fields or change their schema.
 
 ### Guidelines
 

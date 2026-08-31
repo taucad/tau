@@ -223,7 +223,7 @@ describe('KernelRuntimeWorker initialization', () => {
         return { success: true, data: [], issues: [] };
       },
     })();
-    await seedTestFileSystem({ '/model.meta': 'metadata' });
+    await seedTestFileSystem({ 'model.meta': 'metadata' });
     const runtime = defineRuntime({
       kernels: [kernel],
       middleware: [middleware],
@@ -245,13 +245,72 @@ describe('KernelRuntimeWorker initialization', () => {
   });
 });
 
+describe('KernelRuntimeWorker direct transcode', () => {
+  it('transcodes caller-owned files without loading a kernel', async () => {
+    const inputFile = exportFile('settled.glb', new Uint8Array([1, 2, 3]), 'model/gltf-binary');
+    const transcode = vi.fn().mockResolvedValue({
+      success: true,
+      data: [exportFile('capture.webp', new Uint8Array([4, 5, 6]), 'image/webp')],
+      issues: [],
+    });
+    const definition: TranscoderDefinition = {
+      name: 'Image transcoder',
+      version: '1.0.0',
+      edges: [
+        {
+          from: 'glb',
+          to: 'webp',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ width: z.number() }),
+        },
+      ],
+      initialize: vi.fn().mockResolvedValue({}),
+      transcode,
+    };
+    const plugin = attachRuntimePluginDefinition({ id: 'image-transcoder' }, () => definition);
+    const worker = await createMultiKernelWorker([], [plugin]);
+    const telemetry: Array<{ readonly name: string; readonly detail?: Record<string, unknown> }> = [];
+    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+
+    try {
+      const result = await worker.transcode({
+        from: 'glb',
+        to: 'webp',
+        files: [inputFile],
+        options: { width: 640 },
+      });
+
+      expect(result.success).toBe(true);
+      expect(transcode).toHaveBeenCalledWith(
+        { from: 'glb', to: 'webp', files: [inputFile], options: { width: 640 } },
+        expect.any(Object),
+        {},
+      );
+      worker.flushTelemetry();
+      expect(telemetry).toContainEqual(
+        expect.objectContaining({
+          name: 'kernel.transcode',
+          detail: expect.objectContaining({
+            from: 'glb',
+            to: 'webp',
+            transcoder: 'image-transcoder',
+            success: true,
+          }),
+        }),
+      );
+    } finally {
+      await worker.cleanup();
+    }
+  });
+});
+
 // ===================================================================
 // Tests
 // ===================================================================
 
 describe('KernelRuntimeWorker middleware identity', () => {
   it('keeps hooks, options, and loggers independent when display names match', async () => {
-    await seedTestFileSystem({ '/model.mock': 'mock geometry' });
+    await seedTestFileSystem({ 'model.mock': 'mock geometry' });
 
     const observations: Array<{ id: string; marker: string; logger: KernelRuntime['logger'] }> = [];
     const createMiddleware = (id: 'first' | 'second') =>
@@ -290,7 +349,7 @@ describe('KernelRuntimeWorker middleware identity', () => {
 
 describe('provider content projection', () => {
   it('omits content from every content-empty provider input', async () => {
-    await seedTestFileSystem({ '/model.mock': 'mock geometry' });
+    await seedTestFileSystem({ 'model.mock': 'mock geometry' });
     const seen = {
       kernelCreate: [] as boolean[],
       kernelMesh: [] as boolean[],
@@ -383,7 +442,7 @@ describe('provider content projection', () => {
   });
 
   it('projects canonical content per middleware and preserves non-content transformations', async () => {
-    await seedTestFileSystem({ '/model.mock': 'mock geometry' });
+    await seedTestFileSystem({ 'model.mock': 'mock geometry' });
     const observations: Array<{ hook: string; content: unknown; marker: unknown }> = [];
     const kernelCreateInputs: Array<Record<string, unknown>> = [];
     const kernelExportInputs: Array<Record<string, unknown>> = [];
@@ -469,7 +528,7 @@ describe('provider content projection', () => {
   });
 
   it('publishes exact provider unions and source/transcoder intersections without duplicates', async () => {
-    await seedTestFileSystem({ '/model.mock': 'mock geometry' });
+    await seedTestFileSystem({ 'model.mock': 'mock geometry' });
     const definition = createMockKernelDefinition('content-algebra-kernel', {
       render: { content: ['includeEdges'] },
       exportFormats: {
@@ -539,7 +598,7 @@ describe('provider content projection', () => {
   });
 
   it('suppresses fallback work for native content and rejects unsupported dynamic input before providers', async () => {
-    await seedTestFileSystem({ '/model.mock': 'mock geometry' });
+    await seedTestFileSystem({ 'model.mock': 'mock geometry' });
     const createGeometry = vi.fn(async () => ({ nativeHandle: { label: 'native' }, issues: [] }));
     const meshGeometry = vi.fn(async () => ({ geometry: gltfGeometry('display') }));
     const passThroughMesh: WrapMeshGeometryHook = async (input, handler) => handler(input);
@@ -594,7 +653,7 @@ describe('provider content projection', () => {
 
 describe('create-options projection', () => {
   beforeEach(async () => {
-    await seedTestFileSystem({ '/model.mock': 'mock geometry' });
+    await seedTestFileSystem({ 'model.mock': 'mock geometry' });
   });
 
   it('canonicalizes omitted defaults and object insertion order into one native key', async () => {
@@ -678,7 +737,7 @@ describe('create-options projection', () => {
       expect(result.success).toBe(true);
       expect(createInputs).toEqual([
         {
-          entryPath: '/model.mock',
+          entryPath: 'model.mock',
           parameters: {},
           options: { nested: { a: 1, b: 2 }, layers: [9] },
         },
@@ -729,15 +788,31 @@ describe('create-options projection', () => {
 describe('KernelRuntimeWorker kernel selection', () => {
   beforeEach(async () => {
     await seedTestFileSystem({
-      '/model.scad': 'cube([10, 10, 10]);',
-      '/main.ts': `import { draw } from 'replicad';\ndraw();`,
-      '/plain.ts': 'export const main = () => ({ type: "mesh" });',
-      '/data.xyz': 'some unknown format',
-      '/model.step': 'ISO-10303-21;',
+      'model.scad': 'cube([10, 10, 10]);',
+      'main.ts': `import { draw } from 'replicad';\ndraw();`,
+      'plain.ts': 'export const main = () => ({ type: "mesh" });',
+      'data.xyz': 'some unknown format',
+      'model.step': 'ISO-10303-21;',
     });
   });
 
   describe('extension fast path', () => {
+    it('should select a kernel by a case-insensitive compound extension', async () => {
+      await seedTestFileSystem({ 'model.MESH.XML': '<mesh />' });
+      const meshDefinition = createMockKernelDefinition('mesh-kernel');
+      const worker = await createMultiKernelWorker([
+        { id: 'mesh-kernel', extensions: ['mesh.xml'], definition: meshDefinition },
+      ]);
+
+      const result = await worker.createGeometry({
+        file: createGeometryFile('model.MESH.XML'),
+        parameters: {},
+      });
+
+      expect(result.success).toBe(true);
+      expect(getInitSpy(meshDefinition)).toHaveBeenCalledOnce();
+    });
+
     it('should select a kernel by extension when no detectImport is needed', async () => {
       const scadDefinition = createMockKernelDefinition('openrscad');
 
@@ -981,7 +1056,7 @@ describe('KernelRuntimeWorker kernel selection', () => {
       await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
       expect(getInitSpy(scadDefinition)).toHaveBeenCalledOnce();
 
-      await worker.notifyFileChanged(['/model.scad']);
+      await worker.notifyFileChanged(['model.scad']);
 
       await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
     });
@@ -1013,12 +1088,12 @@ describe('KernelRuntimeWorker kernel selection', () => {
       worker.fileSystem = { watch: mockWatch, dispose: vi.fn(), listen: vi.fn() };
 
       // @ts-expect-error - exercising the private observation handoff seam
-      void worker.reconcileWatchSet(new Map([['/model.scad', 50]]));
+      void worker.reconcileWatchSet(new Map([['model.scad', 50]]));
       await vi.waitFor(() => {
         expect(capturedWatchCallback).toBeDefined();
       });
 
-      capturedWatchCallback!({ type: 'change', path: '/model.scad' });
+      capturedWatchCallback!({ type: 'change', path: 'model.scad' });
 
       await vi.waitFor(() => {
         // @ts-expect-error - accessing private for test verification
@@ -1047,7 +1122,7 @@ describe('KernelRuntimeWorker kernel selection', () => {
     });
 
     it('should name the unhandled extension and the registered ones', async () => {
-      await seedTestFileSystem({ '/a.scad': 'cube([1,1,1]);' });
+      await seedTestFileSystem({ 'a.scad': 'cube([1,1,1]);' });
       const worker = await createMultiKernelWorker([
         { id: 'replicad', extensions: ['ts', 'js'], definition: createMockKernelDefinition('replicad') },
       ]);
@@ -1066,7 +1141,7 @@ describe('KernelRuntimeWorker kernel selection', () => {
     });
 
     it('should carry the unhandled-extension detail into the export-route diagnostic', async () => {
-      await seedTestFileSystem({ '/a.scad': 'cube([1,1,1]);' });
+      await seedTestFileSystem({ 'a.scad': 'cube([1,1,1]);' });
       const worker = await createMultiKernelWorker([
         { id: 'replicad', extensions: ['ts', 'js'], definition: createMockKernelDefinition('replicad') },
       ]);
@@ -1092,7 +1167,7 @@ describe('KernelRuntimeWorker kernel selection', () => {
 describe('lazy capabilities manifest', () => {
   beforeEach(async () => {
     await seedTestFileSystem({
-      '/model.scad': 'cube([1,1,1]);',
+      'model.scad': 'cube([1,1,1]);',
     });
   });
 
@@ -1228,7 +1303,7 @@ describe('lazy capabilities manifest', () => {
 describe('native-handle snapshot restoration', () => {
   beforeEach(async () => {
     await seedTestFileSystem({
-      '/model.mock': 'mock geometry',
+      'model.mock': 'mock geometry',
     });
   });
 
@@ -1849,15 +1924,15 @@ describe('native-handle snapshot restoration', () => {
 describe('cache identity regressions', () => {
   beforeEach(async () => {
     await seedTestFileSystem({
-      '/model.mock': 'mock geometry',
-      '/a.mock': 'alpha',
-      '/b.mock': 'bravo',
-      '/b.other': 'other',
+      'model.mock': 'mock geometry',
+      'a.mock': 'alpha',
+      'b.mock': 'bravo',
+      'b.other': 'other',
     });
   });
 
   it('rereads changed dependency bytes on each explicit render when the filesystem has no watcher', async () => {
-    await seedTestFileSystem({ '/model.mock': 'first' });
+    await seedTestFileSystem({ 'model.mock': 'first' });
     const definition = createMockKernelDefinition('watcherless-kernel', {
       createGeometry: async (input, runtime) => {
         const source = await runtime.filesystem.readFile(input.entryPath, 'utf8');
@@ -1871,7 +1946,7 @@ describe('cache identity regressions', () => {
     const worker = await createMultiKernelWorker([{ id: 'watcherless-kernel', extensions: ['mock'], definition }]);
 
     const first = await worker.render({ file: createGeometryFile('model.mock'), parameters: {} });
-    await getTestFileSystem().writeFile('/model.mock', 'second');
+    await getTestFileSystem().writeFile('model.mock', 'second');
     const second = await worker.render({ file: createGeometryFile('model.mock'), parameters: {} });
 
     expect(first.success).toBe(true);

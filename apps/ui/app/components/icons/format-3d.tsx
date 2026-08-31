@@ -25,6 +25,9 @@ export function Format3D(properties: React.SVGProps<SVGSVGElement> & { extension
           }
 
           element.setAttribute('font-size', '11');
+          if (typeof element.getComputedTextLength !== 'function') {
+            return;
+          }
           const width = element.getComputedTextLength();
           if (width > 20) {
             element.setAttribute('font-size', String((11 * 20) / width));

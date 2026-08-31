@@ -19,4 +19,10 @@ describe('Format3D', () => {
     expect(screen.getByText('webp')).toHaveAttribute('x', '22');
     expect(screen.getByText('webp')).toHaveAttribute('font-size', '10');
   });
+
+  it('renders when SVG text measurement is unavailable', () => {
+    render(<Format3D extension='step' aria-label='STEP file' />);
+
+    expect(screen.getByText('step')).toHaveAttribute('font-size', '11');
+  });
 });

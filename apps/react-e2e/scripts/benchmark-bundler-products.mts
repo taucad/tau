@@ -339,7 +339,7 @@ if (
 }
 
 const served = { esbuild: await serve(buildRoots.esbuild), rolldown: await serve(buildRoots.rolldown) };
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const browser = await chromium.launch({ channel: 'chromium', headless: true });
 const browserVersion = browser.version();
 type FixtureSamples = {
   cold: Record<Arm, ColdSample[]>;

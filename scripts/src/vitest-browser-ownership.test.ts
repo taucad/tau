@@ -54,6 +54,12 @@ const facadePatterns = (): readonly ForbiddenPattern[] => [
   [['Test', 'Info'].join(''), 'Playwright-shaped test metadata'],
 ];
 
+const vitestPlaywrightConfigs = (): ReadonlyArray<readonly [path: string, source: string]> =>
+  textFiles().filter(
+    ([path, source]) =>
+      /vitest(?:\.[^.]+)*\.config\.ts$/u.test(path) && source.includes("from '@vitest/browser-playwright'"),
+  );
+
 describe('Vitest Browser test-runner ownership', () => {
   it('keeps removed runner packages, configs, commands, and artifacts out of the repository', () => {
     const driverName = ['play', 'wright'].join('');
@@ -93,6 +99,7 @@ describe('Vitest Browser test-runner ownership', () => {
     const allowedDriverFiles = new Set([
       '.agents/skills/audit-ui/scripts/axe-audit.mjs',
       'apps/react-e2e/browser-command.ts',
+      'apps/react-e2e/scripts/benchmark-bundler-products.mts',
       'scripts/src/reference-html.test.ts',
       'scripts/src/reference-html.ts',
     ]);
@@ -107,19 +114,26 @@ describe('Vitest Browser test-runner ownership', () => {
       .map(([path]) => path);
 
     expect(driverFiles).toEqual([...allowedDriverFiles].sort());
-    expect(installFiles).toEqual(['.github/workflows/ci.yml']);
+    // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
+    expect(installFiles.sort()).toEqual(
+      ['.agents/skills/create-repo/templates/ci.yml', '.github/workflows/ci.yml'].sort(),
+    );
   });
 
   it('documents every Browser Mode write-access requirement', () => {
     const allowWrite = ['allow', 'Write: true'].join('');
     const documentedAllowWrite = new RegExp(
-      `// Artifact requirement: [^\\n]+\\n\\s*api: \\{ ${allowWrite.replace(' ', '\\s*')} \\}`,
+      String.raw`// Artifact requirement: [^\n]+\n\s*api: \{ ${allowWrite.replace(' ', String.raw`\s*`)} \}`,
       'u',
     );
     const allowWriteFiles = textFiles().filter(([, source]) => source.includes(allowWrite));
 
     expect(allowWriteFiles.map(([path]) => path).sort()).toEqual(
-      ['apps/react-e2e/vitest.config.ts', 'apps/ui-e2e/vitest.config.ts'].sort(),
+      [
+        'apps/react-e2e/vitest.config.ts',
+        'apps/ui-e2e/vitest.config.ts',
+        'packages/plugins/rolldown/vitest.browser.benchmark.config.ts',
+      ].sort(),
     );
     for (const [, source] of allowWriteFiles) {
       expect(source).toMatch(documentedAllowWrite);
@@ -143,5 +157,58 @@ describe('Vitest Browser test-runner ownership', () => {
       expect(catalog).toContain(entry);
     }
     expect(new Set(lockedVersions)).toEqual(new Set(['4.1.11']));
+  });
+
+  it('launches every Vitest Playwright Chromium instance through managed full Chromium', () => {
+    const configs = vitestPlaywrightConfigs();
+    expect(configs.map(([path]) => path).sort()).toEqual(
+      [
+        'apps/react-e2e/vitest.bundlers.config.ts',
+        'apps/react-e2e/vitest.config.ts',
+        'apps/ui-e2e/vitest.config.ts',
+        'packages/geospec-engine/e2e/vitest.config.ts',
+        'packages/plugins/rolldown/vitest.browser.benchmark.config.ts',
+        'packages/plugins/rolldown/vitest.browser.config.ts',
+        'packages/plugins/rolldown/vitest.browser.nonisolated.config.ts',
+      ].sort(),
+    );
+
+    for (const [path, source] of configs) {
+      const chromiumInstances = source.match(/browser:\s*['"]chromium['"]/gu)?.length ?? 0;
+      const managedChannels = source.match(/channel:\s*['"]chromium['"]/gu)?.length ?? 0;
+      expect(chromiumInstances, `${path} must declare at least one Chromium instance`).toBeGreaterThan(0);
+      expect(managedChannels, `${path} must select managed full Chromium for every Chromium instance`).toBe(
+        chromiumInstances,
+      );
+      expect(source, `${path} must keep headless ownership at the Vitest Browser level`).toMatch(
+        /browser:\s*\{[\s\S]*?headless:\s*true/u,
+      );
+      expect(source, `${path} must not use ambient branded Chrome`).not.toMatch(/channel:\s*['"]chrome['"]/u);
+      expect(source, `${path} must not put headless inside Playwright launchOptions`).not.toMatch(
+        /launchOptions:\s*\{[^}]*headless:/u,
+      );
+    }
+  });
+
+  it('forbids capability skips in the required Chromium WebGPU cohort', () => {
+    const requiredSpecs = new Set([
+      'apps/ui-e2e/src/graphics-backend.spec.ts',
+      'apps/ui-e2e/src/section-view-contour-fill.spec.ts',
+      'apps/ui-e2e/src/section-view-control-restyle.spec.ts',
+      'apps/ui-e2e/src/section-view-overlap-cap-shading.spec.ts',
+      'apps/ui-e2e/src/section-view-overlap-performance-diagnostics.spec.ts',
+      'apps/ui-e2e/src/shader-fixture.spec.ts',
+      'apps/ui-e2e/src/user-project-thumbnail-generation.spec.ts',
+    ]);
+    const violations = textFiles()
+      .filter(([path]) => requiredSpecs.has(path))
+      .flatMap(([path, source]) =>
+        [
+          source.includes('WebGPU is not available in this browser runtime.') ? `${path}: capability skip` : undefined,
+          source.includes('isWebGpuAvailable') ? `${path}: property-presence helper` : undefined,
+        ].filter((violation): violation is string => violation !== undefined),
+      );
+
+    expect(violations).toEqual([]);
   });
 });

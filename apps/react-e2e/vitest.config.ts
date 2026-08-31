@@ -34,7 +34,7 @@ export default defineConfig({
       headless: true,
       // Artifact requirement: child-context and Electron trace attachments must survive target teardown.
       api: { allowWrite: true },
-      provider: playwright({ actionTimeout: 120_000 }),
+      provider: playwright({ actionTimeout: 120_000, launchOptions: { channel: 'chromium' } }),
       commands: {
         reactCaptureTargetDiagnostics,
         reactClickTarget,

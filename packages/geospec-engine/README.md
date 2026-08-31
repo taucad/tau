@@ -8,7 +8,7 @@ mesh oracles, the lazy BRep evidence ledger and its authenticated cache, the Ope
 the worker pool, and the `geospec` CLI.
 
 Authored `*.geospec.ts` files never import engine code. That is the point of the split: a spec depends on the
-Apache-2.0 substrate, and the engine is an implementation the host installs.
+Apache-2.0 substrate, and the Apache-2.0 engine is an implementation the host installs.
 
 ## Install and register
 
@@ -110,13 +110,8 @@ controls are explicit: `cache` and `cacheDirectory` belong to Node runner constr
 
 ## License
 
-Fair source: **[FSL-1.1-ALv2](./LICENSE)** (Functional Source License 1.1, Apache 2.0 Future License) — free for
-every purpose except a competing commercial offering, including internal and commercial use, CI, education, and
-research. It is source-available, not open source; the perimeter packages around it are.
-
-Every release converts to **Apache-2.0 two years after it is published**. The conversion date for a given release is
-recorded in that release's provenance record (schema: [`provenance.schema.json`](./provenance.schema.json)).
+**[Apache-2.0](./LICENSE)**. The engine may be used, modified, embedded, hosted, and redistributed, including in
+commercial and competing products, subject to the Apache licence and notice requirements.
 
 Running this engine puts no license obligation on your specs, your models, or your verdicts. See
-[LICENSING.md](../../LICENSING.md) at the repository root for the routing map, the internal-use FAQ, and the commercial
-contact.
+[LICENSING.md](../../LICENSING.md) at the repository root for the repository-wide licensing policy.

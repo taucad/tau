@@ -46,7 +46,6 @@ export type GeoSpecProtocolProvenance = {
   readonly engineDigest?: string;
   readonly build?: JSONValue;
   readonly license?: string;
-  readonly licenseConversionDate?: string;
 };
 
 /** Engine half of the Contract-B initialization handshake. @public */

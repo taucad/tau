@@ -5,10 +5,9 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Pins the DL4 release-provenance generator (`scripts/generate-provenance.mjs`)
+ * Pins the release-provenance generator (`scripts/generate-provenance.mjs`)
  * against the constraints of `provenance.schema.json`: required fields, const
- * values, date arithmetic (+2 years to the Apache-2.0 conversion), and a
- * SHA-256 digest per shipped artifact.
+ * values, and a SHA-256 digest per shipped artifact.
  */
 
 const scriptPath = join(import.meta.dirname, '../scripts/generate-provenance.mjs');
@@ -25,14 +24,14 @@ const withFixture = <Result>(run: (root: string) => Result): Result => {
       JSON.stringify({
         name: '@taucad/geospec-engine',
         version: '1.2.3',
-        license: 'FSL-1.1-Apache-2.0',
+        license: 'Apache-2.0',
         files: ['dist', 'LICENSE', 'provenance.json', 'missing-entry'],
       }),
     );
     mkdirSync(join(root, 'dist/nested'), { recursive: true });
     writeFileSync(join(root, 'dist/index.mjs'), 'export {};\n');
     writeFileSync(join(root, 'dist/nested/deep.mjs'), '// deep\n');
-    writeFileSync(join(root, 'LICENSE'), 'FSL-1.1-Apache-2.0\n');
+    writeFileSync(join(root, 'LICENSE'), 'Apache-2.0\n');
     return run(root);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -56,11 +55,9 @@ describe('generate-provenance.mjs', () => {
       expect(record).toHaveProperty(field);
     }
     expect(record['package']).toBe('@taucad/geospec-engine');
-    expect(record['license']).toBe('FSL-1.1-Apache-2.0');
-    expect(record['futureLicense']).toBe('Apache-2.0');
+    expect(record['license']).toBe('Apache-2.0');
     expect(record['version']).toMatch(new RegExp(schema.properties.version.pattern));
     expect(record['releaseDate']).toBe('2026-08-10');
-    expect(record['apacheConversionDate']).toBe('2028-08-10');
   });
 
   it('digests every existing files-array artifact recursively plus package.json, sorted, skipping missing entries', () => {
@@ -72,11 +69,6 @@ describe('generate-provenance.mjs', () => {
       expect(artifact.sha256).toMatch(shaPattern);
       expect(artifact.bytes).toBeGreaterThan(0);
     }
-  });
-
-  it('lands the conversion date on a real day across a leap boundary', () => {
-    const record = generate('2027-02-28');
-    expect(record['apacheConversionDate']).toBe('2029-02-28');
   });
 
   it('is byte-identical across consecutive generations at a fixed date', () => {

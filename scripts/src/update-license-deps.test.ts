@@ -10,7 +10,7 @@ const scanned = [
     license: 'Apache-2.0',
     directory: '/repo/libs/json-schema',
   },
-  { name: 'geospec', version: '0.1.0-beta.0', license: 'FSL-1.1-ALv2', directory: '/repo/packages/geospec' },
+  { name: 'geospec', version: '0.1.0-beta.0', license: 'Apache-2.0', directory: '/repo/packages/geospec' },
   {
     name: '@taucad/kcl-wasm-lib',
     version: '0.1.4',

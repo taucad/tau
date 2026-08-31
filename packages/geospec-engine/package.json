@@ -37,7 +37,7 @@
     "geospec": "./dist/cli/main.mjs"
   },
   "author": "Richard Fontein",
-  "license": "FSL-1.1-Apache-2.0",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=24.0.0"
   },

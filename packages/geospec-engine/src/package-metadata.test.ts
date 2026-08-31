@@ -104,10 +104,10 @@ describe('@taucad/geospec-engine package metadata', () => {
     );
   });
 
-  it('ships its fair-source licence in the tarball', async () => {
+  it('ships its Apache-2.0 licence in the tarball', async () => {
     const packageJson = await readPackageJson();
 
-    expect(packageJson.license).toBe('FSL-1.1-Apache-2.0');
+    expect(packageJson.license).toBe('Apache-2.0');
     expect(packageJson.files).toContain('LICENSE');
   });
 });

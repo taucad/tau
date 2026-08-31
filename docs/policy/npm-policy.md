@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-08-25'
+updated: '2026-08-31'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -284,26 +284,26 @@ export { default } from './plugin';
 
 Every publishable package must declare these fields. Missing fields fail `publint`.
 
-| Field                   | Required value                                                                                                    |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `name`                  | `@taucad/<pkg>`                                                                                                   |
-| `version`               | SemVer per `docs/policy/version-policy.md` (managed by Nx Release)                                                |
-| `description`           | One-line, ≤120 chars, shown on npmjs.com search                                                                   |
-| `keywords`              | At least 3 relevant terms                                                                                         |
-| `license`               | Per the license partition in Rule 12 — `Apache-2.0` for every package in this scope except the fair-source engine |
-| `author`                | Same canonical author across all packages                                                                         |
-| `repository`            | `{ "type": "git", "url": "git+https://github.com/taucad/tau.git", "directory": "<package directory>" }`           |
-| `homepage`              | `https://tau.new/docs/<pkg>` (or repo URL until docs land)                                                        |
-| `bugs`                  | `{ "url": "https://github.com/taucad/tau/issues" }`                                                               |
-| `type`                  | `"module"`                                                                                                        |
-| `engines`               | `{ "node": ">=24.0.0" }` (matches the workspace's minimum supported Node release)                                 |
-| `sideEffects`           | `false` unless the package has top-level side effects (rare)                                                      |
-| `files`                 | `["dist", "README.md", "CHANGELOG.md"]` — never include source, tests, or configs                                 |
-| `main`                  | `./dist/index.mjs` for packages with a root runtime export                                                        |
-| `types`                 | `./dist/index.d.mts` for packages with a root export                                                              |
-| `exports`               | Map every public subpath to its source `.ts` (workspace dev)                                                      |
-| `publishConfig.exports` | Map every public subpath to its ESM output (publish-time override)                                                |
-| `publishConfig.access`  | `"public"` for scoped packages                                                                                    |
+| Field                   | Required value                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| `name`                  | `@taucad/<pkg>`                                                                                         |
+| `version`               | SemVer per `docs/policy/version-policy.md` (managed by Nx Release)                                      |
+| `description`           | One-line, ≤120 chars, shown on npmjs.com search                                                         |
+| `keywords`              | At least 3 relevant terms                                                                               |
+| `license`               | `Apache-2.0` per the repository-wide rule in Rule 12                                                    |
+| `author`                | Same canonical author across all packages                                                               |
+| `repository`            | `{ "type": "git", "url": "git+https://github.com/taucad/tau.git", "directory": "<package directory>" }` |
+| `homepage`              | `https://tau.new/docs/<pkg>` (or repo URL until docs land)                                              |
+| `bugs`                  | `{ "url": "https://github.com/taucad/tau/issues" }`                                                     |
+| `type`                  | `"module"`                                                                                              |
+| `engines`               | `{ "node": ">=24.0.0" }` (matches the workspace's minimum supported Node release)                       |
+| `sideEffects`           | `false` unless the package has top-level side effects (rare)                                            |
+| `files`                 | `["dist", "README.md", "CHANGELOG.md"]` — never include source, tests, or configs                       |
+| `main`                  | `./dist/index.mjs` for packages with a root runtime export                                              |
+| `types`                 | `./dist/index.d.mts` for packages with a root export                                                    |
+| `exports`               | Map every public subpath to its source `.ts` (workspace dev)                                            |
+| `publishConfig.exports` | Map every public subpath to its ESM output (publish-time override)                                      |
+| `publishConfig.access`  | `"public"` for scoped packages                                                                          |
 
 No `prepublishOnly` hook: `nx.json` `targetDefaults["nx-release-publish"].dependsOn` includes `pkgcheck`, so the gate runs as a native dependency of publish for every package. Do not add the hook back.
 
@@ -439,38 +439,33 @@ Publishable packages must declare `"private": false` (or omit the field entirely
 
 `libs/*` packages (internal-only) **must** declare `"private": true` and are never published.
 
-### 12. Apache-2.0 by Default, FSL Only for the GeoSpec Engine
+### 12. Use Apache-2.0 for Every Workspace Package
 
-Every workspace package — published _and_ private — declares a `license` field. Use Apache-2.0 everywhere except the
-explicit GeoSpec engine exception.
+Every workspace package — published _and_ private — declares `"license": "Apache-2.0"`.
 
-| Bucket           | Projects                                                 | `license` field      | `LICENSE` file                            |
-| ---------------- | -------------------------------------------------------- | -------------------- | ----------------------------------------- |
-| Apache default   | Every workspace package except `packages/geospec-engine` | `Apache-2.0`         | Required — canonical Apache-2.0 text      |
-| Engine exception | `packages/geospec-engine`                                | `FSL-1.1-Apache-2.0` | Required — FSL 1.1 Apache-2.0-future text |
+| Projects                | `license` field | `LICENSE` file                       |
+| ----------------------- | --------------- | ------------------------------------ |
+| Every workspace package | `Apache-2.0`    | Required — canonical Apache-2.0 text |
 
 Rules that follow from the table:
 
 - Published package license files are named exactly `LICENSE` — npm includes them in the tarball regardless of the
   `files` array. The private repository root retains its historical lowercase [`license`](../../license) filename.
   Verify published artifacts with `npm pack --dry-run | grep LICENSE`.
-- License texts are **verbatim**. Do not add a preamble, summary, or extra restriction to either text.
+- License texts are **verbatim**. Do not add a preamble, summary, or extra restriction.
 - **Every** workspace package carries a same-directory license file, private ones included. Apache packages use bytes
   identical to the canonical root text. `scripts/src/validate-license-partitions.ts` proves the SPDX field, file
   presence, and byte identity across the workspace.
-- Describe the engine as **fair source** or **source-available**, never as open source. Describe the rest of Tau's
-  first-party code as Apache-2.0 open source.
 - The workspace generator always emits Apache-2.0. Architectural placement still derives tags, privacy, and build
-  defaults, but never legal terms. Create the singular FSL engine exception deliberately rather than as a generator
-  option.
-- Moving code between the editor, API, `apps/libs`, `libs`, and ordinary `packages` keeps Apache-2.0 unchanged. Review
-  any extraction from `packages/geospec-engine` and all third-party code separately.
+  defaults, but never legal terms.
+- Moving Tau-authored code between the editor, API, `apps/libs`, `libs`, ordinary packages, the GeoSpec substrate, and
+  the GeoSpec engine keeps Apache-2.0 unchanged. Review third-party code separately.
 
 Routing prose for consumers lives in `LICENSING.md` at the repository root. The current decision record is
 `docs/research/apache-default-relicensing-blueprint.md`; older licensing comparisons remain historical evidence.
 
-**Why**: the tarball is the unit of distribution, so the SPDX field and the license text must travel with each package
-independently. The single exception remains unambiguous without coupling ordinary package placement to licensing.
+**Why**: the tarball is the unit of distribution, so the SPDX field and licence text must travel with each package
+independently. One repository-wide licence avoids coupling package placement to legal terms.
 
 ## Decision Tables
 
@@ -515,7 +510,7 @@ Before merging a PR that touches a publishable package's `package.json` or `tsdo
 - [ ] README covers every required section (Rule 8)
 - [ ] Build-time integrations declared as optional peers (Rule 10)
 - [ ] `"private": false` (or omitted) on publishable packages (Rule 11)
-- [ ] `license` field matches the partition bucket and a verbatim `LICENSE` file is present where required (Rule 12)
+- [ ] `license` is `Apache-2.0` and a verbatim canonical `LICENSE` file is present (Rule 12)
 
 ## Known Limitations
 

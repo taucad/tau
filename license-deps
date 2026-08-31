@@ -7,11 +7,9 @@ bundled into it — and their respective licenses. It ships inside the artifact 
 
 ## Licensing Overview
 
-Tau source is licensed per directory. The repository root and published perimeter
-packages are **[Apache-2.0](./license)**; `apps/ui`, `apps/api`, and every
-application library under `apps/libs/*` are AGPL-3.0-only; the GeoSpec engine is fair source under
-FSL-1.1-Apache-2.0, converting to Apache-2.0 two years after each release.
-Routing map: **[LICENSING.md](./LICENSING.md)**.
+All Tau-authored source is **[Apache-2.0](./license)**, including the applications,
+libraries, tools, examples, GeoSpec engine, and other published packages.
+Repository licensing details: **[LICENSING.md](./LICENSING.md)**.
 
 Some third-party dependencies impose additional obligations on **combined
 distributions** that include them:

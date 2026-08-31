@@ -20,7 +20,7 @@
     "typescript"
   ],
   "author": "Richard Fontein",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "exports": {
     "./workspace-path-resolver": "./src/workspace-path-resolver.ts",
     "./path-subscriber-registry": "./src/path-subscriber-registry.ts",

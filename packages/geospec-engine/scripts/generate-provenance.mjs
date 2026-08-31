@@ -1,8 +1,7 @@
 /**
  * Generates the release provenance record (`provenance.json`) required by
- * charter DL4: every published engine artifact carries its release date, its
- * FSL-1.1-Apache-2.0 license, and the date the release converts to Apache-2.0
- * (release + 2 years), plus a SHA-256 digest of every shipped artifact except
+ * charter DL4: every published engine artifact carries its release date,
+ * Apache-2.0 license, and a SHA-256 digest of every shipped artifact except
  * this record itself. A self-manifest cannot hash its own final bytes.
  *
  * Runs at `prepack`, so the record always describes the exact bytes being
@@ -91,16 +90,11 @@ for (const entry of manifest.files ?? []) {
 }
 artifactPaths.push(join(packageRoot, 'package.json'));
 
-const conversion = new Date(`${releaseDate}T00:00:00Z`);
-conversion.setUTCFullYear(conversion.getUTCFullYear() + 2);
-
 const record = {
   package: manifest.name,
   version: manifest.version,
   releaseDate,
   license: manifest.license,
-  futureLicense: 'Apache-2.0',
-  apacheConversionDate: conversion.toISOString().slice(0, 10),
   artifacts: artifactPaths
     .map((full) => {
       const bytes = readFileSync(full);
@@ -115,5 +109,5 @@ const record = {
 
 writeFileSync(join(packageRoot, 'provenance.json'), `${JSON.stringify(record, null, 2)}\n`);
 console.log(
-  `provenance.json: ${record.version} released ${releaseDate}, Apache-2.0 from ${record.apacheConversionDate}, ${record.artifacts.length} artifacts`,
+  `provenance.json: ${record.version} released ${releaseDate} under ${record.license}, ${record.artifacts.length} artifacts`,
 );

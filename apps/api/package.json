@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "private": true,
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "dependencies": {
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/lib-storage": "catalog:",

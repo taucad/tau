@@ -19,7 +19,7 @@ The AI-native CAD platform — open-source, browser-based, and kernel-agnostic. 
 
 ## Features
 
-- **Open Source** — Apache-2.0 packages, AGPL-3.0 apps (see [LICENSING.md](LICENSING.md))
+- **Open Source** — Apache-2.0 across the complete Tau codebase (see [LICENSING.md](LICENSING.md))
 - **Browser-Based** — Run CAD on mobile or desktop, no **installation** required
 - **Code-Based CAD** — Precise, version-controlled designs through code
 - **AI-Powered** — Natural language interface for design creation and modification
@@ -92,15 +92,10 @@ Special thanks to [OpenSCAD Playground](https://github.com/openscad/openscad-pla
 
 ## License
 
-Tau is licensed per directory. The repository root is **[Apache-2.0](license)**, which covers every published
-`@taucad/*` package and the `geospec` spec package — everything an npm consumer or embedder installs. The applications
-(`apps/ui`, `apps/api`) and their app libraries are **AGPL-3.0-only**, with an additional permission under AGPL section
-7 allowing combination with the GeoSpec engine. The GeoSpec engine (`@taucad/geospec-engine`) is **fair source** under
-FSL-1.1-Apache-2.0 — free for every purpose except a competing commercial offering, and Apache-2.0 two years after each
-release.
+All Tau-authored code is **[Apache-2.0](license)**, including the applications, internal libraries, tools, examples,
+published packages, and the GeoSpec engine. It may be forked, modified, embedded, hosted, and redistributed, including
+commercially, subject to the Apache licence and notice requirements.
 
-**[LICENSING.md](LICENSING.md) is the routing map**: which license applies where, what the FSL conversion means, and an
-internal-use FAQ (short version: running GeoSpec, including commercially and in CI, is free, and no engine license
-reaches your specs, your models, or your verdicts).
+See **[LICENSING.md](LICENSING.md)** for repository-wide details, previous-release treatment, and third-party notices.
 
 Full third-party license inventory: [license-deps](license-deps).

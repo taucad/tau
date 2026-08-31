@@ -257,8 +257,8 @@ function appendCapTriangles({
   colors,
   uvs,
 }: {
-  readonly contour: readonly Vector2[];
-  readonly holes: readonly Vector2[][];
+  readonly contour: Vector2[];
+  readonly holes: Vector2[][];
   readonly z: number;
   readonly color: Color;
   readonly bounds: Box2;

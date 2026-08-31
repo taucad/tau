@@ -108,4 +108,23 @@ describe('registerMonacoNavigation', () => {
     disposable.dispose();
     workspaceFs.dispose();
   });
+
+  it('rejects a file URI that escapes the workspace root', () => {
+    const workspaceFs = createMonacoWorkspaceFs(monaco);
+    const { editorRef, sent } = createNavDeps();
+    const registerSpy = vi.spyOn(monaco.editor, 'registerEditorOpener');
+    const disposable = registerMonacoNavigation({ monaco, editorRef, workspaceFs });
+    const opener = registerSpy.mock.calls[0]![0] as {
+      openCodeEditor(s: unknown, resource: monaco.Uri): boolean;
+    };
+
+    expect(opener.openCodeEditor({} as unknown, monaco.Uri.from({ scheme: 'file', path: '/../outside.ts' }))).toBe(
+      false,
+    );
+    expect(sent).toEqual([]);
+
+    registerSpy.mockRestore();
+    disposable.dispose();
+    workspaceFs.dispose();
+  });
 });

@@ -96,7 +96,16 @@ class MonacoWorkspaceFsImpl implements MonacoWorkspaceFs {
     if (!fsProvider?.peekText) {
       return undefined;
     }
-    const text = fsProvider.peekText(uri);
+    let text: string | undefined;
+    try {
+      text = fsProvider.peekText(uri);
+    } catch (error) {
+      debugCmdClick('MonacoWorkspaceFs.peekModel:fsProvider-peekText-throw', {
+        uri: uri.toString(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
     if (text === undefined) {
       return undefined;
     }

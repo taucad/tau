@@ -51,6 +51,34 @@ export const idPrefix = {
    */
   run: 'run',
   /**
+   * A durable job ID. One logical job may have multiple execution attempts.
+   */
+  job: 'job',
+  /**
+   * One at-least-once execution attempt for a durable job.
+   */
+  attempt: 'att',
+  /**
+   * An immutable job or revision artifact.
+   */
+  artifact: 'art',
+  /**
+   * An immutable project revision.
+   */
+  revision: 'rev',
+  /**
+   * An ordered durable stream event.
+   */
+  event: 'evt',
+  /**
+   * A durable ordered event stream.
+   */
+  stream: 'str',
+  /**
+   * A capability-advertising job execution host.
+   */
+  runner: 'rnr',
+  /**
    * A request ID.
    */
   request: 'req',

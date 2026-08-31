@@ -82,16 +82,12 @@ describe('createSkillResolver', () => {
     );
   });
 
-  it('should prefer user skills over system and legacy sources and preserve shadow metadata', async () => {
+  it('should prefer user skills over system ones and preserve shadow metadata', async () => {
     const resolver = createMemoryResolver({
       '.agents/skills/create-skill/SKILL.md': skillMarkdown({
         name: 'create-skill',
         description: 'Workspace override',
         source: 'user',
-      }),
-      '.tau/skills/create-skill/SKILL.md': skillMarkdown({
-        name: 'create-skill',
-        description: 'Legacy override',
       }),
     });
 
@@ -105,10 +101,23 @@ describe('createSkillResolver', () => {
         skillPath: '.agents/skills/create-skill/SKILL.md',
         shadowedSources: expect.arrayContaining([
           expect.objectContaining({ source: 'system', resourceUri: 'system:skills/create-skill/SKILL.md' }),
-          expect.objectContaining({ source: 'legacy', skillPath: '.tau/skills/create-skill/SKILL.md' }),
         ]),
       }),
     );
+  });
+
+  // `.agents/skills` is the only filesystem root the resolver reads (L7).
+  it('never reads the legacy .tau/skills directory', async () => {
+    const resolver = createMemoryResolver({
+      '.tau/skills/legacy-only/SKILL.md': skillMarkdown({
+        name: 'legacy-only',
+        description: 'Legacy override',
+      }),
+    });
+
+    const listing = await resolver.listSkills();
+
+    expect(listing.find((skill) => skill.name === 'legacy-only')).toBeUndefined();
   });
 
   it('should reflect edited content on the next prompt listing (no per-chat freeze)', async () => {

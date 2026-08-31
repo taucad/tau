@@ -36,9 +36,8 @@ export function titleFromSkillName(skillName: string): string {
 /**
  * Builds the merged, user-priority skills catalog from the workspace.
  *
- * `.agents/skills/<name>/SKILL.md` is canonical. `.tau/skills/<name>/SKILL.md`
- * is read as a lower-priority migration fallback so older workspaces still
- * surface their knowledge without becoming the source of truth.
+ * `.agents/skills/<name>/SKILL.md` is the only filesystem skills root; the
+ * legacy `.tau/skills` fallback was deleted (blueprint L7).
  */
 export function useSkillsCatalog(): SkillMetadata[] {
   const { readFile, treeService } = useFileManager();

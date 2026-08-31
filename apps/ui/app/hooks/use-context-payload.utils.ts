@@ -5,7 +5,6 @@ const frontmatterMatch = /^---\n([\S\s]*?)\n---/;
 const skillFileSuffix = /\/SKILL\.md$/;
 
 export const canonicalSkillsDirectory = '.agents/skills';
-export const legacySkillsDirectory = '.tau/skills';
 
 export type SkillSourceLayer = {
   readonly directory: string;
@@ -15,7 +14,6 @@ export type SkillSourceLayer = {
 
 export const defaultSkillSourceLayers: readonly SkillSourceLayer[] = [
   { directory: canonicalSkillsDirectory, source: 'user', priority: 100 },
-  { directory: legacySkillsDirectory, source: 'legacy', priority: 10 },
 ];
 
 function parseScalar(frontmatter: string, key: string): string | undefined {

@@ -252,11 +252,9 @@ describe('useContextPayload', () => {
     expect(result.current!.skills).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'good-skill' })]));
   });
 
-  it('should use legacy .tau/skills as lower-priority fallback when no canonical skill exists', async () => {
+  // `.agents/skills` is the only filesystem skills root (blueprint L7).
+  it('ignores the legacy .tau/skills directory entirely', async () => {
     mockListDirectory.mockImplementation(async (path: string) => {
-      if (path === '.agents/skills') {
-        return [];
-      }
       if (path === '.tau/skills') {
         return [{ name: 'legacy-skill', path: '.tau/skills/legacy-skill', isFolder: true, size: 0, mtimeMs: 0 }];
       }
@@ -273,65 +271,12 @@ describe('useContextPayload', () => {
 
     await waitFor(() => {
       expect(result.current?.skills).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ name: 'legacy-skill' }),
-          expect.objectContaining({ name: 'create-skill', source: 'system' }),
-        ]),
+        expect.arrayContaining([expect.objectContaining({ name: 'create-skill', source: 'system' })]),
       );
     });
 
-    expect(result.current!.skills).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: 'legacy-skill',
-          path: '.tau/skills/legacy-skill',
-          source: 'legacy',
-        }),
-      ]),
-    );
-  });
-
-  it('should shadow legacy skills when a canonical .agents skill has the same name', async () => {
-    mockListDirectory.mockImplementation(async (path: string) => {
-      if (path === '.agents/skills') {
-        return [skillDirectoryRow('woodworking')];
-      }
-      if (path === '.tau/skills') {
-        return [{ name: 'woodworking', path: '.tau/skills/woodworking', isFolder: true, size: 0, mtimeMs: 0 }];
-      }
-      return [];
-    });
-    mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '.agents/skills/woodworking/SKILL.md') {
-        return makeSkillMd('woodworking', 'Canonical skill');
-      }
-      if (path === '.tau/skills/woodworking/SKILL.md') {
-        return makeSkillMd('woodworking', 'Legacy skill');
-      }
-      throw new Error('not found');
-    });
-
-    const { result } = renderHook(() => useContextPayload());
-
-    await waitFor(() => {
-      expect(result.current?.skills).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ name: 'woodworking' }),
-          expect.objectContaining({ name: 'create-skill', source: 'system' }),
-        ]),
-      );
-    });
-
-    expect(result.current!.skills).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: 'woodworking',
-          description: 'Canonical skill',
-          path: '.agents/skills/woodworking',
-          shadowedSources: [expect.objectContaining({ source: 'legacy', path: '.tau/skills/woodworking' })],
-        }),
-      ]),
-    );
+    expect(result.current!.skills).not.toContainEqual(expect.objectContaining({ name: 'legacy-skill' }));
+    expect(mockListDirectory).not.toHaveBeenCalledWith('.tau/skills');
   });
 
   it('should discover built-in system skills as virtual resources without filesystem reads', async () => {

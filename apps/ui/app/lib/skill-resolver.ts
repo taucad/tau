@@ -5,7 +5,6 @@ import { tauStoreSkills } from '#lib/tau-plugin-store-catalog.js';
 import {
   canonicalSkillsDirectory,
   fingerprintSkillContent,
-  legacySkillsDirectory,
   mergeSkillMetadata,
   parseSkillFrontmatter,
 } from '#hooks/use-context-payload.utils.js';
@@ -51,7 +50,6 @@ export function createSkillResolver(deps: SkillResolverDependencies): SkillResol
       discoverFilesystemSkills(deps, canonicalSkillsDirectory, 'user'),
       discoverTauStoreManifestSkills(deps),
       discoverSystemSkills(),
-      discoverFilesystemSkills(deps, legacySkillsDirectory, 'legacy'),
     ]);
 
     return mergeSkillMetadata(discovered.flat());

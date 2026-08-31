@@ -8,6 +8,11 @@ const seedRoute = '/__e2e/project-file-tree';
 const seedProjectName = 'sgenoud/models file-tree e2e';
 
 const filesPane = (): Locator => selectors.getByRole('region', { name: /^Files for /u }).first();
+const fileActions = (): Locator =>
+  selectors
+    .getByCss('[data-file-pane-id]:has([role="region"][aria-label^="Files for "])')
+    .first()
+    .getByRole('group', { name: /^File actions for /u });
 
 function treeItem(path: string): Locator {
   return filesPane().getByCss(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
@@ -83,7 +88,7 @@ async function focusFolder(path: string): Promise<void> {
 
 async function createFolder(parentPath: string, name: string): Promise<string> {
   await focusFolder(parentPath);
-  await target.click(filesPane().getByRole('button', { name: 'Create new folder' }));
+  await target.click(fileActions().getByRole('button', { name: 'Create new folder' }));
   const input = filesPane().getByPlaceholder('Folder name');
   await target.fill(input, name);
   await target.press(input, 'Enter');
@@ -95,7 +100,7 @@ async function createFolder(parentPath: string, name: string): Promise<string> {
 
 async function createBlankFile(parentPath: string, name: string): Promise<string> {
   await focusFolder(parentPath);
-  const createButton = filesPane().getByRole('button', { name: 'Create new file' });
+  const createButton = fileActions().getByRole('button', { name: 'Create new file' });
   await target.focus(createButton);
   await target.press(createButton, 'Enter');
   const blankMenuItem = selectors.getByRole('menuitem', { name: 'Blank' });
@@ -417,7 +422,7 @@ test.describe('project file tree', () => {
     await target.expectVisible(treeItem('public/models/nested/strainer.js'));
     await target.press(searchInput, 'Escape');
 
-    await target.click(filesPane().getByRole('button', { name: 'Collapse all folders' }));
+    await target.click(fileActions().getByRole('button', { name: 'Collapse all folders' }));
     await target.expectCount(treeItem('public/models/honeycomb.js'), 0);
 
     await expandPath('public/models');

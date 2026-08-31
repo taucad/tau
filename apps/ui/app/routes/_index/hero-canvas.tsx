@@ -12,6 +12,7 @@ import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/thre
 import { normalizeSampledPoints } from '#routes/_index/hero-points.js';
 import gear12Url from '#routes/_index/assets/gear-12.glb?url';
 import gear8Url from '#routes/_index/assets/gear-8.glb?url';
+import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 // Interaction tuning against `heroTargetRadius` (10): the gaussian falloff in
 // the material bounds displacement at `strength` (no shell pile-up, and safe
@@ -23,6 +24,7 @@ const pointerRepulsionStrength = 2.4;
 async function loadSampledPoints(url: string, pointCount: number): Promise<SampledPoints> {
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(url);
+  applyCanonicalGltfWorld(gltf.scene);
 
   let mesh: THREE.Mesh | undefined;
   gltf.scene.traverse((object) => {

@@ -58,7 +58,6 @@ describe('kernel-worker constants', () => {
       'parameterFileResolver',
       'parameterCache',
       'geometryCache',
-      'gltfCoordinateTransform',
       'gltfEdgeDetection',
     ]);
   });

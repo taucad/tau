@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/addons';
 import { Check, X, Loader2 } from 'lucide-react';
 import type { Geometry } from '@taucad/types';
 import { cn } from '#utils/ui.utils.js';
+import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 // A common desktop FDM print bed edge, in millimetres. The bounding-box check
 // is real geometry verification, framed for a maker audience.
@@ -25,6 +26,7 @@ async function measureGeometry(geometry: Geometry): Promise<Measured | undefined
 
   const loader = new GLTFLoader();
   const gltf = await loader.parseAsync(geometry.content.buffer, '');
+  applyCanonicalGltfWorld(gltf.scene);
   const box = new THREE.Box3().setFromObject(gltf.scene);
   if (box.isEmpty()) {
     return undefined;

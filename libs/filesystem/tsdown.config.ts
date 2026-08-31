@@ -2,7 +2,13 @@ import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
 const baseConfig: UserConfig = {
-  entry: ['src/index.ts', 'src/backend/index.ts', 'src/bundled-types-mount.ts', 'src/storage-root-key.ts'],
+  entry: [
+    'src/index.ts',
+    'src/backend/index.ts',
+    'src/bundled-types-mount.ts',
+    'src/revisions/index.ts',
+    'src/storage-root-key.ts',
+  ],
   sourcemap: false,
   clean: ['dist'],
   dts: true,

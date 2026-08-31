@@ -27,6 +27,7 @@
     ".": "./src/index.ts",
     "./backend": "./src/backend/index.ts",
     "./bundled-types-mount": "./src/bundled-types-mount.ts",
+    "./revisions": "./src/revisions/index.ts",
     "./storage-root-key": "./src/storage-root-key.ts"
   },
   "publishConfig": {
@@ -46,6 +47,11 @@
         "types": "./dist/bundled-types-mount.d.mts",
         "import": "./dist/bundled-types-mount.mjs",
         "default": "./dist/bundled-types-mount.mjs"
+      },
+      "./revisions": {
+        "types": "./dist/revisions/index.d.mts",
+        "import": "./dist/revisions/index.mjs",
+        "default": "./dist/revisions/index.mjs"
       },
       "./storage-root-key": {
         "types": "./dist/storage-root-key.d.mts",

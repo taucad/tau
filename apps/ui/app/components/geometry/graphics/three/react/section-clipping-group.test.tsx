@@ -7,8 +7,20 @@ import type { WebGLRenderer } from 'three';
 import { createRoot, extend } from '@react-three/fiber';
 import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
 import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
+import {
+  commitSectionViewSafeSnapshot,
+  createSectionViewSafeSnapshotStore,
+} from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 
 const testPlane = new ActualThree.Plane(new ActualThree.Vector3(0, 0, 1), 0);
+const testSnapshotStore = createSectionViewSafeSnapshotStore();
+commitSectionViewSafeSnapshot(testSnapshotStore, {
+  identity: 'test',
+  sourceIdentity: 'test-source',
+  kind: 'complete',
+  plane: testPlane,
+});
+const testSnapshotRef = { current: testSnapshotStore };
 
 /** Minimal renderer stub — avoids instantiating THREE.WebGLRenderer under jsdom. */
 function createStubWebGlRenderer(): WebGLRenderer {
@@ -44,6 +56,7 @@ describe('SectionClippingGroup', () => {
       readonly enabled?: boolean;
       readonly enableMesh?: boolean;
       readonly enableLines?: boolean;
+      readonly snapshotStore?: ReturnType<typeof createSectionViewSafeSnapshotStore>;
     } = {},
   ): Promise<{
     cleanup: () => void;
@@ -93,6 +106,7 @@ describe('SectionClippingGroup', () => {
             enabled={enabled}
             innerRef={innerRef}
             plane={testPlane}
+            snapshotRef={{ current: options.snapshotStore ?? testSnapshotStore }}
           >
             <group ref={innerRef}>
               <primitive object={meshOne} />
@@ -123,7 +137,7 @@ describe('SectionClippingGroup', () => {
 
     expect(innerRef.current?.parent).toBeInstanceOf(ClippingGroup);
     const parent = innerRef.current?.parent as ClippingGroup;
-    expect(parent.clippingPlanes[0]).toBe(testPlane);
+    expect(parent.clippingPlanes[0]).toBe(testSnapshotStore.committed?.plane);
     expect(parent.enabled).toBe(true);
     expect(parent.clipIntersection).toBe(false);
     expect(parent.clipShadows).toBe(false);
@@ -135,13 +149,29 @@ describe('SectionClippingGroup', () => {
     cleanup();
   });
 
+  it.each(['webgl', 'webgpu'] as const)(
+    'keeps the ordinary view unclipped on %s until a safe snapshot is committed',
+    async (backend) => {
+      const snapshotStore = createSectionViewSafeSnapshotStore();
+      const { cleanup, gl, innerRef, meshMaterials } = await mountSectionClippingGroup(backend, { snapshotStore });
+
+      expect(gl.localClippingEnabled).toBe(false);
+      expect(meshMaterials.every((material) => !material.clippingPlanes?.length)).toBe(true);
+      if (backend === 'webgpu') {
+        expect((innerRef.current?.parent as ClippingGroup | undefined)?.enabled).toBe(false);
+      }
+
+      cleanup();
+    },
+  );
+
   it('applies clippingPlanes to meshes on WebGL and toggles localClippingEnabled', async () => {
     const { cleanup, gl, meshMaterials, lineMaterial } = await mountSectionClippingGroup('webgl');
 
     expect(gl.localClippingEnabled).toBe(true);
     for (const mat of meshMaterials) {
       expect(mat.clippingPlanes).toHaveLength(1);
-      expect(mat.clippingPlanes![0]).toBe(testPlane);
+      expect(mat.clippingPlanes![0]).toBe(testSnapshotStore.committed?.plane);
     }
     expect(lineMaterial.clippingPlanes).toHaveLength(1);
 
@@ -170,7 +200,14 @@ describe('SectionClippingGroup', () => {
 
       root.render(
         <ThreeGraphicsBackendProvider value='webgl'>
-          <SectionClippingGroup enableLines enableMesh enabled={false} innerRef={innerRef} plane={testPlane}>
+          <SectionClippingGroup
+            enableLines
+            enableMesh
+            enabled={false}
+            innerRef={innerRef}
+            plane={testPlane}
+            snapshotRef={testSnapshotRef}
+          >
             <group ref={innerRef}>
               <primitive object={mesh} />
             </group>
@@ -211,7 +248,14 @@ describe('SectionClippingGroup', () => {
     const renderClippingGroup = (enableMesh: boolean): void => {
       root.render(
         <ThreeGraphicsBackendProvider value='webgl'>
-          <SectionClippingGroup enableLines enableMesh={enableMesh} enabled innerRef={innerRef} plane={testPlane}>
+          <SectionClippingGroup
+            enableLines
+            enableMesh={enableMesh}
+            enabled
+            innerRef={innerRef}
+            plane={testPlane}
+            snapshotRef={testSnapshotRef}
+          >
             <group ref={innerRef}>
               <primitive object={mesh} />
             </group>
@@ -224,7 +268,7 @@ describe('SectionClippingGroup', () => {
       renderClippingGroup(true);
     });
     expect(meshMat.clippingPlanes).toHaveLength(1);
-    expect(meshMat.clippingPlanes![0]).toBe(testPlane);
+    expect(meshMat.clippingPlanes![0]).toBe(testSnapshotStore.committed?.plane);
 
     await act(async () => {
       renderClippingGroup(false);
@@ -235,7 +279,7 @@ describe('SectionClippingGroup', () => {
       renderClippingGroup(true);
     });
     expect(meshMat.clippingPlanes).toHaveLength(1);
-    expect(meshMat.clippingPlanes![0]).toBe(testPlane);
+    expect(meshMat.clippingPlanes![0]).toBe(testSnapshotStore.committed?.plane);
 
     act(() => {
       root.unmount();
@@ -271,7 +315,14 @@ describe('SectionClippingGroup', () => {
 
       root.render(
         <ThreeGraphicsBackendProvider value='webgl'>
-          <SectionClippingGroup enableLines enableMesh={false} enabled innerRef={innerRef} plane={testPlane}>
+          <SectionClippingGroup
+            enableLines
+            enableMesh={false}
+            enabled
+            innerRef={innerRef}
+            plane={testPlane}
+            snapshotRef={testSnapshotRef}
+          >
             <group ref={innerRef}>
               <primitive object={mesh} />
               <primitive object={lines} />
@@ -321,7 +372,14 @@ describe('SectionClippingGroup', () => {
 
       rootA.render(
         <ThreeGraphicsBackendProvider value='webgl'>
-          <SectionClippingGroup enableLines enableMesh enabled innerRef={innerRefA} plane={testPlane}>
+          <SectionClippingGroup
+            enableLines
+            enableMesh
+            enabled
+            innerRef={innerRefA}
+            plane={testPlane}
+            snapshotRef={testSnapshotRef}
+          >
             <group ref={innerRefA}>
               <primitive object={meshA} />
             </group>
@@ -331,7 +389,14 @@ describe('SectionClippingGroup', () => {
 
       rootB.render(
         <ThreeGraphicsBackendProvider value='webgl'>
-          <SectionClippingGroup enableLines enableMesh enabled={false} innerRef={innerRefB} plane={testPlane}>
+          <SectionClippingGroup
+            enableLines
+            enableMesh
+            enabled={false}
+            innerRef={innerRefB}
+            plane={testPlane}
+            snapshotRef={testSnapshotRef}
+          >
             <group ref={innerRefB}>
               <primitive object={meshB} />
             </group>

@@ -5,7 +5,6 @@ const inverseMatrix = new THREE.Matrix4();
 const localRay = new THREE.Ray();
 const worldPoint = new THREE.Vector3();
 
-export const defaultRaycastClipEpsilon = 1e-6;
 export const defaultMaxRaycastCandidateHitsPerMesh = 1024;
 
 export type RaycastClipState = Readonly<{
@@ -31,7 +30,8 @@ const hasActiveClipping = (clipping: RaycastClipState | undefined): clipping is 
   Boolean(clipping?.enabled && clipping.planes.length > 0);
 
 const passesClipping = (point: THREE.Vector3, clipping: RaycastClipState): boolean => {
-  const epsilon = clipping.epsilon ?? defaultRaycastClipEpsilon;
+  const epsilon =
+    clipping.epsilon ?? Math.max(1, Math.abs(point.x), Math.abs(point.y), Math.abs(point.z)) * Number.EPSILON * 64;
   const isVisibleForPlane = (plane: THREE.Plane): boolean => plane.distanceToPoint(point) >= -epsilon;
 
   if (clipping.clipIntersection) {

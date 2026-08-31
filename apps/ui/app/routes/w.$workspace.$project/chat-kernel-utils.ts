@@ -15,6 +15,7 @@ const traceKindsByRootName: Record<string, TelemetryTraceKind> = {
   'kernel.bootstrap': 'bootstrap',
   'kernel.render': 'render',
   'kernel.export': 'export',
+  'kernel.transcode': 'transcode',
 };
 
 const internalAttributeKeys = new Set(['spanId', 'parentSpanId', 'devtools']);

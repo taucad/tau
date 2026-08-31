@@ -7,7 +7,7 @@ export type SpanNode = {
   selfTime: number;
 };
 
-export type TelemetryTraceKind = 'bootstrap' | 'render' | 'export' | 'unattributed';
+export type TelemetryTraceKind = 'bootstrap' | 'render' | 'export' | 'transcode' | 'unattributed';
 
 export type TelemetryTrace = {
   id: string;

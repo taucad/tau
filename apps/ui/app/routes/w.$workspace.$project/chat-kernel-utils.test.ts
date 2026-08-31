@@ -126,6 +126,13 @@ describe('trace projection', () => {
       detail: { spanId: 'render-2' },
     }),
     makeEntry({
+      name: 'kernel.transcode',
+      startTime: 245,
+      duration: 4,
+      workerTimeOrigin: 1000,
+      detail: { spanId: 'transcode', from: 'glb', to: 'webp', success: true },
+    }),
+    makeEntry({
       name: 'orphan',
       startTime: 250,
       duration: 5,
@@ -136,14 +143,14 @@ describe('trace projection', () => {
 
   it('creates one trace per lifecycle root and retains orphan data explicitly', () => {
     const traces = buildTelemetryTraces(entries);
-    expect(traces.map(({ kind }) => kind)).toEqual(['bootstrap', 'render', 'render', 'unattributed']);
+    expect(traces.map(({ kind }) => kind)).toEqual(['bootstrap', 'render', 'render', 'transcode', 'unattributed']);
     expect(traces[1]).toMatchObject({ id: 'render-1', spanCount: 4, duration: 100, absoluteStart: 1030 });
   });
 
   it('selects only the latest completed root', () => {
     expect(getLatestTrace(buildTelemetryTraces(entries))?.id).toBe('orphan');
     expect(getLatestTrace(buildTelemetryTraces(entries).filter(({ kind }) => kind !== 'unattributed'))?.id).toBe(
-      'render-2',
+      'transcode',
     );
   });
 

@@ -47,6 +47,9 @@ function getTraceDescription(trace: TelemetryTrace): string {
   const attributes = new Map(getVisibleAttributes(trace.root.entry));
   const context = [
     attributes.get('fileName') ?? attributes.get('entryPath'),
+    attributes.has('from') && attributes.has('to')
+      ? `${String(attributes.get('from'))} → ${String(attributes.get('to'))}`
+      : undefined,
     attributes.get('format'),
     attributes.get('kernelId') ?? attributes.get('kernel'),
   ].filter(Boolean);

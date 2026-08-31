@@ -105,7 +105,6 @@ async function readStaticTypeDefinitions(
           {
             packageName,
             content,
-            prewrapped: true,
             packageJsonContent,
           },
         ];
@@ -114,9 +113,8 @@ async function readStaticTypeDefinitions(
   return declarationFiles.map((file) => ({
     packageName,
     content: file.content,
-    prewrapped: true,
     filePath: `file://${packageRoot}/${file.relativePath}`,
-    ...(file.relativePath === 'index.d.ts' ? { packageJsonContent } : {}),
+    packageJsonContent,
   }));
 }
 
@@ -129,7 +127,7 @@ async function loadScopedStaticTypes(proxy: FileManagerProxy, scopeName: string)
   }
 
   const definitions = await Promise.all(
-    packageNames.map((packageName) => readStaticTypeDefinitions(proxy, `${scopeName}/${packageName}`)),
+    packageNames.map(async (packageName) => readStaticTypeDefinitions(proxy, `${scopeName}/${packageName}`)),
   );
   return definitions.flat();
 }

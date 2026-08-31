@@ -24,7 +24,7 @@
 
 import type * as Monaco from 'monaco-editor';
 import { getAllImports, parseExportNames } from '#lib/javascript-import-parser.js';
-import { isBareSpecifier, extractPackageFromCdnUrl } from '#utils/import.utils.js';
+import { isBareSpecifier, extractPackageFromCdnUrl } from '@taucad/utils/import';
 
 // =============================================================================
 // Types
@@ -39,8 +39,6 @@ export type StaticTypeDefinition = {
   filePath?: string;
   /** Optional package.json content for package-root declarations. */
   packageJsonContent?: string;
-  /** If true, content already contains `declare module` blocks and should not be wrapped */
-  prewrapped?: boolean;
 };
 
 export type TypeAcquisitionConfig = {
@@ -115,14 +113,11 @@ export class TypeAcquisitionService {
 
     // Register static types via addExtraLib on both defaults
     for (const staticType of config.staticTypes) {
-      const content = staticType.prewrapped
-        ? staticType.content
-        : `declare module '${staticType.packageName}' {\n${staticType.content}\n}`;
       const filePath = staticType.filePath ?? `file:///node_modules/${staticType.packageName}/index.d.ts`;
 
       // Register on both TS and JS defaults so .js files also get type info
-      const tsDisposable = monaco.typescript.typescriptDefaults.addExtraLib(content, filePath);
-      const jsDisposable = monaco.typescript.javascriptDefaults.addExtraLib(content, filePath);
+      const tsDisposable = monaco.typescript.typescriptDefaults.addExtraLib(staticType.content, filePath);
+      const jsDisposable = monaco.typescript.javascriptDefaults.addExtraLib(staticType.content, filePath);
 
       this.staticDisposables.push(tsDisposable, jsDisposable);
       this.acquiredTypes.add(staticType.packageName);

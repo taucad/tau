@@ -320,7 +320,7 @@ describe('TypeAcquisitionService', () => {
       expect(JSON.parse(packageCall![0] as string)).toEqual({ name: 'replicad', types: 'index.d.ts' });
     });
 
-    it('should wrap content in declare module format', () => {
+    it('should register static declaration content verbatim', () => {
       service.initialize(mockMonaco.monaco, {
         staticTypes: [staticReplicad],
       });
@@ -329,8 +329,7 @@ describe('TypeAcquisitionService', () => {
       const call = tsDefaults.addExtraLib.mock.calls[0]!;
       const content = call[0] as string;
 
-      expect(content).toContain("declare module 'replicad'");
-      expect(content).toContain('export function draw(): void;');
+      expect(content).toBe(staticReplicad.content);
     });
 
     it('should use correct filePath format', () => {
@@ -1061,7 +1060,7 @@ describe('TypeAcquisitionService', () => {
       // Static types are injected during initialize, before any network calls
       const tsDefaults = mockMonaco.monaco.typescript.typescriptDefaults;
       expect(tsDefaults.addExtraLib).toHaveBeenCalledWith(
-        expect.stringContaining("declare module 'replicad'"),
+        expect.stringContaining('export function draw(): void;'),
         'file:///node_modules/replicad/index.d.ts',
       );
     });

@@ -7,9 +7,9 @@ import { cylinderSource, mainFile } from './replicad-cylinder';
 
 const timeoutRenderDuration = 100;
 const normalRenderDuration = 60_000;
-const cooperativeFile = '/cooperative.delay';
-const quarantinedFile = '/quarantined.delay';
-const blockingFile = '/blocking.block';
+const cooperativeFile = 'cooperative.delay';
+const quarantinedFile = 'quarantined.delay';
+const blockingFile = 'blocking.block';
 
 type OwnedClient = { terminate(): void };
 

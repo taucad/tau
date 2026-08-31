@@ -13,9 +13,9 @@ const fixture = (name: 'birdhouse' | 'bundler-feature-matrix', mainFile: string)
   const files = Object.fromEntries(
     Object.entries(fixtureModules)
       .filter(([path]) => path.includes(marker))
-      .map(([path, source]) => [`/${path.slice(path.indexOf(marker) + marker.length)}`, source]),
+      .map(([path, source]) => [path.slice(path.indexOf(marker) + marker.length), source]),
   );
-  return { files, mainFile: `/${mainFile}` };
+  return { files, mainFile };
 };
 
 const hash = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>

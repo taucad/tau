@@ -38,6 +38,7 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/share": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",

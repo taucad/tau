@@ -618,6 +618,7 @@ repos:
     description: Resolve npm package specifiers and CDN URLs
   picovoxel:
     upstream: taucad/picovoxel
+    branch: webgpu
     description: PicoGK compiled to WebAssembly - implicit/voxel CAD kernel for the browser
   LEAP71_ShapeKernel:
     upstream: leap71/LEAP71_ShapeKernel

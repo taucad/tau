@@ -21,8 +21,13 @@ The plugin's SessionStart hook injects that variable with this session's id. A j
 
 ```bash
 CC=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs | sort -V | tail -1)
+LANES="<skill-dir>/scripts/lanes.mjs"   # <skill-dir> is announced as "Base directory for this skill"
 env -u CODEX_COMPANION_SESSION_ID node "$CC" setup --json
 ```
+
+Resolve `LANES` once and reuse it. The loader prints the skill's base directory when this skill
+loads; take it from there rather than guessing. Both paths work from any repository, so a wave
+spanning several repos still uses one `CC` and one `LANES`.
 
 Gate on `codex.available` and `auth.loggedIn`. **Do not gate on the aggregate `ready` field.**
 
@@ -73,8 +78,28 @@ One dispatch per lane, all from the repository root:
 
 ```bash
 env -u CODEX_COMPANION_SESSION_ID node "$CC" task --background --write \
-  --model gpt-5.6-sol --effort xhigh "<lane brief>"
+  --model gpt-5.6-sol "<lane brief>"
 ```
+
+**Effort is deliberately omitted.** Lanes run at `max` — `gpt-5.6-sol` supports
+`low | medium | high | xhigh | max | ultra`, but the plugin's `--effort` allowlist stops at `xhigh`
+and rejects `max` outright with `Unsupported reasoning effort "max"`. Omitting the flag sends
+`effort: null`, so Codex falls back to `model_reasoning_effort` in `~/.codex/config.toml`. Set that to
+`"max"` once:
+
+```toml
+model_reasoning_effort = "max"
+```
+
+Verify a lane actually ran at max by grepping its rollout for `"reasoning_effort"`:
+
+```bash
+grep -o '"reasoning_effort":"[a-z]*"' "$(ls -t ~/.codex/sessions/*/*/*/rollout-*.jsonl | head -1)"
+```
+
+This is the one place a lane inherits operator config rather than stating its own parameters. Pass
+`--model` explicitly regardless, and drop back to `--effort xhigh` if you need a run that is fully
+reproducible from its transcript.
 
 Capture each job id from stdout with `(task|review)-[a-z0-9]+-[a-z0-9]+` and record it against its lane in a `lanes.txt` of `<lane-name> <job-id>` lines.
 
@@ -84,24 +109,30 @@ Pass `--model` and `--effort` explicitly rather than inheriting `~/.codex/config
 
 ### 3. Wait, without polling
 
-Each conversational poll costs a turn. Launch **one** backgrounded shell that blocks until every lane is terminal and let the harness notify you when it exits:
+Write a lanes file of `<lane-name> <job-id> <cwd>` lines — the `cwd` column is what lets one wave span
+several repositories:
+
+```text
+RL1-transcode-rpc  task-abc123-xyz  /Users/you/git/tau
+RL5A-nanoraster    task-def456-uvw  /Users/you/git/tau/repos/nanoraster
+```
+
+Then run the bundled waiter **in the background** and let the harness notify you when it exits:
 
 ```bash
 # run_in_background: true
-while :; do
-  DONE=0
-  while read -r LANE ID; do
-    S=$(env -u CODEX_COMPANION_SESSION_ID node "$CC" status "$ID" --json \
-        | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).job.status)}catch{console.log("?")}})')
-    case "$S" in completed|failed|cancelled) DONE=$((DONE+1));; esac
-  done < lanes.txt
-  [ "$DONE" -eq "$(wc -l < lanes.txt)" ] && break
-  sleep 10
-done
-echo "all lanes terminal"
+node "$LANES" wait lanes.txt --deadline-min 45
 ```
 
-A failed lane reaches `failed` promptly with a usable error payload — it does not hang.
+It prints one line per lane as it settles, exits `0` when every lane completed and `1` otherwise, and
+**always exits** — so a wake is guaranteed. It reports a worker that died mid-turn as `zombie`
+(`status: running` behind a dead pid) instead of waiting on it forever, and honours the deadline for
+anything genuinely slow.
+
+Never hand-roll this loop. Every conversational poll costs a turn, an unbounded loop cannot notify
+you, and an inline `node -e` JSON parser is the single most reliable way to break a wave: one missing
+parenthesis produced a monitor that spun for an hour emitting nothing but `SyntaxError` while six
+finished lanes sat uncollected.
 
 ### 4. Collect and check budgets
 
@@ -165,7 +196,7 @@ Map `finding.file` to its owning lane's budget, then dispatch a fresh remediatio
 
 ```bash
 env -u CODEX_COMPANION_SESSION_ID node "$CC" task --background --write \
-  --model gpt-5.6-sol --effort xhigh \
+  --model gpt-5.6-sol \
   "Fix: <title> in <file>:<line_start>-<line_end>. <body> Recommendation: <recommendation>. Change only <file>."
 ```
 

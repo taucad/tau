@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { assign, createActor, setup, waitFor } from 'xstate';
+import { RenderTimeoutError } from '@taucad/runtime';
 import type { CapabilitiesManifest, KernelIssue, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { Geometry } from '@taucad/types';
@@ -341,6 +342,88 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
+    it('should preserve a nested entry path across concurrent CAD actors', async () => {
+      const [main, nested] = await Promise.all([startAndConnect(), startAndConnect()]);
+
+      main.actor.send({
+        type: 'initializeModel',
+        entryPath: 'main.scad',
+      });
+      nested.actor.send({
+        type: 'initializeModel',
+        entryPath: 'lib/cube.scad',
+      });
+
+      expect(main.mockClient.render).toHaveBeenCalledOnce();
+      expect(main.mockClient.render).toHaveBeenCalledWith({
+        source: { path: 'main.scad' },
+        parameters: {},
+        content: { includeEdges: true },
+      });
+      expect(nested.mockClient.render).toHaveBeenCalledOnce();
+      expect(nested.mockClient.render).toHaveBeenCalledWith({
+        source: { path: 'lib/cube.scad' },
+        parameters: {},
+        content: { includeEdges: true },
+      });
+      expect(main.actor.getSnapshot().context.entryPath).toBe('main.scad');
+      expect(nested.actor.getSnapshot().context.entryPath).toBe('lib/cube.scad');
+
+      main.actor.stop();
+      nested.actor.stop();
+    });
+
+    it('should surface a rejected nested render request as a CAD error', async () => {
+      const renderError = new TypeError('Nested render failed');
+
+      const mockClient = createMockAppRuntimeClient();
+      vi.mocked(mockClient.render).mockRejectedValueOnce(renderError);
+      const { actor } = await startAndConnect({
+        connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [] }),
+      });
+
+      actor.send({
+        type: 'initializeModel',
+        entryPath: 'lib/cube.scad',
+      });
+      await waitFor(actor, (state) => state.matches('error'));
+
+      const snapshot = actor.getSnapshot();
+      actor.stop();
+
+      expect(snapshot.value).toBe('error');
+      expect(snapshot.context.kernelIssues.get('lib/cube.scad')).toEqual([
+        {
+          message: renderError.message,
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]);
+    });
+
+    it('should preserve a rejected render timeout as the canonical issue code', async () => {
+      const renderError = new RenderTimeoutError(30_000);
+      const mockClient = createMockAppRuntimeClient();
+      vi.mocked(mockClient.render).mockRejectedValueOnce(renderError);
+      const { actor } = await startAndConnect({
+        connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [] }),
+      });
+
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
+      await waitFor(actor, (state) => state.matches('error'));
+
+      expect(actor.getSnapshot().context.kernelIssues.get(stubEntryPath)).toEqual([
+        {
+          message: renderError.message,
+          code: 'RENDER_TIMEOUT',
+          type: 'runtime',
+          severity: 'error',
+        },
+      ]);
+      actor.stop();
+    });
+
     it('should transition to rendering on stateChanged(rendering)', async () => {
       const { actor } = await startAndConnect();
 
@@ -401,87 +484,6 @@ describe('cadMachine', () => {
 
     it('should store kernel issues with geometryComputed', async () => {
       const { actor } = await startAndConnect();
-      it('should preserve a nested entry path across concurrent CAD actors', async () => {
-        const [main, nested] = await Promise.all([startAndConnect(), startAndConnect()]);
-
-        main.actor.send({
-          type: 'initializeModel',
-          entryPath: 'main.scad',
-        });
-        nested.actor.send({
-          type: 'initializeModel',
-          entryPath: 'lib/cube.scad',
-        });
-
-        expect(main.mockClient.render).toHaveBeenCalledOnce();
-        expect(main.mockClient.render).toHaveBeenCalledWith({
-          source: { path: 'main.scad' },
-          parameters: {},
-          content: { includeEdges: true },
-        });
-        expect(nested.mockClient.render).toHaveBeenCalledOnce();
-        expect(nested.mockClient.render).toHaveBeenCalledWith({
-          source: { path: 'lib/cube.scad' },
-          parameters: {},
-          content: { includeEdges: true },
-        });
-        expect(main.actor.getSnapshot().context.entryPath).toBe('main.scad');
-        expect(nested.actor.getSnapshot().context.entryPath).toBe('lib/cube.scad');
-
-        main.actor.stop();
-        nested.actor.stop();
-      });
-
-      it('should surface a rejected nested render request as a CAD error', async () => {
-        const renderError = new TypeError('Nested render failed');
-
-        const mockClient = createMockAppRuntimeClient();
-        vi.mocked(mockClient.render).mockRejectedValueOnce(renderError);
-        const { actor } = await startAndConnect({
-          connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [] }),
-        });
-
-        actor.send({
-          type: 'initializeModel',
-          entryPath: 'lib/cube.scad',
-        });
-        await waitFor(actor, (state) => state.matches('error'));
-
-        const snapshot = actor.getSnapshot();
-        actor.stop();
-
-        expect(snapshot.value).toBe('error');
-        expect(snapshot.context.kernelIssues.get('lib/cube.scad')).toEqual([
-          {
-            message: renderError.message,
-            code: 'RUNTIME',
-            type: 'runtime',
-            severity: 'error',
-          },
-        ]);
-      });
-
-      it('should preserve a rejected render timeout as the canonical issue code', async () => {
-        const renderError = new RenderTimeoutError(30_000);
-        const mockClient = createMockAppRuntimeClient();
-        vi.mocked(mockClient.render).mockRejectedValueOnce(renderError);
-        const { actor } = await startAndConnect({
-          connectResult: async () => ({ type: 'kernelConnected', client: mockClient, cleanups: [] }),
-        });
-
-        actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
-        await waitFor(actor, (state) => state.matches('error'));
-
-        expect(actor.getSnapshot().context.kernelIssues.get(stubEntryPath)).toEqual([
-          {
-            message: renderError.message,
-            code: 'RENDER_TIMEOUT',
-            type: 'runtime',
-            severity: 'error',
-          },
-        ]);
-        actor.stop();
-      });
 
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       actor.send({
@@ -1245,18 +1247,23 @@ describe('cadMachine', () => {
   // ---------------------------------------------------------------------------
 
   describe('render timeout', () => {
-    it('should forward setRenderTimeout to kernel client via setOptions', async () => {
+    it('should apply a connected timeout synchronously without changing state', async () => {
       const { actor, mockClient } = await startAndConnect();
+      vi.mocked(mockClient.setRenderTimeout).mockClear();
+      vi.mocked(mockClient.setOptions).mockClear();
+      const priorState = actor.getSnapshot().value;
 
       actor.send({ type: 'setRenderTimeout', renderTimeout: 60_000 });
 
       expect(actor.getSnapshot().context.renderTimeout).toBe(60_000);
-      expect(mockClient.setOptions).toHaveBeenCalledWith({ renderTimeout: 60_000 });
+      expect(actor.getSnapshot().value).toEqual(priorState);
+      expect(mockClient.setRenderTimeout).toHaveBeenCalledExactlyOnceWith(60_000);
+      expect(mockClient.setOptions).not.toHaveBeenCalled();
       actor.stop();
     });
 
-    it('should apply stored renderTimeout on kernel connection via setOptions', async () => {
-      const mockClient = createMockRuntimeClient() as AppRuntimeClient;
+    it('should apply the latest stored timeout when connection settles', async () => {
+      const mockClient = createMockAppRuntimeClient();
       let resolveConnect!: () => void;
       const connectGate = new Promise<void>((resolve) => {
         resolveConnect = resolve;
@@ -1273,17 +1280,69 @@ describe('cadMachine', () => {
 
       actor.send({ type: 'setRenderTimeout', renderTimeout: 120_000 });
       expect(actor.getSnapshot().context.renderTimeout).toBe(120_000);
+      expect(mockClient.setRenderTimeout).not.toHaveBeenCalled();
 
       resolveConnect();
       await waitFor(actor, (s) => s.value !== 'connecting');
 
-      expect(mockClient.setOptions).toHaveBeenCalledWith({ renderTimeout: 120_000 });
+      expect(mockClient.setRenderTimeout).toHaveBeenCalledExactlyOnceWith(120_000);
+      expect(mockClient.setOptions).not.toHaveBeenCalled();
       actor.stop();
     });
 
-    it('should default renderTimeout to 60_000ms (60 seconds)', async () => {
-      const { actor } = await startAndConnect();
+    it('should apply the default timeout on connection', async () => {
+      const { actor, mockClient } = await startAndConnect();
       expect(actor.getSnapshot().context.renderTimeout).toBe(defaultRenderTimeout);
+      expect(mockClient.setRenderTimeout).toHaveBeenCalledExactlyOnceWith(defaultRenderTimeout);
+      expect(mockClient.setOptions).not.toHaveBeenCalled();
+      actor.stop();
+    });
+
+    it.each(['idle', 'buffering', 'rendering', 'error'] as const)(
+      'should preserve the %s state when the timeout changes',
+      async (targetState) => {
+        const { actor, mockClient } = await startAndConnect();
+        if (targetState !== 'idle') {
+          actor.send({ type: 'stateChanged', state: targetState });
+        }
+        vi.mocked(mockClient.setRenderTimeout).mockClear();
+        const priorState = actor.getSnapshot().value;
+
+        actor.send({ type: 'setRenderTimeout', renderTimeout: 45_000 });
+
+        expect(actor.getSnapshot().value).toEqual(priorState);
+        expect(mockClient.setRenderTimeout).toHaveBeenCalledExactlyOnceWith(45_000);
+        actor.stop();
+      },
+    );
+
+    it('should configure the timeout before submitting the first render', async () => {
+      const mockClient = createMockAppRuntimeClient();
+      let resolveConnect!: () => void;
+      const connectGate = new Promise<void>((resolve) => {
+        resolveConnect = resolve;
+      });
+      const { actor } = createTestActor({
+        connectResult: async () => {
+          await connectGate;
+          return { type: 'kernelConnected', client: mockClient, cleanups: [] };
+        },
+      });
+      actor.start();
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
+
+      resolveConnect();
+      await waitFor(actor, (snapshot) => snapshot.context.kernelClient === mockClient);
+      await waitFor(actor, (snapshot) => snapshot.matches('idle'));
+
+      expect(mockClient.setRenderTimeout).toHaveBeenCalledExactlyOnceWith(defaultRenderTimeout);
+      expect(mockClient.render).toHaveBeenCalledOnce();
+      const timeoutInvocation = vi.mocked(mockClient.setRenderTimeout).mock.invocationCallOrder.at(0);
+      const renderInvocation = vi.mocked(mockClient.render).mock.invocationCallOrder.at(0);
+      if (timeoutInvocation === undefined || renderInvocation === undefined) {
+        throw new Error('Expected timeout configuration and render invocations');
+      }
+      expect(timeoutInvocation).toBeLessThan(renderInvocation);
       actor.stop();
     });
   });

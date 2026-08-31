@@ -9,6 +9,8 @@ import type {
   TelemetryEntry,
   WorkerState,
 } from '@taucad/runtime';
+import { isRenderTimeoutError } from '@taucad/runtime/client';
+import { isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { LengthSymbol } from '@taucad/units';
@@ -676,9 +678,17 @@ export const cadMachine = setup({
                       ? event.error.message
                       : 'Failed to render model';
                   const entryPath = context.entryPath ?? '__render__';
+                  const errorCode = isRenderTimeoutError(event.error)
+                    ? 'RENDER_TIMEOUT'
+                    : event.error &&
+                        typeof event.error === 'object' &&
+                        'code' in event.error &&
+                        isKernelIssueCode(event.error.code)
+                      ? event.error.code
+                      : 'RUNTIME';
                   const newMap = new Map(context.kernelIssues);
                   newMap.set(entryPath, [
-                    { message: errorMessage, code: 'RUNTIME', type: 'runtime', severity: 'error' },
+                    { message: errorMessage, code: errorCode, type: 'runtime', severity: 'error' },
                   ]);
                   return newMap;
                 },

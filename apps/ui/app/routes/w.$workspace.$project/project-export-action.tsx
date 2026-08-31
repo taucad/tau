@@ -3,7 +3,13 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
-export function ProjectExportAction(): React.JSX.Element {
+export function ProjectExportAction({
+  className,
+  labelClassName,
+}: {
+  readonly className?: string;
+  readonly labelClassName?: string;
+} = {}): React.JSX.Element {
   const { openPanel } = useProjectWorkspace();
 
   return (
@@ -12,14 +18,14 @@ export function ProjectExportAction(): React.JSX.Element {
         <Button
           variant='ghost'
           size='xs'
-          className='max-md:size-8'
+          className={className ?? 'max-md:size-8'}
+          aria-label='Export'
           onClick={() => {
             openPanel('export');
           }}
         >
           <DownloadIcon className='size-3.5' aria-hidden />
-          <span className='sr-only @xl/viewer:hidden'>Export</span>
-          <span className='hidden @xl/viewer:inline'>Export</span>
+          <span className={labelClassName ?? 'hidden @xl/viewer:inline'}>Export</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>Open exporter</TooltipContent>

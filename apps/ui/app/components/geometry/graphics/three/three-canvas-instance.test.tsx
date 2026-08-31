@@ -6,6 +6,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { PerspectiveCamera } from 'three';
 
 import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-canvas-instance.js';
+import { infiniteGridFadeEndVisibleSpans } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 
 /**
  * Dispatches context-loss handlers registered via the latest stub `<Canvas>`
@@ -16,9 +17,11 @@ let latestCanvasEventSource: ReactThreeFiber.CanvasProps['eventSource'] | undefi
 let latestCanvasEventPrefix: ReactThreeFiber.CanvasProps['eventPrefix'] | undefined;
 let latestCanvasCamera: ReactThreeFiber.CanvasProps['camera'] | undefined;
 const rigCamera = new PerspectiveCamera();
+const setClipPlanes = vi.fn();
+const cameraRig = { activeCamera: rigCamera, setClipPlanes };
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useCameraRig: () => ({ activeCamera: rigCamera }),
+  useCameraRig: () => cameraRig,
 }));
 
 vi.mock('@react-three/fiber', async (importOriginal) => {
@@ -86,6 +89,7 @@ vi.mock('#components/geometry/graphics/three/post-processing.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/scene-overlay.js', () => ({
+  OverlayDepthProvider: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   SceneOverlay: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 
@@ -125,13 +129,14 @@ describe('ThreeCanvasInstance', () => {
     latestCanvasEventPrefix = undefined;
     latestCanvasEventSource = undefined;
     latestCanvasCamera = undefined;
+    setClipPlanes.mockClear();
   });
 
   it('shows Graphics context lost fallback when WebGL fires context loss', async () => {
     const onRetry = vi.fn();
 
     render(
-      <ThreeCanvasInstance graphicsBackend='webgl' onRetry={onRetry}>
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={onRetry}>
         {null}
       </ThreeCanvasInstance>,
     );
@@ -147,6 +152,7 @@ describe('ThreeCanvasInstance', () => {
     await waitFor(() => {
       expect(screen.getByText('Graphics context lost')).toBeInTheDocument();
     });
+    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
   });
 
   it('ignores queued context-loss when the keyed instance already unmounted (stale teardown)', async () => {
@@ -236,5 +242,57 @@ describe('ThreeCanvasInstance', () => {
     });
 
     expect(latestCanvasCamera).toBe(rigCamera);
+  });
+
+  it('installs and clears grid presentation clipping during the canvas layout lifecycle', () => {
+    const { rerender, unmount } = render(
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+
+    expect(setClipPlanes).toHaveBeenLastCalledWith({
+      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+      presentationPlaneOffsetMeters: 0,
+    });
+    const installedCallCount = setClipPlanes.mock.calls.length;
+
+    rerender(
+      <ThreeCanvasInstance className='unchanged-policy' enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+    expect(setClipPlanes).toHaveBeenCalledTimes(installedCallCount);
+
+    rerender(
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined} upDirection='x'>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+    expect(setClipPlanes).toHaveBeenCalledTimes(installedCallCount);
+
+    rerender(
+      <ThreeCanvasInstance enableGrid={false} graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
+
+    rerender(
+      <ThreeCanvasInstance enableGrid graphicsBackend='webgl' onRetry={() => undefined}>
+        {null}
+      </ThreeCanvasInstance>,
+    );
+    expect(setClipPlanes).toHaveBeenLastCalledWith({
+      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+      presentationPlaneOffsetMeters: 0,
+    });
+
+    const clearCallsBeforeUnmount = setClipPlanes.mock.calls.filter(([policy]) => policy === undefined).length;
+    unmount();
+    expect(setClipPlanes).toHaveBeenLastCalledWith(undefined);
+    expect(setClipPlanes.mock.calls.filter(([policy]) => policy === undefined)).toHaveLength(
+      clearCallsBeforeUnmount + 1,
+    );
   });
 });

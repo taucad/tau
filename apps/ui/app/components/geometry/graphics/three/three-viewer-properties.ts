@@ -19,7 +19,6 @@ export type ThreeViewerProperties = {
   readonly enableDamping?: boolean;
   readonly upDirection?: 'x' | 'y' | 'z';
   readonly className?: string;
-  readonly enableCentering?: boolean;
   readonly stageOptions?: StageOptions;
   readonly zoomSpeed?: number;
   readonly gizmoContainer?: HTMLElement | string;

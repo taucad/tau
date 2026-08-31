@@ -8,7 +8,6 @@
 
 import type { Line2NodeMaterialParameters as ThreeLine2NodeMaterialParameters } from 'three/webgpu';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
-import { gltfEdgeDepthBiasReferenceTanHalfFov } from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 import {
   attribute,
   cameraFar,
@@ -123,12 +122,9 @@ export const tauOpaqueViewportTexture = (uv: typeof screenUV = screenUV, level: 
  * the encoder must be picked per `builder` rather than locked at construction time. We
  * override `setupDepth(builder)` and dispatch on `builder.renderer.reversedDepthBuffer` /
  * `builder.renderer.logarithmicDepthBuffer`, mirroring the exact pattern three.js itself
- * uses in `PointShadowNode` and `NodeMaterial.setupDepth`. The coplanar bias is exposed via
- * the {@link depthBias} field (default `1.0` = no bias) so the gltf-edges factory can pull
- * the line forward in view-space without re-implementing the dispatch. The pull is
- * perspective-FOV-adaptive: the shader derives `tan(fov/2)` from `cameraProjectionMatrix`
- * at render time so Tau's near-orthographic perspective mode preserves the same effective
- * bias distance instead of letting a fixed multiplier leak far-side edges through occluders.
+ * uses in `PointShadowNode` and `NodeMaterial.setupDepth`. Each encoder receives the exact
+ * geometric `positionView.z`; coplanar separation belongs to the triangle material so a
+ * hidden line can never be promoted through an opaque surface.
  *
  * **Divergence 4 — gamma-space alpha blend for backend parity.** The transparent-branch
  * `outputNode` below performs an explicit manual composition against the Tau-owned
@@ -164,16 +160,6 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
   public static override get type(): string {
     return 'Line2NodeMaterial';
   }
-
-  /**
-   * Base multiplicative bias applied to `positionView.z` inside {@link setupDepth}. `1.0`
-   * is the identity (no bias). Values in `(0, 1)` pull the line forward in view-space
-   * (smaller `|z|` because view-space Z is negative for objects in front of the camera) so
-   * the line wins coplanar Z-fights against the surface it overlays; values `> 1` push the
-   * line backwards. Perspective cameras raise this base value by the live FOV scale before
-   * encoding depth, matching the WebGL shader path and preventing low-FOV overpull.
-   */
-  public depthBias = 1;
 
   /**
    * Enables deterministic screen-space coverage for CAD presentation edges. The stock
@@ -231,9 +217,8 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
    * assigned `material.depthNode` delegate to `super.setupDepth(builder)` so the upstream
    * decision tree (including the ortho-log branch) stays authoritative.
    *
-   * The {@link depthBias} multiplier is FOV-adjusted and applied to `positionView.z` before
-   * encoding so coplanar edges win the depth comparison consistently across all three
-   * encodings without overpulling at near-zero perspective FOV.
+   * The geometric `positionView.z` is encoded unchanged so ordinary depth comparison keeps
+   * genuinely hidden edge fragments behind their occluders.
    */
   public override setupDepth(builder: unknown): void {
     const { renderer, camera } = builder as {
@@ -257,16 +242,11 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       return;
     }
 
-    const tanHalfFov = cameraProjectionMatrix.element(1).element(1).reciprocal();
-    const fovScale = tanHalfFov.div(gltfEdgeDepthBiasReferenceTanHalfFov);
-    const adjustedDepthBias = float(this.depthBias).pow(fovScale);
-    const biasedZ = positionView.z.mul(adjustedDepthBias);
-
     const depthNode = renderer.reversedDepthBuffer
-      ? viewZToReversedPerspectiveDepth(biasedZ, cameraNear, cameraFar)
+      ? viewZToReversedPerspectiveDepth(positionView.z, cameraNear, cameraFar)
       : renderer.logarithmicDepthBuffer
-        ? viewZToLogarithmicDepth(biasedZ, cameraNear, cameraFar)
-        : viewZToPerspectiveDepth(biasedZ, cameraNear, cameraFar);
+        ? viewZToLogarithmicDepth(positionView.z, cameraNear, cameraFar)
+        : viewZToPerspectiveDepth(positionView.z, cameraNear, cameraFar);
 
     depth.assign(depthNode).toStack();
   }

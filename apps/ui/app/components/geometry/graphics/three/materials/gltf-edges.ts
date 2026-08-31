@@ -3,11 +3,6 @@ import type { Group, LineSegments, Object3D, Vector2 } from 'three';
 import { InterleavedBufferAttribute } from 'three';
 import { LineSegments2, LineSegmentsGeometry, LineMaterial } from 'three/addons';
 import { LineSegments2 as WebGpuFatLineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
-import {
-  gltfEdgeDepthBiasFactor,
-  gltfEdgeOrthographicDepthBiasCoefficient,
-  gltfEdgeDepthBiasReferenceTanHalfFov,
-} from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { gltfEdgeColorLightMode } from '#components/geometry/graphics/three/overlay-colors.constants.js';
@@ -16,72 +11,14 @@ import { gltfEdgeColorLightMode } from '#components/geometry/graphics/three/over
  * Default line width in pixels for edge rendering.
  * This is screen-space width, not world units.
  */
-const defaultLineWidth = 1;
+export const gltfEdgeLineWidth = 1;
 
 /**
  * Expanded WebGPU edge quad width in CSS pixels. The material shades only the central
- * {@link defaultLineWidth} stroke as fully covered and uses the extra width as an analytic
+ * {@link gltfEdgeLineWidth} stroke as fully covered and uses the extra width as an analytic
  * AA fringe, avoiding the inconsistent opaque-MSAA thickness of near-1px lines.
  */
 const webGpuEdgePresentationGeometryLineWidth = 2;
-
-/**
- * Depth bias multiplier shared by WebGL (`LineMaterial`) and WebGPU (`Line2NodeMaterial.depthBias`).
- *
- * **WebGL (logarithmicDepthBuffer)** — biases are appended only in the vertex shader after
- * `<logdepthbuf_vertex>`: `vFragDepth *= pow(depthBiasFactor, fovScale)` on **perspective** cameras
- * so `log2(vFragDepth)` in three's bundled fragment chunk gains a constant offset in log space.
- * Omitting `<logdepthbuf_fragment>` replacement avoids rewriting `gl_FragDepth` in the fragment
- * shader, which restores MSAA coverage compared to injecting `gl_FragDepth` manually.
- *
- * **WebGPU** — forwarded to {@link Line2NodeMaterial.depthBias}. The subclass'
- * `setupDepth(builder)` override picks the matching `viewZTo*Depth` encoder per renderer
- * (reversed-Z viewport, log-depth screenshot/offscreen, or standard perspective) so the
- * emitted depth always shares the surrounding surface rasterizer's encoding. It also derives
- * the same perspective FOV scale from `cameraProjectionMatrix[1][1]` at shader runtime, so
- * near-orthographic perspective cameras do not turn the subtle coplanar pull into a
- * cross-object occlusion leak. Hardcoding a single encoder at construction time was the
- * "lines never occluded in screenshots" smoking gun (see
- * `docs/research/webgpu-fat-line-renderer-aware-depth.md`); hardcoding a fixed depth
- * multiplier was the follow-up WebGPU low-FOV smoking gun.
- *
- * **FOV adaptation (perspective cameras)**:
- * `fovScale = tan(fov/2)/tan(30°)`; `adjustedBias = pow(depthBiasFactor, fovScale)`.
- * Orthographic projection uses the analytic zero-FOV limit of the perspective pull. WebGL
- * applies it in clip space; WebGPU uses native polygon offset because its upstream node depth
- * setup already selects the renderer's correct orthographic depth encoding.
- *
- * Tuning trade-off (WebGL subtle bias vs ghosting): weaker bias preserves occlusion from real
- * occluders; stronger bias restores full opaque line coverage against coplanar faces.
- *
- * @see `docs/policy/webgpu-rendering-pipeline.md`
- * @see `docs/research/webgpu-fat-line-renderer-aware-depth.md`
- */
-/**
- * Module-level singleton uniform shared by every WebGL `LineMaterial` instance produced by
- * {@link createWebGlGltfFatLineMaterial}. Lifting the uniform out of per-call allocation
- * (combined with {@link webGlEdgeProgramCacheKey} below) lets three's `WebGLPrograms`
- * deduplicate the compiled GLSL across viewport + screenshot renderers and across every
- * owner-local `LineSegments2` mesh in a loaded scene — the structural perf win from
- * `docs/research/gltf-edges-fat-line-performance.md` R7.
- *
- * Mutating `sharedDepthBiasUniform.value` at runtime updates every material that references it.
- * Owner-local runtime edges can produce multiple fat-line meshes, and sharing this uniform
- * keeps them on one shader program.
- */
-const sharedDepthBiasUniform = { value: gltfEdgeDepthBiasFactor };
-
-const gltfEdgeDepthBiasReferenceTanHalfFovGlsl = gltfEdgeDepthBiasReferenceTanHalfFov.toPrecision(8);
-
-/**
- * Stable cache key returned from `LineMaterial.customProgramCacheKey()`. The shader source
- * is identical across every consumer of {@link createWebGlGltfFatLineMaterial}, so a constant
- * key collapses three's program cache to one compiled program instead of one-per-instance.
- *
- * Versioned (`v1`) so a future shader patch can intentionally invalidate every cached program
- * by bumping the suffix.
- */
-const webGlEdgeProgramCacheKey = 'tau-gltf-edge-logdepth-bias-v2';
 
 /**
  * Disable raycast on edge meshes. Pointer events traverse the scene every move; the default
@@ -227,78 +164,25 @@ function extractPositions(lineSegments: LineSegments): Float32Array | undefined 
 /**
  * WebGL fat-line material paired with `LineSegments2` (`three/addons/lines/LineSegments2`).
  *
- * Injects multiplicative bias on `vFragDepth` in the vertex shader only (after three's
- * `<logdepthbuf_vertex>`), so the engine's `<logdepthbuf_fragment>` chunk (r180+
- * `USE_LOGARITHMIC_DEPTH_BUFFER`) stays authoritative and fragment MSAA stays valid.
- *
  * Exported so the screenshot capability path can allocate fresh materials per capture
  * — sharing the live viewport's `LineMaterial` across renderer instances is structurally
  * unsafe (the shared `'dispose'` listeners purge pipeline state on every renderer using
  * the material). See `docs/research/screenshot-viewport-shared-material-state-bleed.md`.
  *
- * Performance shape (R7): the `depthBias` uniform is the module-level
- * {@link sharedDepthBiasUniform} singleton and `customProgramCacheKey` returns the stable
- * {@link webGlEdgeProgramCacheKey} string, so three's `WebGLPrograms` deduplicates the
- * compiled GLSL program across every consumer in the same renderer. The previous shape
- * minted one program-cache slot per `LineMaterial` instance because three's default
- * `customProgramCacheKey` derived from the material identity rather than the shader text.
- *
  * @param resolution - The viewport resolution for line width calculation.
  * @param edgeColor - sRGB hex edge tint (defaults to {@link gltfEdgeColorLightMode}).
- * @returns A configured LineMaterial with FOV-adaptive depth bias (perspective only).
+ * @returns A configured LineMaterial that writes the line's geometric depth.
  */
 export function createWebGlGltfFatLineMaterial(
   resolution: Vector2,
   edgeColor: number = gltfEdgeColorLightMode,
 ): LineMaterial {
-  const material = new LineMaterial({
+  return new LineMaterial({
     color: edgeColor,
-    linewidth: defaultLineWidth,
+    linewidth: gltfEdgeLineWidth,
     worldUnits: false,
     resolution: resolution.clone(),
   });
-
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms['depthBias'] = sharedDepthBiasUniform;
-
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <logdepthbuf_pars_vertex>',
-      `#include <logdepthbuf_pars_vertex>
-      uniform float depthBias;`,
-    );
-
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <logdepthbuf_vertex>',
-      `#include <logdepthbuf_vertex>
-      #ifdef USE_LOGARITHMIC_DEPTH_BUFFER
-        if (projectionMatrix[3][3] == 0.0) {
-          float tanHalfFov = 1.0 / projectionMatrix[1][1];
-          float fovScale = tanHalfFov / ${gltfEdgeDepthBiasReferenceTanHalfFovGlsl};
-          vFragDepth *= pow(depthBias, fovScale);
-        }
-      #endif`,
-    );
-
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <clipping_planes_vertex>',
-      `if (projectionMatrix[3][3] != 0.0) {
-        float orthographicBias = ${gltfEdgeOrthographicDepthBiasCoefficient.toPrecision(8)} / projectionMatrix[1][1];
-        gl_Position.z += projectionMatrix[2][2] * orthographicBias * gl_Position.w;
-      }
-      #include <clipping_planes_vertex>`,
-    );
-  };
-
-  // Stable cache key so three's WebGLPrograms collapses identical-shader materials into a
-  // single compiled program. Without this override the program cache treats each
-  // `onBeforeCompile`-bearing material as a distinct program (`docs/research/gltf-edges-fat-line-performance.md`
-  // Finding 7).
-  material.customProgramCacheKey = () => webGlEdgeProgramCacheKey;
-
-  // Public alias preserved for callers that bumped the bias at runtime via userData.
-  material.userData['depthBiasUniform'] = sharedDepthBiasUniform;
-
-  return material;
 }
 
 /**
@@ -315,11 +199,6 @@ export function createWebGlGltfFatLineMaterial(
  * area-dither LUT, gpuweb/gpuweb#4867) which surfaces as visible graininess on
  * dithered drivers. See `docs/research/webgpu-edge-line-crispness-gap.md`.
  *
- * The coplanar bias is forwarded as `material.depthBias`; the renderer-aware encoder
- * dispatch lives inside {@link Line2NodeMaterial.setupDepth}, so the same material
- * instance can be rendered correctly by either the reversed-Z viewport renderer or the
- * log-depth screenshot/offscreen renderer in the same frame budget.
- *
  * @param edgeColor - sRGB hex edge tint (defaults to {@link gltfEdgeColorLightMode}).
  */
 export function createWebGpuGltfFatLineMaterial(edgeColor: number = gltfEdgeColorLightMode): Line2NodeMaterial {
@@ -330,15 +209,11 @@ export function createWebGpuGltfFatLineMaterial(edgeColor: number = gltfEdgeColo
   });
 
   material.alphaToCoverage = false;
-  material.depthBias = gltfEdgeDepthBiasFactor;
   material.depthWrite = false;
   material.transparent = false;
   material.edgePresentationCoverage = true;
-  material.edgePresentationLineWidth = defaultLineWidth;
+  material.edgePresentationLineWidth = gltfEdgeLineWidth;
   material.useViewportSrgbBlend = false;
-  material.polygonOffset = true;
-  material.polygonOffsetFactor = 1;
-  material.polygonOffsetUnits = 1;
 
   return material;
 }
@@ -414,9 +289,8 @@ function wrapAsFatLineSegments(
   fatLine.name = lineSegments.name;
   fatLine.userData = { ...lineSegments.userData };
 
-  // R8: do not pin `renderOrder = 1`. The explicit `depthBias` on both backends already
-  // wins the coplanar comparison; sorting edges into a separate bucket only loses cache
-  // locality against the surfaces they overlay.
+  // Keep surfaces and owner-local edges adjacent in the ordinary render order. Surface
+  // materials provide the bounded coplanar separation; edges retain geometric depth.
 
   return fatLine;
 }

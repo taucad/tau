@@ -1,13 +1,15 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import type { Camera, Scene, WebGLRenderer } from 'three';
-import { EffectComposer, RenderPass } from 'postprocessing';
+import { ShaderMaterial } from 'three';
+import type { Camera, Scene, Texture, WebGLRenderer } from 'three';
+import { EffectComposer, Pass, RenderPass } from 'postprocessing';
 // @ts-expect-error -- n8ao 1.10.2 does not publish TypeScript declarations.
-import { N8AOPostPass } from 'n8ao';
+import { N8AOPostPass as N8AoPostPassUntyped } from 'n8ao';
 import type { ThreeCamera } from '@taucad/three/camera';
 import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.js';
+import { useOverlayDepthRestore } from '#components/geometry/graphics/three/scene-overlay.js';
 
-type N8AOPass = {
+type N8AoPass = Pass & {
   configuration: {
     aoRadius: number;
     distanceFalloff: number;
@@ -17,10 +19,63 @@ type N8AOPass = {
   dispose?: () => void;
 };
 
+const N8AoPostPass = N8AoPostPassUntyped as unknown as new (scene: Scene, camera: ThreeCamera) => N8AoPass;
+
 type EndpointComposer = Readonly<{
   camera: ThreeCamera;
   composer: EffectComposer;
+  depthRestore: CanvasDepthRestorePass;
 }>;
+
+/** Receives the composer's stable depth texture, then writes it to canvas on demand. */
+class CanvasDepthRestorePass extends Pass {
+  public constructor() {
+    super('TauCanvasDepthRestorePass');
+    this.needsDepthTexture = true;
+    this.needsSwap = false;
+    this.fullscreenMaterial = new ShaderMaterial({
+      colorWrite: false,
+      depthTest: false,
+      depthWrite: true,
+      uniforms: { depthBuffer: { value: null } },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D depthBuffer;
+        varying vec2 vUv;
+        void main() {
+          gl_FragDepth = texture2D(depthBuffer, vUv).r;
+          gl_FragColor = vec4(0.0);
+        }
+      `,
+    });
+  }
+
+  public override setDepthTexture(depthTexture: Texture): void {
+    (this.fullscreenMaterial as ShaderMaterial).uniforms['depthBuffer']!.value = depthTexture;
+  }
+
+  /** Composer insertion is only for stable depth delivery; restoration runs after final colour. */
+  public override render(): void {
+    return undefined;
+  }
+
+  public restore(renderer: WebGLRenderer): void {
+    const previousTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(null);
+    try {
+      renderer.clearDepth();
+      renderer.render(this.scene, this.camera);
+    } finally {
+      renderer.setRenderTarget(previousTarget);
+    }
+  }
+}
 
 const createEndpointComposer = ({
   camera,
@@ -37,11 +92,13 @@ const createEndpointComposer = ({
 }): EndpointComposer => {
   const composer = new EffectComposer(gl, { stencilBuffer: true, multisampling: 4 });
   const renderPass = new RenderPass(scene, camera);
-  let aoPass: N8AOPass | undefined;
+  const depthRestore = new CanvasDepthRestorePass();
+  let aoPass: N8AoPass | undefined;
   let renderPassAdded = false;
+  let depthRestoreAdded = false;
   let aoPassAdded = false;
   try {
-    aoPass = new N8AOPostPass(scene, camera) as N8AOPass;
+    aoPass = new N8AoPostPass(scene, camera);
     Object.assign(aoPass.configuration, {
       screenSpaceRadius: true,
       aoRadius: 24,
@@ -50,13 +107,22 @@ const createEndpointComposer = ({
     });
     composer.addPass(renderPass);
     renderPassAdded = true;
-    composer.addPass(aoPass as never);
+    composer.addPass(depthRestore);
+    depthRestoreAdded = true;
+    composer.addPass(aoPass);
     aoPassAdded = true;
     composer.setSize(width, height);
-    return { camera, composer };
+    return { camera, composer, depthRestore };
   } catch (error) {
-    if (!aoPassAdded) aoPass?.dispose?.();
-    if (!renderPassAdded) renderPass.dispose();
+    if (!aoPassAdded) {
+      aoPass?.dispose();
+    }
+    if (!depthRestoreAdded) {
+      depthRestore.dispose();
+    }
+    if (!renderPassAdded) {
+      renderPass.dispose();
+    }
     composer.dispose();
     throw error;
   }
@@ -67,6 +133,7 @@ const disposeEndpointComposer = (resource: EndpointComposer): void => {
 };
 
 /** One render owner backed by two persistent, prewarmed endpoint composers. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- WebGL acronym matches the public component API.
 export function PostProcessingWebGL(): undefined {
   const { gl, scene, size, invalidate } = useThree();
   const cameraRig = useCameraRig();
@@ -74,8 +141,8 @@ export function PostProcessingWebGL(): undefined {
   const selectedRef = useRef<EndpointComposer | undefined>(undefined);
 
   useLayoutEffect(() => {
-    const renderer = gl as WebGLRenderer;
-    let resources: EndpointComposer[] = [];
+    const renderer = gl;
+    const resources: EndpointComposer[] = [];
     try {
       resources.push(
         createEndpointComposer({
@@ -129,6 +196,11 @@ export function PostProcessingWebGL(): undefined {
     selectedRef.current = resourcesRef.current?.get(camera);
   }, []);
   useCameraRetarget(retarget);
+
+  const restoreDepth = useCallback((): void => {
+    selectedRef.current?.depthRestore.restore(gl);
+  }, [gl]);
+  useOverlayDepthRestore(restoreDepth);
 
   useFrame((state, delta) => {
     const selected = selectedRef.current;

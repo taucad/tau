@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useCallback, useLayoutEffect, useRef } from 'react';
-import { RenderPipeline as ThreeRenderPipeline, UnsignedByteType } from 'three/webgpu';
+import { NodeMaterial, QuadMesh, RenderPipeline as ThreeRenderPipeline, UnsignedByteType } from 'three/webgpu';
 import type { WebGPURenderer } from 'three/webgpu';
 import {
   colorToDirection,
@@ -15,15 +15,22 @@ import {
   vec4,
 } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
+import { Vector3 } from 'three';
 import type { Camera } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
+import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import type { ThreeCamera } from '@taucad/three/camera';
+import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.js';
+import { pixelsToWorldUnits } from '#components/geometry/graphics/three/utils/spatial.utils.js';
+import { useOverlayDepthRestore } from '#components/geometry/graphics/three/scene-overlay.js';
 
 type PostProcessingPipelineResources = Readonly<{
   camera: ThreeCamera;
   post: InstanceType<typeof ThreeRenderPipeline>;
   aoNode: ReturnType<typeof ao>;
+  depthRestore: QuadMesh;
+  depthRestoreMaterial: NodeMaterial;
   scenePass: ScenePassWithCompile;
 }>;
 
@@ -37,11 +44,9 @@ type PostProcessingPipelineResources = Readonly<{
  * - **Compose-based AO** — the composite quad multiplies scene color by the AO factor (`scenePassColor.mul(vec4(vec3(ao.r), 1))`)
  *   instead of routing AO through `builtinAOContext`. This is the GTAO-paper-canonical pattern recommended in
  *   `three/addons/tsl/display/GTAONode.js`.
- * - **No composite-quad depth wiring** — the audit's R2 attempt to wire `_quadMesh.material.depthNode` to
- *   `scenePassDepth.sample(screenUV)` was reverted: in three.js r184 the composite-quad depth output does **not**
- *   reach the canvas swap-chain depth attachment that subsequent `gl.render` calls read. Canvas depth bridging
- *   is owned by the priority-2 `SceneOverlay` traverse + cached `colorWrite=false` clone-swap depth pre-pass
- *   (see `apps/ui/app/components/geometry/graphics/three/scene-overlay.tsx`).
+ * - **Explicit canvas-depth restore** — the active scene-pass depth is sampled by a retained
+ *   direct-to-canvas `QuadMesh` that writes depth only immediately before overlays. The main
+ *   scene is never traversed or replayed.
  * - **`compileAsync` warmup** — the `RenderPipeline` is built off the critical path inside `useLayoutEffect`
  *   so the first `useFrame` after mount does not block on pipeline compile.
  *
@@ -58,6 +63,34 @@ type ScenePassWithCompile = Readonly<{
   dispose(): void;
 }>;
 
+const gtaoRadiusPixels = 24;
+// Preserve the tuned GTAO depth acceptance while making both values derive from one screen-space contract.
+const gtaoThicknessToRadiusRatio = 1 / 0.09;
+
+const updateGtaoSpatialScale = ({
+  at,
+  resources,
+  size,
+  viewport,
+}: {
+  readonly at: Vector3;
+  readonly resources: readonly PostProcessingPipelineResources[];
+  readonly size: { readonly width: number; readonly height: number };
+  readonly viewport: unknown;
+}): void => {
+  for (const resource of resources) {
+    const radius = pixelsToWorldUnits({
+      at,
+      camera: resource.camera,
+      pixels: gtaoRadiusPixels,
+      size,
+      viewport,
+    });
+    resource.aoNode.radius.value = radius;
+    resource.aoNode.thickness.value = radius * gtaoThicknessToRadiusRatio;
+  }
+};
+
 const createPipelineResources = ({
   camera,
   gpuRenderer,
@@ -70,6 +103,7 @@ const createPipelineResources = ({
   const scenePass = pass(scene, camera);
   let aoNode: ReturnType<typeof ao> | undefined;
   let post: InstanceType<typeof ThreeRenderPipeline> | undefined;
+  let depthRestoreMaterial: NodeMaterial | undefined;
   try {
     scenePass.setMRT(
       mrt({
@@ -88,13 +122,19 @@ const createPipelineResources = ({
     const scenePassNormal = sample((uv) => colorToDirection(scenePass.getTextureNode('normal').sample(uv)));
     const scenePassDepth = scenePass.getTextureNode('depth');
 
+    depthRestoreMaterial = new NodeMaterial();
+    depthRestoreMaterial.colorWrite = false;
+    depthRestoreMaterial.depthTest = false;
+    depthRestoreMaterial.depthWrite = true;
+    /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- TSL texture node fluent API */
+    depthRestoreMaterial.depthNode = scenePassDepth.sample(screenUV);
+    const depthRestore = new QuadMesh(depthRestoreMaterial);
+
     aoNode = ao(scenePassDepth, scenePassNormal, camera as Camera);
     aoNode.resolutionScale = 0.5;
     // Temporal direction rotation shimmers under `frameloop='demand'` because the
     // viewport never accumulates frame-to-frame.
     aoNode.useTemporalFiltering = false;
-    aoNode.radius.value = 0.09;
-    aoNode.thickness.value = 1;
     aoNode.samples.value = 8;
     aoNode.distanceFallOff.value = 1;
 
@@ -105,8 +145,16 @@ const createPipelineResources = ({
     post.outputNode = scenePassColor.mul(vec4(vec3(aoTexture.sample(screenUV).r), 1));
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
 
-    return { camera, post, aoNode, scenePass: scenePass as unknown as ScenePassWithCompile };
+    return {
+      camera,
+      post,
+      aoNode,
+      depthRestore,
+      depthRestoreMaterial,
+      scenePass: scenePass as unknown as ScenePassWithCompile,
+    };
   } catch (error) {
+    depthRestoreMaterial?.dispose();
     post?.dispose();
     aoNode?.dispose();
     scenePass.dispose();
@@ -118,25 +166,28 @@ const disposePipelineResources = (resources: readonly PostProcessingPipelineReso
   for (const resource of resources) {
     resource.post.dispose();
     resource.aoNode.dispose();
+    resource.depthRestoreMaterial.dispose();
     resource.scenePass.dispose();
   }
 };
 
 function PostProcessingWebGpuActive(): ReactNode {
-  const { gl, scene, invalidate } = useThree();
+  const { gl, scene, invalidate, size, viewport } = useThree();
   const cameraRig = useCameraRig();
   const resourcesRef = useRef<Map<Camera, PostProcessingPipelineResources> | undefined>(undefined);
+  const allResourcesRef = useRef<readonly PostProcessingPipelineResources[] | undefined>(undefined);
   const selectedCameraRef = useRef<ThreeCamera>(cameraRig.activeCamera);
 
   useLayoutEffect(() => {
     const gpuRenderer = gl as unknown as WebGPURenderer;
     const cancellation = { cancelled: false };
-    let resources: PostProcessingPipelineResources[] = [];
+    const resources: PostProcessingPipelineResources[] = [];
     try {
       resources.push(
         createPipelineResources({ camera: cameraRig.perspectiveCamera, gpuRenderer, scene }),
         createPipelineResources({ camera: cameraRig.orthographicCamera, gpuRenderer, scene }),
       );
+      allResourcesRef.current = resources;
     } catch (error) {
       disposePipelineResources(resources);
       console.error('Failed to create WebGPU post-processing pipelines', error);
@@ -145,9 +196,17 @@ function PostProcessingWebGpuActive(): ReactNode {
 
     // Publish only after both endpoint scene passes are warm. Until then the stable
     // priority-1 owner below renders the scene directly with the active camera.
+    // async-iife: bootstrap — React effects cannot await pipeline warmup; cleanup owns cancellation.
     void (async (): Promise<void> => {
       try {
-        await Promise.all(resources.map((resource) => resource.scenePass.compileAsync(gpuRenderer)));
+        await Promise.all(
+          resources.map(async (resource) => {
+            await Promise.all([
+              resource.scenePass.compileAsync(gpuRenderer),
+              gpuRenderer.compileAsync(resource.depthRestore, resource.depthRestore.camera),
+            ]);
+          }),
+        );
       } catch (error) {
         console.error('Failed to warm WebGPU post-processing pipelines', error);
         return;
@@ -162,14 +221,44 @@ function PostProcessingWebGpuActive(): ReactNode {
     return (): void => {
       cancellation.cancelled = true;
       resourcesRef.current = undefined;
+      allResourcesRef.current = undefined;
       disposePipelineResources(resources);
     };
   }, [cameraRig, gl, invalidate, scene]);
 
-  const retarget = useCallback((camera: ThreeCamera): void => {
-    selectedCameraRef.current = camera;
-  }, []);
+  const retarget = useCallback(
+    (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
+      selectedCameraRef.current = camera;
+      const target = new Vector3(
+        ...toThreeRenderPoint({ renderFrame: cameraRig.renderFrame, pointMeters: snapshot.view.target }),
+      );
+      updateGtaoSpatialScale({
+        at: target,
+        resources: allResourcesRef.current ?? [],
+        size,
+        viewport,
+      });
+    },
+    [cameraRig, size, viewport],
+  );
   useCameraRetarget(retarget);
+
+  const restoreDepth = useCallback((): void => {
+    const selected = resourcesRef.current?.get(selectedCameraRef.current);
+    if (!selected) {
+      return;
+    }
+    const renderer = gl as unknown as WebGPURenderer;
+    const previousTarget = renderer.getRenderTarget();
+    renderer.setRenderTarget(null);
+    try {
+      renderer.clearDepth();
+      selected.depthRestore.render(renderer);
+    } finally {
+      renderer.setRenderTarget(previousTarget);
+    }
+  }, [gl]);
+  useOverlayDepthRestore(restoreDepth);
 
   useFrame((state) => {
     const selected = resourcesRef.current?.get(selectedCameraRef.current);

@@ -1,5 +1,18 @@
 import { act, render } from '@testing-library/react';
+import { useLayoutEffect } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+type MockCameraSnapshot = { view: { target: [number, number, number] } };
+type MockAoNode = {
+  resolutionScale: number;
+  useTemporalFiltering: boolean;
+  radius: { value: number };
+  thickness: { value: number };
+  samples: { value: number };
+  distanceFallOff: { value: number };
+  getTextureNode: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+};
 
 const mocks = vi.hoisted(() => {
   const perspectiveCamera = { kind: 'perspective' };
@@ -7,13 +20,31 @@ const mocks = vi.hoisted(() => {
   const scene = { isScene: true };
   const invalidate = vi.fn();
   const glRender = vi.fn();
-  const gl = { isWebGPURenderer: true, render: glRender };
-  const state = { gl, scene, camera: perspectiveCamera, invalidate };
+  const clearDepth = vi.fn();
+  const compileAsync = vi.fn(async () => undefined);
+  const getRenderTarget = vi.fn(() => ({ kind: 'prior-target' }));
+  const setRenderTarget = vi.fn();
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Three.js API property.
+  const gl = { clearDepth, compileAsync, getRenderTarget, isWebGPURenderer: true, render: glRender, setRenderTarget };
+  const getCurrentViewport = vi.fn((camera: unknown) => ({
+    height: camera === perspectiveCamera ? 20 : 40,
+    width: 20,
+  }));
+  const state = {
+    gl,
+    scene,
+    camera: perspectiveCamera,
+    invalidate,
+    size: { width: 1500, height: 1000 },
+    viewport: { getCurrentViewport },
+  };
   const rig = {
     perspectiveCamera,
     orthographicCamera,
     activeCamera: perspectiveCamera,
+    renderFrame: { anchorFrameId: 'tau:root', originMeters: [10, 20, 30], metersPerRenderUnit: 0.001 },
   };
+  const snapshot: MockCameraSnapshot = { view: { target: [10.01, 20.02, 30.03] } };
 
   let frame:
     | ((
@@ -21,7 +52,8 @@ const mocks = vi.hoisted(() => {
         delta: number,
       ) => void)
     | undefined;
-  let retarget: ((camera: typeof perspectiveCamera) => void) | undefined;
+  let retarget: ((camera: typeof perspectiveCamera, snapshot: MockCameraSnapshot) => void) | undefined;
+  let restoreDepth: (() => void) | undefined;
   let constructionCamera: unknown;
   const compileSettlers: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   const scenePasses: Array<{
@@ -33,10 +65,11 @@ const mocks = vi.hoisted(() => {
     setMRT: ReturnType<typeof vi.fn>;
   }> = [];
   const pipelineInstances: Array<{ camera: unknown; outputNode?: unknown; render: ReturnType<typeof vi.fn> }> = [];
+  const aoNodes: MockAoNode[] = [];
   const postDispose = vi.fn();
   const aoDispose = vi.fn();
 
-  const depthNode = { kind: 'depth' };
+  const depthNode = { kind: 'depth', sample: vi.fn(() => ({ kind: 'sampled-depth' })) };
   const normalNode = { sample: vi.fn(() => ({ kind: 'normal-sample' })) };
   const colorNode = { mul: vi.fn(() => ({ kind: 'composed-color' })) };
   const aoTexture = { sample: vi.fn(() => ({ r: { kind: 'ao-r' } })) };
@@ -53,11 +86,16 @@ const mocks = vi.hoisted(() => {
           }),
       ),
       dispose: vi.fn(),
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Three.js API method.
       setMRT: vi.fn(),
       getTexture: vi.fn(() => normalTexture),
       getTextureNode: vi.fn((name: string) => {
-        if (name === 'depth') return depthNode;
-        if (name === 'normal') return normalNode;
+        if (name === 'depth') {
+          return depthNode;
+        }
+        if (name === 'normal') {
+          return normalNode;
+        }
         return colorNode;
       }),
     };
@@ -65,26 +103,35 @@ const mocks = vi.hoisted(() => {
     return scenePass;
   });
 
-  const ao = vi.fn(() => ({
-    resolutionScale: 1,
-    useTemporalFiltering: true,
-    radius: { value: 0 },
-    thickness: { value: 0 },
-    samples: { value: 0 },
-    distanceFallOff: { value: 0 },
-    getTextureNode: vi.fn(() => aoTexture),
-    dispose: aoDispose,
-  }));
+  const ao = vi.fn((): MockAoNode => {
+    const node: MockAoNode = {
+      resolutionScale: 1,
+      useTemporalFiltering: true,
+      radius: { value: 0 },
+      thickness: { value: 0 },
+      samples: { value: 0 },
+      distanceFallOff: { value: 0 },
+      getTextureNode: vi.fn(() => aoTexture),
+      dispose: aoDispose,
+    };
+    aoNodes.push(node);
+    return node;
+  });
 
   return {
     ao,
     aoDispose,
+    aoNodes,
     aoTexture,
+    clearDepth,
     colorNode,
+    compileAsync,
     compileSettlers,
     depthNode,
     getFrame: () => frame,
+    getCurrentViewport,
     getRetarget: () => retarget,
+    getRestoreDepth: () => restoreDepth,
     gl,
     glRender,
     invalidate,
@@ -97,6 +144,7 @@ const mocks = vi.hoisted(() => {
     postDispose,
     rig,
     scene,
+    snapshot,
     scenePasses,
     state,
     setFrame: (callback: typeof frame) => {
@@ -104,40 +152,77 @@ const mocks = vi.hoisted(() => {
     },
     setRetarget: (callback: typeof retarget) => {
       retarget = callback;
-      callback?.(rig.activeCamera);
+      callback?.(rig.activeCamera, snapshot);
     },
+    setRestoreDepth: (callback: typeof restoreDepth) => {
+      restoreDepth = callback;
+    },
+    setRenderTarget,
     takeConstructionCamera: () => constructionCamera,
   };
 });
 
 vi.mock('@react-three/fiber', () => ({
   useFrame: (callback: Parameters<typeof mocks.setFrame>[0], priority: number) => {
-    if (priority === 1) mocks.setFrame(callback);
+    if (priority === 1) {
+      mocks.setFrame(callback);
+    }
   },
   useThree: () => mocks.state,
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => mocks.rig,
-  useCameraRetarget: (callback: (camera: typeof mocks.perspectiveCamera) => void) => mocks.setRetarget(callback),
+  useCameraRetarget: (callback: (camera: typeof mocks.perspectiveCamera, snapshot: typeof mocks.snapshot) => void) => {
+    useLayoutEffect(() => {
+      mocks.setRetarget(callback);
+    }, [callback]);
+  },
+}));
+
+vi.mock('#components/geometry/graphics/three/scene-overlay.js', () => ({
+  useOverlayDepthRestore: (callback: () => void) => {
+    mocks.setRestoreDepth(callback);
+  },
 }));
 
 vi.mock('three/addons/tsl/display/GTAONode.js', () => ({ ao: mocks.ao }));
 
 vi.mock('three/tsl', () => ({
-  colorToDirection: vi.fn((value) => value),
-  directionToColor: vi.fn((value) => value),
-  mrt: vi.fn((value) => value),
+  colorToDirection: vi.fn((value: unknown): unknown => value),
+  directionToColor: vi.fn((value: unknown): unknown => value),
+  mrt: vi.fn((value: unknown): unknown => value),
   normalView: { kind: 'normal-view' },
   output: { kind: 'output' },
   pass: mocks.pass,
-  sample: vi.fn((mapper) => ({ mapper })),
+  sample: vi.fn((mapper: unknown) => ({ mapper })),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Three.js TSL export.
   screenUV: { kind: 'screen-uv' },
-  vec3: vi.fn((value) => value),
-  vec4: vi.fn((...values) => values),
+  vec3: vi.fn((value: unknown): unknown => value),
+  vec4: vi.fn((...values: unknown[]): unknown[] => values),
 }));
 
 vi.mock('three/webgpu', () => {
+  class NodeMaterial {
+    public colorWrite = true;
+    public depthNode: unknown;
+    public depthTest = true;
+    public depthWrite = false;
+    public readonly dispose = vi.fn();
+  }
+
+  class QuadMesh {
+    public readonly camera = { kind: 'quad-camera' };
+    // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids parameter properties.
+    public readonly material: NodeMaterial;
+    public constructor(material: NodeMaterial) {
+      this.material = material;
+    }
+    public render(renderer: typeof mocks.gl): void {
+      renderer.render(this, this.camera);
+    }
+  }
+
   class RenderPipeline {
     public outputNode: unknown;
     public readonly camera = mocks.takeConstructionCamera();
@@ -152,17 +237,20 @@ vi.mock('three/webgpu', () => {
     }
   }
 
-  return { RenderPipeline, UnsignedByteType: 1009 };
+  return { NodeMaterial, QuadMesh, RenderPipeline, UnsignedByteType: 1009 };
 });
 
 const mount = async () => {
-  const { PostProcessingWebGPU } = await import('#components/geometry/graphics/three/post-processing-webgpu.js');
-  return render(<PostProcessingWebGPU />);
+  const { PostProcessingWebGPU: PostProcessingWebGpu } =
+    await import('#components/geometry/graphics/three/post-processing-webgpu.js');
+  return render(<PostProcessingWebGpu />);
 };
 
 const settleBothCompiles = async (): Promise<void> => {
   await act(async () => {
-    for (const settler of mocks.compileSettlers) settler.resolve();
+    for (const settler of mocks.compileSettlers) {
+      settler.resolve();
+    }
     await Promise.resolve();
   });
 };
@@ -171,10 +259,14 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
   beforeEach(() => {
     mocks.ao.mockClear();
     mocks.aoDispose.mockClear();
+    mocks.aoNodes.length = 0;
     mocks.aoTexture.sample.mockClear();
+    mocks.clearDepth.mockClear();
     mocks.colorNode.mul.mockClear();
+    mocks.compileAsync.mockClear();
     mocks.compileSettlers.length = 0;
     mocks.glRender.mockClear();
+    mocks.getCurrentViewport.mockClear();
     mocks.invalidate.mockClear();
     mocks.normalNode.sample.mockClear();
     mocks.normalTexture.type = 0;
@@ -183,9 +275,12 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
     mocks.postDispose.mockClear();
     mocks.rig.activeCamera = mocks.perspectiveCamera;
     mocks.state.camera = mocks.perspectiveCamera;
+    mocks.state.size.height = 1000;
     mocks.scenePasses.length = 0;
     mocks.setFrame(undefined);
     mocks.setRetarget(undefined);
+    mocks.setRestoreDepth(undefined);
+    mocks.setRenderTarget.mockClear();
   });
 
   it('builds and warms both native camera graphs before publishing post-processing', async () => {
@@ -199,10 +294,37 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
       mocks.orthographicCamera,
     ]);
     expect(mocks.scenePasses.every(({ compileAsync }) => compileAsync.mock.calls.length === 1)).toBe(true);
+    expect(mocks.compileAsync).toHaveBeenCalledTimes(2);
     expect(mocks.invalidate).not.toHaveBeenCalled();
 
     await settleBothCompiles();
     expect(mocks.invalidate).toHaveBeenCalledOnce();
+  });
+
+  it('restores the selected scene-pass depth with one direct fullscreen draw', async () => {
+    await mount();
+    await settleBothCompiles();
+    mocks.glRender.mockClear();
+
+    mocks.getRestoreDepth()?.();
+
+    expect(mocks.setRenderTarget).toHaveBeenNthCalledWith(1, null);
+    expect(mocks.clearDepth).toHaveBeenCalledOnce();
+    expect(mocks.glRender).toHaveBeenCalledOnce();
+    const { QuadMesh } = await import('three/webgpu');
+    expect(mocks.glRender.mock.calls[0]![0]).toBeInstanceOf(QuadMesh);
+    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
+  });
+
+  it('restores the previous render target when the depth draw fails', async () => {
+    await mount();
+    await settleBothCompiles();
+    mocks.glRender.mockImplementationOnce(() => {
+      throw new Error('depth draw failed');
+    });
+
+    expect(() => mocks.getRestoreDepth()?.()).toThrow('depth draw failed');
+    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
   });
 
   it('keeps one priority-1 direct render alive while both graphs warm', async () => {
@@ -221,7 +343,7 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
     expect(mocks.pipelineInstances[0]!.render).toHaveBeenCalledOnce();
 
     act(() => {
-      mocks.getRetarget()?.(mocks.orthographicCamera);
+      mocks.getRetarget()?.(mocks.orthographicCamera, mocks.snapshot);
       mocks.state.camera = mocks.orthographicCamera;
     });
     mocks.getFrame()?.(mocks.state, 0);
@@ -253,12 +375,27 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
 
     expect(mocks.ao).toHaveBeenCalledTimes(2);
     expect(mocks.normalTexture.type).toBe(1009);
-    for (const result of mocks.ao.mock.results) {
-      const aoNode = result.value;
+    for (const aoNode of mocks.aoNodes) {
       expect(aoNode.resolutionScale).toBe(0.5);
       expect(aoNode.useTemporalFiltering).toBe(false);
       expect(aoNode.samples.value).toBe(8);
     }
+    expect(mocks.aoNodes.map(({ radius }) => radius.value)).toEqual([0.48, 0.96]);
+    expect(mocks.aoNodes.map(({ thickness }) => thickness.value)).toEqual([0.48 / 0.09, 0.96 / 0.09]);
+  });
+
+  it('updates both retained endpoint uniforms after viewport and camera retargeting without reconstruction', async () => {
+    await mount();
+    await settleBothCompiles();
+    const { aoNodes } = mocks;
+
+    mocks.state.size.height = 500;
+    act(() => {
+      mocks.getRetarget()?.(mocks.orthographicCamera, mocks.snapshot);
+    });
+
+    expect(aoNodes.map(({ radius }) => radius.value)).toEqual([0.96, 1.92]);
+    expect(mocks.pass).toHaveBeenCalledTimes(2);
   });
 
   it('disposes both endpoint resources once on unmount, including pending warm-up', async () => {

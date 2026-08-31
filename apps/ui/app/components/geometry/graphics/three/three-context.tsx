@@ -17,7 +17,6 @@ export function ThreeProvider({
   secondaryMouseButtonMode = 'camera-pan',
   enableDamping = false,
   upDirection = 'z',
-  enableCentering = false,
   className,
   stageOptions,
   zoomSpeed = 2,
@@ -84,7 +83,6 @@ export function ThreeProvider({
       secondaryMouseButtonMode={secondaryMouseButtonMode}
       enableDamping={enableDamping}
       upDirection={upDirection}
-      enableCentering={enableCentering}
       className={className}
       stageOptions={stageOptions}
       zoomSpeed={zoomSpeed}

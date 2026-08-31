@@ -6,19 +6,7 @@ import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments
 import type { Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
-import {
-  cameraFar,
-  cameraNear,
-  cameraProjectionMatrix,
-  depth,
-  float,
-  positionView,
-  viewZToReversedPerspectiveDepth,
-} from 'three/tsl';
-import {
-  gltfEdgeDepthBiasFactor,
-  gltfEdgeDepthBiasReferenceTanHalfFov,
-} from '#components/geometry/graphics/three/materials/edge-depth-bias.js';
+import { cameraFar, cameraNear, depth, positionView, viewZToReversedPerspectiveDepth } from 'three/tsl';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import {
   applyFatLineSegments,
@@ -31,19 +19,6 @@ import {
 import { serialiseStrippedTslGraph } from '#components/geometry/graphics/three/utils/tsl-node-graph-snapshot.js';
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url));
-
-type TslNode = Parameters<typeof viewZToReversedPerspectiveDepth>[0];
-type TslScalarNode = TslNode & {
-  div(operand: unknown): TslScalarNode;
-  element(index: number): TslScalarNode;
-  mul(operand: unknown): TslScalarNode;
-  pow(operand: unknown): TslScalarNode;
-  reciprocal(): TslScalarNode;
-};
-
-function asTslScalarNode(node: unknown): TslScalarNode {
-  return node as TslScalarNode;
-}
 
 /**
  * Build a minimal GLTF-like object with `lineSegmentsCount` `LineSegments` children attached
@@ -112,35 +87,16 @@ function fingerprint(node: unknown): string {
   return serialiseStrippedTslGraph((node as { toJSON: () => unknown }).toJSON());
 }
 
-function buildFovAdaptiveBiasedZ(depthBias: number): TslNode {
-  const tanHalfFov = asTslScalarNode(cameraProjectionMatrix).element(1).element(1).reciprocal();
-  const fovScale = tanHalfFov.div(gltfEdgeDepthBiasReferenceTanHalfFov);
-
-  return asTslScalarNode(positionView.z).mul(asTslScalarNode(float(depthBias)).pow(fovScale));
-}
-
 describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
-  /**
-   * Smoking-gun regression: the WebGPU fat-line material must apply a coplanar bias so edge
-   * lines win the depth comparison against the surface they overlay. The bias used to live
-   * as a hardcoded `material.depthNode = viewZToReversedPerspectiveDepth(...)` in the
-   * factory, but that locked the encoder to the reversed-Z viewport and broke the log-depth
-   * screenshot/offscreen renderers (occluded edges leaked through opaque surfaces). The
-   * factory now sets `material.depthBias` and the renderer-aware encoder dispatch lives
-   * inside `Line2NodeMaterial.setupDepth(builder)` per-frame. See
-   * `docs/research/webgpu-fat-line-renderer-aware-depth.md`.
-   */
-  it('forwards the shared base depthBias to Line2NodeMaterial.setupDepth (regression guard)', () => {
+  it('keeps the line at geometric depth', () => {
     const material = createWebGpuGltfFatLineMaterial();
-    expect(material.depthBias).toBe(gltfEdgeDepthBiasFactor);
+    expect(material).not.toHaveProperty('depthBias');
   });
 
-  it('uses native polygon offset for the orthographic endpoint without disabling occlusion', () => {
+  it('does not apply line-side polygon offset', () => {
     const material = createWebGpuGltfFatLineMaterial();
 
-    expect(material.polygonOffset).toBe(true);
-    expect(material.polygonOffsetFactor).toBe(1);
-    expect(material.polygonOffsetUnits).toBe(1);
+    expect(material.polygonOffset).toBe(false);
     expect(material.depthTest).toBe(true);
   });
 
@@ -157,7 +113,7 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
     expect(material.constructor).not.toBe(ThreeLine2NodeMaterial);
   });
 
-  it('routes the factory material through Tau setupDepth with adaptive perspective bias', () => {
+  it('routes the factory material through Tau setupDepth with exact geometric view Z', () => {
     const material = createWebGpuGltfFatLineMaterial();
     const stubBuilder = {
       renderer: { reversedDepthBuffer: true, getMRT: () => null },
@@ -171,11 +127,7 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
       restore();
     }
 
-    const expected = viewZToReversedPerspectiveDepth(
-      buildFovAdaptiveBiasedZ(gltfEdgeDepthBiasFactor),
-      cameraNear,
-      cameraFar,
-    );
+    const expected = viewZToReversedPerspectiveDepth(positionView.z, cameraNear, cameraFar);
     expect(captured.node).toBeDefined();
     expect(fingerprint(captured.node)).toBe(fingerprint(expected));
   });

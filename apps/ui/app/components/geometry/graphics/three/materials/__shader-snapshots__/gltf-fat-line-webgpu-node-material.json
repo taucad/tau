@@ -12,9 +12,6 @@
     "type": "Material",
     "version": 4.7
   },
-  "polygonOffset": true,
-  "polygonOffsetFactor": 1,
-  "polygonOffsetUnits": 1,
   "scale": 1,
   "type": "Line2NodeMaterial"
 }

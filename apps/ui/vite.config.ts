@@ -32,18 +32,18 @@ const toOriginOrRaw = (value: string | undefined): string | undefined => {
 };
 
 const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undefined => {
-  if (environment.TAU_FRONTEND_URL) {
+  if (environment['TAU_FRONTEND_URL']) {
     return undefined;
   }
 
-  if (environment.NETLIFY !== 'true' || environment.CONTEXT === 'production') {
+  if (environment['NETLIFY'] !== 'true' || environment['CONTEXT'] === 'production') {
     return undefined;
   }
 
   return (
-    toOriginOrRaw(environment.DEPLOY_PRIME_URL) ??
-    toOriginOrRaw(environment.DEPLOY_URL) ??
-    toOriginOrRaw(environment.NETLIFY_AI_GATEWAY_URL)
+    toOriginOrRaw(environment['DEPLOY_PRIME_URL']) ??
+    toOriginOrRaw(environment['DEPLOY_URL']) ??
+    toOriginOrRaw(environment['NETLIFY_AI_GATEWAY_URL'])
   );
 };
 

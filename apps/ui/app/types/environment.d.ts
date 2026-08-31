@@ -1,13 +1,9 @@
-import type { Environment } from '#environment.config.js';
+import type { ClientEnvironment } from '#environment.config.js';
 
 declare global {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-definitions -- required for augmentation
   interface Window {
-    ENV: Environment;
-  }
-
-  namespace NodeJS {
-    // oxlint-disable-next-line @typescript-eslint/no-empty-object-type, @typescript-eslint/consistent-type-definitions -- Necessary to augment correctly.
-    interface ProcessEnv extends Environment {}
+    // Only the client-safe allowlist is injected — see `clientEnvironmentKeys`.
+    ENV: ClientEnvironment;
   }
 }

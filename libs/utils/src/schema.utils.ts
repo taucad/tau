@@ -88,7 +88,7 @@ export async function jsonSchemaFromJson(json: Record<string, unknown>): Promise
 
   // Add $schema field and root title
   return {
-    $schema: 'http://json-schema.org/draft-06/schema#',
+    $schema: 'http://json-schema.org/draft-07/schema#',
     ...schema,
     title: 'Root',
   };

@@ -207,7 +207,7 @@ describe('createEsbuildModuleVm', () => {
   });
 
   it('should re-execute identical code by default for repeatable VM consumers', async () => {
-    const key = '__TAUCAD_VM_REPEATABLE_DEFAULT__';
+    const key = '__TAU_VM_REPEATABLE_DEFAULT__';
     const filesystem = new MemoryFileSystem();
     const vm = await createEsbuildModuleVm({ filesystem });
     activeVm = vm;
@@ -233,7 +233,7 @@ describe('createEsbuildModuleVm', () => {
   });
 
   it('should reuse identical code only when execution caching is enabled', async () => {
-    const key = '__TAUCAD_VM_CACHED_EXECUTION__';
+    const key = '__TAU_VM_CACHED_EXECUTION__';
     const filesystem = new MemoryFileSystem();
     const vm = await createEsbuildModuleVm({
       filesystem,

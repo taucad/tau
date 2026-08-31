@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_DBiP4RDlK54lXpqTaATJT",
+  "name": "I-Beam",
+  "description": "Industrial elegance meets precision engineering. This accurate I-beam profile features customizable dimensions, web and flange thickness, and optional root fillets for a professional finish. Ideal for structural studies, furniture accents, or architectural elements that require authentic beam geometry.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

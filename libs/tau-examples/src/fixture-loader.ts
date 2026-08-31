@@ -55,14 +55,18 @@ function readFixtureFiles(directoryUrl: URL, prefix = ''): Record<string, string
  *
  * @param kernel - Kernel directory name (e.g. `'replicad'`, `'jscad'`).
  * @param name   - Example subdirectory name (e.g. `'tray'`, `'bottle'`).
+ * @param entryFile - Optional explicit entry path within the fixture.
  * @returns A {@link Fixture} with all files and the entry-point filename.
  */
-export function loadFixture<K extends KernelName>(kernel: K, name: ExampleName<K>): Fixture {
+export function loadFixture<K extends KernelName>(kernel: K, name: ExampleName<K>, entryFile?: string): Fixture {
   const fixtureUrl = new URL(`${kernel}/${name}/`, baseUrl);
   const files = readFixtureFiles(fixtureUrl);
-  const mainFile = candidateMainFiles.find((candidate) => Object.hasOwn(files, candidate));
+  const mainFile = entryFile ?? candidateMainFiles.find((candidate) => Object.hasOwn(files, candidate));
   if (!mainFile) {
     throw new Error(`Fixture ${kernel}/${name} has no supported main entrypoint`);
+  }
+  if (!Object.hasOwn(files, mainFile)) {
+    throw new Error(`Fixture ${kernel}/${name} has no entrypoint ${mainFile}`);
   }
 
   return { files, mainFile };

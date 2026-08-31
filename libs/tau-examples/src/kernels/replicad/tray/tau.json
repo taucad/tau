@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_Puxz0MZamfmSL0LC8YhiO",
+  "name": "Tray",
+  "description": "A beautifully sculpted tray with elegant curved edges that elevates everyday items. Perfect for serving coffee, displaying jewelry, or organizing your entryway essentials. The sophisticated swept profile creates visual interest while the raised brim keeps everything secure. Fully customizable proportions let you create the perfect size for your space.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

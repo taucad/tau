@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_gr20SlrHcQcug04OlzVox",
+  "name": "Edge Occlusion Fixture",
+  "description": "A deterministic front-slab and rear-cuboid scene for low-FOV GLTF edge occlusion regression testing.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

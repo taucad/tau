@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_d90EiYaA9f14Rqn8D6ees",
+  "name": "JSCAD Cube",
+  "description": "The perfect starting point for your 3D modeling journey. This simple yet powerful cube demonstrates the fundamentals of parametric design with JSCAD. Adjust the size parameter to create anything from tiny components to large building blocks. Ideal for learning the basics or as a foundation for more complex geometric shapes.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

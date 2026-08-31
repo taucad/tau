@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_5L941IPUceeAKufTuaCm7",
+  "name": "Drinking Glass",
+  "description": "Create elegant glassware with precise control over form and function. This parametric design uses advanced revolve and shelling techniques to produce a refined drinking glass with customizable height, taper, and wall thickness. Optional rim and base fillets add a professional finishing touch for a truly polished result.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

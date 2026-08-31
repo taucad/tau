@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_dB6KxezSHEFUv8aX4ibub",
+  "name": "Pot Plant",
+  "description": "A thoughtfully designed plant pot holder that combines form and function. Features an optional integrated saucer, customizable drainage holes, and smooth filleted edges for easy cleaning. Adjust dimensions to perfectly fit your favorite plants while maintaining proper drainage and a clean, modern aesthetic.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

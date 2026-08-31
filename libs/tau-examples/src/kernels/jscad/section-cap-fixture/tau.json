@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_6d7yN2GPDnBHNp5tDKj4k",
+  "name": "Section Cap Fixture",
+  "description": "A deterministic holed housing with colored internal solids for section-view cap and contour-fill regression testing.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

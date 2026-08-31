@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_MGaJc46GJ3f2t9COgF4GR",
+  "name": "Table",
+  "description": "A complete table system with customizable top, legs, apron, and optional shelf. Choose between square or round legs, adjust proportions for any space, and add optional features like rounded corners or a lower shelf. The parametric design ensures perfect alignment and professional results for any furniture project.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

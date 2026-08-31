@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_D2xfPM58AjAVHbdJM5uAV",
+  "name": "Section Picking Fixture",
+  "description": "A deterministic two-cuboid scene for section-view clipping-aware model picking regression testing.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

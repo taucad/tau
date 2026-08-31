@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_YEf7fNIWx82wCY2gtRzyh",
+  "name": "Bottle",
+  "description": "A modern bottle design with soft, rounded shoulders and a refined neck detail. The parametric construction allows precise control over proportions while the shell operation creates a hollow interior. Optional threading detail adds authenticity, making this perfect for functional prototypes or decorative pieces.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

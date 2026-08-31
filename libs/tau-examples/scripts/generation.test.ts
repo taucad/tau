@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createNodeClient } from '@taucad/runtime/node';
+import { projectManifestSchema } from '@taucad/types';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import { exampleKernelIds, exampleRuntime } from '#scripts/runtime.js';
@@ -17,8 +18,39 @@ type ManifestEntry = {
 const rootDirectory = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDirectory = join(rootDirectory, 'src');
 const manifest = JSON.parse(readFileSync(join(sourceDirectory, 'manifest.json'), 'utf8')) as ManifestEntry[];
+const builtinSource = readFileSync(join(sourceDirectory, 'builtin.ts'), 'utf8');
 
 describe('generated example artifacts', () => {
+  it('strictly validates unique manifest-backed builtins and excludes runtime caches', () => {
+    const ids = new Set<string>();
+    const locators = new Set<string>();
+    let count = 0;
+    for (const entry of manifest) {
+      const path = join(sourceDirectory, 'kernels', entry.kernel, entry.name, 'tau.json');
+      if (!existsSync(path)) {
+        continue;
+      }
+      const parsed = projectManifestSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+      const locator = `${entry.kernel}.${entry.name}`;
+      expect(ids.has(parsed.id)).toBe(false);
+      expect(locators.has(locator)).toBe(false);
+      expect(existsSync(join(sourceDirectory, 'kernels', entry.kernel, entry.name, parsed.assets.main.entryPath))).toBe(
+        true,
+      );
+      if (parsed.assets.main.thumbnail) {
+        expect(
+          existsSync(join(sourceDirectory, 'kernels', entry.kernel, entry.name, parsed.assets.main.thumbnail)),
+        ).toBe(true);
+      }
+      ids.add(parsed.id);
+      locators.add(locator);
+      count++;
+    }
+    expect(count).toBeGreaterThanOrEqual(34);
+    expect(builtinSource).toContain('replicad.birdhouse');
+    expect(builtinSource).not.toContain('/.tau/cache/');
+  });
+
   it('discovers only real entrypoints and excludes generated/cache files', () => {
     expect(manifest.find((entry) => entry.kernel === 'openscad')?.mainFile).toBe('main.scad');
     expect(manifest.find((entry) => entry.kernel === 'occt')?.mainFile).toBe('main.cpp');

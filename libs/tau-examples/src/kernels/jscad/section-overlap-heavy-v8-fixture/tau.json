@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_WhNvy0j3FSsZgo5Z6x5vu",
+  "name": "Heavy V8 Section Overlap Fixture",
+  "description": "A deterministic engine-style assembly for section-view overlap drag performance diagnostics.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

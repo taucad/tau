@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_PwxF7vbT3RmK6AM7xa8mL",
+  "name": "Interlocking Brick",
+  "description": "A faithful recreation of the classic interlocking brick system. Features accurate stud placement, hollow underside, and optional bottom tubes for authentic connections. Fully parametric dimensions let you create bricks of any size while maintaining the precise geometry needed for reliable interlocking.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

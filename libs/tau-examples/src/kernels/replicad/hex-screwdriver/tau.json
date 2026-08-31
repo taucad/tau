@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_r9TH1zB4clnbIu7EJYnIx",
+  "name": "Hex Screwdriver",
+  "description": "A robust M5 hex key screwdriver with a comfortable hexagonal handle and precise tip geometry. Features smooth filleted edges for comfortable grip and accurate shaft dimensions. Perfect for creating custom tools, replacement handles, or educational demonstrations of parametric tool design.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

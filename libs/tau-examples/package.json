@@ -7,6 +7,7 @@
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
+    "./builtin": "./src/builtin.ts",
     "./fixtures": "./src/fixture-loader.ts",
     "./manifest": "./src/manifest.ts",
     "./thumbnails": "./src/thumbnail.assets.ts"
@@ -25,7 +26,8 @@
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
     "@taucad/replicad": "workspace:*",
-    "@taucad/runtime": "workspace:*"
+    "@taucad/runtime": "workspace:*",
+    "@taucad/types": "workspace:*"
   },
   "devDependencies": {
     "geospec": "workspace:*",

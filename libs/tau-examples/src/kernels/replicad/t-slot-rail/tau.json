@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_u8iLpUn39XKwwJ00B49J4",
+  "name": "T-Slot Rail",
+  "description": "A precise T-slot extrusion profile perfect for modular framing systems. Features accurate interior geometry with proper clearances and scoring details. Customizable rail height and length make it ideal for building custom fixtures, jigs, or furniture that requires the versatility of T-slot construction.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

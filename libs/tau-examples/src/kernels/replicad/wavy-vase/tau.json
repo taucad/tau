@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_1LAOVYHh7fBvACWzn41Uk",
+  "name": "Wavy Vase",
+  "description": "A bold, sculptural vase featuring dynamic twisted geometry and rhythmic faceting. The parametric design lets you control the number of sides, twist angle, and wall thickness to create unique light-catching forms. Perfect for making a statement piece that combines mathematical precision with artistic expression.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

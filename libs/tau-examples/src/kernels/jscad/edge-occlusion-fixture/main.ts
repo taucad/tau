@@ -13,8 +13,8 @@ export default function main(): Geom3[] {
     cuboid({ size: [96, 4, 96], center: [0, 0, 0] }),
   );
   const rearCuboid = translate(
-    [0, 6.75, 0],
-    cuboid({ size: [3.5, 12, 3.5], center: [0, 0, 0] }),
+    [0, 6.1, 0],
+    cuboid({ size: [24, 12, 24], center: [0, 0, 0] }),
   );
 
   return [

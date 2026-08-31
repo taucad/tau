@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_2RXCvaH02ICXmgr557YOY",
+  "name": "Flower Attachment Section Outline Fixture",
+  "description": "A real exported Replicad flower attachment source fixture for section-view contour outline visual regression testing.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

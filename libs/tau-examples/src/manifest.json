@@ -9,67 +9,67 @@
     "kernel": "jscad",
     "name": "cube",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "cube-cylinder-section-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "cylinder",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "edge-occlusion-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "gear",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "non-manifold-section-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "section-cap-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "section-overlap-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "section-overlap-heavy-planetary-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "section-overlap-heavy-v8-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "jscad",
     "name": "section-picking-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "manifold",
@@ -93,7 +93,7 @@
     "kernel": "openscad",
     "name": "kitchen-sink",
     "mainFile": "main.scad",
-    "files": ["main.scad"]
+    "files": ["main.scad", "tau.json"]
   },
   {
     "kernel": "replicad",
@@ -105,13 +105,13 @@
     "kernel": "replicad",
     "name": "birdhouse",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "bottle",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
@@ -134,43 +134,43 @@
     "kernel": "replicad",
     "name": "card-holder",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "chair",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "cycloidal-gear",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "decorated-box",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "drinking-glass",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "flower-attachment-section-outline-fixture",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "gridfinity-box",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
@@ -182,19 +182,19 @@
     "kernel": "replicad",
     "name": "hex-screwdriver",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "hollow-box",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "ibeam",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
@@ -206,7 +206,27 @@
     "kernel": "replicad",
     "name": "lego",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
+  },
+  {
+    "kernel": "replicad",
+    "name": "libassimp-format-prism",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "banner.svg",
+      "generate-logo.ts",
+      "generate-variants.ts",
+      "libassimp.svg",
+      "main.ts",
+      "variants.ts",
+      "variants/01-full-bleed-stack.svg",
+      "variants/02-ember-spine.svg",
+      "variants/03-signal-ribbon.svg",
+      "variants/04-foundry-frame.svg",
+      "variants/review-board.svg",
+      "wordmark.ts"
+    ]
   },
   {
     "kernel": "replicad",
@@ -236,7 +256,7 @@
     "kernel": "replicad",
     "name": "pot-plant",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
@@ -260,13 +280,13 @@
     "kernel": "replicad",
     "name": "simple-tray",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "staircase",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
@@ -278,13 +298,13 @@
     "kernel": "replicad",
     "name": "t-slot-rail",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "table",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
@@ -296,7 +316,7 @@
     "kernel": "replicad",
     "name": "tray",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
@@ -353,18 +373,18 @@
     "kernel": "replicad",
     "name": "vase",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "wavy-vase",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   },
   {
     "kernel": "replicad",
     "name": "wedge-door-stopper",
     "mainFile": "main.ts",
-    "files": ["main.ts"]
+    "files": ["main.ts", "tau.json"]
   }
 ]

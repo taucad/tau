@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_xEaivK3ZY8tYt2Yc6hn4D",
+  "name": "Simple Tray",
+  "description": "A practical drawer organizer with customizable compartments. Create the perfect grid layout for your needs with adjustable rows and columns. Features rounded corners, clean shelling, and optional edge fillets for a premium feel. Ideal for organizing tools, office supplies, or any small items that need dedicated spaces.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

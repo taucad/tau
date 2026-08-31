@@ -3,7 +3,7 @@
   "compilerOptions": {
     "outDir": "./out-tsc/lib",
     "module": "NodeNext",
-    "types": ["node"],
+    "types": ["node", "vite/client"],
     "target": "ESNext",
     "paths": {
       "#*": ["./src/*"],

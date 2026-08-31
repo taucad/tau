@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_4RHier4pc3fPiLbHATqp9",
+  "name": "Staircase",
+  "description": "A complete staircase system with steps, stringers, handrails, and balusters—all fully parametric. Built to real-world building code proportions with customizable dimensions, optional features, and proper step geometry. Perfect for architectural visualization, furniture design, or educational demonstrations.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

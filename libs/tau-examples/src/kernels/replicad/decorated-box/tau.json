@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_KUU0U8lMwFeljIgovWEGk",
+  "name": "Decorated Box",
+  "description": "A sleek storage box that becomes a canvas for pattern and texture. Start with clean, shelled geometry, then apply decorative patterns like Voronoi cells, grids, or honeycomb structures. Perfect for creating unique, personalized storage solutions that combine functionality with artistic expression.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

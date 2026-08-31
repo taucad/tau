@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_ZTFWxDD8N8ukkYmDCraiL",
+  "name": "Section Overlap Fixture",
+  "description": "A deterministic set of overlapping and tangent cuboids for section-plane overlap cap-shading regression testing.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

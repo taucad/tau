@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_IgqN2fxzG85CsgApKjCfT",
+  "name": "Heavy Planetary Section Overlap Fixture",
+  "description": "A deterministic dense planetary-style assembly for section-view overlap drag performance diagnostics.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

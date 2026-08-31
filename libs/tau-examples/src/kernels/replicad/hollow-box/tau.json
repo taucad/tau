@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_NkkZlTciWX0tA6BHNNyF9",
+  "name": "Hollow Box",
+  "description": "The perfect everyday organizer—simple, elegant, and endlessly useful. This minimalist design features smooth rounded corners and a clean hollow construction that keeps it lightweight yet sturdy. Fully customizable dimensions, wall thickness, and corner radius make it ideal for everything from desk organizers to workshop storage bins.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

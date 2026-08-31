@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_CZ83d8z6kVjsAD8XbniS8",
+  "name": "Card Holder",
+  "description": "A thoughtfully designed card holder with ergonomic finger cutouts and a secure locking mechanism. Features smooth filleted edges for comfortable handling and precise screw hole placement for mounting. The parametric design ensures a perfect fit for your cards while maintaining a clean, professional appearance.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

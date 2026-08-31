@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_WhqwZ4ODSnw2JSdd4gjCx",
+  "name": "Cycloidal Gear",
+  "description": "A striking gear design driven by mathematical elegance. Combines epicycloid and hypocycloid curves to create a unique tooth profile, with optional twist for added visual interest. Perfect for decorative applications, educational demonstrations, or architectural accents that showcase the beauty of parametric design.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

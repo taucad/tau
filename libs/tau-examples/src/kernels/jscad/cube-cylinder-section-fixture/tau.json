@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_qIWjERe3Mu8SIuO82tkqb",
+  "name": "Cube Cylinder Section Fixture",
+  "description": "A deterministic cube with a cylindrical through-cut for WebGL section-view overlay depth regression testing.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -503,12 +503,12 @@ const rim = [
   ring(topRadius - filletRadius, p.height, landTone),
   ring(boreRadius + filletRadius, p.height, 'url(#rcBore)'),
   ring(boreRadius + filletRadius, p.height, 'url(#rcInner)'),
-  ring(
-    boreRadius,
-    p.height - filletRadius,
-    'url(#rcBore)',
-    ' clip-path="url(#rcHole)"',
-  ),
+  // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
+  // ponytail: `ring` has no attribute slot, so the intended
+  // ` clip-path="url(#rcHole)"` argument was dropped at runtime and no shipped
+  // render ever carried it. Give `ring` the slot when `replicad.svg`, the UI
+  // raw icon, and the UI sprite can be re-rendered together.
+  ring(boreRadius, p.height - filletRadius, 'url(#rcBore)'),
 ].join('');
 
 /* ---------------------------------------------------------------------- *

@@ -41,7 +41,8 @@ const only = new Set(
     .split(',')
     .filter(Boolean) ?? [],
 );
-const thumbnailOptions = { width: 768, height: 576, margin: 0.1 } as const;
+const thumbnailOptions = { width: 768, height: 576 } as const;
+const thumbnailMargin = 0.1;
 
 const runtime = exampleRuntime;
 const supportedKernels: ReadonlySet<string> = exampleKernelIds;
@@ -130,11 +131,11 @@ const imagesEquivalent = async (
 };
 
 const renderSvgThumbnail = async (svg: string): Promise<Uint8Array<ArrayBuffer>> => {
-  const { width, height, margin } = thumbnailOptions;
+  const { width, height } = thumbnailOptions;
   const foreground = await sharp(Buffer.from(svg))
     .resize({
-      width: Math.round(width * (1 - 2 * margin)),
-      height: Math.round(height * (1 - 2 * margin)),
+      width: Math.round(width * (1 - 2 * thumbnailMargin)),
+      height: Math.round(height * (1 - 2 * thumbnailMargin)),
       fit: 'contain',
     })
     .png()
@@ -209,9 +210,14 @@ for (const entry of renderable) {
       exportOptions: {
         mode: 'single',
         ...thumbnailOptions,
-        projection: 'perspective',
-        phi: 60,
-        theta: -45,
+        lineWidth: 3,
+        camera: {
+          framing: 'bounds',
+          direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+          up: [0, 0, 1],
+          margin: thumbnailMargin,
+          projection: { kind: 'perspective', verticalFieldOfView: 45 },
+        },
         quality: 0.9,
       },
     });

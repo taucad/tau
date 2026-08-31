@@ -3,24 +3,18 @@ import { booleans, colors, primitives, transforms } from '@jscad/modeling';
 
 type Geom3 = geometries.geom3.Geom3;
 
-const { subtract, union } = booleans;
+const { union } = booleans;
 const { colorize } = colors;
-const { cuboid, cylinder } = primitives;
+const { cuboid, cylinder, torus } = primitives;
 const { translate } = transforms;
 
 export default function main(): Geom3[] {
-  const housing = subtract(
-    cylinder({ height: 8, radius: 32, center: [0, 0, 0], segments: 96 }),
-    cylinder({ height: 10, radius: 20, center: [0, 0, 0], segments: 96 }),
-    translate(
-      [24, 0, 0],
-      cylinder({ height: 10, radius: 3, center: [0, 0, 0], segments: 32 }),
-    ),
-    translate(
-      [-24, 0, 0],
-      cylinder({ height: 10, radius: 3, center: [0, 0, 0], segments: 32 }),
-    ),
-  );
+  const housing = torus({
+    innerRadius: 6,
+    outerRadius: 26,
+    innerSegments: 32,
+    outerSegments: 96,
+  });
 
   const yellowCore = cylinder({
     height: 18,

@@ -39,6 +39,7 @@ export type ExampleManifest = {
     | 'ibeam'
     | 'jscad-logo'
     | 'lego'
+    | 'libassimp-format-prism'
     | 'logo'
     | 'logo-keychain'
     | 'nanoraster-logo'

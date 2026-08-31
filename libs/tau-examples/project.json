@@ -15,11 +15,28 @@
         "{projectRoot}/**/*",
         "!{projectRoot}/src/manifest.json",
         "!{projectRoot}/src/manifest.ts",
+        "!{projectRoot}/src/builtin.ts",
         "!{projectRoot}/src/thumbnail.assets.ts",
         "!{projectRoot}/src/kernels/**/thumbnail.webp",
         "sharedGlobals"
       ],
-      "outputs": ["{projectRoot}/src/manifest.json", "{projectRoot}/src/manifest.ts"]
+      "outputs": ["{projectRoot}/src/manifest.json", "{projectRoot}/src/manifest.ts", "{projectRoot}/src/builtin.ts"]
+    },
+    "check-manifest": {
+      "command": "tsx scripts/generate-manifest.mts --check",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/**/*",
+        "!{projectRoot}/src/manifest.json",
+        "!{projectRoot}/src/manifest.ts",
+        "!{projectRoot}/src/builtin.ts",
+        "!{projectRoot}/src/thumbnail.assets.ts",
+        "!{projectRoot}/src/kernels/**/thumbnail.webp",
+        "sharedGlobals"
+      ]
     },
     "generate-thumbnails": {
       "command": "tsx scripts/generate-thumbnails.mts",
@@ -57,14 +74,14 @@
       "cache": true
     },
     "generate-logo": {
-      "command": "tsx src/kernels/replicad/logo/generate-logo.ts",
+      "command": "tsx src/kernels/replicad/replicad-logo/generate-logo.ts",
       "inputs": ["default", "^default"],
       "options": {
         "cwd": "{projectRoot}"
       }
     },
     "check-logo": {
-      "command": "tsx src/kernels/replicad/logo/generate-logo.ts --check",
+      "command": "tsx src/kernels/replicad/replicad-logo/generate-logo.ts --check",
       "inputs": ["default", "^default"],
       "options": {
         "cwd": "{projectRoot}"

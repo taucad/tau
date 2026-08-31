@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_cDWerB7Efbatf8cJ6eGKu",
+  "name": "Wedge Door Stopper",
+  "description": "A hollow, printable wedge door stopper with rounded front and back profiles, a solid nose, and concentric underside grip ridges.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

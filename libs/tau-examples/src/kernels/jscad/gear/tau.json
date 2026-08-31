@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_kadVFdTACjJfWV77G4y85",
+  "name": "Involute Gear",
+  "description": "Design precision mechanical gears with mathematically accurate involute profiles. This advanced example showcases complex parametric modeling with customizable tooth count, pitch, pressure angle, and thickness. Perfect for creating functional gear systems, educational demonstrations, or replacement parts. Features optional center hole for shaft mounting and professional-grade gear geometry calculations.",
+  "tags": ["3d-printing", "parametric", "jscad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

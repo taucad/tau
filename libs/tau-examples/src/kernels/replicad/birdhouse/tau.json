@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_iEbCJko3yX1UiAvGEdTjB",
+  "name": "Birdhouse",
+  "description": "Invite nature into your backyard with this modern, geometric birdhouse design. Its clean triangular silhouette and rounded edges create a contemporary look while the customizable entrance hole size and wall thickness ensure it's perfectly suited for your local bird species. Features an integrated hanging hook for easy placement.",
+  "tags": ["3d-printing", "parametric", "replicad"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

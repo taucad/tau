@@ -1,6 +1,21 @@
 /* eslint-disable @typescript-eslint/naming-convention -- CONSTANT_CASE is expected for environment variables */
+import { readFile } from 'node:fs/promises';
 // oxlint-disable-next-line import-x/no-unassigned-import -- this is a side effect
 import '@testing-library/jest-dom';
+
+// Vite rewrites package-owned WASM/font assets to /@fs/ URLs. Jsdom has no Vite
+// HTTP server, so load those same real bytes directly while preserving normal fetches.
+const networkFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = new URL(input instanceof Request ? input.url : input.toString(), globalThis.location.href);
+  const isLocalAsset = url.pathname.startsWith('/@fs/') && /\.(?:ttf|wasm)$/u.test(url.pathname);
+  if (!isLocalAsset) {
+    return networkFetch(input, init);
+  }
+  const bytes = await readFile(decodeURIComponent(url.pathname.slice('/@fs'.length)));
+  const contentType = url.pathname.endsWith('.wasm') ? 'application/wasm' : 'font/ttf';
+  return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': contentType } });
+};
 
 // Mock window.ENV for testing - required since the app uses window.ENV in browser environments
 const mockEnv = {

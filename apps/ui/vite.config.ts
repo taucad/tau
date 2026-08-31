@@ -152,21 +152,17 @@ export default defineConfig(({ mode }) => {
       plugins: () => [createUiSourceAliasPlugin(), nxViteTsPaths()],
     },
     resolve: {
-      alias: isTest
-        ? {
-            [testScriptsAlias]: path.resolve(__dirname, 'scripts'),
-          }
-        : {},
+      alias: isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : [],
     },
 
     /*
-     * Externalise only workspace packages that emit sibling SSR chunks via
+     * Externalise only the three packages that emit sibling SSR chunks via
      * static `new URL('./<file>.js', import.meta.url)` patterns (kernel plugins,
      * worker bootstraps, middleware factories). Bundling those re-emits many
      * `build/server/assets/*` chunks SSR never executes. Other `@taucad/*`
      * packages bundle into the SSR output.
      *
-     * Audit: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/ kernels/
+     * Audit first-party sources: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/
      */
     ssr: {
       noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
@@ -203,6 +199,7 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
+      exclude: ['**/node_modules/**', '**/dist/**'],
       typecheck: {
         enabled: true,
         include: ['**/*.test-d.ts'],

@@ -285,7 +285,7 @@ type ImportWorkerCallbackEvents =
   | { type: 'workerError'; message: string; phase: 'download' | 'extract' | 'write' };
 
 const importWorkerActor = fromCallback<ImportWorkerCallbackEvents, ImportWorkerCallbackInput>(({ sendBack, input }) => {
-  const worker = new Worker(new URL('#workers/import.worker.js', import.meta.url), {
+  const worker = new Worker(new URL('../workers/import.worker.ts', import.meta.url), {
     type: 'module',
   });
 

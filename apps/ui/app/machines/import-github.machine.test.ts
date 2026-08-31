@@ -25,7 +25,7 @@ vi.mock('#lib/github-api.js', () => ({
     downloadArchiveWithSize: vi.fn(),
     getArchiveUrl: vi.fn(
       ({ owner, repo }: { owner: string; repo: string }) =>
-        `/api/import?url=${encodeURIComponent(`https://api.github.com/repos/${owner}/${repo}/zipball/refs/heads/main`)}`,
+        `/api/import?provider=github&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&ref=main`,
     ),
     getAuthHeaders: vi.fn(() => ({ 'User-Agent': 'test' })),
   })),

@@ -35,6 +35,20 @@ process.on('unhandledRejection', (reason: unknown) => {
     return;
   }
 
+  // Defense in depth against route-registration races (e.g. the vite-plugin-node
+  // `NestHandler` concurrent-init race, axe-me/vite-plugin-node#33). The
+  // bootstrap below now eagerly initializes the app so this branch should
+  // never fire in practice — if it does, log loudly rather than crash-loop.
+  if (reason instanceof Error && 'code' in reason && reason.code === 'FST_ERR_DUPLICATED_ROUTE') {
+    Logger.error(
+      `Suppressed Fastify duplicate-route registration: ${reason.message}. ` +
+        `This indicates an unexpected concurrent app.init() — investigate.`,
+      reason.stack,
+      'Bootstrap',
+    );
+    return;
+  }
+
   // Re-throw non-abort rejections so Node.js treats them as uncaught exceptions,
   // preserving the default crash-on-unhandled-rejection behavior.
   if (reason instanceof Error) {
@@ -83,6 +97,16 @@ async function bootstrap() {
   const fastifyInstance = app.getHttpAdapter().getInstance();
   const fastifyOtel = new FastifyOtelInstrumentation();
   await fastifyInstance.register(fastifyOtel.plugin());
+
+  // Initialize the Nest app and seal the Fastify router BEFORE the first
+  // request can flow through `vite-plugin-node`'s `NestHandler`. That handler
+  // lazily initializes behind a non-atomic `if (!app.isInitialized)` guard, so
+  // concurrent cold requests (UI SSE `/v1/chat` + Socket.IO `/v1/chat/rpc`
+  // reconnects landing in the same tick) would otherwise all pass the guard
+  // and race `app.init()` against a single Fastify instance, crashing with
+  // `FST_ERR_DUPLICATED_ROUTE`. Upstream: axe-me/vite-plugin-node#33.
+  await app.init();
+  await fastifyInstance.ready();
 
   if (import.meta.env.PROD) {
     app.enableShutdownHooks();

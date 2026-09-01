@@ -50,6 +50,7 @@ import { cn } from '#utils/ui.utils.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '#components/ui/tabs.js';
 import { CadPreviewViewer } from '#components/cad-preview.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
+import { FileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { toast } from '#components/ui/sonner.js';
 import type { Handle } from '#types/matches.types.js';
@@ -74,7 +75,7 @@ import { EmptyItems } from '#components/ui/empty-items.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import type { ChatTextareaProperties } from '#components/chat/chat-textarea-types.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
-import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
+import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useKernel } from '#hooks/use-kernel.js';
@@ -171,16 +172,14 @@ export default function PersonalCadProjects(): React.JSX.Element {
   );
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, model, metadata, imageUrls }) => {
+    async ({ content, imageUrls }) => {
       try {
         const createdProject = await projectManager.createProject({
           kernel,
-          initialMessage: { content, model, metadata, imageUrls },
-          // Set initial panel state: chat open
+          initialMessage: { content, imageUrls },
           editorState: { panelState: { openPanels: { chat: true } } },
         });
 
-        // Navigate immediately - the project page will handle the streaming
         await navigate(`/projects/${createdProject.id}`);
       } catch {
         toast.error('Failed to create project');
@@ -436,8 +435,8 @@ function UnifiedProjectList({
   if (projects.length === 0) {
     return (
       <EmptyItems className='min-h-[60vh]'>
-        {/* Empty-library CTA — ephemeral mode, no chat to attach to. */}
-        <ActiveChatProvider chatId={undefined}>
+        {/* Empty-library CTA — composer-only, no chat session to attach to. */}
+        <ChatComposerProvider>
           <div className='mx-auto max-w-2xl space-y-6'>
             <div className='flex flex-col items-center space-y-4 text-center'>
               <PackageX className='size-16 text-muted-foreground' strokeWidth={1} />
@@ -472,7 +471,7 @@ function UnifiedProjectList({
               </NavLink>
             </div>
           </div>
-        </ActiveChatProvider>
+        </ChatComposerProvider>
       </EmptyItems>
     );
   }
@@ -529,7 +528,12 @@ type ProjectLibraryCardProps = {
   readonly onSelect?: () => void;
 };
 
-function ProjectLibraryCard({ project, actions, isSelected, onSelect }: ProjectLibraryCardProps) {
+export function ProjectLibraryCard({
+  project,
+  actions,
+  isSelected,
+  onSelect,
+}: ProjectLibraryCardProps): React.JSX.Element {
   const [showPreview, setShowPreview] = useState(false);
 
   const mechanicalAsset = project.assets.mechanical;
@@ -561,21 +565,30 @@ function ProjectLibraryCard({ project, actions, isSelected, onSelect }: ProjectL
               event.preventDefault();
             }}
           >
-            <CadPreviewProvider projectId={project.id} mainFile={mainFile} isEnabled={showPreview}>
-              <CadPreviewViewer
-                enablePan={false}
-                stageOptions={{ zoomLevel: 1.5 }}
-                graphicsOptions={{
-                  enableLines: false,
-                  viewerClassName: 'bg-muted',
-                }}
-              />
-            </CadPreviewProvider>
+            <SharedWorkerGate>
+              <FileManagerProvider
+                projectId={project.id}
+                rootDirectory={`/projects/${project.id}`}
+                initialBackend='indexeddb'
+              >
+                <CadPreviewProvider projectId={project.id} mainFile={mainFile}>
+                  <CadPreviewViewer
+                    enablePan={false}
+                    stageOptions={{ zoomLevel: 1.5 }}
+                    graphicsOptions={{
+                      enableLines: false,
+                      viewerClassName: 'bg-muted',
+                    }}
+                  />
+                </CadPreviewProvider>
+              </FileManagerProvider>
+            </SharedWorkerGate>
           </div>
         ) : null}
         <Button
           variant='outline'
           size='icon'
+          aria-label='Preview model'
           className={cn('absolute top-2 right-2', showPreview && 'text-primary')}
           onClick={(event) => {
             event.stopPropagation();

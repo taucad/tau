@@ -7,6 +7,13 @@
  * type — re-exported from the filesystem barrel for consumers without
  * pulling them through the transport-internal surface.
  *
+ * Spec/instance contract: `_fromFsLikeHandle(fsLike, rootPath)` returns
+ * a plain-data spec whose `create()` factory mints a fresh adapter
+ * wrapping the same user-supplied `fsLike` per binding. The underlying
+ * `fsLike` is shared by reference (the user owns its lifecycle); the
+ * adapter object itself is freshly built per `RuntimeClient` for shape
+ * uniformity with the in-memory and Node FS factories.
+ *
  * @internal
  */
 
@@ -42,13 +49,27 @@ export type FsLike = {
 
 /**
  * Internal: produce the discriminated `inline`-arm handle backing the
- * public `fromFsLike` factory.
+ * public `fromFsLike` factory. Captures `fsLike` and `rootPath` in the
+ * spec closure; each `create()` invocation builds a fresh
+ * `RuntimeFileSystemBase` adapter targeting the same backing object.
  *
  * @internal
  * @param fsLike - An fs-compatible object with a `promises` namespace.
  * @param rootPath - Optional root path prefix for all operations.
  */
 export function _fromFsLikeHandle(fsLike: FsLike, rootPath = '/'): RuntimeFileSystemHandle {
+  return {
+    kind: 'inline',
+    create: () => buildFsLikeBase(fsLike, rootPath),
+  };
+}
+
+/**
+ * Build a fresh `RuntimeFileSystemBase` adapter wrapping the supplied
+ * `fsLike` rooted at `rootPath`. Per-binding adapter; underlying
+ * `fsLike` is shared by reference (the user owns its lifecycle).
+ */
+function buildFsLikeBase(fsLike: FsLike, rootPath: string): RuntimeFileSystemBase {
   const resolve = (p: string): string => {
     if (rootPath === '/') {
       return p;
@@ -68,7 +89,7 @@ export function _fromFsLikeHandle(fsLike: FsLike, rootPath = '/'): RuntimeFileSy
     return new Uint8Array(buf);
   }
 
-  const fs: RuntimeFileSystemBase = {
+  return {
     id: 'runtime:fs-like',
     capabilities: { persistent: true, writable: true, quotaBased: false, caseSensitive: true },
     dispose() {
@@ -110,6 +131,4 @@ export function _fromFsLikeHandle(fsLike: FsLike, rootPath = '/'): RuntimeFileSy
       }
     },
   };
-
-  return { kind: 'inline', fs };
 }

@@ -179,17 +179,25 @@ export function findFunctionDeclaration(
   model: Monaco.editor.ITextModel,
   functionName: string,
 ): FunctionInfo | undefined {
-  const lines = model.getLinesContent();
+  return findFunctionDeclarationInLines(model.getLinesContent(), functionName);
+}
 
-  // Pattern to match function declarations: function functionName(...) = ...;
+export function findFunctionDeclarationInLines(
+  lines: readonly string[],
+  functionName: string,
+): FunctionInfo | undefined {
   const functionPattern = new RegExp(`^\\s*function\\s+${escapeRegExp(functionName)}\\s*\\(([^)]*)\\)\\s*=`);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (line === undefined) {
+      continue;
+    }
+
     const match = line.match(functionPattern);
 
     if (match) {
-      const commentInfo = extractCommentDescription(lines, i);
+      const commentInfo = extractCommentDescription([...lines], i);
       const parametersString = match[1].trim();
       const parameters = parametersString ? parametersString.split(',').map((p) => p.trim()) : [];
       const signature = `function ${functionName}(${parametersString})`;
@@ -254,19 +262,28 @@ export function findVariableDeclaration(
   model: Monaco.editor.ITextModel,
   variableName: string,
 ): VariableInfo | undefined {
-  const lines = model.getLinesContent();
+  return findVariableDeclarationInLines(model.getLinesContent(), variableName);
+}
 
+export function findVariableDeclarationInLines(
+  lines: readonly string[],
+  variableName: string,
+): VariableInfo | undefined {
   // Pattern to match variable declarations: variableName = value; (stops at semicolon or comma)
   const variablePattern = new RegExp(`^\\s*${escapeRegExp(variableName)}\\s*=\\s*(.+)$`);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (line === undefined) {
+      continue;
+    }
+
     const match = line.match(variablePattern);
 
     if (match) {
       const rawValue = match[1];
       const value = parseVariableValue(rawValue); // Parse value correctly handling nested structures
-      const commentInfo = extractCommentDescription(lines, i);
+      const commentInfo = extractCommentDescription([...lines], i);
 
       return {
         name: variableName,
@@ -468,17 +485,23 @@ export function escapeRegExp(string: string): string {
 }
 
 export function findModuleDeclaration(model: Monaco.editor.ITextModel, moduleName: string): ModuleInfo | undefined {
-  const lines = model.getLinesContent();
+  return findModuleDeclarationInLines(model.getLinesContent(), moduleName);
+}
 
+export function findModuleDeclarationInLines(lines: readonly string[], moduleName: string): ModuleInfo | undefined {
   // Pattern to match module declarations: module moduleName(...) [optional modifiers like union()] {
   const modulePattern = new RegExp(`^\\s*module\\s+${escapeRegExp(moduleName)}\\s*\\(([^)]*)\\).*?\\{?\\s*$`);
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    if (line === undefined) {
+      continue;
+    }
+
     const match = line.match(modulePattern);
 
     if (match) {
-      const commentInfo = extractCommentDescription(lines, i);
+      const commentInfo = extractCommentDescription([...lines], i);
       const parametersString = match[1].trim();
       const parameters = parametersString ? parametersString.split(',').map((p) => p.trim()) : [];
       const signature = `module ${moduleName}(${parametersString})`;

@@ -205,7 +205,7 @@ describe('MountTable integration', () => {
   describe('single mount', () => {
     it('should work with only a root mount', async () => {
       const providerRegistry = new ProviderRegistry();
-      const provider = await providerRegistry.createMountProvider('memory');
+      const provider = await providerRegistry.createMountProvider({ backend: 'memory' });
       const mt = new MountTable();
       mt.mount('/', provider, { backend: 'memory' });
 
@@ -228,13 +228,13 @@ describe('MountTable integration', () => {
 
   describe('dynamic mount routing', () => {
     it('should mount a path prefix on the specified backend', async () => {
-      await service.mount('/projects/proj_A', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_A', { backend: 'memory', preservePath: true });
       const exists = await service.exists('/projects/proj_A');
       expect(exists).toBeDefined();
     });
 
     it('should route reads/writes to the mounted provider for mounted paths', async () => {
-      await service.mount('/projects/proj_A', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_A', { backend: 'memory', preservePath: true });
       await service.writeFile('/projects/proj_A/main.ts', 'project A code');
       const content = await service.readFile('/projects/proj_A/main.ts', 'utf8');
       expect(content).toBe('project A code');
@@ -244,24 +244,23 @@ describe('MountTable integration', () => {
     });
 
     it('should route non-mounted paths to the root provider', async () => {
-      await service.mount('/projects/proj_A', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_A', { backend: 'memory', preservePath: true });
       await service.writeFile('/config.json', '{}');
       expect(await rootProvider.readFile('/config.json', 'utf8')).toBe('{}');
     });
 
     it('should unmount a prefix and fall through to root', async () => {
-      await service.mount('/projects/proj_B', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_B', { backend: 'memory', preservePath: true });
       await service.writeFile('/projects/proj_B/app.ts', 'app code');
 
       service.unmount('/projects/proj_B');
 
-      // After unmount, the path falls through to root provider, which doesn't have the file
       expect(await service.exists('/projects/proj_B/app.ts')).toBe(false);
     });
 
     it('should handle multiple simultaneous mounts on different prefixes', async () => {
-      await service.mount('/projects/proj_X', 'memory', { preservePath: true });
-      await service.mount('/projects/proj_Y', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_X', { backend: 'memory', preservePath: true });
+      await service.mount('/projects/proj_Y', { backend: 'memory', preservePath: true });
 
       await service.writeFile('/projects/proj_X/x.ts', 'X');
       await service.writeFile('/projects/proj_Y/y.ts', 'Y');
@@ -279,7 +278,7 @@ describe('MountTable integration', () => {
         events.push(event);
       });
 
-      await service.mount('/projects/proj_C', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_C', { backend: 'memory', preservePath: true });
       await service.writeFile('/projects/proj_C/main.ts', 'code');
 
       const writeEvent = events.find(
@@ -295,7 +294,7 @@ describe('MountTable integration', () => {
         events.push(event);
       });
 
-      await service.mount('/projects/proj_D', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_D', { backend: 'memory', preservePath: true });
       await service.writeFile('/root-file.txt', 'root content');
 
       const writeEvent = events.find(
@@ -307,7 +306,7 @@ describe('MountTable integration', () => {
 
     it('should isolate project mount from root mount', async () => {
       const providerRegistry = new ProviderRegistry();
-      const rootProvider = await providerRegistry.createMountProvider('memory');
+      const rootProvider = await providerRegistry.createMountProvider({ backend: 'memory' });
 
       const projectMountTable = new MountTable();
       projectMountTable.mount('/', rootProvider, { backend: 'memory' });
@@ -320,7 +319,7 @@ describe('MountTable integration', () => {
         mountTable: projectMountTable,
       });
 
-      await projectService.mount('/projects/proj_E', 'memory', { preservePath: true });
+      await projectService.mount('/projects/proj_E', { backend: 'memory', preservePath: true });
 
       await projectService.writeFile('/projects/proj_E/test.ts', 'hello');
       expect(await projectService.readFile('/projects/proj_E/test.ts', 'utf8')).toBe('hello');
@@ -329,20 +328,18 @@ describe('MountTable integration', () => {
     });
 
     it('should dispose the mount provider on unmount', async () => {
-      await service.mount('/projects/proj_F', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_F', { backend: 'memory', preservePath: true });
       await service.writeFile('/projects/proj_F/test.ts', 'test');
 
-      // Verify the file exists before unmount
       expect(await service.exists('/projects/proj_F/test.ts')).toBe(true);
 
       service.unmount('/projects/proj_F');
 
-      // After unmount, the path falls through to root — file is gone
       expect(await service.exists('/projects/proj_F/test.ts')).toBe(false);
     });
 
     it('should pass full path to provider when mount uses preservePath', async () => {
-      await service.mount('/projects/proj_G', 'memory', { preservePath: true });
+      await service.mount('/projects/proj_G', { backend: 'memory', preservePath: true });
 
       await service.writeFile('/projects/proj_G/main.ts', 'code');
 
@@ -351,6 +348,46 @@ describe('MountTable integration', () => {
 
       const entries = await service.readdir('/projects/proj_G');
       expect(entries).toContain('main.ts');
+    });
+
+    // Project bootstrap contract pin: the cross-workspace `client.writeFiles`
+    // path used by `createProject` (apps/ui/app/hooks/use-project-manager.tsx)
+    // dispatches a bulk write keyed by absolute paths under sibling mount
+    // prefixes. Backend selection MUST be owned by the mount table's
+    // `_resolveProvider` longest-prefix match — the write call is purely
+    // namespace-typed, never a workspace-resolver call. Regression coverage
+    // for the WorkspacePathEscapeError class of bugs: switching `createProject`
+    // to `client.writeFiles` is correct only if this routing contract holds.
+    it('should route bulk writeFiles across sibling mount prefixes to the correct providers', async () => {
+      const providerRegistry = new ProviderRegistry();
+      const rootProvider = await providerRegistry.createMountProvider({ backend: 'memory' });
+      const siblingMountTable = new MountTable();
+      siblingMountTable.mount('/', rootProvider, { backend: 'memory' });
+      const siblingService = new WorkspaceFileService({
+        providerRegistry,
+        resourceQueue: new ResourceQueue(),
+        eventBus: new ChangeEventBus(),
+        mountTable: siblingMountTable,
+      });
+
+      await siblingService.mount('/projects/proj_A', { backend: 'memory', preservePath: true });
+      await siblingService.mount('/projects/proj_B', { backend: 'memory', preservePath: true });
+
+      const firstMain = '/projects/proj_A/main.ts';
+      const firstUtility = '/projects/proj_A/lib/util.ts';
+      const secondMain = '/projects/proj_B/main.ts';
+      await siblingService.writeFiles({
+        [firstMain]: { content: 'A main' },
+        [firstUtility]: { content: 'A util' },
+        [secondMain]: { content: 'B main' },
+      });
+
+      // Each file lands under its own mount prefix; cross-isolation holds.
+      expect(await siblingService.readFile('/projects/proj_A/main.ts', 'utf8')).toBe('A main');
+      expect(await siblingService.readFile('/projects/proj_A/lib/util.ts', 'utf8')).toBe('A util');
+      expect(await siblingService.readFile('/projects/proj_B/main.ts', 'utf8')).toBe('B main');
+      expect(await siblingService.exists('/projects/proj_A/B-main.ts')).toBe(false);
+      expect(await siblingService.exists('/projects/proj_B/lib/util.ts')).toBe(false);
     });
   });
 });

@@ -3,14 +3,17 @@ title: 'Browser-First Parameter-Aware Geometry Testing'
 description: 'Architecture investigation for moving Tau geometry tests from server-side JSON to in-browser parameter-bound test files with custom matchers'
 status: draft
 created: '2026-04-21'
-updated: '2026-04-21'
+updated: '2026-06-01'
 category: architecture
 related:
   - docs/policy/testing-policy.md
+  - docs/research/geospec-standalone-cad-testing-blueprint.md
+  - docs/research/vitest-style-parameter-geometry-testing-blueprint.md
   - docs/research/mesh-continuity-test-semantics.md
   - docs/research/multi-file-test-json-migration.md
   - docs/research/parameter-architecture-v2.md
   - docs/research/runtime-test-suite-quality-audit.md
+  - docs/research/brepjs-step-streaming-import.md
 ---
 
 # Browser-First Parameter-Aware Geometry Testing
@@ -20,6 +23,17 @@ How to evolve Tau's geometry test surface from a server-side, parameter-blind JS
 ## Executive Summary
 
 Geometry tests today are a server-only flow: `tool-test-model` reads `test.json`, asks the browser for whatever GLB the editor most recently rendered, ships it to the API, and runs assertions in `GeometryAnalysisService`. The schema deliberately omits parameters, so the moment a user nudges a slider the bounding-box assertion captured at design time goes red even though the model is still correct. Tests are also agent-only — there is no "Run tests" button anywhere in the UI, and no way to run them offline. The fix has two halves that fit naturally together: (1) replace the JSON DSL with native `*.test.ts` files that import the same module the kernel already evaluates, so parameters are first-class JavaScript bindings; (2) host a small in-browser test runner inside the existing kernel worker (or a sibling worker) using a Vitest-compatible `expect` and a few custom matchers (`toBeWatertight`, `toHaveBoundingBox`, `toHaveConnectedComponents`). All required infrastructure already exists: `executeCode` already bundles + dynamically imports user code via blob URLs, `@taucad/testing` is mostly browser-ready (one `NodeIO` → `WebIO` swap), and the parameter system already exposes named groups per geometry unit. The recommended path is a custom mini-runner built on `@vitest/expect` (≈190 KB unpacked, fully tree-shakeable) rather than embedding Vitest itself — Vitest's "browser mode" requires Playwright/WebdriverIO and is unsuitable for offline embedding.
+
+## 2026-06-01 Target-State Alignment
+
+This investigation remains the source of the parameter-aware and browser-execution insight, but its package shape is superseded by the GeoSpec target architecture:
+
+- `geospec` owns the standalone Node/browser runner, matchers, mesh/BRep/STEP evidence loaders, and native C++/WASM analyzers.
+- `@taucad/testing` owns Tau-specific render helpers, parameter imports, `test.json` migration, and chat-tool compatibility.
+- Browser-first is no longer the whole goal. The same `*.test.ts` module must run in the Tau UI, in Node CI through `geospec/runner`, and inside ordinary Vitest with the root `geospec` authoring API.
+- `test.json` is a compatibility and migration input, not the target authoring surface.
+- The current `NodeIO` to `WebIO` note becomes broader: mesh loading should move behind GeoSpec's environment-neutral mesh evidence loader, with `@taucad/testing` delegating to it.
+- STEP loading should use the brepjs-inspired `geospec/step` native stream import path inside the worker where possible, then report fallback to Emscripten FS through artifact provenance.
 
 ## Table of Contents
 
@@ -154,11 +168,11 @@ The architecture below allows _both_ and chooses per-run based on a heuristic (s
 
 Three candidate designs, evaluated against the screenshot regression and against the mesh-continuity research:
 
-| Design                     | Schema sketch                                                                                                                                                                                                              | Pros                                                                                                                             | Cons                                                                                                 |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **A. Snapshot in JSON**    | `{ requirements: [{ ..., parameters: { length_x: 2 } }] }`                                                                                                                                                                 | Backward-compatible with `test.json`; simple to author                                                                           | Duplicates parameter values across requirements; no derived expectations; brittle when groups rename |
-| **B. Bind to named group** | `{ parameterGroup: 'small', requirements: [...] }`                                                                                                                                                                         | Single source of truth (the `.tau/parameters/*.json` file); matches existing UI                                                  | Couples tests to group names; group rename breaks tests; cannot test arithmetic-derived expectations |
-| **C. Native `*.test.ts`**  | `import { defaultParams } from './cube'; describe.each([{ length_x: 2 }, { length_x: 8 }])('cube %j', (p) => { it('is watertight', async () => { const result = await render(p); expect(result).toBeWatertight(); }); });` | Parameters are first-class JS; arithmetic derivations work; matrix testing is `describe.each`; future TDD authoring is real code | Migration from `test.json`; new authoring story for the agent (covered below)                        |
+| Design                     | Schema sketch                                                                                                                                                                                                                                               | Pros                                                                                                                             | Cons                                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **A. Snapshot in JSON**    | `{ requirements: [{ ..., parameters: { length_x: 2 } }] }`                                                                                                                                                                                                  | Backward-compatible with `test.json`; simple to author                                                                           | Duplicates parameter values across requirements; no derived expectations; brittle when groups rename |
+| **B. Bind to named group** | `{ parameterGroup: 'small', requirements: [...] }`                                                                                                                                                                                                          | Single source of truth (the `.tau/parameters/*.json` file); matches existing UI                                                  | Couples tests to group names; group rename breaks tests; cannot test arithmetic-derived expectations |
+| **C. Native `*.test.ts`**  | `import { defaultParams } from './cube'; describe.each([{ length_x: 2 }, { length_x: 8 }])('cube %j', (p) => { it('is watertight', async () => { const result = await renderTauModel({ parameters: p }); await expectGeo(result).toBeWatertight(); }); });` | Parameters are first-class JS; arithmetic derivations work; matrix testing is `describe.each`; future TDD authoring is real code | Migration from `test.json`; new authoring story for the agent (covered below)                        |
 
 Design C wins on every dimension that matters once the kernel-worker test host exists. Designs A and B are stepping stones — useful only if migration cannot land in one shot.
 
@@ -193,37 +207,38 @@ CADSmith (arXiv 2603.26512) defines an explicit "Validator" agent that runs Open
 
 ### Authoring format
 
-| Dimension             | `*.test.ts` (recommended)                          | Extend `test.json`          |
-| --------------------- | -------------------------------------------------- | --------------------------- |
-| Parameter expressions | `expect(box.size.x).toBeCloseTo(p.length_x)`       | None — duplicate literals   |
-| Shared fixtures       | `const cube = await render(p)` once per `describe` | Repeat per requirement      |
-| Matrix testing        | `describe.each(parameterGroups)`                   | Hand-write N entries        |
-| Agent authoring       | LLMs already author `.test.ts` files everywhere    | Bespoke schema instructions |
-| Migration             | One-shot `test.json` → `*.test.ts` codemod         | None                        |
-| LSP / Monaco support  | Full TS IntelliSense                               | JSON schema only            |
+| Dimension             | `*.test.ts` (recommended)                                                  | Extend `test.json`          |
+| --------------------- | -------------------------------------------------------------------------- | --------------------------- |
+| Parameter expressions | `expect(box.size.x).toBeCloseTo(p.length_x)`                               | None — duplicate literals   |
+| Shared fixtures       | `const cube = await renderTauModel({ parameters: p })` once per `describe` | Repeat per requirement      |
+| Matrix testing        | `describe.each(parameterGroups)`                                           | Hand-write N entries        |
+| Agent authoring       | LLMs already author `.test.ts` files everywhere                            | Bespoke schema instructions |
+| Migration             | One-shot `test.json` → `*.test.ts` codemod                                 | None                        |
+| LSP / Monaco support  | Full TS IntelliSense                                                       | JSON schema only            |
 
 ## Target Architecture
 
-A single new package `@taucad/test-runtime` (browser-only, ESM) hosts the runner, custom matchers, and the bridge to the existing `RuntimeClient`. Tests are `*.test.ts` files alongside source, evaluated through the same `executeCode` pipeline already used for renders.
+GeoSpec hosts the standalone runner, custom matchers, mesh/BRep/STEP evidence loaders, and native analyzer boundary. `@taucad/testing` hosts the Tau bridge to the existing `RuntimeClient`, parameter system, and chat tools. Tests are `*.test.ts` files alongside source, evaluated through the shared `@taucad/vm` substrate extracted from the runtime esbuild path. The first package cut exposes `geospec` root `runGeoSpecModule` as a POC; richer `geospec/runner` Node/browser drivers can layer config, reporters, and isolation on top of the same VM contract.
 
-| Layer                   | Module                                                                   | Runs in                    | Responsibility                                                           |
-| ----------------------- | ------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------ |
-| **Test author surface** | `import { describe, it, expect } from '@taucad/test-runtime'`            | User code                  | Vitest-compatible globals                                                |
-| **Custom matchers**     | `@taucad/test-runtime/matchers`                                          | User code                  | `toBeWatertight`, `toHaveBoundingBox`, `toHaveConnectedComponents`, etc. |
-| **Render helper**       | `@taucad/test-runtime/render`                                            | User code                  | `render(params)` — internally calls `RuntimeClient`                      |
-| **Collector**           | `@taucad/test-runtime/internal/collector`                                | Worker (kernel or sibling) | Builds task tree from `describe`/`it` calls                              |
-| **Runner driver**       | `@taucad/test-runtime/internal/run`                                      | Worker                     | Executes tasks, captures results, reports back to UI                     |
-| **Worker host**         | New `test-worker.ts` _or_ extension to `kernel-runtime-worker.ts`        | Browser worker             | Bundles + executes test modules; shares bundler cache with renders       |
-| **UI panel**            | New `chat-tests.tsx` (sibling of `chat-parameters.tsx`)                  | Main thread                | "Run tests" button, results tree, watch mode toggle                      |
-| **Persistence**         | `.tau/tests/<entry>/results.json` (cache only, not committed)            | Browser FS                 | Last-run snapshot for fast re-display                                    |
-| **Server tool**         | `tool-test-model` becomes a _thin proxy_ over the browser runner via RPC | API                        | Agent-facing surface; no analysis on the server                          |
+| Layer                         | Module                                                                   | Runs in                    | Responsibility                                                           |
+| ----------------------------- | ------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------ |
+| **Standalone author surface** | `import { describe, expectGeo, it } from 'geospec'`                      | User code                  | Vitest-compatible globals and GeoSpec matchers                           |
+| **Tau author surface**        | `@taucad/testing/tau`                                                    | User code                  | `renderTauModel`, parameter helpers                                      |
+| **Custom matchers**           | `geospec`                                                                | User code                  | `toBeWatertight`, `toHaveBoundingBox`, `toHaveConnectedComponents`, etc. |
+| **Render helper**             | `@taucad/testing/tau`                                                    | User code                  | `renderTauModel({ parameters })` — internally calls `RuntimeClient`      |
+| **Collector**                 | `geospec/runner`                                                         | Worker (kernel or sibling) | Builds task tree from `describe`/`it` calls                              |
+| **Runner driver**             | `geospec/runner`                                                         | Worker                     | Executes tasks, captures results, reports back to UI                     |
+| **Worker host**               | New `test-worker.ts` _or_ extension to `kernel-runtime-worker.ts`        | Browser worker             | Bundles + executes test modules; shares bundler cache with renders       |
+| **UI panel**                  | New `chat-tests.tsx` (sibling of `chat-parameters.tsx`)                  | Main thread                | "Run tests" button, results tree, watch mode toggle                      |
+| **Persistence**               | `.tau/tests/<entry>/results.json` (cache only, not committed)            | Browser FS                 | Last-run snapshot for fast re-display                                    |
+| **Server tool**               | `tool-test-model` becomes a _thin proxy_ over the browser runner via RPC | API                        | Agent-facing surface; no analysis on the server                          |
 
 Key invariants:
 
 - **No analysis runs on the server.** `tool-test-model` becomes an `executeBrowserTests` RPC dispatch with the file path; the browser executes and returns structured results. `GeometryAnalysisService` and the server-side `analyzeGlb` import collapse.
 - **Tests share the bundler cache with renders.** A test file's import of `./cube.ts` reuses the same compiled bundle the editor already cached.
-- **Custom matchers are the only assertion surface for geometry.** Authors do not hand-call `analyzeGlb`; they call `expect(result).toBeWatertight()`. The matcher internally calls `analyzeGlb` (browser-side, `WebIO`).
-- **Parameters flow through `render(p)` calls.** No magic — the test file controls exactly which parameter set each assertion runs against.
+- **Custom matchers are the only assertion surface for geometry.** Authors do not hand-call `analyzeGlb`; they call `expectGeo(result).toBeWatertight()`. The matcher internally calls GeoSpec's evidence analyzers.
+- **Parameters flow through `renderTauModel({ parameters })` calls.** No magic — the test file controls exactly which parameter set each assertion runs against.
 
 ## Parameter-Bound Test Schema
 
@@ -232,15 +247,15 @@ The `.test.ts` file becomes the single source of truth. Three patterns cover eve
 ### Pattern 1: Static — assert against authored defaults
 
 ```typescript
-import { describe, it, expect } from '@taucad/test-runtime';
-import { render } from '@taucad/test-runtime/render';
+import { describe, expectGeo, it } from 'geospec';
+import { renderTauModel } from '@taucad/testing/tau';
 import { defaultParams } from './cube';
 
 describe('cube (defaults)', () => {
   it('is 2 mm wide', async () => {
-    const r = await render(defaultParams);
-    expect(r).toHaveBoundingBox({ size: { x: 2, y: 2, z: 2 } });
-    expect(r).toBeWatertight();
+    const r = await renderTauModel({ parameters: defaultParams });
+    await expectGeo(r).toHaveBoundingBox({ size: { x: 2, y: 2, z: 2 } });
+    await expectGeo(r).toBeWatertight();
   });
 });
 ```
@@ -253,10 +268,10 @@ describe.each([
   { length_x: 8, length_y: 4, length_z: 2 },
 ])('cube (length_x=$length_x)', (p) => {
   it('matches its parameters', async () => {
-    const r = await render(p);
-    expect(r).toHaveBoundingBox({ size: { x: p.length_x, y: p.length_y, z: p.length_z } });
-    expect(r).toBeWatertight();
-    expect(r).toHaveConnectedComponents(1);
+    const r = await renderTauModel({ parameters: p });
+    await expectGeo(r).toHaveBoundingBox({ size: { x: p.length_x, y: p.length_y, z: p.length_z } });
+    await expectGeo(r).toBeWatertight();
+    await expectGeo(r).toHaveConnectedComponents({ count: 1 });
   });
 });
 ```
@@ -266,12 +281,13 @@ This is the case the screenshot example fails: changing `length_x` from 2 to 8 k
 ### Pattern 3: Group-bound — validate every named parameter group
 
 ```typescript
-import { parameterGroups } from '@taucad/test-runtime/parameters';
+import { describe, expectGeo, it } from 'geospec';
+import { parameterGroups, renderTauModel } from '@taucad/testing/tau';
 
 describe.each(parameterGroups('./cube'))('cube ($name)', ({ values: p }) => {
   it('is watertight', async () => {
-    const r = await render(p);
-    expect(r).toBeWatertight();
+    const r = await renderTauModel({ parameters: p });
+    await expectGeo(r).toBeWatertight();
   });
 });
 ```
@@ -280,12 +296,12 @@ describe.each(parameterGroups('./cube'))('cube ($name)', ({ values: p }) => {
 
 ### Custom matcher surface (initial)
 
-| Matcher                                             | Inverse OK? | Async                                     | Internal call                                          |
-| --------------------------------------------------- | ----------- | ----------------------------------------- | ------------------------------------------------------ |
-| `toBeWatertight()`                                  | Yes         | No (analysis is sync once GLB is in hand) | `analyzeGlb(r.glb).watertight`                         |
-| `toHaveBoundingBox({ size?, center?, tolerance? })` | Yes         | No                                        | `analyzeGlb(r.glb).boundingBox` + per-axis comparator  |
-| `toHaveConnectedComponents(n, { tolerance? })`      | Yes         | No                                        | `analyzeGlb(r.glb).connectedComponents(tol)`           |
-| `toMatchGeometrySnapshot()` (later)                 | n/a         | No                                        | Stable hash of bbox + tri count + watertight + cc(0.1) |
+| Matcher                                             | Inverse OK? | Async                                         | Internal call                                           |
+| --------------------------------------------------- | ----------- | --------------------------------------------- | ------------------------------------------------------- |
+| `toBeWatertight()`                                  | Yes         | No (analysis is sync once evidence is loaded) | `analyzeMesh(r.mesh).watertight`                        |
+| `toHaveBoundingBox({ size?, center?, tolerance? })` | Yes         | No                                            | `analyzeMesh(r.mesh).boundingBox` + per-axis comparator |
+| `toHaveConnectedComponents(n, { tolerance? })`      | Yes         | No                                            | `analyzeMesh(r.mesh).connectedComponents(tol)`          |
+| `toMatchGeometrySnapshot()` (later)                 | n/a         | No                                            | Stable hash of bbox + tri count + watertight + cc(0.1)  |
 
 The first three exhaust the agent-facing surface from `mesh-continuity-test-semantics.md`; the snapshot matcher is a follow-on once the runtime is stable. All four implement the Vitest `ExpectationResult` shape (`{ pass, message }`) so they compose with `.not`, `.resolves`, and `expect.extend` typings.
 
@@ -293,13 +309,13 @@ The first three exhaust the agent-facing surface from `mesh-continuity-test-sema
 
 Five phases. Each phase is independently shippable; phases 3-5 build on phase 2.
 
-| Phase                                  | Deliverable                                                                                   | Surface impact                           | Backwards compat                                                                |
-| -------------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------- |
-| **P1. Browser-resident analysis**      | Move `analyzeGlb` to use `WebIO`; expose `runMeasurementTests` from `@taucad/testing/browser` | None visible                             | None needed — server still works                                                |
-| **P2. `@taucad/test-runtime` package** | New package with `describe`/`it`/`expect`/matchers + worker host + RPC dispatch from server   | Agent can call new RPC; UI can run tests | `test.json` continues to work via the old path                                  |
-| **P3. UI Run-Tests panel**             | Per-file Run button, results panel, watch-on-save                                             | "Run tests" button next to "Export"      | None                                                                            |
-| **P4. Migration tool + agent updates** | `test.json` → `*.test.ts` codemod; system prompt + `edit_tests` updated to author `.test.ts`  | Agent stops emitting `test.json`         | Old `test.json` remains valid until P5                                          |
-| **P5. Retire `test.json`**             | Delete `tool-test-model` server logic + `GeometryAnalysisService` + `testFileSchema`          | Agent surface becomes the new RPC        | Per workspace policy: "no backwards compatibility for unreleased/internal APIs" |
+| Phase                                  | Deliverable                                                                                                                  | Surface impact                           | Backwards compat                                                                |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------- |
+| **P1. GeoSpec mesh core**              | Move mesh loading/analysis behind `geospec/mesh`; keep `@taucad/testing` compatibility exports                               | None visible                             | None needed — server still works                                                |
+| **P2. GeoSpec runner + Tau adapter**   | Add root `geospec`, `geospec/runner`, `geospec/step` native stream import, and `@taucad/testing/tau` worker host integration | Agent can call new RPC; UI can run tests | `test.json` continues to work via the old path                                  |
+| **P3. UI Run-Tests panel**             | Per-file Run button, results panel, watch-on-save                                                                            | "Run tests" button next to "Export"      | None                                                                            |
+| **P4. Migration tool + agent updates** | `test.json` → `*.test.ts` codemod; system prompt + `edit_tests` updated to author `.test.ts`                                 | Agent stops emitting `test.json`         | Old `test.json` remains valid until P5                                          |
+| **P5. Retire `test.json`**             | Delete `tool-test-model` server logic + `GeometryAnalysisService` + `testFileSchema`                                         | Agent surface becomes the new RPC        | Per workspace policy: "no backwards compatibility for unreleased/internal APIs" |
 
 Migration tool sketch: the codemod walks every `test.json`, generates one `*.test.ts` per source file, emits one `describe` per file with one `it` per requirement. `boundingBox` requirements are written using _literal_ expected values (Pattern 1) — humans/the agent then upgrade to Pattern 2/3 as parameter coupling becomes useful. No requirement is silently dropped.
 
@@ -307,9 +323,9 @@ Migration tool sketch: the codemod walks every `test.json`, generates one `*.tes
 
 | #   | Action                                                                                                                                                                                          | Priority | Effort | Impact                                                                    |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------------------------------------------------------------------------- |
-| R1  | Swap `NodeIO` → `WebIO` in `packages/testing/src/geometry/analyze-glb.ts` and add a `@taucad/testing/browser` entry point so analysis runs in either environment                                | P0       | XS     | Unblocks all of P1-P5                                                     |
+| R1  | Move mesh loading/analysis behind `geospec/mesh` and keep `@taucad/testing` compatibility exports so analysis runs in either environment                                                        | P0       | M      | Unblocks all of P1-P5                                                     |
 | R2  | Decide between custom mini-runner (R2a) and `@vitest/runner` embedding (R2b) before writing any runner code                                                                                     | P0       | S      | Choosing custom keeps surface area to ~1 week of work                     |
-| R3  | Spike `@taucad/test-runtime` with `describe`/`it`/`expect`/`expect.extend` against `@vitest/expect`, prove a `cube.test.ts` runs end-to-end inside the existing kernel worker                   | P0       | M      | Validates the architecture before any UI/migration work                   |
+| R3  | Spike `geospec` and `geospec/runner` with `describe`/`it`/`expectGeo`, prove a `cube.test.ts` runs in Node and inside the existing kernel worker                                                | P0       | M      | Validates the architecture before any UI/migration work                   |
 | R4  | Author the four custom matchers (`toBeWatertight`, `toHaveBoundingBox`, `toHaveConnectedComponents`, snapshot stub) and ship typings via the documented `interface Assertion` extension pattern | P1       | S      | Closes the agent-facing surface from `mesh-continuity-test-semantics.md`  |
 | R5  | Add `parameterGroups(filePath)` helper and document Patterns 1-3 in `docs/policy/testing-policy.md` (§12 Geometry-Test Surface)                                                                 | P1       | S      | Solves the screenshot regression by making derived expectations idiomatic |
 | R6  | Build `chat-tests.tsx` panel (Run, watch, results tree) sibling to `chat-parameters.tsx`; reuse the dockview pane pattern                                                                       | P1       | M      | First user-visible offline-capable test surface                           |
@@ -352,7 +368,7 @@ sequenceDiagram
   participant User as User (UI)
   participant Agent as LLM agent (server)
   participant Panel as chat-tests panel
-  participant TR as @taucad/test-runtime (worker)
+  participant TR as GeoSpec runner (worker)
   participant RC as RuntimeClient (worker)
   participant FS as Project filesystem
 
@@ -369,7 +385,7 @@ sequenceDiagram
   loop each it()
     TR->>RC: render(parameterSet)
     RC-->>TR: GLB
-    TR->>TR: matcher (analyzeGlb + assert)
+    TR->>TR: matcher (GeoSpec evidence + assert)
   end
   TR-->>Panel: TestResults[]
   Panel-->>User: tree view (pass/fail)
@@ -380,14 +396,15 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-  TR[@taucad/test-runtime] --> EXP[@vitest/expect]
-  TR --> TST[@taucad/testing/browser]
+  VM["@taucad/vm ModuleVm"] --> TR[GeoSpec runner]
+  TR --> EXP[GeoSpec expect]
+  TR --> TST[@taucad/testing/tau]
   TR --> RUN[@taucad/runtime/client]
   USER["user/cube.test.ts"] --> TR
   USER --> SRC["./cube.ts"]
   PANEL[chat-tests.tsx] --> TR
   TOOL[tool-test-model API] -->|RPC| PANEL
-  TST --> WIO[gltf-transform WebIO]
+  TST --> GSM[geospec/mesh]
   TST --> CC[connected-components.ts]
   TST --> WT[watertight.ts]
 ```
@@ -420,13 +437,14 @@ Internal:
 
 | File                                                      | Change                                                                                            | Phase |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----- |
-| `packages/testing/src/geometry/analyze-glb.ts`            | `NodeIO` → `WebIO`; add `@taucad/testing/browser` entry                                           | P1    |
+| `packages/geospec/`                                       | Create standalone package with mesh evidence loader, expect API, and runner                       | P1    |
+| `packages/testing/src/geometry/analyze-glb.ts`            | Delegate through GeoSpec compatibility path once mesh core exists                                 | P1    |
 | `packages/testing/src/geometry/connected-components.ts`   | None (already takes `Document`)                                                                   | —     |
 | `packages/testing/src/geometry/watertight.ts`             | None                                                                                              | —     |
 | `packages/testing/src/schemas.ts`                         | Eventually delete `testFileSchema` (P5)                                                           | P5    |
-| `packages/test-runtime/` (new)                            | Create package: collector, runner, matchers, render helper                                        | P2    |
+| `packages/geospec/src/runner/`                            | Create collector, runner, VM adapters, and matchers                                               | P2    |
 | `packages/runtime/src/bundler/esbuild-core.ts`            | Optionally inject test globals via banner; or expose a `taucad:test` builtin module               | P2    |
-| `packages/runtime/src/framework/kernel-runtime-worker.ts` | Add `executeTests(filePath)` method that bundles + runs through `@taucad/test-runtime` collector  | P2    |
+| `packages/runtime/src/framework/kernel-runtime-worker.ts` | Add `executeTests(filePath)` method that bundles + runs through GeoSpec runner via Tau adapter    | P2    |
 | `apps/ui/app/routes/projects_.$id/chat-tests.tsx` (new)   | UI panel with Run button + watch toggle + results tree                                            | P3    |
 | `apps/ui/app/hooks/rpc-handlers.ts`                       | Add `execute_browser_tests` RPC handler                                                           | P3    |
 | `libs/chat/src/schemas/rpc.schema.ts`                     | Add `executeBrowserTestsInputSchema` / output schema                                              | P3    |
@@ -440,19 +458,19 @@ Internal:
 
 ```typescript
 import { expect } from '@vitest/expect';
-import type { GeometryStats } from '@taucad/testing';
-import { analyzeGlb } from '@taucad/testing/browser';
+import type { MeshAnalysis, MeshEvidence } from 'geospec/mesh';
+import { analyzeMesh } from 'geospec/mesh';
 
 interface RenderResult {
-  glb: Uint8Array;
+  mesh: MeshEvidence;
 }
 
-const statsCache = new WeakMap<Uint8Array, GeometryStats>();
+const statsCache = new WeakMap<MeshEvidence, MeshAnalysis>();
 const statsFor = (r: RenderResult) => {
-  let s = statsCache.get(r.glb);
+  let s = statsCache.get(r.mesh);
   if (!s) {
-    s = analyzeGlb(r.glb);
-    statsCache.set(r.glb, s);
+    s = analyzeMesh({ mesh: r.mesh });
+    statsCache.set(r.mesh, s);
   }
   return s;
 };
@@ -522,7 +540,7 @@ The protocol is intentionally Vitest-shaped so that swapping in `@vitest/runner`
 ### D. Open questions (defer to implementation)
 
 1. Should test files use `*.test.ts` or `*.spec.ts` or a Tau-specific extension? (Recommend `*.test.ts` for muscle memory; lint can disambiguate from app-side Vitest tests.)
-2. Should `render(p)` accept inline code, or always operate on the imported source file? (Recommend the latter — matches the editor's mental model.)
-3. Should the runner expose `beforeAll(async () => { const r = await render(p); })` for shared fixture state across many `it()` calls? (Yes — avoids re-rendering the same parameter set 5 times.)
+2. Should `renderTauModel({ parameters })` accept inline code, or always operate on the imported source file? (Recommend the latter — matches the editor's mental model.)
+3. Should the runner expose `beforeAll(async () => { const r = await renderTauModel({ parameters: p }); })` for shared fixture state across many `it()` calls? (Yes — avoids re-rendering the same parameter set 5 times.)
 4. How does watch mode interact with the existing kernel watch path? (Likely subscribes to the same FS event stream the kernel worker uses for re-render.)
 5. Snapshot serialization format for `toMatchGeometrySnapshot()` — JSON of `GeometryStats` is the obvious choice and survives diff review; bigger serializations (mesh hashes) deferred.

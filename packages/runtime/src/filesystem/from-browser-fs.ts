@@ -72,6 +72,24 @@ const getDirectory = async (
  * ```
  */
 export const fromBrowserFs = (root: FileSystemDirectoryHandle): RuntimeFileSystem => {
+  /* Spec/instance contract: capture `root` in the spec closure; mint a
+   * fresh adapter per binding via `create()`. The underlying FS Access
+   * API directory handle is shared by reference (the host owns its
+   * lifecycle), mirroring `fromNodeFs` / `fromFsLike` shape uniformity
+   * — see
+   * `docs/research/runtime-filesystem-spec-instance-harmonisation.md`. */
+  return wrapAsRuntimeFileSystem({
+    kind: 'inline',
+    create: () => buildBrowserFsBase(root),
+  });
+};
+
+/**
+ * Build a fresh `RuntimeFileSystemBase` adapter wrapping the supplied
+ * `FileSystemDirectoryHandle`. Per-binding adapter; underlying directory
+ * handle is shared by reference.
+ */
+function buildBrowserFsBase(root: FileSystemDirectoryHandle): RuntimeFileSystemBase {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
 
@@ -182,5 +200,5 @@ export const fromBrowserFs = (root: FileSystemDirectoryHandle): RuntimeFileSyste
     },
   };
 
-  return wrapAsRuntimeFileSystem({ kind: 'inline', fs });
-};
+  return fs;
+}

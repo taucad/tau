@@ -1,0 +1,80 @@
+{
+  "name": "@taucad/units",
+  "version": "0.1.0-beta.0",
+  "description": "Units of measurement and conversions",
+  "type": "module",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/units"
+  },
+  "main": "./dist/cjs/types/index.cjs",
+  "types": "./dist/cjs/types/index.d.cts",
+  "module": "./dist/esm/types/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "units",
+    "measurement",
+    "conversion"
+  ],
+  "author": "Richard Fontein",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/types/index.ts",
+    "./constants": "./src/constants/index.ts",
+    "./converter": "./src/converter/index.ts",
+    "./parser": "./src/parser/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "require": {
+          "types": "./dist/cjs/types/index.d.cts",
+          "default": "./dist/cjs/types/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/types/index.d.ts",
+          "default": "./dist/esm/types/index.js"
+        }
+      },
+      "./constants": {
+        "require": {
+          "types": "./dist/cjs/constants/index.d.cts",
+          "default": "./dist/cjs/constants/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/constants/index.d.ts",
+          "default": "./dist/esm/constants/index.js"
+        }
+      },
+      "./converter": {
+        "require": {
+          "types": "./dist/cjs/converter/index.d.cts",
+          "default": "./dist/cjs/converter/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/converter/index.d.ts",
+          "default": "./dist/esm/converter/index.js"
+        }
+      },
+      "./parser": {
+        "require": {
+          "types": "./dist/cjs/parser/index.d.cts",
+          "default": "./dist/cjs/parser/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/parser/index.d.ts",
+          "default": "./dist/esm/parser/index.js"
+        }
+      }
+    }
+  },
+  "imports": {
+    "#*": "./src/*"
+  }
+}

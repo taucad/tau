@@ -138,39 +138,39 @@ export function rpcErrorToToolError(
 export function getToolErrorTitle(errorCode: ToolErrorCode): string {
   switch (errorCode) {
     case 'TOOL_EXECUTION_TIMEOUT': {
-      return 'Tool Timed Out';
+      return 'Timed out';
     }
 
     case 'CLIENT_DISCONNECTED': {
-      return 'Connection Lost';
+      return 'Connection lost during';
     }
 
     case 'NO_CLIENT_CONNECTION': {
-      return 'No Connection';
+      return 'No connection for';
     }
 
     case 'TOOL_INPUT_VALIDATION_FAILED': {
-      return 'Invalid Input';
+      return 'Invalid input for';
     }
 
     case 'TOOL_OUTPUT_VALIDATION_FAILED': {
-      return 'Validation Failed';
+      return 'Unexpected output from';
     }
 
     case 'TOOL_EXECUTION_ERROR': {
-      return 'Tool Error';
+      return 'Attempted';
     }
 
     case 'USER_INTERRUPTED': {
-      return 'Interrupted';
+      return 'Stopped';
     }
 
     case 'STREAM_ERROR': {
-      return 'Stream Failed';
+      return 'Stream interrupted during';
     }
 
     case 'TOOL_NO_RESULTS': {
-      return 'No Results';
+      return 'No results from';
     }
   }
 }
@@ -327,21 +327,48 @@ export type ClientErrorMessageResolver = string | ((error: RpcClientError) => st
  * @param options - Context for error attribution
  * @param options.toolName - The name of the tool (for error attribution)
  * @param options.toolCallId - The tool call ID (for tracking)
- * @param options.clientErrorMessage - Optional custom message for client errors.
- *   Can be a string or a function that receives the RpcClientError for dynamic messages.
+ * @param options.clientErrorMessage -
+ *   - **omitted** — message is `${error.errorCode}: ${error.message}` (wire diagnostic for the LLM).
+ *   - **string** — brief tool-context label plus wire diagnostic:
+ *     `${label} (${error.errorCode}: ${error.message})`.
+ *   - **function** — full control; return the exact LLM-facing string (use for branching on
+ *     `error.errorCode` without re-appending the wire diagnostic).
  * @throws ToolError if result is any kind of error
  *
- * @example <caption>Asserting full RPC success</caption>
+ * @example <caption>Omit resolver for default wire diagnostic</caption>
  * ```typescript
  * import { assertRpcSuccess } from '@taucad/chat/utils';
  *
- * const result = { success: true, content: 'file contents' };
- * assertRpcSuccess(result, {
+ * const rpcResult = {
+ *   success: false,
+ *   errorCode: 'FILE_NOT_FOUND',
+ *   message: 'Path does not exist: foo.scad',
+ * } as const;
+ *
+ * assertRpcSuccess(rpcResult, { toolName: 'grep', toolCallId: 'call-1' });
+ * ```
+ *
+ * @example <caption>Function resolver for custom copy</caption>
+ * ```typescript
+ * import { assertRpcSuccess } from '@taucad/chat/utils';
+ * import { rpcClientErrorCode } from '@taucad/chat';
+ * import type { RpcClientError } from '@taucad/chat';
+ *
+ * const rpcResult = {
+ *   success: false,
+ *   errorCode: rpcClientErrorCode.fileNotFound,
+ *   message: 'Path does not exist: main.scad',
+ * } as const;
+ *
+ * assertRpcSuccess(rpcResult, {
  *   toolName: 'readFile',
  *   toolCallId: 'call-1',
- *   clientErrorMessage(error) {
- *     if (error.errorCode === 'FILE_NOT_FOUND') return 'File not found';
- *     return 'Cannot read file';
+ *   clientErrorMessage(error: RpcClientError) {
+ *     if (error.errorCode === rpcClientErrorCode.fileNotFound) {
+ *       return `File not found: main.scad`;
+ *     }
+ *
+ *     return `Cannot read file "main.scad"`;
  *   },
  * });
  * ```
@@ -358,9 +385,14 @@ export function assertRpcSuccess<T extends { success: boolean }>(
   assertRpcExecution(result, toolName, toolCallId);
 
   if (isRpcClientError(result)) {
-    // Resolve message: call function if provided, otherwise use string or fallback to result.message
-    const message =
-      typeof clientErrorMessage === 'function' ? clientErrorMessage(result) : (clientErrorMessage ?? result.message);
+    let message: string;
+    if (typeof clientErrorMessage === 'function') {
+      message = clientErrorMessage(result);
+    } else if (typeof clientErrorMessage === 'string') {
+      message = `${clientErrorMessage} (${result.errorCode}: ${result.message})`;
+    } else {
+      message = `${result.errorCode}: ${result.message}`;
+    }
 
     throw new ToolError({
       errorCode: 'TOOL_EXECUTION_ERROR',

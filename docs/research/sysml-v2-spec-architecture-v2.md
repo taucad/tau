@@ -3,10 +3,12 @@ title: 'SysML v2 Spec Architecture v2 — File-First, Code-First, Agent-Native'
 description: "A clean-slate architecture proposal for SysML v2 as Tau's primary specification, requirements, and verification language. Replaces test.json with a file-based, TDD-driven, scriptable engineering specification surface aligned with Tau's vision-policy.md."
 status: draft
 created: '2026-04-23'
-updated: '2026-04-23'
+updated: '2026-06-01'
 category: architecture
 related:
   - docs/policy/vision-policy.md
+  - docs/research/geospec-standalone-cad-testing-blueprint.md
+  - docs/research/vitest-style-parameter-geometry-testing-blueprint.md
   - docs/research/sysml-driven-cad-spec.md
   - docs/policy/testing-policy.md
   - docs/policy/library-api-policy.md
@@ -23,6 +25,8 @@ This document **supersedes the additive recommendation** in `sysml-driven-cad-sp
 **Finding.** SysML v2 became an OMG formal standard in September 2025. Its textual notation (KerML/SysML v2) is the only open, vendor-neutral, code-first, browser-compatible engineering specification language with: (a) a typed quantity-and-unit kernel (ISO 80000 / SI / ISQ); (b) first-class `requirement def` / `verification case` / `analysis case` / `assert constraint` constructs; (c) a TypeScript Langium parser that already runs in the browser (Sensmetry's `sysml-2ls`); and (d) a published `.sysml` file convention with package import semantics. Atopile and tscircuit prove that "engineering spec as a typed code file with assert-driven units and tolerances" works at production scale in EDA; SysML v2 generalises the same pattern across every pillar.
 
 **Recommendation.** Make `.sysml` files the **canonical authoring surface** for all of Tau's specifications: requirements, tolerances, verification cases, analysis cases, mass/COM budgets, clearance constraints, and acceptance criteria. The current `test.json` becomes a generated artifact (or is retired entirely). A new `@taucad/spec` package owns parsing/typed-IR via Langium; a `@taucad/spec-runtime` package executes verification cases against pluggable evidence providers (geometry analyser, FEA kernel, ECAD DRC, firmware simulator). The chat agent gains `edit_spec` / `verify_spec` tools that operate on `.sysml` files with in-process parser feedback — the SysTemp multi-agent loop (TemplateGenerator → Writer → Parser) maps directly onto Tau's existing `edit_file` / `test_model` cadence.
+
+**2026-06-01 geometry-provider alignment.** GeoSpec is the target MCAD evidence provider beneath `@taucad/spec-runtime`: it owns mesh, BRep, STEP/AP242, distance, mate/frame, and manufacturing-rule assertions. `@taucad/testing` remains the Tau adapter that can render a `GeometryArtifact` from Tau projects and bridge legacy `test.json`/chat-tool flows. In this doc, older references to `packages/testing` as the geometry analyser should now be read as "GeoSpec through the Tau adapter."
 
 **Why now.** Phases 2–6 of `vision-policy.md` (analysis, systems, ECAD, firmware, robotics) all require a **single cross-discipline specification spine** that survives handoffs without losing fidelity. `test.json` was scoped to geometry checks on one GLB; it cannot express a thermal limit that propagates from a stress analysis into a firmware temperature-protection setpoint. SysML v2 was designed for exactly that propagation. Picking the spec spine before Phase 2 starts is cheaper than retrofitting it once five kernels have shipped against an ad-hoc schema.
 
@@ -403,24 +407,24 @@ export const createSpecRuntime = (options: { providers: readonly EvidenceProvide
 - Multiple `verifies` on one requirement compose: requirement passes iff every linked verification case passes.
 - Verdicts roll up the requirement-decomposition tree.
 
-This is the layer the chat agent directly drives via `verify_spec`. The current `evaluateRequirement` in `packages/testing` becomes a single evidence provider (`geometry-glb` provider) inside this layer.
+This is the layer the chat agent directly drives via `verify_spec`. GeoSpec becomes the MCAD evidence provider inside this layer, with `@taucad/testing` supplying Tau project rendering, parameter resolution, and legacy compatibility.
 
 ### Layer 4: Evidence providers (kernels, analysers, simulators)
 
 Each engineering domain registers one or more providers. Initial set covers Phase-1 + bridges to Phase-2:
 
-| Provider          | Subject kind             | Methods              | Phase | Notes                                                                                                                                           |
-| ----------------- | ------------------------ | -------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `geometry-glb`    | `Geometry`               | `analyze`, `inspect` | 1     | Wraps existing `analyzeGlb` + bounding-box/connected-components/watertight checks                                                               |
-| `mass-rollup`     | `Assembly`               | `analyze`            | 1     | New: density × volume per part, summed across the assembly subject; closes the existing schema gap                                              |
-| `clearance`       | `Assembly`               | `analyze`            | 1     | New: minimum signed-distance solver between two named parts (replicad/OCCT have native APIs)                                                    |
-| `wall-thickness`  | `Geometry`               | `analyze`            | 1     | New: medial-axis sampler; for OCCT use `BRepClass3d_SolidClassifier`                                                                            |
-| `parameter-sweep` | `Geometry` \| `Assembly` | `analyze`, `test`    | 1     | Cartesian product over `assume`-bounded inputs; parallel workers; each cell runs the geometry kernel and re-applies the inner verification case |
-| `fea-stress`      | `FEAResult`              | `analyze`            | 2     | FEAScript or external solver via web worker                                                                                                     |
-| `fea-thermal`     | `FEAResult`              | `analyze`            | 2     | Heat conduction; FEAScript supports it natively                                                                                                 |
-| `screenshot-vlm`  | `Geometry`               | `inspect`            | 1     | Wraps existing capture-view-screenshot + LLM "is this manifold?" check; `verdict = inconclusive` allowed                                        |
-| `bom-checker`     | `Assembly`               | `inspect`            | 4     | Phase 4 ECAD; verifies BOM-driven cost/availability assumptions                                                                                 |
-| `firmware-trace`  | `FirmwareRun`            | `demo`, `test`       | 5     | Phase 5; QEMU/Wokwi instrumented run produces trace, asserts on signal events                                                                   |
+| Provider           | Subject kind             | Methods              | Phase | Notes                                                                                                                                           |
+| ------------------ | ------------------------ | -------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `geospec-geometry` | `Geometry`               | `analyze`, `inspect` | 1     | Wraps GeoSpec mesh/BRep/STEP evidence plus bounding-box/connected-components/watertight checks through the Tau adapter                          |
+| `mass-rollup`      | `Assembly`               | `analyze`            | 1     | New: density × volume per part, summed across the assembly subject; closes the existing schema gap                                              |
+| `clearance`        | `Assembly`               | `analyze`            | 1     | New: minimum signed-distance solver between two named parts (replicad/OCCT have native APIs)                                                    |
+| `wall-thickness`   | `Geometry`               | `analyze`            | 1     | New: medial-axis sampler; for OCCT use `BRepClass3d_SolidClassifier`                                                                            |
+| `parameter-sweep`  | `Geometry` \| `Assembly` | `analyze`, `test`    | 1     | Cartesian product over `assume`-bounded inputs; parallel workers; each cell runs the geometry kernel and re-applies the inner verification case |
+| `fea-stress`       | `FEAResult`              | `analyze`            | 2     | FEAScript or external solver via web worker                                                                                                     |
+| `fea-thermal`      | `FEAResult`              | `analyze`            | 2     | Heat conduction; FEAScript supports it natively                                                                                                 |
+| `screenshot-vlm`   | `Geometry`               | `inspect`            | 1     | Wraps existing capture-view-screenshot + LLM "is this manifold?" check; `verdict = inconclusive` allowed                                        |
+| `bom-checker`      | `Assembly`               | `inspect`            | 4     | Phase 4 ECAD; verifies BOM-driven cost/availability assumptions                                                                                 |
+| `firmware-trace`   | `FirmwareRun`            | `demo`, `test`       | 5     | Phase 5; QEMU/Wokwi instrumented run produces trace, asserts on signal events                                                                   |
 
 **Plugin registration.** Mirrors `defineKernel` / `defineTranscoder` exactly:
 

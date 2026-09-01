@@ -59,6 +59,12 @@ type EmittedEvent =
   | { type: 'dispatchStop' }
   | { type: 'applyFinishedRequest'; messages: MyUIMessage[]; cause: RequestTerminationCause }
   | { type: 'applyStoppedRequest'; messages: MyUIMessage[]; cause: 'user_stop' }
+  | {
+      type: 'restoreCancelledDraft';
+      userMessage: MyUIMessage;
+      truncatedMessages: MyUIMessage[];
+      cause: 'user_stop';
+    }
   | { type: 'applyResumedRequest'; messages: MyUIMessage[]; pendingRequest: ChatRequest; cause: 'preempt' };
 
 /**
@@ -74,6 +80,7 @@ function createTestActorWithEmits(options?: Parameters<typeof createTestActor>[0
   actor.on('dispatchStop', (event) => emitLog.push(event));
   actor.on('applyFinishedRequest', (event) => emitLog.push(event));
   actor.on('applyStoppedRequest', (event) => emitLog.push(event));
+  actor.on('restoreCancelledDraft', (event) => emitLog.push(event));
   actor.on('applyResumedRequest', (event) => emitLog.push(event));
 
   return { actor, emitLog };
@@ -842,7 +849,17 @@ describe('chatPersistenceMachine', () => {
 
       actor.send({ type: 'startRequest', request: { kind: 'regenerate' } });
       actor.send({ type: 'stopRequest' });
-      const interruptedMessages: MyUIMessage[] = [sampleMessage];
+      // Assistant has already streamed at least one part — the stop should
+      // preserve the transcript via `applyStoppedRequest`, NOT lift the
+      // user message back into the draft (which is what the new
+      // `restoreCancelledDraft` branch covers below).
+      const assistantWithContent: MyUIMessage = {
+        id: 'msg_assistant_1',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'partial reply' }],
+        metadata: { createdAt: 0, status: 'pending' },
+      };
+      const interruptedMessages: MyUIMessage[] = [sampleMessage, assistantWithContent];
       actor.send({
         type: 'requestFinished',
         messages: interruptedMessages,
@@ -854,6 +871,107 @@ describe('chatPersistenceMachine', () => {
       expect(actor.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
       const lastEmit = emitLog.at(-1);
       expect(lastEmit).toEqual({ type: 'applyStoppedRequest', messages: interruptedMessages, cause: 'user_stop' });
+      expect(emitLog.filter((event) => event.type === 'restoreCancelledDraft').length).toBe(0);
+      actor.stop();
+    });
+
+    it('should emit restoreCancelledDraft when stopping with no assistant placeholder appended', () => {
+      const { actor, emitLog } = createTestActorWithEmits({ activeChatId: 'chat_abc' });
+      actor.start();
+
+      actor.send({ type: 'startRequest', request: { kind: 'send', message: sampleMessage } });
+      actor.send({ type: 'stopRequest' });
+      // AI SDK aborted before its onStart appended an assistant message --
+      // the trailing message is still the user prompt.
+      const interruptedMessages: MyUIMessage[] = [sampleMessage];
+      actor.send({
+        type: 'requestFinished',
+        messages: interruptedMessages,
+        isAbort: true,
+        isError: false,
+        isDisconnect: false,
+      });
+
+      expect(actor.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
+      const lastEmit = emitLog.at(-1);
+      expect(lastEmit).toEqual({
+        type: 'restoreCancelledDraft',
+        userMessage: sampleMessage,
+        truncatedMessages: [],
+        cause: 'user_stop',
+      });
+      expect(emitLog.filter((event) => event.type === 'applyStoppedRequest').length).toBe(0);
+      actor.stop();
+    });
+
+    it('should emit restoreCancelledDraft and strip the empty assistant placeholder when stopping mid-prefetch', () => {
+      const { actor, emitLog } = createTestActorWithEmits({ activeChatId: 'chat_abc' });
+      actor.start();
+
+      const olderUser: MyUIMessage = {
+        id: 'msg_user_0',
+        role: 'user',
+        parts: [{ type: 'text', text: 'first' }],
+        metadata: { createdAt: 0, status: 'pending' },
+      };
+      const olderAssistant: MyUIMessage = {
+        id: 'msg_assistant_0',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'first reply' }],
+        metadata: { createdAt: 0, status: 'pending' },
+      };
+      const emptyAssistant: MyUIMessage = {
+        id: 'msg_assistant_2',
+        role: 'assistant',
+        parts: [],
+        metadata: { createdAt: 0, status: 'pending' },
+      };
+
+      actor.send({ type: 'startRequest', request: { kind: 'send', message: sampleMessage } });
+      actor.send({ type: 'stopRequest' });
+      const interruptedMessages: MyUIMessage[] = [olderUser, olderAssistant, sampleMessage, emptyAssistant];
+      actor.send({
+        type: 'requestFinished',
+        messages: interruptedMessages,
+        isAbort: true,
+        isError: false,
+        isDisconnect: false,
+      });
+
+      expect(actor.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
+      const lastEmit = emitLog.at(-1);
+      expect(lastEmit).toEqual({
+        type: 'restoreCancelledDraft',
+        userMessage: sampleMessage,
+        truncatedMessages: [olderUser, olderAssistant],
+        cause: 'user_stop',
+      });
+      expect(emitLog.filter((event) => event.type === 'applyStoppedRequest').length).toBe(0);
+      actor.stop();
+    });
+
+    it('should prefer the preempt-resume arm over restoreCancelledDraft when a startRequest is queued', () => {
+      const { actor, emitLog } = createTestActorWithEmits({ activeChatId: 'chat_abc' });
+      actor.start();
+
+      const queued: ChatRequest = { kind: 'send', message: { ...sampleMessage, id: 'msg_user_queued' } };
+      actor.send({ type: 'startRequest', request: { kind: 'send', message: sampleMessage } });
+      actor.send({ type: 'startRequest', request: queued });
+
+      const interruptedMessages: MyUIMessage[] = [sampleMessage];
+      actor.send({
+        type: 'requestFinished',
+        messages: interruptedMessages,
+        isAbort: true,
+        isError: false,
+        isDisconnect: false,
+      });
+
+      // Resume path must win over the empty-cancel restore arm.
+      expect(actor.getSnapshot().matches({ requestLifecycle: 'invoking' })).toBe(true);
+      const types = emitLog.map((event) => event.type);
+      expect(types).toEqual(['dispatchRequest', 'dispatchStop', 'applyResumedRequest', 'dispatchRequest']);
+      expect(emitLog.filter((event) => event.type === 'restoreCancelledDraft').length).toBe(0);
       actor.stop();
     });
 
@@ -918,6 +1036,50 @@ describe('chatPersistenceMachine', () => {
         'dispatchRequest',
       ]);
       actor.stop();
+    });
+
+    /**
+     * The listener-side fix in `chat-session-store.ts` (queueMicrotask wrap
+     * around the `dispatchRequest` listener body — see
+     * `docs/research/chat-followup-message-swallow.md`) relies on the
+     * machine emitting `applyResumedRequest` IMMEDIATELY before the resumed
+     * `dispatchRequest` in the same synchronous transition. If the order
+     * ever changed, the React side's microtask-deferred `chat.sendMessage`
+     * call would fire before `chat.messages` had been sanitised, so this
+     * test pins that invariant down explicitly.
+     */
+    it('emits applyResumedRequest synchronously and immediately before dispatchRequest on the preempt branch', () => {
+      const { actor, emitLog } = createTestActorWithEmits({ activeChatId: 'chat_abc' });
+      actor.start();
+
+      const first: ChatRequest = { kind: 'send', message: sampleMessage };
+      const queued: ChatRequest = { kind: 'send', message: { ...sampleMessage, id: 'msg_user_2' } };
+      const interruptedMessages: MyUIMessage[] = [sampleMessage];
+
+      actor.send({ type: 'startRequest', request: first });
+      actor.send({ type: 'startRequest', request: queued });
+      const beforeFinish = emitLog.length;
+      actor.send({
+        type: 'requestFinished',
+        messages: interruptedMessages,
+        isAbort: true,
+        isError: false,
+        isDisconnect: false,
+      });
+
+      // Exactly two emits land synchronously on `requestFinished` in the
+      // preempt branch: applyResumedRequest then dispatchRequest, with no
+      // other interleaved events.
+      const afterFinishSlice = emitLog.slice(beforeFinish);
+      expect(afterFinishSlice).toHaveLength(2);
+      const [resumed, dispatched] = afterFinishSlice;
+      expect(resumed).toEqual({
+        type: 'applyResumedRequest',
+        messages: interruptedMessages,
+        pendingRequest: queued,
+        cause: 'preempt',
+      });
+      expect(dispatched).toEqual({ type: 'dispatchRequest', request: queued });
     });
   });
 

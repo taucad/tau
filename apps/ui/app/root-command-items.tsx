@@ -1,6 +1,7 @@
 import { Code2, Cog, History, List, LogIn, LogOut, MessageCircle } from 'lucide-react';
 import { useMemo } from 'react';
-import { useAuthenticate } from '@daveyplate/better-auth-ui';
+import { useSession } from '@better-auth-ui/react';
+import { authClient } from '#lib/auth-client.js';
 import { useLocation } from 'react-router';
 import type { UIMatch } from 'react-router';
 import { useCommandPaletteItems } from '#components/layout/command-palette.js';
@@ -10,7 +11,7 @@ import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
-  const { data: authData } = useAuthenticate({ enabled: false });
+  const { data: authData } = useSession(authClient);
   const { projects } = useProjects();
   const { signIn, signOut } = useAuthLinks();
   const location = useLocation();

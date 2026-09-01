@@ -2121,6 +2121,9 @@ export default function main() {
       }
 
       const originalShape = drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10);
+      if (!isShape3D(originalShape)) {
+        throw new Error('Extruded shape is not a 3D shape');
+      }
       const originalVolume = measureVolume(originalShape);
       const importedVolume = measureVolume(importedShape);
 

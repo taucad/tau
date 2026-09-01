@@ -48,7 +48,7 @@ export function ChatInterfaceGraphics({ className }: ChatInterfaceGraphicsProps)
   }
 
   return (
-    <GraphicsPanel title={titleFromMode[mode]} className={cn('w-full max-w-80', className)}>
+    <GraphicsPanel title={titleFromMode[mode]} className={cn('max-w-80', className)}>
       <ChatInterfaceGraphicsInner mode={mode} />
     </GraphicsPanel>
   );

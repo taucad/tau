@@ -348,11 +348,97 @@ const booleans: ModelBenchmarkCase[] = [
   },
 ];
 
+/**
+ * Context-prevention benchmark cases exercise the agent's read hygiene on
+ * dense generated code (the `node_modules_read_safety` motivator from
+ * `docs/research/tool-result-offloading-and-context-prevention.md`). The
+ * grader inspects tool-call arguments rather than token usage so it does
+ * not depend on provider-specific cache accounting — every `read_file` on
+ * `node_modules/` must include `offset` + `limit`, and the agent must
+ * reach for `grep` (with a narrow regex) before sweeping the d.ts.
+ *
+ * Fixture seeding is handled out-of-band by the runner using
+ * {@link ./fixtures/node-modules-read-safety/generate-fixture.ts}.
+ */
+const contextPrevention: ModelBenchmarkCase[] = [
+  {
+    name: 'node_modules_read_safety',
+    category: 'context-prevention',
+    prompt: [
+      'Find the OCCT classes that build Bezier curves in `node_modules/fake-cad/index.d.ts`.',
+      'Use `grep` first with a narrow regex to locate candidate symbols, then `read_file` with `offset` and `limit` to inspect only the most-relevant ranges.',
+      'Reply with the names of the discovered classes.',
+    ].join('\n'),
+    grader(outcome) {
+      const readFileCalls = outcome.toolCalls.filter((call) => call.name === 'read_file');
+      const grepCalls = outcome.toolCalls.filter((call) => call.name === 'grep');
+
+      const calledGrepFirst = (() => {
+        const firstGrep = outcome.toolCalls.findIndex((call) => call.name === 'grep');
+        const firstFullRead = outcome.toolCalls.findIndex(
+          (call) =>
+            call.name === 'read_file' &&
+            call.args['offset'] === undefined &&
+            call.args['limit'] === undefined &&
+            typeof call.args['targetFile'] === 'string' &&
+            call.args['targetFile'].includes('node_modules/'),
+        );
+        if (firstFullRead === -1) {
+          return true;
+        }
+        if (firstGrep === -1) {
+          return false;
+        }
+        return firstGrep < firstFullRead;
+      })();
+
+      const boundedReads = readFileCalls.every((call) => {
+        const { targetFile } = call.args;
+        if (typeof targetFile !== 'string' || !targetFile.includes('node_modules/')) {
+          return true;
+        }
+        return typeof call.args['offset'] === 'number' && typeof call.args['limit'] === 'number';
+      });
+
+      const narrowGreps = grepCalls.every((call) => {
+        const { headLimit } = call.args;
+        return typeof headLimit !== 'number' || headLimit <= 50;
+      });
+
+      const checks: GraderCheck[] = [
+        {
+          name: 'grep_before_unbounded_read_of_node_modules',
+          passed: calledGrepFirst,
+          detail: calledGrepFirst ? undefined : 'Agent issued an unbounded read_file on node_modules/ before any grep.',
+        },
+        {
+          name: 'bounded_node_modules_reads',
+          passed: boundedReads,
+          detail: boundedReads ? undefined : 'A read_file on node_modules/ omitted offset+limit.',
+        },
+        {
+          name: 'narrow_grep_head_limits',
+          passed: narrowGreps,
+          detail: narrowGreps ? undefined : 'A grep call requested headLimit > 50 — widen the regex instead.',
+        },
+      ];
+
+      return computeGraderResult(checks);
+    },
+  },
+];
+
 // =============================================================================
 // Suite Export
 // =============================================================================
 
-export const benchmarkSuite: ModelBenchmarkCase[] = [...smoke, ...toolUse, ...primitives, ...booleans];
+export const benchmarkSuite: ModelBenchmarkCase[] = [
+  ...smoke,
+  ...toolUse,
+  ...primitives,
+  ...booleans,
+  ...contextPrevention,
+];
 
 export const benchmarkCategories: string[] = [...new Set(benchmarkSuite.map((c) => c.category))];
 

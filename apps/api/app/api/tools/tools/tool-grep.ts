@@ -17,6 +17,7 @@ Usage:
 - Escape special characters for exact matches, e.g. "functionCall\\("
 - Use the glob parameter to filter by file type, e.g. "*.scad", "*.ts"
 - Results show file path, line number, and matching line content
+- Defaults to first 50 matches; pass \`headLimit\` (1-1000) to widen, \`offset\` to paginate.
 
 Use this tool when you need to:
 - Find specific code patterns or function calls
@@ -38,7 +39,6 @@ export const grepTool: ChatTool<typeof grepInputSchema, GrepInput, GrepOutput, t
     assertRpcSuccess(result, {
       toolName: toolName.grep,
       toolCallId,
-      clientErrorMessage: 'Grep search failed',
     });
 
     // Return success output
@@ -46,6 +46,8 @@ export const grepTool: ChatTool<typeof grepInputSchema, GrepInput, GrepOutput, t
       matches: result.matches,
       totalMatches: result.totalMatches,
       truncated: result.truncated,
+      appliedHeadLimit: result.appliedHeadLimit,
+      appliedOffset: result.appliedOffset,
     };
   },
   grepToolDefinition,

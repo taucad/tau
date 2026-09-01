@@ -41,7 +41,7 @@ export const editFileTool: ChatTool<
   const { toolCallId } = runtime;
   const { targetFile, codeEdit } = args;
 
-  // Step 1: Read the original file content via RPC
+  // Step 1: Read the original file content via RPC (raw bytes; cat-n gutter is only added by the read_file chat tool)
   // The frontend returns raw content without line numbers
   const readResult = await chatRpcService.sendRpcRequest({
     chatId,
@@ -57,7 +57,7 @@ export const editFileTool: ChatTool<
     clientErrorMessage: `Cannot read file "${targetFile}"`,
   });
 
-  // Frontend sends raw content (no line numbers)
+  // RPC returns raw file content
   const originalContent = readResult.content;
 
   // Step 2: Apply the edit using FileEditService
@@ -89,7 +89,7 @@ export const editFileTool: ChatTool<
   assertRpcSuccess(writeResult, {
     toolName: toolName.editFile,
     toolCallId,
-    clientErrorMessage: `Cannot save file`,
+    clientErrorMessage: `Cannot save file "${targetFile}"`,
   });
 
   // Return the result with diff stats (success only - no success property)

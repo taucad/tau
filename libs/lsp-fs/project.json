@@ -1,0 +1,7 @@
+{
+  "name": "lsp-fs",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/lsp-fs",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:lib"]
+}

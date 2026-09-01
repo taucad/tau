@@ -2,18 +2,16 @@
  * Shared types for KCL LSP communication.
  */
 
+import type { JSONRPCRequest, JSONRPCResponse } from 'json-rpc-2.0';
+
 /**
  * Worker event types for LSP communication.
  */
 export const lspWorkerEventType = {
   init: 'init',
   call: 'call',
-  fileReadRequest: 'fileReadRequest',
-  fileReadResponse: 'fileReadResponse',
-  fileExistsRequest: 'fileExistsRequest',
-  fileExistsResponse: 'fileExistsResponse',
-  fileListRequest: 'fileListRequest',
-  fileListResponse: 'fileListResponse',
+  languageFsJsonRpc: 'languageFsJsonRpc',
+  setDocumentContext: 'setDocumentContext',
 } as const;
 
 export type LspWorkerEventType = (typeof lspWorkerEventType)[keyof typeof lspWorkerEventType];
@@ -33,42 +31,15 @@ export type KclLspWorkerOptions = {
   token: string;
   /** API base URL (empty for offline mode) */
   apiBaseUrl: string;
+  /** Workspace root path (same string as file manager {@link WorkspacePathResolver.root}) */
+  workspaceRootPath: string;
+  /** Optional shared file pool for Tier 0 reads */
+  filePoolBuffer?: SharedArrayBuffer;
 };
 
-/**
- * File system request sent from worker to client.
- */
-export type FileSystemRequest = {
-  requestId: number;
-  path: string;
-};
-
-/**
- * File read response sent from client to worker.
- */
-export type FileReadResponse = {
-  requestId: number;
-  data: Uint8Array<ArrayBuffer> | undefined;
-  error?: string;
-};
-
-/**
- * File exists response sent from client to worker.
- */
-export type FileExistsResponse = {
-  requestId: number;
-  exists: boolean;
-  error?: string;
-};
-
-/**
- * File list response sent from client to worker.
- */
-export type FileListResponse = {
-  requestId: number;
-  files: string[];
-  error?: string;
-};
+export type SetDocumentContextPayload = Readonly<{
+  documentUri: string;
+}>;
 
 /**
  * Event sent to/from the LSP worker.
@@ -79,10 +50,9 @@ export type LspWorkerEvent = {
   eventData:
     | Uint8Array<ArrayBuffer>
     | KclLspWorkerOptions
-    | FileSystemRequest
-    | FileReadResponse
-    | FileExistsResponse
-    | FileListResponse;
+    | SetDocumentContextPayload
+    | JSONRPCRequest
+    | JSONRPCResponse;
 };
 
 /**

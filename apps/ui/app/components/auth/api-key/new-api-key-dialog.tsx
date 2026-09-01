@@ -1,0 +1,86 @@
+import { useAuth, useAuthPlugin } from '@better-auth-ui/react';
+import { Check, Copy, Key } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from '#components/ui/alert-dialog.js';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '#components/ui/input-group.js';
+import { Label } from '#components/ui/label.js';
+import { apiKeyPlugin } from '#utils/api-key-plugin.js';
+
+export type NewApiKeyDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  name: string | undefined;
+  secretKey: string | undefined;
+};
+
+export function NewApiKeyDialog({ open, onOpenChange, name, secretKey }: NewApiKeyDialogProps) {
+  const { localization } = useAuth();
+  const { localization: apiKeyLocalization } = useAuthPlugin(apiKeyPlugin);
+
+  const [copied, setCopied] = useState(false);
+
+  const copySecretKey = async () => {
+    if (!secretKey) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(secretKey);
+      setCopied(true);
+      setTimeout(() => {
+        setCopied(false);
+      }, 1500);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogMedia>
+            <Key />
+          </AlertDialogMedia>
+
+          <AlertDialogTitle>{apiKeyLocalization.newApiKey}</AlertDialogTitle>
+
+          <AlertDialogDescription>{apiKeyLocalization.newApiKeyWarning}</AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className='flex flex-col gap-2'>
+          <Label htmlFor='new-api-key-secret'>{name ?? apiKeyLocalization.apiKey}</Label>
+
+          <InputGroup>
+            <InputGroupInput id='new-api-key-secret' value={secretKey ?? ''} readOnly className='font-mono text-xs' />
+
+            <InputGroupAddon align='inline-end'>
+              <InputGroupButton
+                size='icon-xs'
+                aria-label={localization.settings.copyToClipboard}
+                onClick={copySecretKey}
+              >
+                {copied ? <Check /> : <Copy />}
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+        </div>
+
+        <AlertDialogFooter>
+          <AlertDialogAction>{apiKeyLocalization.dismissNewKey}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}

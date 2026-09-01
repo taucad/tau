@@ -4,7 +4,7 @@
 @import 'fumadocs-ui/css/preset.css';
 
 @import 'tw-animate-css';
-@source '../../../../node_modules/@daveyplate/better-auth-ui';
+@source '../components/auth';
 @source '../../../../node_modules/streamdown/dist';
 @source '../../content/docs/**/*.{json,mdx}';
 

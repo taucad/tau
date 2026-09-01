@@ -8,14 +8,19 @@ type AuthSplashbackEvent =
   | { type: 'typingComplete' }
   | { type: 'enterComplete' }
   | { type: 'userInteraction' }
+  | { type: 'loadingReady' } // Scatter cloud + gear12 points + gear12 mesh all ready
+  | { type: 'loadingMorphComplete' } // Scatter -> gear12 morph finished
+  | { type: 'gear12MeshReady' } // Gear12 mesh crossfade finished (atoms -> matter handover)
   | { type: 'morphComplete' } // Point cloud morph animation finished (gear12 -> gear8)
   | { type: 'morph2Complete' } // Point cloud morph animation finished (gear8 -> assembly)
   | { type: 'geometriesReady' } // Both source and target geometries are ready for morphing
   | { type: 'gear8MeshReady' } // Gear8 mesh is loaded and ready for crossfade
-  | { type: 'assemblyMeshReady' }; // Assembly meshes are loaded and ready after crossfade
+  | { type: 'assemblyMeshReady' } // Assembly meshes are loaded and ready after crossfade
+  | { type: 'unloadingMeshFadedOut' } // Assembly meshes -> per-gear point clouds crossfade finished
+  | { type: 'unloadingMorphComplete' }; // Per-gear point clouds dispersed to scatter (matter -> abyss)
 
 export const timing = {
-  loadingDuration: 1200,
+  loadingPreparingFallback: 1500, // Fallback if cached data isn't yet present (first cycle JSCAD compute)
   gear12AnimateInDuration: 500,
   displayDuration: 3000,
   morphDuration: 1400, // Duration for point cloud morph animation
@@ -24,7 +29,6 @@ export const timing = {
   gear8DisplayDuration: 3000,
   assemblyAnimateInDuration: 400,
   assemblyDisplayDuration: 6000,
-  fadeDuration: 800,
   resetDelay: 1000,
 };
 
@@ -47,13 +51,34 @@ export const authSplashbackMachine = setup({
           on: { typingComplete: 'enterKey' },
         },
         enterKey: {
-          on: { enterComplete: '#authSplashback.loading' },
+          on: { enterComplete: '#authSplashback.loadingPreparing' },
         },
       },
     },
-    loading: {
+    // Atoms-to-matter loading pipeline (mirror of preparingMorph -> morphingToGear8 -> gear8WaitingForMesh).
+    // Waits for cached data, runs scatter -> gear12 morph, then crossfades into the gear12 mesh.
+    loadingPreparing: {
+      on: {
+        loadingReady: 'loadingMorphing',
+      },
       after: {
-        [timing.loadingDuration]: 'gear12',
+        [timing.loadingPreparingFallback]: 'loadingMorphing',
+      },
+    },
+    loadingMorphing: {
+      on: {
+        loadingMorphComplete: 'loadingCrossfading',
+      },
+      after: {
+        [timing.morphDuration + 500]: 'loadingCrossfading',
+      },
+    },
+    loadingCrossfading: {
+      on: {
+        gear12MeshReady: 'gear12',
+      },
+      after: {
+        [timing.crossfadeDuration + 500]: 'gear12',
       },
     },
     gear12: {
@@ -181,7 +206,7 @@ export const authSplashbackMachine = setup({
         },
         displaying: {
           after: {
-            [timing.assemblyDisplayDuration]: '#authSplashback.fading',
+            [timing.assemblyDisplayDuration]: '#authSplashback.unloadingCrossfading',
           },
           on: {
             // Re-enter to reset the timer when user interacts
@@ -190,9 +215,23 @@ export const authSplashbackMachine = setup({
         },
       },
     },
-    fading: {
+    // Matter-to-abyss unloading pipeline (time-reverse of the loading pipeline).
+    // Assembly meshes crossfade into per-gear point clouds, then those clouds morph
+    // outward to the scatter cloud while their opacity fades to 0.
+    unloadingCrossfading: {
+      on: {
+        unloadingMeshFadedOut: 'unloadingMorphing',
+      },
       after: {
-        [timing.fadeDuration]: 'resetting',
+        [timing.crossfadeDuration + 500]: 'unloadingMorphing',
+      },
+    },
+    unloadingMorphing: {
+      on: {
+        unloadingMorphComplete: 'resetting',
+      },
+      after: {
+        [timing.morphDuration + 500]: 'resetting',
       },
     },
     resetting: {

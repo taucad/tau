@@ -98,7 +98,7 @@ export function ChatMessageToolWebSearch({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={Globe} fallbackTitle='Failed to search the web' />;
+      return <ChatToolError errorText={part.errorText} icon={Globe} noun='web search' />;
     }
 
     case 'output-available': {

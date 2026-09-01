@@ -83,7 +83,7 @@ export function ChatMessageToolWebBrowser({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={Globe} fallbackTitle='Failed to browse the web' />;
+      return <ChatToolError errorText={part.errorText} icon={Globe} noun='web visit' />;
     }
 
     case 'approval-requested':

@@ -1,7 +1,10 @@
 import { Plane } from '@react-three/drei';
 import React from 'react';
-import { infiniteGridMaterial } from '#components/geometry/graphics/three/materials/infinite-grid-material.js';
+import { useThree } from '@react-three/fiber';
+import { infiniteGridMaterialForBackend } from '#components/geometry/graphics/three/materials/infinite-grid-material.js';
 import type { InfiniteGridMaterialProperties } from '#components/geometry/graphics/three/materials/infinite-grid-material.js';
+import type { InfiniteGridMaterialHandle } from '#components/geometry/graphics/three/materials/infinite-grid-material.types.js';
+import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { sceneTag, sceneTagData } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 type InfiniteGridProperties = {
@@ -60,17 +63,29 @@ type InfiniteGridProperties = {
 export function InfiniteGrid(properties: InfiniteGridProperties): React.JSX.Element {
   const { materialProperties = {}, planeProperties = {}, axes } = properties;
 
-  // Create material with provided axes
-  const material = React.useMemo(
-    () => infiniteGridMaterial({ ...materialProperties, axes }),
-    [axes, materialProperties],
-  );
+  const backendWeb = useThreeGraphicsBackend();
+  const { invalidate } = useThree();
+
+  const gridHandle = React.useMemo((): InfiniteGridMaterialHandle => {
+    return infiniteGridMaterialForBackend(backendWeb, { ...materialProperties, axes });
+    // Intentionally omit `materialProperties`: zoom-driven size/colour updates use `applyVisualOverrides`
+    // so the material is not rebuilt every camera decade (see `docs/research/webgpu-render-loop-audit.md`).
+  }, [axes, backendWeb]);
+
+  React.useEffect(() => {
+    gridHandle.applyVisualOverrides({
+      smallSize: materialProperties.smallSize,
+      largeSize: materialProperties.largeSize,
+      color: materialProperties.color,
+    });
+    invalidate();
+  }, [gridHandle, invalidate, materialProperties.smallSize, materialProperties.largeSize, materialProperties.color]);
 
   return (
     <Plane
       frustumCulled={false} // Ensure the grid is always rendered
       userData={sceneTagData(sceneTag.previewOnly)}
-      material={material}
+      material={gridHandle.material}
       {...planeProperties}
     />
   );

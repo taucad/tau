@@ -3,6 +3,7 @@ import { useLocation } from 'react-router';
 
 type AuthLinks = {
   signIn: string;
+  magicLink: string;
   signUp: string;
   signOut: string;
 };
@@ -27,6 +28,7 @@ export function useAuthLinks(): AuthLinks {
 
     return {
       signIn: `/auth/sign-in?redirectTo=${redirectTo}`,
+      magicLink: `/auth/magic-link?redirectTo=${redirectTo}`,
       signUp: `/auth/sign-up?redirectTo=${redirectTo}`,
       signOut: `/auth/sign-out?redirectTo=${redirectTo}`,
     };

@@ -1,12 +1,13 @@
 /**
  * Shared utilities for viewport gizmo components.
  *
- * Extracts common logic (canvas/renderer creation, FOV synchronization,
- * container resolution, resource cleanup) so that the individual gizmo
- * components only need to declare their configuration differences.
+ * Extracts common logic (FOV synchronization, container resolution) so that the
+ * individual gizmo components only need to declare their configuration differences.
  */
 
+import { useThree } from '@react-three/fiber';
 import type { ViewportGizmo } from 'three-viewport-gizmo';
+import { useEffect } from 'react';
 import * as THREE from 'three';
 import {
   calculateGizmoFovFromAngle,
@@ -68,70 +69,20 @@ export function resolveGizmoContainer(
   return container ?? glDomElement.parentElement ?? undefined;
 }
 
-// ── Canvas & renderer creation ──────────────────────────────────────────────
+// ── Canvas resize sync (shared R3F `gl`) ─────────────────────────────────────
+
+type GizmoRefLike = Readonly<{
+  current: ViewportGizmo | undefined;
+}>;
 
 /**
- * Create and configure a canvas element for a viewport gizmo overlay.
- *
- * The canvas is absolutely positioned at bottom-right with a z-index of 10,
- * matching the convention used by all gizmo variants.
+ * Re-run `ViewportGizmo.update()` when the R3F canvas size changes so
+ * `ViewportGizmo.render()` restores the correct full-canvas viewport (the library
+ * caches `_originalViewport` and has no built-in resize listener).
  */
-export function createGizmoCanvas(className: string): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.className = className;
-  canvas.style.position = 'absolute';
-  canvas.style.bottom = '0';
-  canvas.style.right = '0';
-  canvas.style.zIndex = '10';
-  return canvas;
-}
-
-/**
- * Create and configure a WebGL renderer for a viewport gizmo.
- *
- * Uses alpha + antialias, caps pixel ratio at 2, and clears to transparent.
- */
-export function createGizmoRenderer(canvas: HTMLCanvasElement, size: number): THREE.WebGLRenderer {
-  const renderer = new THREE.WebGLRenderer({
-    canvas,
-    alpha: true,
-    antialias: true,
-  });
-  renderer.setSize(size, size);
-  const dpr = Math.min(globalThis.devicePixelRatio, 2);
-  renderer.setPixelRatio(dpr);
-  renderer.setClearColor(0x00_00_00, 0);
-  return renderer;
-}
-
-// ── Resource cleanup ────────────────────────────────────────────────────────
-
-/**
- * Dispose all resources created for a viewport gizmo.
- *
- * Removes event listeners, disposes the gizmo and renderer, removes the
- * canvas from the DOM, and forces WebGL context loss to prevent GPU context
- * exhaustion.
- */
-export function disposeGizmoResources({
-  gizmo,
-  renderer,
-  canvas,
-  handleChange,
-}: {
-  gizmo: ViewportGizmo;
-  renderer: THREE.WebGLRenderer;
-  canvas: HTMLCanvasElement;
-  handleChange: () => void;
-}): void {
-  gizmo.removeEventListener('change', handleChange);
-  gizmo.removeEventListener('hoverchange', handleChange);
-  gizmo.dispose();
-
-  if (canvas.parentElement) {
-    canvas.remove();
-  }
-
-  renderer.forceContextLoss();
-  renderer.dispose();
+export function useGizmoResizeSync(gizmoRef: GizmoRefLike): void {
+  const size = useThree((state) => state.size);
+  useEffect(() => {
+    gizmoRef.current?.update();
+  }, [gizmoRef, size.width, size.height]);
 }

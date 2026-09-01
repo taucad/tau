@@ -178,7 +178,6 @@ export function ProjectProvider({
     return snapshot.context.wrappedWorker;
   }, [projectManager.projectManagerRef]);
 
-  // Create Editor state machine with provided actors
   const editorRef = useActorRef(
     editorMachine.provide({
       actors: {
@@ -190,6 +189,40 @@ export function ProjectProvider({
         saveEditorStateActor: fromSafeAsync(async ({ input }) => {
           const worker = await getReadiedWorker();
           await worker.updateEditorState(input.editorState);
+        }),
+        ensureFocusedChatActor: fromSafeAsync(async ({ input }) => {
+          // Establishes the focused-chat invariant by consulting the
+          // worker's live chat list. Heuristic:
+          //   1. Use `candidateFocusedChatId` if it points to an
+          //      extant (non-soft-deleted) chat.
+          //   2. Otherwise pick the most-recently-updated extant chat.
+          //   3. Otherwise create a fresh empty chat and adopt it
+          //      (zero-chats project, or post-delete-of-last-chat).
+          const worker = await getReadiedWorker();
+          const chats = await worker.getChatsForResource(input.projectId);
+
+          if (input.candidateFocusedChatId !== undefined) {
+            const match = chats.find((c) => c.id === input.candidateFocusedChatId);
+            if (match) {
+              return { type: 'focusedChatEnsured', focusedChatId: match.id };
+            }
+          }
+
+          if (chats.length > 0) {
+            let mostRecent = chats[0]!;
+            for (const candidate of chats) {
+              if (candidate.updatedAt > mostRecent.updatedAt) {
+                mostRecent = candidate;
+              }
+            }
+            return { type: 'focusedChatEnsured', focusedChatId: mostRecent.id };
+          }
+
+          const created = await worker.createChat(input.projectId, { name: 'New chat', messages: [] });
+          // Surface the new chat through TanStack Query so `useChats`
+          // refetches and the history selector picks it up immediately.
+          void queryClient.invalidateQueries({ queryKey: ['chats', input.projectId] });
+          return { type: 'focusedChatEnsured', focusedChatId: created.id };
         }),
       },
     }),

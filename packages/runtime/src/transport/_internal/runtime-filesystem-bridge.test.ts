@@ -24,7 +24,7 @@ function makeFs(files?: Record<string, string>): RuntimeFileSystemBase {
   if (handle.kind !== 'inline') {
     throw new Error('fromMemoryFS() must return the inline-kind handle.');
   }
-  return handle.fs;
+  return handle.create();
 }
 
 /** Wrap WHATWG/Web-compatible `MessagePort`s for `@taucad/rpc` (parity with prod call sites). */
@@ -472,33 +472,29 @@ describe('runtime-filesystem-bridge', () => {
     });
   });
 
-  describe('createBridgeServer methodContextProvider', () => {
-    it('should append non-undefined provider payload as the trailing call argument', async () => {
+  describe('createBridgeServer primitive purity', () => {
+    it('should dispatch exactly the args supplied by the client without injection', async () => {
+      // After the per-port wrapper migration, the bridge primitive is a
+      // dumb dispatcher: it passes user args verbatim with no slot
+      // padding, no context injection, no out-of-band metadata. This
+      // pins that contract — any future regression that re-introduces
+      // implicit arg manipulation fails here.
       const writeFile = vi.fn().mockResolvedValue(undefined);
       const channel = new MessageChannel();
-      createBridgeServer({ writeFile }, fsBridgePort(channel.port1, 'fs-bridge-server'), {
-        methodContextProvider: (name) => (name === 'writeFile' ? { originClientId: 'p1' } : undefined),
-      });
+      createBridgeServer({ writeFile }, fsBridgePort(channel.port1, 'fs-bridge-server'));
 
       const { createBridgeCall } = await import('#transport/_internal/runtime-filesystem-bridge.js');
       const { call, dispose } = createBridgeCall(fsBridgePort(channel.port2, 'fs-bridge-client'));
-      await call('writeFile', ['/f.txt', new TextEncoder().encode('x')]);
-      expect(writeFile).toHaveBeenCalledWith('/f.txt', expect.any(Uint8Array), { originClientId: 'p1' });
-      dispose();
-      channel.port1.close();
-    });
+      const bytes = new TextEncoder().encode('x');
+      await call('writeFile', ['/f.txt', bytes]);
 
-    it('should not append when provider returns undefined', async () => {
-      const readFile = vi.fn().mockResolvedValue('ok');
-      const channel = new MessageChannel();
-      createBridgeServer({ readFile }, fsBridgePort(channel.port1, 'fs-bridge-server'), {
-        methodContextProvider: () => undefined,
-      });
+      expect(writeFile).toHaveBeenCalledTimes(1);
+      const recordedArgs = writeFile.mock.calls[0]!;
+      expect(recordedArgs).toHaveLength(2);
+      // The bridge serialises the Uint8Array — assert structural equality on the bytes.
+      expect(recordedArgs[0]).toBe('/f.txt');
+      expect(recordedArgs[1]).toBeInstanceOf(Uint8Array);
 
-      const { createBridgeCall } = await import('#transport/_internal/runtime-filesystem-bridge.js');
-      const { call, dispose } = createBridgeCall(fsBridgePort(channel.port2, 'fs-bridge-client'));
-      await call('readFile', ['/a.txt', 'utf8']);
-      expect(readFile).toHaveBeenCalledWith('/a.txt', 'utf8');
       dispose();
       channel.port1.close();
     });

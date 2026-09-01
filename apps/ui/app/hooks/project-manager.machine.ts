@@ -22,7 +22,7 @@ type WorkerInitializedEvent = {
 const initializeWorkerActor = fromSafeAsync<WorkerInitializedEvent, { context: ProjectManagerContext }>(
   async ({ input, signal }) => {
     const { context } = input;
-    console.debug('[BuildManager] initializeWorkerActor: start');
+    console.debug('[ProjectManager] initializeWorkerActor: start');
 
     if (context.worker) {
       safeDispose(() => context.worker?.terminate());
@@ -33,7 +33,7 @@ const initializeWorkerActor = fromSafeAsync<WorkerInitializedEvent, { context: P
     const worker = new ObjectStoreWorker();
     const wrappedWorker = wrap<ObjectStoreWorkerType>(worker);
 
-    console.debug('[BuildManager] initializeWorkerActor: success');
+    console.debug('[ProjectManager] initializeWorkerActor: success');
     return { type: 'workerInitialized', worker, wrappedWorker };
   },
 );
@@ -104,7 +104,7 @@ export const projectManagerMachine = setup({
   states: {
     initializing: {
       entry() {
-        console.debug('[BuildManager] state → initializing');
+        console.debug('[ProjectManager] state → initializing');
       },
       on: {
         initialize: {
@@ -117,7 +117,7 @@ export const projectManagerMachine = setup({
       entry: [
         'clearError',
         () => {
-          console.debug('[BuildManager] state → creatingWorker');
+          console.debug('[ProjectManager] state → creatingWorker');
         },
       ],
       on: {
@@ -141,13 +141,13 @@ export const projectManagerMachine = setup({
 
     ready: {
       entry() {
-        console.debug('[BuildManager] state → ready');
+        console.debug('[ProjectManager] state → ready');
       },
     },
 
     error: {
       entry({ context }) {
-        console.error('[BuildManager] state → error', context.error);
+        console.error('[ProjectManager] state → error', context.error);
       },
       on: {
         initialize: {

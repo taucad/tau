@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
-import { Columns2, Copy, Eye, FolderTree, Rows2, X, XCircle } from 'lucide-react';
+import { Box, Columns2, Copy, FolderTree, Rows2, X, XCircle } from 'lucide-react';
 import { ContextMenuItem, ContextMenuSeparator } from '#components/ui/context-menu.js';
 import {
   closeOtherPanels,
@@ -138,7 +138,7 @@ function EditorTabContextMenu(properties: IDockviewPanelHeaderProps): React.JSX.
 
       {/* ── Navigation group ── */}
       <ContextMenuItem disabled={!filePath} onSelect={handleOpenInViewer}>
-        <Eye />
+        <Box />
         Open in Viewer
       </ContextMenuItem>
       <ContextMenuItem disabled={!filePath} onSelect={handleRevealInFileTree}>

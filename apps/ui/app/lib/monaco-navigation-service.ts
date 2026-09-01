@@ -6,14 +6,12 @@
  * (undocumented internal Monaco API).
  *
  * Registered ONCE globally in the provider (not per-editor instance).
- * Dispatches navigation requests through registered handlers from
- * language contributions.
  */
 
 import type * as Monaco from 'monaco-editor';
 import type { AnyActorRef, Subscription } from 'xstate';
-import type { MonacoModelService } from '#lib/monaco-model-service.js';
-import type { NavigationHandler } from '#lib/monaco-language-registry.js';
+import { debugCmdClick } from '#lib/monaco-workspace-fs/cmd-click-diagnostic.js';
+import type { MonacoWorkspaceFs } from '#lib/monaco-workspace-fs/monaco-workspace-fs.types.js';
 
 type PendingNavigation = {
   path: string;
@@ -40,10 +38,9 @@ function extractPathFromUri(uriPath: string): string {
 export function registerMonacoNavigation(options: {
   monaco: typeof Monaco;
   editorRef: AnyActorRef;
-  modelService: MonacoModelService;
-  handlers: NavigationHandler[];
+  workspaceFs: MonacoWorkspaceFs;
 }): Monaco.IDisposable {
-  const { monaco, editorRef, modelService, handlers } = options;
+  const { monaco, editorRef, workspaceFs } = options;
 
   let pendingNavigation: PendingNavigation | undefined;
   let fileOpenedSub: Subscription | undefined;
@@ -93,22 +90,37 @@ export function registerMonacoNavigation(options: {
       resource: Monaco.Uri,
       selectionOrPosition?: Monaco.IRange | Monaco.IPosition,
     ): boolean {
-      // Only handle file:// scheme
+      const resourceString = resource.toString();
+      debugCmdClick('registerMonacoNavigation.openCodeEditor:enter', {
+        uri: resourceString,
+        scheme: resource.scheme,
+      });
       if (resource.scheme !== 'file') {
+        debugCmdClick('registerMonacoNavigation.openCodeEditor:reject-non-file', {
+          uri: resourceString,
+          scheme: resource.scheme,
+        });
         return false;
       }
 
-      // Extract relative path
       const relativePath = extractPathFromUri(resource.path);
       if (!relativePath) {
+        debugCmdClick('registerMonacoNavigation.openCodeEditor:reject-empty-path', { uri: resourceString });
         return false;
       }
 
-      // Find a handler that can handle this path
-      const handler = handlers.find((h) => h.canHandle(relativePath));
-      if (!handler) {
+      const targetUri = monaco.Uri.file(`/${relativePath}`);
+      if (!workspaceFs.canMaterialise(targetUri)) {
+        debugCmdClick('registerMonacoNavigation.openCodeEditor:reject-cannot-materialise', {
+          uri: resourceString,
+          targetUri: targetUri.toString(),
+        });
         return false;
       }
+      debugCmdClick('registerMonacoNavigation.openCodeEditor:accept', {
+        uri: resourceString,
+        relativePath,
+      });
 
       // Extract position from selection/position
       let lineNumber = 1;
@@ -140,27 +152,29 @@ export function registerMonacoNavigation(options: {
         pendingTimerId = undefined;
       }, 5000);
 
-      // Ensure the target model exists (async, fire-and-forget)
-      // async-iife: bootstrap — ensure model exists before openFile; cannot block navigation hook
-      void (async (): Promise<void> => {
+      const openTarget = (): void => {
         try {
-          await modelService.getOrEnsureModel(relativePath);
-          const isReadOnly = handler.isReadOnly?.(relativePath) ?? false;
+          const fileFs = workspaceFs.getFileSystemProvider('file');
+          const readOnly = fileFs?.isReadOnly?.(targetUri) ?? false;
 
           editorRef.send({
             type: 'openFile',
             path: relativePath,
             source: 'user',
-            readOnly: isReadOnly,
+            readOnly,
             lineNumber,
             column,
           });
         } catch {
           pendingNavigation = undefined;
-          clearTimeout(pendingTimerId);
-          pendingTimerId = undefined;
+          if (pendingTimerId !== undefined) {
+            clearTimeout(pendingTimerId);
+            pendingTimerId = undefined;
+          }
         }
-      })();
+      };
+
+      openTarget();
 
       // Return true to indicate we're handling this navigation
       return true;

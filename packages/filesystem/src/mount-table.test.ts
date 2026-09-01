@@ -73,6 +73,16 @@ describe('MountTable', () => {
     });
   });
 
+  describe('listMounts', () => {
+    it('should enumerate mounts in longest-prefix-first order', () => {
+      mountTable.mount('/', rootProvider, { backend: 'memory' });
+      mountTable.mount('/node_modules', nodeModulesProvider, { backend: 'memory' });
+      const list = mountTable.listMounts();
+      expect(list.map((m) => m.prefix)).toEqual(['/node_modules', '/']);
+      expect(list.map((m) => m.provider)).toEqual([nodeModulesProvider, rootProvider]);
+    });
+  });
+
   describe('getMountsUnder', () => {
     it('should return child mounts', () => {
       mountTable.mount('/', rootProvider, { backend: 'memory' });
@@ -228,6 +238,30 @@ describe('MountTable', () => {
       mountTable.mount('/node_modules', nodeModulesProvider, { backend: 'memory' });
       mountTable.dispose();
       expect(() => mountTable.resolve('/file.ts')).toThrow();
+    });
+  });
+
+  describe('webaccess MountConfig discriminator', () => {
+    it('should carry workspaceId through to MountEntry for webaccess mounts', async () => {
+      const wspProvider = await createMemoryProvider();
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- intentional bare-stub `FileSystemDirectoryHandle`; production callers always supply a real handle resolved by the FM machine
+      const stubHandle = {} as FileSystemDirectoryHandle;
+      mountTable.mount('/projects/proj_A', wspProvider, {
+        backend: 'webaccess',
+        directoryHandle: stubHandle,
+        workspaceId: 'wsp_alpha',
+        preservePath: true,
+      });
+
+      const list = mountTable.listMounts();
+      const entry = list.find((m) => m.prefix === '/projects/proj_A');
+      expect(entry?.workspaceId).toBe('wsp_alpha');
+    });
+
+    it('should not assign workspaceId for non-webaccess mounts', () => {
+      mountTable.mount('/', rootProvider, { backend: 'memory' });
+      const entry = mountTable.listMounts().find((m) => m.prefix === '/');
+      expect(entry?.workspaceId).toBeUndefined();
     });
   });
 });

@@ -140,6 +140,8 @@ describe('TauRpcBackend', () => {
         success: true,
         matches: [{ file: 'src/a.ts', line: 10, content: 'const x = 1;' }],
         totalMatches: 1,
+        appliedHeadLimit: 50,
+        appliedOffset: 0,
       });
 
       const result = await backend.grepRaw('const x', 'src');
@@ -152,6 +154,8 @@ describe('TauRpcBackend', () => {
         success: true,
         matches: [],
         totalMatches: 0,
+        appliedHeadLimit: 50,
+        appliedOffset: 0,
       });
 
       await backend.grepRaw('pattern', undefined, undefined);

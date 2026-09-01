@@ -37,12 +37,24 @@ const controlItems2d: ToolbarItemConfig[] = controlItems3d.filter((item) => item
 /** Gap-2 = 8px, settings button (32px) + one gap (8px) = 40px reserved */
 const overflowOptions = { gap: 8, reservedWidth: 40 } as const;
 
-export function ChatViewerControls({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.JSX.Element {
+type ChatViewerControlsProps = React.HTMLAttributes<HTMLDivElement> & {
+  /**
+   * Horizontal budget for the toolbar row from the viewer layout (e.g. canvas container width minus gutter).
+   * Must not be the toolbar element's own width — use a parent measurement so overflow can restore when widened.
+   */
+  readonly availableWidth?: number;
+};
+
+export function ChatViewerControls({
+  className,
+  availableWidth,
+  ...props
+}: ChatViewerControlsProps): React.JSX.Element {
   const is2dGeometry = useGraphicsSelector((state) =>
     state.context.geometries.some((geometry) => geometry.format === 'svg'),
   );
   const controlItems = is2dGeometry ? controlItems2d : controlItems3d;
-  const { containerRef, visibleIds, overflowIds, isCompact } = useToolbarOverflow(controlItems, overflowOptions);
+  const { visibleIds, overflowIds, isCompact } = useToolbarOverflow(controlItems, availableWidth, overflowOptions);
 
   const overflowControls = useMemo(() => {
     if (overflowIds.size === 0) {
@@ -62,7 +74,7 @@ export function ChatViewerControls({ className, ...props }: React.HTMLAttributes
   }, [overflowIds, is2dGeometry]);
 
   return (
-    <div ref={containerRef} className={cn('flex items-center gap-2', className)} {...props}>
+    <div className={cn('flex items-center gap-2', className)} {...props}>
       {visibleIds.has('fov') && !is2dGeometry && (
         <FovControl className={isCompact ? 'w-30' : 'w-50'} isCompact={isCompact} />
       )}

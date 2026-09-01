@@ -16,7 +16,7 @@ import { asBuffer } from '@taucad/utils/file';
 import { jsonSchemaFromJson } from '@taucad/utils/schema';
 import { createExportFile } from '@taucad/types/constants';
 import { defineKernel } from '#types/runtime-kernel.types.js';
-import type { KernelRuntime } from '#types/runtime-kernel.types.js';
+import type { KernelRuntime, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import {
   replicadOptionsSchema,
   replicadRenderSchema,
@@ -36,8 +36,9 @@ import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { KernelIssue, KernelStackFrame } from '#types/runtime.types.js';
 import { createKernelError, createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
-import { initOpenCascade } from '#kernels/replicad/init-open-cascade.js';
-import type { OpenCascadeModuleFactory } from '#kernels/replicad/init-open-cascade.js';
+import { initOcct } from '#kernels/occt/oc-init.js';
+import type { OcctModuleFactory } from '#kernels/occt/oc-init.js';
+import { detectMultiThreadSupport, activateOccParallelism } from '#kernels/occt/oc-threading.js';
 import { resolveCjsDefault } from '#kernels/replicad/utils/resolve-cjs-default.js';
 import { formatOcRuntimeError } from '#kernels/occt/oc-error-formatter.js';
 import type { OcErrorContext } from '#kernels/occt/oc-error-formatter.js';
@@ -58,55 +59,92 @@ import type { GeometryReplicad } from '#kernels/replicad/replicad.types.js';
 const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href;
 const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.url).href;
 
-// WASM URL using universal pattern for browsers and bundlers.
-// Static string literal so bundlers detect and copy the asset at build time.
+// WASM URLs using the universal pattern for browsers and bundlers. Static
+// string literals so bundlers detect and copy the assets at build time.
 // @see https://web.dev/articles/bundling-non-js-resources#universal_pattern_for_browsers_and_bundlers
 const singleWasmUrl = new URL('wasm/replicad_single.wasm', import.meta.url).href;
+const multiWasmUrl = new URL('wasm/replicad_multi.wasm', import.meta.url).href;
+
+// =============================================================================
+// WASM variant selection
+// =============================================================================
+
+type WasmVariant = 'single' | 'multi';
 
 // =============================================================================
 // WASM resolution (two-tier dynamic import pattern)
 // =============================================================================
 
+/** Emscripten module factory returning the replicad-flavoured OpenCascade instance. */
+type OpenCascadeModuleFactory = OcctModuleFactory<OpenCascadeInstance>;
+
 type ResolvedWasm = {
   wasmUrl: string;
   bindingsFactory: OpenCascadeModuleFactory;
+  variant: WasmVariant | 'custom';
 };
 
-type WasmOption = string | { wasmUrl: string; wasmBindingsUrl: string };
+type WasmOption = 'auto' | 'single' | 'multi' | { wasmUrl: string; wasmBindingsUrl: string };
 
 /**
  * Resolve the WASM variant into a concrete URL and loaded bindings factory.
  *
- * - **Preset** (`'single'`): Uses static-string `import()` so the bundler creates a
- *   code-split chunk loaded on-demand.
+ * - **`'auto'`** (default): pick `'multi'` when SAB + cross-origin isolation
+ *   are available, otherwise fall back to `'single'`.
+ * - **`'single'`** / **`'multi'`**: pin the variant explicitly. Uses static-string
+ *   `import()` so bundlers create a code-split chunk loaded on-demand.
+ * - **Custom config** (`{ wasmUrl, wasmBindingsUrl }`): variable `import()` with
+ *   `@vite-ignore` to bypass bundler analysis. Works in Node for any module format.
  *
- * - **Custom config** (`{ wasmUrl, wasmBindingsUrl }`): Uses variable `import()` with
- *   `@vite-ignore` to bypass bundler analysis. Works in Node.js for any module format.
- *
- * @param wasm - the WASM variant preset name or custom config
- * @param tracer - optional span tracer for performance instrumentation
- * @returns the resolved WASM URL and bindings factory
+ * @param wasm - variant tag or custom URL pair
+ * @param logger - kernel logger (used for the auto-selection log line)
+ * @param tracer - optional span tracer
+ * @returns the resolved WASM URL, bindings factory, and concrete variant.
  */
-async function resolveWasm(wasm: WasmOption, tracer?: RuntimeSpanTracer): Promise<ResolvedWasm> {
+async function resolveWasm(wasm: WasmOption, logger: RuntimeLogger, tracer?: RuntimeSpanTracer): Promise<ResolvedWasm> {
   const span = tracer?.startSpan('replicad.resolve-bindings', {
     variant: typeof wasm === 'string' ? wasm : 'custom',
   });
 
   try {
-    if (typeof wasm === 'string') {
-      const module_ = await import('replicad-opencascadejs/src/replicad_single.js');
+    if (typeof wasm !== 'string') {
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- dynamic import() with variable URL returns any
+      const module_: Record<string, unknown> = await import(/* @vite-ignore */ wasm.wasmBindingsUrl);
       return {
-        wasmUrl: singleWasmUrl,
-        bindingsFactory: resolveCjsDefault(module_.default) as OpenCascadeModuleFactory,
+        wasmUrl: wasm.wasmUrl,
+        bindingsFactory: resolveCjsDefault(module_['default'] ?? module_) as OpenCascadeModuleFactory,
+        variant: 'custom',
       };
     }
 
-    // Custom WASM config -- runtime import bypasses bundler
-    // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- dynamic import() with variable URL returns any
-    const module_: Record<string, unknown> = await import(/* @vite-ignore */ wasm.wasmBindingsUrl);
+    let variant: WasmVariant;
+    if (wasm === 'auto') {
+      const detection = detectMultiThreadSupport();
+      variant = detection.supported ? 'multi' : 'single';
+      logger.log(`Replicad WASM variant auto-selected: ${variant} (${detection.reason})`);
+    } else {
+      variant = wasm;
+    }
+
+    if (variant === 'multi') {
+      const module_ = await import('replicad-opencascadejs/multi');
+      return {
+        wasmUrl: multiWasmUrl,
+        // The multi build ships its own `OpenCascadeInstance` declaration that diverges from
+        // the single build's (different NCollection template instantiations), so the factory
+        // return types are not structurally comparable. Both expose the contract replicad
+        // consumes at runtime, so erase to the single-build factory type via `unknown`.
+        // oxlint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- single vs multi OCJS .d.ts diverge; runtime contract is identical
+        bindingsFactory: resolveCjsDefault(module_.default) as unknown as OpenCascadeModuleFactory,
+        variant: 'multi',
+      };
+    }
+
+    const module_ = await import('replicad-opencascadejs');
     return {
-      wasmUrl: wasm.wasmUrl,
-      bindingsFactory: resolveCjsDefault(module_['default'] ?? module_) as OpenCascadeModuleFactory,
+      wasmUrl: singleWasmUrl,
+      bindingsFactory: resolveCjsDefault(module_.default) as OpenCascadeModuleFactory,
+      variant: 'single',
     };
   } finally {
     span?.end();
@@ -261,12 +299,16 @@ export type ReplicadOptions = {
   /**
    * WASM build variant or custom build configuration.
    *
-   * - `'single'` (default) -- exceptions-enabled build with human-readable OC error messages
-   * - `ReplicadWasmConfig` -- custom WASM/JS URLs for runtime injection (Node.js tooling)
+   * - `'auto'` (default) -- pick `'multi'` when `SharedArrayBuffer` is usable
+   *   (Node 22+, or browsers with `crossOriginIsolated=true`); fall back to
+   *   `'single'` otherwise.
+   * - `'single'` -- pthread-free build; works without COOP/COEP headers.
+   * - `'multi'` -- pthread-enabled build; requires SAB + cross-origin isolation.
+   * - `ReplicadWasmConfig` -- custom WASM/JS URLs for runtime injection (Node tooling).
    *
-   * @default 'single'
+   * @default 'auto'
    */
-  wasm?: 'single' | ReplicadWasmConfig;
+  wasm?: 'auto' | 'single' | 'multi' | ReplicadWasmConfig;
   /** OC API call tracing mode. 'summary' (default) emits aggregated stats, 'per-call' emits individual spans. */
   ocTracing?: 'off' | 'summary' | 'per-call';
   /** Include Boundary Representation (BRep) edge lines in the generated GLTF geometry. Defaults to `false`. */
@@ -297,8 +339,8 @@ export default defineKernel({
     logger.debug(`Initializing OpenCASCADE WASM (ocTracing: ${ocTracing}, wasm: ${wasmLabel})`);
 
     const wasmSpan = tracer.startSpan('replicad.wasm-init');
-    const resolved = await resolveWasm(wasm, tracer);
-    let openCascade = await initOpenCascade(resolved.wasmUrl, resolved.bindingsFactory, {
+    const resolved = await resolveWasm(wasm, logger, tracer);
+    let openCascade = await initOcct(resolved.wasmUrl, resolved.bindingsFactory, {
       tracer,
       print: (text) => {
         logger.trace('OCJS stdout', { data: { text } });
@@ -307,6 +349,13 @@ export default defineKernel({
         logger.warn('OCJS stderr', { data: { text } });
       },
     });
+
+    if (resolved.variant === 'multi') {
+      activateOccParallelism(openCascade, logger);
+    } else {
+      logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
+    }
+
     let tracingSummary: OcTracingSummary | undefined;
 
     if (ocTracing === 'summary' || ocTracing === 'per-call') {

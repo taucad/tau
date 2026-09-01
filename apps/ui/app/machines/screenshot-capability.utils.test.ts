@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
+import { LineSegments2 as WebGlFatLineSegments2, LineSegmentsGeometry, LineMaterial } from 'three/addons';
+import { LineSegments2 as WebGpuFatLineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import { calculateOptimalGrid, removeCloneUnsafeObjects } from '#machines/screenshot-capability.machine.js';
 import {
   applyMatcapToClonedScene,
-  disposeClonedSceneMaterials,
+  disposeCloneOwnedMaterials,
 } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
+import {
+  applyEdgeMaterialsToClonedScene,
+  createWebGpuGltfFatLineMaterial,
+} from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import type { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import { calculateFovDistanceCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
 import { computeViewFittingZoom } from '#components/geometry/graphics/three/utils/camera.utils.js';
 import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
@@ -332,53 +339,191 @@ describe('applyMatcapToClonedScene', () => {
   });
 });
 
-// ── disposeClonedSceneMaterials ─────────────────────────────────────────────
+// ── applyMatcapToClonedScene return shape (R1) ──────────────────────────────
 
-describe('disposeClonedSceneMaterials', () => {
-  it('should call dispose on each mesh material', () => {
+describe('applyMatcapToClonedScene return shape', () => {
+  it('should return a Set containing every newly-allocated matcap material', () => {
     const scene = new THREE.Scene();
     const mesh1 = createColoredMesh();
     const mesh2 = createColoredMesh();
-    scene.add(mesh1);
-    scene.add(mesh2);
-    const texture = createStubTexture();
+    scene.add(mesh1, mesh2);
 
-    // Apply matcap first (mimics screenshot pipeline)
-    applyMatcapToClonedScene(scene, texture);
+    const allocated = applyMatcapToClonedScene(scene, createStubTexture());
 
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- mesh.material type narrow needed for dispose spy
-    const disposeSpy1 = vi.spyOn(mesh1.material as unknown as THREE.Material, 'dispose');
-    const disposeSpy2 = vi.spyOn(mesh2.material as unknown as THREE.Material, 'dispose');
-
-    disposeClonedSceneMaterials(scene);
-
-    expect(disposeSpy1).toHaveBeenCalledOnce();
-    expect(disposeSpy2).toHaveBeenCalledOnce();
+    expect(allocated.size).toBe(2);
+    expect(allocated.has(mesh1.material as unknown as THREE.Material)).toBe(true);
+    expect(allocated.has(mesh2.material as unknown as THREE.Material)).toBe(true);
   });
 
-  it('should handle an empty scene without error', () => {
+  it('should return an empty set when the scene has no meshes', () => {
     const scene = new THREE.Scene();
+    scene.add(new THREE.Group());
 
+    const allocated = applyMatcapToClonedScene(scene, createStubTexture());
+
+    expect(allocated.size).toBe(0);
+  });
+});
+
+// ── disposeCloneOwnedMaterials ──────────────────────────────────────────────
+
+describe('disposeCloneOwnedMaterials', () => {
+  it('should call dispose on every material in the supplied set', () => {
+    const scene = new THREE.Scene();
+    const mesh1 = createColoredMesh();
+    const mesh2 = createColoredMesh();
+    scene.add(mesh1, mesh2);
+
+    const allocated = applyMatcapToClonedScene(scene, createStubTexture());
+
+    const disposeSpies = [...allocated].map((material) => vi.spyOn(material, 'dispose'));
+
+    disposeCloneOwnedMaterials(allocated);
+
+    for (const spy of disposeSpies) {
+      expect(spy).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('should handle an empty set without error', () => {
     expect(() => {
-      disposeClonedSceneMaterials(scene);
+      disposeCloneOwnedMaterials(new Set());
     }).not.toThrow();
   });
+});
 
-  it('should dispose nested mesh materials', () => {
+// ── R2 + R6: ownership invariants for fat-line materials ────────────────────
+
+/**
+ * `LineSegments2` extends `Mesh`, so an inheritance-based `isMesh` walk would
+ * historically pull shared viewport `Line2NodeMaterial` instances into the
+ * dispose chain — purging the viewport's `RenderObject` pipeline state via
+ * three's `'dispose'` listener fan-out and producing the
+ * "viewport edges grainy after screenshot" regression.
+ *
+ * These tests lock the contract that explicit-ownership tracking eliminates:
+ * `applyMatcapToClonedScene` + `applyEdgeMaterialsToClonedScene` return only
+ * the materials they themselves allocate, and `disposeCloneOwnedMaterials`
+ * iterates that set without ever touching shared viewport materials.
+ *
+ * @see docs/research/screenshot-viewport-shared-material-state-bleed.md
+ */
+describe('clone-owned material ownership (R1 + R5)', () => {
+  function buildLineSegments2WebGl(): {
+    lineSegments: WebGlFatLineSegments2;
+    sharedMaterial: LineMaterial;
+  } {
+    const geometry = new LineSegmentsGeometry();
+    geometry.setPositions([0, 0, 0, 1, 1, 1]);
+    const sharedMaterial = new LineMaterial({ color: 0x00_00_00, linewidth: 1 });
+    const lineSegments = new WebGlFatLineSegments2(geometry, sharedMaterial);
+    return { lineSegments, sharedMaterial };
+  }
+
+  function buildLineSegments2WebGpu(): {
+    lineSegments: WebGpuFatLineSegments2;
+    sharedMaterial: Line2NodeMaterial;
+  } {
+    const geometry = new LineSegmentsGeometry();
+    geometry.setPositions([0, 0, 0, 1, 1, 1]);
+    const sharedMaterial = createWebGpuGltfFatLineMaterial();
+    const lineSegments = new WebGpuFatLineSegments2(geometry, sharedMaterial);
+    return { lineSegments, sharedMaterial };
+  }
+
+  it("R2 (WebGL): does NOT dispose the viewport's shared LineMaterial when only matcap was applied", () => {
     const scene = new THREE.Scene();
-    const group = new THREE.Group();
-    const mesh = createColoredMesh();
-    group.add(mesh);
-    scene.add(group);
-    const texture = createStubTexture();
+    scene.add(createColoredMesh());
+    const { lineSegments, sharedMaterial } = buildLineSegments2WebGl();
+    scene.add(lineSegments);
 
-    applyMatcapToClonedScene(scene, texture);
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- mesh.material type narrow needed for dispose spy
-    const disposeSpy = vi.spyOn(mesh.material as unknown as THREE.Material, 'dispose');
+    const matcapMaterials = applyMatcapToClonedScene(scene, createStubTexture(), { backend: 'webgl' });
+    const sharedDisposeSpy = vi.spyOn(sharedMaterial, 'dispose');
 
-    disposeClonedSceneMaterials(scene);
+    disposeCloneOwnedMaterials(matcapMaterials);
 
-    expect(disposeSpy).toHaveBeenCalledOnce();
+    expect(sharedDisposeSpy).not.toHaveBeenCalled();
+  });
+
+  it("R2 (WebGPU): does NOT dispose the viewport's shared Line2NodeMaterial when only matcap was applied", () => {
+    const scene = new THREE.Scene();
+    scene.add(createColoredMesh());
+    const { lineSegments, sharedMaterial } = buildLineSegments2WebGpu();
+    scene.add(lineSegments);
+
+    const matcapMaterials = applyMatcapToClonedScene(scene, createStubTexture(), { backend: 'webgpu' });
+    const sharedDisposeSpy = vi.spyOn(sharedMaterial, 'dispose');
+
+    disposeCloneOwnedMaterials(matcapMaterials);
+
+    expect(sharedDisposeSpy).not.toHaveBeenCalled();
+  });
+
+  it("R6 (WebGL): applyEdgeMaterialsToClonedScene replaces the LineSegments2's material with a fresh allocation", () => {
+    const scene = new THREE.Scene();
+    const { lineSegments, sharedMaterial } = buildLineSegments2WebGl();
+    scene.add(lineSegments);
+
+    const edgeMaterials = applyEdgeMaterialsToClonedScene(scene, {
+      backend: 'webgl',
+      resolution: new THREE.Vector2(800, 600),
+    });
+
+    expect(lineSegments.material).not.toBe(sharedMaterial);
+    expect(edgeMaterials.size).toBe(1);
+    expect(edgeMaterials.has(lineSegments.material as unknown as THREE.Material)).toBe(true);
+  });
+
+  it("R6 (WebGPU): applyEdgeMaterialsToClonedScene replaces the LineSegments2's material with a fresh allocation", () => {
+    const scene = new THREE.Scene();
+    const { lineSegments, sharedMaterial } = buildLineSegments2WebGpu();
+    scene.add(lineSegments);
+
+    const edgeMaterials = applyEdgeMaterialsToClonedScene(scene, {
+      backend: 'webgpu',
+      resolution: new THREE.Vector2(800, 600),
+    });
+
+    expect(lineSegments.material).not.toBe(sharedMaterial);
+    expect(edgeMaterials.size).toBe(1);
+    expect(edgeMaterials.has(lineSegments.material as unknown as THREE.Material)).toBe(true);
+  });
+
+  it('R6: copies color and linewidth from the source viewport material onto the fresh allocation', () => {
+    const scene = new THREE.Scene();
+    const geometry = new LineSegmentsGeometry();
+    geometry.setPositions([0, 0, 0, 1, 1, 1]);
+    const sharedMaterial = new LineMaterial({ color: 0xab_cd_ef, linewidth: 3 });
+    const lineSegments = new WebGlFatLineSegments2(geometry, sharedMaterial);
+    scene.add(lineSegments);
+
+    applyEdgeMaterialsToClonedScene(scene, {
+      backend: 'webgl',
+      resolution: new THREE.Vector2(800, 600),
+    });
+
+    const fresh = lineSegments.material as unknown as LineMaterial;
+    expect(fresh.color.getHex()).toBe(0xab_cd_ef);
+    expect(fresh.linewidth).toBe(3);
+  });
+
+  it('R2 + R6 combined: disposeCloneOwnedMaterials disposes only fresh edge materials, leaving the viewport-shared one intact', () => {
+    const scene = new THREE.Scene();
+    const { lineSegments, sharedMaterial } = buildLineSegments2WebGpu();
+    scene.add(lineSegments);
+
+    const sharedDisposeSpy = vi.spyOn(sharedMaterial, 'dispose');
+
+    const edgeMaterials = applyEdgeMaterialsToClonedScene(scene, {
+      backend: 'webgpu',
+      resolution: new THREE.Vector2(800, 600),
+    });
+    const freshDisposeSpy = vi.spyOn([...edgeMaterials][0]!, 'dispose');
+
+    disposeCloneOwnedMaterials(edgeMaterials);
+
+    expect(sharedDisposeSpy).not.toHaveBeenCalled();
+    expect(freshDisposeSpy).toHaveBeenCalledOnce();
   });
 });
 

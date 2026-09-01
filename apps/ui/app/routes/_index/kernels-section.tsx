@@ -2,6 +2,7 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import { Badge } from '#components/ui/badge.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
+import { KernelTierBadge } from '#components/tier-badge.js';
 
 export function KernelsSection(): React.JSX.Element {
   return (
@@ -27,7 +28,10 @@ export function KernelsSection(): React.JSX.Element {
                         <SvgIcon id={kernel.id} className='size-5' />
                       </div>
                       <div>
-                        <h3 className='font-semibold'>{kernel.name}</h3>
+                        <h3 className='flex items-center gap-1.5 font-semibold'>
+                          {kernel.name}
+                          <KernelTierBadge kernelId={kernel.id} />
+                        </h3>
                         <p className='text-xs text-muted-foreground'>{kernel.language}</p>
                       </div>
                     </div>
@@ -39,7 +43,10 @@ export function KernelsSection(): React.JSX.Element {
                     <div className='flex items-center gap-3'>
                       <SvgIcon id={kernel.id} className='size-8' />
                       <div>
-                        <h4 className='font-semibold'>{kernel.name}</h4>
+                        <h4 className='flex items-center gap-1.5 font-semibold'>
+                          {kernel.name}
+                          <KernelTierBadge kernelId={kernel.id} />
+                        </h4>
                         <p className='text-xs text-muted-foreground'>
                           Backend: {kernel.backendProvider} · {kernel.dimensions.join('D & ')}D
                         </p>

@@ -47,6 +47,23 @@ describe('createMemoryProvider', () => {
     expect(await provider.exists('/empty-dir')).toBe(false);
   });
 
+  it('should rename a directory and move every contained file under the new prefix', async () => {
+    const provider = await createMemoryProvider();
+    await provider.mkdir('/src/utils', { recursive: true });
+    await provider.writeFile('/src/index.ts', 'export {}');
+    await provider.writeFile('/src/utils/helpers.ts', 'export {}');
+    await provider.writeFile('/src/utils/strings.ts', 'export {}');
+
+    await provider.rename('/src', '/lib');
+
+    expect(await provider.exists('/src')).toBe(false);
+    expect(await provider.exists('/src/index.ts')).toBe(false);
+    expect(await provider.exists('/lib')).toBe(true);
+    expect(await provider.exists('/lib/index.ts')).toBe(true);
+    expect(await provider.exists('/lib/utils/helpers.ts')).toBe(true);
+    expect(await provider.exists('/lib/utils/strings.ts')).toBe(true);
+  });
+
   it('should return entries with stats from readdirWithStats', async () => {
     const provider = await createMemoryProvider();
     await provider.mkdir('/src');

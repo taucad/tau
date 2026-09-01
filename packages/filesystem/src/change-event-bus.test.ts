@@ -99,4 +99,46 @@ describe('ChangeEventBus', () => {
     const emittedEvent = handler.mock.calls[0]![0] as ChangeEvent;
     expect(getEventOrigin(emittedEvent)).toBe('port_a');
   });
+
+  it('should not skip sibling handlers when one self-unsubscribes during emit', () => {
+    const bus = new ChangeEventBus();
+    const sibling = vi.fn();
+    let unsubscribeSelf: (() => void) | undefined;
+
+    unsubscribeSelf = bus.subscribe(() => {
+      unsubscribeSelf?.();
+    });
+    bus.subscribe(sibling);
+
+    bus.emit(fileWrittenEvent('/self-unsub.txt'));
+
+    expect(sibling).toHaveBeenCalledOnce();
+  });
+
+  it('should unsubscribe when AbortSignal aborts after subscribe', () => {
+    const bus = new ChangeEventBus();
+    const handler = vi.fn();
+    const controller = new AbortController();
+
+    bus.subscribe(handler, { signal: controller.signal });
+    controller.abort();
+    bus.emit(fileWrittenEvent('/after-abort.txt'));
+
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('should not deliver the in-flight event to subscribers added during emit', () => {
+    const bus = new ChangeEventBus();
+    const late = vi.fn();
+
+    bus.subscribe(() => {
+      bus.subscribe(late);
+    });
+    bus.emit(fileWrittenEvent('/during.txt'));
+
+    expect(late).not.toHaveBeenCalled();
+
+    bus.emit(fileWrittenEvent('/after.txt'));
+    expect(late).toHaveBeenCalledOnce();
+  });
 });

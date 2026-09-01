@@ -610,4 +610,4 @@ These components must be implemented first. The autonomous render loop is the fo
 12. Remove `use-project.tsx` relay, `changedPaths` threading, `notifyFileChanged` command.
 13. Update `RuntimeClient` API to the v5 surface (explicit `connect`, `lifecycleState`, deterministic `terminate`, typed errors).
 14. Delete `kernel.machine.ts`.
-15. Add `awaitFreshRender` helper at `apps/ui/app/lib/await-fresh-render.ts`; wire RPC handlers (`getKernelResult`, `fetchGeometry`) through it.
+15. Add `awaitFreshRender` helper at `apps/ui/app/machines/await-fresh-render.ts`; wire RPC handlers (`getKernelResult`, `fetchGeometry`) through it.

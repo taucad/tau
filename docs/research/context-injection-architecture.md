@@ -32,7 +32,7 @@ Tau supports user-defined context through `.tau/skills/` and `.tau/AGENTS.md` (l
 
 ## Methodology
 
-1. **Cursor system audit**: Examined `.cursor/rules/*.mdc` frontmatter (10 rules), `.cursor/skills/` (13 skills), agent transcripts (JSONL schema), and the `~/.cursor/.gitignore` visibility contract
+1. **Cursor system audit**: Examined `.cursor/rules/*.mdc` frontmatter (10 rules), `.agent/skills/` (13 skills), agent transcripts (JSONL schema), and the `~/.cursor/.gitignore` visibility contract
 2. **Cursor injection trace**: Analyzed how Cursor embeds `<always_applied_workspace_rules>`, `<agent_skills>`, `<manually_attached_skills>`, and `<user_rules>` XML tags in the system prompt (observed from our own transcript JSONL)
 3. **Tau middleware source audit**: Read `deepagents@1.8.4` bundle (`createSkillsMiddleware`, `createMemoryMiddleware`, `BackendProtocol`), `chat.service.ts` wiring, `TauRpcBackend`, and `ChatRpcService`
 4. **Tau RPC client audit**: Traced the browser-side RPC handler chain (`chat-rpc-socket.service.ts` → `rpc-handlers.ts` → `rpc-dispatcher.ts` → `handle-list-directory.ts` / `handle-read-file.ts`)
@@ -154,7 +154,7 @@ Tau's injection is **runtime and filesystem-dependent**. The middleware reads fr
 
 **Impact**: Skills and memory middleware never inject any context on fresh projects. The user gets no indication that the system supports these features.
 
-**Cursor comparison**: Cursor doesn't have this problem because `.cursor/rules/` and `.cursor/skills/` are tracked in git. The IDE reads them from the workspace, not a virtual filesystem.
+**Cursor comparison**: Cursor doesn't have this problem because `.cursor/rules/` and `.agent/skills/` are tracked in git. The IDE reads them from the workspace, not a virtual filesystem.
 
 ### Gap 2: Trailing Slash Mismatch
 
@@ -209,7 +209,7 @@ Tracing through Cursor's transcript JSONL reveals the exact lifecycle:
 1. User opens workspace
 2. IDE reads .cursor/rules/*.mdc files from workspace
 3. IDE parses frontmatter (alwaysApply, globs, description)
-4. IDE reads .cursor/skills/*/SKILL.md files
+4. IDE reads .agent/skills/*/SKILL.md files
 5. IDE reads AGENTS.md from workspace root
 
 Per user message:
@@ -278,7 +278,7 @@ Per model call (may happen multiple times per user message):
 
 | Aspect                     | Cursor                                          | Tau                                              |
 | -------------------------- | ----------------------------------------------- | ------------------------------------------------ |
-| **Location**               | `.cursor/skills/*/SKILL.md` (git-tracked)       | `.tau/skills/*/SKILL.md` (virtual FS)            |
+| **Location**               | `.agent/skills/*/SKILL.md` (git-tracked)        | `.tau/skills/*/SKILL.md` (virtual FS)            |
 | **Discovery**              | IDE scans at startup + on file change           | `lsInfo` via RPC in `beforeAgent` (once)         |
 | **Catalog injection**      | `<available_skills>` with paths + descriptions  | `SKILLS_SYSTEM_PROMPT` with paths + descriptions |
 | **Full content injection** | `<manually_attached_skills>` when user attaches | Agent reads `SKILL.md` via `read_file` tool      |
@@ -395,7 +395,7 @@ User opens workspace
       │
       ▼
   IDE reads .cursor/rules/*.mdc
-  IDE reads .cursor/skills/*/SKILL.md
+  IDE reads .agent/skills/*/SKILL.md
   IDE reads AGENTS.md
       │
       ▼

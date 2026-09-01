@@ -172,7 +172,7 @@ function RouteProvider({ children }: { readonly children?: React.ReactNode }): R
 
   return (
     <SharedWorkerGate>
-      <FileManagerProvider projectId={id} rootDirectory={`/projects/${id}`}>
+      <FileManagerProvider projectId={id} rootDirectory={`/projects/${id}`} initialBackend='indexeddb'>
         {staticProject ? (
           <StaticPreviewProvider projectId={id!} staticProject={staticProject}>
             {children}

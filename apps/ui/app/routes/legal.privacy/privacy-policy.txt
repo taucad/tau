@@ -26,7 +26,7 @@ While using our Service, we may collect personally identifiable information incl
 
 - Email address
 - First name and last name
-- Profile information from authentication providers (GitHub, Google): email address, username/name, and profile picture URL
+- Profile information from authentication providers (GitHub, Google): email address, display name, and profile picture URL
 - Cookies and Usage Data
 
 ### 3.2 Financial Data

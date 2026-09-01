@@ -9,17 +9,22 @@
 
 import { exposeFileSystem, workerReadyMessageType } from '@taucad/runtime/transport-internals';
 
+import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
+import type { BundledTypesMountEntry } from '@taucad/filesystem/bundled-types-mount';
+import { FileSystemAccessProvider } from '@taucad/filesystem/backend';
 import {
+  ChangeEventBus,
+  EventCoalescer,
+  MountTable,
   ProviderRegistry,
   ResourceQueue,
-  ChangeEventBus,
-  WorkspaceFileService,
-  MountTable,
-  EventCoalescer,
   ThrottledWorker,
+  WorkspaceFileService,
 } from '@taucad/filesystem';
-import { FileSystemAccessProvider } from '@taucad/filesystem/backend';
 import { SharedPool } from '@taucad/memory';
+import { kernelTypeMaps } from '@taucad/api-extractor/kernel-types';
+import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
+import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
 
 const providerRegistry = new ProviderRegistry({ databasePrefix: metaConfig.databasePrefix });
@@ -110,11 +115,27 @@ async function createNodeModulesMount(): Promise<void> {
     const opfsRoot = await navigator.storage.getDirectory();
     const nodeModulesHandle = await opfsRoot.getDirectoryHandle('tau-node-modules', { create: true });
     const nodeModulesProvider = new FileSystemAccessProvider(nodeModulesHandle);
+    // Worker-internal OPFS-backed mount — no workspaceId because the
+    // backing storage isn't user-pickable. The discriminated
+    // `MountConfig` accepts `backend: 'opfs'` without the webaccess
+    // identity fields.
     mountTable.mount('/node_modules', nodeModulesProvider, { backend: 'opfs' });
     console.debug('[FM-Worker] /node_modules mounted on OPFS');
   } catch (error) {
     console.warn('[FM-Worker] Failed to mount OPFS /node_modules, falling through to root', error);
   }
+}
+
+function buildBundledTypesPayload(): readonly BundledTypesMountEntry[] {
+  return kernelTypeMaps.flatMap((typesMap) =>
+    Object.entries(typesMap).map(
+      (entry): BundledTypesMountEntry => ({
+        packageName: entry[0],
+        content: entry[1],
+        prewrapped: true,
+      }),
+    ),
+  );
 }
 
 const fileService = new WorkspaceFileService({
@@ -128,7 +149,7 @@ const t0 = performance.now();
 console.debug(`[FM-Worker] module evaluated in ${t0.toFixed(1)}ms`);
 
 try {
-  await fileService.mount('/', 'indexeddb');
+  await fileService.mount('/', { backend: 'indexeddb' });
 } catch (error) {
   postWorkerInitError("mount('/', 'indexeddb')", error);
   throw error;
@@ -138,6 +159,14 @@ try {
   await createNodeModulesMount();
 } catch (error) {
   postWorkerInitError('createNodeModulesMount', error);
+  throw error;
+}
+
+try {
+  await populateBundledTypesMount(fileService, buildBundledTypesPayload());
+  console.debug(`[FM-Worker] bundled types populated +${(performance.now() - t0).toFixed(1)}ms`);
+} catch (error) {
+  postWorkerInitError('populateBundledTypesMount', error);
   throw error;
 }
 
@@ -155,13 +184,57 @@ exposeFileSystem(fileService, {
   createThrottledWorker: (handler) => new ThrottledWorker(handler),
 });
 
-self.addEventListener('message', (event: MessageEvent<{ type: string; buffer?: SharedArrayBuffer }>) => {
-  const { data } = event;
-  if (data.type === 'filePool' && data.buffer instanceof SharedArrayBuffer) {
-    fileService.setFilePool(new SharedPool(data.buffer));
-    console.debug('[FM-Worker] filePool attached');
-  }
-});
+let languageFsSyncDispose: { dispose(): void } | undefined;
+
+self.addEventListener(
+  'message',
+  (
+    event: MessageEvent<{
+      type?: string;
+      buffer?: SharedArrayBuffer;
+      port?: MessagePort;
+      slotSab?: SharedArrayBuffer;
+      arenaSab?: SharedArrayBuffer;
+    }>,
+  ) => {
+    const { data } = event;
+    if (data.type === 'filePool' && data.buffer instanceof SharedArrayBuffer) {
+      fileService.setFilePool(new SharedPool(data.buffer));
+      console.debug('[FM-Worker] filePool attached');
+      return;
+    }
+
+    if (
+      data.type === 'languageFsSyncAttach' &&
+      data.port instanceof MessagePort &&
+      data.slotSab instanceof SharedArrayBuffer &&
+      data.arenaSab instanceof SharedArrayBuffer
+    ) {
+      languageFsSyncDispose?.dispose();
+      const workspace: SyncFsWorkspaceAdapter = {
+        readFileBytes: async (path) => {
+          const bytes = await fileService.readFile(path);
+          if (typeof bytes === 'string') {
+            return new TextEncoder().encode(bytes);
+          }
+          return bytes;
+        },
+        stat: async (path) => {
+          const stat = await fileService.stat(path);
+          return { mtimeMs: stat.mtimeMs, isDirectory: stat.type === 'dir' };
+        },
+        readdir: async (path) => fileService.readdir(path),
+      };
+      languageFsSyncDispose = attachSyncFsServer({
+        port: data.port,
+        slotSab: data.slotSab,
+        arenaSab: data.arenaSab,
+        workspace,
+      });
+      console.debug('[FM-Worker] languageFs sync FS attach');
+    }
+  },
+);
 
 console.debug(`[FM-Worker] exposeFileSystem registered at +${(performance.now() - t0).toFixed(1)}ms`);
 self.postMessage({ type: workerReadyMessageType });

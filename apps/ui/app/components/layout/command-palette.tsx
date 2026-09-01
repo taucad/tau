@@ -214,7 +214,6 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
         groupedItems={groupedItems}
         renderLabel={renderItemLabel}
         getValue={getItemValue}
-        defaultValue={undefined}
         isDisabled={isItemDisabled}
         searchPlaceHolder='Search commands...'
         placeholder='Actions'

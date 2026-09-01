@@ -2,15 +2,15 @@ import { forwardRef, memo, useCallback, useEffect, useRef, useState } from 'reac
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { XIcon, MessageCircle } from 'lucide-react';
-import { messageRole, messageStatus } from '@taucad/chat/constants';
+import { messageRole } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/projects_.$id/chat-message.js';
 import { buildTurnGroups } from '#routes/projects_.$id/chat-turn-groups.js';
 import { ScrollDownButton } from '#routes/projects_.$id/scroll-down-button.js';
 import { ChatError } from '#routes/projects_.$id/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
-import { createMessage } from '#utils/chat.utils.js';
-import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
+import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
+import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatHistorySelector } from '#routes/projects_.$id/chat-history-selector.js';
 import { ChatHistoryStatus } from '#routes/projects_.$id/chat-history-status.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -27,9 +27,6 @@ import type { KeyCombination } from '#utils/keys.utils.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '#utils/ui.utils.js';
 import { ChatHistoryEmpty } from '#routes/projects_.$id/chat-history-empty.js';
-import { useActiveChatKernel } from '#hooks/use-active-chat-kernel.js';
-import { useCookie } from '#hooks/use-cookie.js';
-import { cookieName } from '#constants/cookie.constants.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChats } from '#hooks/use-chats.js';
@@ -140,17 +137,11 @@ export const ChatHistory = memo(function (props: {
 }) {
   const { className, isExpanded = true, setIsExpanded } = props;
   const messageIds = useChatSelector((state) => state.messageOrder);
-  const { sendMessage } = useChatActions();
-  // Stamp outgoing user-message metadata with the chat-scoped kernel
-  // (chat row first, cookie fallback) so a cookie change in another tab
-  // cannot retroactively retag the kernel for the *current* chat session.
-  const { kernelId: kernel } = useActiveChatKernel();
+  const cadChat = useCadChatClient();
   const { treeService } = useFileManager();
   const { projectId } = useProject();
   const { chats } = useChats(projectId);
-  // Const snapshot = useChatSnapshot();
-  // const contextPayload = useContextPayload();
-  const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
+  const { persistenceActorRef } = useChatContext();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
   const toggleChatHistory = useCallback(() => {
@@ -166,37 +157,38 @@ export const ChatHistory = memo(function (props: {
     });
   }, []);
 
-  // Refs for stable onSubmit — snapshot/contextPayload/kernel change frequently
-  // on actual projects (editor state, file tree), which would recreate the
-  // callback and cascade re-renders through memo'd tooltip-heavy children.
-  const kernelRef = useRef(kernel);
-  kernelRef.current = kernel;
-  // Const snapshotRef = useRef(snapshot);
-  // snapshotRef.current = snapshot;
-  // const contextPayloadRef = useRef(contextPayload);
-  // contextPayloadRef.current = contextPayload;
-  const testingEnabledRef = useRef(testingEnabled);
-  testingEnabledRef.current = testingEnabled;
-
-  const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, model, metadata, imageUrls }) => {
-      const userMessage = createMessage({
-        content,
-        role: messageRole.user,
-        metadata: {
-          ...metadata,
-          kernel: kernelRef.current,
-          model,
-          status: messageStatus.pending,
-          // Snapshot: snapshotRef.current,
-          // contextPayload: contextPayloadRef.current,
-          testingEnabled: testingEnabledRef.current,
-        },
-        imageUrls,
+  // Empty-cancel: the persistence machine has lifted the cancelled user
+  // message back into the composer draft (via the store's
+  // `restoreCancelledDraft` listener), so refocus the composer in the next
+  // animation frame. The frame deferral mirrors `handleNewChat` above and
+  // lets Tiptap/HTMLTextArea finish reflowing for the restored draft text
+  // before the cursor lands.
+  useEffect(() => {
+    if (!persistenceActorRef) {
+      return;
+    }
+    const subscription = persistenceActorRef.on('restoreCancelledDraft', () => {
+      requestAnimationFrame(() => {
+        chatTextareaRef.current?.focus();
       });
-      sendMessage(userMessage);
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [persistenceActorRef]);
+
+  // The CAD chat-client composes the per-request `agent` payload (kernel,
+  // model, mode, toolChoice, testingEnabled, snapshot, contextPayload) from
+  // `useCadAgentConfig`. The verb identity stays stable across renders as
+  // long as the underlying agent config identity is stable — memoising the
+  // call site lets the tooltip-heavy memo'd children downstream avoid
+  // re-renders on every editor-state tick.
+  const submitChat = cadChat.submit;
+  const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
+    async ({ content, imageUrls }) => {
+      submitChat({ text: content, imageUrls });
     },
-    [sendMessage],
+    [submitChat],
   );
 
   // Build the rendered turn groups. A new group starts at index 0 and at

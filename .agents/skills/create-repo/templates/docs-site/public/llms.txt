@@ -1,0 +1,7 @@
+# @@CREATE_REPO_npm-name@@
+
+@@CREATE_REPO_description@@
+
+- Overview: https://@@CREATE_REPO_docs-domain@@/docs
+- Quick start: https://@@CREATE_REPO_docs-domain@@/docs/quick-start
+- API: https://@@CREATE_REPO_docs-domain@@/docs/api

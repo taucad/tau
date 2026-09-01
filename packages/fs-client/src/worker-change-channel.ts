@@ -1,3 +1,4 @@
+import { Topic } from '@taucad/events';
 import type { ChangeEvent, FileSystemBackend } from '@taucad/types';
 import { normalizePath } from '@taucad/utils/path';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
@@ -21,6 +22,8 @@ export type WorkerChangeSubscription<T> = {
   readonly handler: (event: T) => void;
   /** When set, the handler runs only if this returns true for the relative path. */
   readonly interestedIn?: (relativePath: string) => boolean;
+  /** When set, unsubscribes the moment the signal aborts. */
+  readonly signal?: AbortSignal;
 };
 
 /**
@@ -36,6 +39,70 @@ export type WorkerRelativeRenameEvent = {
   readonly backend: FileSystemBackend;
 };
 
+/**
+ * Directory rename notification with workspace-relative paths. Distinct
+ * discriminator from {@link WorkerRelativeRenameEvent} so subtree-aware
+ * consumers (FileContentService cache subtree migration, FileTreeService
+ * subtree re-key, MonacoModelService model batch migrate) can react to
+ * the structural change without conflating it with a single-file rename.
+ *
+ * @public
+ */
+export type WorkerRelativeDirectoryRenameEvent = {
+  readonly type: 'directoryRenamed';
+  readonly oldPath: string | undefined;
+  readonly newPath: string | undefined;
+  readonly backend: FileSystemBackend;
+};
+
+/**
+ * Directory creation notification (e.g. from `mkdir`).
+ *
+ * @public
+ */
+export type WorkerRelativeDirectoryCreateEvent = {
+  readonly type: 'directoryCreated';
+  readonly path: string;
+  readonly backend: FileSystemBackend;
+};
+
+/**
+ * Directory deletion notification (e.g. from recursive `rmdir`).
+ *
+ * @public
+ */
+export type WorkerRelativeDirectoryDeleteEvent = {
+  readonly type: 'directoryDeleted';
+  readonly path: string;
+  readonly backend: FileSystemBackend;
+};
+
+/**
+ * File copy notification, distinct from `fileWritten` so participants can
+ * react to deliberate duplication without conflating it with content edits.
+ *
+ * @public
+ */
+export type WorkerRelativeFileCopyEvent = {
+  readonly type: 'fileCopied';
+  readonly sourcePath: string | undefined;
+  readonly targetPath: string;
+  readonly backend: FileSystemBackend;
+};
+
+/**
+ * Directory copy notification, distinct from a flurry of `fileWritten`
+ * events so participants treat the subtree as a single logical operation.
+ *
+ * @public
+ */
+export type WorkerRelativeDirectoryCopyEvent = {
+  readonly type: 'directoryCopied';
+  readonly sourcePath: string | undefined;
+  readonly targetPath: string;
+  readonly backend: FileSystemBackend;
+};
+
 function isChangeEvent(value: unknown): value is ChangeEvent {
   if (typeof value !== 'object' || value === null || !('type' in value)) {
     return false;
@@ -45,6 +112,11 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
     type === 'fileWritten' ||
     type === 'fileDeleted' ||
     type === 'fileRenamed' ||
+    type === 'fileCopied' ||
+    type === 'directoryCreated' ||
+    type === 'directoryDeleted' ||
+    type === 'directoryRenamed' ||
+    type === 'directoryCopied' ||
     type === 'directoryChanged' ||
     type === 'backendChanged'
   );
@@ -76,22 +148,37 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
 export class WorkerChangeChannel {
   private readonly paths: WorkspacePathResolver;
   private readonly unlisten: () => void;
-  private readonly fileWrittenSubs: Array<
-    WorkerChangeSubscription<{ type: 'fileWritten'; path: string; backend: FileSystemBackend }>
-  > = [];
-  private readonly fileDeletedSubs: Array<
-    WorkerChangeSubscription<{ type: 'fileDeleted'; path: string; backend: FileSystemBackend }>
-  > = [];
-  private readonly fileRenamedSubs: Array<WorkerChangeSubscription<WorkerRelativeRenameEvent>> = [];
-  private readonly directoryChangedSubs: Array<
-    WorkerChangeSubscription<{ type: 'directoryChanged'; path: string; backend: FileSystemBackend }>
-  > = [];
-  private readonly backendChangedSubs: Array<(event: Extract<ChangeEvent, { type: 'backendChanged' }>) => void> = [];
+  readonly #fileWritten = new Topic<{ type: 'fileWritten'; path: string; backend: FileSystemBackend }>({
+    name: 'WorkerChangeChannel.fileWritten',
+  });
+  readonly #fileDeleted = new Topic<{ type: 'fileDeleted'; path: string; backend: FileSystemBackend }>({
+    name: 'WorkerChangeChannel.fileDeleted',
+  });
+  readonly #fileRenamed = new Topic<WorkerRelativeRenameEvent>({ name: 'WorkerChangeChannel.fileRenamed' });
+  readonly #fileCopied = new Topic<WorkerRelativeFileCopyEvent>({ name: 'WorkerChangeChannel.fileCopied' });
+  readonly #directoryCreated = new Topic<WorkerRelativeDirectoryCreateEvent>({
+    name: 'WorkerChangeChannel.directoryCreated',
+  });
+  readonly #directoryDeleted = new Topic<WorkerRelativeDirectoryDeleteEvent>({
+    name: 'WorkerChangeChannel.directoryDeleted',
+  });
+  readonly #directoryRenamed = new Topic<WorkerRelativeDirectoryRenameEvent>({
+    name: 'WorkerChangeChannel.directoryRenamed',
+  });
+  readonly #directoryCopied = new Topic<WorkerRelativeDirectoryCopyEvent>({
+    name: 'WorkerChangeChannel.directoryCopied',
+  });
+  readonly #directoryChanged = new Topic<{ type: 'directoryChanged'; path: string; backend: FileSystemBackend }>({
+    name: 'WorkerChangeChannel.directoryChanged',
+  });
+  readonly #backendChanged = new Topic<Extract<ChangeEvent, { type: 'backendChanged' }>>({
+    name: 'WorkerChangeChannel.backendChanged',
+  });
 
   public constructor(deps: { transport: WorkerChangeChannelTransport; paths: WorkspacePathResolver }) {
     this.paths = deps.paths;
     this.unlisten = deps.transport.listen('fileChanged', (data: unknown) => {
-      this.dispatch(data);
+      this.#dispatch(data);
     });
   }
 
@@ -103,13 +190,13 @@ export class WorkerChangeChannel {
   public onFileWritten(
     sub: WorkerChangeSubscription<{ type: 'fileWritten'; path: string; backend: FileSystemBackend }>,
   ): () => void {
-    this.fileWrittenSubs.push(sub);
-    return () => {
-      const index = this.fileWrittenSubs.indexOf(sub);
-      if (index !== -1) {
-        this.fileWrittenSubs.splice(index, 1);
-      }
-    };
+    return this.#fileWritten.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn: sub.interestedIn === undefined ? undefined : (event) => sub.interestedIn!(event.path),
+      },
+      { signal: sub.signal },
+    );
   }
 
   /**
@@ -120,13 +207,13 @@ export class WorkerChangeChannel {
   public onFileDeleted(
     sub: WorkerChangeSubscription<{ type: 'fileDeleted'; path: string; backend: FileSystemBackend }>,
   ): () => void {
-    this.fileDeletedSubs.push(sub);
-    return () => {
-      const index = this.fileDeletedSubs.indexOf(sub);
-      if (index !== -1) {
-        this.fileDeletedSubs.splice(index, 1);
-      }
-    };
+    return this.#fileDeleted.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn: sub.interestedIn === undefined ? undefined : (event) => sub.interestedIn!(event.path),
+      },
+      { signal: sub.signal },
+    );
   }
 
   /**
@@ -135,13 +222,18 @@ export class WorkerChangeChannel {
    * @returns Unsubscribe function removing `sub`.
    */
   public onFileRenamed(sub: WorkerChangeSubscription<WorkerRelativeRenameEvent>): () => void {
-    this.fileRenamedSubs.push(sub);
-    return () => {
-      const index = this.fileRenamedSubs.indexOf(sub);
-      if (index !== -1) {
-        this.fileRenamedSubs.splice(index, 1);
-      }
-    };
+    return this.#fileRenamed.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn:
+          sub.interestedIn === undefined
+            ? undefined
+            : (event) =>
+                (event.oldPath !== undefined && sub.interestedIn!(event.oldPath)) ||
+                (event.newPath !== undefined && sub.interestedIn!(event.newPath)),
+      },
+      { signal: sub.signal },
+    );
   }
 
   /**
@@ -152,28 +244,122 @@ export class WorkerChangeChannel {
   public onDirectoryChanged(
     sub: WorkerChangeSubscription<{ type: 'directoryChanged'; path: string; backend: FileSystemBackend }>,
   ): () => void {
-    this.directoryChangedSubs.push(sub);
-    return () => {
-      const index = this.directoryChangedSubs.indexOf(sub);
-      if (index !== -1) {
-        this.directoryChangedSubs.splice(index, 1);
-      }
-    };
+    return this.#directoryChanged.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn: sub.interestedIn === undefined ? undefined : (event) => sub.interestedIn!(event.path),
+      },
+      { signal: sub.signal },
+    );
+  }
+
+  /**
+   * Subscribe to directory creation events from `mkdir`.
+   *
+   * @param sub - Handler plus optional path filter.
+   * @returns Unsubscribe function removing `sub`.
+   */
+  public onDirectoryCreated(sub: WorkerChangeSubscription<WorkerRelativeDirectoryCreateEvent>): () => void {
+    return this.#directoryCreated.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn: sub.interestedIn === undefined ? undefined : (event) => sub.interestedIn!(event.path),
+      },
+      { signal: sub.signal },
+    );
+  }
+
+  /**
+   * Subscribe to directory deletion events from recursive `rmdir`.
+   *
+   * @param sub - Handler plus optional path filter.
+   * @returns Unsubscribe function removing `sub`.
+   */
+  public onDirectoryDeleted(sub: WorkerChangeSubscription<WorkerRelativeDirectoryDeleteEvent>): () => void {
+    return this.#directoryDeleted.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn: sub.interestedIn === undefined ? undefined : (event) => sub.interestedIn!(event.path),
+      },
+      { signal: sub.signal },
+    );
+  }
+
+  /**
+   * Subscribe to directory rename events. Distinct from {@link onFileRenamed}
+   * because subtree-aware consumers must migrate every cached descendant.
+   *
+   * @param sub - Handler plus optional path filter covering either edge.
+   * @returns Unsubscribe function removing `sub`.
+   */
+  public onDirectoryRenamed(sub: WorkerChangeSubscription<WorkerRelativeDirectoryRenameEvent>): () => void {
+    return this.#directoryRenamed.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn:
+          sub.interestedIn === undefined
+            ? undefined
+            : (event) =>
+                (event.oldPath !== undefined && sub.interestedIn!(event.oldPath)) ||
+                (event.newPath !== undefined && sub.interestedIn!(event.newPath)),
+      },
+      { signal: sub.signal },
+    );
+  }
+
+  /**
+   * Subscribe to file copy events.
+   *
+   * @param sub - Handler plus optional path filter.
+   * @returns Unsubscribe function removing `sub`.
+   */
+  public onFileCopied(sub: WorkerChangeSubscription<WorkerRelativeFileCopyEvent>): () => void {
+    return this.#fileCopied.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn:
+          sub.interestedIn === undefined
+            ? undefined
+            : (event) =>
+                (event.sourcePath !== undefined && sub.interestedIn!(event.sourcePath)) ||
+                sub.interestedIn!(event.targetPath),
+      },
+      { signal: sub.signal },
+    );
+  }
+
+  /**
+   * Subscribe to directory copy events.
+   *
+   * @param sub - Handler plus optional path filter.
+   * @returns Unsubscribe function removing `sub`.
+   */
+  public onDirectoryCopied(sub: WorkerChangeSubscription<WorkerRelativeDirectoryCopyEvent>): () => void {
+    return this.#directoryCopied.subscribe(
+      {
+        handler: sub.handler,
+        interestedIn:
+          sub.interestedIn === undefined
+            ? undefined
+            : (event) =>
+                (event.sourcePath !== undefined && sub.interestedIn!(event.sourcePath)) ||
+                sub.interestedIn!(event.targetPath),
+      },
+      { signal: sub.signal },
+    );
   }
 
   /**
    * Subscribe to backend swap events (IndexedDB ↔ OPFS, etc.).
    * @param handler - Invoked whenever the worker reports a backend transition.
+   * @param options - Optional AbortSignal lifecycle binding.
    * @returns Unsubscribe function removing `handler`.
    */
-  public onBackendChanged(handler: (event: Extract<ChangeEvent, { type: 'backendChanged' }>) => void): () => void {
-    this.backendChangedSubs.push(handler);
-    return () => {
-      const index = this.backendChangedSubs.indexOf(handler);
-      if (index !== -1) {
-        this.backendChangedSubs.splice(index, 1);
-      }
-    };
+  public onBackendChanged(
+    handler: (event: Extract<ChangeEvent, { type: 'backendChanged' }>) => void,
+    options?: { signal?: AbortSignal },
+  ): () => void {
+    return this.#backendChanged.subscribe(handler, options);
   }
 
   /**
@@ -181,109 +367,104 @@ export class WorkerChangeChannel {
    */
   public dispose(): void {
     this.unlisten();
-    this.fileWrittenSubs.length = 0;
-    this.fileDeletedSubs.length = 0;
-    this.fileRenamedSubs.length = 0;
-    this.directoryChangedSubs.length = 0;
-    this.backendChangedSubs.length = 0;
+    this.#fileWritten.dispose();
+    this.#fileDeleted.dispose();
+    this.#fileRenamed.dispose();
+    this.#fileCopied.dispose();
+    this.#directoryCreated.dispose();
+    this.#directoryDeleted.dispose();
+    this.#directoryRenamed.dispose();
+    this.#directoryCopied.dispose();
+    this.#directoryChanged.dispose();
+    this.#backendChanged.dispose();
   }
 
-  private dispatch(data: unknown): void {
+  #dispatch(data: unknown): void {
     if (!isChangeEvent(data)) {
       return;
     }
     switch (data.type) {
       case 'fileWritten': {
-        this.dispatchFileWritten(data);
-        break;
+        const path = this.paths.toRelativePath(data.path);
+        if (path !== undefined) {
+          this.#fileWritten.emit({ type: 'fileWritten', path, backend: data.backend });
+        }
+        return;
       }
       case 'fileDeleted': {
-        this.dispatchFileDeleted(data);
-        break;
+        const path = this.paths.toRelativePath(data.path);
+        if (path !== undefined) {
+          this.#fileDeleted.emit({ type: 'fileDeleted', path, backend: data.backend });
+        }
+        return;
       }
       case 'fileRenamed': {
-        this.dispatchFileRenamed(data);
-        break;
+        const oldPath = this.paths.toRelativePath(data.oldPath);
+        const newPath = this.paths.toRelativePath(data.newPath);
+        if (oldPath === undefined && newPath === undefined) {
+          return;
+        }
+        this.#fileRenamed.emit({ type: 'fileRenamed', oldPath, newPath, backend: data.backend });
+        return;
+      }
+      case 'fileCopied': {
+        const sourcePath = this.paths.toRelativePath(data.sourcePath);
+        const targetPath = this.paths.toRelativePath(data.targetPath);
+        if (targetPath === undefined) {
+          return;
+        }
+        this.#fileCopied.emit({ type: 'fileCopied', sourcePath, targetPath, backend: data.backend });
+        return;
+      }
+      case 'directoryCreated': {
+        const path = this.paths.toRelativePath(data.path);
+        if (path !== undefined) {
+          this.#directoryCreated.emit({ type: 'directoryCreated', path, backend: data.backend });
+        }
+        return;
+      }
+      case 'directoryDeleted': {
+        const path = this.paths.toRelativePath(data.path);
+        if (path !== undefined) {
+          this.#directoryDeleted.emit({ type: 'directoryDeleted', path, backend: data.backend });
+        }
+        return;
+      }
+      case 'directoryRenamed': {
+        const oldPath = this.paths.toRelativePath(data.oldPath);
+        const newPath = this.paths.toRelativePath(data.newPath);
+        if (oldPath === undefined && newPath === undefined) {
+          return;
+        }
+        this.#directoryRenamed.emit({ type: 'directoryRenamed', oldPath, newPath, backend: data.backend });
+        return;
+      }
+      case 'directoryCopied': {
+        const sourcePath = this.paths.toRelativePath(data.sourcePath);
+        const targetPath = this.paths.toRelativePath(data.targetPath);
+        if (targetPath === undefined) {
+          return;
+        }
+        this.#directoryCopied.emit({ type: 'directoryCopied', sourcePath, targetPath, backend: data.backend });
+        return;
       }
       case 'directoryChanged': {
-        this.dispatchDirectoryChanged(data);
-        break;
+        const directoryAbsolute = data.path;
+        const rootNorm = normalizePath(this.paths.root);
+        const directoryNorm = normalizePath(directoryAbsolute);
+        const relativeDirectory = directoryNorm === rootNorm ? '' : this.paths.toRelativePath(directoryAbsolute);
+        if (relativeDirectory !== undefined) {
+          this.#directoryChanged.emit({
+            type: 'directoryChanged',
+            path: relativeDirectory,
+            backend: data.backend,
+          });
+        }
+        return;
       }
       case 'backendChanged': {
-        this.dispatchBackendChanged(data);
-        break;
+        this.#backendChanged.emit(data);
       }
-    }
-  }
-
-  private dispatchFileWritten(data: Extract<ChangeEvent, { type: 'fileWritten' }>): void {
-    const relativePath = this.paths.toRelativePath(data.path);
-    if (relativePath === undefined) {
-      return;
-    }
-    for (const sub of this.fileWrittenSubs) {
-      if (sub.interestedIn && !sub.interestedIn(relativePath)) {
-        continue;
-      }
-      sub.handler({ type: 'fileWritten', path: relativePath, backend: data.backend });
-    }
-  }
-
-  private dispatchFileDeleted(data: Extract<ChangeEvent, { type: 'fileDeleted' }>): void {
-    const relativePath = this.paths.toRelativePath(data.path);
-    if (relativePath === undefined) {
-      return;
-    }
-    for (const sub of this.fileDeletedSubs) {
-      if (sub.interestedIn && !sub.interestedIn(relativePath)) {
-        continue;
-      }
-      sub.handler({ type: 'fileDeleted', path: relativePath, backend: data.backend });
-    }
-  }
-
-  private dispatchFileRenamed(data: Extract<ChangeEvent, { type: 'fileRenamed' }>): void {
-    const oldPath = this.paths.toRelativePath(data.oldPath);
-    const newPath = this.paths.toRelativePath(data.newPath);
-    if (oldPath === undefined && newPath === undefined) {
-      return;
-    }
-    for (const sub of this.fileRenamedSubs) {
-      const gate =
-        sub.interestedIn === undefined ||
-        (oldPath !== undefined && sub.interestedIn(oldPath)) ||
-        (newPath !== undefined && sub.interestedIn(newPath));
-      if (!gate) {
-        continue;
-      }
-      sub.handler({
-        type: 'fileRenamed',
-        oldPath,
-        newPath,
-        backend: data.backend,
-      });
-    }
-  }
-
-  private dispatchDirectoryChanged(data: Extract<ChangeEvent, { type: 'directoryChanged' }>): void {
-    const directoryAbsolute = data.path;
-    const rootNorm = normalizePath(this.paths.root);
-    const directoryNorm = normalizePath(directoryAbsolute);
-    const relativeDirectory = directoryNorm === rootNorm ? '' : this.paths.toRelativePath(directoryAbsolute);
-    if (relativeDirectory === undefined) {
-      return;
-    }
-    for (const sub of this.directoryChangedSubs) {
-      if (sub.interestedIn && !sub.interestedIn(relativeDirectory)) {
-        continue;
-      }
-      sub.handler({ type: 'directoryChanged', path: relativeDirectory, backend: data.backend });
-    }
-  }
-
-  private dispatchBackendChanged(data: Extract<ChangeEvent, { type: 'backendChanged' }>): void {
-    for (const handler of this.backendChangedSubs) {
-      handler(data);
     }
   }
 }

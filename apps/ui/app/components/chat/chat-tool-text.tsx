@@ -15,8 +15,8 @@ type ChatToolActionProps = {
  *
  * Prefer {@link ChatToolLabel} for new code — it composes the verb +
  * description pair with the correct inline spacing in one place. This
- * primitive remains exported for niche callers (e.g. {@link ChatToolError})
- * that render only a verb without a description sibling.
+ * primitive remains exported for niche callers that render only a verb
+ * without a description sibling.
  *
  * Lifts to `text-foreground` on hover when nested inside a parent that
  * declares the `group/chat-tool-trigger` Tailwind named group, matching

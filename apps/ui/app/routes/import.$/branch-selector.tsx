@@ -68,7 +68,7 @@ export function BranchSelector(properties: BranchSelectorProperties): React.JSX.
         </div>
       )}
       getValue={(branch) => branch.name}
-      defaultValue={branches.find((b) => b.name === selectedBranch)}
+      value={branches.find((b) => b.name === selectedBranch)}
       placeholder='Select branch...'
       searchPlaceHolder='Search branches...'
       title='Select Branch'

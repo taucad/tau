@@ -30,7 +30,7 @@ This brief was assembled by mining the live Tau repo in `/Users/rifont/git/tau` 
 3. Web UI (`apps/ui`, React Router routes, XState machines, Dockview, Three.js viewer).
 4. Filesystem + shared memory (`packages/filesystem`, `packages/memory`, runtime FS bridge, COEP/SAB).
 5. API backend (NestJS, Fastify, Drizzle, Better Auth, Socket.IO, OTEL telemetry, Fly/Netlify deploy).
-6. Meta layer (`docs/policy`, `docs/research`, `.cursor/skills`, `.cursor/rules`, `tools/`, `scripts/`, `repos.yaml`, `infra/`).
+6. Meta layer (`docs/policy`, `docs/research`, `.agent/skills`, `.cursor/rules`, `tools/`, `scripts/`, `repos.yaml`, `infra/`).
 
 Findings were merged, de-duplicated, and reformatted into a single navigable directory pointer with one-paragraph summaries and 1-3 anticipated questions per area.
 
@@ -171,7 +171,7 @@ LangChain `createAgent` orchestrates a tool-using CAD agent with provider-agnost
 | `apps/ui/app/utils/assistant-message-activity.ts`                                                                                                                           | Builds the "activity groups" from raw message parts (consumed by `chat-message.tsx`).                                                                                                                                                                                                                                                                                                                                                   | What's the rule for grouping vs not?                                                                        |
 | `apps/ui/app/routes/projects_.$id/chat-message-tool-*.tsx`                                                                                                                  | One renderer per tool result (edit-file, edit-tests, read-file, test-model, get-kernel-result, screenshot, web-browser, web-search, etc.).                                                                                                                                                                                                                                                                                              | Where is each tool's UI implemented?                                                                        |
 | `apps/ui/app/hooks/use-chat.tsx`, `chat-instance.tsx`, `chat-instance-registry.ts`, `chat-registry-provider.tsx`, `active-chat-provider.tsx`, `chat-persistence.machine.ts` | Concurrent chat instances; `ActiveChatProvider` separates **draft persistence** from streaming so background chats can run in parallel.                                                                                                                                                                                                                                                                                                 | How are multiple chats keyed? How is draft persistence separated from streaming?                            |
-| `.cursor/skills/adding-tools/SKILL.md`                                                                                                                                      | The end-to-end "add a new chat tool" workflow: schema in `libs/chat`, API handler, RPC dispatcher, UI part renderer.                                                                                                                                                                                                                                                                                                                    | Full checklist from schema to UI?                                                                           |
+| `.agent/skills/adding-tools/SKILL.md`                                                                                                                                      | The end-to-end "add a new chat tool" workflow: schema in `libs/chat`, API handler, RPC dispatcher, UI part renderer.                                                                                                                                                                                                                                                                                                                    | Full checklist from schema to UI?                                                                           |
 
 ---
 
@@ -324,7 +324,7 @@ Snapshot investigations. Themed clusters:
 - **Observability** — `observability-architecture.md`, `grafana-observability-gaps.md`, `observability-metrics-audit.md`.
 - **UI / perf** — `ui-startup-performance-gap-analysis.md`, `netlify-ui-deployment-strategy.md`.
 
-### Cursor skills (`.cursor/skills/`)
+### Cursor skills (`.agent/skills/`)
 
 Workflow scripts agents follow for repeatable tasks: **adding-tools** (new chat tool end-to-end), **create-package**, **create-policy**, **create-research**, **create-vite-plugin**, **langgraph** (LangGraph docs MCP), **mine** (deep external mining), **new-kernel**, **occt-wasm-build**, **package-release**, **pr-review-coordinator**, **repos**, **submit-pr**, **typescript-overloads**.
 

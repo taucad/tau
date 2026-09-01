@@ -2,6 +2,10 @@ import React from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { InfiniteGrid } from '#components/geometry/graphics/three/react/infinite-grid.js';
+import {
+  infiniteGridColorDarkMode,
+  infiniteGridColorLightMode,
+} from '#components/geometry/graphics/three/overlay-colors.constants.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
 
@@ -20,9 +24,8 @@ export const Grid = React.memo(() => {
     invalidate();
   }, [invalidate]);
 
-  // Calculate theme-aware grid color
   const gridColor = React.useMemo(
-    () => (theme === Theme.LIGHT ? new THREE.Color('lightgrey') : new THREE.Color('grey')),
+    () => new THREE.Color(theme === Theme.LIGHT ? infiniteGridColorLightMode : infiniteGridColorDarkMode),
     [theme],
   );
 

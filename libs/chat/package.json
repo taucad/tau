@@ -24,12 +24,18 @@
       "types": "./src/rpc/index.ts",
       "import": "./src/rpc/index.ts",
       "default": "./src/rpc/index.ts"
+    },
+    "./schemas": {
+      "types": "./src/schemas/index.ts",
+      "import": "./src/schemas/index.ts",
+      "default": "./src/schemas/index.ts"
     }
   },
   "dependencies": {
+    "@taucad/runtime": "workspace:*",
     "@taucad/testing": "workspace:*",
     "@taucad/types": "workspace:*",
-    "@taucad/runtime": "workspace:*"
+    "@taucad/utils": "workspace:*"
   },
   "imports": {
     "#*": "./src/*"

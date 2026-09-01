@@ -56,10 +56,6 @@ const baseConfig: Options = {
       to: `${options.outDir}/kernels/replicad/fonts`,
     },
     {
-      from: 'src/bundler/wasm',
-      to: `${options.outDir}/bundler/wasm`,
-    },
-    {
       from: 'src/kernels/replicad/wasm',
       to: `${options.outDir}/kernels/replicad/wasm`,
     },

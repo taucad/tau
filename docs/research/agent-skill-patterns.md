@@ -411,4 +411,4 @@ flowchart LR
 - Policy: `docs/policy/context-engineering-policy.md`
 - Policy: `docs/policy/filesystem-context-policy.md`
 - Conversation transcript: `agent-transcripts/d32dc5e2-b087-4c5d-927c-75dc4100e137/`
-- Skill guide: `.cursor/skills-cursor/create-skill/SKILL.md`
+- Skill guide: `.agent/skills-cursor/create-skill/SKILL.md`

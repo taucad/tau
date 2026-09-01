@@ -83,14 +83,14 @@ function deriveStatus(cadState: string): CadPreviewStatus {
  *
  * @example <caption>Simple thumbnail</caption>
  * ```tsx
- * <CadPreviewProvider projectId="my-build" mainFile="main.ts" files={files}>
+ * <CadPreviewProvider projectId="my-project" mainFile="main.ts" files={files}>
  *   <CadPreviewViewer className="size-full" />
  * </CadPreviewProvider>
  * ```
  *
  * @example <caption>Dynamic project (files already in the filesystem)</caption>
  * ```tsx
- * <CadPreviewProvider projectId={existingBuildId} mainFile="main.ts">
+ * <CadPreviewProvider projectId={existingProjectId} mainFile="main.ts">
  *   <CadPreviewViewer enablePan enableZoom />
  * </CadPreviewProvider>
  * ```
@@ -127,6 +127,7 @@ export function CadPreviewProvider({
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
       environmentPreset: defaultGraphicsSettings.environmentPreset,
+      graphicsBackendPreference: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
     },
   });
 

@@ -2,23 +2,15 @@
  * URI/path helpers for KCL document and import resolution in the Monaco stack.
  */
 
+import { URI, Utils } from 'vscode-uri';
+
 /**
- * Convert URI to file path.
- * The file manager expects paths without leading slashes (e.g., "public/...")
- * but Monaco URIs use "file:///public/..." format.
+ * Convert URI to workspace-relative path key (no leading slash), matching
+ * virtual Monaco `file:///public/...` paths and the file manager layout.
  */
 export function kclUriToWorkspacePath(uri: string): string {
-  let path = uri;
-
-  if (path.startsWith('file://')) {
-    path = path.slice(7);
-  }
-
-  if (path.startsWith('/')) {
-    path = path.slice(1);
-  }
-
-  return path;
+  const { path } = URI.parse(uri);
+  return path.startsWith('/') ? path.slice(1) : path;
 }
 
 /**
@@ -29,15 +21,13 @@ export function kclUriToWorkspacePath(uri: string): string {
  * @returns Absolute file:// URI of the imported file
  */
 export function resolveKclImportToUri(currentFileUri: string, importPath: string): string {
-  const lastSlashIndex = currentFileUri.lastIndexOf('/');
-  const directory = currentFileUri.slice(0, lastSlashIndex + 1);
-
-  return `${directory}${importPath}`;
+  const current = URI.parse(currentFileUri);
+  const directory = Utils.joinPath(current, '..');
+  return Utils.joinPath(directory, importPath).toString();
 }
 
 /**
  * Parent directory of a workspace-relative file path (no `file://` prefix).
- * Used so WASM bridge requests that omit directory context can be joined with the current document's folder.
  *
  * @example `public/kcl-samples/axial-fan/main.kcl` → `public/kcl-samples/axial-fan`
  * @example `main.kcl` → `''` (file at virtual workspace root)

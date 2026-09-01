@@ -118,9 +118,7 @@ export function ChatMessageToolListDirectory({
     }
 
     case 'output-error': {
-      return (
-        <ChatToolError errorText={part.errorText} fallbackIcon={FolderOpen} fallbackTitle='Failed to list directory' />
-      );
+      return <ChatToolError errorText={part.errorText} icon={FolderOpen} noun='directory list' />;
     }
 
     case 'approval-requested':

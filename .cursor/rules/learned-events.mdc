@@ -1,0 +1,16 @@
+---
+description: Auto-curated learned facts for pub/sub fan-out and @taucad/events Topic<E>
+globs:
+  - "packages/events/**"
+  - "packages/filesystem/**"
+  - "packages/fs-client/**"
+  - "packages/runtime/src/client/**"
+  - "apps/ui/app/services/chat-session-store.ts"
+alwaysApply: false
+---
+
+# Learned: events
+
+## Learned Workspace Facts
+
+- Production pub/sub fan-out composes `Topic<E>` from `@taucad/events`; hand-rolled `Set<handler>` / `Array<{ handler }>` + manual `for..of` dispatch is forbidden and enforced by `tau-lint/no-handrolled-fanout` (see `docs/policy/event-fanout-policy.md`).

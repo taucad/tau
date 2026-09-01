@@ -1,0 +1,50 @@
+{
+  "name": "@taucad/events",
+  "version": "0.1.0-beta.0",
+  "description": "Zero-dependency pub/sub primitive (Topic) with snapshot-on-emit, AbortSignal lifecycle, handler-error containment",
+  "type": "module",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/events"
+  },
+  "main": "./dist/cjs/index.cjs",
+  "types": "./dist/cjs/index.d.cts",
+  "module": "./dist/esm/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript",
+    "events",
+    "pubsub",
+    "topic",
+    "emitter"
+  ],
+  "author": "Richard Fontein",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "require": {
+          "types": "./dist/cjs/index.d.cts",
+          "default": "./dist/cjs/index.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/index.d.ts",
+          "default": "./dist/esm/index.js"
+        }
+      }
+    }
+  },
+  "imports": {
+    "#*": "./src/*"
+  }
+}

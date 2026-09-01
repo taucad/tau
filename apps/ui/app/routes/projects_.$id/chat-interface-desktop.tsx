@@ -1,8 +1,8 @@
 import { memo, useRef, useState, useEffect } from 'react';
-import { useSelector } from '@xstate/react';
 import type { AllotmentHandle } from 'allotment';
 import { Allotment, LayoutPriority } from 'allotment';
 import { ChatHistory, ChatHistoryTrigger } from '#routes/projects_.$id/chat-history.js';
+import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/projects_.$id/focused-chat-gate.js';
 import { ChatFileTree, ChatFileTreeTrigger } from '#routes/projects_.$id/chat-file-tree.js';
 import { ChatParameters, ChatParametersTrigger } from '#routes/projects_.$id/chat-parameters.js';
 import { ViewerDockview } from '#routes/projects_.$id/chat-viewer-dockview.js';
@@ -11,11 +11,10 @@ import { ChatExplorerTree, ChatExplorerTrigger } from '#routes/projects_.$id/cha
 import { ChatKernel, ChatKernelTrigger } from '#routes/projects_.$id/chat-kernel.js';
 import { ChatDetails, ChatDetailsTrigger } from '#routes/projects_.$id/chat-details.js';
 import { ChatConverter, ChatConverterTrigger } from '#routes/projects_.$id/chat-converter.js';
-import { ProjectNotFound } from '#routes/projects_.$id/project-not-found.js';
+import { ProjectUnavailableOverlay } from '#routes/projects_.$id/project-unavailable-overlay.js';
 import { cn } from '#utils/ui.utils.js';
 import { SidebarOffset } from '#components/layout/sidebar-offset.js';
 import { useChatInterfaceState, usePanePositionObserver } from '#routes/projects_.$id/use-chat-interface-state.js';
-import { useProject } from '#hooks/use-project.js';
 import { useFeature } from '#flags/use-feature.js';
 import {
   allotmentPanelOrder,
@@ -49,9 +48,6 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
     panelSizes,
     setChatResize,
   } = useChatInterfaceState();
-
-  const { projectRef } = useProject();
-  const isProjectError = useSelector(projectRef, (state) => state.matches('error'));
 
   const isTauDebugEnabled = useFeature('tauDebug');
   const isExplorerPaneVisible = isTauDebugEnabled && isExplorerOpen;
@@ -185,228 +181,238 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const opacityValue = isLayoutReady ? 1 : 0;
 
   return (
-    <div
-      ref={allotmentRef}
-      className='size-full'
-      style={{ opacity: opacityValue, transition: isLayoutReady ? 'opacity 150ms' : 'none' }}
-    >
-      <SidebarOffset asChild via='padding'>
-        <Allotment
-          ref={allotmentInstanceRef}
-          separator={false}
-          proportionalLayout={false}
-          className={cn(
-            'size-full',
+    <ChatInterfaceSessionGate fallback={<div className='hidden size-full md:flex' />}>
+      <div
+        ref={allotmentRef}
+        className='size-full'
+        style={{ opacity: opacityValue, transition: isLayoutReady ? 'opacity 150ms' : 'none' }}
+      >
+        <SidebarOffset asChild via='padding'>
+          <Allotment
+            ref={allotmentInstanceRef}
+            separator={false}
+            proportionalLayout={false}
+            className={cn(
+              'size-full',
 
-            // Pad the sash container to the top of the header height.
-            'pt-(--header-height)',
-            'pb-2',
+              // Pad the sash container to the top of the header height.
+              'pt-(--header-height)',
+              'pb-2',
 
-            // Set the height of the sash to the height of the content.
-            '[&_.sash.sash-vertical:before]:h-[calc(100dvh-var(--header-height)-var(--spacing)*2)]!',
+              // Set the height of the sash to the height of the content.
+              '[&_.sash.sash-vertical:before]:h-[calc(100dvh-var(--header-height)-var(--spacing)*2)]!',
 
-            // Apply top+bottom border to the floating panels.
-            '**:data-[slot=floating-panel]:border-y',
+              // ── Sash (resize handles) — match Dockview primary-on-hover styling ──
+              '[--focus-border:var(--primary)]',
+              '[--sash-hover-transition-duration:0.1s]',
+              '[&_.sash:before]:[transition-delay:0.5s]',
 
-            // Left side: First pane styling
-            '[&_.rs-left.split-view-view-visible[data-first]]:pl-2',
-            '[&_.rs-left.split-view-view-visible[data-first]_[data-slot=floating-panel]]:rounded-l-md',
+              // Apply top+bottom border to the floating panels.
+              '**:data-[slot=floating-panel]:border-y',
 
-            // Left side: Last pane styling
-            '[&_.rs-left.split-view-view-visible[data-last]_[data-slot=floating-panel]]:rounded-r-none',
-            '[&_.rs-left.split-view-view-visible[data-last]_[data-slot=floating-panel]]:border-r',
+              // Left side: First pane styling
+              '[&_.rs-left.split-view-view-visible[data-first]]:pl-2',
+              '[&_.rs-left.split-view-view-visible[data-first]_[data-slot=floating-panel]]:rounded-l-md',
 
-            // Left side: All visible panes get left border
-            '[&_.rs-left.split-view-view-visible_[data-slot=floating-panel]]:border-l',
+              // Left side: Last pane styling
+              '[&_.rs-left.split-view-view-visible[data-last]_[data-slot=floating-panel]]:rounded-r-none',
+              '[&_.rs-left.split-view-view-visible[data-last]_[data-slot=floating-panel]]:border-r',
 
-            // Right side: First pane styling (leftmost visually)
-            '[&_.rs-right.split-view-view-visible[data-first]_[data-slot=floating-panel]]:rounded-l-none',
-            '[&_.rs-right.split-view-view-visible[data-first]_[data-slot=floating-panel]]:border-l',
+              // Left side: All visible panes get left border
+              '[&_.rs-left.split-view-view-visible_[data-slot=floating-panel]]:border-l',
 
-            // Right side: Last pane styling (rightmost visually, needs right padding)
-            '[&_.rs-right.split-view-view-visible[data-last]]:pr-2',
-            '[&_.rs-right.split-view-view-visible[data-last]_[data-slot=floating-panel]]:rounded-r-md',
+              // Right side: First pane styling (leftmost visually)
+              '[&_.rs-right.split-view-view-visible[data-first]_[data-slot=floating-panel]]:rounded-l-none',
+              '[&_.rs-right.split-view-view-visible[data-first]_[data-slot=floating-panel]]:border-l',
 
-            // Right side: All visible panes get right border
-            '[&_.rs-right.split-view-view-visible_[data-slot=floating-panel]]:border-r',
+              // Right side: Last pane styling (rightmost visually, needs right padding)
+              '[&_.rs-right.split-view-view-visible[data-last]]:pr-2',
+              '[&_.rs-right.split-view-view-visible[data-last]_[data-slot=floating-panel]]:rounded-r-md',
 
-            // Allow the viewer to appear behind the floating panels.
-            '[&_.split-view-view]:overflow-visible!',
-          )}
-          onDragEnd={(sizes) => {
-            setChatResize(sizes);
-          }}
-        >
-          {/* Left panels - Low priority so they keep their preferred size */}
-          <Allotment.Pane
-            className='rs-left z-10'
-            minSize={panelMinSizeChat}
-            preferredSize={panelSizes.chat}
-            priority={LayoutPriority.Low}
-            visible={isChatOpen}
+              // Right side: All visible panes get right border
+              '[&_.rs-right.split-view-view-visible_[data-slot=floating-panel]]:border-r',
+
+              // Allow the viewer to appear behind the floating panels.
+              '[&_.split-view-view]:overflow-visible!',
+            )}
+            onDragEnd={(sizes) => {
+              setChatResize(sizes);
+            }}
           >
-            <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
-          </Allotment.Pane>
-
-          <Allotment.Pane
-            className='rs-left z-10'
-            minSize={panelMinSizeStandard}
-            preferredSize={panelSizes.files}
-            priority={LayoutPriority.Low}
-            visible={isFileTreeOpen}
-          >
-            <ChatFileTree isExpanded={isFileTreeOpen} setIsExpanded={setIsFileTreeOpen} />
-          </Allotment.Pane>
-
-          <Allotment.Pane
-            className='rs-left z-10'
-            minSize={panelMinSizeStandard}
-            preferredSize={panelSizes.explorer}
-            priority={LayoutPriority.Low}
-            visible={isExplorerPaneVisible}
-          >
-            <ChatExplorerTree isExpanded={isExplorerPaneVisible} setIsExpanded={setIsExplorerOpen} />
-          </Allotment.Pane>
-
-          <Allotment.Pane
-            className='rs-left z-10'
-            minSize={panelMinSizeStandard}
-            preferredSize={panelSizes.kernel}
-            priority={LayoutPriority.Low}
-            visible={isKernelPaneVisible}
-          >
-            <ChatKernel isExpanded={isKernelPaneVisible} setIsExpanded={setIsKernelOpen} />
-          </Allotment.Pane>
-
-          {/* Center viewer - High priority so it absorbs all extra space from collapsed panels */}
-          <Allotment.Pane
-            className='rs-center'
-            minSize={panelMinSizeViewer}
-            preferredSize={panelSizes.viewer}
-            priority={LayoutPriority.High}
-          >
-            {/* Top-left Content */}
-            <div className={cn('absolute top-10 z-10 flex flex-col gap-2', isAnyLeftPanelOpen ? 'left-2' : 'left-4')}>
-              <ChatHistoryTrigger
-                isOpen={isChatOpen}
-                onToggle={() => {
-                  setIsChatOpen((previous) => !previous);
-                }}
-              />
-              <ChatFileTreeTrigger
-                isOpen={isFileTreeOpen}
-                onToggle={() => {
-                  setIsFileTreeOpen((previous) => !previous);
-                }}
-              />
-              {isTauDebugEnabled ? (
-                <>
-                  <ChatExplorerTrigger
-                    isOpen={isExplorerOpen}
-                    onToggle={() => {
-                      setIsExplorerOpen((previous) => !previous);
-                    }}
-                  />
-                  <ChatKernelTrigger
-                    isOpen={isKernelOpen}
-                    onToggle={() => {
-                      setIsKernelOpen((previous) => !previous);
-                    }}
-                  />
-                </>
-              ) : null}
-            </div>
-
-            {/* Top-right Content - positioned above gizmo */}
-            <div
-              className={cn(
-                'absolute top-10 z-20 flex flex-col gap-2 overflow-hidden!',
-                isAnyRightPanelOpen ? 'right-2' : 'right-4',
-              )}
+            {/* Left panels - Low priority so they keep their preferred size */}
+            <Allotment.Pane
+              className='rs-left z-10'
+              minSize={panelMinSizeChat}
+              preferredSize={panelSizes.chat}
+              priority={LayoutPriority.Low}
+              visible={isChatOpen}
             >
-              <ChatParametersTrigger
-                isOpen={isParametersOpen}
-                onToggle={() => {
-                  setIsParametersOpen((previous) => !previous);
-                }}
-              />
-              <ChatEditorLayoutTrigger
-                isOpen={isEditorOpen}
-                onToggle={() => {
-                  setIsEditorOpen((previous) => !previous);
-                }}
-              />
-              <ChatConverterTrigger
-                isOpen={isConverterOpen}
-                onToggle={() => {
-                  setIsConverterOpen((previous) => !previous);
-                }}
-              />
-              <ChatDetailsTrigger
-                isOpen={isDetailsOpen}
-                onToggle={() => {
-                  setIsDetailsOpen((previous) => !previous);
-                }}
-              />
-            </div>
+              <ChatHistoryGate>
+                <ChatHistory isExpanded={isChatOpen} setIsExpanded={setIsChatOpen} />
+              </ChatHistoryGate>
+            </Allotment.Pane>
 
-            {/* Viewer - DockviewReact manages tabs, splits, and per-view overlays */}
-            <div
-              className={cn(
-                'absolute inset-y-0 overflow-hidden border-y',
-                isAnyLeftPanelOpen ? 'left-0' : 'left-2 rounded-l-md border-l',
-                isAnyRightPanelOpen ? 'right-0' : 'right-2 rounded-r-md border-r',
-              )}
+            <Allotment.Pane
+              className='rs-left z-10'
+              minSize={panelMinSizeStandard}
+              preferredSize={panelSizes.files}
+              priority={LayoutPriority.Low}
+              visible={isFileTreeOpen}
             >
-              <ViewerDockview />
-            </div>
+              <ChatFileTree isExpanded={isFileTreeOpen} setIsExpanded={setIsFileTreeOpen} />
+            </Allotment.Pane>
 
-            {/* Project Not Found Overlay */}
-            {isProjectError ? <ProjectNotFound /> : null}
-          </Allotment.Pane>
+            <Allotment.Pane
+              className='rs-left z-10'
+              minSize={panelMinSizeStandard}
+              preferredSize={panelSizes.explorer}
+              priority={LayoutPriority.Low}
+              visible={isExplorerPaneVisible}
+            >
+              <ChatExplorerTree isExpanded={isExplorerPaneVisible} setIsExpanded={setIsExplorerOpen} />
+            </Allotment.Pane>
 
-          {/* Right panels - Low priority so they keep their preferred size */}
-          <Allotment.Pane
-            className='rs-right'
-            minSize={panelMinSizeStandard}
-            preferredSize={panelSizes.parameters}
-            priority={LayoutPriority.Low}
-            visible={isParametersOpen}
-          >
-            <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
-          </Allotment.Pane>
+            <Allotment.Pane
+              className='rs-left z-10'
+              minSize={panelMinSizeStandard}
+              preferredSize={panelSizes.kernel}
+              priority={LayoutPriority.Low}
+              visible={isKernelPaneVisible}
+            >
+              <ChatKernel isExpanded={isKernelPaneVisible} setIsExpanded={setIsKernelOpen} />
+            </Allotment.Pane>
 
-          <Allotment.Pane
-            className='rs-right'
-            minSize={panelMinSizeEditor}
-            preferredSize={panelSizes.editor}
-            priority={LayoutPriority.Low}
-            visible={isEditorOpen}
-          >
-            <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
-          </Allotment.Pane>
+            {/* Center viewer - High priority so it absorbs all extra space from collapsed panels */}
+            <Allotment.Pane
+              className='rs-center'
+              minSize={panelMinSizeViewer}
+              preferredSize={panelSizes.viewer}
+              priority={LayoutPriority.High}
+            >
+              {/* Top-left Content */}
+              <div className={cn('absolute top-10 z-10 flex flex-col gap-2', isAnyLeftPanelOpen ? 'left-2' : 'left-4')}>
+                <ChatHistoryTrigger
+                  isOpen={isChatOpen}
+                  onToggle={() => {
+                    setIsChatOpen((previous) => !previous);
+                  }}
+                />
+                <ChatFileTreeTrigger
+                  isOpen={isFileTreeOpen}
+                  onToggle={() => {
+                    setIsFileTreeOpen((previous) => !previous);
+                  }}
+                />
+                {isTauDebugEnabled ? (
+                  <>
+                    <ChatExplorerTrigger
+                      isOpen={isExplorerOpen}
+                      onToggle={() => {
+                        setIsExplorerOpen((previous) => !previous);
+                      }}
+                    />
+                    <ChatKernelTrigger
+                      isOpen={isKernelOpen}
+                      onToggle={() => {
+                        setIsKernelOpen((previous) => !previous);
+                      }}
+                    />
+                  </>
+                ) : null}
+              </div>
 
-          <Allotment.Pane
-            className='rs-right'
-            minSize={panelMinSizeStandard}
-            preferredSize={panelSizes.converter}
-            priority={LayoutPriority.Low}
-            visible={isConverterOpen}
-          >
-            <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
-          </Allotment.Pane>
+              {/* Top-right Content - positioned above gizmo */}
+              <div
+                className={cn(
+                  'absolute top-10 z-20 flex flex-col gap-2 overflow-hidden!',
+                  isAnyRightPanelOpen ? 'right-2' : 'right-4',
+                )}
+              >
+                <ChatParametersTrigger
+                  isOpen={isParametersOpen}
+                  onToggle={() => {
+                    setIsParametersOpen((previous) => !previous);
+                  }}
+                />
+                <ChatEditorLayoutTrigger
+                  isOpen={isEditorOpen}
+                  onToggle={() => {
+                    setIsEditorOpen((previous) => !previous);
+                  }}
+                />
+                <ChatConverterTrigger
+                  isOpen={isConverterOpen}
+                  onToggle={() => {
+                    setIsConverterOpen((previous) => !previous);
+                  }}
+                />
+                <ChatDetailsTrigger
+                  isOpen={isDetailsOpen}
+                  onToggle={() => {
+                    setIsDetailsOpen((previous) => !previous);
+                  }}
+                />
+              </div>
 
-          <Allotment.Pane
-            className='rs-right'
-            minSize={panelMinSizeStandard}
-            preferredSize={panelSizes.details}
-            priority={LayoutPriority.Low}
-            visible={isDetailsOpen}
-          >
-            <ChatDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
-          </Allotment.Pane>
-        </Allotment>
-      </SidebarOffset>
-    </div>
+              {/* Viewer - DockviewReact manages tabs, splits, and per-view overlays */}
+              <div
+                className={cn(
+                  'absolute inset-y-0 overflow-hidden border-y',
+                  isAnyLeftPanelOpen ? 'left-0' : 'left-2 rounded-l-md border-l',
+                  isAnyRightPanelOpen ? 'right-0' : 'right-2 rounded-r-md border-r',
+                )}
+              >
+                <ViewerDockview />
+              </div>
+
+              {/* Renders ProjectNotFound / FileManagerError / WorkspaceUnavailableRecovery
+                depending on which gate has failed. See Audit R8 for rationale. */}
+              <ProjectUnavailableOverlay />
+            </Allotment.Pane>
+
+            {/* Right panels - Low priority so they keep their preferred size */}
+            <Allotment.Pane
+              className='rs-right'
+              minSize={panelMinSizeStandard}
+              preferredSize={panelSizes.parameters}
+              priority={LayoutPriority.Low}
+              visible={isParametersOpen}
+            >
+              <ChatParameters isExpanded={isParametersOpen} setIsExpanded={setIsParametersOpen} />
+            </Allotment.Pane>
+
+            <Allotment.Pane
+              className='rs-right'
+              minSize={panelMinSizeEditor}
+              preferredSize={panelSizes.editor}
+              priority={LayoutPriority.Low}
+              visible={isEditorOpen}
+            >
+              <ChatEditorLayout isExpanded={isEditorOpen} setIsExpanded={setIsEditorOpen} />
+            </Allotment.Pane>
+
+            <Allotment.Pane
+              className='rs-right'
+              minSize={panelMinSizeStandard}
+              preferredSize={panelSizes.converter}
+              priority={LayoutPriority.Low}
+              visible={isConverterOpen}
+            >
+              <ChatConverter isExpanded={isConverterOpen} setIsExpanded={setIsConverterOpen} />
+            </Allotment.Pane>
+
+            <Allotment.Pane
+              className='rs-right'
+              minSize={panelMinSizeStandard}
+              preferredSize={panelSizes.details}
+              priority={LayoutPriority.Low}
+              visible={isDetailsOpen}
+            >
+              <ChatDetails isExpanded={isDetailsOpen} setIsExpanded={setIsDetailsOpen} />
+            </Allotment.Pane>
+          </Allotment>
+        </SidebarOffset>
+      </div>
+    </ChatInterfaceSessionGate>
   );
 });

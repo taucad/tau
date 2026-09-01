@@ -35,14 +35,6 @@ describe('ImportWorkerResponse types', () => {
     expect(response.files).toHaveLength(2);
   });
 
-  it('should accept valid writeComplete response', () => {
-    const response: ImportWorkerResponse = {
-      type: 'writeComplete',
-      fileCount: 42,
-    };
-    expect(response.type).toBe('writeComplete');
-  });
-
   it('should accept valid error response with phase', () => {
     const response: ImportWorkerResponse = {
       type: 'error',

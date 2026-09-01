@@ -9,6 +9,9 @@
 import * as THREE from 'three';
 import { calculateFovLightingCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
 
+/** Output buffer for camera world rotation — reused by every `applyLightingForCamera` call (live + screenshot). */
+const scratchCameraWorldQuaternionForLighting = new THREE.Quaternion();
+
 // ── Lighting constants ─────────────────────────────────────────────────────
 // Exported so that both the Lights component and the screenshot capture
 // system reference the same tuning values.
@@ -279,9 +282,8 @@ export function applyLightingForCamera({ scene, camera, headlamp, ambient, confi
   scene.environmentIntensity = config.environmentIntensity * compensation.envFactor * themeScale;
 
   // Camera-locked environment rotation
-  const quaternion = new THREE.Quaternion();
-  camera.getWorldQuaternion(quaternion);
-  const rotation = computeEnvironmentRotation(quaternion, config.upDirection);
+  camera.getWorldQuaternion(scratchCameraWorldQuaternionForLighting);
+  const rotation = computeEnvironmentRotation(scratchCameraWorldQuaternionForLighting, config.upDirection);
   scene.environmentRotation.copy(rotation);
 
   // Ambient intensity with FOV compensation + theme boost

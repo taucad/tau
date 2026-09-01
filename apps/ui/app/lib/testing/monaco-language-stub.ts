@@ -151,6 +151,18 @@ export function createMonacoTestStub(): MonacoTestStub {
       registerDefinitionProvider(): Monaco.IDisposable {
         return noopDisposable;
       },
+      registerReferenceProvider(): Monaco.IDisposable {
+        return noopDisposable;
+      },
+      registerImplementationProvider(): Monaco.IDisposable {
+        return noopDisposable;
+      },
+      registerTypeDefinitionProvider(): Monaco.IDisposable {
+        return noopDisposable;
+      },
+      registerLinkProvider(): Monaco.IDisposable {
+        return noopDisposable;
+      },
       registerCodeActionProvider(): Monaco.IDisposable {
         return noopDisposable;
       },

@@ -55,7 +55,7 @@ export function ChatMessageToolCreateFile({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={FilePlus} fallbackTitle='Failed to create file' />;
+      return <ChatToolError errorText={part.errorText} icon={FilePlus} noun='file creation' />;
     }
 
     case 'approval-requested':

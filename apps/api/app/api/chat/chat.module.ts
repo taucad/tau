@@ -8,6 +8,7 @@ import { ChatService } from '#api/chat/chat.service.js';
 import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { ChatRpcGateway } from '#api/chat/chat-rpc.gateway.js';
 import { CheckpointerService } from '#api/chat/checkpointer.service.js';
+import { StoreService } from '#api/chat/store.service.js';
 import { CompactionService } from '#api/chat/compaction.service.js';
 import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
 
@@ -16,12 +17,13 @@ import { TauRpcBackendFactory } from '#api/chat/tau-rpc-backend.js';
   controllers: [ChatController],
   providers: [
     CheckpointerService,
+    StoreService,
     ChatService,
     ChatRpcService,
     ChatRpcGateway,
     CompactionService,
     TauRpcBackendFactory,
   ],
-  exports: [ChatService, ChatRpcService],
+  exports: [ChatService, ChatRpcService, StoreService],
 })
 export class ChatModule {}

@@ -25,6 +25,7 @@ function parentDirectory(path: string): string {
  * @public
  */
 export class DirectIdbProvider extends AbstractFileSystemProvider {
+  /* eslint-disable @typescript-eslint/member-ordering -- `_renameDirectory` and the IDB flush helpers are intentionally co-located with the public methods that call them so the IDB-transaction lifecycle stays readable; relocating them would split a tightly-coupled triple. */
   /**
    * Backend identifier; always `'indexeddb'`.
    * @returns The literal string `'indexeddb'`.
@@ -262,13 +263,22 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * Move the file at `from` to `to` via copy + delete (IDB has no atomic rename).
+   * Move the file or directory at `from` to `to`. Files are moved via
+   * copy + delete (IDB has no atomic rename). Directories are walked and
+   * every contained file is re-keyed under the new prefix atomically
+   * within a single IDB transaction.
    *
    * @param from - Source absolute path.
    * @param to - Destination absolute path.
    */
   public async rename(from: string, to: string): Promise<void> {
     this._ensureOpen();
+
+    if (this._dirs.has(from) && !this._paths.has(from)) {
+      await this._renameDirectory(from, to);
+      return;
+    }
+
     if (!this._paths.has(from)) {
       throw this._enoent(from);
     }
@@ -288,6 +298,86 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     this._fileSizes.delete(from);
     if (size !== undefined) {
       this._fileSizes.set(to, size);
+    }
+  }
+
+  private async _renameDirectory(from: string, to: string): Promise<void> {
+    this._ensureOpen();
+
+    const sourcePrefix = `${from}/`;
+    const filePaths: string[] = [];
+    for (const path of this._paths) {
+      if (path.startsWith(sourcePrefix)) {
+        filePaths.push(path);
+      }
+    }
+
+    const directoriesToMove: string[] = [from];
+    for (const directory of this._dirs) {
+      if (directory.startsWith(sourcePrefix)) {
+        directoriesToMove.push(directory);
+      }
+    }
+
+    if (filePaths.length === 0) {
+      this._ensureParentDirs(to);
+      for (const directory of directoriesToMove) {
+        const newDirectory = to + directory.slice(from.length);
+        this._dirs.add(newDirectory);
+        this._dirs.delete(directory);
+        const mtime = this._mtimes.get(directory) ?? Date.now();
+        this._mtimes.delete(directory);
+        this._mtimes.set(newDirectory, mtime);
+      }
+      return;
+    }
+
+    const fileData = new Map<string, Uint8Array<ArrayBuffer>>();
+    for (const path of filePaths) {
+      // oxlint-disable-next-line no-await-in-loop -- Sequential reads required to assemble the directory subtree before the rewrite transaction
+      const data = await this._idbGet(path);
+      if (data !== undefined) {
+        fileData.set(path, data);
+      }
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = this._db!.transaction(storeName, 'readwrite', { durability: 'relaxed' });
+      const store = tx.objectStore(storeName);
+      for (const [oldPath, data] of fileData) {
+        const newPath = to + oldPath.slice(from.length);
+        store.delete(oldPath);
+        store.put(data, newPath);
+      }
+      tx.addEventListener('complete', () => {
+        resolve();
+      });
+      tx.addEventListener('error', () => {
+        reject(tx.error ?? new Error('Directory rename transaction failed'));
+      });
+    });
+
+    this._ensureParentDirs(to);
+    for (const oldPath of filePaths) {
+      const newPath = to + oldPath.slice(from.length);
+      this._paths.delete(oldPath);
+      this._paths.add(newPath);
+      const mtime = this._mtimes.get(oldPath) ?? Date.now();
+      this._mtimes.delete(oldPath);
+      this._mtimes.set(newPath, mtime);
+      const size = this._fileSizes.get(oldPath);
+      this._fileSizes.delete(oldPath);
+      if (size !== undefined) {
+        this._fileSizes.set(newPath, size);
+      }
+    }
+    for (const directory of directoriesToMove) {
+      const newDirectory = to + directory.slice(from.length);
+      this._dirs.add(newDirectory);
+      this._dirs.delete(directory);
+      const mtime = this._mtimes.get(directory) ?? Date.now();
+      this._mtimes.delete(directory);
+      this._mtimes.set(newDirectory, mtime);
     }
   }
 
@@ -564,4 +654,5 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       });
     });
   }
+  /* eslint-enable @typescript-eslint/member-ordering -- restore the default rule outside this class. */
 }

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/filesystem",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.0",
   "description": "Filesystem abstraction layer with watch-based reactivity for Tau (core / worker-facing; UI client facades live in @taucad/fs-client)",
   "type": "module",
   "private": false,
@@ -26,7 +26,8 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
-    "./backend": "./src/backend/index.ts"
+    "./backend": "./src/backend/index.ts",
+    "./bundled-types-mount": "./src/bundled-types-mount.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -50,6 +51,16 @@
           "types": "./dist/esm/backend/index.d.ts",
           "default": "./dist/esm/backend/index.js"
         }
+      },
+      "./bundled-types-mount": {
+        "import": {
+          "types": "./dist/esm/bundled-types-mount.d.ts",
+          "default": "./dist/esm/bundled-types-mount.js"
+        },
+        "require": {
+          "types": "./dist/cjs/bundled-types-mount.d.cts",
+          "default": "./dist/cjs/bundled-types-mount.cjs"
+        }
       }
     }
   },
@@ -57,12 +68,13 @@
     "#*": "./src/*"
   },
   "dependencies": {
+    "@taucad/events": "workspace:*",
     "@taucad/memory": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
     "jszip": "^3.10.1"
   },
   "devDependencies": {
-    "vitest": "catalog:"
+    "vitest": "4.1.5"
   }
 }

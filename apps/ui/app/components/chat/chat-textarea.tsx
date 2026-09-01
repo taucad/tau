@@ -11,14 +11,16 @@ import { ChatTextareaSkeleton } from '#components/chat/chat-textarea-skeleton.js
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChats } from '#hooks/use-chats.js';
-import { useChatActions } from '#hooks/use-chat.js';
+import { useDraftActions } from '#hooks/use-chat.js';
 import { useImageQuality } from '#hooks/use-image-quality.js';
 import { toast } from '#components/ui/sonner.js';
 import { orthographicViews, screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
 import type { ContextSuggestionItem } from '#components/chat/tiptap/suggestion-types.js';
 import { takeScreenshotGroup } from '#components/chat/tiptap/context-suggestion.utils.js';
 import { captureViewScreenshot } from '#components/chat/capture-view-screenshot.utils.js';
+import { buildScreenshotOverlayForPath, resolveScreenshotOverlay } from '#machines/resolve-screenshot-overlay.js';
 
 /**
  * Main chat textarea component that conditionally renders either the
@@ -74,7 +76,7 @@ export const ChatTextarea = memo(function ({
   const projectContext = useProject({ enableNoContext: true });
   const { treeService } = useFileManager();
   const { chats } = useChats(projectContext?.projectId ?? '');
-  const { setDraftText: setMainDraftText, setEditDraftText } = useChatActions();
+  const { setDraftText: setMainDraftText, setEditDraftText } = useDraftActions();
 
   const setDraftText = useCallback(
     (text: string) => {
@@ -200,6 +202,34 @@ export const ChatTextarea = memo(function ({
     [],
   );
 
+  /**
+   * Resolve the per-view CAD actor whose geometry unit corresponds to
+   * `entryFile`. Used to thread the screenshot overlay's file path + icon
+   * key through to the screenshot pipeline (see
+   * `docs/research/screenshot-overlay-watermark-architecture.md` Finding 3).
+   *
+   * Falls back to the main entry when omitted, mirroring the graphics-ref
+   * resolution above so chip + capture stay in lock-step.
+   */
+  const resolveCadRefForEntry = useCallback(
+    (entryFile: string | undefined): ActorRefFrom<typeof cadMachine> | undefined => {
+      const currentProjectContext = projectContextRef.current;
+      if (!currentProjectContext) {
+        return undefined;
+      }
+      const { geometryUnits, mainEntryFile: mainEntry } = currentProjectContext;
+      const target = entryFile ?? mainEntry;
+      if (target && geometryUnits.has(target)) {
+        return geometryUnits.get(target);
+      }
+      if (entryFile === undefined) {
+        return geometryUnits.values().next().value;
+      }
+      return undefined;
+    },
+    [],
+  );
+
   // Wire viewer-drop screenshots into the same active-actors set used by the
   // existing single-view + composite branches so unmount cleanup stays uniform.
   useEffect(() => {
@@ -209,10 +239,13 @@ export const ChatTextarea = memo(function ({
         toast.error('No graphics view available for screenshot');
         return;
       }
+      const overlay =
+        resolveScreenshotOverlay(resolveCadRefForEntry(entryFile)) ?? buildScreenshotOverlayForPath(entryFile);
       captureViewScreenshot({
         graphicsRef,
         quality: screenshotQualityRef.current,
         activeActors: activeScreenshotActorsRef.current,
+        overlay,
         onImage: (dataUrl) => {
           handleAddImageRef.current(dataUrl);
           toast.success('Added screenshot to chat');
@@ -222,7 +255,7 @@ export const ChatTextarea = memo(function ({
         },
       });
     };
-  }, [resolveGraphicsRefForEntry]);
+  }, [resolveGraphicsRefForEntry, resolveCadRefForEntry]);
 
   const handleScreenshotAction = useCallback(
     (item: ContextSuggestionItem) => {
@@ -231,15 +264,17 @@ export const ChatTextarea = memo(function ({
         return;
       }
 
-      const graphicsRef = resolveGraphicsRefForEntry(
-        screenshotAction.type === 'view' ? screenshotAction.entryFile : undefined,
-      );
+      const targetEntry = screenshotAction.type === 'view' ? screenshotAction.entryFile : undefined;
+      const graphicsRef = resolveGraphicsRefForEntry(targetEntry);
       if (!graphicsRef) {
         toast.error('No graphics view available for screenshot');
         return;
       }
 
       const quality = screenshotQualityRef.current;
+      const overlay =
+        resolveScreenshotOverlay(resolveCadRefForEntry(targetEntry)) ??
+        (targetEntry ? buildScreenshotOverlayForPath(targetEntry) : undefined);
 
       if (screenshotAction.type === 'composite') {
         const actor = createActor(screenshotRequestMachine, {
@@ -266,6 +301,7 @@ export const ChatTextarea = memo(function ({
             aspectRatio: 1,
             maxResolution: 800,
             zoomLevel: 1.2,
+            overlay,
             composite: {
               enabled: true,
               preferredRatio: { columns: 3, rows: 2 },
@@ -299,6 +335,7 @@ export const ChatTextarea = memo(function ({
         graphicsRef,
         quality,
         activeActors: activeScreenshotActorsRef.current,
+        overlay,
         onImage: (dataUrl) => {
           handleAddImageRef.current(dataUrl);
         },
@@ -307,7 +344,7 @@ export const ChatTextarea = memo(function ({
         },
       });
     },
-    [resolveGraphicsRefForEntry],
+    [resolveGraphicsRefForEntry, resolveCadRefForEntry],
   );
 
   // Mobile drag-drop chip insertion: append `@<path>` segments and lean on the

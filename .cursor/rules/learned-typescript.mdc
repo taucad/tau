@@ -1,0 +1,21 @@
+---
+description: Auto-curated learned facts and preferences for TypeScript conventions and JSDoc authoring
+globs:
+  - "**/*.ts"
+  - "**/*.tsx"
+alwaysApply: false
+---
+
+# Learned: typescript
+
+Auto-maintained by the `agents-memory-updater` subagent. New bullets are
+capped at 200 chars and 12 bullets per section. The existing entries below
+were harvested verbatim from `AGENTS.md` during the one-time context
+cleanup; they may exceed the 200-char cap.
+
+## Learned User Preferences
+
+- Avoid type assertion escape hatches (`as never`, `as unknown as`, unnecessary `as const` on returns); fix underlying type issues instead; use `z.input` (not `z.infer`) for consumer-facing Zod schema types — preserves `.default()` optionality so callers see which fields are truly required; JSDoc codeblocks use explicit language tags (`typescript`/`javascript`, not `ts`/`js`); `@public` tag gates compile-checking; `@example` tags require `<caption>` per JSDoc spec (non-empty, no redundant "example" word); examples must reflect actual consumer usage patterns, not synthetic isolated calls — `declare const ...` stubs are banned in MDX docs (custom ESLint rule scoped to docs only) and `// @ts-nocheck` is never an acceptable escape hatch for consumer-facing examples (rewrite the example so it typechecks against real exported APIs, e.g. `presets.all` client, instead of suppressing); public JSDoc required for `libs/` and `packages/` only — apps are exempt
+- Never introduce a second TS path-alias scheme alongside an existing one (e.g. adding `@*` when `#*` already exists is damaging) — consolidate to one alias and migrate every consumer rather than running two in parallel.
+- Fix import/module resolution issues at the source file or package boundary, never by patching `tsconfig.json` paths/options to paper over the underlying mistake.
+

@@ -21,5 +21,4 @@ export const skillMetadataSchema = z.object({
 export const contextPayloadSchema = z.object({
   skills: z.array(skillMetadataSchema).optional(),
   memory: z.record(z.string(), z.string()).optional(),
-  gitStatus: z.string().optional(),
 });

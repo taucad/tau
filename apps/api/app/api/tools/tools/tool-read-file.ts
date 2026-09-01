@@ -1,10 +1,22 @@
 import type { ToolRuntime } from '@langchain/core/tools';
 import { tool } from '@langchain/core/tools';
-import { readFileInputSchema } from '@taucad/chat';
+import type { BaseStore } from '@langchain/langgraph';
+import { readFileInputSchema, rpcClientErrorCode } from '@taucad/chat';
 import { assertRpcSuccess } from '@taucad/chat/utils';
 import type { ChatTool, ReadFileInput, ReadFileOutput } from '@taucad/chat';
-import { rpcName, toolName } from '@taucad/chat/constants';
+import { rpcName, toolName, fileUnchangedMarker } from '@taucad/chat/constants';
 import type { ChatRpcConfigurable } from '#api/tools/tool.types.js';
+import { buildReadFingerprint } from '#api/tools/tools/read-file-fingerprint.js';
+import { recentReadsRootNamespace } from '#api/chat/recent-reads-namespace.js';
+
+/**
+ * `cat -n` gutter for LLM display only (mirrors claude-code's FileReadTool).
+ * RPC `readFile` returns raw bytes; the chat tool adds this prefix.
+ */
+const formatReadFileOutputForDisplay = (rawContent: string, startLine: number): string => {
+  const lines = rawContent.split('\n');
+  return lines.map((line, index) => `   ${startLine + index}\t${line}`).join('\n');
+};
 
 export const readFileToolDefinition = {
   name: toolName.readFile,
@@ -12,7 +24,7 @@ export const readFileToolDefinition = {
 
 You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters.
 
-Lines in the output are numbered starting at 1, using the format: LINE_NUMBER|LINE_CONTENT.
+Lines in the output are prefixed with a cat -n gutter ("   <line>\\t<content>"). Files >2000 lines require explicit \`offset\` and \`limit\`.
 
 Use this tool when you need to:
 - Examine the contents of a specific file
@@ -21,15 +33,22 @@ Use this tool when you need to:
   schema: readFileInputSchema,
 } as const;
 
-/**
- * Add line numbers to raw content for LLM display.
- * Format: "1|content" (no padding to save tokens).
- */
-function addLineNumbers(content: string, startLine: number): string {
-  const lines = content.split('\n');
-  return lines.map((line, index) => `${startLine + index}|${line}`).join('\n');
-}
+type DedupValue = { priorToolCallId: string; modifiedAt: string };
 
+/**
+ * Returns a plain {@link ReadFileOutput} so LangGraph's `ToolNode` auto-wraps
+ * it into a `ToolMessage` with the correct stream semantics — no `Command`
+ * indirection, no manual `ToolMessage` construction. The dedup pointer is
+ * persisted to the LangGraph auxiliary store
+ * (see {@link import('#api/chat/redis-read-dedup-store.js').RedisReadDedupStore})
+ * as a side effect, keyed by `(recent_reads, chatId, fingerprint)`.
+ *
+ * LangChain core's `ToolRuntime.store` is typed as `BaseStore<string, unknown>`
+ * (the legacy KV interface), while LangGraph's checkpoint+store layer threads
+ * its own `BaseStore` (namespaced) onto the runtime — the single cast at the
+ * call site bridges the two type ecosystems without leaking the mismatch into
+ * the dedup helpers.
+ */
 export const readFileTool: ChatTool<
   typeof readFileInputSchema,
   ReadFileInput,
@@ -46,25 +65,53 @@ export const readFileTool: ChatTool<
     args,
   });
 
-  // Assert RPC success - throws ToolError for any infrastructure or client error
   assertRpcSuccess(result, {
     toolName: toolName.readFile,
     toolCallId,
     clientErrorMessage(error) {
-      if (error.errorCode === 'FILE_NOT_FOUND') {
-        return `File not found`;
+      if (error.errorCode === rpcClientErrorCode.fileNotFound) {
+        return `File not found: ${args.targetFile}`;
       }
 
-      return `Cannot read file`;
+      return `Cannot read file "${args.targetFile}"`;
     },
   });
 
-  // Add line numbers to the raw content for LLM display
-  const startLine = result.startLine ?? 1;
-  const contentWithLineNumbers = addLineNumbers(result.content, startLine);
+  const store = (runtime.store ?? undefined) as BaseStore | undefined;
+  const namespace = [...recentReadsRootNamespace, chatId];
+  const fingerprint = buildReadFingerprint({
+    targetFile: args.targetFile,
+    offset: args.offset,
+    limit: args.limit,
+  });
 
-  return {
-    content: contentWithLineNumbers,
+  if (store && result.modifiedAt) {
+    const prior = await store.get(namespace, fingerprint);
+    if (prior && (prior.value as DedupValue).modifiedAt === result.modifiedAt) {
+      return {
+        content: fileUnchangedMarker.build((prior.value as DedupValue).priorToolCallId),
+        totalLines: result.totalLines,
+        modifiedAt: result.modifiedAt,
+      };
+    }
+  }
+
+  const displayStartLine = result.startLine ?? args.offset ?? 1;
+  const output: ReadFileOutput = {
+    content: formatReadFileOutputForDisplay(result.content, displayStartLine),
     totalLines: result.totalLines,
+    ...(result.modifiedAt !== undefined && { modifiedAt: result.modifiedAt }),
   };
-}, readFileToolDefinition);
+
+  if (store && result.modifiedAt) {
+    const next: DedupValue = { priorToolCallId: toolCallId, modifiedAt: result.modifiedAt };
+    await store.put(namespace, fingerprint, next);
+  }
+
+  return output;
+}, readFileToolDefinition) as unknown as ChatTool<
+  typeof readFileInputSchema,
+  ReadFileInput,
+  ReadFileOutput,
+  typeof toolName.readFile
+>;

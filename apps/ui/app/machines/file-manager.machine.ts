@@ -2,11 +2,7 @@ import { assign, assertEvent, setup, enqueueActions } from 'xstate';
 import type { FileEntry, FileSystemBackend } from '@taucad/types';
 import { safeDispose } from '@taucad/utils/dispose';
 import FileManagerWorker from '#machines/file-manager.worker.js?worker';
-import {
-  getStoredDirectoryHandle,
-  getProjectFileSystemConfig,
-  checkHandlePermission,
-} from '#filesystem/handle-store.js';
+import { getProjectFileSystemConfig, getWorkspace, checkHandlePermission } from '#filesystem/handle-store.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { normalizePath } from '@taucad/utils/path';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -16,6 +12,7 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { createDomVisibilityProvider } from '@taucad/fs-client/visibility-provider';
+import { bundledTypesWorkspaceRootSegment } from '#lib/bundled-types-tree.constants.js';
 import type { FileManagerProxy, FileManagerProtocol } from '#machines/file-manager.machine.types.js';
 import {
   formatWorkerError,
@@ -30,6 +27,20 @@ const fileCacheMaxSingleFileBytes = 1024 * 1024;
 
 const filePoolBytes = 50 * 1024 * 1024;
 
+/**
+ * Why webaccess can't be initialized when the FM machine enters the
+ * `webAccessUnavailable` recovery state. Drives the copy/recovery surface
+ * rendered by `ProjectUnavailableOverlay` (R8) and the legacy
+ * `chat-error-service-unavailable` component.
+ *
+ * - `missing` — the bound workspace doesn't exist in the handle store (the
+ *   user deleted/forgot it, or the project was created on another device).
+ * - `permission` — the workspace's handle is intact but the browser
+ *   revoked read/write permission. A user-gesture `Grant Access` flow
+ *   recovers without a re-pick.
+ */
+export type WorkspaceUnavailableReason = 'missing' | 'permission';
+
 type FileManagerContext = {
   worker: Worker | undefined;
   proxy: (FileManagerProxy & { listen?: (event: string, handler: (data: unknown) => void) => () => void }) | undefined;
@@ -42,7 +53,32 @@ type FileManagerContext = {
   rootDirectory: string;
   shouldInitializeOnStart: boolean;
   backendType: FileSystemBackend;
-  webAccessNeedsPermission: boolean;
+  /**
+   * Why the current webaccess attempt failed, or `undefined` when
+   * webaccess is healthy / the backend isn't webaccess. The dedicated
+   * `webAccessUnavailable` state is the source of truth for the recovery
+   * UI; this context field exposes the reason to `useFileManager`
+   * consumers without forcing them to inspect the state value.
+   */
+  unavailableReason: WorkspaceUnavailableReason | undefined;
+  /**
+   * `workspaceId` resolved by the most recent `initializeServicesActor`
+   * run for the current `projectId`. **Per-init output only** — this is
+   * NEVER mutated by event handlers and is cleared by
+   * `updateRootAndReset` on every project transition. The persistent
+   * `ProjectFileSystemConfig.workspaceId` is the authority for the
+   * project ↔ workspace binding; this field is a projection of it
+   * surfaced to UI consumers (chat details, recovery overlay). See
+   * `docs/policy/filesystem-policy.md` Rule 13b.
+   */
+  activeWorkspaceId: string | undefined;
+  /**
+   * Human label for `activeWorkspaceId`, derived from the workspace
+   * store at init time so consumers read it straight from the FM
+   * context rather than triggering a stale IDB read. Same lifecycle as
+   * `activeWorkspaceId`: per-init output, cleared on every `setRoot`.
+   */
+  activeWorkspaceName: string | undefined;
   projectId: string | undefined;
   sharedWorker: Worker | undefined;
 };
@@ -57,14 +93,32 @@ type WorkerConnectedEvent = {
   filePoolBuffer: SharedArrayBuffer | undefined;
 };
 
+/**
+ * Emitted by `initializeServicesActor` on a successful (or non-webaccess)
+ * init. Carries the resolved backend, workspace identity (when
+ * applicable), and the freshly-built fs-client services.
+ */
 type WorkerInitializedEvent = {
   type: 'workerInitialized';
   configuredBackend: FileSystemBackend;
-  webAccessNeedsPermission: boolean;
+  activeWorkspaceId: string | undefined;
+  activeWorkspaceName: string | undefined;
   initialEntries: FileEntry[];
   contentService: FileContentService;
   treeService: FileTreeService;
   workerChangeChannel: WorkerChangeChannel;
+};
+
+/**
+ * Emitted by `initializeServicesActor` when a webaccess project can't be
+ * brought online. Routes the FM machine into the `webAccessUnavailable`
+ * recovery state where the `ProjectUnavailableOverlay` (R8) takes over.
+ */
+type WebAccessUnavailableEvent = {
+  type: 'webAccessUnavailable';
+  reason: WorkspaceUnavailableReason;
+  activeWorkspaceId: string | undefined;
+  activeWorkspaceName: string | undefined;
 };
 
 const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileManagerContext }>(
@@ -183,112 +237,161 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
   },
 );
 
-const initializeServicesActor = fromSafeAsync<WorkerInitializedEvent, { context: FileManagerContext }>(
-  async ({ input, signal }) => {
-    const { context } = input;
-    const proxy = context.proxy!;
-    const initT0 = performance.now();
-    console.debug(`[FileManager] initializeServicesActor: start +${initT0.toFixed(0)}ms`);
+type ProjectConfigLookup = Awaited<ReturnType<typeof getProjectFileSystemConfig>>;
 
-    let backend = context.backendType;
+const initializeServicesActor = fromSafeAsync<
+  WorkerInitializedEvent | WebAccessUnavailableEvent,
+  { context: FileManagerContext }
+>(async ({ input, signal }) => {
+  const { context } = input;
+  const proxy = context.proxy!;
+  const initT0 = performance.now();
+  console.debug(`[FileManager] initializeServicesActor: start +${initT0.toFixed(0)}ms`);
+
+  let backend = context.backendType;
+  let projectConfig: ProjectConfigLookup;
+  if (context.projectId) {
+    signal.throwIfAborted();
+    projectConfig = await getProjectFileSystemConfig(context.projectId);
+    backend = projectConfig?.backend ?? 'indexeddb';
+  }
+
+  let activeWorkspaceId: string | undefined;
+  let activeWorkspaceName: string | undefined;
+
+  if (backend === 'webaccess') {
+    // The persistent `ProjectFileSystemConfig.workspaceId` is the only
+    // authority for which workspace this project is bound to. The FM
+    // machine never carries that identity as ambient context — callers
+    // that want to re-bind must write the persistent record first (see
+    // `bindProjectToWorkspace` on `useFileManager`) and then dispatch
+    // `reloadWorkspace`. Missing/stale bindings surface
+    // `WebAccessUnavailableEvent` so the recovery overlay can prompt
+    // the user (Rule 13b in `docs/policy/filesystem-policy.md`).
+    const requestedWorkspaceId = projectConfig?.backend === 'webaccess' ? projectConfig.workspaceId : undefined;
+
+    const entry = requestedWorkspaceId ? await getWorkspace(requestedWorkspaceId) : undefined;
+    if (!entry) {
+      return {
+        type: 'webAccessUnavailable',
+        reason: 'missing',
+        activeWorkspaceId: requestedWorkspaceId,
+        activeWorkspaceName: undefined,
+      };
+    }
+
+    activeWorkspaceId = entry.workspace.workspaceId;
+    activeWorkspaceName = entry.workspace.name;
+    const permission = await checkHandlePermission(entry.handle);
+    if (permission !== 'granted') {
+      return {
+        type: 'webAccessUnavailable',
+        reason: 'permission',
+        activeWorkspaceId,
+        activeWorkspaceName,
+      };
+    }
+
     if (context.projectId) {
-      signal.throwIfAborted();
-      const projectBackend = await getProjectFileSystemConfig(context.projectId);
-      backend = projectBackend ?? 'indexeddb';
-    }
-
-    let webAccessNeedsPermission = false;
-
-    if (backend === 'webaccess') {
-      const workspaceHandle = await getStoredDirectoryHandle();
-      if (workspaceHandle) {
-        const permission = await checkHandlePermission(workspaceHandle);
-        if (permission === 'granted') {
-          proxy.setDirectoryHandle(workspaceHandle);
-          if (context.projectId) {
-            const projectPrefix = `/projects/${context.projectId}`;
-            await proxy.mount(projectPrefix, 'webaccess', { preservePath: true });
-          }
-        } else {
-          webAccessNeedsPermission = true;
-          backend = 'indexeddb';
-        }
-      } else {
-        webAccessNeedsPermission = true;
-        backend = 'indexeddb';
-      }
-    }
-
-    if (backend !== 'webaccess' && context.projectId) {
       const projectPrefix = `/projects/${context.projectId}`;
-      await proxy.mount(projectPrefix, backend, { preservePath: true });
+      // Single discriminated mount call — the directory handle and stable
+      // workspace id are passed atomically (Audit R2). The worker never
+      // observes an "active handle" between two RPCs.
+      await proxy.mount(projectPrefix, {
+        backend: 'webaccess',
+        directoryHandle: entry.handle,
+        workspaceId: entry.workspace.workspaceId,
+        preservePath: true,
+      });
     }
+  } else if (context.projectId) {
+    const projectPrefix = `/projects/${context.projectId}`;
+    await proxy.mount(projectPrefix, { backend, preservePath: true });
+  }
 
-    let initialEntries: FileEntry[] = [];
-    try {
-      const rootPath = context.rootDirectory;
-      const absolutePath = normalizePath(rootPath);
-      const rootNodes = await proxy.readDirectory(absolutePath);
-      for (const node of rootNodes) {
-        initialEntries.push({
-          path: node.name,
-          name: node.name,
-          type: node.children === undefined ? 'file' : 'dir',
-          size: node.size,
-          mtimeMs: node.mtimeMs,
-          isLoaded: false,
-        });
-      }
-    } catch (error) {
-      console.debug('[FileManager] Initial tree hydration failed (empty filesystem?):', error);
-      initialEntries = [];
+  let initialEntries: FileEntry[] = [];
+  try {
+    const rootPath = context.rootDirectory;
+    const absolutePath = normalizePath(rootPath);
+    const rootNodes = await proxy.readDirectory(absolutePath);
+    for (const node of rootNodes) {
+      initialEntries.push({
+        path: node.name,
+        name: node.name,
+        type: node.children === undefined ? 'file' : 'dir',
+        size: node.size,
+        mtimeMs: node.mtimeMs,
+        isLoaded: false,
+      });
     }
+  } catch (error) {
+    console.debug('[FileManager] Initial tree hydration failed (empty filesystem?):', error);
+    initialEntries = [];
+  }
 
-    const filePool = context.filePoolBuffer ? new SharedPool(context.filePoolBuffer) : undefined;
+  const filePool = context.filePoolBuffer ? new SharedPool(context.filePoolBuffer) : undefined;
 
-    const paths = new WorkspacePathResolver(context.rootDirectory);
-    const refreshGuard = new RefreshGenerationGuard();
-    const workerChangeChannel = new WorkerChangeChannel({
-      transport: { listen: proxy.listen! },
-      paths,
-    });
-    const visibilityProvider = createDomVisibilityProvider();
+  const paths = new WorkspacePathResolver(context.rootDirectory);
+  const refreshGuard = new RefreshGenerationGuard();
+  const workerChangeChannel = new WorkerChangeChannel({
+    transport: { listen: proxy.listen! },
+    paths,
+  });
+  const visibilityProvider = createDomVisibilityProvider();
 
-    const contentService = new FileContentService({
-      proxy,
-      paths,
-      channel: workerChangeChannel,
-      refreshGuard,
-      cacheOptions: {
-        maxEntries: fileCacheMaxEntries,
-        maxTotalBytes: fileCacheMaxTotalBytes,
-        maxSingleFileBytes: fileCacheMaxSingleFileBytes,
-      },
-      filePool,
-    });
+  const contentService = new FileContentService({
+    proxy,
+    paths,
+    channel: workerChangeChannel,
+    refreshGuard,
+    cacheOptions: {
+      maxEntries: fileCacheMaxEntries,
+      maxTotalBytes: fileCacheMaxTotalBytes,
+      maxSingleFileBytes: fileCacheMaxSingleFileBytes,
+    },
+    filePool,
+  });
 
-    const treeService = new FileTreeService({
-      proxy,
-      paths,
-      channel: workerChangeChannel,
-      visibility: visibilityProvider,
-      initialEntries,
-    });
+  const treeService = new FileTreeService({
+    proxy,
+    paths,
+    channel: workerChangeChannel,
+    visibility: visibilityProvider,
+    initialEntries,
+  });
 
-    treeService.connectToContentService(contentService);
+  treeService.connectToContentService(contentService);
 
-    console.debug('[FileManager] initializeServicesActor: success');
-    return {
-      type: 'workerInitialized',
-      configuredBackend: backend,
-      webAccessNeedsPermission,
-      initialEntries,
-      contentService,
-      treeService,
-      workerChangeChannel,
-    };
-  },
-);
+  // Eagerly load `/node_modules` + each package directory through the regular
+  // treeService so the file tree renders the bundled-types subtree without
+  // user interaction (cmd+click was the smoking gun before R1). The mount is
+  // populated by the FM worker before `workerReady`, so these listings always
+  // see the full set of kernel typings.
+  try {
+    const rootEntries = await treeService.listDirectory(bundledTypesWorkspaceRootSegment, { signal });
+    await Promise.all(
+      rootEntries
+        .filter((entry) => entry.isFolder)
+        .map(async (entry) =>
+          treeService.listDirectory(`${bundledTypesWorkspaceRootSegment}/${entry.name}`, { signal }),
+        ),
+    );
+  } catch (error) {
+    console.debug('[FileManager] eager node_modules listing failed:', error);
+  }
+
+  console.debug('[FileManager] initializeServicesActor: success');
+  return {
+    type: 'workerInitialized',
+    configuredBackend: backend,
+    activeWorkspaceId,
+    activeWorkspaceName,
+    initialEntries,
+    contentService,
+    treeService,
+    workerChangeChannel,
+  };
+});
 
 const fileManagerActors = {
   connectWorkerActor,
@@ -300,9 +403,25 @@ const fileManagerActors = {
 type FileManagerEventLifecycle =
   | { type: 'initialize' }
   | { type: 'setRoot'; path: string; projectId?: string }
-  | { type: 'setBackendType'; backendType: FileSystemBackend };
+  | { type: 'setBackendType'; backendType: FileSystemBackend }
+  /**
+   * Re-run `initializeServicesActor` against the current `projectId`. The
+   * actor reads `ProjectFileSystemConfig` from IDB on every init, so the
+   * caller writes the new persistent binding *before* dispatching this
+   * event. No payload: the machine never carries workspace identity as
+   * ambient state — it always projects from the persistent record.
+   *
+   * Emitted by `bindProjectToWorkspace` (the binding-transaction helper on
+   * `useFileManager`) after `setProjectFileSystemConfig` resolves. See
+   * `docs/policy/filesystem-policy.md` Rule 13b.
+   */
+  | { type: 'reloadWorkspace' };
 
-type FileManagerEvent = FileManagerEventLifecycle | WorkerConnectedEvent | WorkerInitializedEvent;
+type FileManagerEvent =
+  | FileManagerEventLifecycle
+  | WorkerConnectedEvent
+  | WorkerInitializedEvent
+  | WebAccessUnavailableEvent;
 
 type FileManagerInput = {
   rootDirectory: string;
@@ -377,6 +496,13 @@ export const fileManagerMachine = setup({
         return event.projectId;
       },
       error: undefined,
+      // Workspace identity is a per-init *output* of `initializeServicesActor`;
+      // it must NEVER survive a project transition. Clearing here closes the
+      // class of cross-project corruption bugs (see
+      // `docs/research/fm-workspace-binding-scope.md` Findings 1 & 3).
+      activeWorkspaceId: undefined,
+      activeWorkspaceName: undefined,
+      unavailableReason: undefined,
     }),
 
     updateWorkerFromConnect: assign({
@@ -403,10 +529,15 @@ export const fileManagerMachine = setup({
         assertEvent(event, 'workerInitialized');
         return event.configuredBackend;
       },
-      webAccessNeedsPermission({ event }) {
+      activeWorkspaceId({ event }) {
         assertEvent(event, 'workerInitialized');
-        return event.webAccessNeedsPermission;
+        return event.activeWorkspaceId;
       },
+      activeWorkspaceName({ event }) {
+        assertEvent(event, 'workerInitialized');
+        return event.activeWorkspaceName;
+      },
+      unavailableReason: undefined,
       contentService({ event }) {
         assertEvent(event, 'workerInitialized');
         return event.contentService;
@@ -418,6 +549,22 @@ export const fileManagerMachine = setup({
       workerChangeChannel({ event }) {
         assertEvent(event, 'workerInitialized');
         return event.workerChangeChannel;
+      },
+    }),
+
+    recordWebAccessUnavailable: assign({
+      backendType: 'webaccess',
+      unavailableReason({ event }) {
+        assertEvent(event, 'webAccessUnavailable');
+        return event.reason;
+      },
+      activeWorkspaceId({ event }) {
+        assertEvent(event, 'webAccessUnavailable');
+        return event.activeWorkspaceId;
+      },
+      activeWorkspaceName({ event }) {
+        assertEvent(event, 'webAccessUnavailable');
+        return event.activeWorkspaceName;
       },
     }),
 
@@ -437,11 +584,24 @@ export const fileManagerMachine = setup({
     stopPolling({ context }) {
       context.treeService?.stopChangeDetection();
     },
+
+    unmountProjectMount({ context }) {
+      if (context.projectId && context.proxy) {
+        const projectPrefix = `/projects/${context.projectId}`;
+        // Fire-and-forget: the worker side is synchronous-ish (mount table
+        // ops) and `reloadWorkspace` is followed immediately by a fresh
+        // `initializeServicesActor` run that will re-mount.
+        context.proxy.unmount(projectPrefix);
+      }
+    },
   },
   guards: {
     isRootChanged({ context, event }) {
       assertEvent(event, 'setRoot');
       return event.path !== context.rootDirectory || event.projectId !== context.projectId;
+    },
+    isWebAccessUnavailable({ context }) {
+      return context.unavailableReason !== undefined;
     },
   },
 }).createMachine({
@@ -464,7 +624,9 @@ export const fileManagerMachine = setup({
     rootDirectory: input.rootDirectory,
     shouldInitializeOnStart: input.shouldInitializeOnStart ?? true,
     backendType: input.initialBackend ?? 'indexeddb',
-    webAccessNeedsPermission: false,
+    unavailableReason: undefined,
+    activeWorkspaceId: undefined,
+    activeWorkspaceName: undefined,
     projectId: input.projectId,
     sharedWorker: input.sharedWorker,
   }),
@@ -512,13 +674,23 @@ export const fileManagerMachine = setup({
         workerInitialized: {
           actions: ['updateBackendFromInit'],
         },
+        webAccessUnavailable: {
+          actions: ['recordWebAccessUnavailable'],
+        },
       },
       invoke: {
         src: 'initializeServicesActor',
         input({ context }) {
           return { context };
         },
-        onDone: 'ready',
+        onDone: [
+          // The actor returns either `workerInitialized` (success) or
+          // `webAccessUnavailable` (recoverable). XState fires the matching
+          // assignment action above before `onDone`, so we route by reading
+          // the freshly-stored `unavailableReason`.
+          { guard: 'isWebAccessUnavailable', target: 'webAccessUnavailable' },
+          { target: 'ready' },
+        ],
         onError: {
           target: 'error',
           actions: ['setError'],
@@ -539,6 +711,38 @@ export const fileManagerMachine = setup({
         setBackendType: {
           actions: ['updateBackendType'],
         },
+
+        reloadWorkspace: {
+          target: 'initializingServices',
+          // Unmount the existing project mount before re-initializing so the
+          // worker doesn't briefly hold both the old and new webaccess
+          // providers (R11 / Finding 9). Falls through cleanly when the
+          // mount didn't exist (e.g. recovery branch).
+          actions: ['stopPolling', 'unmountProjectMount', 'clearError'],
+        },
+      },
+    },
+
+    /**
+     * Recoverable terminal state entered when a webaccess project can't
+     * resolve its workspace handle (missing entry or revoked permission).
+     * The `ProjectUnavailableOverlay` (R8) renders inside the editor
+     * shell, and the user recovers by either granting permission on the
+     * existing handle or picking a different workspace — both flows
+     * call `bindProjectToWorkspace` which writes the persistent record
+     * and dispatches `reloadWorkspace`.
+     */
+    webAccessUnavailable: {
+      on: {
+        setRoot: {
+          target: 'connectingWorker',
+          guard: 'isRootChanged',
+          actions: ['stopPolling', 'destroyWorkerAndServices', 'updateRootAndReset'],
+        },
+        reloadWorkspace: {
+          target: 'initializingServices',
+          actions: ['unmountProjectMount', 'clearError'],
+        },
       },
     },
 
@@ -553,6 +757,10 @@ export const fileManagerMachine = setup({
         },
         initialize: {
           target: 'connectingWorker',
+        },
+        reloadWorkspace: {
+          target: 'connectingWorker',
+          actions: ['clearError'],
         },
       },
     },

@@ -13,6 +13,7 @@
  */
 
 import type { FileExtension, GeometryFile, ExportFile, LogEntry } from '@taucad/types';
+import { Topic } from '@taucad/events';
 import type {
   HashedGeometryResult,
   GetParametersResult,
@@ -429,15 +430,19 @@ export type RuntimeClientOptions<
 // oxlint-enable @typescript-eslint/no-explicit-any
 
 type EventHandlers = {
-  log: Set<(entry: LogEntry) => void>;
-  progress: Set<(phase: RenderPhase, detail?: Record<string, unknown>) => void>;
-  telemetry: Set<(entries: TelemetryEntry[]) => void>;
-  parametersResolved: Set<(result: GetParametersResult) => void>;
-  geometry: Set<(result: HashedGeometryResult) => void>;
-  state: Set<(state: WorkerState, detail?: string) => void>;
-  error: Set<(issues: KernelIssue[]) => void>;
-  capabilities: Set<(manifest: CapabilitiesManifest) => void>;
-  activeKernelChanged: Set<(kernelId: string | undefined) => void>;
+  log: Topic<LogEntry>;
+  progress: Topic<{ phase: RenderPhase; detail?: Record<string, unknown> }>;
+  telemetry: Topic<TelemetryEntry[]>;
+  parametersResolved: Topic<GetParametersResult>;
+  geometry: Topic<HashedGeometryResult>;
+  state: Topic<{ state: WorkerState; detail?: string }>;
+  error: Topic<KernelIssue[]>;
+  capabilities: Topic<CapabilitiesManifest>;
+  activeKernelChanged: Topic<string | undefined>;
+};
+
+type RuntimeSubscribeOptions = {
+  readonly signal?: AbortSignal;
 };
 
 /**
@@ -657,15 +662,35 @@ export type RuntimeClient<
    * @param handler - Event handler
    * @returns Unsubscribe function
    */
-  on(event: 'geometry', handler: (result: HashedGeometryResult) => void): () => void;
-  on(event: 'state', handler: (state: WorkerState, detail?: string) => void): () => void;
-  on(event: 'log', handler: (entry: LogEntry) => void): () => void;
-  on(event: 'progress', handler: (phase: RenderPhase, detail?: Record<string, unknown>) => void): () => void;
-  on(event: 'telemetry', handler: (entries: TelemetryEntry[]) => void): () => void;
-  on(event: 'parametersResolved', handler: (result: GetParametersResult) => void): () => void;
-  on(event: 'error', handler: (issues: KernelIssue[]) => void): () => void;
-  on(event: 'capabilities', handler: (manifest: CapabilitiesManifest<Kernels, Transcoders>) => void): () => void;
-  on(event: 'activeKernelChanged', handler: (kernelId: CollectKernelIds<Kernels> | undefined) => void): () => void;
+  on(event: 'geometry', handler: (result: HashedGeometryResult) => void, options?: RuntimeSubscribeOptions): () => void;
+  on(
+    event: 'state',
+    handler: (state: WorkerState, detail?: string) => void,
+    options?: RuntimeSubscribeOptions,
+  ): () => void;
+  on(event: 'log', handler: (entry: LogEntry) => void, options?: RuntimeSubscribeOptions): () => void;
+  on(
+    event: 'progress',
+    handler: (phase: RenderPhase, detail?: Record<string, unknown>) => void,
+    options?: RuntimeSubscribeOptions,
+  ): () => void;
+  on(event: 'telemetry', handler: (entries: TelemetryEntry[]) => void, options?: RuntimeSubscribeOptions): () => void;
+  on(
+    event: 'parametersResolved',
+    handler: (result: GetParametersResult) => void,
+    options?: RuntimeSubscribeOptions,
+  ): () => void;
+  on(event: 'error', handler: (issues: KernelIssue[]) => void, options?: RuntimeSubscribeOptions): () => void;
+  on(
+    event: 'capabilities',
+    handler: (manifest: CapabilitiesManifest<Kernels, Transcoders>) => void,
+    options?: RuntimeSubscribeOptions,
+  ): () => void;
+  on(
+    event: 'activeKernelChanged',
+    handler: (kernelId: CollectKernelIds<Kernels> | undefined) => void,
+    options?: RuntimeSubscribeOptions,
+  ): () => void;
 
   /**
    * Terminate the worker and clean up all resources.
@@ -837,6 +862,15 @@ export function createRuntimeClient(options: RuntimeClientOptions): RuntimeClien
   };
   let pendingRender: PendingRender | undefined;
   let hasSettledRender = false;
+  /**
+   * Per-shape hash list of the last result emitted to the `geometry`
+   * Topic. Drives redundant-emission suppression for UI subscribers
+   * WITHOUT affecting render settlement — settlement happens in the
+   * `onGeometry` callback before {@link emitGeometry} is consulted, so a
+   * repeated identical render still settles its awaiting Promise even
+   * when the byte-identical geometry is suppressed for UI consumers.
+   */
+  let lastEmittedGeometryHashKey: string | undefined;
 
   /**
    * Tracks an in-flight `connect()` so `terminate()` can reject it on the next
@@ -922,15 +956,15 @@ export function createRuntimeClient(options: RuntimeClientOptions): RuntimeClien
   }
 
   const handlers: EventHandlers = {
-    log: new Set(),
-    progress: new Set(),
-    telemetry: new Set(),
-    parametersResolved: new Set(),
-    geometry: new Set(),
-    state: new Set(),
-    error: new Set(),
-    capabilities: new Set(),
-    activeKernelChanged: new Set(),
+    log: new Topic<LogEntry>({ name: 'RuntimeClient.log' }),
+    progress: new Topic<{ phase: RenderPhase; detail?: Record<string, unknown> }>({ name: 'RuntimeClient.progress' }),
+    telemetry: new Topic<TelemetryEntry[]>({ name: 'RuntimeClient.telemetry' }),
+    parametersResolved: new Topic<GetParametersResult>({ name: 'RuntimeClient.parametersResolved' }),
+    geometry: new Topic<HashedGeometryResult>({ name: 'RuntimeClient.geometry' }),
+    state: new Topic<{ state: WorkerState; detail?: string }>({ name: 'RuntimeClient.state' }),
+    error: new Topic<KernelIssue[]>({ name: 'RuntimeClient.error' }),
+    capabilities: new Topic<CapabilitiesManifest>({ name: 'RuntimeClient.capabilities' }),
+    activeKernelChanged: new Topic<string | undefined>({ name: 'RuntimeClient.activeKernelChanged' }),
   };
 
   async function ensureConnected(): Promise<RuntimeWorkerClient> {
@@ -946,20 +980,13 @@ export function createRuntimeClient(options: RuntimeClientOptions): RuntimeClien
     workerClient = new RuntimeWorkerClient({ transport });
 
     workerClient.onLog((entry) => {
-      for (const handler of handlers.log) {
-        handler(entry);
-      }
+      handlers.log.emit(entry);
     });
     workerClient.onTelemetry((entries) => {
-      const mutableEntries: TelemetryEntry[] = [...entries];
-      for (const handler of handlers.telemetry) {
-        handler(mutableEntries);
-      }
+      handlers.telemetry.emit([...entries]);
     });
     workerClient.onState(({ state, detail }) => {
-      for (const handler of handlers.state) {
-        handler(state, detail);
-      }
+      handlers.state.emit({ state, detail });
     });
     workerClient.onGeometry((resolved) => {
       if (resolved.success) {
@@ -969,33 +996,23 @@ export function createRuntimeClient(options: RuntimeClientOptions): RuntimeClien
       emitGeometry(resolved);
     });
     workerClient.onParametersResolved(({ result }) => {
-      for (const handler of handlers.parametersResolved) {
-        handler(result);
-      }
+      handlers.parametersResolved.emit(result);
     });
     workerClient.onProgress(({ phase, detail }) => {
-      for (const handler of handlers.progress) {
-        handler(phase, detail);
-      }
+      handlers.progress.emit({ phase, detail });
     });
     workerClient.onError((issues) => {
       const mutableIssues: KernelIssue[] = [...issues];
       rejectPendingRender(mutableIssues);
-      for (const handler of handlers.error) {
-        handler(mutableIssues);
-      }
+      handlers.error.emit(mutableIssues);
     });
     workerClient.onKernelChange((kernelId) => {
       _activeKernelId = kernelId;
-      for (const handler of handlers.activeKernelChanged) {
-        handler(kernelId);
-      }
+      handlers.activeKernelChanged.emit(kernelId);
     });
     workerClient.onCapabilities((capabilities) => {
       _capabilities = capabilities;
-      for (const handler of handlers.capabilities) {
-        handler(capabilities);
-      }
+      handlers.capabilities.emit(capabilities);
     });
 
     const kernelModules = kernels.map((k) => ({
@@ -1056,9 +1073,7 @@ export function createRuntimeClient(options: RuntimeClientOptions): RuntimeClien
 
     _capabilities = workerClient.capabilities;
     if (_capabilities) {
-      for (const handler of handlers.capabilities) {
-        handler(_capabilities);
-      }
+      handlers.capabilities.emit(_capabilities);
     }
 
     if (options.renderTimeout !== undefined) {
@@ -1069,10 +1084,28 @@ export function createRuntimeClient(options: RuntimeClientOptions): RuntimeClien
     return workerClient;
   }
 
+  /**
+   * Emit a resolved geometry result to the `geometry` Topic, suppressing
+   * back-to-back emissions whose per-shape hash list is byte-identical to
+   * the previous successful emission. This is purely a UI re-render
+   * optimisation — it runs AFTER render settlement (see the `onGeometry`
+   * wiring) so deduping a redundant emission never blocks an awaited
+   * render Promise. Failures always emit and reset the dedupe key so a
+   * subsequent successful render is never swallowed.
+   */
   function emitGeometry(result: HashedGeometryResult): void {
-    for (const handler of handlers.geometry) {
-      handler(result);
+    if (!result.success) {
+      lastEmittedGeometryHashKey = undefined;
+      handlers.geometry.emit(result);
+      return;
     }
+
+    const hashKey = result.data.map((shape) => shape.hash).join('|');
+    if (hashKey === lastEmittedGeometryHashKey) {
+      return;
+    }
+    lastEmittedGeometryHashKey = hashKey;
+    handlers.geometry.emit(result);
   }
 
   return {
@@ -1335,29 +1368,67 @@ export function createRuntimeClient(options: RuntimeClientOptions): RuntimeClien
       return settlement;
     },
 
-    on(event: string, handler: (...args: never[]) => void): () => void {
+    on(event: string, handler: (...args: never[]) => void, options?: RuntimeSubscribeOptions): () => void {
       // Synchronous throw after terminate so a post-terminate
       // `client.on('geometry', ...)` is loud rather than silently subscribing
       // to a dead handler set that will never fire.
       if (lifecycleState === 'terminated') {
         throw new RuntimeTerminatedError();
       }
-      const set = handlers[event as keyof EventHandlers] as Set<(...args: never[]) => void> | undefined;
-      if (!set) {
-        throw new Error(`Unknown event: ${event}`);
+
+      switch (event) {
+        case 'log': {
+          return handlers.log.subscribe(handler as (entry: LogEntry) => void, options);
+        }
+        case 'progress': {
+          return handlers.progress.subscribe(
+            ({ phase, detail }) =>
+              (handler as (phase: RenderPhase, detail?: Record<string, unknown>) => void)(phase, detail),
+            options,
+          );
+        }
+        case 'telemetry': {
+          return handlers.telemetry.subscribe(handler as (entries: TelemetryEntry[]) => void, options);
+        }
+        case 'parametersResolved': {
+          return handlers.parametersResolved.subscribe(handler as (result: GetParametersResult) => void, options);
+        }
+        case 'geometry': {
+          return handlers.geometry.subscribe(handler as (result: HashedGeometryResult) => void, options);
+        }
+        case 'state': {
+          return handlers.state.subscribe(
+            ({ state, detail }) => (handler as (state: WorkerState, detail?: string) => void)(state, detail),
+            options,
+          );
+        }
+        case 'error': {
+          return handlers.error.subscribe(handler as (issues: KernelIssue[]) => void, options);
+        }
+        case 'capabilities': {
+          const unsubscribe = handlers.capabilities.subscribe(
+            handler as (manifest: CapabilitiesManifest) => void,
+            options,
+          );
+          if (_capabilities !== undefined) {
+            (handler as (manifest: CapabilitiesManifest) => void)(_capabilities);
+          }
+          return unsubscribe;
+        }
+        case 'activeKernelChanged': {
+          const unsubscribe = handlers.activeKernelChanged.subscribe(
+            handler as (kernelId: string | undefined) => void,
+            options,
+          );
+          if (_activeKernelId !== undefined) {
+            (handler as (kernelId: string | undefined) => void)(_activeKernelId);
+          }
+          return unsubscribe;
+        }
+        default: {
+          throw new Error(`Unknown event: ${event}`);
+        }
       }
-
-      set.add(handler);
-
-      if (event === 'capabilities' && _capabilities !== undefined) {
-        (handler as (manifest: CapabilitiesManifest) => void)(_capabilities);
-      } else if (event === 'activeKernelChanged' && _activeKernelId !== undefined) {
-        (handler as (kernelId: string | undefined) => void)(_activeKernelId);
-      }
-
-      return () => {
-        set.delete(handler);
-      };
     },
 
     routesFor(format: FileExtension): readonly ExportRoute[] {
@@ -1507,13 +1578,14 @@ export function createRuntimeClient(options: RuntimeClientOptions): RuntimeClien
 
       void transport.close('Runtime client terminated');
 
-      for (const set of Object.values(handlers)) {
-        set.clear();
+      for (const topic of Object.values(handlers)) {
+        topic.dispose();
       }
 
       workerClient = undefined;
       lifecycleState = 'terminated';
       hasSettledRender = false;
+      lastEmittedGeometryHashKey = undefined;
     },
   };
 }

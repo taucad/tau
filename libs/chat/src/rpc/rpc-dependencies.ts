@@ -22,6 +22,17 @@ import type {
  * @public
  */
 export type RpcFileSystem = {
+  /**
+   * Returns the full file contents as a UTF-8 string.
+   *
+   * Bounded-reads contract: callers MUST `stat` first and impose a per-call
+   * size cap when the input path could be user/agent-controlled. The two
+   * agent-facing handlers (`handle-read-file`, `handle-grep`) enforce a
+   * 256 KB unbounded-read precheck plus a 2 000-line / 100-match output cap
+   * so a single `read_file index.d.ts` cannot poison the prompt cache.
+   * New handlers that surface this API to the agent MUST adopt the same
+   * pattern — never call `readFile` on agent-supplied paths without bounds.
+   */
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
   writeBinaryFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void>;

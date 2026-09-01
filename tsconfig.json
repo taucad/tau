@@ -26,7 +26,7 @@
       "path": "./libs/api-extractor"
     },
     {
-      "path": "./libs/types"
+      "path": "./packages/types"
     },
     {
       "path": "./packages/json-schema"
@@ -38,13 +38,16 @@
       "path": "./packages/runtime"
     },
     {
-      "path": "./libs/units"
+      "path": "./packages/units"
+    },
+    {
+      "path": "./libs/billing"
     },
     {
       "path": "./libs/chat"
     },
     {
-      "path": "./libs/utils"
+      "path": "./packages/utils"
     },
     {
       "path": "./libs/vite"

@@ -4,10 +4,11 @@ description: "Investigates how SysML v2 (parts, ports, requirements, verificatio
 status: superseded
 superseded_by: docs/research/sysml-v2-spec-architecture-v2.md
 created: '2026-04-23'
-updated: '2026-04-23'
+updated: '2026-06-01'
 category: architecture
 related:
   - docs/research/sysml-v2-spec-architecture-v2.md
+  - docs/research/geospec-standalone-cad-testing-blueprint.md
   - docs/research/chatgpt-deep-research-brief.md
   - docs/research/mesh-continuity-test-semantics.md
   - docs/research/parameter-architecture-v2.md
@@ -15,7 +16,7 @@ related:
   - docs/architecture/runtime-topology.md
 ---
 
-> **Superseded by [`sysml-v2-spec-architecture-v2.md`](./sysml-v2-spec-architecture-v2.md).** This document proposed extending Tau's existing `test.json` schema with SysML-derived fields (an additive, "graft" approach). The successor document treats `.sysml` files as a first-class file primitive across all five vision pillars and retires `test.json` entirely. Retained for the additive-extension analysis and the schema-extension code samples in case the v2 architecture needs a back-compat shim.
+> **Superseded by [`sysml-v2-spec-architecture-v2.md`](./sysml-v2-spec-architecture-v2.md).** This document proposed extending Tau's existing `test.json` schema with SysML-derived fields (an additive, "graft" approach). The successor document treats `.sysml` files as a first-class file primitive across all five vision pillars and retires `test.json` entirely. As of 2026-06-01, the MCAD verification provider beneath that spec architecture is GeoSpec, with `@taucad/testing` acting as Tau's adapter and legacy compatibility layer. Retained for the additive-extension analysis and the schema-extension code samples in case the v2 architecture needs a back-compat shim.
 
 # SysML v2 as a Specification Layer for Tau Code-Based CAD Assemblies
 

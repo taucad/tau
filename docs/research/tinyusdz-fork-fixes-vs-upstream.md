@@ -249,7 +249,7 @@ Every opened/synchronized PR is reviewed by an automated LLM bot configured via 
 4. Security concerns
 5. Test coverage
 
-**Implication for our PRs:** since the reviewing agent is itself an LLM, our PR descriptions and commit messages should explicitly disclose the AI-assisted authorship (per the [`submit-pr`](../../.cursor/skills/submit-pr/SKILL.md) skill convention) so the human maintainer can weigh both signals together.
+**Implication for our PRs:** since the reviewing agent is itself an LLM, our PR descriptions and commit messages should explicitly disclose the AI-assisted authorship (per the [`submit-pr`](../../.agent/skills/submit-pr/SKILL.md) skill convention) so the human maintainer can weigh both signals together.
 
 ### Code Style (`.clang-format`)
 
@@ -355,7 +355,7 @@ These six file changes split cleanly into two upstream PRs (PR #1 squashes `48e3
 
 Both PRs **must target `dev`**, not `release`. Although `release` is GitHub's default branch and merged PRs surface there via maintainer-driven syncs (e.g. [#270](https://github.com/lighttransport/tinyusdz/pull/270) "NRVO single named return variable"), the `README.md` "Branches" section is explicit (_"Basically, use `dev` branch to submit PR"_) and every CI workflow only triggers on `pull_request: branches: [ dev ]` — submitting against `release` means zero CI runs and the PR will be ignored or redirected.
 
-The `taucad/tinyusdz` fork carries our work on `release` (mirroring `lighttransport/tinyusdz:release`'s status as the default branch), but the PR branches we publish to our own fork should be cut off `upstream/dev` so the cherry-pick sits on the correct base. Use the [`submit-pr`](../../.cursor/skills/submit-pr/SKILL.md) skill to open both as drafts; that skill captures the AI co-authorship disclosure and testing-evidence convention.
+The `taucad/tinyusdz` fork carries our work on `release` (mirroring `lighttransport/tinyusdz:release`'s status as the default branch), but the PR branches we publish to our own fork should be cut off `upstream/dev` so the cherry-pick sits on the correct base. Use the [`submit-pr`](../../.agent/skills/submit-pr/SKILL.md) skill to open both as drafts; that skill captures the AI co-authorship disclosure and testing-evidence convention.
 
 ### PR #1 — Fix UsdUVTexture serialization (Bugs 1–4)
 
@@ -799,7 +799,7 @@ cd ..
 python tests/tydra_to_renderscene/runner.py    # required for PR #2 specifically
 ```
 
-Both PRs should be opened as **draft** initially per the [`submit-pr`](../../.cursor/skills/submit-pr/SKILL.md) workflow. Targeting `lighttransport/tinyusdz:dev`, use the PR descriptions above verbatim with file paths adjusted as needed, and include the `ctest` and Python runner output in the PR body as testing evidence (the maintainer is strict about reproducible signals; see [Issue Hygiene](#issue-hygiene-transferable-to-pr-descriptions)).
+Both PRs should be opened as **draft** initially per the [`submit-pr`](../../.agent/skills/submit-pr/SKILL.md) workflow. Targeting `lighttransport/tinyusdz:dev`, use the PR descriptions above verbatim with file paths adjusted as needed, and include the `ctest` and Python runner output in the PR body as testing evidence (the maintainer is strict about reproducible signals; see [Issue Hygiene](#issue-hygiene-transferable-to-pr-descriptions)).
 
 ## Code Examples
 

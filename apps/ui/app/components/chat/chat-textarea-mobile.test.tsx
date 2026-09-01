@@ -7,19 +7,13 @@ import type { KernelConfiguration } from '@taucad/types/constants';
 
 const manifoldKernel = kernelConfigurations.find((k) => k.id === 'manifold')!;
 const jscadKernel = kernelConfigurations.find((k) => k.id === 'jscad')!;
-const mockKernel: { current: KernelConfiguration | undefined } = {
-  current: manifoldKernel,
-};
-
-const mockUseActiveChatKernel = vi.fn(() => ({
-  kernelId: mockKernel.current?.id,
-  kernel: mockKernel.current,
-  setActiveKernel: vi.fn(),
-}));
-
-vi.mock('#hooks/use-active-chat-kernel.js', () => ({
-  useActiveChatKernel: () => mockUseActiveChatKernel(),
-}));
+// Holds the kernel that the (mocked) ChatKernelSelector will hand back
+// via its render-prop. The mobile component no longer reads
+// `useChatComposer().kernel` directly — the kernel flows in through the
+// selector's children-as-function signature, which post-tightening
+// guarantees a non-nullable `KernelConfiguration`. This test mirrors
+// that contract.
+const mockKernel: { current: KernelConfiguration } = { current: manifoldKernel };
 
 vi.mock('#components/chat/chat-model-selector.js', () => ({
   ChatModelSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
@@ -31,7 +25,7 @@ vi.mock('#components/chat/chat-kernel-selector.js', () => ({
   ChatKernelSelector: ({
     children,
   }: {
-    readonly children: (props: { selectedKernel: KernelConfiguration | undefined }) => React.ReactNode;
+    readonly children: (props: { selectedKernel: KernelConfiguration }) => React.ReactNode;
   }) => <div>{children({ selectedKernel: mockKernel.current })}</div>,
 }));
 
@@ -156,13 +150,12 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
     mockKernel.current = manifoldKernel;
   });
 
-  it('should consume useActiveChatKernel instead of the prior hardcoded openscad lookup', () => {
+  it('renders the kernel handed back by ChatKernelSelector (no hardcoded openscad fallback)', () => {
     renderMobile();
-    expect(mockUseActiveChatKernel).toHaveBeenCalled();
     expect(screen.getAllByText('Manifold').length).toBeGreaterThan(0);
   });
 
-  it('should reflect the chat-active kernel name in the drawer label, not "OpenSCAD"', () => {
+  it('reflects the chat-active kernel name in the drawer label, not "OpenSCAD"', () => {
     mockKernel.current = jscadKernel;
     renderMobile();
     expect(screen.getAllByText('JSCAD').length).toBeGreaterThan(0);

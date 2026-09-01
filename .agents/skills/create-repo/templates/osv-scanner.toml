@@ -1,0 +1,5 @@
+# Every suppression must include a stable reason and an ISO expiry date.
+# [[IgnoredVulns]]
+# id = "GHSA-example"
+# reason = "No affected code path is shipped."
+# ignoreUntil = "2026-12-31"

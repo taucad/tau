@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 import { LineSegments2 } from 'three/addons';
+import { hasSceneTag, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+
+function isMeshWithBufferGeometry(object: THREE.Object3D): object is THREE.Mesh {
+  return object instanceof THREE.Mesh && Boolean(object.material) && Boolean(object.geometry);
+}
 
 type ClipMeshOptions = {
   readonly enable: boolean;
@@ -7,11 +12,9 @@ type ClipMeshOptions = {
 };
 
 /**
- * Applies or removes clipping planes on a mesh's materials.
+ * Applies or removes clipping planes on a mesh's materials (WebGL local clipping via `renderer.localClippingEnabled`).
  *
  * Materials keep their original `side` property (typically DoubleSide from GLTF).
- * The stencil capping technique relies on DoubleSide so that back faces render at
- * the clipping boundary, providing a solid appearance at the cross-section.
  */
 export function applyMeshClipping(mesh: THREE.Mesh, options: ClipMeshOptions): void {
   const { enable, plane } = options;
@@ -22,30 +25,39 @@ export function applyMeshClipping(mesh: THREE.Mesh, options: ClipMeshOptions): v
   }
 }
 
-type CollectAndClipOptions = {
+type CollectClippableOptions = {
   readonly enableSection: boolean;
   readonly enableLines: boolean;
   readonly enableMesh: boolean;
   readonly plane: THREE.Plane;
 };
 
+export type ClippableTargets = {
+  readonly meshes: THREE.Mesh[];
+  readonly lines: ReadonlyArray<THREE.LineSegments | LineSegments2>;
+};
+
 /**
- * Traverses a root group to collect meshes for stencil capping and apply
- * clipping planes to all relevant objects. Returns the list of solid meshes
- * that should participate in stencil capping.
+ * Traverses a root group, applies WebGL-local clipping planes, and returns
+ * solid meshes plus line objects for downstream `enforceMaterialClipping` (meshes only).
  *
- * - `LineSegments` and `LineSegments2` are clipped via `enableLines` but
- *   never included in the mesh list (they don't get caps).
- * - Solid `THREE.Mesh` objects are clipped via `enableMesh` and always
- *   included in the mesh list (capping is independent of surface clipping).
- * - When `enableSection` is false, all clipping planes are removed.
+ * Skips objects tagged {@link sceneTag.sectionViewHelper} (contour-fill helpers etc.).
+ *
+ * - `LineSegments` / `LineSegments2`: clipped via `enableLines`; listed in `lines`.
+ * - `THREE.Mesh`: clipped via `enableMesh`; listed in `meshes`.
+ * - When `enableSection` is false, clears clipping planes on all traversed materials.
  */
-export function collectAndClipMeshes(rootGroup: THREE.Group, options: CollectAndClipOptions): THREE.Mesh[] {
+export function collectClippableTargets(rootGroup: THREE.Group, options: CollectClippableOptions): ClippableTargets {
   const { enableSection, enableLines, enableMesh, plane } = options;
 
   if (!enableSection) {
     rootGroup.traverse((child: THREE.Object3D) => {
-      const isMeshOrLine = child instanceof THREE.Mesh || child instanceof THREE.LineSegments;
+      if (hasSceneTag(child, sceneTag.sectionViewHelper)) {
+        return;
+      }
+
+      const isMeshOrLine =
+        child instanceof THREE.Mesh || child instanceof THREE.LineSegments || child instanceof LineSegments2;
 
       if (isMeshOrLine && child.material) {
         if (Array.isArray(child.material)) {
@@ -58,12 +70,17 @@ export function collectAndClipMeshes(rootGroup: THREE.Group, options: CollectAnd
       }
     });
 
-    return [];
+    return { meshes: [], lines: [] };
   }
 
   const meshChildren: THREE.Mesh[] = [];
+  const lineChildren: Array<THREE.LineSegments | LineSegments2> = [];
 
   rootGroup.traverse((child: THREE.Object3D) => {
+    if (hasSceneTag(child, sceneTag.sectionViewHelper)) {
+      return;
+    }
+
     if (child instanceof THREE.LineSegments) {
       if (child.material) {
         if (Array.isArray(child.material)) {
@@ -74,6 +91,8 @@ export function collectAndClipMeshes(rootGroup: THREE.Group, options: CollectAnd
           child.material.clippingPlanes = enableLines ? [plane] : [];
         }
       }
+
+      lineChildren.push(child);
 
       return;
     }
@@ -87,23 +106,26 @@ export function collectAndClipMeshes(rootGroup: THREE.Group, options: CollectAnd
         child.material.clippingPlanes = enableLines ? [plane] : [];
       }
 
+      lineChildren.push(child);
+
       return;
     }
 
-    if (child instanceof THREE.Mesh && child.material && child.geometry) {
-      child.matrixAutoUpdate = false;
-
-      applyMeshClipping(child as THREE.Mesh, {
-        enable: enableMesh,
-        plane,
-      });
-
-      // oxlint-disable-next-line @typescript-eslint/no-unsafe-argument -- Mesh type generics are complex
-      meshChildren.push(child);
+    if (!isMeshWithBufferGeometry(child)) {
+      return;
     }
+
+    child.matrixAutoUpdate = false;
+
+    applyMeshClipping(child, {
+      enable: enableMesh,
+      plane,
+    });
+
+    meshChildren.push(child);
   });
 
-  return meshChildren;
+  return { meshes: meshChildren, lines: lineChildren };
 }
 
 /**
@@ -127,101 +149,4 @@ export function enforceMaterialClipping(meshes: THREE.Mesh[], plane: THREE.Plane
       }
     }
   }
-}
-
-type EdgeKey = string;
-
-function quantize(value: number, precision = 1e-6): number {
-  return Math.round(value / precision) * precision;
-}
-
-function vertexKey(x: number, y: number, z: number): string {
-  return `${quantize(x)},${quantize(y)},${quantize(z)}`;
-}
-
-function makeEdgeKey(aKey: string, bKey: string): EdgeKey {
-  return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
-}
-
-type ManifoldResult = {
-  readonly closed: boolean;
-  readonly openEdges: number;
-  readonly totalEdges: number;
-};
-
-/**
- * Checks whether a set of triangle geometries together form a closed
- * (watertight) manifold by verifying that every edge is shared by exactly
- * 2 triangles.
- *
- * For the stencil-based capping algorithm to produce correct results, the
- * geometry must be a closed manifold so that front/back face stencil
- * contributions balance to zero at every pixel outside the cross-section.
- */
-export function isClosedManifold(geometries: THREE.BufferGeometry[]): ManifoldResult {
-  const edgeCounts = new Map<EdgeKey, number>();
-
-  for (const geometry of geometries) {
-    const positionAttribute = geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
-    if (!positionAttribute) {
-      continue;
-    }
-
-    const index = geometry.getIndex();
-
-    if (index) {
-      for (let i = 0; i < index.count; i += 3) {
-        const i0 = index.getX(i);
-        const i1 = index.getX(i + 1);
-        const i2 = index.getX(i + 2);
-
-        const v0 = vertexKey(positionAttribute.getX(i0), positionAttribute.getY(i0), positionAttribute.getZ(i0));
-        const v1 = vertexKey(positionAttribute.getX(i1), positionAttribute.getY(i1), positionAttribute.getZ(i1));
-        const v2 = vertexKey(positionAttribute.getX(i2), positionAttribute.getY(i2), positionAttribute.getZ(i2));
-
-        const edge0 = makeEdgeKey(v0, v1);
-        const edge1 = makeEdgeKey(v1, v2);
-        const edge2 = makeEdgeKey(v2, v0);
-
-        edgeCounts.set(edge0, (edgeCounts.get(edge0) ?? 0) + 1);
-        edgeCounts.set(edge1, (edgeCounts.get(edge1) ?? 0) + 1);
-        edgeCounts.set(edge2, (edgeCounts.get(edge2) ?? 0) + 1);
-      }
-    } else {
-      for (let i = 0; i < positionAttribute.count; i += 3) {
-        const v0 = vertexKey(positionAttribute.getX(i), positionAttribute.getY(i), positionAttribute.getZ(i));
-        const v1 = vertexKey(
-          positionAttribute.getX(i + 1),
-          positionAttribute.getY(i + 1),
-          positionAttribute.getZ(i + 1),
-        );
-        const v2 = vertexKey(
-          positionAttribute.getX(i + 2),
-          positionAttribute.getY(i + 2),
-          positionAttribute.getZ(i + 2),
-        );
-
-        const edge0 = makeEdgeKey(v0, v1);
-        const edge1 = makeEdgeKey(v1, v2);
-        const edge2 = makeEdgeKey(v2, v0);
-
-        edgeCounts.set(edge0, (edgeCounts.get(edge0) ?? 0) + 1);
-        edgeCounts.set(edge1, (edgeCounts.get(edge1) ?? 0) + 1);
-        edgeCounts.set(edge2, (edgeCounts.get(edge2) ?? 0) + 1);
-      }
-    }
-  }
-
-  let openEdges = 0;
-  for (const count of edgeCounts.values()) {
-    if (count !== 2) {
-      openEdges++;
-    }
-  }
-
-  return {
-    closed: openEdges === 0,
-    openEdges,
-    totalEdges: edgeCounts.size,
-  };
 }

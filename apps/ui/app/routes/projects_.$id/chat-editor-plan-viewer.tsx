@@ -3,6 +3,7 @@ import { ChatEditorBreadcrumbs } from '#routes/projects_.$id/chat-editor-breadcr
 import type { ChatEditorViewerProps } from '#routes/projects_.$id/chat-editor-viewer.types.js';
 
 export function ChatEditorPlanViewer({ filePath, content }: ChatEditorViewerProps): React.JSX.Element {
+  // `paneId` (in props) intentionally unused: plan viewer is single-tab.
   return (
     <>
       <ChatEditorBreadcrumbs filePath={filePath} />

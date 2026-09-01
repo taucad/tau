@@ -1,0 +1,125 @@
+{
+  "name": "@taucad/utils",
+  "version": "0.1.0-beta.0",
+  "description": "Tau shared utilities (ID generation, path, file, schema, dispose)",
+  "type": "module",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/utils"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "utils",
+    "cad"
+  ],
+  "author": "Richard Fontein",
+  "license": "MIT",
+  "exports": {
+    "./id": "./src/id.utils.ts",
+    "./path": "./src/path.utils.ts",
+    "./file": "./src/file.utils.ts",
+    "./import": "./src/import.utils.ts",
+    "./schema": "./src/schema.utils.ts",
+    "./dispose": "./src/dispose.utils.ts",
+    "./error": "./src/error.utils.ts",
+    "./cache": "./src/cache.utils.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      "./id": {
+        "require": {
+          "types": "./dist/cjs/id.utils.d.cts",
+          "default": "./dist/cjs/id.utils.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/id.utils.d.ts",
+          "default": "./dist/esm/id.utils.js"
+        }
+      },
+      "./path": {
+        "require": {
+          "types": "./dist/cjs/path.utils.d.cts",
+          "default": "./dist/cjs/path.utils.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/path.utils.d.ts",
+          "default": "./dist/esm/path.utils.js"
+        }
+      },
+      "./file": {
+        "require": {
+          "types": "./dist/cjs/file.utils.d.cts",
+          "default": "./dist/cjs/file.utils.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/file.utils.d.ts",
+          "default": "./dist/esm/file.utils.js"
+        }
+      },
+      "./import": {
+        "require": {
+          "types": "./dist/cjs/import.utils.d.cts",
+          "default": "./dist/cjs/import.utils.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/import.utils.d.ts",
+          "default": "./dist/esm/import.utils.js"
+        }
+      },
+      "./schema": {
+        "require": {
+          "types": "./dist/cjs/schema.utils.d.cts",
+          "default": "./dist/cjs/schema.utils.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/schema.utils.d.ts",
+          "default": "./dist/esm/schema.utils.js"
+        }
+      },
+      "./dispose": {
+        "require": {
+          "types": "./dist/cjs/dispose.utils.d.cts",
+          "default": "./dist/cjs/dispose.utils.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/dispose.utils.d.ts",
+          "default": "./dist/esm/dispose.utils.js"
+        }
+      },
+      "./error": {
+        "require": {
+          "types": "./dist/cjs/error.utils.d.cts",
+          "default": "./dist/cjs/error.utils.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/error.utils.d.ts",
+          "default": "./dist/esm/error.utils.js"
+        }
+      },
+      "./cache": {
+        "require": {
+          "types": "./dist/cjs/cache.utils.d.cts",
+          "default": "./dist/cjs/cache.utils.cjs"
+        },
+        "import": {
+          "types": "./dist/esm/cache.utils.d.ts",
+          "default": "./dist/esm/cache.utils.js"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@taucad/json-schema": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "cdn-resolve": "catalog:"
+  },
+  "imports": {
+    "#*": "./src/*"
+  }
+}

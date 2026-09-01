@@ -20,9 +20,22 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   }),
 }));
 
+const editorMachineSnapshot = {
+  context: { openFiles: [] as Array<{ paneId: string; path: string; readOnly?: boolean }> },
+  status: 'active',
+  output: undefined,
+  error: undefined,
+};
+
+const mockEditorRef = {
+  send: vi.fn(),
+  getSnapshot: () => editorMachineSnapshot,
+  subscribe: () => ({ unsubscribe: vi.fn() }),
+};
+
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
-    editorRef: { send: vi.fn() },
+    editorRef: mockEditorRef,
     geometryUnits: new Map(),
     mainEntryFile: 'main.ts',
   }),
@@ -44,15 +57,17 @@ vi.mock('@monaco-editor/react', () => ({
   useMonaco: () => undefined,
 }));
 
+const defaultViewer = ({ filePath, content }: { filePath: string; content: string }) => (
+  <div data-testid='viewer'>
+    <div data-testid='viewer-path'>{filePath}</div>
+    <div data-testid='viewer-content'>{content}</div>
+  </div>
+);
+const mockResolveViewer = vi.fn().mockReturnValue(defaultViewer);
+
 vi.mock('#routes/projects_.$id/chat-editor-viewer-registry.js', () => ({
-  resolveViewer:
-    () =>
-    ({ filePath, content }: { filePath: string; content: string }) => (
-      <div data-testid='viewer'>
-        <div data-testid='viewer-path'>{filePath}</div>
-        <div data-testid='viewer-content'>{content}</div>
-      </div>
-    ),
+  // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- structural test double: forward to mock that returns a React component
+  resolveViewer: (...arguments_: unknown[]) => mockResolveViewer(...arguments_),
 }));
 
 vi.mock('#components/files/file-selector.js', () => ({
@@ -74,7 +89,7 @@ describe('FileEditor routing', () => {
   it('should render the loader when outcome is loading', () => {
     mockUseFileContent.mockReturnValue({ kind: 'loading' });
 
-    const { container } = render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+    const { container } = render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
     expect(container.querySelector('[data-slot="loader"], svg')).toBeTruthy();
   });
@@ -86,7 +101,7 @@ describe('FileEditor routing', () => {
       head: new Uint8Array([0x00, 0x01, 0x02]),
     });
 
-    render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+    render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
     expect(screen.getByText(/binary or uses an unsupported text encoding/i)).toBeInTheDocument();
   });
@@ -99,7 +114,7 @@ describe('FileEditor routing', () => {
       head: new Uint8Array([0x00, 0x01, 0x02]),
     });
 
-    render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+    render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
     await user.click(screen.getByRole('button', { name: /open anyway/i }));
 
@@ -116,7 +131,7 @@ describe('FileEditor routing', () => {
       limit: 2 * 1024 * 1024,
     });
 
-    render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+    render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
     expect(screen.getByText(/5\.0 MB/)).toBeInTheDocument();
     expect(screen.getByText(/2\.0 MB/)).toBeInTheDocument();
@@ -130,7 +145,7 @@ describe('FileEditor routing', () => {
       limit: 2 * 1024 * 1024,
     });
 
-    render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+    render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
     await user.click(screen.getByRole('button', { name: /open anyway/i }));
 
@@ -142,7 +157,7 @@ describe('FileEditor routing', () => {
   it('should render the error placeholder with the cause when outcome is error', () => {
     mockUseFileContent.mockReturnValue({ kind: 'error', cause: new Error('disk on fire') });
 
-    render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+    render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
     expect(screen.getByText(/failed to load file/i)).toBeInTheDocument();
     expect(screen.getByText(/disk on fire/)).toBeInTheDocument();
@@ -151,7 +166,7 @@ describe('FileEditor routing', () => {
   it('should render the file-not-found placeholder with the file selector when outcome is orphaned', () => {
     mockUseFileContent.mockReturnValue({ kind: 'orphaned' });
 
-    render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+    render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
     expect(screen.getByText(/file not found/i)).toBeInTheDocument();
     expect(screen.getByTestId('file-selector')).toBeInTheDocument();
@@ -161,7 +176,7 @@ describe('FileEditor routing', () => {
     const content = new TextEncoder().encode('hello world');
     mockUseFileContent.mockReturnValue({ kind: 'text', content });
 
-    render(<FileEditor filePath='main.ts' panelApi={mockPanelApi} />);
+    render(<FileEditor paneId='test-pane' filePath='main.ts' panelApi={mockPanelApi} />);
 
     expect(screen.getByTestId('viewer')).toBeInTheDocument();
     expect(screen.getByTestId('viewer-content').textContent).toBe('hello world');
@@ -174,7 +189,7 @@ describe('FileEditor routing', () => {
       head[0] = 0x00;
       mockUseFileContent.mockReturnValue({ kind: 'binary', size: 5 * 1024 * 1024, head });
 
-      render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+      render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
       expect(screen.getByText(/binary or uses an unsupported text encoding/i)).toBeInTheDocument();
     });
@@ -186,7 +201,7 @@ describe('FileEditor routing', () => {
         limit: 2 * 1024 * 1024,
       });
 
-      render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+      render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
       expect(screen.getByText(/exceeds the .* editor limit/)).toBeInTheDocument();
     });
@@ -197,10 +212,75 @@ describe('FileEditor routing', () => {
         content: new TextEncoder().encode('plain text'),
       });
 
-      render(<FileEditor filePath='mystery.dat' panelApi={mockPanelApi} />);
+      render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
       expect(screen.getByTestId('viewer')).toBeInTheDocument();
       expect(screen.getByTestId('viewer-content').textContent).toBe('plain text');
+    });
+  });
+
+  // R16 (F20): after a rename, a code change must target the new path
+  // resolved through `paneId`, not the path the panel was created with.
+  describe('handleCodeChange paneId resolution (R16)', () => {
+    it('should write to the live path resolved via paneId, not the stale params filePath', async () => {
+      // Mount with the original path; immediately rewrite openFiles to
+      // simulate a rename that updated the openFiles entry in place
+      // (preserving the same paneId).
+      editorMachineSnapshot.context.openFiles = [{ paneId: 'pane-1', path: 'src/renamed.ts' }];
+      const captured: string[] = [];
+      mockWriteFile.mockImplementation(async (p: string) => {
+        captured.push(p);
+      });
+      mockUseFileContent.mockReturnValue({
+        kind: 'text',
+        content: new TextEncoder().encode('hello'),
+      });
+
+      // Render a ChatEditorViewer that exposes onChange — we use the
+      // existing mocked viewer registry which calls onChange(content).
+      // The mocked viewer above does not actually wire `onChange`, so
+      // we exercise the resolver via a direct call: capture the
+      // handler from FileEditor by mocking the viewer to invoke it.
+
+      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+        <button
+          type='button'
+          data-testid='trigger-change'
+          onClick={() => {
+            onChange('new content');
+          }}
+        >
+          change
+        </button>
+      ));
+
+      render(<FileEditor paneId='pane-1' filePath='src/original.ts' panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('trigger-change'));
+      expect(captured).toEqual(['src/renamed.ts']);
+    });
+
+    it('should suppress writes when the tab is no longer in openFiles', async () => {
+      editorMachineSnapshot.context.openFiles = [];
+      mockWriteFile.mockClear();
+      mockUseFileContent.mockReturnValue({
+        kind: 'text',
+        content: new TextEncoder().encode('hello'),
+      });
+      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+        <button
+          type='button'
+          data-testid='trigger-change'
+          onClick={() => {
+            onChange('orphan write');
+          }}
+        >
+          change
+        </button>
+      ));
+
+      render(<FileEditor paneId='pane-orphan' filePath='src/ghost.ts' panelApi={mockPanelApi} />);
+      await userEvent.click(screen.getByTestId('trigger-change'));
+      expect(mockWriteFile).not.toHaveBeenCalled();
     });
   });
 });

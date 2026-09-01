@@ -302,9 +302,17 @@ async function runSingleBenchmark({
             id: 'msg_1',
             role: 'user',
             parts: [{ type: 'text', text: benchmarkCase.prompt }],
-            metadata: { model: model.id, kernel: 'openscad' },
+            metadata: { createdAt: Date.now() },
           },
         ],
+        agent: {
+          profile: 'cad',
+          model: model.id,
+          kernel: 'openscad',
+          mode: 'agent',
+          toolChoice: 'auto',
+          testingEnabled: true,
+        },
       }),
       signal: AbortSignal.timeout(benchmarkTimeout),
     });

@@ -14,6 +14,52 @@ Object.defineProperty(globalThis, 'ENV', {
   value: mockEnv,
 });
 
+// Monaco 0.55+ evaluates `document.queryCommandSupported('paste')` at module load
+// (see monaco-editor clipboard contribution). jsdom does not implement it.
+// oxlint-disable-next-line @typescript-eslint/no-deprecated -- Monaco still probes the deprecated DOM API; jsdom needs the stub to load
+if (typeof document !== 'undefined' && typeof document.queryCommandSupported !== 'function') {
+  Object.defineProperty(document, 'queryCommandSupported', {
+    configurable: true,
+    writable: true,
+    value: () => false,
+  });
+}
+
+// oxlint-disable-next-line @typescript-eslint/naming-convention -- Monaco's global contract
+const g = globalThis as typeof globalThis & {
+  MonacoEnvironment?: { getWorkerUrl?: (moduleId: string, label: string) => string };
+};
+g.MonacoEnvironment ??= {
+  getWorkerUrl(): string {
+    const source = 'self.onmessage=function(){};';
+    return `data:application/javascript;charset=utf-8,${encodeURIComponent(source)}`;
+  },
+};
+
+// Jsdom does not define the Web `Worker` global; Monaco still constructs one for TS diagnostics.
+// oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM types claim Worker is always defined; jsdom omits it
+globalThis.Worker ??= class Worker {
+  public postMessage(_message: unknown): void {
+    /* Noop stub for jsdom */
+  }
+
+  public terminate(): void {
+    /* Noop stub for jsdom */
+  }
+
+  public addEventListener(): void {
+    /* Noop stub for jsdom */
+  }
+
+  public removeEventListener(): void {
+    /* Noop stub for jsdom */
+  }
+
+  public dispatchEvent(): boolean {
+    return true;
+  }
+} as unknown as typeof Worker;
+
 // Mock common browser APIs for testing
 Object.defineProperty(globalThis, 'matchMedia', {
   writable: true,

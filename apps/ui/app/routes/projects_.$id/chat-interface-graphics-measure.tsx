@@ -48,7 +48,7 @@ export function ChatInterfaceGraphicsMeasure(): React.JSX.Element {
 
   return (
     <div className='flex h-full flex-col gap-2'>
-      <div className='flex items-center justify-between px-1 text-xs text-muted-foreground'>
+      <div className='flex items-center justify-between gap-2 px-1 text-xs text-muted-foreground'>
         <div>Measurements</div>
         <div className='text-[11px]'>Hover to preview, pin to persist</div>
       </div>

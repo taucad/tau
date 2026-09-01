@@ -8,6 +8,7 @@ import type { Project } from '@taucad/types';
 // ── Mock fns ──────────────────────────────────────────────────────────────────
 
 const mockWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>>();
+const mockClientWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>>();
 const mockMount = vi.fn<(prefix: string, backend: string, options?: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
 let mockBackendType = 'indexeddb';
@@ -16,21 +17,49 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     backendType: mockBackendType,
     writeFiles: mockWriteFiles,
-    mount: mockMount,
-    unmount: mockUnmount,
+    client: {
+      writeFiles: mockClientWriteFiles,
+    },
+    workspace: {
+      mount: mockMount,
+      unmount: mockUnmount,
+      invalidateStandaloneProvider: vi.fn(async () => undefined),
+    },
     copyDirectory: vi.fn(),
     fileManagerRef: { getSnapshot: () => ({ matches: () => true }) },
   }),
 }));
 
-const mockSetBuildFileSystemConfig = vi.fn<(projectId: string, backend: string) => Promise<void>>();
-const mockGetStoredDirectoryHandle = vi.fn<() => Promise<undefined>>();
+type ProjectFsConfigInput =
+  | { projectId: string; backend: 'indexeddb' | 'opfs' | 'memory' }
+  | { projectId: string; backend: 'webaccess'; workspaceId: string };
+
+const mockSetProjectFileSystemConfig = vi.fn<(config: ProjectFsConfigInput) => Promise<void>>();
+const mockGetDefaultWorkspace =
+  vi.fn<
+    () => Promise<{ workspace: { workspaceId: string; name: string }; handle: FileSystemDirectoryHandle } | undefined>
+  >();
+const mockGetWorkspace =
+  vi.fn<
+    (
+      workspaceId: string,
+    ) => Promise<{ workspace: { workspaceId: string; name: string }; handle: FileSystemDirectoryHandle } | undefined>
+  >();
 const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
 
 vi.mock('#filesystem/handle-store.js', () => ({
-  setBuildFileSystemConfig: async (...args: unknown[]) => mockSetBuildFileSystemConfig(...(args as [string, string])),
-  getStoredDirectoryHandle: async () => mockGetStoredDirectoryHandle(),
+  setProjectFileSystemConfig: async (...args: unknown[]) =>
+    mockSetProjectFileSystemConfig(...(args as [ProjectFsConfigInput])),
+  getDefaultWorkspace: async () => mockGetDefaultWorkspace(),
+  getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),
   checkHandlePermission: async () => mockCheckHandlePermission(),
+}));
+
+let mockIsFileSystemAccessSupported = false;
+vi.mock('#constants/browser.constants.js', () => ({
+  get isFileSystemAccessSupported() {
+    return mockIsFileSystemAccessSupported;
+  },
 }));
 
 const mainFile = 'main.ts';
@@ -157,10 +186,14 @@ describe('useProjectManager', () => {
     vi.clearAllMocks();
     mockBackendType = 'indexeddb';
     mockWriteFiles.mockResolvedValue(undefined);
+    mockClientWriteFiles.mockResolvedValue(undefined);
     mockMount.mockResolvedValue(undefined);
     mockUnmount.mockReturnValue(undefined);
-    mockSetBuildFileSystemConfig.mockResolvedValue(undefined);
-    mockGetStoredDirectoryHandle.mockResolvedValue(undefined);
+    mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockGetDefaultWorkspace.mockResolvedValue(undefined);
+    mockGetWorkspace.mockResolvedValue(undefined);
+    mockCheckHandlePermission.mockResolvedValue('granted');
+    mockIsFileSystemAccessSupported = false;
   });
 
   describe('createProject mount-based backend wiring', () => {
@@ -175,7 +208,10 @@ describe('useProjectManager', () => {
         });
       });
 
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, 'opfs', { preservePath: true });
+      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
+        backend: 'opfs',
+        preservePath: true,
+      });
     });
 
     it('should call unmount in finally block after writeFiles', async () => {
@@ -184,7 +220,7 @@ describe('useProjectManager', () => {
       mockMount.mockImplementation(async () => {
         callOrder.push('mount');
       });
-      mockWriteFiles.mockImplementation(async () => {
+      mockClientWriteFiles.mockImplementation(async () => {
         callOrder.push('writeFiles');
       });
       mockUnmount.mockImplementation(() => {
@@ -205,7 +241,7 @@ describe('useProjectManager', () => {
     });
 
     it('should call unmount even when writeFiles throws', async () => {
-      mockWriteFiles.mockRejectedValueOnce(new Error('write failed'));
+      mockClientWriteFiles.mockRejectedValueOnce(new Error('write failed'));
 
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -219,7 +255,10 @@ describe('useProjectManager', () => {
         }),
       ).rejects.toThrow('write failed');
 
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, 'opfs', { preservePath: true });
+      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
+        backend: 'opfs',
+        preservePath: true,
+      });
       expect(mockUnmount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`);
     });
 
@@ -237,7 +276,7 @@ describe('useProjectManager', () => {
       expect(mockMount).toHaveBeenCalledOnce();
     });
 
-    it('should still call setBuildFileSystemConfig with resolvedBackend', async () => {
+    it('should still call setProjectFileSystemConfig with resolvedBackend', async () => {
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
       await act(async () => {
@@ -248,7 +287,7 @@ describe('useProjectManager', () => {
         });
       });
 
-      expect(mockSetBuildFileSystemConfig).toHaveBeenCalledWith(fakeProject.id, 'opfs');
+      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({ projectId: fakeProject.id, backend: 'opfs' });
     });
 
     it('should mount with default indexeddb when no backend specified', async () => {
@@ -263,12 +302,47 @@ describe('useProjectManager', () => {
         });
       });
 
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, 'indexeddb', { preservePath: true });
+      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
+        backend: 'indexeddb',
+        preservePath: true,
+      });
       expect(mockUnmount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`);
     });
 
-    it('should fall back to indexeddb when webaccess has no stored handle', async () => {
-      mockGetStoredDirectoryHandle.mockResolvedValue(undefined);
+    it('should throw WorkspaceDirectoryRequiredError when webaccess cannot resolve a workspace', async () => {
+      // In jsdom `isFileSystemAccessSupported === false`, so this exercises
+      // the `'unsupported'` branch. Either way `createProject` MUST refuse
+      // to silently downgrade to indexeddb (Audit R3).
+      mockGetDefaultWorkspace.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(
+        act(async () => {
+          await result.current.createProject({
+            project: stubProjectData,
+            files: makeFiles({ [mainFile]: [1] }),
+            backend: 'webaccess',
+          });
+        }),
+      ).rejects.toMatchObject({ name: 'WorkspaceDirectoryRequiredError' });
+
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+      expect(mockMount).not.toHaveBeenCalled();
+    });
+
+    // Audit R15 happy-path regression: webaccess with a resolved + permitted
+    // default workspace MUST bind the project to that workspaceId in
+    // `configs[projectId]` and mount with `'webaccess'`. Silent downgrade
+    // is forbidden (Rule 13a).
+    it('should bind webaccess project to the default workspaceId and mount webaccess', async () => {
+      mockIsFileSystemAccessSupported = true;
+      const defaultEntry = {
+        workspace: { workspaceId: 'wsp_default', name: 'Default Workspace' },
+        handle: { kind: 'directory', name: 'Default' } as unknown as FileSystemDirectoryHandle,
+      };
+      mockGetDefaultWorkspace.mockResolvedValue(defaultEntry);
+      mockCheckHandlePermission.mockResolvedValue('granted');
 
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -280,28 +354,126 @@ describe('useProjectManager', () => {
         });
       });
 
-      expect(mockSetBuildFileSystemConfig).toHaveBeenCalledWith(fakeProject.id, 'indexeddb');
-      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, 'indexeddb', { preservePath: true });
+      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
+        projectId: fakeProject.id,
+        backend: 'webaccess',
+        workspaceId: 'wsp_default',
+      });
+      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
+        backend: 'webaccess',
+        directoryHandle: defaultEntry.handle,
+        workspaceId: 'wsp_default',
+        preservePath: true,
+      });
     });
 
-    it('should seed activeModel and activeKernel on the new chat from the kernel template + initial message', async () => {
+    // Audit R15 explicit-workspace regression: when callers (e.g. the
+    // `/projects/new` workspace picker) pass an explicit `workspaceId`, the
+    // project must bind to that workspace, NOT the default. This is the
+    // foundation for Finding 15 — projects are pinned to the workspace
+    // chosen at creation time and never re-point to the current default.
+    it('should bind webaccess project to the explicit workspaceId option, ignoring the default', async () => {
+      mockIsFileSystemAccessSupported = true;
+      const defaultEntry = {
+        workspace: { workspaceId: 'wsp_default', name: 'Default Workspace' },
+        handle: { kind: 'directory', name: 'Default' } as unknown as FileSystemDirectoryHandle,
+      };
+      const explicitEntry = {
+        workspace: { workspaceId: 'wsp_explicit', name: 'Explicit Workspace' },
+        handle: { kind: 'directory', name: 'Explicit' } as unknown as FileSystemDirectoryHandle,
+      };
+      mockGetDefaultWorkspace.mockResolvedValue(defaultEntry);
+      mockGetWorkspace.mockResolvedValue(explicitEntry);
+      mockCheckHandlePermission.mockResolvedValue('granted');
+
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.createProject({
+          project: stubProjectData,
+          files: makeFiles({ [mainFile]: [1] }),
+          backend: 'webaccess',
+          workspaceId: 'wsp_explicit',
+        });
+      });
+
+      expect(mockGetWorkspace).toHaveBeenCalledWith('wsp_explicit');
+      expect(mockGetDefaultWorkspace).not.toHaveBeenCalled();
+      expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
+        projectId: fakeProject.id,
+        backend: 'webaccess',
+        workspaceId: 'wsp_explicit',
+      });
+    });
+
+    // Audit R15 permission-denied regression: a resolved workspace with
+    // `permission !== 'granted'` must surface as a structured
+    // `WorkspaceDirectoryRequiredError({ code: 'permission' })` and NOT
+    // partially bind the project. The route layer translates this into
+    // the inline `WorkspaceDirectoryPanel` recovery UX.
+    it('should throw permission-coded error when webaccess workspace has revoked permission', async () => {
+      mockIsFileSystemAccessSupported = true;
+      mockGetDefaultWorkspace.mockResolvedValue({
+        workspace: { workspaceId: 'wsp_revoked', name: 'Revoked' },
+        handle: { kind: 'directory', name: 'Revoked' } as unknown as FileSystemDirectoryHandle,
+      });
+      mockCheckHandlePermission.mockResolvedValue('prompt');
+
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(
+        act(async () => {
+          await result.current.createProject({
+            project: stubProjectData,
+            files: makeFiles({ [mainFile]: [1] }),
+            backend: 'webaccess',
+          });
+        }),
+      ).rejects.toMatchObject({ name: 'WorkspaceDirectoryRequiredError', code: 'permission' });
+
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+      expect(mockMount).not.toHaveBeenCalled();
+    });
+
+    // Audit R15 missing-workspace regression: an explicit `workspaceId`
+    // that no longer exists in IDB must surface as
+    // `code: 'missing'` so the UI can prompt the user to re-pick the
+    // workspace (rather than silently falling back to the default).
+    it('should throw missing-coded error when explicit workspaceId is not in the store', async () => {
+      mockIsFileSystemAccessSupported = true;
+      mockGetWorkspace.mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await expect(
+        act(async () => {
+          await result.current.createProject({
+            project: stubProjectData,
+            files: makeFiles({ [mainFile]: [1] }),
+            backend: 'webaccess',
+            workspaceId: 'wsp_gone',
+          });
+        }),
+      ).rejects.toMatchObject({ name: 'WorkspaceDirectoryRequiredError', code: 'missing' });
+
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    });
+
+    it('should seed activeKernel from the kernel template and leave activeModel unset when not supplied', async () => {
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
       await act(async () => {
         await result.current.createProject({
           kernel: 'openscad',
           projectName: 'Seeded',
-          initialMessage: {
-            content: 'hello',
-            model: 'anthropic/claude-sonnet-4-5',
-          },
+          initialMessage: { content: 'hello' },
         });
       });
 
       const callArgs = mockCreateProjectWithResources.mock.calls.at(-1)?.[0] as
         | { chat: { activeModel?: string; activeKernel?: string } }
         | undefined;
-      expect(callArgs?.chat.activeModel).toBe('anthropic/claude-sonnet-4-5');
+      expect(callArgs?.chat.activeModel).toBeUndefined();
       expect(callArgs?.chat.activeKernel).toBe('openscad');
     });
 
@@ -329,10 +501,7 @@ describe('useProjectManager', () => {
           kernel: 'openscad',
           activeModel: 'override-model',
           activeKernel: 'manifold',
-          initialMessage: {
-            content: 'hello',
-            model: 'derived-model',
-          },
+          initialMessage: { content: 'hello' },
         });
       });
 
@@ -341,6 +510,36 @@ describe('useProjectManager', () => {
         | undefined;
       expect(callArgs?.chat.activeModel).toBe('override-model');
       expect(callArgs?.chat.activeKernel).toBe('manifold');
+    });
+
+    // Wire-format invariant for the chat-metadata-first-class-architecture
+    // refactor: the pending-user-message seeded onto a brand-new chat must
+    // carry only `status: pending`. The per-request `agent` payload (kernel,
+    // model, mode, toolChoice, testingEnabled, snapshot, contextPayload)
+    // is composed by the chat-client at regenerate time, not stamped onto
+    // the seed message. Regression coverage for the previous failure mode
+    // where the seed message stamped kernel/model and the seed mode drifted
+    // from the chat row's activeKernel.
+    it('should seed the initial pending user message with only status: pending', async () => {
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.createProject({
+          kernel: 'openscad',
+          initialMessage: { content: 'first turn' },
+        });
+      });
+
+      const callArgs = mockCreateProjectWithResources.mock.calls.at(-1)?.[0] as
+        | { chat: { messages: Array<{ metadata?: Record<string, unknown> }> } }
+        | undefined;
+      const seedMetadata = callArgs?.chat.messages[0]?.metadata;
+      expect(seedMetadata?.['status']).toBe('pending');
+      expect(seedMetadata?.['kernel']).toBeUndefined();
+      expect(seedMetadata?.['model']).toBeUndefined();
+      expect(seedMetadata?.['mode']).toBeUndefined();
+      expect(seedMetadata?.['toolChoice']).toBeUndefined();
+      expect(seedMetadata?.['testingEnabled']).toBeUndefined();
     });
 
     it('should write files with correct project paths', async () => {
@@ -356,10 +555,135 @@ describe('useProjectManager', () => {
         });
       });
 
-      const writtenFiles = mockWriteFiles.mock.calls[0]![0];
+      const writtenFiles = mockClientWriteFiles.mock.calls[0]![0];
       const paths = Object.keys(writtenFiles);
       expect(paths).toContain(`/projects/${fakeProject.id}/${sourceFile}`);
       expect(paths).toContain(`/projects/${fakeProject.id}/${packageFile}`);
+    });
+
+    // Regression: project bootstrap writes /projects/<id>/... keys that are
+    // foreign to the root FM's workspace ('/'). Going through
+    // `fileManager.writeFiles` (the scoped FileContentService) used to spam
+    // `WorkspacePathEscapeError` ~100 ms after every homepage submit because
+    // `batchWritten` carried those foreign keys to the root FM's
+    // FileTreeService. The cross-workspace bootstrap MUST route through
+    // `fileManager.client.writeFiles` (worker namespace, no resolver,
+    // dispatched by the mount table) for backend dispatch to land in the
+    // correct provider without tripping the workspace contract.
+    //
+    // See also: `use-cad-preview.test.tsx` — the same cross-workspace
+    // bootstrap pattern applies to `CadPreviewProvider` when its surrounding
+    // FM doesn't already own the preview's `/projects/<id>` mount (root-FM
+    // thumbnails on the homepage, import-route Review previews, cross-scope
+    // previews). Both bootstrap sites are discoverable as one class.
+    it('should route bootstrap writes through fileManager.client.writeFiles, not fileManager.writeFiles', async () => {
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.createProject({
+          project: stubProjectData,
+          files: makeFiles({ [mainFile]: [1] }),
+          backend: 'opfs',
+        });
+      });
+
+      expect(mockClientWriteFiles).toHaveBeenCalledOnce();
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+    });
+
+    it('should invoke client.writeFiles between workspace.mount and workspace.unmount for indexeddb', async () => {
+      const callOrder: string[] = [];
+      mockMount.mockImplementation(async () => {
+        callOrder.push('mount');
+      });
+      mockClientWriteFiles.mockImplementation(async () => {
+        callOrder.push('client.writeFiles');
+      });
+      mockUnmount.mockImplementation(() => {
+        callOrder.push('unmount');
+      });
+
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.createProject({
+          project: stubProjectData,
+          files: makeFiles({ [mainFile]: [1] }),
+          backend: 'indexeddb',
+        });
+      });
+
+      expect(callOrder).toEqual(['mount', 'client.writeFiles', 'unmount']);
+      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
+        backend: 'indexeddb',
+        preservePath: true,
+      });
+    });
+
+    it('should invoke client.writeFiles between workspace.mount and workspace.unmount for opfs', async () => {
+      const callOrder: string[] = [];
+      mockMount.mockImplementation(async () => {
+        callOrder.push('mount');
+      });
+      mockClientWriteFiles.mockImplementation(async () => {
+        callOrder.push('client.writeFiles');
+      });
+      mockUnmount.mockImplementation(() => {
+        callOrder.push('unmount');
+      });
+
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.createProject({
+          project: stubProjectData,
+          files: makeFiles({ [mainFile]: [1] }),
+          backend: 'opfs',
+        });
+      });
+
+      expect(callOrder).toEqual(['mount', 'client.writeFiles', 'unmount']);
+      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
+        backend: 'opfs',
+        preservePath: true,
+      });
+    });
+
+    it('should invoke client.writeFiles between workspace.mount and workspace.unmount for webaccess (with handle + workspaceId)', async () => {
+      mockIsFileSystemAccessSupported = true;
+      const entry = {
+        workspace: { workspaceId: 'wsp_test', name: 'Test' },
+        handle: { kind: 'directory', name: 'Test' } as unknown as FileSystemDirectoryHandle,
+      };
+      mockGetDefaultWorkspace.mockResolvedValue(entry);
+      const callOrder: string[] = [];
+      mockMount.mockImplementation(async () => {
+        callOrder.push('mount');
+      });
+      mockClientWriteFiles.mockImplementation(async () => {
+        callOrder.push('client.writeFiles');
+      });
+      mockUnmount.mockImplementation(() => {
+        callOrder.push('unmount');
+      });
+
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () => {
+        await result.current.createProject({
+          project: stubProjectData,
+          files: makeFiles({ [mainFile]: [1] }),
+          backend: 'webaccess',
+        });
+      });
+
+      expect(callOrder).toEqual(['mount', 'client.writeFiles', 'unmount']);
+      expect(mockMount).toHaveBeenCalledWith(`/projects/${fakeProject.id}`, {
+        backend: 'webaccess',
+        directoryHandle: entry.handle,
+        workspaceId: 'wsp_test',
+        preservePath: true,
+      });
     });
   });
 });

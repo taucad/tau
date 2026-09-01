@@ -30,7 +30,7 @@
   },
   "panels": [
     {
-      "title": "Token Usage (Input / Output)",
+      "title": "Token Usage (Input / Output / Cache Read)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "targets": [
@@ -40,6 +40,33 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "title": "Prompt cache hit rate",
+      "type": "timeseries",
+      "description": "Provider-agnostic prompt-cache hit rate computed as cache_read / (input + cache_read). Input tokens are recorded normalized (cache reads excluded) by `usage-tracking.middleware.ts`, so the denominator is the prompt prefix the provider had to bill in full plus the prefix it served from cache. Tracks the goal in docs/research/gemini-prompt-cache-busting.md (target: >=80% steady-state on multi-turn chats).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "expr": "sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n/\n(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n  +\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"input\", service_name=~\"$service\"}[5m]))\n)",
+          "legendFormat": "{{gen_ai_provider_name}}/{{gen_ai_request_model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 0.4, "color": "yellow" },
+              { "value": 0.8, "color": "green" }
+            ]
+          }
+        }
+      }
     },
     {
       "title": "Estimated Cost ($/hr)",

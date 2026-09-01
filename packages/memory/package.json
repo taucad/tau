@@ -1,6 +1,6 @@
 {
   "name": "@taucad/memory",
-  "version": "0.0.1",
+  "version": "0.1.0-beta.0",
   "description": "Zero-dependency shared-memory primitives (SharedPool, SharedMemoryArena) over SharedArrayBuffer with Atomics",
   "type": "module",
   "private": false,

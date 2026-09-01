@@ -154,7 +154,7 @@ export function ChatMessageToolExportGeometry({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={XCircle} fallbackTitle='Failed to export' />;
+      return <ChatToolError errorText={part.errorText} icon={XCircle} noun='geometry export' />;
     }
 
     case 'approval-requested':

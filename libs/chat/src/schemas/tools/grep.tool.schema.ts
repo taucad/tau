@@ -16,6 +16,19 @@ export const grepInputSchema = z.object({
     .optional()
     .describe('Glob pattern to filter files (e.g., "*.ts", "*.scad"). Searches all files if not provided.'),
   caseSensitive: z.boolean().optional().describe('Whether the search should be case-sensitive. Defaults to true.'),
+  headLimit: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .optional()
+    .describe('Maximum number of matches to return (1-1000, default 50). Use with offset to paginate.'),
+  offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Number of leading matches to skip before applying headLimit. Defaults to 0.'),
 });
 
 const grepMatchSchema = z.object({
@@ -29,6 +42,8 @@ export const grepOutputSchema = z.object({
   matches: z.array(grepMatchSchema).describe('The list of matches found.'),
   totalMatches: z.number().describe('The total number of matches found.'),
   truncated: z.boolean().optional().describe('Whether results were truncated due to too many matches.'),
+  appliedHeadLimit: z.number().int().nonnegative().describe('The effective headLimit used to slice the matches list.'),
+  appliedOffset: z.number().int().nonnegative().describe('The effective offset used to slice the matches list.'),
 });
 
 /** @public */

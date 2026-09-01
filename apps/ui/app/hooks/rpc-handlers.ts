@@ -9,7 +9,7 @@
  */
 import { createActor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
-import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#lib/await-fresh-render.js';
+import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-fresh-render.js';
 import type {
   RpcCall,
   RpcClientErrorCode,
@@ -38,6 +38,7 @@ import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 
 import { recordRpcOutcome } from '#services/rpc-ledger.js';
 import { screenshotRequestMachine, orthographicViews } from '#machines/screenshot-request.machine.js';
+import { buildScreenshotOverlayForPath } from '#machines/resolve-screenshot-overlay.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -439,6 +440,7 @@ function createBrowserGraphicsClient(
               aspectRatio: 1,
               maxResolution: 800,
               zoomLevel: 1.2,
+              overlay: buildScreenshotOverlayForPath(targetFile),
             },
             onSuccess(dataUrls) {
               screenshotActor.stop();
@@ -497,6 +499,7 @@ function createBrowserGraphicsClient(
                 isPreview: true,
               },
               cameraAngles: viewAngles,
+              overlay: buildScreenshotOverlayForPath(targetFile),
               aspectRatio: 1,
               maxResolution: 800,
               zoomLevel: 1.2,

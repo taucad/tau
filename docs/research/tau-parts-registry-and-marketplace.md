@@ -22,7 +22,7 @@ Blueprint for a registry of reusable Code-CAD parts — parametric hinges, brack
 
 Today the closest thing to a parts library is the `presets.all()` kernel catalog and any user happens to copy-paste between projects. There is no discovery surface, no install workflow, no cross-project reuse, no community attribution. The vision is **`@taucad/parts` as the npm-of-CAD**: a Tau-owned registry that mirrors npm's content-addressed model from [`api-npm-and-reproducible-snapshots.md`](./api-npm-and-reproducible-snapshots.md), reuses the publication infrastructure from [`sharing-architecture.md`](./sharing-architecture.md), plugs into the dynamic plugin loader from [`dynamic-runtime-plugins.md`](./dynamic-runtime-plugins.md), and surfaces in the IDE via a new sidebar entry sibling to the existing `Community` and `Convert` items in `app-sidebar.tsx`. A part is a kernel-tagged, parameter-typed, screenshot-equipped, optionally-tested unit of CAD that imports cleanly into any Tau project: `import { hinge } from '@tau/parts/m3-pivot-hinge'` for an OpenSCAD hinge, `import { bracket } from '@tau/parts/wall-bracket'` for a Replicad bracket. The Parts sidebar is browse-search-install in three clicks; install adds an entry to the project's `taucad.config.ts` deps and the lockfile; the part's source materializes under `/.tau/parts/<scope>/<name>/`.
 
-The registry is content-addressed (sha256-keyed blobs in R2, same bucket as publications), version-tagged (semver, immutable per version), kernel-tagged (a part declares which kernels it supports), and license-tagged (MIT/Apache/CC-BY/proprietary). The marketplace layer adds a Postgres `part`, `part_version`, `part_install`, `part_review`, `creator_payout` schema; a `tau-parts.dev` discovery surface (or `parts.tau.new`); a verification pipeline that runs each part through `@taucad/test-runtime` (per [`browser-first-parameter-aware-testing.md`](./browser-first-parameter-aware-testing.md)) for watertightness, manifold-ness, and dimensional sanity; and a creator monetization tier (free / one-time / subscription) with Stripe Connect for payouts. **Crucially, this is one consistent `import` mechanism** — kernel files (`.scad`, `.kcl`), TS files (`.ts` for Replicad/Manifold/OC), middleware, transcoders, and even runtime plugins all flow through the same registry / lockfile / Service Worker chain. Specialization happens **above** the install layer; the install layer itself is uniform.
+The registry is content-addressed (sha256-keyed blobs in R2, same bucket as publications), version-tagged (semver, immutable per version), kernel-tagged (a part declares which kernels it supports), and license-tagged (MIT/Apache/CC-BY/proprietary). The marketplace layer adds a Postgres `part`, `part_version`, `part_install`, `part_review`, `creator_payout` schema; a `tau-parts.dev` discovery surface (or `parts.tau.new`); a verification pipeline that runs each part through GeoSpec via Tau's `@taucad/testing` adapter (per [`geospec-standalone-cad-testing-blueprint.md`](./geospec-standalone-cad-testing-blueprint.md)) for watertightness, manifold-ness, and dimensional sanity; and a creator monetization tier (free / one-time / subscription) with Stripe Connect for payouts. **Crucially, this is one consistent `import` mechanism** — kernel files (`.scad`, `.kcl`), TS files (`.ts` for Replicad/Manifold/OC), middleware, transcoders, and even runtime plugins all flow through the same registry / lockfile / Service Worker chain. Specialization happens **above** the install layer; the install layer itself is uniform.
 
 ## Table of Contents
 
@@ -48,7 +48,7 @@ Five concrete frictions sum to "no community CAD library":
 1. **Reuse is copy-paste.** A user designing a hinge for project A cannot reach into project B's hinge without manually copying files, parameters, and (mentally) the kernel context. The agent cannot suggest "use the hinge from your previous project."
 2. **No discovery surface.** Tau has no equivalent of npm.com, Thingiverse, GrabCAD, or Onshape Public Documents. The `Community` sidebar entry exists (`route.constants.ts:57-60`) but routes to publications, not parts.
 3. **No multi-kernel sharing.** A bracket parametrically generated in OpenSCAD cannot be referenced by a Replicad project today. The kernel boundary is an unwanted distribution boundary.
-4. **No quality signals.** A user who finds a hinge somewhere has no programmatic guarantee it produces watertight, manifold geometry across its parameter range. The `@taucad/test-runtime` work in [`browser-first-parameter-aware-testing.md`](./browser-first-parameter-aware-testing.md) creates the testing primitive but not the registry that records which parts pass.
+4. **No quality signals.** A user who finds a hinge somewhere has no programmatic guarantee it produces watertight, manifold geometry across its parameter range. GeoSpec plus the Tau adapter creates the testing primitive, but the registry records which parts pass.
 5. **No creator economy.** Skilled CAD authors have no incentive to invest time in publishing high-quality parametric parts; CAD's equivalent of "the npm package author" doesn't exist as a recognized role.
 
 ## Scope and Non-Goals
@@ -108,11 +108,11 @@ A part is **kernel-native at runtime** — an OpenSCAD hinge runs in the OpenSCA
 
 ### Finding 6: Verification at publish time is enabled by browser-first testing
 
-[`browser-first-parameter-aware-testing.md`](./browser-first-parameter-aware-testing.md)'s `@taucad/test-runtime` runs in the browser. **Same code can run server-side in a headless browser worker** as part of the registry's publish pipeline:
+GeoSpec plus Tau's `@taucad/testing` adapter runs in the browser and Node. **The same test modules can run server-side in a headless browser worker** as part of the registry's publish pipeline:
 
 1. Author publishes part with `*.test.ts` files.
 2. Registry server queues a verification job.
-3. Worker spins up an `@taucad/test-runtime` instance, runs every test across declared parameter groups, captures pass/fail + GLB hash.
+3. Worker spins up GeoSpec through the Tau adapter, runs every test across declared parameter groups, captures pass/fail + geometry evidence hash.
 4. Result attached to the part version: `verification.status: 'verified' | 'failed' | 'pending'`, `verification.tests: 12 passed, 0 failed`.
 
 Result is a programmatic quality signal — much stronger than star ratings.
@@ -124,7 +124,7 @@ Result is a programmatic quality signal — much stronger than star ratings.
 | **Registry storage**    | R2 / MinIO via `ObjectStorageService` (per `sharing-architecture.md`) | Content-addressed sha256 blobs under `tau-content/parts/<sha256>`                                   |
 | **Registry DB**         | New `part`, `part_version`, `part_install`, `part_review` tables      | Postgres schema mirroring `publication` shape                                                       |
 | **Registry API**        | New NestJS `parts` module in `apps/api/app/api/parts/`                | `/api/parts/*` REST + Socket.IO subscriptions                                                       |
-| **Verification worker** | New background job in `apps/api`                                      | Runs `@taucad/test-runtime` against each new version; records pass/fail + GLB hash                  |
+| **Verification worker** | New background job in `apps/api`                                      | Runs GeoSpec through `@taucad/testing` against each new version; records pass/fail + evidence hash  |
 | **Sidebar entry**       | New `'Parts'` route in `route.constants.ts:36-81`                     | Sibling to `Community`/`Convert`; lucide `Boxes` icon                                               |
 | **Browse UI**           | New `apps/ui/app/routes/parts.tsx`                                    | Grid of parts; filters; search; infinite scroll                                                     |
 | **Part detail UI**      | `apps/ui/app/routes/parts.$slug.tsx`                                  | Screenshots, parameters, install button, reviews, version history                                   |
@@ -485,4 +485,4 @@ Internal:
 - Foundation: [`docs/research/dynamic-runtime-plugins.md`](./dynamic-runtime-plugins.md) — `taucad.config.ts` records part deps; resolver picks them up.
 - Foundation: [`docs/research/vscode-style-resolution-and-virtual-types.md`](./vscode-style-resolution-and-virtual-types.md) — virtual types surface part parameter shapes in IntelliSense.
 - Foundation: [`docs/research/node-modules-single-source-of-truth.md`](./node-modules-single-source-of-truth.md) — same FS-as-SSoT principle applies to `/.tau/parts/`.
-- Drives: [`docs/research/browser-first-parameter-aware-testing.md`](./browser-first-parameter-aware-testing.md) — verification reuses `@taucad/test-runtime`.
+- Drives: [`docs/research/geospec-standalone-cad-testing-blueprint.md`](./geospec-standalone-cad-testing-blueprint.md) — verification reuses GeoSpec through Tau's adapter.

@@ -1,5 +1,6 @@
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
+import type { ScreenshotOverlay } from '@taucad/types';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { screenshotRequestMachine } from '#machines/screenshot-request.machine.js';
 
@@ -12,6 +13,12 @@ export type CaptureViewScreenshotOptions = {
   readonly quality: number;
   /** Optional Set used by the host to track active actors for unmount cleanup. */
   readonly activeActors?: Set<{ stop: () => void }>;
+  /**
+   * Optional top-left chip overlay (file-extension icon + full file path).
+   * Resolve via `resolveScreenshotOverlay(cadRef)` at the call site so the
+   * graphics layer never depends on CAD state.
+   */
+  readonly overlay?: ScreenshotOverlay;
   /**
    * Called with the raw screenshot data URL once the screenshot succeeds.
    * Resizing for chat upload is owned by the `draftMachine` `imageProcessing`
@@ -38,7 +45,7 @@ export type CaptureViewScreenshotOptions = {
  *  - the `CaptureViewControl` toolbar button in the viewer
  */
 export function captureViewScreenshot(options: CaptureViewScreenshotOptions): void {
-  const { graphicsRef, quality, activeActors, onImage, onError } = options;
+  const { graphicsRef, quality, activeActors, overlay, onImage, onError } = options;
 
   const actor = createActor(screenshotRequestMachine, {
     input: { graphicsRef },
@@ -61,6 +68,7 @@ export function captureViewScreenshot(options: CaptureViewScreenshotOptions): vo
       aspectRatio: 16 / 9,
       maxResolution: 1200,
       zoomLevel: 1.4,
+      overlay,
     },
     onSuccess(dataUrls) {
       const dataUrl = dataUrls[0];

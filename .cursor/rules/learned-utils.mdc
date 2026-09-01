@@ -1,0 +1,18 @@
+---
+description: Auto-curated learned facts and preferences for the `utils` library (libs/utils)
+globs:
+  - "libs/utils/**"
+alwaysApply: false
+---
+
+# Learned: utils
+
+Auto-maintained by the `agents-memory-updater` subagent. New bullets are
+capped at 200 chars and 12 bullets per section. The existing entries below
+were harvested verbatim from `AGENTS.md` during the one-time context
+cleanup; they may exceed the 200-char cap.
+
+## Learned User Preferences
+
+- Use `generatePrefixedId(idPrefix.*)` from `@taucad/utils/id` for all ID generation — not `crypto.randomUUID()`; prefixed IDs use nanoid with typed prefixes defined in `@taucad/types/constants` (e.g., `idPrefix.log` = `'log'`)
+

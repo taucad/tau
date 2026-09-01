@@ -344,7 +344,7 @@ emailVerification: {
 | R9  | Update lock-screen copy/actions so private invite recipients land on magic-link signup/sign-in and return to the same shared URL.                                                                            | P1       | Low    | Medium |
 | R10 | Add Resend staging/prod operator checklist: verified domains, DNS records, API key scopes, Fly secrets, sender smoke tests.                                                                                  | P1       | Low    | High   |
 | R11 | Add delivery observability: log Resend message id, template kind, recipient hash/domain, and failure class; never log auth URLs or tokens.                                                                   | P1       | Medium | High   |
-| R12 | Add Terraform-managed Resend/Fly email secrets and Resend DNS verification CNAME support in `repos/cloud-infra`.                                                                                             | P0       | Medium | High   |
+| R12 | Add Terraform-managed Resend/Fly email secrets and Resend DNS verification CNAME support in `repos/tau-cloud`.                                                                                             | P0       | Medium | High   |
 
 ## Security and Privacy Notes
 

@@ -5,13 +5,13 @@ status: superseded
 created: '2026-04-20'
 updated: '2026-05-14'
 category: architecture
-superseded_by: docs/research/cloud-infra-activation-status.md
+superseded_by: docs/research/tau-cloud-activation-status.md
 related:
-  - docs/research/cloud-infra-activation-status.md
+  - docs/research/tau-cloud-activation-status.md
   - docs/policy/commit-policy.md
 ---
 
-> **Superseded.** The Netlify cutover this document scoped is code-complete; its M1–M5 gap-analysis findings about residual operator steps (PAT minting, OAuth redirect-URI verification, registrar NS delegation, Let's Encrypt wait, smoke gate) are consolidated into the activation checklist at [`docs/research/cloud-infra-activation-status.md`](cloud-infra-activation-status.md). Operational ownership of the Netlify Terraform module lives in [`repos/cloud-infra/docs/netlify-iac-runbook.md`](../../repos/cloud-infra/docs/netlify-iac-runbook.md) and the topology diagram in [`docs/architecture/ui-deployment-topology.md`](../architecture/ui-deployment-topology.md). Treat the content below as historical reference for the cutover rationale.
+> **Superseded.** The Netlify cutover this document scoped is code-complete; its M1–M5 gap-analysis findings about residual operator steps (PAT minting, OAuth redirect-URI verification, registrar NS delegation, Let's Encrypt wait, smoke gate) are consolidated into the activation checklist at [`docs/research/tau-cloud-activation-status.md`](tau-cloud-activation-status.md). Operational ownership of the Netlify Terraform module lives in [`repos/tau-cloud/docs/netlify-iac-runbook.md`](../../repos/tau-cloud/docs/netlify-iac-runbook.md) and the topology diagram in [`docs/architecture/ui-deployment-topology.md`](../architecture/ui-deployment-topology.md). Treat the content below as historical reference for the cutover rationale.
 
 # Netlify UI Deployment Strategy: PR Previews + Auto Staging + Manual Production
 
@@ -21,7 +21,7 @@ Document the current Tau UI deployment landscape across Netlify and Fly.io, exam
 
 **Status (2026-04-20)**: Both staging and production cutovers are **code-complete**. The staging UI ships from Netlify (`taucad` site, custom domain `taucad.dev`) via the Netlify GitHub integration; the Fly staging API CORS allowlist + Helmet `Cross-Origin-Resource-Policy` accommodate the Netlify origins. The production UI ships from Netlify (`taucad-prod` site, custom domain `tau.new`) via the manual [`prod-deploy-ui.yml`](../../.github/workflows/prod-deploy-ui.yml) (`workflow_dispatch`). See [docs/architecture/ui-deployment-topology.md](../architecture/ui-deployment-topology.md) for the resulting topology, [Recommendations / Task List](#recommendations--task-list) for the per-recommendation status, and the [Gap Analysis: Remaining Manual Operations](#gap-analysis-remaining-manual-operations) section below for the residual items inherent to OAuth, registrar nameserver delegation latency, PAT minting workflows, Let's Encrypt issuance timing, and human smoke tests.
 
-**Infra carve-out (2026-05)**: Registrar-record **declarations** (+ Netlify attachment metadata that Terraform can emit) migrate to **`repos/cloud-infra`** per [`iac-terraform-strategy.md`](iac-terraform-strategy.md) V1 — follow [`repos/cloud-infra/docs/dns-migration-plan.md`](../../repos/cloud-infra/docs/dns-migration-plan.md) (`pnpm repos sync` required) until Cloudflare assumes full authority after the nameserver flip.
+**Infra carve-out (2026-05)**: Registrar-record **declarations** (+ Netlify attachment metadata that Terraform can emit) migrate to **`repos/tau-cloud`** per [`iac-terraform-strategy.md`](iac-terraform-strategy.md) V1 — follow [`repos/tau-cloud/docs/dns-migration-plan.md`](../../repos/tau-cloud/docs/dns-migration-plan.md) (`pnpm repos sync` required) until Cloudflare assumes full authority after the nameserver flip.
 
 Tau currently runs **two parallel UI hosting stacks** (Fly.io and Netlify) that disagree about which is "staging" vs "production" and have **misconfigured environment variables on Netlify** that mix staging and production endpoints. Only one Netlify site exists (`taucad`, building `main` only — PR previews already work via the `deploy-preview` context); there is no production Netlify site and no manual-promotion workflow. The Fly.io UI side has both `tau-ui-staging` and `taucad` (prod) Fly apps but `ci.yml` only auto-deploys `tau-ui-staging` — production is reachable only through `workflow_dispatch` on the reusable `deploy.yml`. Reaching the target state requires: provisioning a second Netlify site (`taucad-prod`), preserving the existing per-PR deploy-preview behaviour on the staging site (no all-branch deploys), fixing the env-var topology on both Netlify sites, adding `prod-deploy-ui.yml` (modelled on Novu's `reusable-dashboard-deploy.yml` + `prod-deploy-web.yml` pair) using `nwtgck/actions-netlify@v1.2`, and patching `apps/api/fly.*.toml` to include the two production-class Netlify origins (`https://taucad-prod.netlify.app` plus the public `tau.new`/`taucad.dev` aliases) in `ADDITIONAL_CORS_ORIGINS`.
 
@@ -427,11 +427,11 @@ netlify api listSiteDeploys --data='{"site_id":"…","per_page":50}'      # Depl
 
 ### Executive Summary
 
-The Netlify migration is **code-complete** across both environments. Staging UI builds automatically on every push to `main` and PR via the Netlify GitHub integration; production UI ships manually via [`.github/workflows/prod-deploy-ui.yml`](../../.github/workflows/prod-deploy-ui.yml) (`workflow_dispatch`). **DNS record declarations now live under `repos/cloud-infra` (Terraform)**, coordinated by **`repos/cloud-infra/docs/dns-migration-plan.md`**, leaving these operations outside CI automation: PAT mint + secret placement (often **HCP Terraform Variable Sets** + GitHub Actions secrets simultaneously), OAuth redirect-URI edits in vendor consoles, **registrar authoritative nameserver delegation**, Netlify-managed Let's Encrypt TLS provisioning wait windows, and the human judgement smoke gate before trusting a promotion. This gap section therefore tracks remaining **interaction surfaces**, not unmanaged DNS rows after Cloudflare assumes authority post NS flip.
+The Netlify migration is **code-complete** across both environments. Staging UI builds automatically on every push to `main` and PR via the Netlify GitHub integration; production UI ships manually via [`.github/workflows/prod-deploy-ui.yml`](../../.github/workflows/prod-deploy-ui.yml) (`workflow_dispatch`). **DNS record declarations now live under `repos/tau-cloud` (Terraform)**, coordinated by **`repos/tau-cloud/docs/dns-migration-plan.md`**, leaving these operations outside CI automation: PAT mint + secret placement (often **HCP Terraform Variable Sets** + GitHub Actions secrets simultaneously), OAuth redirect-URI edits in vendor consoles, **registrar authoritative nameserver delegation**, Netlify-managed Let's Encrypt TLS provisioning wait windows, and the human judgement smoke gate before trusting a promotion. This gap section therefore tracks remaining **interaction surfaces**, not unmanaged DNS rows after Cloudflare assumes authority post NS flip.
 
 ### Methodology
 
-The gap list was derived by enumerating every interactive step outside **Git-mergeable** automation in this repo. Tooling surveyed includes **`netlify-cli`**, **`gh`**, [`prod-deploy-ui.yml`](../../.github/workflows/prod-deploy-ui.yml), and the Terraform-managed surfaces in **`repos/cloud-infra`**. Operational bootstrapping that predated Terraform (temporary shell helpers) may still exist in archived notes but **`repos/cloud-infra/scripts/netlify-bootstrap-site.sh`** (+ API deletes documented in **`repos/cloud-infra/docs/netlify-iac-runbook.md`**) supersede imperative click-ops wherever possible — subject to Terraform provider gaps (notably declarative **`netlify_site` creation**, still absent).
+The gap list was derived by enumerating every interactive step outside **Git-mergeable** automation in this repo. Tooling surveyed includes **`netlify-cli`**, **`gh`**, [`prod-deploy-ui.yml`](../../.github/workflows/prod-deploy-ui.yml), and the Terraform-managed surfaces in **`repos/tau-cloud`**. Operational bootstrapping that predated Terraform (temporary shell helpers) may still exist in archived notes but **`repos/tau-cloud/scripts/netlify-bootstrap-site.sh`** (+ API deletes documented in **`repos/tau-cloud/docs/netlify-iac-runbook.md`**) supersede imperative click-ops wherever possible — subject to Terraform provider gaps (notably declarative **`netlify_site` creation**, still absent).
 
 ### Findings
 
@@ -441,7 +441,7 @@ The gap list was derived by enumerating every interactive step outside **Git-mer
 
 **Status**: **MANUAL** — one-time per Netlify account / GitHub repo pair.
 
-**Source**: Historically scripted helper calls to `gh secret set`; post- **`repos/cloud-infra`**, consolidate Netlify PAT in **Terraform Cloud / HCP variable sets** alongside other provider tokens (still pasted interactively outside CI).
+**Source**: Historically scripted helper calls to `gh secret set`; post- **`repos/tau-cloud`**, consolidate Netlify PAT in **Terraform Cloud / HCP variable sets** alongside other provider tokens (still pasted interactively outside CI).
 
 **Reason it cannot be scripted**: A Netlify Personal Access Token is created at [app.netlify.com/user/applications#personal-access-tokens](https://app.netlify.com/user/applications#personal-access-tokens) via a logged-in browser session. Netlify does not expose a programmatic PAT-mint endpoint (intentionally — the PAT is the root credential for `netlify-cli`). The provisioning script therefore prompts the operator to paste it once and forwards it directly to `gh secret set NETLIFY_AUTH_TOKEN --env production` without persisting locally.
 
@@ -459,9 +459,9 @@ The gap list was derived by enumerating every interactive step outside **Git-mer
 
 **Severity**: P0 — actual resolver authority flip toward Cloudflare-hosted records.
 
-**Status**: **MANUAL NAMESERVER EDIT** — still performed at registrar; **individual DNS rows** now reviewable beforehand as Terraform-managed `repos/cloud-infra/stacks/cloud/{staging,prod}` plans.
+**Status**: **MANUAL NAMESERVER EDIT** — still performed at registrar; **individual DNS rows** now reviewable beforehand as Terraform-managed `repos/tau-cloud/stacks/cloud/{staging,prod}` plans.
 
-**Source**: [`repos/cloud-infra/docs/dns-migration-plan.md`](../../repos/cloud-infra/docs/dns-migration-plan.md).
+**Source**: [`repos/tau-cloud/docs/dns-migration-plan.md`](../../repos/tau-cloud/docs/dns-migration-plan.md).
 
 **Reason it stays manual**: Registrar APIs vary; NS glue updates require owner credentials and judgement about propagation windows (`dig +trace` acceptance tests). IaC declares the eventual steady-state records (including **`api.<env>`** pairing) prior to flipping NS so Cloudflare authoritative answers converge immediately upon delegation.
 
@@ -491,10 +491,10 @@ The gap list was derived by enumerating every interactive step outside **Git-mer
 | --- | ------------------------------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------- |
 | M1  | Paste Netlify PAT                                                   | Interactive only — Netlify does not expose programmatic PAT minting.  | PAT vault / `gh secret set` / HCP TF var sets | Operators paste once each surface that needs automation creds. |
 | M2  | OAuth redirect-URI verification                                     | No GCP / GitHub API for OAuth-client URI mutation.                    | Web console                                   | Operator verifies the listed URIs.                             |
-| M3  | Registrar NS delegation (`taucad.dev`, `tau.new`) toward Cloudflare | IaC previews entire zone — operator still swaps NS glue at registrar. | Registrar dashboard + **`dig`**               | Follow **`repos/cloud-infra/docs/dns-migration-plan.md`**.     |
+| M3  | Registrar NS delegation (`taucad.dev`, `tau.new`) toward Cloudflare | IaC previews entire zone — operator still swaps NS glue at registrar. | Registrar dashboard + **`dig`**               | Follow **`repos/tau-cloud/docs/dns-migration-plan.md`**.     |
 | M4  | TLS provisioning wait                                               | Netlify exposes read-only state; no SLA / force-provision endpoint.   | `netlify api`                                 | Operator polls until `issued`.                                 |
 | M5  | Production smoke test                                               | E2E covers deterministic surface; final gate is human.                | Human                                         | Operator validates UX before promoting.                        |
 
 ### Conclusion
 
-The migration remains code-complete relative to Tau application repos: staging deploys automatically, production promotes through `prod-deploy-ui.yml`, and **`repos/cloud-infra`** now absorbs DNS + Netlify settings drift that previously lived purely in dashboards / ad-hoc scripts. M1/PAT minting stays interactive by vendor design; registrar NS delegation persists as a guarded human milestone even though record bodies are IaC-reviewed first. **`This gap analysis is the reconciliation point between historical Netlify-console operations and Terraform ownership — not a denial that DNS moved into IaC.`**
+The migration remains code-complete relative to Tau application repos: staging deploys automatically, production promotes through `prod-deploy-ui.yml`, and **`repos/tau-cloud`** now absorbs DNS + Netlify settings drift that previously lived purely in dashboards / ad-hoc scripts. M1/PAT minting stays interactive by vendor design; registrar NS delegation persists as a guarded human milestone even though record bodies are IaC-reviewed first. **`This gap analysis is the reconciliation point between historical Netlify-console operations and Terraform ownership — not a denial that DNS moved into IaC.`**

@@ -1,4 +1,4 @@
-# Maintained declaratively alongside `release-managers` in `cloud-infra` stack
+# Maintained declaratively alongside `release-managers` in `tau-cloud` stack
 # `stacks/repo/tau` (github_repository_ruleset `main`: require_code_owner_review).
 .github/workflows/** @taucad/release-managers
 .github/CODEOWNERS @taucad/release-managers

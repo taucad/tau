@@ -80,8 +80,23 @@ const config: KnipConfig = {
       ],
     },
     'apps/ui': {
-      entry: ['app/routes/**/*.tsx', 'app/types/**/*.d.ts', 'vite-environment.d.ts', 'content/docs/**/*.{ts,tsx}'],
+      entry: ['app/routes/**/*.tsx', 'app/types/**/*.d.ts', 'vite-environment.d.ts'],
       ignore: ['public/**'],
+    },
+    'apps/docs': {
+      entry: ['app/routes/**/*.{ts,tsx}', 'vite-environment.d.ts'],
+      // Content-side modules are referenced from MDX (auto-type-table props,
+      // worker examples) and server-compat is wired through a vitest alias —
+      // neither is a reference knip can follow.
+      ignore: ['content/**', 'app/lib/fumadocs/server-compat.ts'],
+      // Kernel and runtime packages are imported by MDX code samples and by the
+      // type generator behind auto-type-table.
+      ignoreDependencies: ['@taucad/*'],
+    },
+    'packages/ui': {
+      // A design system publishes its whole surface; consumption by the apps in
+      // this repo is not what makes a component reachable.
+      entry: ['src/**/*.{ts,tsx}'],
     },
     scripts: {
       entry: ['src/**/*.{ts,tsx,mts}'],

@@ -557,7 +557,7 @@ const config = [
   },
 
   {
-    files: ['apps/ui/content/docs/**/*.mdx'],
+    files: ['apps/docs/content/docs/**/*.mdx'],
     languageOptions: { parser: mdxParser },
     plugins: { 'tau-lint': tauLintPlugin },
     rules: {
@@ -570,7 +570,7 @@ const config = [
 
   {
     // Compile-only documentation fixtures intentionally model consumer imports outside the Nx graph.
-    files: ['apps/ui/content/docs/**/*.ts'],
+    files: ['apps/docs/content/docs/**/*.ts'],
     rules: {
       '@nx/enforce-module-boundaries': 'off',
     },
@@ -586,7 +586,7 @@ const config = [
      * TypeScript block owns the core rule's options, and these fixtures also
      * re-export types, which the base rule reports identically.
      */
-    files: ['apps/ui/content/docs/runtime/**/*.ts'],
+    files: ['apps/docs/content/docs/runtime/**/*.ts'],
     rules: {
       '@typescript-eslint/no-restricted-imports': [
         'error',

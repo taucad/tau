@@ -1190,6 +1190,17 @@
       "plugins": ["jsdoc"]
     },
     {
+      // React components in the design system always return an element; a
+      // `@returns` on each one restates the signature without adding meaning.
+      "files": ["packages/ui/src/components/**/*.tsx"],
+      "rules": {
+        "jsdoc/require-returns": "off",
+        "jsdoc/require-returns-description": "off",
+        "jsdoc-js/sort-tags": "off"
+      },
+      "plugins": ["jsdoc"]
+    },
+    {
       // Test files are not part of the published API — JSDoc enforcement is unnecessary.
       "files": ["packages/**/*.test.{ts,tsx}", "packages/**/*.test-d.{ts,tsx}"],
       "rules": {

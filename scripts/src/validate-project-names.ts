@@ -12,6 +12,14 @@ const readJson = <T>(filePath: string): T => JSON.parse(readFileSync(filePath, '
 
 const stripScope = (name: string): string => name.replace(/^@[^/]+\//, '');
 
+// The `@taucad/ui` npm name belongs to the published component library at
+// packages/ui, while the app keeps the `ui` project name — so each side of the
+// collision carries an explicit exception instead of a placement-derived name.
+const placementExceptions: Record<string, { projectName?: string; packageName?: string }> = {
+  'apps/ui': { packageName: '@taucad/app' },
+  'packages/ui': { projectName: 'taucad-ui', packageName: '@taucad/ui' },
+};
+
 const validateProject = (projectDirectory: string): ProjectResult => {
   const relativePath = projectDirectory.replace(root + '/', '');
   const diagnostics: Diagnostic[] = [];
@@ -24,11 +32,14 @@ const validateProject = (projectDirectory: string): ProjectResult => {
   // Two placements disambiguate a directory name that would otherwise collide
   // across the workspace (`packages/core/occt` vs the occt plugin, `examples/nextjs`
   // vs the nextjs e2e app), so their project names carry the placement.
-  const expectedProjectName = relativePath.startsWith('packages/core/')
-    ? `${directoryName}-core`
-    : relativePath.startsWith('examples/')
-      ? `example-${directoryName}`
-      : directoryName;
+  const exception = placementExceptions[relativePath];
+  const expectedProjectName =
+    exception?.projectName ??
+    (relativePath.startsWith('packages/core/')
+      ? `${directoryName}-core`
+      : relativePath.startsWith('examples/')
+        ? `example-${directoryName}`
+        : directoryName);
 
   if (!nxConfig.name) {
     diagnostics.push({ level: 'ERROR', message: 'project.json missing "name" field' });
@@ -45,12 +56,21 @@ const validateProject = (projectDirectory: string): ProjectResult => {
   if (existsSync(packagePath)) {
     const package_ = readJson<{ name?: string }>(packagePath);
     if (package_.name) {
-      const packageShortName = stripScope(package_.name);
-      if (nxConfig.name !== packageShortName) {
-        diagnostics.push({
-          level: 'ERROR',
-          message: `project.json name "${nxConfig.name}" does not match package.json name "${package_.name}" (unscoped: "${packageShortName}")`,
-        });
+      if (exception?.packageName) {
+        if (package_.name !== exception.packageName) {
+          diagnostics.push({
+            level: 'ERROR',
+            message: `package.json name "${package_.name}" does not match placement-exception name "${exception.packageName}"`,
+          });
+        }
+      } else {
+        const packageShortName = stripScope(package_.name);
+        if (nxConfig.name !== packageShortName) {
+          diagnostics.push({
+            level: 'ERROR',
+            message: `project.json name "${nxConfig.name}" does not match package.json name "${package_.name}" (unscoped: "${packageShortName}")`,
+          });
+        }
       }
     } else {
       diagnostics.push({ level: 'ERROR', message: 'package.json missing "name" field' });

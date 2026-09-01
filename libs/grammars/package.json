@@ -1,0 +1,92 @@
+{
+  "name": "@taucad/grammars",
+  "version": "0.0.1",
+  "description": "Precompiled Shiki grammars for Tau CAD languages",
+  "type": "module",
+  "sideEffects": false,
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "libs/grammars"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/libs/grammars#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./kcl": "./src/kcl.ts",
+    "./openscad": "./src/openscad.ts",
+    "./stepfile": "./src/stepfile.ts",
+    "./stl": "./src/stl.ts",
+    "./sysml": "./src/sysml.ts",
+    "./usd": "./src/usd.ts",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./kcl": {
+        "types": "./dist/kcl.d.mts",
+        "import": "./dist/kcl.mjs",
+        "default": "./dist/kcl.mjs"
+      },
+      "./openscad": {
+        "types": "./dist/openscad.d.mts",
+        "import": "./dist/openscad.mjs",
+        "default": "./dist/openscad.mjs"
+      },
+      "./stepfile": {
+        "types": "./dist/stepfile.d.mts",
+        "import": "./dist/stepfile.mjs",
+        "default": "./dist/stepfile.mjs"
+      },
+      "./stl": {
+        "types": "./dist/stl.d.mts",
+        "import": "./dist/stl.mjs",
+        "default": "./dist/stl.mjs"
+      },
+      "./sysml": {
+        "types": "./dist/sysml.d.mts",
+        "import": "./dist/sysml.mjs",
+        "default": "./dist/sysml.mjs"
+      },
+      "./usd": {
+        "types": "./dist/usd.d.mts",
+        "import": "./dist/usd.mjs",
+        "default": "./dist/usd.mjs"
+      },
+      "./package.json": "./package.json"
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "shiki": "catalog:"
+  }
+}

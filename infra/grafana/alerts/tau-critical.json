@@ -92,6 +92,61 @@
         "service": "tau-api",
         "component": "database"
       }
+    },
+    {
+      "uid": "billing-ledger-drift",
+      "title": "P0: Billing Ledger Drift",
+      "condition": "drift_threshold",
+      "data": [
+        {
+          "refId": "drift",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 900,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "max(max_over_time(tau_billing_ledger_drift{service_name=\"tau-api\"}[15m]))",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "drift"
+          }
+        },
+        {
+          "refId": "drift_threshold",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
+          "datasourceUid": "__expr__",
+          "model": {
+            "type": "threshold",
+            "expression": "drift",
+            "refId": "drift_threshold",
+            "conditions": [
+              {
+                "evaluator": {
+                  "type": "gt",
+                  "params": [0]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "summary": "SUM(credit_transaction.deltaMicro) disagrees with materialised balances (C12). Money invariant broken \u2014 treat as a page, not a log line. Runbook: repos/tau-cloud/docs/stripe-iac-runbook.md."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "billing"
+      }
     }
   ]
 }

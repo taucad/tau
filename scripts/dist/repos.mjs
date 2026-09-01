@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import process from "node:process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
@@ -2452,90 +2452,324 @@ const { Type, Schema, FAILSAFE_SCHEMA, JSON_SCHEMA, CORE_SCHEMA, DEFAULT_SCHEMA,
 
 //#endregion
 //#region src/repos/lib.ts
-function findRoot() {
-	if (process.env["TAU_ROOT"]) {
-		const envRoot = process.env["TAU_ROOT"];
-		if (existsSync(join(envRoot, "repos.yaml"))) return envRoot;
+const isTauRoot = (directory) => {
+	const packagePath = join(directory, "package.json");
+	if (!existsSync(packagePath) || !existsSync(join(directory, "pnpm-workspace.yaml"))) return false;
+	try {
+		return JSON.parse(readFileSync(packagePath, "utf8")).name === "@taucad/tau-source";
+	} catch {
+		return false;
 	}
-	let directory = process.cwd();
-	while (directory !== dirname(directory)) {
-		if (existsSync(join(directory, "repos.yaml"))) return directory;
-		directory = dirname(directory);
+};
+const findRoot = (startDirectory = process.cwd()) => {
+	const envRoot = process.env["TAU_ROOT"];
+	if (envRoot) {
+		const resolvedEnvRoot = resolve(envRoot);
+		if (!isTauRoot(resolvedEnvRoot)) throw new Error(`TAU_ROOT does not identify the Tau workspace (expected package @taucad/tau-source and pnpm-workspace.yaml): ${resolvedEnvRoot}`);
+		return resolvedEnvRoot;
 	}
-	throw new Error("Could not find repos.yaml. Run from the workspace root or set TAU_ROOT.");
-}
-function readManifest(root) {
-	const resolvedRoot = root ?? findRoot();
-	const filePath = join(resolvedRoot, "repos.yaml");
-	const content = readFileSync(filePath, "utf8");
+	let directory = resolve(startDirectory);
+	while (true) {
+		if (isTauRoot(directory)) return directory;
+		const parent = dirname(directory);
+		if (parent === directory) break;
+		directory = parent;
+	}
+	throw new Error("Could not find the Tau workspace root. Run inside Tau or set TAU_ROOT.");
+};
+const resolveRoot = (root) => {
+	if (!root) return findRoot();
+	const resolvedRoot = resolve(root);
+	if (!isTauRoot(resolvedRoot)) throw new Error(`Invalid Tau workspace root (expected package @taucad/tau-source and pnpm-workspace.yaml): ${resolvedRoot}`);
+	return resolvedRoot;
+};
+const publicCatalogKeys = /* @__PURE__ */ new Set([
+	"version",
+	"repos_dir",
+	"owner",
+	"groups",
+	"repos"
+]);
+const privateCatalogKeys = /* @__PURE__ */ new Set([
+	"version",
+	"groups",
+	"repos"
+]);
+const repoKeys = /* @__PURE__ */ new Set([
+	"upstream",
+	"fork",
+	"branch",
+	"commit",
+	"path",
+	"description",
+	"shallow"
+]);
+const groupKeys = /* @__PURE__ */ new Set(["description", "repos"]);
+const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+const requireRecord = (value, label) => {
+	if (!isRecord(value)) throw new Error(`${label} must be a mapping.`);
+	return value;
+};
+const rejectUnknownKeys = (value, allowed, label) => {
+	const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+	if (unknown.length > 0) throw new Error(`${label} has unsupported field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}.`);
+};
+const requireString = (value, label) => {
+	if (typeof value !== "string" || value.length === 0) throw new Error(`${label} must be a non-empty string.`);
+	return value;
+};
+const optionalString = (value, label) => value === void 0 ? void 0 : requireString(value, label);
+const parseRepo = (value, label) => {
+	const raw = requireRecord(value, label);
+	rejectUnknownKeys(raw, repoKeys, label);
+	if (raw["shallow"] !== void 0 && typeof raw["shallow"] !== "boolean") throw new Error(`${label}.shallow must be a boolean.`);
+	const fork = optionalString(raw["fork"], `${label}.fork`);
+	const branch = optionalString(raw["branch"], `${label}.branch`);
+	const commit = optionalString(raw["commit"], `${label}.commit`);
+	const path = optionalString(raw["path"], `${label}.path`);
+	const description = optionalString(raw["description"], `${label}.description`);
 	return {
-		manifest: load(content),
-		root: resolvedRoot
+		upstream: requireString(raw["upstream"], `${label}.upstream`),
+		...fork && { fork },
+		...branch && { branch },
+		...commit && { commit },
+		...path && { path },
+		...description && { description },
+		...raw["shallow"] === true && { shallow: true }
 	};
-}
-function writeManifest(manifest, root) {
-	const resolvedRoot = root ?? findRoot();
-	const filePath = join(resolvedRoot, "repos.yaml");
-	const content = dump(manifest, {
-		lineWidth: -1,
-		noRefs: true,
-		quotingType: "'",
-		forceQuotes: false
+};
+const parseRepos = (value, label) => {
+	const raw = requireRecord(value, label);
+	return Object.fromEntries(Object.entries(raw).map(([name, repo]) => [name, parseRepo(repo, `${label}.${name}`)]));
+};
+const parseGroup = (value, label) => {
+	const raw = requireRecord(value, label);
+	rejectUnknownKeys(raw, groupKeys, label);
+	if (!Array.isArray(raw["repos"]) || raw["repos"].some((repo) => typeof repo !== "string" || repo.length === 0)) throw new Error(`${label}.repos must be an array of non-empty strings.`);
+	const repos = raw["repos"];
+	const duplicates = repos.filter((repo, index) => repos.indexOf(repo) !== index);
+	if (duplicates.length > 0) throw new Error(`${label}.repos contains duplicate entries: ${[...new Set(duplicates)].join(", ")}.`);
+	const description = optionalString(raw["description"], `${label}.description`);
+	return {
+		...description && { description },
+		repos: [...repos]
+	};
+};
+const parseGroups = (value, label) => {
+	const raw = requireRecord(value, label);
+	return Object.fromEntries(Object.entries(raw).map(([name, group]) => [name, parseGroup(group, `${label}.${name}`)]));
+};
+const requireVersion = (value, label) => {
+	if (value !== 1) throw new Error(`${label}.version must be 1.`);
+	return value;
+};
+const parseCatalog = (content, catalog, filePath) => {
+	let loaded;
+	try {
+		loaded = load(content);
+	} catch (error) {
+		throw new Error(`Invalid ${catalog} catalog ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	const raw = requireRecord(loaded, `${catalog} catalog`);
+	rejectUnknownKeys(raw, catalog === "public" ? publicCatalogKeys : privateCatalogKeys, `${catalog} catalog`);
+	const shared = {
+		version: requireVersion(raw["version"], `${catalog} catalog`),
+		groups: parseGroups(raw["groups"], `${catalog} catalog.groups`),
+		repos: parseRepos(raw["repos"], `${catalog} catalog.repos`)
+	};
+	if (catalog === "private") return shared;
+	const reposDirectory = requireString(raw["repos_dir"], "public catalog.repos_dir");
+	if (reposDirectory !== "repos") throw new Error("public catalog.repos_dir must be \"repos\".");
+	return {
+		version: shared.version,
+		repos_dir: reposDirectory,
+		owner: requireString(raw["owner"], "public catalog.owner"),
+		groups: shared.groups,
+		repos: shared.repos
+	};
+};
+const publicCatalogPath = (root) => join(root, "repos.yaml");
+const privateCatalogPath = (root) => join(root, "repos", "tau-brain", "repos.yaml");
+const readCatalog = (root, catalog) => {
+	const filePath = catalog === "public" ? publicCatalogPath(root) : privateCatalogPath(root);
+	if (!existsSync(filePath)) {
+		if (catalog === "private") throw new Error(`Private repos catalog not found at ${filePath}. Authorized setup: GIT_LFS_SKIP_SMUDGE=1 gh repo clone taucad/tau-brain repos/tau-brain`);
+		throw new Error(`Public repos catalog not found at ${filePath}.`);
+	}
+	return parseCatalog(readFileSync(filePath, "utf8"), catalog, filePath);
+};
+const assertSafeRepoPath = (root, manifest, name, repo) => {
+	const cloneRoot = resolve(root, manifest.repos_dir);
+	const configuredPath = repo.path ?? name;
+	if (isAbsolute(configuredPath)) throw new Error(`Repo "${name}" path must be relative: ${configuredPath}.`);
+	const resolvedPath = resolve(cloneRoot, configuredPath);
+	const fromCloneRoot = relative(cloneRoot, resolvedPath);
+	if (fromCloneRoot === ".." || fromCloneRoot.startsWith(`..${sep}`) || isAbsolute(fromCloneRoot)) throw new Error(`Repo "${name}" path escapes ${manifest.repos_dir}: ${configuredPath}.`);
+	return resolvedPath;
+};
+const buildState = (root, catalogs) => {
+	const publicCatalog = catalogs.public;
+	const privateCatalog = catalogs.private;
+	if (publicCatalog.repos["tau-brain"] || privateCatalog?.repos["tau-brain"]) throw new Error("Repo \"tau-brain\" is forbidden in both catalogs; Tau Brain cannot manage itself.");
+	if (publicCatalog.groups["brain"] || privateCatalog?.groups["brain"]) throw new Error("Group \"brain\" is forbidden in both catalogs.");
+	const duplicateRepos = privateCatalog ? Object.keys(privateCatalog.repos).filter((name) => publicCatalog.repos[name]) : [];
+	if (duplicateRepos.length > 0) throw new Error(`Repo definitions collide across catalogs: ${duplicateRepos.join(", ")}.`);
+	const duplicateGroups = privateCatalog ? Object.keys(privateCatalog.groups).filter((name) => publicCatalog.groups[name]) : [];
+	if (duplicateGroups.length > 0) throw new Error(`Group definitions collide across catalogs: ${duplicateGroups.join(", ")}.`);
+	const manifest = {
+		version: publicCatalog.version,
+		repos_dir: publicCatalog.repos_dir,
+		owner: publicCatalog.owner,
+		groups: {
+			...publicCatalog.groups,
+			...privateCatalog?.groups
+		},
+		repos: {
+			...publicCatalog.repos,
+			...privateCatalog?.repos
+		}
+	};
+	const repoCatalogs = Object.fromEntries(Object.keys(publicCatalog.repos).map((name) => [name, "public"]));
+	const groupCatalogs = Object.fromEntries(Object.keys(publicCatalog.groups).map((name) => [name, "public"]));
+	for (const name of Object.keys(privateCatalog?.repos ?? {})) repoCatalogs[name] = "private";
+	for (const name of Object.keys(privateCatalog?.groups ?? {})) groupCatalogs[name] = "private";
+	for (const [name, group] of Object.entries(publicCatalog.groups)) {
+		const missing = group.repos.filter((repoName) => repoCatalogs[repoName] !== "public");
+		if (missing.length > 0) throw new Error(`Public group "${name}" references non-public repos: ${missing.join(", ")}.`);
+	}
+	for (const [name, group] of Object.entries(privateCatalog?.groups ?? {})) {
+		const missing = group.repos.filter((repoName) => !manifest.repos[repoName]);
+		if (missing.length > 0) throw new Error(`Private group "${name}" references missing repos: ${missing.join(", ")}.`);
+	}
+	const paths = /* @__PURE__ */ new Map();
+	for (const [name, repo] of Object.entries(manifest.repos)) {
+		const path = assertSafeRepoPath(root, manifest, name, repo);
+		const existing = paths.get(path);
+		if (existing) throw new Error(`Repos "${existing}" and "${name}" resolve to the same clone path: ${path}.`);
+		paths.set(path, name);
+	}
+	return {
+		manifest,
+		root,
+		catalogs,
+		repoCatalogs,
+		groupCatalogs
+	};
+};
+const readManifest = (root, selection = "all") => {
+	const resolvedRoot = resolveRoot(root);
+	const publicCatalog = readCatalog(resolvedRoot, "public");
+	if (selection === "public") return buildState(resolvedRoot, { public: publicCatalog });
+	const privatePath = privateCatalogPath(resolvedRoot);
+	if (!existsSync(privatePath)) {
+		if (selection === "private") readCatalog(resolvedRoot, "private");
+		return buildState(resolvedRoot, { public: publicCatalog });
+	}
+	const privateCatalog = readCatalog(resolvedRoot, "private");
+	return buildState(resolvedRoot, {
+		public: publicCatalog,
+		private: privateCatalog
 	});
-	writeFileSync(filePath, content, "utf8");
-}
-function repoUrl(ownerRepo) {
-	return `https://github.com/${ownerRepo}.git`;
-}
-function parseOwnerRepo(url) {
-	return /github\.com[/:](?<ownerRepo>[^/]+\/[^./]+?)(?:\.git)?$/.exec(url)?.groups?.["ownerRepo"];
-}
-function repoPath(context) {
-	const { name, repo, manifest, root } = context;
-	const relative = repo.path ?? name;
-	return resolve(root, manifest.repos_dir, relative);
-}
-function resolveRepos(manifest, filter) {
-	if (!filter || filter.all) return Object.entries(manifest.repos);
+};
+const dumpCatalog = (catalog) => dump(catalog, {
+	lineWidth: -1,
+	noRefs: true,
+	quotingType: "'",
+	forceQuotes: false
+});
+const writeCatalog = (state, catalog) => {
+	const value = state.catalogs[catalog];
+	if (!value) throw new Error(`Cannot write missing ${catalog} catalog.`);
+	const filePath = catalog === "public" ? publicCatalogPath(state.root) : privateCatalogPath(state.root);
+	const temporaryPath = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+	try {
+		writeFileSync(temporaryPath, dumpCatalog(value), "utf8");
+		renameSync(temporaryPath, filePath);
+	} catch (error) {
+		if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+		throw error;
+	}
+};
+const mutateCatalog = (state, catalog, mutate) => {
+	const catalogs = structuredClone(state.catalogs);
+	const target = catalogs[catalog];
+	if (!target) throw new Error(`Cannot mutate missing ${catalog} catalog.`);
+	mutate(target);
+	const next = buildState(state.root, catalogs);
+	writeCatalog(next, catalog);
+	return next;
+};
+const repoUrl = (ownerRepo) => `https://github.com/${ownerRepo}.git`;
+const parseOwnerRepo = (url) => /github\.com[/:](?<ownerRepo>[^/]+\/[^./]+?)(?:\.git)?$/.exec(url)?.groups?.["ownerRepo"];
+const repoPath = (context) => resolve(context.root, context.manifest.repos_dir, context.repo.path ?? context.name);
+const includesCatalog = (owner, selection) => selection === "all" || owner === selection;
+const resolveRepos = (state, options = {}) => {
+	const { manifest, repoCatalogs, groupCatalogs } = state;
+	const filter = options.filter;
+	const selection = options.catalog ?? "all";
+	const entries = Object.entries(manifest.repos).map(([name, repo]) => [
+		name,
+		repo,
+		repoCatalogs[name]
+	]);
+	if (!filter || filter.all) return entries.filter(([, , owner]) => includesCatalog(owner, selection));
 	if (filter.name) {
 		const repo = manifest.repos[filter.name];
-		if (!repo) throw new Error(`Repo "${filter.name}" not found in manifest.`);
-		return [[filter.name, repo]];
+		const owner = repoCatalogs[filter.name];
+		if (!repo || !owner || !includesCatalog(owner, selection)) throw new Error(`Repo "${filter.name}" not found in selected catalog.`);
+		return [[
+			filter.name,
+			repo,
+			owner
+		]];
 	}
 	if (filter.group) {
 		const group = manifest.groups[filter.group];
-		if (!group) throw new Error(`Group "${filter.group}" not found. Available: ${Object.keys(manifest.groups).join(", ")}`);
-		return group.repos.map((name) => {
-			const repo = manifest.repos[name];
-			if (!repo) {
-				console.warn(`Warning: repo "${name}" in group "${filter.group}" not found in manifest.`);
-				return;
-			}
-			return [name, repo];
-		}).filter((entry) => entry !== void 0);
+		const groupOwner = groupCatalogs[filter.group];
+		if (!group || !groupOwner || !includesCatalog(groupOwner, selection)) {
+			const available = Object.keys(manifest.groups).filter((name) => includesCatalog(groupCatalogs[name], selection)).join(", ");
+			throw new Error(`Group "${filter.group}" not found in selected catalog. Available: ${available}`);
+		}
+		return group.repos.filter((name) => includesCatalog(repoCatalogs[name], selection)).map((name) => [
+			name,
+			manifest.repos[name],
+			repoCatalogs[name]
+		]);
 	}
-	return Object.entries(manifest.repos);
-}
-function isCloned(context) {
-	const directory = repoPath(context);
-	return existsSync(join(directory, ".git"));
-}
-function gitExec(context, args) {
-	const directory = repoPath(context);
-	return execSync(["git", ...args].join(" "), {
-		cwd: directory,
-		encoding: "utf8",
-		stdio: [
-			"pipe",
-			"pipe",
-			"pipe"
-		]
-	}).trim();
-}
-function getRepoStatus(context) {
-	const { name, repo } = context;
+	return entries.filter(([, , owner]) => includesCatalog(owner, selection));
+};
+const resolveGroups = (state, selection = "all") => Object.entries(state.manifest.groups).filter(([name]) => includesCatalog(state.groupCatalogs[name], selection)).map(([name, group]) => [
+	name,
+	group,
+	state.groupCatalogs[name]
+]);
+const isCloned = (context) => existsSync(join(repoPath(context), ".git"));
+const gitExec = (context, args) => execSync(["git", ...args].join(" "), {
+	cwd: repoPath(context),
+	encoding: "utf8",
+	stdio: [
+		"pipe",
+		"pipe",
+		"pipe"
+	]
+}).trim();
+const getLastActivity = (context) => {
+	if (!isCloned(context)) return;
+	try {
+		return Number.parseInt(gitExec(context, [
+			"log",
+			"-1",
+			"--format=%ct"
+		]), 10);
+	} catch {
+		return;
+	}
+};
+const getRepoStatus = (context) => {
+	const { name, repo, catalog } = context;
 	if (!isCloned(context)) return {
 		name,
+		catalog,
 		cloned: false
 	};
 	try {
@@ -2548,25 +2782,23 @@ function getRepoStatus(context) {
 		let ahead = 0;
 		let behind = 0;
 		try {
-			const parts = gitExec(context, [
+			const [behindRaw = "0", aheadRaw = "0"] = gitExec(context, [
 				"rev-list",
 				"--left-right",
 				"--count",
 				`origin/${branch}...HEAD`
 			]).split("	");
-			behind = Number.parseInt(parts[0] ?? "0", 10);
-			ahead = Number.parseInt(parts[1] ?? "0", 10);
+			behind = Number.parseInt(behindRaw, 10);
+			ahead = Number.parseInt(aheadRaw, 10);
 		} catch {}
 		let upstreamAhead;
 		if (repo.fork) try {
-			const uaOutput = gitExec(context, [
+			upstreamAhead = Number.parseInt(gitExec(context, [
 				"rev-list",
 				"--count",
 				`HEAD..upstream/${repo.branch ?? branch}`
-			]);
-			upstreamAhead = Number.parseInt(uaOutput, 10);
+			]), 10);
 		} catch {}
-		const lastActivity = getLastActivity(context);
 		let pinnedCommit;
 		let atPinnedCommit;
 		if (repo.commit) {
@@ -2580,37 +2812,26 @@ function getRepoStatus(context) {
 		}
 		return {
 			name,
+			catalog,
 			cloned: true,
 			branch,
 			dirty,
 			ahead,
 			behind,
 			upstreamAhead,
-			lastActivity,
+			lastActivity: getLastActivity(context),
 			pinnedCommit,
 			atPinnedCommit
 		};
 	} catch {
 		return {
 			name,
+			catalog,
 			cloned: true
 		};
 	}
-}
-function getLastActivity(context) {
-	if (!isCloned(context)) return;
-	try {
-		const ts = gitExec(context, [
-			"log",
-			"-1",
-			"--format=%ct"
-		]);
-		return Number.parseInt(ts, 10);
-	} catch {
-		return;
-	}
-}
-function fetchRepoDescription(upstream) {
+};
+const fetchRepoDescription = (upstream) => {
 	try {
 		return execSync(`gh repo view ${upstream} --json description -q .description`, {
 			encoding: "utf8",
@@ -2623,17 +2844,33 @@ function fetchRepoDescription(upstream) {
 	} catch {
 		return;
 	}
-}
-function buildCloneArgs(options) {
-	const { cloneUrl, directory, branch, shallow } = options;
+};
+const setRepoDescription = (state, name, description) => {
+	const owner = state.repoCatalogs[name];
+	if (!owner) throw new Error(`Repo "${name}" not found.`);
+	return mutateCatalog(state, owner, (catalog) => {
+		catalog.repos[name].description = description;
+	});
+};
+const removeRepo = (state, name) => {
+	const owner = state.repoCatalogs[name];
+	if (!owner) throw new Error(`Repo "${name}" not found in manifest.`);
+	const foreignReferences = Object.entries(state.manifest.groups).filter(([groupName, group]) => state.groupCatalogs[groupName] !== owner && group.repos.includes(name)).map(([groupName]) => groupName);
+	if (foreignReferences.length > 0) throw new Error(`Cannot remove "${name}"; ${owner === "public" ? "private" : "public"} group references remain: ${foreignReferences.join(", ")}.`);
+	return mutateCatalog(state, owner, (catalog) => {
+		delete catalog.repos[name];
+		for (const group of Object.values(catalog.groups)) group.repos = group.repos.filter((repoName) => repoName !== name);
+	});
+};
+const buildCloneArgs = (options) => {
 	const args = ["git", "clone"];
-	if (shallow) args.push("--depth", "1");
-	if (branch) args.push("--branch", branch);
-	args.push(cloneUrl, directory);
+	if (options.shallow) args.push("--depth", "1");
+	if (options.branch) args.push("--branch", options.branch);
+	args.push(options.cloneUrl, options.directory);
 	return args;
-}
-function cloneRepo(context) {
-	const { name, repo, manifest, root } = context;
+};
+const cloneRepo = (context) => {
+	const { name, repo } = context;
 	const directory = repoPath(context);
 	if (existsSync(join(directory, ".git"))) return {
 		action: "skipped",
@@ -2641,13 +2878,11 @@ function cloneRepo(context) {
 	};
 	if (!repo.description) {
 		const description = fetchRepoDescription(repo.upstream);
-		if (description) {
-			repo.description = description;
-			writeManifest(manifest, root);
-		}
+		if (description && context.state) setRepoDescription(context.state, name, description);
 	}
+	const cloneUrl = repo.fork ? repoUrl(repo.fork) : repoUrl(repo.upstream);
 	const args = buildCloneArgs({
-		cloneUrl: repo.fork ? repoUrl(repo.fork) : repoUrl(repo.upstream),
+		cloneUrl,
 		directory,
 		branch: repo.branch,
 		shallow: repo.shallow && !repo.commit
@@ -2659,8 +2894,8 @@ function cloneRepo(context) {
 		action: "cloned",
 		message: `${name}: cloned`
 	};
-}
-function syncRepo(context) {
+};
+const syncRepo = (context) => {
 	const { name, repo } = context;
 	if (!isCloned(context)) return {
 		ok: false,
@@ -2702,9 +2937,9 @@ function syncRepo(context) {
 			message: `${name}: ${error instanceof Error ? error.message : String(error)}`
 		};
 	}
-}
-function forkRepo(name, manifest, root) {
-	const repo = manifest.repos[name];
+};
+const forkRepo = (state, name) => {
+	const repo = state.manifest.repos[name];
 	if (!repo) return {
 		ok: false,
 		message: `Repo "${name}" not found in manifest.`
@@ -2713,18 +2948,20 @@ function forkRepo(name, manifest, root) {
 		ok: false,
 		message: `${name}: already forked to ${repo.fork}`
 	};
-	const repoName = repo.upstream.split("/")[1];
-	const forkSlug = `${manifest.owner}/${repoName}`;
+	const forkSlug = `${state.manifest.owner}/${repo.upstream.split("/")[1]}`;
 	try {
-		execSync(`gh repo fork ${repo.upstream} --org ${manifest.owner} --clone=false`, { stdio: "inherit" });
+		execSync(`gh repo fork ${repo.upstream} --org ${state.manifest.owner} --clone=false`, { stdio: "inherit" });
 	} catch {}
-	repo.fork = forkSlug;
-	writeManifest(manifest, root);
+	mutateCatalog(state, state.repoCatalogs[name], (catalog) => {
+		catalog.repos[name].fork = forkSlug;
+	});
 	const context = {
 		name,
 		repo,
-		manifest,
-		root
+		manifest: state.manifest,
+		root: state.root,
+		catalog: state.repoCatalogs[name],
+		state
 	};
 	if (isCloned(context)) {
 		const directory = repoPath(context);
@@ -2741,9 +2978,9 @@ function forkRepo(name, manifest, root) {
 		ok: true,
 		message: `${name}: forked to ${forkSlug}`
 	};
-}
-function unforkRepo(name, manifest, root) {
-	const repo = manifest.repos[name];
+};
+const unforkRepo = (state, name) => {
+	const repo = state.manifest.repos[name];
 	if (!repo) return {
 		ok: false,
 		message: `Repo "${name}" not found in manifest.`
@@ -2755,8 +2992,10 @@ function unforkRepo(name, manifest, root) {
 	const context = {
 		name,
 		repo,
-		manifest,
-		root
+		manifest: state.manifest,
+		root: state.root,
+		catalog: state.repoCatalogs[name],
+		state
 	};
 	if (isCloned(context)) {
 		const directory = repoPath(context);
@@ -2765,13 +3004,14 @@ function unforkRepo(name, manifest, root) {
 			execSync(`git -C ${directory} remote rename upstream origin`, { stdio: "pipe" });
 		} catch {}
 	}
-	delete repo.fork;
-	writeManifest(manifest, root);
+	mutateCatalog(state, state.repoCatalogs[name], (catalog) => {
+		delete catalog.repos[name].fork;
+	});
 	return {
 		ok: true,
 		message: `${name}: unforked (upstream only)`
 	};
-}
+};
 
 //#endregion
 //#region src/repos/commands.ts
@@ -2782,251 +3022,262 @@ const shortFlagMap = {
 	d: "description",
 	p: "path"
 };
-function parseArgs(argv) {
-	const command = argv[0] ?? "";
+const parseArgs = (argv) => {
 	const positional = [];
 	const flags = {};
-	let i = 1;
-	while (i < argv.length) {
-		const argument = argv[i];
+	let index = 1;
+	while (index < argv.length) {
+		const argument = argv[index];
 		if (argument === "--") {
-			positional.push(...argv.slice(i + 1));
+			positional.push(...argv.slice(index + 1));
 			break;
 		}
 		if (argument.startsWith("--")) {
 			const key = argument.slice(2);
-			const next = argv[i + 1];
+			const next = argv[index + 1];
 			if (next && !next.startsWith("-")) {
 				flags[key] = next;
-				i += 2;
+				index += 2;
 			} else {
 				flags[key] = true;
-				i += 1;
+				index += 1;
 			}
-		} else if (argument.startsWith("-") && argument.length === 2) {
-			const short = argument[1];
-			const longKey = shortFlagMap[short] ?? short;
-			const next = argv[i + 1];
-			if (next && !next.startsWith("-")) {
-				flags[longKey] = next;
-				i += 2;
-			} else {
-				flags[longKey] = true;
-				i += 1;
-			}
-		} else {
-			positional.push(argument);
-			i += 1;
+			continue;
 		}
+		if (argument.startsWith("-") && argument.length === 2) {
+			const key = shortFlagMap[argument[1]] ?? argument[1];
+			const next = argv[index + 1];
+			if (next && !next.startsWith("-")) {
+				flags[key] = next;
+				index += 2;
+			} else {
+				flags[key] = true;
+				index += 1;
+			}
+			continue;
+		}
+		positional.push(argument);
+		index += 1;
 	}
 	return {
-		command,
+		command: argv[0] ?? "",
 		positional,
 		flags
 	};
-}
-function getFilter(positional, flags) {
+};
+const getFilter = (positional, flags) => {
 	if (flags["all"]) return { all: true };
 	if (typeof flags["group"] === "string") return { group: flags["group"] };
-	if (positional.length > 0) return { name: positional[0] };
+	if (positional[0]) return { name: positional[0] };
 	return { all: true };
-}
-function cmdClone(positional, flags) {
-	const { manifest, root } = readManifest();
-	const filter = getFilter(positional, flags);
-	const repos = resolveRepos(manifest, filter);
-	const results = [];
-	for (const [name, repo] of repos) {
-		const result = cloneRepo({
-			name,
-			repo,
-			manifest,
-			root
-		});
-		results.push({
-			name,
-			...result
-		});
-		console.log(result.message);
-	}
-	if (flags["json"]) console.log(JSON.stringify(results, void 0, 2));
-}
-function cmdSync(positional, flags) {
-	const { manifest, root } = readManifest();
-	const filter = getFilter(positional, flags);
-	const repos = resolveRepos(manifest, filter);
-	const results = [];
-	for (const [name, repo] of repos) {
-		if (!isCloned({
-			name,
-			repo,
-			manifest,
-			root
-		})) continue;
-		const result = syncRepo({
-			name,
-			repo,
-			manifest,
-			root
-		});
-		results.push({
-			name,
-			...result
-		});
-		console.log(result.message);
-	}
-	if (flags["json"]) console.log(JSON.stringify(results, void 0, 2));
-}
-function cmdStatus(positional, flags) {
-	const { manifest, root } = readManifest();
-	const filter = getFilter(positional, flags);
-	const repos = resolveRepos(manifest, filter);
-	const statuses = [];
-	for (const [name, repo] of repos) statuses.push(getRepoStatus({
+};
+const getCatalog = (flags, fallback) => {
+	const value = flags["catalog"];
+	if (value === void 0) return fallback;
+	if (value === "public" || value === "private" || value === "all") return value;
+	throw new Error("--catalog must be public, private, or all.");
+};
+const getMutationCatalog = (flags) => {
+	const catalog = getCatalog(flags, "private");
+	if (catalog === "all") throw new Error("repos add requires --catalog public or --catalog private; writes cannot target all catalogs.");
+	return catalog;
+};
+const rejectCatalogOverride = (flags, command) => {
+	if (flags["catalog"] !== void 0) throw new Error(`repos ${command} infers the owning catalog; --catalog is not accepted.`);
+};
+const contextFor = (state, entry) => {
+	const [name, repo, catalog] = entry;
+	return {
 		name,
 		repo,
-		manifest,
-		root
-	}));
+		catalog,
+		manifest: state.manifest,
+		root: state.root,
+		state
+	};
+};
+const cmdClone = (positional, flags) => {
+	const catalog = getCatalog(flags, "all");
+	const state = readManifest(void 0, catalog);
+	const repos = resolveRepos(state, {
+		filter: getFilter(positional, flags),
+		catalog
+	});
+	const results = [];
+	for (const entry of repos) {
+		const [name, , owner] = entry;
+		const result = cloneRepo(contextFor(state, entry));
+		results.push({
+			name,
+			catalog: owner,
+			...result
+		});
+		if (!flags["json"]) console.log(result.message);
+	}
+	if (flags["json"]) console.log(JSON.stringify(results, void 0, 2));
+};
+const cmdSync = (positional, flags) => {
+	const catalog = getCatalog(flags, "all");
+	const state = readManifest(void 0, catalog);
+	const repos = resolveRepos(state, {
+		filter: getFilter(positional, flags),
+		catalog
+	});
+	const results = [];
+	for (const entry of repos) {
+		const [name, , owner] = entry;
+		const context = contextFor(state, entry);
+		if (!isCloned(context)) continue;
+		const result = syncRepo(context);
+		results.push({
+			name,
+			catalog: owner,
+			...result
+		});
+		if (!flags["json"]) console.log(result.message);
+	}
+	if (flags["json"]) console.log(JSON.stringify(results, void 0, 2));
+};
+const cmdStatus = (positional, flags) => {
+	const catalog = getCatalog(flags, "all");
+	const state = readManifest(void 0, catalog);
+	const statuses = resolveRepos(state, {
+		filter: getFilter(positional, flags),
+		catalog
+	}).map((entry) => getRepoStatus(contextFor(state, entry)));
 	if (flags["json"]) {
 		console.log(JSON.stringify(statuses, void 0, 2));
 		return;
 	}
-	const nameWidth = Math.max(...statuses.map((s) => s.name.length), 4);
-	console.log(`${"NAME".padEnd(nameWidth)}  STATUS   BRANCH               DIRTY  AHEAD  BEHIND  PINNED`);
-	console.log("─".repeat(nameWidth + 63));
-	for (const s of statuses) {
-		const status = s.cloned ? "cloned" : "─";
-		const branch = s.branch ?? "─";
-		const dirty = s.dirty ? "yes" : s.cloned ? "no" : "─";
-		const ahead = s.ahead === void 0 ? "─" : String(s.ahead);
-		const behind = s.behind === void 0 ? "─" : String(s.behind);
-		const pinned = s.pinnedCommit ? s.atPinnedCommit ? `✓ ${s.pinnedCommit.slice(0, 7)}` : `✗ ${s.pinnedCommit.slice(0, 7)}` : "─";
-		console.log(`${s.name.padEnd(nameWidth)}  ${status.padEnd(7)}  ${branch.padEnd(20)} ${dirty.padEnd(6)} ${ahead.padEnd(6)} ${behind.padEnd(7)} ${pinned}`);
+	const nameWidth = Math.max(4, ...statuses.map((status) => status.name.length));
+	console.log(`${"NAME".padEnd(nameWidth)}  CATALOG  STATUS   BRANCH               DIRTY  AHEAD  BEHIND  PINNED`);
+	console.log("─".repeat(nameWidth + 72));
+	for (const status of statuses) {
+		const cloned = status.cloned ? "cloned" : "─";
+		const branch = status.branch ?? "─";
+		const dirty = status.dirty ? "yes" : status.cloned ? "no" : "─";
+		const ahead = status.ahead === void 0 ? "─" : String(status.ahead);
+		const behind = status.behind === void 0 ? "─" : String(status.behind);
+		const pinned = status.pinnedCommit ? status.atPinnedCommit ? `✓ ${status.pinnedCommit.slice(0, 7)}` : `✗ ${status.pinnedCommit.slice(0, 7)}` : "─";
+		console.log(`${status.name.padEnd(nameWidth)}  ${(status.catalog ?? "─").padEnd(7)}  ${cloned.padEnd(7)}  ${branch.padEnd(20)} ${dirty.padEnd(6)} ${ahead.padEnd(6)} ${behind.padEnd(7)} ${pinned}`);
 	}
-}
-function cmdList(flags) {
-	const { manifest, root } = readManifest();
+};
+const cmdList = (flags) => {
+	const catalog = getCatalog(flags, "all");
+	const state = readManifest(void 0, catalog);
 	if (flags["groups"]) {
+		const groups = resolveGroups(state, catalog).map(([name, group, owner]) => ({
+			name,
+			description: group.description,
+			catalog: owner,
+			repos: group.repos.map((repoName) => ({
+				name: repoName,
+				catalog: state.repoCatalogs[repoName]
+			}))
+		}));
 		if (flags["json"]) {
-			console.log(JSON.stringify(manifest.groups, void 0, 2));
+			console.log(JSON.stringify(groups, void 0, 2));
 			return;
 		}
-		for (const [name, group] of Object.entries(manifest.groups)) {
-			console.log(`${name}: ${group.description ?? ""}`);
-			for (const repoName of group.repos) {
-				const clonedFlag = manifest.repos[repoName] ? isCloned({
-					name: repoName,
-					repo: manifest.repos[repoName],
-					manifest,
-					root
+		for (const group of groups) {
+			console.log(`${group.name} [${group.catalog}]: ${group.description ?? ""}`);
+			for (const member of group.repos) {
+				const repo = state.manifest.repos[member.name];
+				const clonedFlag = repo ? isCloned({
+					name: member.name,
+					repo,
+					manifest: state.manifest,
+					root: state.root
 				}) ? "✓" : "·" : "?";
-				console.log(`  ${clonedFlag} ${repoName}`);
+				console.log(`  ${clonedFlag} ${member.name} [${member.catalog ?? "missing"}]`);
 			}
 			console.log();
 		}
 		return;
 	}
-	const entries = Object.entries(manifest.repos);
-	if (flags["json"]) {
-		const data = entries.map(([name, repo]) => ({
+	const data = resolveRepos(state, { catalog }).map(([name, repo, owner]) => ({
+		name,
+		catalog: owner,
+		upstream: repo.upstream,
+		fork: repo.fork,
+		branch: repo.branch,
+		commit: repo.commit,
+		description: repo.description,
+		cloned: isCloned({
 			name,
-			upstream: repo.upstream,
-			fork: repo.fork,
-			branch: repo.branch,
-			commit: repo.commit,
-			description: repo.description,
-			cloned: isCloned({
-				name,
-				repo,
-				manifest,
-				root
-			}),
-			path: repo.path ?? name
-		}));
-		if (flags["cloned"]) console.log(JSON.stringify(data.filter((d) => d.cloned), void 0, 2));
-		else console.log(JSON.stringify(data, void 0, 2));
+			repo,
+			manifest: state.manifest,
+			root: state.root
+		}),
+		path: repo.path ?? name
+	}));
+	const visible = flags["cloned"] ? data.filter((repo) => repo.cloned) : data;
+	if (flags["json"]) {
+		console.log(JSON.stringify(visible, void 0, 2));
 		return;
 	}
-	const nameWidth = Math.max(...entries.map(([n]) => n.length), 4);
-	console.log(`${"NAME".padEnd(nameWidth)}  CLN  ORIGIN                    UPSTREAM                  BRANCH`);
-	console.log("─".repeat(nameWidth + 70));
-	for (const [name, repo] of entries) {
-		if (flags["cloned"] && !isCloned({
-			name,
-			repo,
-			manifest,
-			root
-		})) continue;
-		const clonedFlag = isCloned({
-			name,
-			repo,
-			manifest,
-			root
-		}) ? "✓" : "·";
-		const origin = repo.fork ?? repo.upstream;
-		const upstream = repo.fork ? `← ${repo.upstream}` : "─";
-		const branch = repo.branch ?? "─";
-		console.log(`${name.padEnd(nameWidth)}   ${clonedFlag}   ${origin.padEnd(24)}  ${upstream.padEnd(24)}  ${branch}`);
+	const nameWidth = Math.max(4, ...visible.map((repo) => repo.name.length));
+	console.log(`${"NAME".padEnd(nameWidth)}  CATALOG  CLN  ORIGIN                    UPSTREAM                  BRANCH`);
+	console.log("─".repeat(nameWidth + 79));
+	for (const repo of visible) {
+		const source = state.manifest.repos[repo.name];
+		const clonedFlag = repo.cloned ? "✓" : "·";
+		const origin = source.fork ?? source.upstream;
+		const upstream = source.fork ? `← ${source.upstream}` : "─";
+		console.log(`${repo.name.padEnd(nameWidth)}  ${repo.catalog.padEnd(7)}   ${clonedFlag}   ${origin.padEnd(24)}  ${upstream.padEnd(24)}  ${repo.branch ?? "─"}`);
 	}
-}
-function cmdExec(positional, flags) {
-	const { manifest, root } = readManifest();
-	const filter = getFilter([], flags);
-	const repos = resolveRepos(manifest, filter);
-	const cmd = positional.join(" ");
-	if (!cmd) throw new Error("Usage: repos exec [--group G] [--all] -- <command>");
-	for (const [name, repo] of repos) {
-		if (!isCloned({
-			name,
-			repo,
-			manifest,
-			root
-		})) continue;
-		const directory = repoPath({
-			name,
-			repo,
-			manifest,
-			root
-		});
-		console.log(`\n=== ${name} ===`);
+};
+const cmdExec = (positional, flags) => {
+	const command = positional.join(" ");
+	if (!command) throw new Error("Usage: repos exec [--group G] [--all] [--catalog public|private|all] -- <command>");
+	const catalog = getCatalog(flags, "all");
+	const state = readManifest(void 0, catalog);
+	const repos = resolveRepos(state, {
+		filter: getFilter([], flags),
+		catalog
+	});
+	for (const entry of repos) {
+		const [name] = entry;
+		const context = contextFor(state, entry);
+		if (!isCloned(context)) continue;
+		console.log(`\n=== ${name} [${context.catalog}] ===`);
 		try {
-			execSync(cmd, {
-				cwd: directory,
+			execSync(command, {
+				cwd: repoPath(context),
 				stdio: "inherit"
 			});
 		} catch {
 			console.error(`  Command failed in ${name}`);
 		}
 	}
-}
-function cmdFork(positional) {
+};
+const cmdFork = (positional, flags) => {
+	rejectCatalogOverride(flags, "fork");
 	const name = positional[0];
 	if (!name) throw new Error("Usage: repos fork <name>");
-	const { manifest, root } = readManifest();
-	const result = forkRepo(name, manifest, root);
+	const result = forkRepo(readManifest(), name);
 	console.log(result.message);
 	if (!result.ok) throw new Error(result.message);
-}
-function cmdUnfork(positional) {
+};
+const cmdUnfork = (positional, flags) => {
+	rejectCatalogOverride(flags, "unfork");
 	const name = positional[0];
 	if (!name) throw new Error("Usage: repos unfork <name>");
-	const { manifest, root } = readManifest();
-	const result = unforkRepo(name, manifest, root);
+	const result = unforkRepo(readManifest(), name);
 	console.log(result.message);
 	if (!result.ok) throw new Error(result.message);
-}
-function cmdAdd(positional, flags) {
+};
+const cmdAdd = (positional, flags) => {
 	const raw = positional[0];
-	if (!raw) throw new Error("Usage: repos add <owner/repo | github-url> [-g group] [-b branch] [-d description] [--shallow] [--clone]");
+	if (!raw) throw new Error("Usage: repos add <owner/repo | github-url> [--catalog public|private] [-g group] [-b branch] [-d description] [--shallow] [--clone]");
 	const slug = raw.includes("://") ? parseOwnerRepo(raw) : raw;
 	if (!slug?.includes("/")) throw new Error(`Could not parse repo slug from "${raw}". Expected owner/repo or a GitHub URL.`);
+	const target = getMutationCatalog(flags);
 	const repoName = slug.split("/")[1];
-	const { manifest, root } = readManifest();
-	if (manifest.repos[repoName]) throw new Error(`Repo "${repoName}" already exists in manifest.`);
-	let description;
-	if (typeof flags["description"] === "string") ({description} = flags);
-	else try {
+	const state = readManifest(void 0, target === "public" ? "all" : "private");
+	if (state.manifest.repos[repoName]) throw new Error(`Repo "${repoName}" already exists in manifest.`);
+	let description = typeof flags["description"] === "string" ? flags["description"] : void 0;
+	if (!description) try {
 		description = execSync(`gh repo view ${slug} --json description -q .description`, {
 			encoding: "utf8",
 			stdio: [
@@ -3034,7 +3285,7 @@ function cmdAdd(positional, flags) {
 				"pipe",
 				"pipe"
 			]
-		}).trim() || void 0;
+		}).trim();
 	} catch {}
 	const config = {
 		upstream: slug,
@@ -3044,58 +3295,58 @@ function cmdAdd(positional, flags) {
 		...typeof flags["path"] === "string" && { path: flags["path"] },
 		...flags["shallow"] && { shallow: true }
 	};
-	manifest.repos[repoName] = config;
 	const groupName = typeof flags["group"] === "string" ? flags["group"] : void 0;
-	if (groupName) {
-		manifest.groups[groupName] ??= { repos: [] };
-		if (!manifest.groups[groupName].repos.includes(repoName)) manifest.groups[groupName].repos.push(repoName);
-	}
-	writeManifest(manifest, root);
-	console.log(`✓ Added ${repoName} (${slug})`);
+	if (groupName && state.groupCatalogs[groupName] && state.groupCatalogs[groupName] !== target) throw new Error(`Group "${groupName}" belongs to the ${state.groupCatalogs[groupName]} catalog.`);
+	const next = mutateCatalog(state, target, (catalog) => {
+		catalog.repos[repoName] = config;
+		if (groupName) {
+			catalog.groups[groupName] ??= { repos: [] };
+			catalog.groups[groupName].repos.push(repoName);
+		}
+	});
+	console.log(`✓ Added ${repoName} (${slug}) to ${target} catalog`);
 	if (groupName) console.log(`  → added to group "${groupName}"`);
 	if (flags["clone"]) {
-		const result = cloneRepo({
+		const repo = next.manifest.repos[repoName];
+		console.log(cloneRepo({
 			name: repoName,
-			repo: manifest.repos[repoName],
-			manifest,
-			root
-		});
-		console.log(result.message);
+			repo,
+			catalog: target,
+			manifest: next.manifest,
+			root: next.root,
+			state: next
+		}).message);
 	}
-}
-function cmdRemove(positional) {
+};
+const cmdRemove = (positional, flags) => {
+	rejectCatalogOverride(flags, "remove");
 	const name = positional[0];
 	if (!name) throw new Error("Usage: repos remove <name>");
-	const { manifest, root } = readManifest();
-	if (!manifest.repos[name]) throw new Error(`Repo "${name}" not found in manifest.`);
-	const { [name]: _, ...remainingRepos } = manifest.repos;
-	manifest.repos = remainingRepos;
-	for (const group of Object.values(manifest.groups)) {
-		const index = group.repos.indexOf(name);
-		if (index !== -1) group.repos.splice(index, 1);
-	}
-	writeManifest(manifest, root);
-	console.log(`✓ Removed ${name} from manifest`);
-}
+	const state = readManifest();
+	const owner = state.repoCatalogs[name];
+	removeRepo(state, name);
+	console.log(`✓ Removed ${name} from ${owner} catalog`);
+};
 const helpText = `
 Usage: repos <command> [options]
 
 Commands:
-  add    <owner/repo> [-g group] [-b branch] [-c commit] [-d desc] [--shallow] [--clone]
-  remove <name>                               Remove repo from manifest
-  clone  [name] [--group G] [--all]           Clone repos
-  sync   [name] [--group G] [--all]           Pull latest / checkout pinned commit
-  status [name] [--group G] [--all] [--json]  Show repo status
-  list   [--groups] [--cloned] [--json]       List repos/groups
-  exec   [--group G] [--all] -- <cmd>         Run command across repos
-  fork   <name>                               Fork repo to owner org
-  unfork <name>                               Remove fork config
+  add    <owner/repo> [--catalog public|private] [-g group] [-b branch] [-c commit] [-d desc] [--shallow] [--clone]
+  remove <name>                                      Remove repo from its owning catalog
+  clone  [name] [--group G] [--all] [--catalog C]   Clone repos
+  sync   [name] [--group G] [--all] [--catalog C]   Pull latest / checkout pinned commit
+  status [name] [--group G] [--all] [--catalog C]   Show repo status
+  list   [--groups] [--cloned] [--catalog C]        List repos/groups
+  exec   [--group G] [--all] [--catalog C] -- <cmd> Run command across repos
+  fork   <name>                                      Fork repo to owner org
+  unfork <name>                                      Remove fork config
 
+C is public, private, or all. Reads default to all; add defaults to private.
 Short flags: -g (group) -b (branch) -c (commit) -d (description) -p (path)
 
 Run without arguments for interactive TUI.
 `.trim();
-function run(argv) {
+const run = (argv) => {
 	const { command, positional, flags } = parseArgs(argv);
 	switch (command) {
 		case "add":
@@ -3103,7 +3354,7 @@ function run(argv) {
 			break;
 		case "remove":
 		case "rm":
-			cmdRemove(positional);
+			cmdRemove(positional, flags);
 			break;
 		case "clone":
 			cmdClone(positional, flags);
@@ -3121,10 +3372,10 @@ function run(argv) {
 			cmdExec(positional, flags);
 			break;
 		case "fork":
-			cmdFork(positional);
+			cmdFork(positional, flags);
 			break;
 		case "unfork":
-			cmdUnfork(positional);
+			cmdUnfork(positional, flags);
 			break;
 		case "help":
 		case "--help":
@@ -3136,7 +3387,7 @@ function run(argv) {
 			console.log(helpText);
 			throw new Error(`Unknown command: ${command}`);
 	}
-}
+};
 
 //#endregion
 //#region src/repos/repos.ts

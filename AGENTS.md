@@ -22,6 +22,12 @@ pnpm docs:validate                        # Validate policy/research doc frontma
 
 - `docs/research` and `docs/reference` are symlinks into `repos/tau-brain`; write through `docs/...`, validate from Tau root, but check git with `git -C repos/tau-brain status --short -- research/<file>` or `reference/<file>`.
 
+## Repository Source Catalogs
+
+- `repos.yaml` is the public source-maintenance catalog. Authorized team checkouts optionally overlay `repos/tau-brain/repos.yaml`; `pnpm repos` merges both and labels ownership.
+- New catalog entries default private. Use `pnpm repos add owner/repo --catalog public -g public-maintenance` only for deliberate OSS publication.
+- Catalogs and `repos/` checkouts are optional investigation tooling. Tau install, build, test, and runtime workflows must not depend on them.
+
 ## Architecture
 
 Tau is the AI-native CAD platform for the web (`tau.new`), built as an Nx monorepo with pnpm workspaces.
@@ -90,7 +96,7 @@ Project skills in `.agents/skills/` provide guided workflows. Read the relevant 
 - Vitest for tests; jsdom env for UI, node env for API
 - Hybrid oxlint + ESLint linting; formatting via oxfmt (`.oxfmtrc.json`), not ESLint
 - PostgreSQL with Drizzle ORM; schema in `apps/api/app/database/`; auth tables via Better Auth
-- Investigate dependency source via `repos/` (managed by `repos.yaml` and `pnpm repos`), not `node_modules`. Use the `repos` skill to clone, add, or explore repos.
+- Investigate dependency source via `repos/` (managed by the public catalog, optional Tau Brain overlay, and `pnpm repos`), not `node_modules`. Use the `repos` skill to clone, add, or explore repos.
 
 ## Learned User Preferences
 

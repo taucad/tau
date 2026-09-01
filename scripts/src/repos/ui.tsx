@@ -4,7 +4,7 @@ import process from 'node:process';
 import React, { useState, useMemo } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
 import { Spinner, ConfirmInput, TextInput } from '@inkjs/ui';
-import type { Manifest, RepoConfig, RepoContext, RepoStatus } from './lib.ts';
+import type { CatalogName, CatalogState, RepoConfig, RepoStatus } from './lib.ts';
 import { readManifest, getRepoStatus, getLastActivity, cloneRepo, syncRepo, forkRepo, unforkRepo } from './lib.ts';
 
 // ── Types ───────────────────────────────────────────────────────
@@ -13,6 +13,7 @@ type AppMode = 'list' | 'fork-confirm' | 'unfork-confirm' | 'syncing' | 'cloning
 
 type EnrichedRepo = {
   name: string;
+  catalog: CatalogName;
   config: RepoConfig;
   status: RepoStatus;
   lastActivity?: number;
@@ -20,12 +21,14 @@ type EnrichedRepo = {
 
 // ── Data Loading ────────────────────────────────────────────────
 
-function loadRepos(manifest: Manifest, root: string): EnrichedRepo[] {
+function loadRepos(state: CatalogState): EnrichedRepo[] {
+  const { manifest, root } = state;
   const entries = Object.entries(manifest.repos);
   const enriched: EnrichedRepo[] = entries.map(([name, config]) => {
-    const status = getRepoStatus({ name, repo: config, manifest, root });
+    const catalog = state.repoCatalogs[name]!;
+    const status = getRepoStatus({ name, repo: config, manifest, root, catalog, state });
     const lastActivity = status.cloned ? getLastActivity({ name, repo: config, manifest, root }) : undefined;
-    return { name, config, status, lastActivity };
+    return { name, catalog, config, status, lastActivity };
   });
 
   enriched.sort((a, b) => {
@@ -143,6 +146,9 @@ function RepoRow({
           {name}
         </Text>
       </Box>
+      <Box width={9}>
+        <Text dimColor>{repo.catalog}</Text>
+      </Box>
       <Box width={10}>{clonedBadge}</Box>
       <Box width={3}>
         <ForkToggle isForked={Boolean(config.fork)} isSelected={isSelected} />
@@ -165,6 +171,11 @@ function Header({ nameWidth }: { readonly nameWidth: number }): React.ReactEleme
       <Box width={nameWidth + 2}>
         <Text dimColor bold>
           NAME
+        </Text>
+      </Box>
+      <Box width={9}>
+        <Text dimColor bold>
+          CATALOG
         </Text>
       </Box>
       <Box width={10}>
@@ -305,8 +316,9 @@ function useNavigationInput(options: {
 
 function App(): React.ReactElement {
   const { exit } = useApp();
-  const [{ manifest, root }] = useState(() => readManifest());
-  const [repos, setRepos] = useState<EnrichedRepo[]>(() => loadRepos(manifest, root));
+  const [catalogState, setCatalogState] = useState(() => readManifest());
+  const { manifest, root } = catalogState;
+  const [repos, setRepos] = useState<EnrichedRepo[]>(() => loadRepos(catalogState));
   const [cursor, setCursor] = useState(0);
   const [mode, setMode] = useState<AppMode>('list');
   const [message, setMessage] = useState('');
@@ -353,7 +365,8 @@ function App(): React.ReactElement {
 
   const refreshRepos = (): void => {
     const fresh = readManifest(root);
-    setRepos(loadRepos(fresh.manifest, root));
+    setCatalogState(fresh);
+    setRepos(loadRepos(fresh));
   };
 
   useNavigationInput({
@@ -385,7 +398,14 @@ function App(): React.ReactElement {
         setMessage(`Cloning ${repo.name}...`);
         setTimeout(() => {
           try {
-            cloneRepo({ name: repo.name, repo: repo.config, manifest, root });
+            cloneRepo({
+              name: repo.name,
+              repo: repo.config,
+              catalog: repo.catalog,
+              manifest,
+              root,
+              state: catalogState,
+            });
             setMessage(`✓ ${repo.name} cloned`);
           } catch (error) {
             setMessage(`✗ Clone failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -405,7 +425,14 @@ function App(): React.ReactElement {
         setMode('syncing');
         setMessage(`Syncing ${repo.name}...`);
         setTimeout(() => {
-          const result = syncRepo({ name: repo.name, repo: repo.config, manifest, root });
+          const result = syncRepo({
+            name: repo.name,
+            repo: repo.config,
+            catalog: repo.catalog,
+            manifest,
+            root,
+            state: catalogState,
+          });
           setMessage(result.ok ? `✓ ${result.message}` : `✗ ${result.message}`);
           refreshRepos();
           setMode('list');
@@ -423,7 +450,14 @@ function App(): React.ReactElement {
         let fail = 0;
         for (const repo of filteredRepos) {
           if (repo.status.cloned) {
-            const result = syncRepo({ name: repo.name, repo: repo.config, manifest, root });
+            const result = syncRepo({
+              name: repo.name,
+              repo: repo.config,
+              catalog: repo.catalog,
+              manifest,
+              root,
+              state: catalogState,
+            });
             if (result.ok) {
               ok++;
             } else {
@@ -461,7 +495,7 @@ function App(): React.ReactElement {
       <KeyHints />
 
       <Header nameWidth={nameWidth} />
-      <Text dimColor>{'─'.repeat(nameWidth + 55)}</Text>
+      <Text dimColor>{'─'.repeat(nameWidth + 64)}</Text>
 
       {visibleRepos.map((repo, index) => (
         <RepoRow
@@ -498,7 +532,7 @@ function App(): React.ReactElement {
               setMessage(`Forking ${selectedRepo.name}...`);
               setMode('syncing');
               setTimeout(() => {
-                const result = forkRepo(selectedRepo.name, manifest, root);
+                const result = forkRepo(catalogState, selectedRepo.name);
                 setMessage(result.ok ? `✓ ${result.message}` : `✗ ${result.message}`);
                 refreshRepos();
                 setMode('list');
@@ -526,7 +560,7 @@ function App(): React.ReactElement {
               setMessage(`Unforking ${selectedRepo.name}...`);
               setMode('syncing');
               setTimeout(() => {
-                const result = unforkRepo(selectedRepo.name, manifest, root);
+                const result = unforkRepo(catalogState, selectedRepo.name);
                 setMessage(result.ok ? `✓ ${result.message}` : `✗ ${result.message}`);
                 refreshRepos();
                 setMode('list');

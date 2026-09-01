@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type PanelEmptyStateProps = Omit<React.ComponentProps<'div'>, 'title'> & {
   readonly icon: LucideIcon;

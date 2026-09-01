@@ -1,7 +1,7 @@
 import { ChatInterfaceGraphicsMeasure } from '#routes/w.$workspace.$project/chat-interface-graphics-measure.js';
 import { ChatInterfaceGraphicsSectionView } from '#routes/w.$workspace.$project/chat-interface-graphics-section-view.js';
 import { GraphicsPanel } from '#routes/w.$workspace.$project/chat-interface-graphics-panel.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
 
 type ChatInterfaceGraphicsProps = {

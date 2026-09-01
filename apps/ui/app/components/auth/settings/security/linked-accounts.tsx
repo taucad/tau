@@ -1,8 +1,8 @@
 import { useAuth, useListAccounts } from '@better-auth-ui/react';
-import { Card, CardContent } from '#components/ui/card.js';
-import { Separator } from '#components/ui/separator.js';
-import { Skeleton } from '#components/ui/skeleton.js';
-import { cn } from '#utils/ui.utils.js';
+import { Card, CardContent } from '@taucad/ui/components/card';
+import { Separator } from '@taucad/ui/components/separator';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { cn } from '@taucad/ui/utils/cn';
 import { LinkedAccount } from '#components/auth/settings/security/linked-account.js';
 
 export type LinkedAccountsProps = {

@@ -10,7 +10,7 @@ import {
 } from '#components/chat/chat-tool-card.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 
 type CompactionView = {
@@ -91,6 +91,10 @@ function formatFailureKind(kind: ContextCompactionData['compactionFailureKind'])
       return 'Transcript commit failed';
     case 'context_overflow_retry_failed':
       return 'Overflow retry failed';
+    case 'circuit_breaker_open':
+      return 'Compaction paused after repeated ineffective passes';
+    case 'summarization_failed':
+      return 'History summarization failed';
     case 'unexpected_error':
       return 'Unexpected implementation error';
     case undefined:

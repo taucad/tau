@@ -1,7 +1,7 @@
 import { AlertCircle, ArrowLeft, RefreshCcw } from 'lucide-react';
 import { lazy, Suspense, useEffect } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
 

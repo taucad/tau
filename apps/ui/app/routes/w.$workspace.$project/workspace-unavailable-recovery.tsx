@@ -31,11 +31,11 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { toast } from '#components/ui/sonner.js';
 import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
-import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
-import { Label } from '#components/ui/label.js';
+import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
+import { Label } from '@taucad/ui/components/label';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 
 type WorkspaceUnavailableRecoveryProps = {
@@ -92,7 +92,7 @@ export function WorkspaceUnavailableRecovery({
   }, [bindProjectToWorkspace, projectManager, telemetry, workspaceId]);
 
   const handlePickAnother = useCallback(async () => {
-    if (!isFileSystemAccessSupported) {
+    if (!webAccessDirectoryPicker()) {
       return;
     }
     setIsBusy(true);
@@ -118,15 +118,17 @@ export function WorkspaceUnavailableRecovery({
   }, [bindProjectToWorkspace, projectManager, telemetry, workspaceId]);
 
   const handleReconnect = useCallback(async () => {
-    if (!isFileSystemAccessSupported || !workspaceId) {
+    const picker = webAccessDirectoryPicker();
+    if (!picker || !workspaceId) {
       return;
     }
     setIsBusy(true);
     try {
-      const handle = await globalThis.window.showDirectoryPicker({
-        id: `tau-workspace-${workspaceId}`,
-        mode: 'readwrite',
-      });
+      const handle = await picker.pick({ id: `tau-workspace-${workspaceId}`, mode: 'readwrite' });
+      if (handle === undefined) {
+        telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
+        return;
+      }
       await workspace.replaceWorkspaceHandle(workspaceId, handle);
       fileManagerRef.send({ type: 'reloadWorkspace' });
       await projectManager.refreshWorkspaceCatalog();

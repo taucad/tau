@@ -8,7 +8,7 @@ import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { projectToManifest } from '@taucad/types';
 import type { Geometry } from '@taucad/types';
 import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { toast } from '#components/ui/sonner.js';
 import type { Handle } from '#types/matches.types.js';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
@@ -32,7 +32,7 @@ import {
 } from '#components/code/code-block.js';
 import { CopyButton } from '#components/copy-button.js';
 import { ExternalLink } from '#components/external-link.js';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '#components/ui/card.js';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@taucad/ui/components/card';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import {
   getFormatFromFilename,
@@ -49,7 +49,7 @@ import { ViewerSettings } from '#components/geometry/cad/viewer-settings.js';
 import { ChatInterfaceGraphics } from '#routes/w.$workspace.$project/chat-interface-graphics.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '#components/ui/loader.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.js';
@@ -489,7 +489,7 @@ function ConverterContentInner(): React.JSX.Element {
                     </CardHeader>
                     <CardContent>
                       <Button asChild variant='outline' size='sm' className='w-full'>
-                        <Link to='/docs'>View API Documentation</Link>
+                        <Link to='https://docs.tau.new/runtime/api'>View API Documentation</Link>
                       </Button>
                     </CardContent>
                   </Card>

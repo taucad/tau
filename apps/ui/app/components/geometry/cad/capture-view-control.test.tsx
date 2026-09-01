@@ -27,19 +27,19 @@ vi.mock('#providers/headless-image-provider.js', () => ({
   useHeadlessImageService: () => mockImageService,
 }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   TooltipContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('#components/ui/button.js', () => ({
+vi.mock('@taucad/ui/components/button', () => ({
   Button: ({ children, onClick }: { readonly children: React.ReactNode; readonly onClick?: () => void }) => (
     <button type='button' onClick={onClick} data-testid='capture-button'>
       {children}
     </button>
   ),
 }));
-vi.mock('#components/ui/dropdown-menu.js', () => ({
+vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenuItem: ({
     children,
     onSelect,

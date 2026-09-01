@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { PaneButton } from '#components/ui/pane-button.js';
 
 type DockviewPaneActionProperties = {

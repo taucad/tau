@@ -136,13 +136,13 @@ vi.mock('#components/ui/combobox-responsive.js', () => ({
   ),
 }));
 
-vi.mock('#components/ui/popover.js', () => ({
+vi.mock('@taucad/ui/components/popover', () => ({
   Popover: ({ children }: { children: React.ReactNode }) => <div data-testid='popover'>{children}</div>,
   PopoverTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   PopoverContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
   TooltipContent: () => null,
   TooltipTrigger: ({ children }: { children: React.ReactNode }): React.ReactNode => children,

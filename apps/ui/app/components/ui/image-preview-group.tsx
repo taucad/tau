@@ -1,8 +1,14 @@
 import * as React from 'react';
-import { cn } from '#utils/ui.utils.js';
-import { Dialog, DialogContent } from '#components/ui/dialog.js';
-import { Carousel, CarouselContent, CarouselItem, CarouselPrevious, CarouselNext } from '#components/ui/carousel.js';
-import type { CarouselApi } from '#components/ui/carousel.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Dialog, DialogContent } from '@taucad/ui/components/dialog';
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselPrevious,
+  CarouselNext,
+} from '@taucad/ui/components/carousel';
+import type { CarouselApi } from '@taucad/ui/components/carousel';
 
 type ImagePreviewItem = {
   /** Unique identifier for the item */

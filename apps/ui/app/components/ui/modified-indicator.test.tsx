@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 function renderIndicator(props: { onReset: () => void; tooltip?: string }, wrapper?: React.JSX.Element) {
   const indicator = (

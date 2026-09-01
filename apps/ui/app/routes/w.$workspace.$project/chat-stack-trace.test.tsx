@@ -19,7 +19,7 @@ const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockRe
 let mockKernelIssues = new Map<string, KernelIssue[]>();
 let mockAgent: CadAgentConfigInput = {
   profile: 'cad',
-  model: 'cookie-model',
+  execution: { kind: 'tau', model: 'cookie-model' },
   kernel: 'openscad',
   mode: 'agent',
   toolChoice: 'auto',
@@ -103,19 +103,19 @@ vi.mock('#components/ui/key-shortcut.js', () => ({
   KeyShortcut: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
   TooltipTrigger: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
   TooltipContent: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
 }));
 
-vi.mock('#components/ui/collapsible.js', () => ({
+vi.mock('@taucad/ui/components/collapsible', () => ({
   Collapsible: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   CollapsibleTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   CollapsibleContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('#components/ui/button.js', () => ({
+vi.mock('@taucad/ui/components/button', () => ({
   Button: ({ children, onClick }: { readonly children: React.ReactNode; readonly onClick?: () => void }) => (
     <button type='button' onClick={onClick} data-testid='fix-with-ai'>
       {children}
@@ -149,7 +149,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
     mockKernelIssues = new Map([['main.scad', [issue]]]);
     mockAgent = {
       profile: 'cad',
-      model: 'cookie-model',
+      execution: { kind: 'tau', model: 'cookie-model' },
       kernel: 'openscad',
       mode: 'agent',
       toolChoice: 'auto',
@@ -157,7 +157,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
     };
   });
 
-  it('seeds activeModel and activeKernel on the new chat from the chat-client agent', async () => {
+  it('seeds activeExecution and activeKernel on the new chat from the chat-client agent', async () => {
     render(<ChatStackTrace entryPath='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
@@ -165,8 +165,11 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
       expect(mockCreateChat).toHaveBeenCalledOnce();
     });
 
-    const callArgs = mockCreateChat.mock.calls[0]?.[0] as { activeModel?: string; activeKernel?: string };
-    expect(callArgs.activeModel).toBe('cookie-model');
+    const callArgs = mockCreateChat.mock.calls[0]?.[0] as {
+      activeExecution?: CadAgentConfigInput['execution'];
+      activeKernel?: string;
+    };
+    expect(callArgs.activeExecution).toEqual({ kind: 'tau', model: 'cookie-model' });
     expect(callArgs.activeKernel).toBe('openscad');
     expect(mockSetChatOpen).toHaveBeenCalledWith(true);
   });
@@ -186,7 +189,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
   // legacy "stamp kernel/model into metadata" pattern that the chat-metadata-
   // first-class-architecture refactor removes.
   it('seeds the pending user message without per-field metadata stamping', async () => {
-    mockAgent = { ...mockAgent, model: 'chat-local-model', kernel: 'manifold' };
+    mockAgent = { ...mockAgent, execution: { kind: 'tau', model: 'chat-local-model' }, kernel: 'manifold' };
 
     render(<ChatStackTrace entryPath='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
@@ -196,12 +199,12 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
     });
 
     const callArgs = mockCreateChat.mock.calls[0]?.[0] as {
-      activeModel?: string;
+      activeExecution?: CadAgentConfigInput['execution'];
       activeKernel?: string;
       messages?: Array<{ id: string; metadata?: Record<string, unknown> }>;
       startupRequest?: { id: string; kind: string; messageId: string; source: string; createdAt: number };
     };
-    expect(callArgs.activeModel).toBe('chat-local-model');
+    expect(callArgs.activeExecution).toEqual({ kind: 'tau', model: 'chat-local-model' });
     expect(callArgs.activeKernel).toBe('manifold');
     expect(callArgs.messages?.[0]?.metadata?.['status']).toBe('pending');
     expect(callArgs.startupRequest?.id).toMatch(/^req_/);
@@ -219,7 +222,7 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
     mockKernelIssues = new Map([['main.scad', [issue]]]);
     mockAgent = {
       profile: 'cad',
-      model: 'chat-local-model',
+      execution: { kind: 'tau', model: 'chat-local-model' },
       kernel: 'manifold',
       mode: 'plan',
       toolChoice: 'auto',

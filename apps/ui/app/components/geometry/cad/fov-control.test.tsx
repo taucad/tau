@@ -29,7 +29,7 @@ vi.mock('#hooks/use-keyboard.js', () => ({
   useModifiers: () => ({ shift: mocks.modifiers.shift }),
 }));
 
-vi.mock('#components/ui/slider.js', () => ({
+vi.mock('@taucad/ui/components/slider', () => ({
   Slider: ({ step, onValueChange }: SliderProps) => (
     <button type='button' data-testid='fov-slider' data-step={step} onClick={() => onValueChange?.([30])}>
       Slider
@@ -37,7 +37,7 @@ vi.mock('#components/ui/slider.js', () => ({
   ),
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: ReactNode }): ReactNode => children,
   TooltipTrigger: ({ children }: { readonly children: ReactNode }): ReactNode => children,
   TooltipContent: ({ children }: { readonly children: ReactNode }): ReactNode => (

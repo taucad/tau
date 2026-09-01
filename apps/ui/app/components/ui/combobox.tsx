@@ -2,11 +2,11 @@ import * as React from 'react';
 import { Combobox as ComboboxPrimitive } from '@base-ui/react';
 import { CheckIcon, ChevronDownIcon, XIcon } from 'lucide-react';
 
-import { cn } from '#utils/ui.utils.js';
-import { Button } from '#components/ui/button.js';
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '#components/ui/input-group.js';
-import { menuItemVariants } from '#components/ui/menu.variants.js';
-import { popoverSurfaceVariants } from '#components/ui/popover.variants.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Button } from '@taucad/ui/components/button';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
+import { menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 
 const Combobox = ComboboxPrimitive.Root;
 

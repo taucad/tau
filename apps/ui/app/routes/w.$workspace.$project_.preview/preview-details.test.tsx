@@ -40,7 +40,7 @@ vi.mock('#components/ui/sonner.js', () => ({
   },
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
   TooltipContent: () => null,
   TooltipTrigger: ({ children }: { children: React.ReactNode }): React.ReactNode => children,

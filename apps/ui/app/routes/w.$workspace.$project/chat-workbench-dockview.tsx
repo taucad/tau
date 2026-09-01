@@ -70,6 +70,8 @@ import { FileTreePanelBody } from '#routes/w.$workspace.$project/chat-file-tree.
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 import { ModelPanelBody } from '#routes/w.$workspace.$project/chat-explorer.js';
 import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
+import { AgentsPanelBody } from '#routes/w.$workspace.$project/chat-agents.js';
+import { JobsPanelBody } from '#routes/w.$workspace.$project/chat-jobs.js';
 import { ConverterPanelBody } from '#routes/w.$workspace.$project/chat-converter.js';
 import { DetailsPanelBody } from '#routes/w.$workspace.$project/chat-details.js';
 import { TelemetryPanelContent } from '#routes/w.$workspace.$project/chat-kernel.js';
@@ -84,7 +86,7 @@ import type {
   WorkbenchPanelId,
   WorkbenchUtilityPanelId,
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { useIsMobile } from '#hooks/use-mobile.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import type { OpenFile } from '#types/editor.types.js';
 import { PaneButton } from '#components/ui/pane-button.js';
@@ -94,7 +96,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import type {
   FileViewerPaneContent,
@@ -249,6 +251,14 @@ function RevisionsWorkbenchPanel(): React.JSX.Element {
   return <RevisionsPanelBody />;
 }
 
+function AgentsWorkbenchPanel(): React.JSX.Element {
+  return <AgentsPanelBody />;
+}
+
+function JobsWorkbenchPanel(): React.JSX.Element {
+  return <JobsPanelBody />;
+}
+
 function ExportWorkbenchPanel(): React.JSX.Element {
   const profile = useContext(WorkbenchProfileContext);
   return <ConverterPanelBody downloadOnly={profile === 'shared'} />;
@@ -300,6 +310,18 @@ export const workbenchSurfaces: readonly WorkbenchSurface[] = [
     label: 'Revisions',
     icon: History,
     panel: { id: 'workbench:revisions', component: 'revisions', title: 'Revisions' },
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    icon: Bot,
+    panel: { id: 'workbench:agents', component: 'agents', title: 'Agents' },
+  },
+  {
+    id: 'jobs',
+    label: 'Jobs',
+    icon: BriefcaseBusiness,
+    panel: { id: 'workbench:jobs', component: 'jobs', title: 'Jobs' },
   },
   {
     id: 'export',
@@ -616,6 +638,8 @@ const components = {
   parameters: ParametersWorkbenchPanel,
   model: ModelWorkbenchPanel,
   revisions: RevisionsWorkbenchPanel,
+  agents: AgentsWorkbenchPanel,
+  jobs: JobsWorkbenchPanel,
   export: ExportWorkbenchPanel,
   share: ShareWorkbenchPanel,
   details: DetailsWorkbenchPanel,
@@ -627,6 +651,8 @@ export const workbenchPanels = {
   parameters: getWorkbenchSurface('parameters').panel!,
   model: getWorkbenchSurface('model').panel!,
   revisions: getWorkbenchSurface('revisions').panel!,
+  agents: getWorkbenchSurface('agents').panel!,
+  jobs: getWorkbenchSurface('jobs').panel!,
   export: getWorkbenchSurface('export').panel!,
   share: getWorkbenchSurface('share').panel!,
   details: getWorkbenchSurface('details').panel!,

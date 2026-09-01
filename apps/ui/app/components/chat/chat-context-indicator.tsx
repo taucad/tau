@@ -1,7 +1,7 @@
 import type { ContextUsageData } from '@taucad/chat';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 const size = 28;
 const strokeWidth = 4;

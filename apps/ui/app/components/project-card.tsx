@@ -3,10 +3,10 @@ import type { To } from 'react-router';
 import { Link } from 'react-router';
 import { CadPreviewViewer } from '#components/cad-preview.js';
 import type { CadPreviewGraphicsOptions } from '#components/cad-preview.js';
-import { Button } from '#components/ui/button.js';
-import { Card } from '#components/ui/card.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card } from '@taucad/ui/components/card';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ProjectCardProps = React.ComponentProps<typeof Card> & {
   readonly to: To;

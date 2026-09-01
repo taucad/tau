@@ -1,5 +1,5 @@
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
-import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '#components/ui/context-menu.js';
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent } from '@taucad/ui/components/context-menu';
 import { DockviewTab } from '#components/panes/dockview-tab.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 

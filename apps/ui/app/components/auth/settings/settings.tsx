@@ -4,8 +4,8 @@ import type { SettingsView } from '@better-auth-ui/core';
 import { useAuth, useAuthenticate } from '@better-auth-ui/react';
 import { useMemo } from 'react';
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '#components/ui/tabs.js';
-import { cn } from '#utils/ui.utils.js';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
+import { cn } from '@taucad/ui/utils/cn';
 import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
 import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
 

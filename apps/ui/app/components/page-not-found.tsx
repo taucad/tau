@@ -1,7 +1,7 @@
 import { ArrowLeft, Home, Search, MapPin } from 'lucide-react';
 import { useNavigate, Link, useLocation } from 'react-router';
-import { Button, buttonVariants } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button, buttonVariants } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { InlineCode } from '#components/code/code-block.js';
 
 export function PageNotFound(): React.JSX.Element {
@@ -66,7 +66,10 @@ export function PageNotFound(): React.JSX.Element {
         <div className='mt-6 text-center'>
           <p className='text-sm text-muted-foreground'>
             Still need help?{' '}
-            <Link to='/docs' className={cn(buttonVariants({ variant: 'link' }), 'h-auto p-0 text-sm underline')}>
+            <Link
+              to='https://docs.tau.new'
+              className={cn(buttonVariants({ variant: 'link' }), 'h-auto p-0 text-sm underline')}
+            >
               Check our docs
             </Link>{' '}
             or{' '}

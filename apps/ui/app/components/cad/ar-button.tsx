@@ -1,11 +1,11 @@
 import { memo } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { Geometry } from '@taucad/types';
-import { Button } from '#components/ui/button.js';
-import { useIsMobile } from '#hooks/use-mobile.js';
+import { Button } from '@taucad/ui/components/button';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { useAr } from '#components/cad/use-ar.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
   return (

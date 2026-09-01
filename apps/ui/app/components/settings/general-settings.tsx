@@ -2,16 +2,17 @@ import { Link } from 'react-router';
 import { AlertCircle, Check, ChevronDown, Circle, Contrast, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
+import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { Theme, useTheme, themeOptions } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import { useColor } from '#hooks/use-color.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { Card, CardContent, CardHeader, CardTitle } from '#components/ui/card.js';
+import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { ColorPicker } from '#components/ui/color-picker.js';
-import { Button } from '#components/ui/button.js';
-import { Switch } from '#components/ui/switch.js';
+import { Button } from '@taucad/ui/components/button';
+import { Switch } from '@taucad/ui/components/switch';
 
 type PrivacyMode = {
   id: 'share' | 'private';
@@ -61,6 +62,10 @@ function getThemeIcon(themeId: ThemeWithSystem): React.JSX.Element {
  */
 export function GeneralSettings(): React.JSX.Element {
   const { preferences, isLoading, error, updatePreferences, isUpdating } = usePrivacyPreferences();
+  // T15/AD15: paid tiers carry a contractual no-train guarantee — the
+  // projection forces `trainingConsent: false`, so no toggle is rendered.
+  const { tier } = useEntitlements();
+  const hasNoTrainGuarantee = tier !== 'free';
   const { themeWithSystem, setTheme, currentOption } = useTheme();
   const { hue, setHue, resetHue } = useColor();
   const [areCodeInlayHintsEnabled, setCodeInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
@@ -171,6 +176,20 @@ export function GeneralSettings(): React.JSX.Element {
             <div className='flex items-center gap-2 text-sm text-muted-foreground'>
               <AlertCircle className='size-4 shrink-0' />
               <span>Unable to load privacy preferences. Check your connection and refresh.</span>
+            </div>
+          ) : hasNoTrainGuarantee ? (
+            <div className='flex flex-col gap-1'>
+              <div className='flex items-center gap-2 font-medium'>
+                <ShieldCheck className='size-4 text-primary' />
+                No-train guarantee
+              </div>
+              <p className='text-sm text-muted-foreground'>
+                Your plan never trains on your data — prompts and designs are excluded from AI training as part of your
+                subscription.{' '}
+                <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
+                  Learn more
+                </Link>
+              </p>
             </div>
           ) : (
             <div className='flex items-center justify-between gap-4'>

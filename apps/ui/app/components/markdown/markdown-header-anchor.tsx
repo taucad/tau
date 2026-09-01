@@ -1,7 +1,7 @@
 import { Link as LinkIcon } from 'lucide-react';
 import type { ComponentProps } from 'react';
 import type { StreamdownProps } from 'streamdown';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { extractTextFromChildren } from '#utils/react.utils.js';
 
 /**

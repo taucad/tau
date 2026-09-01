@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { CookieIcon } from 'lucide-react';
 import { Link } from 'react-router';
 import { useAnalytics, useCookieConsent } from '#hooks/use-analytics.js';
-import { Button } from '#components/ui/button.js';
-import { Checkbox } from '#components/ui/checkbox.js';
-import { Label } from '#components/ui/label.js';
-import { Separator } from '#components/ui/separator.js';
+import { Button } from '@taucad/ui/components/button';
+import { Checkbox } from '@taucad/ui/components/checkbox';
+import { Label } from '@taucad/ui/components/label';
+import { Separator } from '@taucad/ui/components/separator';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '#components/ui/dialog.js';
+} from '@taucad/ui/components/dialog';
 
 /**
  * Detects if Global Privacy Control (GPC) is enabled in the browser.

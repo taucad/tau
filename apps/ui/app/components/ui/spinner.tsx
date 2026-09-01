@@ -1,6 +1,6 @@
 import { Loader2Icon } from 'lucide-react';
 
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 function Spinner({ className, ...props }: React.ComponentProps<'svg'>): React.JSX.Element {
   return (

@@ -16,12 +16,12 @@ import {
   Store,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { Badge } from '#components/ui/badge.js';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
-import { Separator } from '#components/ui/separator.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
+import { Separator } from '@taucad/ui/components/separator';
 import type { Handle } from '#types/matches.types.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 import { builtInSystemSkills } from '#lib/system-skills-catalog.js';

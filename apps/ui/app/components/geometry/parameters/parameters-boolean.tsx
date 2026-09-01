@@ -1,5 +1,5 @@
-import { Switch } from '#components/ui/switch.js';
-import { cn } from '#utils/ui.utils.js';
+import { Switch } from '@taucad/ui/components/switch';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ParametersBooleanProps = {
   // oxlint-disable-next-line react-js/boolean-prop-naming -- third-party component prop

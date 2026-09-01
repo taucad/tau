@@ -1,8 +1,8 @@
 import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PaneviewPanelApi } from 'dockview-react';
-import { cn } from '#utils/ui.utils.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 const defaultExpandedHeight = 200;
 

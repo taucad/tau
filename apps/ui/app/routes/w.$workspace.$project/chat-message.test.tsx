@@ -63,7 +63,7 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
     error: undefined,
     agent: {
       profile: 'cad',
-      model: 'openai-gpt-5.5',
+      execution: { kind: 'tau', model: 'openai-gpt-5.5' },
       kernel: 'replicad',
       mode: 'agent',
       toolChoice: 'auto',
@@ -225,7 +225,7 @@ vi.mock('#components/chat/chat-activity-section.js', () => ({
   ),
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='tooltip'>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='tooltip-trigger'>{children}</div>
@@ -239,7 +239,7 @@ vi.mock('#components/copy-button.js', () => ({
   CopyButton: () => <div data-testid='copy-button' />,
 }));
 
-vi.mock('#components/ui/dropdown-menu.js', () => ({
+vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='dropdown-menu'>{children}</div>
   ),

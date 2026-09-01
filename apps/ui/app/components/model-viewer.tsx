@@ -8,7 +8,7 @@ import { Loader } from '#components/ui/loader.js';
 import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import type { RenderStatus } from '@taucad/react';
 

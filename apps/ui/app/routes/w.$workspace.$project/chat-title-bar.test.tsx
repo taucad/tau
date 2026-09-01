@@ -52,7 +52,7 @@ vi.mock('react-router', () => ({ useNavigate: () => navigate }));
 vi.mock('#routes/w.$workspace.$project/chat-history-settings.js', () => ({
   ChatHistorySettings: () => <button type='button'>Chat settings</button>,
 }));
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   TooltipContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,

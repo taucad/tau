@@ -16,7 +16,7 @@ import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useRuntime } from '@taucad/react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { toast } from '#components/ui/sonner.js';

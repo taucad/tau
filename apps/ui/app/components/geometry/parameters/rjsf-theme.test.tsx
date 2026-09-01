@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Form from '@rjsf/core';
+import type { IChangeEvent } from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
-import type { IChangeEvent, WidgetProps, RJSFSchema, Registry } from '@rjsf/utils';
+import type { WidgetProps, RJSFSchema, Registry } from '@rjsf/utils';
 import { mock } from 'vitest-mock-extended';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
@@ -12,7 +13,7 @@ import {
   rjsfIdPrefix,
   rjsfIdSeparator,
 } from '#components/geometry/parameters/rjsf-utils.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const SelectWidget = widgets['SelectWidget']!;
 const CheckboxWidget = widgets['CheckboxWidget']!;
@@ -93,9 +94,12 @@ const renderSchemaForm = ({
     <TooltipProvider>
       <Form
         schema={schema}
+        // @ts-expect-error -- TODO: fix this (mirrors parameters.tsx; rjsf-theme exports use default any generics)
         validator={validator}
         widgets={widgets}
+        // @ts-expect-error -- TODO: fix this (mirrors parameters.tsx; rjsf-theme exports use default any generics)
         templates={templates}
+        // @ts-expect-error -- TODO: fix this (mirrors parameters.tsx; rjsf-theme exports use default any generics)
         uiSchema={uiSchema}
         idPrefix={rjsfIdPrefix}
         idSeparator={rjsfIdSeparator}
@@ -555,7 +559,7 @@ describe('composite fields', () => {
     await user.click(framingSelectors[0]!);
     await user.click(screen.getByRole('option', { name: 'Fixed' }));
 
-    const emitted = onChange.mock.lastCall?.[0].formData as Record<string, unknown>;
+    const emitted = onChange.mock.lastCall![0].formData!;
     expect(emitted).toMatchObject({
       views: [
         { id: 'first', camera: { framing: 'fixed', distance: 3 } },

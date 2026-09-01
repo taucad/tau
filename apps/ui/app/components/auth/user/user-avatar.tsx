@@ -3,9 +3,9 @@ import type { User } from 'better-auth';
 import { User2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { Avatar, AvatarFallback, AvatarImage } from '#components/ui/avatar.js';
-import { Skeleton } from '#components/ui/skeleton.js';
-import { cn } from '#utils/ui.utils.js';
+import { Avatar, AvatarFallback, AvatarImage } from '@taucad/ui/components/avatar';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type UserAvatarProps = {
   className?: string;

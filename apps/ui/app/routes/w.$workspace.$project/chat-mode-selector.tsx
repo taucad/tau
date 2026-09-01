@@ -7,9 +7,9 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 export type ChatMode = 'agent' | 'editor' | 'publish';
 
@@ -79,7 +79,7 @@ export const ChatModeSelector = memo(function ({
             return (
               <DropdownMenuRadioItem
                 key={mode.id}
-                className="h-10 pl-2 data-[state=checked]:bg-accent data-[state=checked]:text-primary [&_[data-slot='dropdown-menu-radio-item-indicator']]:hidden"
+                className="h-10 pl-2 data-[state=checked]:bg-accent data-[state=checked]:text-accent-foreground [&_[data-slot='dropdown-menu-radio-item-indicator']]:hidden"
                 value={mode.id}
               >
                 <Icon />

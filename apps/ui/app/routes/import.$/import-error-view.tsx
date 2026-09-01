@@ -1,5 +1,5 @@
 import { AlertCircle, RotateCcw } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 
 type ImportErrorViewProperties = {
   readonly error: Error | undefined;

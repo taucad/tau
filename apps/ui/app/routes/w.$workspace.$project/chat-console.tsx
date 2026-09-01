@@ -7,7 +7,7 @@ import type { VirtuosoHandle } from 'react-virtuoso';
 import { Virtuoso } from 'react-virtuoso';
 import type { LogEntry, LogLevel, LogOrigin } from '@taucad/types';
 import { logLevels } from '@taucad/types/constants';
-import { Badge } from '#components/ui/badge.js';
+import { Badge } from '@taucad/ui/components/badge';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -15,10 +15,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { PaneButton } from '#components/ui/pane-button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { SearchInput } from '#components/search-input.js';
 import { HighlightText } from '#components/highlight-text.js';
 import {
@@ -36,7 +36,7 @@ import {
   usePaneviewPersistence,
 } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { stringToColor } from '#utils/color.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 const defaultLogLevels: Record<LogLevel, boolean> = {
   error: true,

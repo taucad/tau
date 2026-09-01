@@ -3,7 +3,7 @@ import { defaultRehypePlugins, defaultRemarkPlugins as streamdownRemarkPlugins, 
 import type { ControlsConfig, StreamdownProps } from 'streamdown';
 import remarkMath from 'remark-math';
 import { memo, useMemo } from 'react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { MarkdownHyperlink } from '#components/markdown/markdown-hyperlink.js';
 import { MarkdownCode } from '#components/markdown/markdown-code.js';
 import { useTheme } from '#hooks/use-theme.js';

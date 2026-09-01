@@ -1,9 +1,9 @@
 import { Search, X } from 'lucide-react';
 import React from 'react';
-import { Input } from '#components/ui/input.js';
-import { Button } from '#components/ui/button.js';
+import { Input } from '@taucad/ui/components/input';
+import { Button } from '@taucad/ui/components/button';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type SearchInputProperties = {
   /**

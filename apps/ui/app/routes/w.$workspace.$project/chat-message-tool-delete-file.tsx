@@ -1,7 +1,7 @@
 import { Trash2, X } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
-import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@taucad/ui/components/tooltip';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';

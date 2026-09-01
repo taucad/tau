@@ -9,13 +9,13 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '#components/ui/dialog.js';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
-import { Label } from '#components/ui/label.js';
-import { Textarea } from '#components/ui/textarea.js';
-import { Separator } from '#components/ui/separator.js';
-import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
+} from '@taucad/ui/components/dialog';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
+import { Label } from '@taucad/ui/components/label';
+import { Textarea } from '@taucad/ui/components/textarea';
+import { Separator } from '@taucad/ui/components/separator';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@taucad/ui/components/tooltip';
 
 export function ProjectSettingsDialog(): React.JSX.Element {
   const { project, updateName, updateDescription } = usePreviewProject();

@@ -5,9 +5,9 @@ import { Suggestion } from '@tiptap/suggestion';
 import { PluginKey } from '@tiptap/pm/state';
 import type { EditorState } from '@tiptap/pm/state';
 import { Blocks, Zap } from 'lucide-react';
-import { cn } from '#utils/ui.utils.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
-import { menuContentVariants, menuItemVariants } from '#components/ui/menu.variants.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
+import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/menu.variants';
 import type {
   SlashCommandItem,
   SuggestionPopupState,

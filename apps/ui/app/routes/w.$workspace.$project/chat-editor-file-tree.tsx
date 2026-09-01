@@ -36,8 +36,8 @@ import { useTree, AssistiveTreeDescription } from '@headless-tree/react';
 import { kernelConfigurations, tauFileDragMime } from '@taucad/types/constants';
 import type { KernelConfiguration } from '@taucad/types/constants';
 import type { FileItem } from '#types/editor.types.js';
-import { cn } from '#utils/ui.utils.js';
-import { Button, buttonVariants } from '#components/ui/button.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { SearchInput } from '#components/search-input.js';
 import { toast } from '#components/ui/sonner.js';
 import {
@@ -58,7 +58,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '#components/ui/alert-dialog.js';
+} from '@taucad/ui/components/alert-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,14 +66,14 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
   DropdownMenuLabel,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
   ContextMenuSeparator,
-} from '#components/ui/context-menu.js';
+} from '@taucad/ui/components/context-menu';
 import { useProject } from '#hooks/use-project.js';
 import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
 import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';

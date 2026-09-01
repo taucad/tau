@@ -60,7 +60,7 @@ export const formatIosTrustBanner = (
     '        the "Connection Is Not Private" interstitial, so',
     '        SharedArrayBuffer-backed kernels load on the device.',
     '',
-    '        Background: https://tau.new/docs/runtime/guides/cross-origin-isolation',
+    '        Background: https://docs.tau.new/runtime/guides/cross-origin-isolation',
     '',
   ].join('\n');
 

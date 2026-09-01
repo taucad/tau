@@ -24,11 +24,11 @@ import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
-import { Tooltip, TooltipTrigger, TooltipContent } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@taucad/ui/components/tooltip';
 import { CopyButton } from '#components/copy-button.js';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
-import { menuItemVariants, menuSubTriggerOpenClass } from '#components/ui/menu.variants.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
+import { menuItemVariants, menuSubTriggerOpenClass } from '@taucad/ui/components/menu.variants';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import {
@@ -36,7 +36,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuLabel,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';

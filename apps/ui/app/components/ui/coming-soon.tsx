@@ -1,7 +1,7 @@
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
-import { Badge } from '#components/ui/badge.js';
-import { cn } from '#utils/ui.utils.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { cn } from '@taucad/ui/utils/cn';
 
 const comingSoonVariants = cva(
   // Font

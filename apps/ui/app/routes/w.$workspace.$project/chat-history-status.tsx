@@ -4,7 +4,7 @@ import { useSelector } from '@xstate/react';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { formatCurrency } from '#utils/currency.utils.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { useModels } from '#hooks/use-models.js';
@@ -43,9 +43,9 @@ export const ChatHistoryStatus = memo(function ({ className }: ChatHistoryStatus
   // to derive the "current" model from the latest stamped metadata, which
   // (a) duplicated the chat-scoped resolver's responsibility and (b) was
   // wrong while a chat existed but had not yet been used (no messages →
-  // no model badge). The persisted `Chat.activeModel` is now the source
+  // no model badge). The persisted Tau execution target is now the source
   // of truth, with a cookie fallback when the chat hasn't pinned one.
-  const currentModel = useChatSelector((state) => state.activeModel);
+  const currentExecution = useChatSelector((state) => state.activeExecution);
 
   // Calculate total cost from all usage data parts
   const totalCost = useChatSelector((state) => {
@@ -61,7 +61,10 @@ export const ChatHistoryStatus = memo(function ({ className }: ChatHistoryStatus
     return cost;
   });
 
-  const model = useMemo(() => (currentModel ? resolveModel(currentModel) : undefined), [currentModel, resolveModel]);
+  const model = useMemo(
+    () => (currentExecution?.kind === 'tau' ? resolveModel(currentExecution.model) : undefined),
+    [currentExecution, resolveModel],
+  );
 
   return (
     <div

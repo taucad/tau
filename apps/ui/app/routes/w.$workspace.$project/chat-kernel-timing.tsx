@@ -5,7 +5,7 @@ import type { ActorRefFrom } from 'xstate';
 import type { FilterCondition } from '#components/kernel/trace-condition-picker.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type {
   DisplaySettings,

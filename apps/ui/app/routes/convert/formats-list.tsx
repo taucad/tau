@@ -2,8 +2,8 @@ import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
 import { formatConfigurations } from '@taucad/types/constants';
-import { Badge } from '#components/ui/badge.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { SearchInput } from '#components/search-input.js';
 import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
 

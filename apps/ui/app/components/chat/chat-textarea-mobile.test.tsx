@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelConfiguration } from '@taucad/types/constants';
+import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 
 const manifoldKernel = kernelConfigurations.find((k) => k.id === 'manifold')!;
 const jscadKernel = kernelConfigurations.find((k) => k.id === 'jscad')!;
@@ -14,6 +15,14 @@ const jscadKernel = kernelConfigurations.find((k) => k.id === 'jscad')!;
 // guarantees a non-nullable `KernelConfiguration`. This test mirrors
 // that contract.
 const mockKernel: { current: KernelConfiguration } = { current: manifoldKernel };
+
+vi.mock('#hooks/active-chat-provider.js', () => ({
+  useChatComposer: (): ChatComposerContextValue =>
+    ({
+      execution: { execution: { kind: 'tau', model: 'test-model' }, setActiveExecution: vi.fn() },
+      session: undefined,
+    }) as unknown as ChatComposerContextValue,
+}));
 
 vi.mock('#components/chat/chat-model-selector.js', () => ({
   ChatModelSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
@@ -44,8 +53,8 @@ vi.mock('#components/chat/chat-textarea-mobile-images.js', () => ({
 }));
 
 vi.mock('#components/chat/chat-textarea-submit-button.js', () => ({
-  ChatTextareaSubmitButton: () => (
-    <button type='button' data-testid='submit'>
+  ChatTextareaSubmitButton: ({ isDisabled }: { readonly isDisabled: boolean }) => (
+    <button type='button' data-testid='submit' aria-label='Send message' disabled={isDisabled}>
       submit
     </button>
   ),
@@ -55,30 +64,45 @@ vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon'>{id}</span>,
 }));
 
-vi.mock('#components/ui/textarea.js', () => ({
+vi.mock('@taucad/ui/components/textarea', () => ({
   Textarea: () => <textarea data-testid='textarea' />,
 }));
 
-vi.mock('#components/ui/button.js', () => ({
-  Button: ({ children }: { readonly children: React.ReactNode }) => <button type='button'>{children}</button>,
+vi.mock('@taucad/ui/components/button', () => ({
+  Button: ({ children, ...properties }: React.ComponentProps<'button'>) => (
+    <button type='button' {...properties}>
+      {children}
+    </button>
+  ),
 }));
 
-vi.mock('#components/ui/menu.variants.js', () => ({
+vi.mock('@taucad/ui/components/menu.variants', () => ({
   menuContentVariants: () => 'shared-menu-surface',
   menuItemVariants: () => '',
 }));
 
-vi.mock('#components/ui/drawer.js', () => ({
+vi.mock('@taucad/ui/components/drawer', () => ({
   Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer'>{children}</div>,
-  DrawerContent: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='drawer-content'>{children}</div>
+  DrawerContent: ({
+    children,
+    onCloseAutoFocus,
+  }: {
+    readonly children: React.ReactNode;
+    readonly onCloseAutoFocus?: (event: { preventDefault: () => void }) => void;
+  }) => (
+    <div data-testid='drawer-content'>
+      {children}
+      <button type='button' onClick={() => onCloseAutoFocus?.({ preventDefault: noop })}>
+        Close drawer
+      </button>
+    </div>
   ),
   DrawerDescription: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   DrawerTitle: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   DrawerTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('#components/ui/command.js', () => ({
+vi.mock('@taucad/ui/components/command', () => ({
   Command: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   CommandGroup: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   CommandItem: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
@@ -103,7 +127,13 @@ const stubTextareaRef: React.RefObject<HTMLTextAreaElement | null> = { current: 
 const stubContainerRef: React.RefObject<HTMLDivElement | null> = { current: null };
 // oxlint-enable @typescript-eslint/no-restricted-types
 
-function renderMobile(options?: { readonly showContextMenu?: boolean }) {
+function renderMobile(options?: {
+  readonly creationLocationControl?: React.ReactNode;
+  readonly inputText?: string;
+  readonly isSubmitDisabled?: boolean;
+  readonly focusInput?: () => void;
+  readonly showContextMenu?: boolean;
+}) {
   return render(
     <ChatTextareaMobile
       dragKind={undefined}
@@ -111,7 +141,7 @@ function renderMobile(options?: { readonly showContextMenu?: boolean }) {
       contextSearchQuery=''
       selectedMenuIndex={0}
       isSubmitting={false}
-      inputText=''
+      inputText={options?.inputText ?? ''}
       images={[]}
       selectedToolChoice='auto'
       setDraftToolChoice={noop}
@@ -138,12 +168,14 @@ function renderMobile(options?: { readonly showContextMenu?: boolean }) {
       handleAddImage={noop}
       handleTextareaBlur={noop}
       handlePointerDown={noop}
-      focusInput={noop}
+      focusInput={options?.focusInput ?? noop}
       removeImage={noop}
       setShowContextMenu={noop}
       setAtSymbolPosition={noop}
       setContextSearchQuery={noop}
       setSelectedMenuIndex={noop}
+      creationLocationControl={options?.creationLocationControl}
+      isSubmitDisabled={options?.isSubmitDisabled}
     />,
   );
 }
@@ -164,6 +196,24 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
     renderMobile();
     expect(screen.getAllByText('JSCAD').length).toBeGreaterThan(0);
     expect(screen.queryByText('OpenSCAD')).toBeNull();
+  });
+
+  it('names the options trigger and renders location inside Settings', () => {
+    renderMobile({ creationLocationControl: <button type='button'>Create in Home</button> });
+    expect(screen.getByRole('button', { name: 'Open chat options' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create in Home' })).toBeInTheDocument();
+  });
+
+  it('disables the submit button for external prerequisites even with text', () => {
+    renderMobile({ inputText: 'draft', isSubmitDisabled: true });
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+  });
+
+  it('returns focus to the editor when the options drawer closes', () => {
+    const focusInput = vi.fn();
+    renderMobile({ focusInput });
+    screen.getByRole('button', { name: 'Close drawer' }).click();
+    expect(focusInput).toHaveBeenCalledOnce();
   });
 
   it('uses the shared menu surface for inline context actions', () => {

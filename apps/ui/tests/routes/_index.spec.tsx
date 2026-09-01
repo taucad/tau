@@ -3,7 +3,7 @@ import { createRoutesStub } from 'react-router';
 import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 // Import Index from '#routes/_index/route.js';
 
 // Test wrapper component that provides necessary providers

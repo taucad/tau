@@ -12,10 +12,13 @@ import { Scene } from '#components/geometry/graphics/three/scene.js';
 import { AxesHelper } from '#components/geometry/graphics/three/react/axes-helper.js';
 import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import type { ThreeContextProperties } from '#components/geometry/graphics/three/three-viewer-properties.js';
-import { infiniteGridFadeEndVisibleSpans } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
+import {
+  infiniteGridFadeEndVisibleSpans,
+  infiniteGridPresentationPlaneByUpDirection,
+} from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 import { WebGpuInspectorOverlay } from '#components/geometry/graphics/three/webgpu-inspector-overlay.js';
 import { useFeature } from '#flags/use-feature.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useCameraRig } from '#hooks/use-graphics.js';
 
 export type ThreeCanvasInstanceProps = ThreeContextProperties & {
@@ -56,10 +59,13 @@ export function ThreeCanvasInstance({
   useLayoutEffect(() => {
     cameraRig.setClipPlanes(
       enableGrid && !isContextLost
-        ? { farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans, presentationPlaneOffsetMeters: 0 }
+        ? {
+            farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+            presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection],
+          }
         : undefined,
     );
-  }, [cameraRig, enableGrid, isContextLost]);
+  }, [cameraRig, enableGrid, isContextLost, upDirection]);
 
   useLayoutEffect(
     () => () => {

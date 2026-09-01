@@ -7,12 +7,12 @@ import { ChatDetails } from '#routes/w.$workspace.$project/chat-details.js';
 import { ChatConverter } from '#routes/w.$workspace.$project/chat-converter.js';
 import { ProjectShareWorkbenchPanel } from '#routes/w.$workspace.$project/project-share-action.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ChatInterfaceNav } from '#routes/w.$workspace.$project/chat-interface-nav.js';
-import { Tabs, TabsContent } from '#components/ui/tabs.js';
+import { Tabs, TabsContent } from '@taucad/ui/components/tabs';
 import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
-import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '#components/ui/drawer.js';
+import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {

@@ -5,7 +5,7 @@ import { mock } from 'vitest-mock-extended';
 import type { Workspace, WorkspaceEntry } from '#filesystem/handle-store.js';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import FilesRoute from '#routes/files/route.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 type ToastSuccessOptions = {
   readonly action: { readonly label: string; readonly onClick: () => void | Promise<void> };
@@ -94,7 +94,27 @@ vi.mock('#components/ui/sonner.js', () => ({
   toast: { error: vi.fn(), info: vi.fn(), success: mockToastSuccess },
 }));
 
-vi.mock('#constants/browser.constants.js', () => ({ isFileSystemAccessSupported: true }));
+vi.mock('#constants/browser.constants.js', () => ({
+  isFileSystemAccessSupported: true,
+  directoryPicker: () => ({
+    available: true,
+    backend: 'webaccess' as const,
+    pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) => {
+      const handle = await globalThis.window.showDirectoryPicker({
+        id: options?.id,
+        mode: options?.mode ?? 'readwrite',
+      });
+      return { backend: 'webaccess' as const, handle };
+    },
+  }),
+  webAccessDirectoryPicker: () =>
+    true
+      ? {
+          pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) =>
+            globalThis.window.showDirectoryPicker({ id: options?.id, mode: options?.mode ?? 'readwrite' }),
+        }
+      : undefined,
+}));
 
 describe('FilesRoute workspace disconnect', () => {
   beforeEach(() => {

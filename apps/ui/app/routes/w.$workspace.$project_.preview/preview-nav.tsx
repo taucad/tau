@@ -1,6 +1,6 @@
 import { Box, Files, SlidersHorizontal, Info } from 'lucide-react';
-import { TabsList, TabsTrigger } from '#components/ui/tabs.js';
-import { cn } from '#utils/ui.utils.js';
+import { TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
+import { cn } from '@taucad/ui/utils/cn';
 
 export const previewNavTabs = [
   {

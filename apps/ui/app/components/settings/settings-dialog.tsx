@@ -1,11 +1,23 @@
 import { useCallback } from 'react';
 import type { MouseEvent } from 'react';
-import { Bot, BrainCircuit, CreditCard, FlaskConical, HardDrive, Key, Lock, Settings2, User } from 'lucide-react';
+import {
+  Bot,
+  BrainCircuit,
+  Cable,
+  Cpu,
+  CreditCard,
+  FlaskConical,
+  HardDrive,
+  Key,
+  Lock,
+  Settings2,
+  User,
+} from 'lucide-react';
 import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
 import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
 import { ApiKeys } from '#components/auth/api-key/api-keys.js';
 import type { LucideIcon } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '#components/ui/dialog.js';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
 import {
   useSettingsDialog,
   closeSettingsDialog,
@@ -13,17 +25,20 @@ import {
   openSettingsDialog,
 } from '#hooks/use-settings-dialog.js';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
+import { BillingSettings } from '#components/settings/billing-settings.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 import { GeneralSettings } from '#components/settings/general-settings.js';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { ModelSettings } from '#components/settings/model-settings.js';
 import { AgentSettings } from '#components/settings/agent-settings.js';
+import { PaseoConnectionSettings } from '#components/settings/paseo-connection-settings.js';
 import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
-import { cn } from '#utils/ui.utils.js';
+import { RemoteComputeSettings } from '#components/settings/remote-compute-settings.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ResponsiveTabs } from '#components/ui/responsive-tabs.js';
 import type { ResponsiveTabItem } from '#components/ui/responsive-tabs.js';
-import { TabsContent } from '#components/ui/tabs.js';
+import { TabsContent } from '@taucad/ui/components/tabs';
 
 type SettingsGroup = 'platform' | 'ai' | 'advanced';
 
@@ -41,6 +56,8 @@ const sections: readonly SettingsSectionDefinition[] = [
   { id: 'security', label: 'Security', icon: Lock, requiresAuth: true, group: 'platform' },
   { id: 'api-keys', label: 'API Keys', icon: Key, requiresAuth: true, group: 'platform' },
   { id: 'billing', label: 'Billing', icon: CreditCard, requiresAuth: true, group: 'platform' },
+  { id: 'connections', label: 'Connections', icon: Cable, requiresAuth: true, group: 'platform' },
+  { id: 'compute', label: 'Compute', icon: Cpu, requiresAuth: true, group: 'platform' },
   { id: 'models', label: 'Models', icon: Bot, requiresAuth: false, group: 'ai' },
   { id: 'agents', label: 'Agents', icon: BrainCircuit, requiresAuth: false, group: 'ai' },
   { id: 'filesystem', label: 'Filesystem', icon: HardDrive, requiresAuth: false, group: 'advanced' },
@@ -54,6 +71,8 @@ const sectionPathMap: Record<SettingsSection, string> = {
   security: '/settings/security',
   'api-keys': '/settings/api-keys',
   billing: '/settings/billing',
+  connections: '/settings/connections',
+  compute: '/settings/compute',
   models: '/settings/models',
   agents: '/settings/agents',
   experimental: '/settings/experimental',
@@ -178,7 +197,17 @@ export function SettingsDialog(): React.JSX.Element {
             </TabsContent>
             <TabsContent forceMount enableAnimation={false} value='Billing'>
               <SettingsAuthGate>
-                <div className='py-4 text-sm text-muted-foreground'>Billing - coming soon.</div>
+                <BillingSettings />
+              </SettingsAuthGate>
+            </TabsContent>
+            <TabsContent forceMount enableAnimation={false} value='Connections'>
+              <SettingsAuthGate>
+                <PaseoConnectionSettings />
+              </SettingsAuthGate>
+            </TabsContent>
+            <TabsContent forceMount enableAnimation={false} value='Compute'>
+              <SettingsAuthGate>
+                <RemoteComputeSettings />
               </SettingsAuthGate>
             </TabsContent>
             <TabsContent forceMount enableAnimation={false} value='Models'>

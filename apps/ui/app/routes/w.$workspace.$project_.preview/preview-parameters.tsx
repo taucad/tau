@@ -2,10 +2,10 @@ import { useState, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import { RefreshCcw, ChevronRight, Search } from 'lucide-react';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 
 export function PreviewParameters(): React.JSX.Element {

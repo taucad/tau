@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons';
 import { Check, X, Loader2 } from 'lucide-react';
 import type { Geometry } from '@taucad/types';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
 // A common desktop FDM print bed edge, in millimetres. The bounding-box check

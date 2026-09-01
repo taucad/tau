@@ -10,17 +10,17 @@ import {
   FloatingPanelMenuButton,
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 // ── Mocks ──────────────────────────────────────────────────────────────
 
 const mockUseIsMobile = vi.fn(() => false);
-vi.mock('#hooks/use-mobile.js', () => ({
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: () => mockUseIsMobile(),
 }));
 
 const mockUseIsInsideDrawer = vi.fn(() => false);
-vi.mock('#components/ui/drawer.js', () => ({
+vi.mock('@taucad/ui/components/drawer', () => ({
   useIsInsideDrawer: () => mockUseIsInsideDrawer(),
   DrawerHandle: ({ children, ...props }: React.ComponentProps<'div'>) => (
     <div data-testid='drawer-handle' {...props}>

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 type ViewportRef = {
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- mirrors React `RefObject` shape produced by `useRef<HTMLDivElement>(null)`

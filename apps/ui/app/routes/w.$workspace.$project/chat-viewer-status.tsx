@@ -2,7 +2,7 @@ import { useSelector } from '@xstate/react';
 import { Loader } from '#components/ui/loader.js';
 import { useProject } from '#hooks/use-project.js';
 import { useCadSelector } from '#hooks/use-cad.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
   const { projectRef } = useProject();

@@ -11,7 +11,7 @@ import {
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 export const keyCombinationEditor = projectWorkspaceKeyCombinations.editor;

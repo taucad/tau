@@ -12,7 +12,7 @@ import {
   ProjectShareRouteIntent,
   ProjectShareWorkbenchPanel,
 } from '#routes/w.$workspace.$project/project-share-action.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const openPanel = vi.hoisted(() => vi.fn());
 const snapshotSource = vi.hoisted(() => vi.fn());

@@ -5,8 +5,8 @@
 export const browserRevalidateCacheControl = 'public, max-age=0, must-revalidate';
 
 /**
- * Edge CDN hint for SSR routes whose body changes only on deploy (docs, llms.
- * artifacts). Today this targets Netlify Durable Cache; if the edge moves,
+ * Edge CDN hint for SSR routes whose body changes only on deploy. Today this
+ * targets Netlify Durable Cache; if the edge moves,
  * replace {@link cdnCacheControlResponseHeader} + this directive string per
  * the new provider's docs.
  */

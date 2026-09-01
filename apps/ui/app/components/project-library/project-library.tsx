@@ -23,8 +23,8 @@ import type { ProjectLocator } from '@taucad/filesystem';
 import type { ProjectListItem } from '#types/project.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import { createColumns } from '#components/project-library/columns.js';
-import { Button, buttonVariants } from '#components/ui/button.js';
-import { CardHeader, CardFooter } from '#components/ui/card.js';
+import { Button, buttonVariants } from '@taucad/ui/components/button';
+import { CardHeader, CardFooter } from '@taucad/ui/components/card';
 import {
   DataTable,
   DataTableSearch,
@@ -39,8 +39,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-} from '#components/ui/dropdown-menu.js';
-import { cn } from '#utils/ui.utils.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { cn } from '@taucad/ui/utils/cn';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
@@ -55,11 +55,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '#components/ui/alert-dialog.js';
+} from '@taucad/ui/components/alert-dialog';
 import { useCookie } from '#hooks/use-cookie.js';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
-import { Checkbox } from '#components/ui/checkbox.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Checkbox } from '@taucad/ui/components/checkbox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import { cookieName } from '#constants/cookie.constants.js';

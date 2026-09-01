@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Slot as SlotPrimitive } from 'radix-ui';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 type TooltipSide = 'left' | 'right' | 'top' | 'bottom';
 

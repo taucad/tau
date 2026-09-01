@@ -50,6 +50,62 @@ TAU_API_URL = "http://localhost:4000"
 TAU_FRONTEND_URL = "http://localhost:3000"
 TAU_WEBSOCKET_URL = "ws://localhost:4001"
 
+# The docs site serves documentation at its root, so the old runtime-scoped
+# LLM indexes are replaced by its top-level ones rather than moving verbatim.
+[[redirects]]
+from = "/docs/runtime/llms.txt"
+to = "https://docs.tau.new/llms.txt"
+status = 301
+force = true
+
+[[redirects]]
+from = "/docs/runtime/llms-full.txt"
+to = "https://docs.tau.new/llms-full.txt"
+status = 301
+force = true
+
+[[redirects]]
+from = "/docs"
+to = "https://docs.tau.new/"
+status = 301
+force = true
+
+[[redirects]]
+from = "/docs/*"
+to = "https://docs.tau.new/:splat"
+status = 301
+force = true
+
+[[redirects]]
+from = "/docs.mdx"
+to = "https://docs.tau.new/docs.mdx"
+status = 301
+force = true
+
+[[redirects]]
+from = "/llms.txt"
+to = "https://docs.tau.new/llms.txt"
+status = 301
+force = true
+
+[[redirects]]
+from = "/llms-full.txt"
+to = "https://docs.tau.new/llms-full.txt"
+status = 301
+force = true
+
+[[redirects]]
+from = "/llms.mdx"
+to = "https://docs.tau.new/llms.txt"
+status = 301
+force = true
+
+[[redirects]]
+from = "/llms.mdx/*"
+to = "https://docs.tau.new/llms.mdx/:splat"
+status = 301
+force = true
+
 [[headers]]
 for = "/*"
 [headers.values]
@@ -82,7 +138,21 @@ Document-Policy = "js-profiling"
 #     Socket.IO endpoint. Listed explicitly so when CSP flips to enforcing
 #     (report-only first) we don't rely on the catch-all `wss:` and any unintended hop is
 #     immediately reported.
-Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+
+# Homepage cache policy. Previously a `headers` export in
+# `app/routes/_index/route.tsx`; moved here because React Router SPA mode (the
+# `ui:build:desktop` config) bans route `headers` exports and the desktop build
+# shares this route module. Values must stay in step with
+# `app/constants/cache.constants.ts` (`browserRevalidateCacheControl` +
+# `edgeShortLivedSsrRouteCacheControl`, `cacheTag.homepage`).
+[[headers]]
+for = "/"
+[headers.values]
+Cache-Control = "public, max-age=0, must-revalidate"
+Netlify-CDN-Cache-Control = "public, durable, s-maxage=600, stale-while-revalidate=86400"
+Cache-Tag = "homepage"
+Netlify-Vary = "query="
 
 # Content-hashed Vite bundles + WASM (immutable filenames)
 [[headers]]

@@ -2,8 +2,8 @@ import { memo } from 'react';
 import type React from 'react';
 import { LogIn, UserPlus } from 'lucide-react';
 import { NavLink } from 'react-router';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '#components/ui/loader.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 

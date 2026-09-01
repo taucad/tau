@@ -3,7 +3,7 @@ import { useSelector } from '@xstate/react';
 import type { PaneviewApi } from 'dockview-react';
 import type { chatTabs } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import { useProject } from '#hooks/use-project.js';
-import { useIsMobile } from '#hooks/use-mobile.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { mobileDrawerSnapPoints } from '#constants/editor.constants.js';
 import type { PaneviewPanelState, PanelState } from '#types/editor.types.js';
 

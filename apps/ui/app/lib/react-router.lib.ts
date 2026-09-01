@@ -16,12 +16,6 @@ import {
  * route class is a one-line addition here.
  */
 export const cacheTag = {
-  docs: 'docs',
-  llmsIndex: 'llms-index',
-  llmsFull: 'llms-full',
-  llmsRuntimeIndex: 'llms-runtime-index',
-  llmsRuntimeFull: 'llms-runtime-full',
-  llmsMdx: 'llms-mdx, docs',
   homepage: 'homepage',
   publicationViewer: 'publication-viewer',
 } as const;

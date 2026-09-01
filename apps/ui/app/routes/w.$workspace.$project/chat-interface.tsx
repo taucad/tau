@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { useIsMobile } from '#hooks/use-mobile.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
 import { ChatInterfaceDesktop } from '#routes/w.$workspace.$project/chat-interface-desktop.js';
 

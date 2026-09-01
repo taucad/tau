@@ -3,11 +3,11 @@
 import { useAuth, useAuthPlugin, useListApiKeys } from '@better-auth-ui/react';
 import type { ApiKeyAuthClient } from '@better-auth-ui/react';
 import { useState } from 'react';
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent } from '#components/ui/card.js';
-import { Separator } from '#components/ui/separator.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent } from '@taucad/ui/components/card';
+import { Separator } from '@taucad/ui/components/separator';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ApiKey } from '#components/auth/api-key/api-key.js';
 import { ApiKeySkeleton } from '#components/auth/api-key/api-key-skeleton.js';
 import { ApiKeysEmpty } from '#components/auth/api-key/api-keys-empty.js';

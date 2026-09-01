@@ -13,11 +13,11 @@ import {
   AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogTitle,
-} from '#components/ui/alert-dialog.js';
-import { Button } from '#components/ui/button.js';
-import { Field } from '#components/ui/field.js';
-import { Input } from '#components/ui/input.js';
-import { Label } from '#components/ui/label.js';
+} from '@taucad/ui/components/alert-dialog';
+import { Button } from '@taucad/ui/components/button';
+import { Field } from '@taucad/ui/components/field';
+import { Input } from '@taucad/ui/components/input';
+import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '#components/ui/spinner.js';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 

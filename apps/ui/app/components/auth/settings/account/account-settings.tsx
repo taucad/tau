@@ -1,7 +1,7 @@
 import { useAuth } from '@better-auth-ui/react';
 import type { ComponentProps } from 'react';
 
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { UserProfile } from '#components/auth/settings/account/user-profile.js';
 
 export type AccountSettingsProps = {

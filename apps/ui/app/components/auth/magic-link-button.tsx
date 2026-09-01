@@ -4,9 +4,9 @@ import { useAuth, useAuthPlugin } from '@better-auth-ui/react';
 import { useIsMutating } from '@tanstack/react-query';
 import { Lock, Mail } from 'lucide-react';
 
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { magicLinkPlugin } from '#utils/magic-link-plugin.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type MagicLinkButtonProps = {
   /** @remarks `AuthView` */

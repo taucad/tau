@@ -8,16 +8,17 @@ import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
 import type { ClientEnvironment } from '#environment.config.js';
-import { getClientEnvironment } from '#environment.config.js';
+import { ENV, getClientEnvironment } from '#environment.config.js';
+import { buildClientEnvScript } from '#lib/client-env-script.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { Page } from '#components/layout/page.js';
-import { themeSessionResolver } from '#sessions.server.js';
-import { cn } from '#utils/ui.utils.js';
+import { readThemeCookie } from '#theme-cookie.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { Toaster } from '#components/ui/sonner.js';
-import { webManifestLinks } from '#routes/manifest[.webmanifest].js';
+import { webManifestLinks } from '#lib/web-manifest.js';
 import { ColorProvider, useColor } from '#hooks/use-color.js';
 import { useFavicon } from '#hooks/use-favicon.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ErrorPage } from '#components/error-page.js';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { globalStylesLinks } from '#styles/global.styles.js';
@@ -30,10 +31,12 @@ import { KeyboardProvider } from '#hooks/use-keyboard.js';
 import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
 import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
-import { AuthedHintSync } from '#components/authed-hint-sync.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { BuildSkewBanner } from '#components/build-skew-banner.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
+import { authClient } from '#lib/auth-client.js';
+import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
+import { useTopupReturn } from '@taucad/billing/hooks/use-topup-return';
 
 export const links: LinksFunction = () => [...globalStylesLinks, ...webManifestLinks];
 
@@ -62,12 +65,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Redirect www to apex domain (e.g., www.example.new -> example.new)
   throwRedirectIfSubdomain(request, 'www');
 
-  const { getTheme } = await themeSessionResolver(request);
+  const theme = await readThemeCookie(request);
   const cookie = request.headers.get('Cookie') ?? '';
 
   return {
-    theme: getTheme(),
+    theme,
     cookie,
+    pathname: new URL(request.url).pathname,
     // Allowlisted subset only — this value is serialised into page source both
     // by the `window.ENV` script below and React Router's `<Scripts />` payload.
     env: await getClientEnvironment(),
@@ -130,38 +134,64 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
     return client;
   }, []);
 
+  const managedChildren = (
+    <HeadlessImageProvider>
+      <ProjectManagerProvider>
+        <TooltipProvider>
+          <KeyboardProvider>
+            <UnloadProvider>
+              <ChatSessionStoreProvider>
+                <GlobalChatFlushGuard />
+                {children}
+              </ChatSessionStoreProvider>
+            </UnloadProvider>
+          </KeyboardProvider>
+        </TooltipProvider>
+      </ProjectManagerProvider>
+    </HeadlessImageProvider>
+  );
+  const application =
+    data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
+      children
+    ) : (
+      <HomeFileManagerProvider rootDirectory='/'>{managedChildren}</HomeFileManagerProvider>
+    );
+
+  /*
+   * `QueryClientProvider` is outermost so `AuthConfigProvider`'s own
+   * `DesktopAuthBridge` mount can reach the query cache: better-auth-ui's
+   * `AuthProvider` does not supply a fallback client, so with the old order the
+   * bridge's `invalidateQueries` half silently no-opped and an Electron-main
+   * sign-in never refreshed `useSession`. Web behaviour is unchanged — the
+   * relative order of the auth, billing, and analytics providers is the same.
+   */
   return (
-    <AuthConfigProvider>
-      <QueryClientProvider client={queryClient}>
-        <AnalyticsProvider>
-          <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
-            <ColorProvider>
-              <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
-                <HomeFileManagerProvider rootDirectory='/'>
-                  <HeadlessImageProvider>
-                    <ProjectManagerProvider>
-                      <TooltipProvider>
-                        <KeyboardProvider>
-                          <UnloadProvider>
-                            <ChatSessionStoreProvider>
-                              <GlobalChatFlushGuard />
-                              <AuthedHintSync />
-                              {children}
-                            </ChatSessionStoreProvider>
-                          </UnloadProvider>
-                        </KeyboardProvider>
-                      </TooltipProvider>
-                    </ProjectManagerProvider>
-                  </HeadlessImageProvider>
-                </HomeFileManagerProvider>
-              </LayoutDocument>
-            </ColorProvider>
-          </ThemeProvider>
-        </AnalyticsProvider>
-      </QueryClientProvider>
-    </AuthConfigProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthConfigProvider>
+        <BillingSessionBridge>
+          <AnalyticsProvider>
+            <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
+              <ColorProvider>
+                <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme}>
+                  {application}
+                </LayoutDocument>
+              </ColorProvider>
+            </ThemeProvider>
+          </AnalyticsProvider>
+        </BillingSessionBridge>
+      </AuthConfigProvider>
+    </QueryClientProvider>
   );
 }
+
+const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): React.JSX.Element => {
+  const { data: session } = authClient.useSession();
+  return (
+    <BillingSessionProvider value={{ apiBaseUrl: ENV.TAU_API_URL, userId: session?.user.id }}>
+      {children}
+    </BillingSessionProvider>
+  );
+};
 
 function LayoutDocument({
   children,
@@ -206,7 +236,7 @@ function LayoutDocument({
         <script
           // oxlint-disable-next-line react/no-danger -- safe for environment injection as recommended by Remix
           dangerouslySetInnerHTML={{
-            __html: `window.ENV = ${JSON.stringify(env)}`,
+            __html: buildClientEnvScript(env),
           }}
         />
         <SvgSpriteMount />
@@ -221,6 +251,8 @@ function LayoutDocument({
 }
 
 export default function App(): React.JSX.Element {
+  // Handles the hosted-Checkout `?topup=success` return on any route.
+  useTopupReturn({ onPaymentReceived: () => toast('Payment received — your balance will update shortly.') });
   return <Page />;
 }
 

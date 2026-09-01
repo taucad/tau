@@ -10,7 +10,7 @@ import { useProjectCreationLocationError } from '#hooks/use-project-creation-loc
 import { useRuntime } from '@taucad/react';
 import { parameterEntryPath } from '@taucad/types';
 import type { Geometry } from '@taucad/types';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { toast } from '#components/ui/sonner.js';

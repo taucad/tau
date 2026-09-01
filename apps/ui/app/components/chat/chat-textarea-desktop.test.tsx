@@ -11,6 +11,10 @@ const openscadKernel = kernelConfigurations.find((k) => k.id === 'openscad')!;
 const mockKernelByConsumer: { current: KernelConfiguration | undefined } = {
   current: manifoldKernel,
 };
+const mockExecutionByConsumer: { current: ChatComposerContextValue['execution']['execution'] } = {
+  current: { kind: 'tau', model: 'm' },
+};
+const mockSessionByConsumer: { current: boolean } = { current: false };
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => ({ setDraftMode: vi.fn() }),
@@ -29,15 +33,17 @@ const mockUseChatComposer = vi.fn(
     ({
       draftActorRef: { send: vi.fn() },
       model: { modelId: 'm', model: undefined, setActiveModel: vi.fn() },
+      execution: { execution: mockExecutionByConsumer.current, setActiveExecution: vi.fn() },
       kernel: {
         kernelId: mockKernelByConsumer.current?.id,
         kernel: mockKernelByConsumer.current,
         setActiveKernel: vi.fn(),
       },
       status: 'ready',
+      agentActivity: 'ready',
       stop: () => undefined,
       contextUsage: undefined,
-      session: undefined,
+      session: mockSessionByConsumer.current ? {} : undefined,
     }) as unknown as ChatComposerContextValue,
 );
 
@@ -60,8 +66,21 @@ vi.mock('#flags/use-feature.js', () => ({
 vi.mock('#components/chat/chat-model-selector.js', () => ({
   openModelSelectorKeyCombination: { key: '/', modKey: true },
   ChatModelSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
-    <div>{children({})}</div>
+    <div data-testid='model-selector'>{children({})}</div>
   ),
+}));
+
+vi.mock('#components/chat/chat-execution-selector.js', () => ({
+  formatChatAgentActivity: () => 'Approval needed',
+  ChatExecutionSelector: ({
+    children,
+  }: {
+    readonly children: (props: {
+      readonly label: string;
+      readonly kind: 'tau' | 'paseo';
+      readonly activity: 'approval-required';
+    }) => React.ReactNode;
+  }) => <div>{children({ label: 'Claude Code', kind: 'paseo', activity: 'approval-required' })}</div>,
 }));
 
 vi.mock('#components/chat/chat-kernel-selector.js', () => ({
@@ -91,7 +110,7 @@ vi.mock('#components/ui/key-shortcut.js', () => ({
   KeyShortcut: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   TooltipContent: ({ children }: { readonly children: React.ReactNode }) => (
@@ -99,8 +118,12 @@ vi.mock('#components/ui/tooltip.js', () => ({
   ),
 }));
 
-vi.mock('#components/ui/button.js', () => ({
-  Button: ({ children }: { readonly children: React.ReactNode }) => <button type='button'>{children}</button>,
+vi.mock('@taucad/ui/components/button', () => ({
+  Button: ({ children, ...properties }: React.ComponentProps<'button'>) => (
+    <button type='button' {...properties}>
+      {children}
+    </button>
+  ),
 }));
 
 const { ChatTextareaLeftControls } = await import('#components/chat/chat-textarea-desktop.js');
@@ -116,7 +139,7 @@ const stubModel: ResolvedModel = {
 const stubFileInput: React.RefObject<HTMLInputElement | null> = { current: null };
 const noop = (): void => undefined;
 
-function renderControls() {
+function renderControls(creationLocationControl?: React.ReactNode) {
   return render(
     <ChatTextareaLeftControls
       selectedModel={stubModel}
@@ -126,6 +149,7 @@ function renderControls() {
       setDraftToolChoice={noop}
       fileInputReference={stubFileInput}
       handleFileChange={noop}
+      creationLocationControl={creationLocationControl}
     />,
   );
 }
@@ -134,6 +158,8 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockKernelByConsumer.current = manifoldKernel;
+    mockExecutionByConsumer.current = { kind: 'tau', model: 'm' };
+    mockSessionByConsumer.current = false;
   });
 
   it('should render the kernel label from useChatComposer().kernel (no direct useKernel)', () => {
@@ -152,5 +178,24 @@ describe('ChatTextareaLeftControls — chat-scoped kernel label', () => {
     renderControls();
 
     expect(screen.getAllByText('OpenSCAD').length).toBeGreaterThan(0);
+  });
+
+  it('places the creation location control directly after the model selector', () => {
+    renderControls(<button type='button'>Create in Home</button>);
+    const location = screen.getByRole('button', { name: 'Create in Home' });
+    expect(location.previousElementSibling).toHaveTextContent('Select model');
+  });
+
+  it('names the agent selector and hides the Tau model selector for a Paseo execution', () => {
+    mockExecutionByConsumer.current = { kind: 'paseo', connectionId: 'connection-1', agentId: 'claude' };
+    mockSessionByConsumer.current = true;
+
+    renderControls();
+
+    expect(screen.getByRole('button', { name: 'Select agent: Claude Code' })).toHaveAttribute(
+      'aria-description',
+      'Agent status: Approval needed',
+    );
+    expect(screen.queryByTestId('model-selector')).toBeNull();
   });
 });

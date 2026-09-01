@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 import { createContext, useContext, useMemo } from 'react';
 import type { DropEvent, DropzoneOptions, FileRejection } from 'react-dropzone';
 import { useDropzone } from 'react-dropzone';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 
 type DropzoneContextType = {
   src?: File[];

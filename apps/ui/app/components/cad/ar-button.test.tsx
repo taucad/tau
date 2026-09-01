@@ -5,7 +5,7 @@ import { ArButton } from '#components/cad/ar-button.js';
 
 const mobileMocks = vi.hoisted(() => ({ isMobile: true }));
 
-vi.mock('#hooks/use-mobile.js', () => ({
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: () => mobileMocks.isMobile,
 }));
 

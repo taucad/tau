@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSelector } from '@xstate/react';
-import { Skeleton } from '#components/ui/skeleton.js';
-import { Button } from '#components/ui/button.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { Button } from '@taucad/ui/components/button';
 import { useProject } from '#hooks/use-project.js';
 import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
 

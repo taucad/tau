@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { Box, Columns2, Copy, FolderTree, Rows2, X, XCircle } from 'lucide-react';
-import { ContextMenuItem, ContextMenuSeparator } from '#components/ui/context-menu.js';
+import { ContextMenuItem, ContextMenuSeparator } from '@taucad/ui/components/context-menu';
 import {
   closeOtherPanels,
   closePanelsToTheRight,

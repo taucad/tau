@@ -1,5 +1,5 @@
 import { Slot as SlotPrimitive } from 'radix-ui';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 /**
  * Positioning constants for floating sidebar routes.

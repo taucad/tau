@@ -3,9 +3,17 @@ import { DollarSign } from 'lucide-react';
 import type { UsageData } from '@taucad/chat';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
-import { Badge } from '#components/ui/badge.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
-import { TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter, Table } from '#components/ui/table.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
+import {
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+  TableFooter,
+  Table,
+} from '@taucad/ui/components/table';
 import { useModels } from '#hooks/use-models.js';
 import { formatCurrency } from '#utils/currency.utils.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';

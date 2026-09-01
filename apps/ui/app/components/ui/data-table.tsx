@@ -15,9 +15,9 @@ import {
   EyeOff,
   List,
 } from 'lucide-react';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '#components/ui/table.js';
-import { Button } from '#components/ui/button.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@taucad/ui/components/table';
+import { Button } from '@taucad/ui/components/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -26,10 +26,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { toTitleCase } from '#utils/string.utils.js';
 import { SearchInput } from '#components/search-input.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 // =============================================================================
 // DataTable

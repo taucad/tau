@@ -59,7 +59,7 @@ vi.mock('#components/chat/chat-tool-error.js', () => ({
   },
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
     return <span data-testid='tooltip'>{children}</span>;
   },

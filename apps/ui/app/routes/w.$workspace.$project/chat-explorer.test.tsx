@@ -8,7 +8,7 @@ import type { ActorRefFrom } from 'xstate';
 import { createActor } from 'xstate';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { createSourceModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   ChatExplorerTree,
   ComponentRow,

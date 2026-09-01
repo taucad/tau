@@ -15,16 +15,16 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '#components/ui/sidebar.js';
-import { Skeleton } from '#components/ui/skeleton.js';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { ProjectChatList } from '#components/nav/project-chat-list.js';
 import { Loader } from '#components/ui/loader.js';

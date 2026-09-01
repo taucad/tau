@@ -1,5 +1,5 @@
 import { communityGridClassName } from '#components/project-grid.js';
-import { Skeleton } from '#components/ui/skeleton.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 
 function CardSkeleton(): React.JSX.Element {
   return (

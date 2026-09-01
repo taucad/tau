@@ -1,6 +1,6 @@
 import { FlaskConical } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#components/ui/card.js';
-import { Switch } from '#components/ui/switch.js';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { Switch } from '@taucad/ui/components/switch';
 import { flagRegistry, featureFlagNames } from '#flags/flag.constants.js';
 import type { FeatureFlagName } from '#flags/flag.constants.js';
 import { useFeatureFlags, useSetFeatureFlag } from '#flags/use-feature.js';

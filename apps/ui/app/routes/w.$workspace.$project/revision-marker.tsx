@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Check, ChevronDown, ChevronUp, Pencil, RotateCcw, Undo2 } from 'lucide-react';
-import { Badge } from '#components/ui/badge.js';
-import { Button } from '#components/ui/button.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { Button } from '@taucad/ui/components/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Spinner } from '#components/ui/spinner.js';
 import { ChangeIndicator } from '#components/chat/change-indicator.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { FileLink } from '#components/files/file-link.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import type { Revision, RevisionFileChange } from '#lib/file-restore-timeline.js';
 
 export type RevisionMarkerProps = {

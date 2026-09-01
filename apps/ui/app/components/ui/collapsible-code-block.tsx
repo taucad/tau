@@ -9,8 +9,8 @@ import {
   Pre,
 } from '#components/code/code-block.js';
 import { CopyButton } from '#components/copy-button.js';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 
 type CollapsibleContainerProps = {
   readonly children: React.ReactNode;

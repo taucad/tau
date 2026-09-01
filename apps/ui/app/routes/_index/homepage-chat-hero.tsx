@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
 import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
-import { Separator } from '#components/ui/separator.js';
+import { Separator } from '@taucad/ui/components/separator';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { toast } from '#components/ui/sonner.js';
 import { Loader } from '#components/ui/loader.js';

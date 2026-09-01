@@ -6,8 +6,8 @@ import Bowser from 'bowser';
 import { LogOut, Monitor, Smartphone, X } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent } from '#components/ui/card.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent } from '@taucad/ui/components/card';
 import { Spinner } from '#components/ui/spinner.js';
 
 function timeAgo(date: Date) {

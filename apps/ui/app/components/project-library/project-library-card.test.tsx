@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { projectToManifest } from '@taucad/types';
 import { ProjectLibraryCard } from '#components/project-library/project-library.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ProjectListItem } from '#types/project.types.js';
 
 const mockProject: ProjectListItem = {

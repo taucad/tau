@@ -4,7 +4,7 @@ import { Compass, BookOpen, Users, ArrowRight, CornerDownLeft, LoaderCircle, Che
 import { isToolExecutionError } from '@taucad/chat/utils';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { useChatSelector } from '#hooks/use-chat.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { toolName } from '@taucad/chat/constants';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';

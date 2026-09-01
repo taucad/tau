@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import { useEffect, useImperativeHandle, useRef } from 'react';
 
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type OmniScrollerProperties = ComponentProps<'div'> & {
   readonly viewportSelector?: string;

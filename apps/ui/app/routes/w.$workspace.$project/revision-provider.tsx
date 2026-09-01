@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { useQueryClient } from '@tanstack/react-query';
-import type { PersistedRevisionState } from '@taucad/types';
 import { toast } from '#components/ui/sonner.js';
 import {
   AlertDialog,
@@ -12,8 +11,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '#components/ui/alert-dialog.js';
-import { Button } from '#components/ui/button.js';
+} from '@taucad/ui/components/alert-dialog';
+import { Button } from '@taucad/ui/components/button';
 import type { ContentChangeEvent } from '@taucad/fs-client/file-content-service';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { useProject } from '#hooks/use-project.js';
@@ -25,6 +24,7 @@ import { isDesignPath, migrateHeadTurnId, resolveRestore } from '#lib/file-resto
 import { applyRestorePlan } from '#lib/restore-apply.js';
 import { revisionMachine } from '#machines/revision.machine.js';
 import type { ApplyPlanInput, ComputePlanInput, PlanComputedEvent } from '#machines/revision.machine.js';
+import type { PersistedRevisionState } from '#types/project.types.js';
 
 /**
  * Owns the per-project `revisionMachine` actor, supplies its real
@@ -75,6 +75,7 @@ export function RevisionProvider({ children }: { readonly children: ReactNode })
         headTurnId: migrateHeadTurnId(persistedRevisionState, cachedChats),
         supersededTurnIds: persistedRevisionState?.supersededTurnIds ?? DEFAULT_REVISION_STATE.supersededTurnIds,
         dirty: persistedRevisionState?.dirty ?? DEFAULT_REVISION_STATE.dirty,
+        ...(persistedRevisionState?.graph === undefined ? {} : { graph: persistedRevisionState.graph }),
       };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only actor input

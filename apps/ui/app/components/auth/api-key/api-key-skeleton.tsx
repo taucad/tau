@@ -1,5 +1,5 @@
-import { Card, CardContent } from '#components/ui/card.js';
-import { Skeleton } from '#components/ui/skeleton.js';
+import { Card, CardContent } from '@taucad/ui/components/card';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 
 export function ApiKeySkeleton() {
   return (

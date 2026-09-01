@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TelemetryEntry } from '@taucad/runtime';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { GeometryUnitTiming } from '#routes/w.$workspace.$project/chat-kernel-timing.js';
 
 vi.mock('react-virtuoso', () => ({

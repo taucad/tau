@@ -20,14 +20,14 @@ vi.mock('#components/ui/sonner.js', () => ({
 }));
 vi.mock('#components/geometry/converter/format-selector.js', () => ({ FormatSelector: () => null }));
 vi.mock('#components/geometry/converter/converter-file-tree.js', () => ({ ConverterFileTree: () => null }));
-vi.mock('#components/ui/button.js', () => ({
+vi.mock('@taucad/ui/components/button', () => ({
   Button: ({ children, ...properties }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type='button' {...properties}>
       {children}
     </button>
   ),
 }));
-vi.mock('#components/ui/checkbox.js', () => ({
+vi.mock('@taucad/ui/components/checkbox', () => ({
   Checkbox: ({
     id,
     checked,
@@ -48,7 +48,7 @@ vi.mock('#components/ui/checkbox.js', () => ({
   ),
 }));
 /* oxlint-enable react-js/boolean-prop-naming */
-vi.mock('#components/ui/label.js', () => ({
+vi.mock('@taucad/ui/components/label', () => ({
   Label: ({ children, htmlFor }: { children: React.ReactNode; htmlFor: string }) => (
     <label htmlFor={htmlFor}>{children}</label>
   ),

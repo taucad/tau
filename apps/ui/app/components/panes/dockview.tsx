@@ -5,7 +5,7 @@ import { DockviewReact } from 'dockview-react';
 import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 /**
  * Custom Dockview theme. The `dockview-theme-tau` class is applied to the root

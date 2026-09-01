@@ -1,4 +1,4 @@
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export function BoxDown(properties: React.SVGProps<SVGSVGElement>): React.JSX.Element {
   return (

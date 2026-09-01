@@ -16,7 +16,7 @@ import {
   gear8Teeth as gear8TeethConstant,
   assemblySplitRatio as assemblySplitRatioConstant,
 } from '#components/geometry/splash/auth-splashback.constants.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import {
   probeWebGpuSupport,
   mergeGraphicsBackendWithQueryOverride,

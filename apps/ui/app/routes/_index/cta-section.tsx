@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
 import { ArrowRight } from 'lucide-react';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
 
 export function CtaSection(): React.JSX.Element {

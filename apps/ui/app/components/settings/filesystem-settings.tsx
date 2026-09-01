@@ -12,8 +12,8 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { AlertCircle, HardDrive, Plus } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from '#components/ui/card.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
 import {
   checkHandlePermission,
@@ -24,7 +24,7 @@ import {
 } from '#filesystem/handle-store.js';
 import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
 import type { Workspace } from '#filesystem/handle-store.js';
-import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
+import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
 import { Loader } from '#components/ui/loader.js';
 import { toast } from '#components/ui/sonner.js';
@@ -73,7 +73,7 @@ export function FileSystemSettings(): React.JSX.Element {
   }, [reloadRows]);
 
   const handleAddWorkspace = useCallback(async () => {
-    if (!isFileSystemAccessSupported) {
+    if (!webAccessDirectoryPicker()) {
       return;
     }
     try {
@@ -100,16 +100,18 @@ export function FileSystemSettings(): React.JSX.Element {
 
   const handleConnectChange = useCallback(
     async (workspaceId: string) => {
-      if (!isFileSystemAccessSupported) {
+      const picker = webAccessDirectoryPicker();
+      if (!picker) {
         return;
       }
       setBusyWorkspaceId(workspaceId);
       try {
         await projectManager.assertWorkspaceMutationAllowed(workspaceId);
-        const handle = await globalThis.window.showDirectoryPicker({
-          id: `tau-workspace-${workspaceId}`,
-          mode: 'readwrite',
-        });
+        const handle = await picker.pick({ id: `tau-workspace-${workspaceId}`, mode: 'readwrite' });
+        if (handle === undefined) {
+          telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
+          return;
+        }
         await workspace.replaceWorkspaceHandle(workspaceId, handle);
         await projectManager.refreshWorkspaceCatalog();
         telemetry.workspaceConnected({ workspaceId });
@@ -271,7 +273,7 @@ export function FileSystemSettings(): React.JSX.Element {
 
   return (
     <div className='flex flex-col gap-6 pb-6'>
-      {isFileSystemAccessSupported ? (
+      {webAccessDirectoryPicker() ? (
         <Card>
           <CardHeader className='flex flex-row items-center justify-between gap-2'>
             <CardTitle>Workspaces</CardTitle>

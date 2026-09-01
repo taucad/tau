@@ -1,10 +1,10 @@
 import { ChevronDown, Info, X } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import { cn } from '#utils/ui.utils.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { cn } from '@taucad/ui/utils/cn';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';

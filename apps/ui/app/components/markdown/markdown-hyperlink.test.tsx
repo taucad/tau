@@ -48,11 +48,11 @@ describe('isExternalLink', () => {
 
 describe('isResourceRouteHref', () => {
   it('returns true for .txt paths', () => {
-    expect(isResourceRouteHref('/docs/runtime/llms.txt')).toBe(true);
+    expect(isResourceRouteHref('/robots.txt')).toBe(true);
   });
 
-  it('returns true for .mdx paths', () => {
-    expect(isResourceRouteHref('/docs/runtime/getting-started/installation.mdx')).toBe(true);
+  it('returns false for regular file extensions', () => {
+    expect(isResourceRouteHref('/notes.mdx')).toBe(false);
   });
 
   it('returns true for .webmanifest paths', () => {
@@ -60,70 +60,58 @@ describe('isResourceRouteHref', () => {
   });
 
   it('returns false for HTML routes', () => {
-    expect(isResourceRouteHref('/docs/runtime/getting-started/installation')).toBe(false);
+    expect(isResourceRouteHref('/legal/privacy')).toBe(false);
   });
 
   it('returns false for hashed paths without an extension', () => {
-    expect(isResourceRouteHref('/docs/api/client#methods')).toBe(false);
+    expect(isResourceRouteHref('/projects/example#details')).toBe(false);
   });
 
   it('returns true even when a query string is present', () => {
-    expect(isResourceRouteHref('/llms.txt?foo=bar')).toBe(true);
+    expect(isResourceRouteHref('/robots.txt?foo=bar')).toBe(true);
   });
 });
 
 describe('resolveRelativeHref', () => {
   it('returns absolute paths unchanged', () => {
-    expect(resolveRelativeHref('/docs/getting-started/quick-start', '/docs/guides/live-rendering')).toBe(
-      '/docs/getting-started/quick-start',
-    );
+    expect(resolveRelativeHref('/legal/terms', '/guides/live-rendering')).toBe('/legal/terms');
   });
 
   it('returns anchor-only links unchanged', () => {
-    expect(resolveRelativeHref('#section', '/docs/guides/live-rendering')).toBe('#section');
+    expect(resolveRelativeHref('#section', '/guides/live-rendering')).toBe('#section');
   });
 
   it('returns scheme links unchanged', () => {
-    expect(resolveRelativeHref('mailto:hello@example.com', '/docs/guides/live-rendering')).toBe(
-      'mailto:hello@example.com',
-    );
-    expect(resolveRelativeHref('https://example.com/foo', '/docs/guides/live-rendering')).toBe(
-      'https://example.com/foo',
-    );
+    expect(resolveRelativeHref('mailto:hello@example.com', '/guides/live-rendering')).toBe('mailto:hello@example.com');
+    expect(resolveRelativeHref('https://example.com/foo', '/guides/live-rendering')).toBe('https://example.com/foo');
   });
 
   it('resolves ../ from a leaf URL via standard URL semantics (RFC 3986)', () => {
     // Regression: React Router's `relative='path'` would have produced
-    // /docs/guides/getting-started/quick-start (only popping `live-rendering`),
+    // /guides/getting-started/quick-start (only popping `live-rendering`),
     // breaking every cross-directory MDX link.
-    expect(resolveRelativeHref('../getting-started/quick-start', '/docs/guides/live-rendering')).toBe(
-      '/docs/getting-started/quick-start',
+    expect(resolveRelativeHref('../getting-started/quick-start', '/guides/live-rendering')).toBe(
+      '/getting-started/quick-start',
     );
   });
 
   it('resolves ./sibling from a leaf URL', () => {
-    expect(resolveRelativeHref('./embedding-in-a-host', '/docs/guides/live-rendering')).toBe(
-      '/docs/guides/embedding-in-a-host',
-    );
+    expect(resolveRelativeHref('./embedding-in-a-host', '/guides/live-rendering')).toBe('/guides/embedding-in-a-host');
   });
 
   it('resolves a bare sibling path from a leaf URL', () => {
-    expect(resolveRelativeHref('embedding-in-a-host', '/docs/guides/live-rendering')).toBe(
-      '/docs/guides/embedding-in-a-host',
-    );
+    expect(resolveRelativeHref('embedding-in-a-host', '/guides/live-rendering')).toBe('/guides/embedding-in-a-host');
   });
 
   it('preserves hash and search when resolving', () => {
-    expect(resolveRelativeHref('../api/client#methods', '/docs/guides/live-rendering')).toBe(
-      '/docs/api/client#methods',
-    );
-    expect(resolveRelativeHref('./error-handling?q=1#x', '/docs/guides/live-rendering')).toBe(
-      '/docs/guides/error-handling?q=1#x',
+    expect(resolveRelativeHref('../api/client#methods', '/guides/live-rendering')).toBe('/api/client#methods');
+    expect(resolveRelativeHref('./error-handling?q=1#x', '/guides/live-rendering')).toBe(
+      '/guides/error-handling?q=1#x',
     );
   });
 
   it('returns empty string unchanged', () => {
-    expect(resolveRelativeHref('', '/docs/guides/live-rendering')).toBe('');
+    expect(resolveRelativeHref('', '/guides/live-rendering')).toBe('');
   });
 });
 
@@ -260,24 +248,24 @@ describe('MarkdownHyperlink', () => {
 
     it('rewrites a relative ../ href into an absolute URL relative to the current pathname', () => {
       render(
-        <MemoryRouter initialEntries={['/docs/guides/live-rendering']}>
+        <MemoryRouter initialEntries={['/guides/live-rendering']}>
           <MarkdownHyperlink href='../getting-started/quick-start'>Quick Start</MarkdownHyperlink>
         </MemoryRouter>,
       );
 
       const link = screen.getByRole('link', { name: 'Quick Start' });
-      expect(link).toHaveAttribute('href', '/docs/getting-started/quick-start');
+      expect(link).toHaveAttribute('href', '/getting-started/quick-start');
     });
 
     it('rewrites a ./sibling href into an absolute URL within the current directory', () => {
       render(
-        <MemoryRouter initialEntries={['/docs/guides/live-rendering']}>
+        <MemoryRouter initialEntries={['/guides/live-rendering']}>
           <MarkdownHyperlink href='./embedding-in-a-host'>Embedding</MarkdownHyperlink>
         </MemoryRouter>,
       );
 
       const link = screen.getByRole('link', { name: 'Embedding' });
-      expect(link).toHaveAttribute('href', '/docs/guides/embedding-in-a-host');
+      expect(link).toHaveAttribute('href', '/guides/embedding-in-a-host');
     });
 
     it('renders children', () => {
@@ -293,12 +281,12 @@ describe('MarkdownHyperlink', () => {
     it('renders resource-route hrefs as plain anchors so the browser can do a full document load', () => {
       render(
         <MemoryRouter>
-          <MarkdownHyperlink href='/docs/runtime/llms.txt'>llms.txt</MarkdownHyperlink>
+          <MarkdownHyperlink href='/robots.txt'>robots.txt</MarkdownHyperlink>
         </MemoryRouter>,
       );
 
-      const link = screen.getByRole('link', { name: 'llms.txt' });
-      expect(link).toHaveAttribute('href', '/docs/runtime/llms.txt');
+      const link = screen.getByRole('link', { name: 'robots.txt' });
+      expect(link).toHaveAttribute('href', '/robots.txt');
     });
 
     it('passes through additional props', () => {

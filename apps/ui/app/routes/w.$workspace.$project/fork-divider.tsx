@@ -1,6 +1,6 @@
 import { GitBranch } from 'lucide-react';
 import { useSelector } from '@xstate/react';
-import { Separator } from '#components/ui/separator.js';
+import { Separator } from '@taucad/ui/components/separator';
 import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provider.js';
 
 /**

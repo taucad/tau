@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const { cadPreviewViewerMock } = vi.hoisted(() => ({
   cadPreviewViewerMock: vi.fn(() => <div data-testid='cad-preview-viewer' />),

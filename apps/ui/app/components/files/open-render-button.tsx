@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { Box } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useProject } from '#hooks/use-project.js';
 
 export type OpenRenderButtonProperties = {

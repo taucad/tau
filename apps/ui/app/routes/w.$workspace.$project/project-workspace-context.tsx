@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { useProject } from '#hooks/use-project.js';
-import { useIsMobile } from '#hooks/use-mobile.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import type { PanelState } from '#types/editor.types.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
@@ -19,8 +19,10 @@ export type WorkbenchPanelId =
   | 'files'
   | 'model'
   | 'revisions'
-  | 'share'
+  | 'agents'
+  | 'jobs'
   | 'export'
+  | 'share'
   | 'details'
   | 'kernel'
   | 'console';

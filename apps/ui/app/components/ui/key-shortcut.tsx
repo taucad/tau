@@ -1,6 +1,6 @@
 import type { VariantProps } from 'class-variance-authority';
 import { cva } from 'class-variance-authority';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 const keyboardShortcutVariants = cva(
   'font-normal select-none text-xs flex items-center rounded-xs p-0 pl-1 pr-0.5 hidden md:inline-flex',

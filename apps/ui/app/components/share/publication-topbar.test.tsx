@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi } from 'vitest';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 

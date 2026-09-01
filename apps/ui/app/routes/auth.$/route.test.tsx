@@ -36,7 +36,7 @@ vi.mock('#components/auth/verify-email.js', () => ({
   VerifyEmail: () => <div>verify-email</div>,
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: React.PropsWithChildren) => <>{children}</>,
   TooltipContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   TooltipTrigger: ({ children }: React.PropsWithChildren) => <>{children}</>,

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import { Button } from '#components/ui/button.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { Button } from '@taucad/ui/components/button';
 import { ChatActivitySummary } from '#components/chat/chat-activity-summary.js';
 import { useActivityFoldContext } from '#components/chat/chat-activity-fold-context.js';
 

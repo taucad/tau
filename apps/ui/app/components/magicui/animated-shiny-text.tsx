@@ -1,5 +1,5 @@
 import type { ComponentPropsWithoutRef } from 'react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type AnimatedShinyTextProps = {
   readonly shimmerWidth?: number;

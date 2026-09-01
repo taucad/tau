@@ -4,140 +4,19 @@
 @import 'fumadocs-ui/css/preset.css';
 
 @import 'tw-animate-css';
+@import '@taucad/ui/styles/tokens.css';
+
 @source '../components/auth';
 @source '../../../../node_modules/streamdown/dist';
-@source '../../content/docs/**/*.{json,mdx}';
+@source '../../../../packages/ui/src';
 
 /* Typography is provided by fumadocs-ui/css/preset.css (forked @tailwindcss/typography with fd-* color support) */
 
 :root {
-  /* Radius */
-  --radius-4xl: calc(var(--radius-3xl) + 0.5rem);
-  --radius-3xl: calc(var(--radius-2xl) + 0.5rem);
-  --radius-2xl: calc(var(--radius-xl) + 0.25rem);
-  --radius-xl: calc(var(--radius-lg) + 0.25rem);
-  --radius-lg: calc(var(--radius-md) + 0.125rem);
-  --radius-md: calc(var(--radius-sm) + 0.125rem);
-  --radius-sm: calc(var(--radius-xs) + 0.125rem);
-  --radius-xs: 0.4375rem;
-
-  /* Base color hues */
-  --hue-primary: 180deg;
-  --hue-secondary: calc(var(--hue-primary) - 10deg);
-  --hue-destructive: 15deg;
-  --hue-success: 150deg;
-  --hue-warning: 70deg;
-  --hue-feature: 280deg;
-  --hue-information: 250deg;
-  --hue-highlighted: 330deg;
-  --hue-stable: 185deg;
-  --hue-alert: 90deg;
-  --hue-verified: 210deg;
-  --hue-highlighter: calc(var(--hue-primary) - 86deg); /* Results in ~180deg - true teal */
-
-  /* Mode-responsive lightness scale */
-  --l-base: 1;
-  /* Base lightness level, typically used for the lightest backgrounds */
-  --l-surface: 0.965;
-  /* Slightly darker than base, used for surfaces like cards */
-  --l-subtle: 0.9;
-  /* Subtle lightness, for less prominent elements */
-  --l-element: 0.85;
-  /* Lightness for UI elements like buttons */
-  --l-medium: 0.55;
-  /* Medium lightness, for emphasized elements */
-  --l-emphasized: 0.47;
-  /* Emphasized lightness, for important elements */
-  --l-high: 0.25;
-  /* High contrast lightness, for high emphasis elements */
-  --l-intense: 0.16;
-  /* Intense lightness, for very high contrast elements */
-  --l-deepest: 0.16;
-  /* Deepest lightness, typically used for the darkest elements */
-
-  --l-primary: 0.53;
-  --c-primary: 0.1898;
-
-  --l-highlighter: 0.9;
-  --c-highlighter: 0.12;
-
-  /* Base colors */
-  --background: oklch(var(--l-base) 0 none);
-  --foreground: oklch(var(--l-deepest) 0 none);
-
-  --muted: oklch(var(--l-surface) 0 none);
-  --muted-foreground: oklch(var(--l-emphasized) 0 none);
-
-  /* Primary colors with consistent chroma */
-  --primary: oklch(var(--l-primary) var(--c-primary) var(--hue-primary));
-  --primary-foreground: oklch(0.985 0 none);
-
-  /* Secondary colors */
-  --secondary: oklch(var(--l-surface) 0 none);
-  --secondary-foreground: oklch(var(--l-deepest) 0 none);
-
-  /* Structural neutral scale */
-  --neutral: oklch(var(--l-medium) 0 none);
-  --neutral-foreground: oklch(var(--l-base) 0 none);
-
-  /* Semantic colors */
-  --accent: oklch(0.935 0 none);
-  --accent-foreground: oklch(var(--l-deepest) 0 none);
-  --border: oklch(var(--l-subtle) 0 none);
-
-  --destructive: oklch(var(--l-medium) 0.25 var(--hue-destructive));
-  --success: oklch(var(--l-medium) 0.18 var(--hue-success));
-  --warning: oklch(var(--l-medium) 0.18 var(--hue-warning));
-  --feature: oklch(var(--l-medium) 0.22 var(--hue-feature));
-  --information: oklch(var(--l-medium) 0.22 var(--hue-information));
-  --highlighted: oklch(var(--l-medium) 0.25 var(--hue-highlighted));
-  --stable: oklch(var(--l-medium) 0.18 var(--hue-stable));
-  --alert: oklch(var(--l-medium) 0.18 var(--hue-alert));
-  --verified: oklch(var(--l-medium) 0.25 var(--hue-verified));
-
-  --input: oklch(var(--l-subtle) 0 none);
-  --ring: oklch(var(--l-medium) 0.08 var(--hue-primary));
-
-  /* Component specific */
-  --popover: oklch(var(--l-base) 0 none);
-  --popover-foreground: oklch(var(--l-deepest) 0 none);
-
-  /* Menu opaque colors (pre-blended equivalents of transparent overlays over popover) */
-  --menu-ring: color-mix(in oklch, black 10%, var(--popover));
-  --menu-highlight: color-mix(in oklch, var(--neutral) 20%, var(--popover));
-  --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 10%, var(--popover));
-
-  --card: oklch(var(--l-base) 0 none);
-  --card-foreground: oklch(var(--l-deepest) 0 none);
-
-  /* Sidebar specific */
-  --sidebar-background: oklch(0.99 0 none);
-  --sidebar-foreground: oklch(var(--l-high) 0 none);
-  --sidebar-primary: oklch(var(--l-deepest) 0 none);
-  --sidebar-primary-foreground: oklch(0.985 0 none);
-  --sidebar-accent: oklch(0.935 0 none);
-  --sidebar-accent-foreground: oklch(var(--l-deepest) 0 none);
-  --sidebar-border: oklch(var(--l-subtle) 0 none);
-  --sidebar-ring: var(--ring);
-
-  /* Scrollbar specific */
   --scrollbar-thumb: var(--border);
   --scrollbar-track: transparent;
   --scrollbar-thickness: 9px;
   --scrollbar-padding: 1.5px;
-
-  /* Highlighter specific */
-  --highlighter: oklch(var(--l-highlighter) var(--c-highlighter) var(--hue-highlighter) / 0.5);
-  --highlighter-foreground: oklch(var(--l-deepest) 0 none / 0.7);
-
-  /* Chart colors */
-  --chart-1: oklch(0.55 0.18 250deg); /* Blue - Input */
-  --chart-2: oklch(0.55 0.18 290deg); /* Purple - Output */
-  --chart-3: oklch(0.55 0.15 180deg); /* Teal - Cache */
-  --chart-4: oklch(0.55 0.18 150deg); /* Green */
-  --chart-5: oklch(0.55 0.2 30deg); /* Orange */
-
-  /* Diagram colors — softened primary tint */
   --diagram-node: oklch(0.96 0.015 var(--hue-primary));
   --diagram-node-border: oklch(0.8 0.05 var(--hue-primary));
   --diagram-node-text: var(--foreground);
@@ -152,45 +31,6 @@
 
 .dark,
 :root[class~='dark'] {
-  /* Dark-mode lightness scale */
-  --l-base: 0.19;
-  --l-surface: 0.245;
-  --l-subtle: 0.315;
-  --l-element: 0.35;
-  --l-medium: 0.55;
-  --l-emphasized: 0.67;
-  --l-high: 0.82;
-  --l-intense: 0.95;
-  --l-deepest: 0.95;
-  --l-highlighter: 0.8;
-
-  --background: oklch(var(--l-base) 0 none);
-  --neutral: oklch(0.47 0 none);
-  --muted: oklch(var(--l-surface) 0 none);
-  --input: oklch(var(--l-subtle) 0 none);
-  --border: oklch(var(--l-subtle) 0 none);
-  --accent: oklch(0.295 0 none);
-  --sidebar-background: oklch(0.22 0 none);
-  --sidebar-primary-foreground: oklch(var(--l-base) 0 none);
-  --sidebar-border: oklch(var(--l-subtle) 0 none);
-  --sidebar-accent: oklch(0.295 0 none);
-  --menu-ring: color-mix(in oklch, white 25%, var(--popover));
-  --menu-highlight: color-mix(in oklch, var(--neutral) 30%, var(--popover));
-  --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 20%, var(--popover));
-
-  --secondary-foreground: oklch(var(--l-deepest) 0 none);
-
-  --highlighter: oklch(var(--l-highlighter) var(--c-highlighter) var(--hue-highlighter) / 0.5);
-  --highlighter-foreground: oklch(var(--l-deepest) 0 none / 0.85);
-
-  /* Chart colors - lighter for dark mode */
-  --chart-1: oklch(0.7 0.16 250deg); /* Blue - Input */
-  --chart-2: oklch(0.7 0.16 290deg); /* Purple - Output */
-  --chart-3: oklch(0.7 0.14 180deg); /* Teal - Cache */
-  --chart-4: oklch(0.7 0.16 150deg); /* Green */
-  --chart-5: oklch(0.7 0.18 30deg); /* Orange */
-
-  /* Diagram colors - dark mode */
   --diagram-node: oklch(0.28 0.02 var(--hue-primary));
   --diagram-node-border: oklch(0.4 0.03 var(--hue-primary));
   --diagram-cluster: oklch(0.22 0.01 var(--hue-primary));
@@ -202,27 +42,6 @@
 
 .black,
 :root[class~='black'] {
-  /* Pure-black canvas with tightly stepped, achromatic surfaces. */
-  --l-base: 0;
-  --l-surface: 0.075;
-  --l-subtle: 0.16;
-  --l-element: 0.2;
-  --l-medium: 0.5;
-  --l-emphasized: 0.65;
-  --l-high: 0.82;
-  --l-intense: 0.95;
-  --l-deepest: 0.95;
-
-  --background: oklch(0 0 none);
-  --muted: oklch(var(--l-surface) 0 none);
-  --input: oklch(0.13 0 none);
-  --border: oklch(var(--l-subtle) 0 none);
-  --accent: oklch(0.12 0 none);
-  --neutral: oklch(0.44 0 none);
-  --sidebar-background: oklch(0.035 0 none);
-  --sidebar-border: oklch(0.14 0 none);
-  --sidebar-accent: oklch(0.11 0 none);
-
   --diagram-node: oklch(0.13 0.012 var(--hue-primary));
   --diagram-node-border: oklch(0.27 0.025 var(--hue-primary));
   --diagram-cluster: oklch(0.055 0.006 var(--hue-primary));
@@ -233,45 +52,7 @@
 
 .high-contrast,
 :root[class~='high-contrast'] {
-  /* Dark-based accessible palette with strong, achromatic structural separation. */
-  --l-base: 0.06;
-  --l-surface: 0.15;
-  --l-subtle: 0.55;
-  --l-element: 0.3;
-  --l-medium: 0.72;
-  --l-emphasized: 0.82;
-  --l-high: 0.95;
-  --l-intense: 1;
-  --l-deepest: 1;
-  --l-primary: 0.4;
-  --l-highlighter: 0.78;
-
-  --background: oklch(var(--l-base) 0 none);
-  --muted: oklch(var(--l-surface) 0 none);
-  --input: oklch(var(--l-subtle) 0 none);
-  --border: oklch(var(--l-subtle) 0 none);
-  --accent: oklch(var(--l-element) 0 none);
-  --neutral: oklch(var(--l-medium) 0 none);
-  --popover: oklch(0.12 0 none);
-  --card: oklch(0.12 0 none);
-
-  --menu-ring: color-mix(in oklch, white 70%, var(--popover));
-  --menu-highlight: color-mix(in oklch, white 20%, var(--popover));
-  --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 35%, var(--popover));
-
-  --sidebar-background: oklch(0.1 0 none);
-  --sidebar-border: oklch(var(--l-subtle) 0 none);
-  --sidebar-accent: oklch(0.28 0 none);
-  --sidebar-primary-foreground: oklch(var(--l-base) 0 none);
-
   --scrollbar-thumb: oklch(0.65 0 none);
-
-  --chart-1: oklch(0.8 0.14 250deg);
-  --chart-2: oklch(0.8 0.14 290deg);
-  --chart-3: oklch(0.8 0.12 180deg);
-  --chart-4: oklch(0.8 0.14 150deg);
-  --chart-5: oklch(0.8 0.16 30deg);
-
   --diagram-node: oklch(0.18 0.012 var(--hue-primary));
   --diagram-node-border: oklch(0.72 0.05 var(--hue-primary));
   --diagram-cluster: oklch(0.11 0.006 var(--hue-primary));
@@ -283,42 +64,7 @@
 
 @media (prefers-contrast: more) {
   :root {
-    --l-base: 1;
-    --l-surface: 0.94;
-    --l-subtle: 0.58;
-    --l-element: 0.82;
-    --l-medium: 0.42;
-    --l-emphasized: 0.4;
-    --l-high: 0.14;
-    --l-intense: 0.08;
-    --l-deepest: 0.08;
-    --l-primary: 0.4;
-
-    --background: oklch(var(--l-base) 0 none);
-    --muted: oklch(var(--l-surface) 0 none);
-    --input: oklch(var(--l-subtle) 0 none);
-    --border: oklch(var(--l-subtle) 0 none);
-    --accent: oklch(var(--l-element) 0 none);
-    --neutral: oklch(var(--l-medium) 0 none);
-    --popover: oklch(0.96 0 none);
-    --card: oklch(0.96 0 none);
-
-    --menu-ring: color-mix(in oklch, black 55%, var(--popover));
-    --menu-highlight: color-mix(in oklch, black 14%, var(--popover));
-    --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 25%, var(--popover));
-
-    --sidebar-background: oklch(0.96 0 none);
-    --sidebar-border: oklch(var(--l-subtle) 0 none);
-    --sidebar-accent: oklch(0.82 0 none);
-
     --scrollbar-thumb: oklch(0.48 0 none);
-
-    --chart-1: oklch(0.42 0.16 250deg);
-    --chart-2: oklch(0.42 0.16 290deg);
-    --chart-3: oklch(0.42 0.14 180deg);
-    --chart-4: oklch(0.42 0.16 150deg);
-    --chart-5: oklch(0.42 0.18 30deg);
-
     --diagram-node: oklch(0.92 0.012 var(--hue-primary));
     --diagram-node-border: oklch(0.48 0.05 var(--hue-primary));
     --diagram-cluster: oklch(0.96 0.006 var(--hue-primary));
@@ -330,44 +76,7 @@
 
   .dark,
   :root[class~='dark'] {
-    --l-base: 0.06;
-    --l-surface: 0.15;
-    --l-subtle: 0.55;
-    --l-element: 0.3;
-    --l-medium: 0.72;
-    --l-emphasized: 0.82;
-    --l-high: 0.95;
-    --l-intense: 1;
-    --l-deepest: 1;
-    --l-primary: 0.4;
-    --l-highlighter: 0.78;
-
-    --background: oklch(var(--l-base) 0 none);
-    --muted: oklch(var(--l-surface) 0 none);
-    --input: oklch(var(--l-subtle) 0 none);
-    --border: oklch(var(--l-subtle) 0 none);
-    --accent: oklch(var(--l-element) 0 none);
-    --neutral: oklch(var(--l-medium) 0 none);
-    --popover: oklch(0.12 0 none);
-    --card: oklch(0.12 0 none);
-
-    --menu-ring: color-mix(in oklch, white 70%, var(--popover));
-    --menu-highlight: color-mix(in oklch, white 20%, var(--popover));
-    --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 35%, var(--popover));
-
-    --sidebar-background: oklch(0.1 0 none);
-    --sidebar-border: oklch(var(--l-subtle) 0 none);
-    --sidebar-accent: oklch(0.28 0 none);
-    --sidebar-primary-foreground: oklch(var(--l-base) 0 none);
-
     --scrollbar-thumb: oklch(0.65 0 none);
-
-    --chart-1: oklch(0.8 0.14 250deg);
-    --chart-2: oklch(0.8 0.14 290deg);
-    --chart-3: oklch(0.8 0.12 180deg);
-    --chart-4: oklch(0.8 0.14 150deg);
-    --chart-5: oklch(0.8 0.16 30deg);
-
     --diagram-node: oklch(0.18 0.012 var(--hue-primary));
     --diagram-node-border: oklch(0.72 0.05 var(--hue-primary));
     --diagram-cluster: oklch(0.11 0.006 var(--hue-primary));
@@ -375,16 +84,6 @@
     --diagram-line: oklch(0.82 0.04 var(--hue-primary));
     --diagram-note: oklch(0.2 0.012 calc(var(--hue-primary) + 60deg));
     --diagram-note-border: oklch(0.72 0.04 calc(var(--hue-primary) + 60deg));
-  }
-
-  .black,
-  :root[class~='black'] {
-    --l-base: 0;
-    --background: oklch(0 0 none);
-    --muted: oklch(0.12 0 none);
-    --popover: oklch(0.09 0 none);
-    --card: oklch(0.09 0 none);
-    --sidebar-background: oklch(0.035 0 none);
   }
 }
 
@@ -423,115 +122,15 @@
 
 /* Dark variant is provided by fumadocs-ui/css/preset.css: @variant dark (&:where(.dark, .dark *)) */
 
-@supports (corner-shape: superellipse(1.5)) {
-  :root {
-    /* Preserve the fallback scale's visual corner reach with the flatter native curve. */
-    --radius-xs: 0.59375rem;
-    --radius-sm: 0.75rem;
-    --radius-md: 0.9375rem;
-    --radius-lg: 1.09375rem;
-    --radius-xl: 1.4375rem;
-    --radius-2xl: 1.78125rem;
-    --radius-3xl: 2.4375rem;
-    --radius-4xl: 3.125rem;
-  }
-}
-
-@layer base {
-  @supports (corner-shape: superellipse(1.5)) {
-    :where(*) {
-      corner-shape: superellipse(1.5);
-    }
-
-    :where([class*='rounded-full']) {
-      corner-shape: round;
-    }
-  }
-}
-
 @theme inline {
-  /* Shadows */
-  --shadow-*: initial;
-  --shadow-xs: 0px 1px 2px 0px rgba(10, 13, 20, 0.03);
-  --shadow-sm: 0px 1px 2px 0px #1018280f, 0px 1px 3px 0px #1018281a;
-  --shadow-md: 0px 16px 32px -12px rgba(14, 18, 27, 0.1);
-  --shadow: 0px 16px 32px -12px #0e121b1a;
-  --shadow-menu: 0 0 0 1px var(--menu-ring), 0 6px 20px -4px rgba(0, 0, 0, 0.25);
-
-  /* Fonts */
-  --font-sans: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, monospace;
-
-  /* Colors */
-  --color-*: initial;
-  --color-black: black;
-  --color-white: white;
-  --color-transparent: transparent;
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-
   --color-blue: oklch(63.82% 0.1949 265.76);
   --color-purple: oklch(60.29% 0.1875 289.06);
   --color-yellow: oklch(86.76% 0.6 93.18);
-
-  --color-neutral: var(--neutral);
-  --color-neutral-foreground: var(--neutral-foreground);
-
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-
-  /* Semantic colors */
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-border: var(--border);
-
-  --color-destructive: var(--destructive);
-
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-feature: var(--feature);
-  --color-information: var(--information);
-  --color-highlighted: var(--highlighted);
-  --color-stable: var(--stable);
-  --color-verified: var(--verified);
-  --color-alert: var(--alert);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-
-  /* Sidebar specific */
-  --color-sidebar: var(--sidebar-background);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-
-  /* Card specific */
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-menu-highlight: var(--menu-highlight);
-  --color-menu-highlight-destructive: var(--menu-highlight-destructive);
-
-  /* Highlighter specific */
-  --color-highlighter: var(--highlighter);
-  --color-highlighter-foreground: var(--highlighter-foreground);
 
   --animate-pulse-subtle: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-gradient: gradient 5s ease infinite;
   --animate-bounce-subtle: gentle-bounce 2s infinite;
   --animate-shiny-text: shiny-text 1.2s linear infinite;
-
-  /* Fumadocs Docs */
   --color-fd-primary: var(--primary);
   --color-fd-primary-foreground: var(--primary-foreground);
   --color-fd-secondary: var(--secondary);
@@ -585,13 +184,11 @@
     100% {
       transform: translateY(0);
       animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
-      /* slow down at the bottom */
     }
 
     50% {
       transform: translateY(6px);
       animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
-      /* speed up on the way up */
     }
   }
 

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { Model } from '@taucad/chat';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
-import { Switch } from '#components/ui/switch.js';
+import type { Model } from '#hooks/use-models.js';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
+import { Switch } from '@taucad/ui/components/switch';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { useModels } from '#hooks/use-models.js';
 

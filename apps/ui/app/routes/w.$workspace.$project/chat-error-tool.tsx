@@ -1,10 +1,10 @@
 import { memo } from 'react';
 import type React from 'react';
 import { AlertTriangle, RefreshCcw } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { ExternalLink } from '#components/external-link.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useChatActions } from '#hooks/use-chat.js';
 
 type ChatErrorToolProps = {

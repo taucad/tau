@@ -1,7 +1,7 @@
 import { DownloadIcon } from 'lucide-react';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 export function ProjectExportAction({
   className,

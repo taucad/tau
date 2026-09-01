@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Globe } from 'lucide-react';
 import { safeCreateFaviconUrl } from '#utils/url.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type FaviconLoadState = 'pending' | 'ok' | 'fallback';
 

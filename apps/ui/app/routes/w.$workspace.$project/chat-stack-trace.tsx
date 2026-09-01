@@ -4,9 +4,9 @@ import type { KernelProvider, KernelIssue, KernelStackFrame, IssueSeverity } fro
 import { idPrefix, languageFromKernel } from '@taucad/types/constants';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
-import { Button } from '#components/ui/button.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { FileLink } from '#components/files/file-link.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -16,7 +16,7 @@ import { useChats } from '#hooks/use-chats.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { useModifiers } from '#hooks/use-keyboard.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { createMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -507,7 +507,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
             source: 'fix-with-ai-new-chat',
             createdAt: Date.now(),
           },
-          activeModel: agent.model,
+          activeExecution: agent.execution,
           activeKernel: agent.kernel,
         });
         setFocusedChatId(newChat.id);
@@ -520,7 +520,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
       getMainFilename,
       fileManager,
       agent.kernel,
-      agent.model,
+      agent.execution,
       createChat,
       setFocusedChatId,
       cadChat,

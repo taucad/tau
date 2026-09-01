@@ -1,7 +1,7 @@
 import { Sparkles, WifiOff } from 'lucide-react';
 import { messageRole } from '@taucad/chat/constants';
 import { useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import {
   ChatToolCard,
   ChatToolCardHeader,

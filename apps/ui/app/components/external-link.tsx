@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ArrowUpRight } from 'lucide-react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ExternalLinkProps = {
   readonly href: string;

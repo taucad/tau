@@ -36,7 +36,7 @@ vi.mock('#components/panes/paneview-header.js', () => ({
   paneviewHeaderSize: 40,
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }): React.JSX.Element => <>{children}</>,
   TooltipContent: () => null,
   TooltipTrigger: ({ children }: { children: React.ReactNode }): React.JSX.Element => <>{children}</>,

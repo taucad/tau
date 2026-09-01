@@ -5,7 +5,7 @@ import type { ChatTextareaProperties } from '#components/chat/chat-textarea-type
 import { useChatTextareaLogic } from '#components/chat/chat-textarea-types.js';
 import { ChatTextareaDesktop } from '#components/chat/chat-textarea-desktop.js';
 import { ChatTextareaMobile } from '#components/chat/chat-textarea-mobile.js';
-import { useIsMobile } from '#hooks/use-mobile.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { ChatTextareaSkeleton } from '#components/chat/chat-textarea-skeleton.js';
 import { useProject } from '#hooks/use-project.js';
@@ -40,6 +40,8 @@ export const ChatTextarea = memo(function ({
   className,
   enableContextActions = true,
   enableKernelSelector = true,
+  creationLocationControls,
+  isSubmitDisabled = false,
   mode = 'main',
 }: ChatTextareaProperties): React.JSX.Element {
   const isMobile = useIsMobile();
@@ -80,6 +82,7 @@ export const ChatTextarea = memo(function ({
     onEscapePressed,
     onBlur,
     mode,
+    isSubmitDisabled,
     onViewerScreenshotDrop: handleViewerScreenshotDrop,
     onAddContextChips: handleAddContextChips,
   });
@@ -104,6 +107,7 @@ export const ChatTextarea = memo(function ({
   // Mutable ref populated by ChatTextareaDesktop so the imperative handle
   // can focus the Tiptap editor instead of the (non-existent) <textarea>
   const focusEditorRef = useRef<(() => void) | undefined>(undefined);
+  const closeOptionsRef = useRef<(() => void) | undefined>(undefined);
 
   useImperativeHandle(
     ref,
@@ -114,6 +118,9 @@ export const ChatTextarea = memo(function ({
         } else {
           logic.focusInput();
         }
+      },
+      closeOptions: () => {
+        closeOptionsRef.current?.();
       },
     }),
     [logic.focusInput],
@@ -345,6 +352,8 @@ export const ChatTextarea = memo(function ({
           enableAutoFocus={enableAutoFocus}
           enableContextActions={enableContextActions}
           enableKernelSelector={enableKernelSelector}
+          creationLocationControl={creationLocationControls?.field}
+          isSubmitDisabled={isSubmitDisabled}
           // State
           dragKind={logic.dragKind}
           showContextMenu={logic.showContextMenu}
@@ -362,6 +371,7 @@ export const ChatTextarea = memo(function ({
           textareaReference={logic.textareaReference}
           fileInputReference={logic.fileInputReference}
           containerReference={logic.containerReference}
+          closeOptionsRef={closeOptionsRef}
           // Handlers
           handleSubmit={logic.handleSubmit}
           handleCancelClick={logic.handleCancelClick}
@@ -398,6 +408,8 @@ export const ChatTextarea = memo(function ({
         enableAutoFocus={enableAutoFocus}
         enableContextActions={enableContextActions}
         enableKernelSelector={enableKernelSelector}
+        creationLocationControl={creationLocationControls?.toolbar}
+        isSubmitDisabled={isSubmitDisabled}
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}

@@ -2,10 +2,10 @@ import { memo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { FileCode } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
-import { Button } from '#components/ui/button.js';
-import { Tabs, TabsContent } from '#components/ui/tabs.js';
-import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '#components/ui/drawer.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tabs, TabsContent } from '@taucad/ui/components/tabs';
+import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
+import { cn } from '@taucad/ui/utils/cn';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 import { CadPreviewViewer, CadPreviewStatus } from '#components/cad-preview.js';
 import { usePreviewProject } from '#routes/w.$workspace.$project_.preview/preview-project-context.js';
@@ -66,7 +66,7 @@ export const PreviewMobile = memo(function (): React.JSX.Element {
             !isModelTab && 'hidden',
           )}
         >
-          <Button variant='default' size='lg' className='shadow-lg rounded-full' onClick={handleEdit}>
+          <Button variant='default' size='lg' className='rounded-full shadow-lg' onClick={handleEdit}>
             <FileCode className='mr-2 size-4' />
             Edit
           </Button>

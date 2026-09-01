@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ContextUsageData } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 
 // Mock the unified composer context so the connected `<ChatContextIndicator>`

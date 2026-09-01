@@ -18,7 +18,7 @@ import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneviewReact } from 'dockview-react';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -28,7 +28,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from '#components/ui/context-menu.js';
+} from '@taucad/ui/components/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,7 +38,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { ExportSelector } from '#components/files/export-selector.js';
 import {
   FloatingPanel,
@@ -50,8 +50,8 @@ import {
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
 import { SearchInput } from '#components/search-input.js';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import {
   PaneviewHeader,

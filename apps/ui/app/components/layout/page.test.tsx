@@ -38,14 +38,14 @@ vi.mock('#components/ui/sidebar.js', () => ({
   ),
   SidebarTrigger: ({ children }: { readonly children: ReactNode }) => <button type='button'>{children}</button>,
 }));
-vi.mock('#components/ui/breadcrumb.js', () => ({
+vi.mock('@taucad/ui/components/breadcrumb', () => ({
   Breadcrumb: ({ children }: { readonly children: ReactNode }) => <nav>{children}</nav>,
   BreadcrumbItem: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   BreadcrumbLink: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   BreadcrumbList: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   BreadcrumbSeparator: () => <span>/</span>,
 }));
-vi.mock('#components/ui/separator.js', () => ({ Separator: () => <span /> }));
+vi.mock('@taucad/ui/components/separator', () => ({ Separator: () => <span /> }));
 vi.mock('#components/ui/utils/compose.js', () => ({
   Compose: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
 }));

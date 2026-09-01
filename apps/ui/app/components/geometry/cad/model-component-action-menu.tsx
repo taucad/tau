@@ -2,26 +2,25 @@ import { AtSign, Eye, EyeOff, FileBox, Focus, MoreHorizontal, RotateCcw, Target 
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentReference } from '@taucad/types';
 import { geometryReferenceToToken, useChatContextInsertion } from '#components/chat/chat-context-insertion.js';
-import {
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSliderItem,
-} from '#components/ui/context-menu.js';
+import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@taucad/ui/components/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSliderItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { ModelInteractionSource } from '#machines/model-interaction.machine.js';
 import { useProject } from '#hooks/use-project.js';
-import { MenuSliderItem } from '#components/ui/menu-slider-item.js';
-import { menuItemVariants, menuSeparatorVariants } from '#components/ui/menu.variants.js';
-import { cn } from '#utils/ui.utils.js';
+import {
+  ContextMenuSliderItem,
+  DropdownMenuSliderItem,
+  MenuSliderItem,
+  preventMenuSliderEscapeDismissal,
+} from '#components/ui/menu-slider-item.js';
+import { menuItemVariants, menuSeparatorVariants } from '@taucad/ui/components/menu.variants';
+import { cn } from '@taucad/ui/utils/cn';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
@@ -122,7 +121,12 @@ export function ModelComponentActionDropdown({
           <MoreHorizontal className='size-3.5' />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side='right' align='start' className='min-w-56'>
+      <DropdownMenuContent
+        side='right'
+        align='start'
+        className='min-w-56'
+        onEscapeKeyDown={preventMenuSliderEscapeDismissal}
+      >
         <ModelComponentDropdownItems {...data} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -134,7 +138,7 @@ export function ModelComponentActionContextContent({
   ...data
 }: ModelComponentActionContextContentProperties): React.JSX.Element {
   return (
-    <ContextMenuContent className={className ?? 'min-w-56'}>
+    <ContextMenuContent className={className ?? 'min-w-56'} onEscapeKeyDown={preventMenuSliderEscapeDismissal}>
       <ModelComponentContextMenuItems {...data} />
     </ContextMenuContent>
   );

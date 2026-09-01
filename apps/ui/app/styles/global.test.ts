@@ -3,7 +3,9 @@ import { join } from 'node:path';
 import { converter, parse, wcagContrast } from 'culori';
 import { describe, expect, it } from 'vitest';
 
-const globalStyles = readFileSync(join(process.cwd(), 'app/styles/global.css'), 'utf8');
+const tokenStyles = readFileSync(join(process.cwd(), '../../packages/ui/src/styles/tokens.css'), 'utf8');
+const appStyles = readFileSync(join(process.cwd(), 'app/styles/global.css'), 'utf8');
+const globalStyles = `${tokenStyles}\n${appStyles}`;
 
 const structuralTokens = [
   '--background',
@@ -34,27 +36,27 @@ const structuralTokens = [
 type TokenName = (typeof structuralTokens)[number] | `--${string}`;
 type TokenMap = Record<TokenName, string>;
 
-const readRuleBody = (selectorStart: number): string => {
-  const blockStart = globalStyles.indexOf('{', selectorStart) + 1;
-  const blockEnd = globalStyles.indexOf('}', blockStart);
+const readRuleBody = (selectorStart: number, styles = globalStyles): string => {
+  const blockStart = styles.indexOf('{', selectorStart) + 1;
+  const blockEnd = styles.indexOf('}', blockStart);
 
   expect(selectorStart).toBeGreaterThanOrEqual(0);
   expect(blockStart).toBeGreaterThan(0);
   expect(blockEnd).toBeGreaterThan(blockStart);
 
-  return globalStyles.slice(blockStart, blockEnd);
+  return styles.slice(blockStart, blockEnd);
 };
 
-const readRuleStyle = (selectorStart: number): CSSStyleDeclaration => {
+const readRuleStyle = (selectorStart: number, styles = globalStyles): CSSStyleDeclaration => {
   const { style } = document.createElement('div');
 
-  style.cssText = readRuleBody(selectorStart);
+  style.cssText = readRuleBody(selectorStart, styles);
 
   return style;
 };
 
-const readRuleTokens = (selectorStart: number): TokenMap => {
-  const style = readRuleStyle(selectorStart);
+const readRuleTokens = (selectorStart: number, styles = globalStyles): TokenMap => {
+  const style = readRuleStyle(selectorStart, styles);
 
   return Object.fromEntries(
     Array.from({ length: style.length }, (_, index) => style.item(index))
@@ -64,17 +66,38 @@ const readRuleTokens = (selectorStart: number): TokenMap => {
 };
 
 const firstRoot = globalStyles.indexOf(':root');
-const lightTokens = readRuleTokens(firstRoot);
-const darkOverride = readRuleTokens(globalStyles.indexOf(":root[class~='dark']"));
-const blackOverride = readRuleTokens(globalStyles.indexOf(":root[class~='black']"));
-const highContrastOverride = readRuleTokens(globalStyles.indexOf(":root[class~='high-contrast']"));
+const lightTokens = {
+  ...readRuleTokens(tokenStyles.indexOf(':root'), tokenStyles),
+  ...readRuleTokens(appStyles.indexOf(':root'), appStyles),
+};
+const darkOverride = {
+  ...readRuleTokens(tokenStyles.indexOf(":root[class~='dark']"), tokenStyles),
+  ...readRuleTokens(appStyles.indexOf(":root[class~='dark']"), appStyles),
+};
+const blackOverride = {
+  ...readRuleTokens(tokenStyles.indexOf(":root[class~='black']"), tokenStyles),
+  ...readRuleTokens(appStyles.indexOf(":root[class~='black']"), appStyles),
+};
+const highContrastOverride = {
+  ...readRuleTokens(tokenStyles.indexOf(":root[class~='high-contrast']"), tokenStyles),
+  ...readRuleTokens(appStyles.indexOf(":root[class~='high-contrast']"), appStyles),
+};
 const darkTokens = { ...lightTokens, ...darkOverride };
 const blackTokens = { ...darkTokens, ...blackOverride };
 const highContrastTokens = { ...darkTokens, ...highContrastOverride };
-const contrastMediaStart = globalStyles.indexOf('@media (prefers-contrast: more)');
-const contrastLightOverride = readRuleTokens(globalStyles.indexOf(':root', contrastMediaStart));
-const contrastDarkOverride = readRuleTokens(globalStyles.indexOf(":root[class~='dark']", contrastMediaStart));
-const contrastBlackOverride = readRuleTokens(globalStyles.indexOf(":root[class~='black']", contrastMediaStart));
+const tokenContrastStart = tokenStyles.indexOf('@media (prefers-contrast: more)');
+const appContrastStart = appStyles.indexOf('@media (prefers-contrast: more)');
+const contrastLightOverride = {
+  ...readRuleTokens(tokenStyles.indexOf(':root', tokenContrastStart), tokenStyles),
+  ...readRuleTokens(appStyles.indexOf(':root', appContrastStart), appStyles),
+};
+const contrastDarkOverride = {
+  ...readRuleTokens(tokenStyles.indexOf(":root[class~='dark']", tokenContrastStart), tokenStyles),
+  ...readRuleTokens(appStyles.indexOf(":root[class~='dark']", appContrastStart), appStyles),
+};
+const contrastBlackOverride = {
+  ...readRuleTokens(tokenStyles.indexOf(":root[class~='black']", tokenContrastStart), tokenStyles),
+};
 const contrastLightTokens = { ...lightTokens, ...contrastLightOverride };
 const contrastDarkTokens = { ...darkTokens, ...contrastLightOverride, ...contrastDarkOverride };
 const contrastBlackTokens = {

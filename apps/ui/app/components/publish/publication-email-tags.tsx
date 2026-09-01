@@ -1,6 +1,6 @@
 import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
-import { Label } from '#components/ui/label.js';
-import { cn } from '#utils/ui.utils.js';
+import { Label } from '@taucad/ui/components/label';
+import { cn } from '@taucad/ui/utils/cn';
 
 export const maxPublicationAccessRecipients = 50;
 

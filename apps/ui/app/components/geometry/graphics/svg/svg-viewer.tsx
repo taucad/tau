@@ -9,7 +9,7 @@ import { usePanzoomReset } from '#components/geometry/graphics/svg/use-panzoom-r
 import { axesColors } from '#constants/color.constants.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type Viewbox = {
   xMin: number;

@@ -1,7 +1,7 @@
 import { Copy, Check } from 'lucide-react';
 import React, { useCallback } from 'react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Button } from '@taucad/ui/components/button';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
 
 export type CopyButtonProperties = {

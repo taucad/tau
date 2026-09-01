@@ -1,6 +1,6 @@
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { Bug, CircleHelp, CreditCard, Settings, Sparkles, WifiOff } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,13 +8,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { UserButton } from '#components/auth/user/user-button.js';
 import { ProBadge } from '#components/tier-badge.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { metaConfig } from '#constants/meta.constants.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 

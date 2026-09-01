@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Check, ChevronDown, FolderOpen, House, Plus, Settings, ShieldAlert, Unplug } from 'lucide-react';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { Button } from '#components/ui/button.js';
-import { menuItemVariants } from '#components/ui/menu.variants.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { menuItemVariants } from '@taucad/ui/components/menu.variants';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type {
   ProjectCreationLocationOption,
   ProjectCreationLocationState,
@@ -13,7 +13,7 @@ import {
   projectCreationLocationAccessibleName,
   projectCreationLocationsEqual,
 } from '#utils/project-creation-location.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type WorkspaceSelectorProperties = Omit<React.HTMLAttributes<HTMLDivElement>, 'onSelect'> & {
   readonly state: ProjectCreationLocationState;

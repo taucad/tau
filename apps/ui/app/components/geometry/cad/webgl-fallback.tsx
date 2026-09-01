@@ -1,5 +1,5 @@
 import { AlertCircle, MonitorX, RotateCcw, RefreshCcw } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import type { WebglErrorFallbackProps } from '#components/geometry/cad/webgl-error-boundary.js';
 
 type WebglLimitFallbackProps = {

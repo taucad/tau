@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanelHeaderProps } from 'dockview-react';
 import { describe, expect, it, vi } from 'vitest';
 import { DockviewTab } from '#components/panes/dockview-tab.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const createProperties = (title = 'main.scad', params?: Record<string, unknown>): IDockviewPanelHeaderProps => {
   const containerApi = Object.create(null) as DockviewApi;

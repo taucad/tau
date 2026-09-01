@@ -1,8 +1,8 @@
 import type { LucideIcon } from 'lucide-react';
 import { LoaderCircle } from 'lucide-react';
-import { Badge } from '#components/ui/badge.js';
+import { Badge } from '@taucad/ui/components/badge';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ChatToolInlineStatus = 'loading' | 'success' | 'error';
 

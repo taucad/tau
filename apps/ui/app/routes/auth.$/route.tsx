@@ -5,7 +5,7 @@ import { AuthEmailDraftProvider } from '#components/auth/auth-email-draft.js';
 import { MagicLinkVerify } from '#components/auth/magic-link-verify.js';
 import { VerifyEmail } from '#components/auth/verify-email.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
 

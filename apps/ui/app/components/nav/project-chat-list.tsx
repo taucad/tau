@@ -5,15 +5,15 @@ import { Link, useLocation, useNavigate, useNavigation } from 'react-router';
 import type { ProjectListItem } from '#types/project.types.js';
 import { useChats } from '#hooks/use-chats.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
-import { Skeleton } from '#components/ui/skeleton.js';
-import { Button } from '#components/ui/button.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { Loader } from '#components/ui/loader.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';

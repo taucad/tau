@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectManifestSchemaUrl, projectToManifest } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ProjectListItem } from '#types/project.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';

@@ -6,13 +6,13 @@ import { useEffect, useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from '#components/ui/card.js';
-import { Field, FieldDescription, FieldError, FieldGroup } from '#components/ui/field.js';
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '#components/ui/input-group.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { Field, FieldDescription, FieldError, FieldGroup } from '@taucad/ui/components/field';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
 import { Spinner } from '#components/ui/spinner.js';
-import { cn } from '#utils/ui.utils.js';
-import { Label } from '#components/ui/label.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Label } from '@taucad/ui/components/label';
 
 export type ResetPasswordProps = {
   className?: string;

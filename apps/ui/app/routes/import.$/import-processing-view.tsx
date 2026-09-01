@@ -1,7 +1,7 @@
 import { XCircle, Upload } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
-import { Progress } from '#components/ui/progress.js';
-import { Button } from '#components/ui/button.js';
+import { Progress } from '@taucad/ui/components/progress';
+import { Button } from '@taucad/ui/components/button';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 
 type ImportProcessingViewProperties = {

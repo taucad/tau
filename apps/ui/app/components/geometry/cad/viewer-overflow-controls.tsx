@@ -11,12 +11,12 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSliderItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuSwitchItem,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { DropdownMenuSliderItem } from '#components/ui/menu-slider-item.js';
 import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
 import { gridUnitOptions, maxGridDigits } from '#components/geometry/cad/grid-unit-options.js';
 import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';

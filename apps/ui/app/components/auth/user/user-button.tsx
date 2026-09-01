@@ -3,7 +3,7 @@ import { ChevronsUpDown, LogIn, LogOut, Settings, UserPlus2 } from 'lucide-react
 import { isValidElement } from 'react';
 import type { ComponentType, ReactElement, ReactNode } from 'react';
 
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,8 +11,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
-import { cn } from '#utils/ui.utils.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { cn } from '@taucad/ui/utils/cn';
 import { UserAvatar } from '#components/auth/user/user-avatar.js';
 import { UserView } from '#components/auth/user/user-view.js';
 /** Auth states a `UserButton` link can be visible in. */

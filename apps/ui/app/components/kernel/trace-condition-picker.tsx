@@ -5,10 +5,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
-import { cn } from '#utils/ui.utils.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
+import { cn } from '@taucad/ui/utils/cn';
 
 // ---------------------------------------------------------------------------
 // Types

@@ -65,7 +65,7 @@ const carouselMock = vi.hoisted(() => {
   };
 });
 
-vi.mock('#components/ui/carousel.js', async () => {
+vi.mock('@taucad/ui/components/carousel', async () => {
   const ReactModule = await import('react');
 
   type MockCarouselProperties = React.ComponentProps<'div'> & {

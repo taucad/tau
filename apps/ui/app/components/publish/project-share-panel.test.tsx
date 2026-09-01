@@ -15,7 +15,7 @@ import * as publishMachineActual from '#machines/publish.machine.js';
 import type * as useEntitlementsModule from '@taucad/billing/hooks/use-entitlements';
 import type * as useSettingsDialogModule from '#hooks/use-settings-dialog.js';
 import type * as shareProvidersModule from '#lib/share-providers.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const portableProviderPublish = vi.hoisted(() => vi.fn());
 const portableProviderLoad = vi.hoisted(() => vi.fn(async () => ({ publish: portableProviderPublish })));

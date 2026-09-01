@@ -1,6 +1,6 @@
 import { Check, Focus } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useGraphics } from '#hooks/use-graphics.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
 

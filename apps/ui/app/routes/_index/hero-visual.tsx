@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 const HeroCanvasLazy = lazy(async () => {
   const m = await import('#routes/_index/hero-canvas.js');

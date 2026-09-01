@@ -4,7 +4,7 @@ import type { ShikiTransformer } from 'shiki/types';
 import { addClassToHast } from 'shiki/core';
 import type { HighlighterCore } from 'shiki/core';
 import { getHighlighter } from '#lib/shiki.lib.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useTheme } from '#hooks/use-theme.js';
 import type { HighlightLanguageInput } from '#lib/code-language-resolution.js';
 import { resolveHighlightLanguage } from '#lib/code-language-resolution.js';

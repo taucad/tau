@@ -1,5 +1,5 @@
 import { TriangleAlert } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 
 type ChatEditorTooLargeWarningProps = {
   readonly size: number;

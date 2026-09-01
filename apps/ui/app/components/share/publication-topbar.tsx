@@ -2,12 +2,12 @@ import { useCallback } from 'react';
 import { Link } from 'react-router';
 import { Download, Link2 } from 'lucide-react';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { ForkAction } from '#components/share/fork-action.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
 import { ProjectExportAction } from '#routes/w.$workspace.$project/project-export-action.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { toast } from '#components/ui/sonner.js';
 
 type PublicationTopbarProps = {

@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
 import { Spinner } from '#components/ui/spinner.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type SignOutProps = {
   className?: string;

@@ -1,6 +1,6 @@
 import { Info } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { cn } from '#utils/ui.utils.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { cn } from '@taucad/ui/utils/cn';
 
 export function InfoTooltip({
   children,

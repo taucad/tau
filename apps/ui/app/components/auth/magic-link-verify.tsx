@@ -3,11 +3,11 @@ import { CheckCircle2, CircleAlert, LogIn } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
 
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#components/ui/card.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Spinner } from '#components/ui/spinner.js';
 import { sanitizeVerifyEmailRedirectTo } from '#components/auth/verify-email.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 /** Milliseconds. */
 const redirectDelay = 900;

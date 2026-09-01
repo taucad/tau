@@ -1,6 +1,6 @@
-import { Badge } from '#components/ui/badge.js';
-import { cn } from '#utils/ui.utils.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { cn } from '@taucad/ui/utils/cn';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 export function ReleaseBadge(): React.JSX.Element {
   return (

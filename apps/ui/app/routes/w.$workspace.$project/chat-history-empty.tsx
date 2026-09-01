@@ -1,6 +1,6 @@
 import { MessageSquare } from 'lucide-react';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export function ChatHistoryEmpty({ className }: { readonly className?: string }): React.JSX.Element {
   return (

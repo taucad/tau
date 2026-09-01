@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Upload } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { ImportViewer } from '#routes/import.$/import-viewer.js';

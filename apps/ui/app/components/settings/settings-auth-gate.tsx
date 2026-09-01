@@ -1,7 +1,7 @@
 import { useSession } from '@better-auth-ui/react';
 import { Lock } from 'lucide-react';
 import { NavLink } from 'react-router';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { Loader } from '#components/ui/loader.js';
 import { authClient } from '#lib/auth-client.js';

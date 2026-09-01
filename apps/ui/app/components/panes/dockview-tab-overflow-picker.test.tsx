@@ -11,7 +11,7 @@ import type {
 import { mock } from 'vitest-mock-extended';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const mobileState = vi.hoisted(() => ({ current: false }));
 const comboBoxSpy = vi.hoisted(() => vi.fn());

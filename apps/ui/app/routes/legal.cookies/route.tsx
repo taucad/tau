@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router';
 import cookiePolicy from '#routes/legal.cookies/cookie-policy.txt?raw';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { markdownHeaderAnchorComponents } from '#components/markdown/markdown-header-anchor.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { CookiePreferencesDialog } from '#components/cookie-consent.js';

@@ -2,8 +2,8 @@ import React, { useCallback, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
 import { Info, Lock, LockIcon, LockOpen } from 'lucide-react';
 import type { LengthSymbol } from '@taucad/units';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,8 +13,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuSwitchItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
-import { cn } from '#utils/ui.utils.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { cn } from '@taucad/ui/utils/cn';
 import { formatNumberEngineeringNotation } from '#utils/number.utils.js';
 import { gridUnitOptions, maxGridDigits } from '#components/geometry/cad/grid-unit-options.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';

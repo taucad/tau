@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import { toast } from 'sonner';
@@ -14,18 +14,21 @@ import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manag
 import { ChatRpcSocketProvider } from '#hooks/use-chat-rpc-socket.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { RevisionProvider } from '#routes/w.$workspace.$project/revision-provider.js';
+import { ChatWorkspaceAuthorityProvider } from '#providers/chat-workspace-authority-provider.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useBlockBrowserNavigation } from '#hooks/use-block-browser-navigation.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
 import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
-import { debugKernelOptions } from '#constants/kernel-options.presets.js';
+import { localKernelOptions } from '#constants/desktop-kernel-options.js';
+import { remoteKernelOptions } from '#constants/remote-kernel-options.js';
+import { useRemoteComputePlacement, useRemoteComputeSelectionRevision } from '#lib/remote-compute-placement.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { Loader } from '#components/ui/loader.js';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
 import { ProjectLoadError } from '#routes/w.$workspace.$project/project-load-error.js';
 
@@ -61,23 +64,32 @@ function ProjectSession({
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
 }): React.ReactNode {
+  const placement = useRemoteComputePlacement();
+  const selectionRevision = useRemoteComputeSelectionRevision();
+  // Desktop resolves the local kernel to a utility process rooted at this
+  // project's directory on disk; the browser keeps the debug web worker.
+  const localOptions = useMemo(() => localKernelOptions(projectId), [projectId]);
+  const kernelOptionsFactory = placement.state === 'local' ? localOptions : remoteKernelOptions;
   return (
     <HomeFileManagerProvider projectId={projectId} rootDirectory={`/projects/${projectId}`}>
       <ChatRpcSocketProvider>
         <WebglContextTrackerProvider>
           <ProjectProvider
+            key={`${placement.state === 'local' ? 'local' : placement.deviceId}:${String(selectionRevision)}`}
             projectId={projectId}
             requestedChatId={requestedChatId}
             onFocusedChatResolved={onFocusedChatResolved}
-            kernelOptionsFactory={debugKernelOptions}
+            kernelOptionsFactory={kernelOptionsFactory}
           >
             <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
             <MonacoModelServiceProvider>
               <RevisionProvider>
-                <ProjectWorkspaceProvider>
-                  <ProjectShareRouteIntent />
-                  {children}
-                </ProjectWorkspaceProvider>
+                <ChatWorkspaceAuthorityProvider>
+                  <ProjectWorkspaceProvider>
+                    <ProjectShareRouteIntent />
+                    {children}
+                  </ProjectWorkspaceProvider>
+                </ChatWorkspaceAuthorityProvider>
               </RevisionProvider>
             </MonacoModelServiceProvider>
           </ProjectProvider>

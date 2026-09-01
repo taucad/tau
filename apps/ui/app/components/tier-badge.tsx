@@ -1,9 +1,9 @@
 import type { KernelId } from '@taucad/types/constants';
 import type { BillingTier } from '@taucad/billing';
 import { getKernelRequiredTier } from '@taucad/billing';
-import { Badge } from '#components/ui/badge.js';
-import { cn } from '#utils/ui.utils.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { cn } from '@taucad/ui/utils/cn';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 const proBadgeClassName =
   'h-4 border-blue/30 bg-blue/10 px-1 text-[10px] leading-none font-medium tracking-wide text-blue uppercase dark:text-blue/70';

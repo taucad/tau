@@ -7,7 +7,7 @@ import { useIsMutating } from '@tanstack/react-query';
 import type { SocialProvider } from 'better-auth/social-providers';
 import type { ComponentProps } from 'react';
 
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { Spinner } from '#components/ui/spinner.js';
 
 export type ProviderButtonProps = {

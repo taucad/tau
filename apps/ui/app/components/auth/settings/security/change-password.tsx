@@ -12,15 +12,15 @@ import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent, CardFooter } from '#components/ui/card.js';
-import { Field, FieldError } from '#components/ui/field.js';
-import { Input } from '#components/ui/input.js';
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '#components/ui/input-group.js';
-import { Label } from '#components/ui/label.js';
-import { Skeleton } from '#components/ui/skeleton.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent, CardFooter } from '@taucad/ui/components/card';
+import { Field, FieldError } from '@taucad/ui/components/field';
+import { Input } from '@taucad/ui/components/input';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
+import { Label } from '@taucad/ui/components/label';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '#components/ui/spinner.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type ChangePasswordProps = {
   className?: string;

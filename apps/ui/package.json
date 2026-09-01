@@ -1,5 +1,5 @@
 {
-  "name": "@taucad/ui",
+  "name": "@taucad/app",
   "version": "0.0.1",
   "type": "module",
   "private": true,
@@ -28,6 +28,7 @@
     "@taucad/json-schema": "workspace:*",
     "@taucad/lsp": "workspace:*",
     "@taucad/gltf": "workspace:*",
+    "@taucad/grammars": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",
     "@taucad/lsp-fs": "workspace:*",
@@ -48,6 +49,7 @@
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/zoo": "workspace:*",
+    "@taucad/ui": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "better-auth": "catalog:",
     "bowser": "catalog:",

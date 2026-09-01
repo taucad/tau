@@ -1,11 +1,11 @@
 import { memo } from 'react';
 import { ArrowUp, Square } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { Loader } from '#components/ui/loader.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 const chatComposerActionButtonClassName =
   'rounded-full bg-foreground text-background shadow-xs hover:bg-foreground/85 hover:text-background dark:bg-foreground dark:text-background dark:hover:bg-foreground/85 dark:hover:text-background';

@@ -1,7 +1,7 @@
 import { ArrowDown } from 'lucide-react';
 import { memo, useCallback } from 'react';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ScrollDownButtonProperties = {
   readonly hasContent: boolean;

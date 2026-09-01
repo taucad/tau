@@ -5,13 +5,13 @@
     "app/**/*.tsx",
     "app/**/*.js",
     "app/**/*.jsx",
-    "content/docs/**/examples/**/*.ts",
+    "desktop/**/*.ts",
+    "desktop/**/*.tsx",
     "server.ts",
     "react-router.config.ts",
     "vite-environment.d.ts",
     "types/**/*.d.ts",
     ".react-router/types/**/*",
-    "../../node_modules/.cache/fumadocs/apps/ui/**/*", // Fumadocs collections
     "package.json"
   ],
   "compilerOptions": {
@@ -26,8 +26,13 @@
     "target": "ES2024",
     "paths": {
       "package.json": ["./package.json"],
-      "#*": ["./app/*"],
-      "fumadocs-mdx:collections/*": ["../../node_modules/.cache/fumadocs/apps/ui/*"]
+      // `#*` is greedy across the whole program: a workspace package compiled
+      // from source here resolves its own `#index.js` against `packages/ui`
+      // first, which is not its barrel. Only `@taucad/runtime` spells that
+      // specifier in this program (its electron modules, reached from the
+      // desktop kernel preset), so it is named exactly rather than by pattern.
+      "#index.js": ["../../packages/runtime/src/index.ts"],
+      "#*": ["../../packages/ui/src/*", "./app/*"]
     }
   },
   "exclude": [

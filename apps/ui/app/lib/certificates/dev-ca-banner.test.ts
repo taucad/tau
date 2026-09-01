@@ -51,7 +51,7 @@ describe('formatIosTrustBanner', () => {
     expect(header).toContain('SharedArrayBuffer');
     expect(header).toContain('cross-origin');
     expect(header).toContain('https://203.0.113.42:3000');
-    expect(header).toContain('https://tau.new/docs/runtime/guides/cross-origin-isolation');
+    expect(header).toContain('https://docs.tau.new/runtime/guides/cross-origin-isolation');
 
     expect(steps).toContain('Certificate Trust Settings');
     expect(steps).toContain('mkcert alice@notebook');

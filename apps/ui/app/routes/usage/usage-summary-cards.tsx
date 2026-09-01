@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import { DollarSign, Coins, Bot, Folder } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '#components/ui/card.js';
+import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { formatCurrency } from '#utils/currency.utils.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
-import type { UsageRecord } from '#hooks/use-all-usage.js';
+import type { UsageRecord } from '@taucad/billing/usage';
 
 type UsageSummaryCardsProps = {
   readonly records: UsageRecord[];

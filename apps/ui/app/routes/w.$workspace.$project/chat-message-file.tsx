@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { FileUIPart } from 'ai';
 import { File } from 'lucide-react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 

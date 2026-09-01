@@ -3,7 +3,7 @@ import { Link, NavLink } from 'react-router';
 import { Code2, SlidersHorizontal } from 'lucide-react';
 import type { KernelProvider } from '@taucad/runtime';
 import { kernelProviders } from '@taucad/types/constants';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { SearchInput } from '#components/search-input.js';
 import {
   DropdownMenu,
@@ -11,7 +11,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { sampleProjects } from '#constants/project-examples.js';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import type { Handle } from '#types/matches.types.js';

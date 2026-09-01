@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useShikiHighlighter } from 'react-shiki/core';
 import type { HighlighterCore } from 'shiki/core';
 import type { ClassValue } from 'clsx';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { getHighlighter } from '#lib/shiki.lib.js';
 import { useTheme } from '#hooks/use-theme.js';
 import type { HighlightLanguageInput, ShikiLanguage } from '#lib/code-language-resolution.js';

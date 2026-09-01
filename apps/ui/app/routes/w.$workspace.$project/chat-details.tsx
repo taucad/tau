@@ -13,8 +13,8 @@ import {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
-import { Input } from '#components/ui/input.js';
-import { Textarea } from '#components/ui/textarea.js';
+import { Input } from '@taucad/ui/components/input';
+import { Textarea } from '@taucad/ui/components/textarea';
 import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';

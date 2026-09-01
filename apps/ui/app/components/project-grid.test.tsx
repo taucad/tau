@@ -4,7 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
 import { CommunityProjectGrid } from '#components/project-grid.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const { createProjectMock, presentLocationErrorMock } = vi.hoisted(() => ({
   createProjectMock: vi.fn(),

@@ -2,7 +2,7 @@ import { memo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { getRandomExamples } from '#constants/chat-prompt-examples.js';
 import type { ChatExample } from '#constants/chat-prompt-examples.js';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 

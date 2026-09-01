@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import type { Model } from '@taucad/chat';
+import type { Model, ResolvedModel } from '#hooks/use-models.js';
 import { resolveKernel } from '@taucad/types/constants';
-import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 
 // The chat model selector reads AND writes through the unified composer
@@ -48,6 +47,11 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 
 vi.mock('#hooks/use-keyboard.js', () => ({
   useKeybinding: () => ({ formattedKeyCombination: '' }),
+}));
+
+const openSettingsDialogMock = vi.fn();
+vi.mock('#hooks/use-settings-dialog.js', () => ({
+  openSettingsDialog: openSettingsDialogMock,
 }));
 
 const modelCatalogue: Model[] = [
@@ -139,11 +143,11 @@ vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon'>{id}</span>,
 }));
 
-vi.mock('#components/ui/badge.js', () => ({
+vi.mock('@taucad/ui/components/badge', () => ({
   Badge: ({ children }: { readonly children: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock('#components/ui/hover-card.js', () => ({
+vi.mock('@taucad/ui/components/hover-card', () => ({
   HoverCard: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   HoverCardTrigger: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   HoverCardContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,

@@ -14,7 +14,7 @@ import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 const submitMock = vi.fn();
 const cadAgent: CadAgentConfigInput = {
   profile: 'cad',
-  model: 'openai-gpt-5.5',
+  execution: { kind: 'tau', model: 'openai-gpt-5.5' },
   kernel: 'replicad',
   mode: 'agent',
   toolChoice: 'auto',
@@ -57,7 +57,7 @@ vi.mock('#constants/chat-prompt-examples.js', () => ({
   ],
 }));
 
-vi.mock('#components/ui/button.js', () => ({
+vi.mock('@taucad/ui/components/button', () => ({
   Button: ({ children, onClick }: { readonly children: React.ReactNode; readonly onClick?: () => void }) => (
     <button type='button' onClick={onClick}>
       {children}

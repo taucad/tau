@@ -10,7 +10,7 @@ import type {
 } from 'dockview-react';
 import { mock } from 'vitest-mock-extended';
 import { describe, expect, it, vi } from 'vitest';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({

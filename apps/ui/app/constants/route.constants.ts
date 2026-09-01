@@ -76,7 +76,7 @@ export const navRoutes: {
     },
     {
       title: 'Documentation',
-      url: '/docs',
+      url: 'https://docs.tau.new',
       icon: BookOpen,
     },
     {

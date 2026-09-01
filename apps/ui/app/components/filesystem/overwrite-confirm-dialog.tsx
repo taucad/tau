@@ -25,10 +25,10 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '#components/ui/alert-dialog.js';
-import { Button } from '#components/ui/button.js';
-import { Checkbox } from '#components/ui/checkbox.js';
-import { Label } from '#components/ui/label.js';
+} from '@taucad/ui/components/alert-dialog';
+import { Button } from '@taucad/ui/components/button';
+import { Checkbox } from '@taucad/ui/components/checkbox';
+import { Label } from '@taucad/ui/components/label';
 
 /**
  * Choice returned from the dialog.

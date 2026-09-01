@@ -31,7 +31,7 @@ vi.mock('#hooks/use-network-connectivity.js', () => ({
   useNetworkConnectivity: useNetworkConnectivityMock,
 }));
 
-vi.mock('#components/ui/dropdown-menu.js', () => ({
+vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuContent: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuItem: ({ children }: { readonly children?: React.ReactNode }) => <div role='menuitem'>{children}</div>,
@@ -44,7 +44,7 @@ vi.mock('#components/ui/utils/client-only.js', () => ({
   ClientOnly: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children?: React.ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children?: React.ReactNode }) => <span>{children}</span>,
   TooltipContent: ({ children }: { readonly children?: React.ReactNode }) => <span>{children}</span>,

@@ -2,10 +2,10 @@ import { useCallback, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Folder, Files, FolderOpen, Upload, Download } from 'lucide-react';
 import { importFileAcceptString } from '#routes/import.$/import.utils.js';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { isZipFile } from '#utils/file-reader.utils.js';
-import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
+import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
 
 type UploadCardProperties = {
   readonly onFilesSelected: (files: FileList | File[]) => void;
@@ -89,8 +89,10 @@ export function UploadCard({
     }
 
     try {
-      const handle = await globalThis.window.showDirectoryPicker({ mode: 'read' });
-      onDirectoryHandleSelected(handle);
+      const handle = await webAccessDirectoryPicker()?.pick({ mode: 'read' });
+      if (handle !== undefined) {
+        onDirectoryHandleSelected(handle);
+      }
     } catch (error) {
       // User cancelled the directory picker
       if (error instanceof DOMException && error.name === 'AbortError') {
@@ -203,7 +205,7 @@ export function UploadCard({
           isDropping ? 'pointer-events-none h-0 opacity-0' : 'opacity-100',
         )}
       >
-        {isFileSystemAccessSupported ? (
+        {webAccessDirectoryPicker() ? (
           <Button
             type='button'
             variant='outline'

@@ -5,7 +5,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import Form from '@rjsf/core';
 import type { RJSFSchema } from '@rjsf/utils';
 import { SearchInput } from '#components/search-input.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
 import type { RJSFContext, Units } from '#components/geometry/parameters/rjsf-context.js';
 import {

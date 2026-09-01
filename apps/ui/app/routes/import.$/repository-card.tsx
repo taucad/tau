@@ -1,8 +1,8 @@
 import { Star, GitFork, Eye, Scale, Lock, Globe, Clock } from 'lucide-react';
-import { Badge } from '#components/ui/badge.js';
+import { Badge } from '@taucad/ui/components/badge';
 import { ExternalLink } from '#components/external-link.js';
-import { Skeleton } from '#components/ui/skeleton.js';
-import { cn } from '#utils/ui.utils.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { cn } from '@taucad/ui/utils/cn';
 
 type RepositoryCardProperties = {
   readonly metadata:

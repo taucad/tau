@@ -6,9 +6,12 @@ import type { KernelConfiguration } from '@taucad/types/constants';
 import { kernelConfigurations } from '@taucad/types/constants';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
+import { isKernelAllowed } from '@taucad/billing';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { KernelTierBadge } from '#components/tier-badge.js';
+import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
+import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 function formatKernelDimensions(dimensions: KernelConfiguration['dimensions']): string {
   return dimensions.map((d) => `${d}D`).join(' & ');
@@ -56,17 +59,24 @@ export const ChatKernelSelector = memo(function ({
   const {
     kernel: { kernel: selectedKernel, setActiveKernel },
   } = useChatComposer();
+  const entitlements = useEntitlements();
 
   const handleSelectKernel = useCallback(
     (item: string) => {
       const kernel = kernelConfigurations.find((k) => k.id === item);
 
       if (kernel) {
+        // T3: Pro kernels route to the upgrade surface for un-entitled users
+        // (the websocket gate enforces server-side regardless).
+        if (!isKernelAllowed(kernel.id, entitlements.tier)) {
+          openSettingsDialog('billing');
+          return;
+        }
         setActiveKernel(kernel.id);
         onSelect?.(kernel.id);
       }
     },
-    [onSelect, setActiveKernel],
+    [entitlements.tier, onSelect, setActiveKernel],
   );
 
   return (

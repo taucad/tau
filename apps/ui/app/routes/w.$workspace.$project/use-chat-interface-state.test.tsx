@@ -28,7 +28,7 @@ vi.mock('@xstate/react', () => ({
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef: { send } }),
 }));
-vi.mock('#hooks/use-mobile.js', () => ({
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: () => state.isMobile,
 }));
 

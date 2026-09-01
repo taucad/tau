@@ -4,15 +4,15 @@ import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { CodeIssue } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
-import { TooltipTrigger, TooltipContent, Tooltip } from '#components/ui/tooltip.js';
-import { Button } from '#components/ui/button.js';
+import { TooltipTrigger, TooltipContent, Tooltip } from '@taucad/ui/components/tooltip';
+import { Button } from '@taucad/ui/components/button';
 import { useProject, useMainGraphics } from '#hooks/use-project.js';
 import { toast } from '#components/ui/sonner.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { cn } from '#utils/ui.utils.js';
-import { menuItemLayoutClass, menuItemVariants } from '#components/ui/menu.variants.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { menuItemLayoutClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
 import type { DraftImageOptions } from '#hooks/use-chat.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
@@ -22,7 +22,7 @@ import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics
 type ChatContextActionsProperties = {
   readonly addImage: (image: string, options?: DraftImageOptions) => void;
   readonly addText: (text: string) => void;
-  readonly imageInputSupported?: boolean;
+  readonly isImageInputSupported?: boolean;
   readonly asPopoverMenu?: boolean;
   readonly onClose?: () => void;
   readonly searchQuery?: string;
@@ -44,7 +44,7 @@ type ContextActionItem = {
 export function ChatContextActions({
   addImage,
   addText,
-  imageInputSupported = true,
+  isImageInputSupported = true,
   asPopoverMenu,
   onClose,
   searchQuery = '',
@@ -165,7 +165,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
   }, [addText, kernelIssue, asPopoverMenu, onClose]);
 
   const contextItems = useMemo((): ContextActionItem[] => {
-    const items: ContextActionItem[] = imageInputSupported
+    const items: ContextActionItem[] = isImageInputSupported
       ? [
           {
             id: 'add-current-view-screenshot',
@@ -190,7 +190,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
       : [];
 
     // Add per-view screenshot items for non-main views when there are 2+ views
-    if (imageInputSupported && viewGraphics.size >= 2) {
+    if (isImageInputSupported && viewGraphics.size >= 2) {
       for (const [viewId, graphicsRef] of viewGraphics) {
         const settings = viewSettings[viewId];
         // Skip the main entry path view (already covered by "Current view screenshot")
@@ -236,7 +236,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
     return items;
   }, [
     handleAddModelScreenshot,
-    imageInputSupported,
+    isImageInputSupported,
     mainCameraReady,
     mainGeometryFormat,
     handleAddAllViewsScreenshots,

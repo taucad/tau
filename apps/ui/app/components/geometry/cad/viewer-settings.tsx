@@ -14,20 +14,20 @@ import {
   Lightbulb,
   Check,
 } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { Button } from '#components/ui/button.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSwitchItem,
-  DropdownMenuSelectItem,
   DropdownMenuToggleGroupItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
-import { cn } from '#utils/ui.utils.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { cn } from '@taucad/ui/utils/cn';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
+import { DropdownMenuSelectItem, preventMenuSliderEscapeDismissal } from '#components/ui/menu-slider-item.js';
 import { axesColors } from '#constants/color.constants.js';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import type { EnvironmentPreset } from '#constants/editor.constants.js';
@@ -226,6 +226,7 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
         align='end'
         side='right'
         className='w-72'
+        onEscapeKeyDown={preventMenuSliderEscapeDismissal}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
         }}

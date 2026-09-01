@@ -1,5 +1,5 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#components/ui/card.js';
-import { Switch } from '#components/ui/switch.js';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { Switch } from '@taucad/ui/components/switch';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 

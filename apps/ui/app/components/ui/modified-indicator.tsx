@@ -1,6 +1,6 @@
 import { RefreshCcwDot } from 'lucide-react';
-import { cn } from '#utils/ui.utils.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 /**
  * Signals a value has been modified from its default.

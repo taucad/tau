@@ -6,9 +6,9 @@ import { CalendarIcon, Check, ChevronDownIcon, Copy } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-import { Button } from '#components/ui/button.js';
-import { Calendar } from '#components/ui/calendar.js';
-import { Checkbox } from '#components/ui/checkbox.js';
+import { Button } from '@taucad/ui/components/button';
+import { Calendar } from '@taucad/ui/components/calendar';
+import { Checkbox } from '@taucad/ui/components/checkbox';
 import {
   Combobox,
   ComboboxContent,
@@ -17,16 +17,16 @@ import {
   ComboboxItem,
   ComboboxList,
 } from '#components/ui/combobox.js';
-import { Field, FieldContent, FieldError, FieldLabel } from '#components/ui/field.js';
-import { Input } from '#components/ui/input.js';
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '#components/ui/input-group.js';
-import { Label } from '#components/ui/label.js';
-import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
-import { Slider } from '#components/ui/slider.js';
-import { Switch } from '#components/ui/switch.js';
-import { Textarea } from '#components/ui/textarea.js';
-import { cn } from '#utils/ui.utils.js';
+import { Field, FieldContent, FieldError, FieldLabel } from '@taucad/ui/components/field';
+import { Input } from '@taucad/ui/components/input';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
+import { Label } from '@taucad/ui/components/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
+import { Slider } from '@taucad/ui/components/slider';
+import { Switch } from '@taucad/ui/components/switch';
+import { Textarea } from '@taucad/ui/components/textarea';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type AdditionalFieldProps = {
   name: string;

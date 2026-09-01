@@ -1,8 +1,8 @@
 import type { LucideIcon } from 'lucide-react';
 import { Archive, CloudOff, FileWarning, Lock, MapPin, TimerReset } from 'lucide-react';
 import { Link } from 'react-router';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 
 export type PublicationLockReason =

@@ -80,14 +80,14 @@ vi.mock('#components/ui/sidebar.js', () => ({
     ),
   useSidebar: () => ({ isMobile: false }),
 }));
-vi.mock('#components/ui/button.js', () => ({
+vi.mock('@taucad/ui/components/button', () => ({
   Button: ({ children, ...properties }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button type='button' {...properties}>
       {children}
     </button>
   ),
 }));
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   TooltipContent: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
@@ -96,7 +96,7 @@ type DropdownMenuItemMockProps = Pick<React.ButtonHTMLAttributes<HTMLButtonEleme
   readonly children: ReactNode;
   readonly onSelect?: () => void;
 };
-vi.mock('#components/ui/dropdown-menu.js', () => ({
+vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   DropdownMenuContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,

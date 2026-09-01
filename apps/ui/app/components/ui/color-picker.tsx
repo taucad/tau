@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { HslColor } from 'react-colorful';
 import { Pipette, RotateCcw } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { Slider } from '#components/ui/slider.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Slider } from '@taucad/ui/components/slider';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { cn } from '#utils/ui.utils.js';
-import { Button } from '#components/ui/button.js';
-import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Button } from '@taucad/ui/components/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 
 export type ColorPickerValue = HslColor;

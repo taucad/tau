@@ -7,7 +7,7 @@ import { CopyButton } from '#components/copy-button.js';
 import { HighlightText } from '#components/highlight-text.js';
 import { TraceConditionPicker } from '#components/kernel/trace-condition-picker.js';
 import type { FilterCondition } from '#components/kernel/trace-condition-picker.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -17,10 +17,10 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { PaneButton } from '#components/ui/pane-button.js';
-import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
-import { ToggleGroup, ToggleGroupItem } from '#components/ui/toggle-group.js';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import type {
   DisplaySettings,
   FlatSpanRow,
@@ -44,7 +44,7 @@ import {
   getSpanKey,
   getVisibleAttributes,
 } from '#routes/w.$workspace.$project/chat-kernel-utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ExplorerProperties = {
   readonly spanTree: SpanNode[];

@@ -5,7 +5,7 @@ import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 export type DockviewTabOverflowPickerProperties = IDockviewHeaderActionsProps & {
   readonly getIcon?: DockviewTabIconRenderer;

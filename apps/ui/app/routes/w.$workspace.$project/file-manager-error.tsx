@@ -9,7 +9,7 @@
 
 import { ArrowLeft, Home, AlertOctagon, RefreshCw } from 'lucide-react';
 import { useNavigate, Link } from 'react-router';
-import { Button, buttonVariants } from '#components/ui/button.js';
+import { Button, buttonVariants } from '@taucad/ui/components/button';
 import {
   FloatingPanel,
   FloatingPanelContent,
@@ -17,7 +17,7 @@ import {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type FileManagerErrorProps = {
   readonly error: Error;

@@ -16,7 +16,7 @@ import {
 } from '#components/geometry/parameters/rjsf-utils.js';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const optionalSectionsSchema: RJSFSchema = {
   type: 'object',

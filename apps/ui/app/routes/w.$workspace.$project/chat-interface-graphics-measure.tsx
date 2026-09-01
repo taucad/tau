@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { Pin, PinOff, Trash } from 'lucide-react';
 import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { axesColors } from '#constants/color.constants.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 

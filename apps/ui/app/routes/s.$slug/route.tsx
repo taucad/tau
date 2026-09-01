@@ -10,9 +10,9 @@ import { isShareError, ShareError } from '@taucad/share/provider';
 import type { ShareProtection } from '@taucad/share/provider';
 import type { ShareProjectSnapshot, ShareSnapshotFileRole } from '@taucad/share/snapshot';
 import { Loader } from '#components/ui/loader.js';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
-import { Label } from '#components/ui/label.js';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
+import { Label } from '@taucad/ui/components/label';
 import type { Handle } from '#types/matches.types.js';
 import PublicationViewRoute, {
   ErrorBoundary as PublicationErrorBoundary,

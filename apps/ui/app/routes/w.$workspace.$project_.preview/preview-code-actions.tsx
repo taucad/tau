@@ -1,11 +1,11 @@
 import { Download, Ellipsis, FileCode } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 
 type PreviewCodeActionsProps = {
   readonly onEdit: () => void;

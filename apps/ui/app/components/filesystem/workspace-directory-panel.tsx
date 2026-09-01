@@ -17,8 +17,8 @@
  */
 
 import { FolderOpen, AlertTriangle, RefreshCw, Unplug } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { workspaceDirectoryActions, workspaceDirectoryCopy } from '#constants/workspace-directory-copy.constants.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
 

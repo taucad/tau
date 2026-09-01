@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { clamp } from '#utils/number.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 const dragThresholdPx = 3;
 

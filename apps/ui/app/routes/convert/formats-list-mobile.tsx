@@ -1,5 +1,5 @@
 import type { FileExtension } from '@taucad/types';
-import { Badge } from '#components/ui/badge.js';
+import { Badge } from '@taucad/ui/components/badge';
 
 type FormatsListMobileProps = {
   readonly title: string;

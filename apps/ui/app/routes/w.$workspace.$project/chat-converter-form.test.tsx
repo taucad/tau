@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { toJSONSchema } from 'zod';
 import { describe, expect, it, vi } from 'vitest';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ExportSchemaForm } from '#routes/w.$workspace.$project/chat-converter.js';
 
 const schema = toJSONSchema(imageEdgeSchemas.png, { target: 'draft-7', io: 'input' }) as JSONSchema7;

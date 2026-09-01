@@ -3,8 +3,8 @@ import type { ListedApiKey } from '@better-auth-ui/react';
 import { Key, X } from 'lucide-react';
 import { useState } from 'react';
 
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent } from '#components/ui/card.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent } from '@taucad/ui/components/card';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 import { DeleteApiKeyDialog } from '#components/auth/api-key/delete-api-key-dialog.js';
 

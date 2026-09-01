@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -13,7 +13,7 @@ import {
   SidebarMenuSubItem,
 } from '#components/ui/sidebar.js';
 import { Loader } from '#components/ui/loader.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export function NavMain({
   items,

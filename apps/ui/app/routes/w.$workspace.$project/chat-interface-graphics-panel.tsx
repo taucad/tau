@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import { cn } from '#utils/ui.utils.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { cn } from '@taucad/ui/utils/cn';
 
 type GraphicsPanelProps = {
   readonly title: string;

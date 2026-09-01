@@ -84,7 +84,7 @@ function createSysmlLanguageConfiguration(monaco: typeof Monaco): Monaco.languag
 /**
  * Register SysML v2 textual notation with Monaco (KerML `.kerml` files share the same highlighter id).
  *
- * Syntax highlighting is supplied via Shiki precompiled grammar ({@link sysml-shiki-precompiled.ts}).
+ * Syntax highlighting is supplied via Shiki precompiled grammar (`@taucad/grammars/sysml`).
  *
  * @see https://microsoft.github.io/monaco-editor/playground.html#extending-language-services-custom-languages
  */

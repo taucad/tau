@@ -2,7 +2,7 @@ import { Menu, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, createContext, useContext } from 'react';
 import { Fragment } from 'react/jsx-runtime';
 import { useNavigate } from 'react-router';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import {
   CommandDialog,
   CommandInput,
@@ -10,13 +10,13 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
-} from '#components/ui/command.js';
+} from '@taucad/ui/components/command';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { menuItemLayoutClass } from '#components/ui/menu.variants.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { menuItemLayoutClass } from '@taucad/ui/components/menu.variants';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { ProjectNavigationCommandItems } from '#components/nav/project-navigation-command-items.js';
 import { SidebarMenuButton } from '#components/ui/sidebar.js';

@@ -3,10 +3,10 @@ import { RgbColorPicker } from 'react-colorful';
 import type { RgbColor } from 'react-colorful';
 import { parse, converter } from 'culori';
 import { Check, X } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
-import { cn } from '#utils/ui.utils.js';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
+import { cn } from '@taucad/ui/utils/cn';
 
 type StringColorPickerProperties = {
   readonly value: string;

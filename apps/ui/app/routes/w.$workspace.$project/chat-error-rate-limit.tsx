@@ -1,8 +1,8 @@
 import { memo } from 'react';
 import type React from 'react';
 import { Clock, RefreshCcw } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { useChatActions } from '#hooks/use-chat.js';
 
 export const ChatErrorRateLimit = memo(function ({ className }: { readonly className?: string }): React.JSX.Element {

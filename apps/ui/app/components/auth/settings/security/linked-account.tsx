@@ -6,11 +6,11 @@ import type { Account, SocialProvider } from 'better-auth';
 import { Link2, Link2Off, Plug } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent } from '#components/ui/card.js';
-import { Skeleton } from '#components/ui/skeleton.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent } from '@taucad/ui/components/card';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '#components/ui/spinner.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type LinkedAccountProps = {
   account?: Account;

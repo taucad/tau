@@ -7,8 +7,8 @@ import type { ModelComponentActionMenuData } from '#components/geometry/cad/mode
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
 import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { FileSelector } from '#components/files/file-selector.js';
-import { Button } from '#components/ui/button.js';
-import { popoverSurfaceVariants } from '#components/ui/popover.variants.js';
+import { Button } from '@taucad/ui/components/button';
+import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
@@ -27,7 +27,7 @@ import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-co
 import { ChatInterfaceGraphics } from '#routes/w.$workspace.$project/chat-interface-graphics.js';
 import { ChatInterfaceStatus } from '#routes/w.$workspace.$project/chat-interface-status.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
@@ -568,7 +568,7 @@ const ViewerContent = memo(function ({
             type='button'
             variant='outline'
             size='sm'
-            className='shadow-lg pointer-events-auto'
+            className='pointer-events-auto shadow-lg'
             onClick={handleReopenRenderer}
           >
             <PlayCircle />

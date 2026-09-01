@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import type React from 'react';
 import type { SocialProvider } from 'better-auth/social-providers';
 
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ProviderButton } from '#components/auth/provider-button.js';
 
 export type ProviderButtonsProps = {

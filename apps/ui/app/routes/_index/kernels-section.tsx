@@ -1,7 +1,7 @@
 import { kernelConfigurations } from '@taucad/types/constants';
-import { Badge } from '#components/ui/badge.js';
+import { Badge } from '@taucad/ui/components/badge';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { KernelTierBadge } from '#components/tier-badge.js';
 
 export function KernelsSection(): React.JSX.Element {

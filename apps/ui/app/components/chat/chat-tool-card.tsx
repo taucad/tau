@@ -2,10 +2,10 @@ import * as React from 'react';
 import { createContext, useContext, useState, useCallback } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ChevronRight, LoaderCircle } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
-import { Button } from '#components/ui/button.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { Button } from '@taucad/ui/components/button';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useCookie } from '#hooks/use-cookie.js';
 import type { CookieName } from '#constants/cookie.constants.js';
 

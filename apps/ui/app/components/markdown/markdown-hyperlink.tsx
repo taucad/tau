@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import { Link, useLocation } from 'react-router';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ExternalLink } from '#components/external-link.js';
 
 /**
@@ -19,7 +19,7 @@ const urlSchemeRegex = /^(?:[a-z][\d+.a-z-]*:|#)/i;
  * visible while the address bar shows the new URL. Forcing a full document
  * navigation lets the browser render the loader's text/* response directly.
  */
-const resourceRouteExtensions = new Set(['.txt', '.mdx', '.webmanifest']);
+const resourceRouteExtensions = new Set(['.txt', '.webmanifest']);
 
 /**
  * Returns true when `href` resolves to a path whose final segment ends in a
@@ -41,8 +41,8 @@ export function isResourceRouteHref(href: string): boolean {
  * RFC 3986 / WHATWG URL resolution -- the same semantics the browser would
  * apply to an `<a href>` tag. React Router's `<Link relative='path'>` quirk
  * (only pops a single segment per `..`) is intentionally bypassed: a link
- * `../foo` from `/docs/guides/live-rendering` resolves to `/docs/foo`, not
- * `/docs/guides/foo`. Absolute, anchor-only, and scheme links are returned
+ * `../foo` from `/guides/live-rendering` resolves to `/foo`, not
+ * `/guides/foo`. Absolute, anchor-only, and scheme links are returned
  * unchanged.
  */
 export function resolveRelativeHref(href: string, locationPathname: string): string {

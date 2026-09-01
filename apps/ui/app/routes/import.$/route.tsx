@@ -10,9 +10,9 @@ import type { Handle } from '#types/matches.types.js';
 import { importGitHubMachine } from '#machines/import-github.machine.js';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { Loader } from '#components/ui/loader.js';
-import { Progress } from '#components/ui/progress.js';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
+import { Progress } from '@taucad/ui/components/progress';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { formatFileSize } from '#components/geometry/converter/converter-utils.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -38,7 +38,17 @@ export const handle: Handle = {
 };
 
 export function meta({ loaderData }: Route.MetaArgs): MetaDescriptor[] {
-  const repo = `${loaderData.owner}/${loaderData.repo} ${loaderData.ref === 'main' ? '' : `@ ${loaderData.ref}`}`;
+  /*
+   * React Router types `loaderData` as always present, but a `clientLoader`
+   * route has none during the server render — `ServerRouter` deletes the entry
+   * for any route that must hydrate its own data. Widen and guard.
+   */
+  const data = loaderData as GitHubRepoInfo | undefined;
+  if (!data) {
+    return [{ title: 'Import from GitHub into Tau' }];
+  }
+
+  const repo = `${data.owner}/${data.repo} ${data.ref === 'main' ? '' : `@ ${data.ref}`}`;
   const title = `Import ${repo} from GitHub into Tau`;
   const description = `Get started with ${repo} by importing it into Tau.`;
   return [{ title, description }];
@@ -50,9 +60,12 @@ export function meta({ loaderData }: Route.MetaArgs): MetaDescriptor[] {
  * Handles path-based GitHub URLs like:
  * - /import/https://github.com/owner/repo
  * - /import/https://github.com/owner/repo?ref=main&main=file.scad
+ *
+ * A `clientLoader`, not a `loader`: this is pure URL parsing with no I/O, and
+ * React Router SPA mode (`ui:build:desktop`) bans server `loader` exports.
  */
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- inferred type
-export function loader({ request, params }: Route.LoaderArgs) {
+export function clientLoader({ request, params }: Route.ClientLoaderArgs) {
   const url = new URL(request.url);
   const splatPath = (params as { '*'?: string })['*'] ?? '';
 
@@ -89,7 +102,7 @@ type ImportMode = 'github' | 'disk';
 
 // oxlint-disable-next-line complexity -- TODO: consider refactoring.
 export default function ImportRoute(): React.JSX.Element {
-  const { owner, repo, ref, mainFile } = useLoaderData<typeof loader>();
+  const { owner, repo, ref, mainFile } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const projectManager = useProjectManager();
   const presentLocationError = useProjectCreationLocationError();

@@ -3,8 +3,8 @@
 import { useAuth, useSession } from '@better-auth-ui/react';
 import type { User } from 'better-auth';
 
-import { Skeleton } from '#components/ui/skeleton.js';
-import { cn } from '#utils/ui.utils.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { cn } from '@taucad/ui/utils/cn';
 import { UserAvatar } from '#components/auth/user/user-avatar.js';
 
 export type UserViewProps = {

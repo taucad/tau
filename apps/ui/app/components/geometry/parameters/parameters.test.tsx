@@ -5,7 +5,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 
 // Test wrapper component that provides necessary providers

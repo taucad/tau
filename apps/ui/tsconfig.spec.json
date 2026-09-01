@@ -8,9 +8,14 @@
     "target": "ES2024",
     "paths": {
       "package.json": ["./package.json"],
-      "#*": ["./app/*"],
-      "#scripts/*": ["./scripts/*"],
-      "fumadocs-mdx:collections/*": ["../../node_modules/.cache/fumadocs/apps/ui/*"]
+      // `#*` is greedy across the whole program: a workspace package compiled
+      // from source here resolves its own `#index.js` against `packages/ui`
+      // first, which is not its barrel. Only `@taucad/runtime` spells that
+      // specifier in this program (its electron modules, reached from the
+      // desktop kernel preset), so it is named exactly rather than by pattern.
+      "#index.js": ["../../packages/runtime/src/index.ts"],
+      "#*": ["../../packages/ui/src/*", "./app/*"],
+      "#scripts/*": ["./scripts/*"]
     },
     "outDir": "./out-tsc/spec",
     "rootDirs": [".", "./.react-router/types"],
@@ -35,7 +40,6 @@
     "scripts/**/*.ts",
     "scripts/**/*.mts",
     "vite-environment.d.ts",
-    "../../node_modules/.cache/fumadocs/apps/ui/**/*", // Fumadocs collections
     "package.json"
   ]
 }

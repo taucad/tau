@@ -5,7 +5,7 @@ import { DirectoryLink } from '#components/files/directory-link.js';
 
 const mobileState = vi.hoisted(() => ({ isMobile: false }));
 
-vi.mock('#hooks/use-mobile.js', () => ({
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: () => mobileState.isMobile,
 }));
 

@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { GitFork } from 'lucide-react';
 import { parameterEntryPath } from '@taucad/types';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '#components/ui/dialog.js';
+} from '@taucad/ui/components/dialog';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';

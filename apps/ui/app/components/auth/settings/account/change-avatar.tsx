@@ -7,15 +7,15 @@ import { useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { toast } from 'sonner';
 import { UserAvatar } from '#components/auth/user/user-avatar.js';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
-import { Field } from '#components/ui/field.js';
-import { Label } from '#components/ui/label.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { Field } from '@taucad/ui/components/field';
+import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '#components/ui/spinner.js';
 
 export type ChangeAvatarProps = {

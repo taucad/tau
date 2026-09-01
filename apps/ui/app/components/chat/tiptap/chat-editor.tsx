@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { EditorContent } from '@tiptap/react';
 import type { Editor } from '@tiptap/core';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ContextSuggestionDropdown } from '#components/chat/tiptap/context-suggestion.js';
 import { SlashCommandDropdown } from '#components/chat/tiptap/slash-command-suggestion.js';
 import type {

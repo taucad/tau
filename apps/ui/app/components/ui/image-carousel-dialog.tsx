@@ -1,11 +1,17 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { Download, X } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '#components/ui/carousel.js';
-import type { CarouselApi } from '#components/ui/carousel.js';
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '#components/ui/dialog.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from '@taucad/ui/components/carousel';
+import type { CarouselApi } from '@taucad/ui/components/carousel';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ImageCarouselDialogItem = {
   readonly id: string;

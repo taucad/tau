@@ -1,5 +1,5 @@
 import { Link, NavLink } from 'react-router';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { metaConfig } from '#constants/meta.constants.js';
@@ -7,7 +7,7 @@ import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { GithubStarButton } from '#components/marketing/github-star-button.js';
 
 const navLinks = [
-  { label: 'Docs', to: '/docs' },
+  { label: 'Docs', to: 'https://docs.tau.new' },
   { label: 'Community', to: '/community' },
 ];
 

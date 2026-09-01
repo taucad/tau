@@ -26,7 +26,7 @@ const editorRef = {
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef, mainEntryPath: 'main.ts' }),
 }));
-vi.mock('#hooks/use-mobile.js', () => ({ useIsMobile: () => state.isMobile }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => state.isMobile }));
 vi.mock('#hooks/use-keyboard.js', () => ({ useKeybinding: vi.fn(() => ({ formattedKeyCombination: '' })) }));
 
 const { ProjectWorkspaceProvider, resolveCompactAuxiliary, useProjectWorkspace } =

@@ -1,10 +1,10 @@
 import React, { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '#components/ui/chart.js';
-import type { ChartConfig } from '#components/ui/chart.js';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#components/ui/card.js';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@taucad/ui/components/chart';
+import type { ChartConfig } from '@taucad/ui/components/chart';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { formatCurrency } from '#utils/currency.utils.js';
-import type { UsageRecord } from '#hooks/use-all-usage.js';
+import type { UsageRecord } from '@taucad/billing/usage';
 import type { TimeBucket } from '#routes/usage/time-bucket.utils.js';
 import { formatBucketLabel, getBucketInterval, getBucketKey, roundToBucket } from '#routes/usage/time-bucket.utils.js';
 

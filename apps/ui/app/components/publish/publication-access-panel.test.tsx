@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactElement } from 'react';
 import { PublicationAccessPanel } from '#components/publish/publication-access-panel.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();

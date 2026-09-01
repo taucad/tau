@@ -7,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { useChatContext } from '#hooks/use-chat.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';

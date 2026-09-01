@@ -5,7 +5,7 @@ import { ParametersString } from '#components/geometry/parameters/parameters-str
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { getDescriptor } from '#constants/project-parameters.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
-import { Input } from '#components/ui/input.js';
+import { Input } from '@taucad/ui/components/input';
 
 export function ParametersWidget(
   props: WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext>,

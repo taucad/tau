@@ -1,6 +1,14 @@
 import { useMemo } from 'react';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
-import { TableHeader, TableRow, TableHead, TableBody, TableCell, TableFooter, Table } from '#components/ui/table.js';
+import {
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+  TableFooter,
+  Table,
+} from '@taucad/ui/components/table';
 import { formatCurrency } from '#utils/currency.utils.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 import { useChats } from '#hooks/use-chats.js';

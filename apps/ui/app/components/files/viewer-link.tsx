@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { Box } from 'lucide-react';
 import { Slot as SlotPrimitive } from 'radix-ui';
 import { useProject } from '#hooks/use-project.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ViewerLinkProps = {
   readonly path: string;

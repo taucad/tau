@@ -4,7 +4,7 @@ import { kernelConfigurations } from '@taucad/types/constants';
 import type { KernelId } from '@taucad/types/constants';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type SuggestedRepository = {
   owner: string;
@@ -104,8 +104,7 @@ function RepositoryAvatar({ owner, repo }: RepositoryAvatarProperties): React.JS
     setImageState('error');
   }, []);
 
-  // Use proxied avatar URL through our API
-  const avatarUrl = `/api/github-avatar?user=${encodeURIComponent(owner)}&size=64`;
+  const avatarUrl = `https://github.com/${encodeURIComponent(owner)}.png?size=64`;
 
   // Show GitHub icon fallback when error
   if (imageState === 'error') {

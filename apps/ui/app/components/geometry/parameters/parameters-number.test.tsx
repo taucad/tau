@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { LengthSymbol } from '@taucad/units';
 import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 
 function createUnits(sourceSymbol: LengthSymbol, displaySymbol: LengthSymbol): Units {

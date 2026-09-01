@@ -7,11 +7,11 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
-import { Button } from '#components/ui/button.js';
+} from '@taucad/ui/components/dropdown-menu';
+import { Button } from '@taucad/ui/components/button';
 import type { ProjectActions } from '#components/project-library/project-library.js';
-import { Popover, PopoverContent } from '#components/ui/popover.js';
-import { Input } from '#components/ui/input.js';
+import { Popover, PopoverContent } from '@taucad/ui/components/popover';
+import { Input } from '@taucad/ui/components/input';
 
 type ProjectActionDropdownProps = {
   readonly project: ProjectListItem;

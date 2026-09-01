@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { Clock, Filter, RefreshCw, X } from 'lucide-react';
-import { Badge } from '#components/ui/badge.js';
-import { Button } from '#components/ui/button.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { Button } from '@taucad/ui/components/button';
 import { DateRangePicker } from '#components/ui/date-range-picker.js';
 import {
   DropdownMenu,
@@ -11,9 +11,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { Loader } from '#components/ui/loader.js';
-import { ToggleGroup, ToggleGroupItem } from '#components/ui/toggle-group.js';
+import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { useAllUsage } from '#hooks/use-all-usage.js';
 import { UsageBarChart } from '#routes/usage/charts/usage-bar-chart.js';
 import { UsageLineChart } from '#routes/usage/charts/usage-line-chart.js';

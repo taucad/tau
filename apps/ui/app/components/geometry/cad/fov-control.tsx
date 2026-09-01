@@ -1,8 +1,8 @@
 import { Info } from 'lucide-react';
-import { Slider } from '#components/ui/slider.js';
-import { buttonVariants } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Slider } from '@taucad/ui/components/slider';
+import { buttonVariants } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useModifiers } from '#hooks/use-keyboard.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';

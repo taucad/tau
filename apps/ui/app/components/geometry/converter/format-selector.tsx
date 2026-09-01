@@ -1,6 +1,6 @@
-import { Checkbox } from '#components/ui/checkbox.js';
-import { Label } from '#components/ui/label.js';
-import { Button } from '#components/ui/button.js';
+import { Checkbox } from '@taucad/ui/components/checkbox';
+import { Label } from '@taucad/ui/components/label';
+import { Button } from '@taucad/ui/components/button';
 import { formatDisplayName } from '#components/geometry/converter/converter-utils.js';
 import { converterExportFormats, type ConverterExportFormat } from '#routes/convert/converter-runtime.definition.js';
 

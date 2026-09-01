@@ -8,23 +8,14 @@ import type { Config } from '@react-router/dev/config';
  *
  * 4 matches the React Router docs example
  * (https://reactrouter.com/how-to/pre-rendering#concurrency) and is a safe
- * ceiling on a 22 MB SSR Function bundle: enough parallelism to cut the
- * ~40-page prerender pass to a few seconds, low enough to not blow memory in
- * CI runners. Bump cautiously — N > 8 has produced OOMs in similar setups.
+ * ceiling on a 22 MB SSR Function bundle: enough parallelism to shorten the
+ * prerender pass, low enough to not blow memory in CI runners. Bump cautiously
+ * — N > 8 has produced OOMs in similar setups.
  */
 const prerenderConcurrency = 4;
 
 /**
- * Pre-render docs URLs by walking the Fumadocs MDX content tree directly
- * with `fumadocs-core/source` helpers (canonical Fumadocs + React Router wiring,
- * see https://www.fumadocs.dev/docs/manual-installation/react-router).
- *
- * `/llms.mdx/*` is intentionally NOT prerendered: nested URL segments and the
- * parent route would both write under `build/client/llms.mdx/...`, causing
- * `EISDIR` (file vs directory collision). Those routes rely on the
- * `Netlify-CDN-Cache-Control` headers on the SSR loader instead.
- *
- * `getStaticPaths()` is NOT used: most static routes here (`/projects`,
+ * `getStaticPaths()` is not used: most routes here (`/projects`,
  * `/files`, `/usage`, `/settings_`, `/health/*`, `/action/set-theme`,
  * `/api/*`, `/_index`) are auth-gated, runtime-only, or proxy endpoints that
  * would fail prerender. Each safelisted path below is one that genuinely has

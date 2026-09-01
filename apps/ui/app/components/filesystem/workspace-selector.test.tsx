@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ProjectCreationLocationState } from '#hooks/use-project-creation-location.js';
 
 const homeOnly: ProjectCreationLocationState = {

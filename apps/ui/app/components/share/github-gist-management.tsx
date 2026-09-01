@@ -14,14 +14,14 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '#components/ui/alert-dialog.js';
-import { Button } from '#components/ui/button.js';
+} from '@taucad/ui/components/alert-dialog';
+import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import {
   connectGithubGist,

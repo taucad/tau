@@ -1,6 +1,6 @@
 import { Link } from 'react-router';
 import { ArrowRight, FileCode, Package, Lock } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { formatKernelList } from '#utils/kernel.utils.js';
 

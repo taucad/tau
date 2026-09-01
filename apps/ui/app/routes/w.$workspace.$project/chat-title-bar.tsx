@@ -12,9 +12,9 @@ import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { projectChatUrl } from '#utils/project-url.utils.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { FloatingPanelButtonGroup, FloatingPanelContentHeaderActions } from '#components/ui/floating-panel.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 const newChatKeyCombination = {
   key: 'c',

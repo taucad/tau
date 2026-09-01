@@ -1,5 +1,5 @@
 import React from 'react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type SvgPathIconProps = Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> & {
   /** URL string resolved via Vite (e.g., import iconUrl from './icon.svg?url') */

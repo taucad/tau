@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
 import { Camera, Check } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { DropdownMenuItem } from '#components/ui/dropdown-menu.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { DropdownMenuItem } from '@taucad/ui/components/dropdown-menu';
 import { useGraphics } from '#hooks/use-graphics.js';
 import { useCad } from '#hooks/use-cad.js';
 import { useChatActions } from '#hooks/use-chat.js';

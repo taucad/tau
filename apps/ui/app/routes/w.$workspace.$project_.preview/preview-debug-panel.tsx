@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
-import { Separator } from '#components/ui/separator.js';
+import { Separator } from '@taucad/ui/components/separator';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { inspectGlb } from '#utils/inspect-glb.utils.js';
 import type { GltfInspection } from '#utils/inspect-glb.utils.js';

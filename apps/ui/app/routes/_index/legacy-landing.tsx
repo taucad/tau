@@ -1,5 +1,5 @@
 import { Link } from 'react-router';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { CommunityProjectGrid } from '#components/project-grid.js';
 import { sampleProjects } from '#constants/project-examples.js';
 import { LazySection } from '#components/ui/lazy-section.js';

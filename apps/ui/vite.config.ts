@@ -8,11 +8,8 @@ import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
-import mdx from 'fumadocs-mdx/vite';
 import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
-// oxlint-disable-next-line no-restricted-imports, import/extensions -- allowed for Fumadocs; .js for ESM
-import * as MdxConfig from './app/lib/fumadocs/source.config.js';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
 
@@ -56,7 +53,13 @@ const createUiSourceAliasPlugin = (): Plugin => ({
     }
 
     const uiRoot = `${path.resolve(__dirname)}${path.sep}`;
-    if (importer !== undefined && !path.resolve(importer).startsWith(uiRoot)) {
+    const designSystemRoot = `${path.resolve(__dirname, '../../packages/ui/src')}${path.sep}`;
+    const resolvedImporter = importer === undefined ? undefined : path.resolve(importer);
+    if (
+      resolvedImporter !== undefined &&
+      !resolvedImporter.startsWith(uiRoot) &&
+      !resolvedImporter.startsWith(designSystemRoot)
+    ) {
       return null;
     }
 
@@ -65,10 +68,13 @@ const createUiSourceAliasPlugin = (): Plugin => ({
       return null;
     }
 
-    const appPath = path.resolve(__dirname, 'app', specifier.slice(1));
-    const candidatePaths = [appPath];
+    const sourceRoot = resolvedImporter?.startsWith(designSystemRoot)
+      ? designSystemRoot
+      : path.resolve(__dirname, 'app');
+    const sourcePath = path.resolve(sourceRoot, specifier.slice(1));
+    const candidatePaths = [sourcePath];
     if (specifier.endsWith('.js')) {
-      const sourceBasePath = appPath.slice(0, -'.js'.length);
+      const sourceBasePath = sourcePath.slice(0, -'.js'.length);
       candidatePaths.push(
         `${sourceBasePath}.ts`,
         `${sourceBasePath}.tsx`,
@@ -128,12 +134,6 @@ export default defineConfig(({ mode }) => {
 
       // Paths - use nxViteTsPaths only (tsconfigPaths is redundant in Nx workspaces)
       nxViteTsPaths(),
-
-      // Fumadocs
-      mdx(MdxConfig, {
-        configPath: path.resolve(__dirname, './app/lib/fumadocs/source.config.ts'),
-        outDir: path.resolve(__dirname, '../../node_modules/.cache/fumadocs/apps/ui'),
-      }), // Fumadocs
 
       // Browser DevTools JSON plugin.
       devtoolsJson(),

@@ -12,7 +12,7 @@ import {
   FloatingPanelContentHeaderActions,
   FloatingPanelContentTitle,
 } from '#components/ui/floating-panel.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { SearchInput } from '#components/search-input.js';
 import {
   PaneviewHeader,

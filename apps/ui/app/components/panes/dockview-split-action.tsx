@@ -1,7 +1,7 @@
 import type { DockviewGroupPanel, IDockviewHeaderActionsProps } from 'dockview-react';
 import { Columns2 } from 'lucide-react';
 import { PiMouseLeftClick, PiMouseRightClick } from 'react-icons/pi';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 
 /**

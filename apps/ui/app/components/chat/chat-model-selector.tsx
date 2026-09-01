@@ -1,19 +1,18 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Check, Plus } from 'lucide-react';
-import type { Model } from '@taucad/chat';
+// oxlint-disable-next-line import/consistent-type-specifier-style -- A separate type import trips import/no-duplicates.
+import { useModels, type Model, type ResolvedModel } from '#hooks/use-models.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { Badge } from '#components/ui/badge.js';
-import { menuItemVariants } from '#components/ui/menu.variants.js';
+import { Badge } from '@taucad/ui/components/badge';
+import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
-import { useModels } from '#hooks/use-models.js';
-import type { ResolvedModel } from '#hooks/use-models.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export const openModelSelectorKeyCombination = {
   key: '/',
@@ -148,12 +147,10 @@ export const ChatModelSelector = memo(function ({
                   {formatContextWindow(item.details.contextWindow)} context window
                 </p>
               ) : null}
-              {item.details.cost ? (
-                <p className='text-xs text-muted-foreground'>
-                  Cost: {formatCost(item.details.cost.inputTokens)} input / {formatCost(item.details.cost.outputTokens)}{' '}
-                  output per 1M tokens
-                </p>
-              ) : null}
+              <p className='text-xs text-muted-foreground'>
+                Cost: {formatCost(item.details.cost.inputTokens)} input / {formatCost(item.details.cost.outputTokens)}{' '}
+                output per 1M tokens
+              </p>
             </div>
           </HoverCardContent>
         </HoverCard>

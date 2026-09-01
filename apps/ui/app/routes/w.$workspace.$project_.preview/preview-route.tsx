@@ -5,12 +5,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { AlertTriangle } from 'lucide-react';
 import type { ProjectManifest } from '@taucad/types';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { Loader } from '#components/ui/loader.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
 import { CadPreviewProvider } from '#hooks/use-cad-preview.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useIsMobile } from '#hooks/use-mobile.js';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { PreviewDesktop } from '#routes/w.$workspace.$project_.preview/preview-desktop.js';
 import { PreviewMobile } from '#routes/w.$workspace.$project_.preview/preview-mobile.js';
 import {

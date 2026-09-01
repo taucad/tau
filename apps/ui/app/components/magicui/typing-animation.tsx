@@ -1,7 +1,7 @@
 import type { MotionProps } from 'motion/react';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type TypingAnimationProps = {
   readonly children: string;

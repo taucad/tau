@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { Hash } from 'lucide-react';
 import { Angle } from '#components/icons/angle.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { cn } from '#utils/ui.utils.js';
-import { Input } from '#components/ui/input.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { cn } from '@taucad/ui/utils/cn';
+import { Input } from '@taucad/ui/components/input';
 import type { MeasurementDescriptor } from '#constants/project-parameters.js';
 
 const baseIndicatorClass = 'flex h-6 w-6 items-center justify-center text-muted-foreground/60 select-none text-[11px]';

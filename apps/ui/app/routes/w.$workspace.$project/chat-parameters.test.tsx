@@ -231,7 +231,7 @@ vi.mock('@taucad/utils/schema', () => ({
     Boolean(schema && typeof schema === 'object' && 'properties' in schema),
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
   TooltipContent: () => null,
   TooltipTrigger: ({ children }: { children: React.ReactNode }): React.ReactNode => children,
@@ -257,7 +257,7 @@ vi.mock('#components/files/export-selector.js', () => ({
   ExportSelector: () => <div data-testid='export-selector'>ExportSelector</div>,
 }));
 
-vi.mock('#components/ui/context-menu.js', () => ({
+vi.mock('@taucad/ui/components/context-menu', () => ({
   ContextMenu: ({ children }: { children: React.ReactNode }) => <div data-testid='context-menu'>{children}</div>,
   ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
   ContextMenuContent: ({ children }: { children: React.ReactNode }) => (
@@ -299,7 +299,7 @@ vi.mock('#components/ui/context-menu.js', () => ({
   ),
 }));
 
-vi.mock('#components/ui/dropdown-menu.js', () => ({
+vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (

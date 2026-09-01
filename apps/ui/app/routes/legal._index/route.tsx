@@ -1,6 +1,6 @@
 import { ArrowRight } from 'lucide-react';
 import { Link } from 'react-router';
-import { Card, CardDescription, CardTitle } from '#components/ui/card.js';
+import { Card, CardDescription, CardTitle } from '@taucad/ui/components/card';
 
 const legalPages = [
   {

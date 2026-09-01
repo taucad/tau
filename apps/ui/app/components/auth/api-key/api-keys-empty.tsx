@@ -3,8 +3,8 @@
 import { useAuthPlugin } from '@better-auth-ui/react';
 import { Key } from 'lucide-react';
 
-import { Button } from '#components/ui/button.js';
-import { Card, CardContent } from '#components/ui/card.js';
+import { Button } from '@taucad/ui/components/button';
+import { Card, CardContent } from '@taucad/ui/components/card';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 
 export type ApiKeysEmptyProps = {

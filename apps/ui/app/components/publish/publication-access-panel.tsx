@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Loader2, Trash2 } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { CopyButton } from '#components/copy-button.js';
 import { toast } from '#components/ui/sonner.js';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@taucad/ui/components/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { PublicationEmailTagsField, getPublicationEmailTagsError } from '#components/publish/publication-email-tags.js';
 
 export type PublicationAccessGrant = {

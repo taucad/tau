@@ -10,11 +10,11 @@ import {
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbSeparator,
-} from '#components/ui/breadcrumb.js';
-import { Separator } from '#components/ui/separator.js';
+} from '@taucad/ui/components/breadcrumb';
+import { Separator } from '@taucad/ui/components/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '#components/ui/sidebar.js';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { Compose } from '#components/ui/utils/compose.js';
 import { PageFooter } from '#components/layout/page-footer.js';
 import { SidebarOffset } from '#components/layout/sidebar-offset.js';

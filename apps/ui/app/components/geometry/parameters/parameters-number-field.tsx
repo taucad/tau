@@ -2,8 +2,8 @@ import * as React from 'react';
 import { Hash } from 'lucide-react';
 import { Angle } from '#components/icons/angle.js';
 import { SliderInput } from '#components/ui/slider-input.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { cn } from '#utils/ui.utils.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { cn } from '@taucad/ui/utils/cn';
 import type { MeasurementDescriptor } from '#constants/project-parameters.js';
 
 type ParametersNumberFieldProperties = {

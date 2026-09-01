@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type HighlightTextProperties = {
   readonly text: string;

@@ -2,7 +2,7 @@ import { memo, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
 
 type ChatTextareaImageStripSize = 'desktop' | 'mobile';

@@ -1,10 +1,10 @@
 import { ArrowRight } from 'lucide-react';
 import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { Button } from '#components/ui/button.js';
-import { Avatar, AvatarFallback, AvatarImage } from '#components/ui/avatar.js';
-import { CardHeader, CardTitle, CardFooter } from '#components/ui/card.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Button } from '@taucad/ui/components/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@taucad/ui/components/avatar';
+import { CardHeader, CardTitle, CardFooter } from '@taucad/ui/components/card';
 import { Loader } from '#components/ui/loader.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';

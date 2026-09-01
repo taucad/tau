@@ -7,16 +7,19 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSliderItem,
   ContextMenuTrigger,
-} from '#components/ui/context-menu.js';
+} from '@taucad/ui/components/context-menu';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSliderItem,
   DropdownMenuTrigger,
-} from '#components/ui/dropdown-menu.js';
+} from '@taucad/ui/components/dropdown-menu';
+import {
+  ContextMenuSliderItem,
+  DropdownMenuSliderItem,
+  preventMenuSliderEscapeDismissal,
+} from '#components/ui/menu-slider-item.js';
 
 const fireSliderPointerEvent = (
   element: HTMLElement,
@@ -34,7 +37,7 @@ const DropdownHarness = ({ onValueChange }: { readonly onValueChange: (value: nu
   return (
     <DropdownMenu>
       <DropdownMenuTrigger>Open</DropdownMenuTrigger>
-      <DropdownMenuContent>
+      <DropdownMenuContent onEscapeKeyDown={preventMenuSliderEscapeDismissal}>
         <DropdownMenuSliderItem
           value={value}
           trailingAdornment='%'
@@ -58,7 +61,7 @@ const ContextHarness = ({ onValueChange }: { readonly onValueChange: (value: num
   return (
     <ContextMenu>
       <ContextMenuTrigger>Target</ContextMenuTrigger>
-      <ContextMenuContent>
+      <ContextMenuContent onEscapeKeyDown={preventMenuSliderEscapeDismissal}>
         <ContextMenuSliderItem
           value={value}
           trailingAdornment='%'

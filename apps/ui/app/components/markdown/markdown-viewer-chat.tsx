@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import type { ComponentProps } from 'react';
 import type { ControlsConfig, StreamdownProps } from 'streamdown';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { defaultMarkdownControls, MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { rehypeAtReferences } from '#components/markdown/rehype-at-references.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';

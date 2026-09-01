@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import { X } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 
 type DockviewEmptyActionProps = Omit<ComponentProps<typeof Button>, 'variant'>;
 

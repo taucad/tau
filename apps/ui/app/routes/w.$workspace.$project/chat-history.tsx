@@ -26,7 +26,7 @@ import {
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 import { useFileManager } from '#hooks/use-file-manager.js';

@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowRight } from 'lucide-react';
 import { Slot as SlotPrimitive } from 'radix-ui';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type InteractiveHoverButtonProps = {
   readonly asChild?: boolean;

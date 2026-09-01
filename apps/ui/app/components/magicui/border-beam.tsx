@@ -1,6 +1,6 @@
 import type { MotionStyle, Transition } from 'motion/react';
 import { motion } from 'motion/react';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type BorderBeamProps = {
   /**

@@ -7,9 +7,9 @@ import { File as FileIcon, Folder, MessageSquare, Camera, AlertCircle, ChevronRi
 import { Virtuoso } from 'react-virtuoso';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
-import { cn } from '#utils/ui.utils.js';
-import { Separator } from '#components/ui/separator.js';
-import { menuContentVariants, menuItemVariants } from '#components/ui/menu.variants.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Separator } from '@taucad/ui/components/separator';
+import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/menu.variants';
 import {
   getRecentFiles,
   getCategories,

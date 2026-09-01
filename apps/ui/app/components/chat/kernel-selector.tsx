@@ -1,11 +1,14 @@
 import type { KernelProvider } from '@taucad/runtime';
 import { kernelConfigurations } from '@taucad/types/constants';
-import { Button } from '#components/ui/button.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
-import { Badge } from '#components/ui/badge.js';
+import { isKernelAllowed } from '@taucad/billing';
+import { Button } from '@taucad/ui/components/button';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
+import { Badge } from '@taucad/ui/components/badge';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { KernelTierBadge } from '#components/tier-badge.js';
+import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
+import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 export type KernelSelectorProperties = {
   readonly selectedKernel: KernelProvider;
@@ -18,6 +21,8 @@ export function KernelSelector({
   onKernelChange,
   onClose,
 }: KernelSelectorProperties): React.JSX.Element {
+  const entitlements = useEntitlements();
+
   return (
     <div className="flex flex-wrap gap-3 max-md:-mx-4 max-md:snap-x max-md:snap-mandatory max-md:scroll-px-4 max-md:[scrollbar-width:none] max-md:flex-nowrap max-md:overflow-x-auto max-md:pb-2 max-md:pl-4 max-md:[-webkit-overflow-scrolling:touch] max-md:after:block max-md:after:w-1 max-md:after:shrink-0 max-md:after:content-[''] max-md:[&::-webkit-scrollbar]:hidden">
       {kernelConfigurations.map((option) => (
@@ -33,6 +38,12 @@ export function KernelSelector({
                   'border-ring bg-primary/5 text-primary hover:border-ring hover:bg-primary/10 dark:border-ring',
               )}
               onClick={() => {
+                // T3: Pro kernels route to the upgrade surface for un-entitled
+                // users (the websocket gate enforces server-side regardless).
+                if (!isKernelAllowed(option.id, entitlements.tier)) {
+                  openSettingsDialog('billing');
+                  return;
+                }
                 onKernelChange(option.id);
                 onClose?.();
               }}

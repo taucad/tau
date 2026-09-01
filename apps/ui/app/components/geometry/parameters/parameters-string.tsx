@@ -1,6 +1,6 @@
-import { Input } from '#components/ui/input.js';
+import { Input } from '@taucad/ui/components/input';
 import { isValidColor, StringColorPicker } from '#components/ui/string-color-picker.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type ParametersStringProps = {
   readonly value: string;

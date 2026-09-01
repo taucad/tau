@@ -1,6 +1,6 @@
 import { TriangleAlert, ChevronRight } from 'lucide-react';
 import type { UIMessagePart } from 'ai';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '#components/ui/collapsible.js';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { CodeBlockContent, Pre } from '#components/code/code-block.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';

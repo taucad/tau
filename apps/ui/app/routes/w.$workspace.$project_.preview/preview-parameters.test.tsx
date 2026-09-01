@@ -30,7 +30,7 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
   ),
 }));
 
-vi.mock('#components/ui/tooltip.js', () => ({
+vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }): React.ReactElement => children as React.ReactElement,
   TooltipContent: () => null,
   TooltipTrigger: ({ children }: { children: React.ReactNode }): React.ReactElement => children as React.ReactElement,

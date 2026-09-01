@@ -1,4 +1,4 @@
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { stringToColor } from '#utils/color.utils.js';
 
 export function Format3D(properties: React.SVGProps<SVGSVGElement> & { extension: string }): React.JSX.Element {

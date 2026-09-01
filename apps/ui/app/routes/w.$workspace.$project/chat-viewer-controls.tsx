@@ -13,7 +13,7 @@ import {
   MeasureOverflowControl,
   ResetCameraOverflowControl,
 } from '#components/geometry/cad/viewer-overflow-controls.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { useToolbarOverflow } from '#hooks/use-toolbar-overflow.js';
 import type { ToolbarItemConfig } from '#hooks/use-toolbar-overflow.js';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';

@@ -1,7 +1,7 @@
 import { FlipHorizontal } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { cn } from '@taucad/ui/utils/cn';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 
 export function SectionViewControl(): React.JSX.Element {

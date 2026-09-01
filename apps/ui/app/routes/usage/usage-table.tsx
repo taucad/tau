@@ -7,8 +7,8 @@ import {
   DataTableSortingDropdown,
   DataTableColumnVisibilityDropdown,
 } from '#components/ui/data-table.js';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '#components/ui/card.js';
-import type { UsageRecord } from '#hooks/use-all-usage.js';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import type { UsageRecord } from '@taucad/billing/usage';
 import { usageColumns } from '#routes/usage/columns.js';
 
 type UsageTableProps = {

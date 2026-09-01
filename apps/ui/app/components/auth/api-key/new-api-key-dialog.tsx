@@ -12,9 +12,9 @@ import {
   AlertDialogHeader,
   AlertDialogMedia,
   AlertDialogTitle,
-} from '#components/ui/alert-dialog.js';
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '#components/ui/input-group.js';
-import { Label } from '#components/ui/label.js';
+} from '@taucad/ui/components/alert-dialog';
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@taucad/ui/components/input-group';
+import { Label } from '@taucad/ui/components/label';
 import { apiKeyPlugin } from '#utils/api-key-plugin.js';
 
 export type NewApiKeyDialogProps = {

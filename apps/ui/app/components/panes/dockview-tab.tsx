@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { Box, X } from 'lucide-react';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 export type DockviewTabProps = IDockviewPanelHeaderProps & {
   /**

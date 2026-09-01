@@ -1,9 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { Star } from 'lucide-react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import type { GithubStarsResponse } from '#routes/api.github-stars/route.js';
+
+type GithubStarsResponse = {
+  readonly stars: number | undefined;
+};
+
+const githubApiUrl = `https://api.github.com/repos/${metaConfig.githubOwner}/${metaConfig.githubRepo}`;
 
 function formatStars(count: number): string {
   if (count >= 1000) {
@@ -22,12 +27,13 @@ export function GithubStarButton(): React.JSX.Element {
   const { data } = useQuery<GithubStarsResponse>({
     queryKey: ['github-stars'],
     async queryFn(): Promise<GithubStarsResponse> {
-      const response = await fetch('/api/github-stars');
+      const response = await fetch(githubApiUrl);
       if (!response.ok) {
         return { stars: undefined };
       }
 
-      return (await response.json()) as GithubStarsResponse;
+      const body = (await response.json()) as { stargazers_count?: unknown };
+      return { stars: typeof body.stargazers_count === 'number' ? body.stargazers_count : undefined };
     },
     staleTime: 60 * 60 * 1000,
     retry: false,

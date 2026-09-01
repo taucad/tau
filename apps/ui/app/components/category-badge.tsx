@@ -1,7 +1,7 @@
 import { Brain, Cpu, Wrench, Zap } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { EngineeringDiscipline } from '@taucad/types';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 const colors = {
   mechanical: 'text-blue',

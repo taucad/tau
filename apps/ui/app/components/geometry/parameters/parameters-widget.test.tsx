@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ParametersWidget } from '#components/geometry/parameters/parameters-widget.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const formContext: RJSFContext = {
   idPrefix: '///root',

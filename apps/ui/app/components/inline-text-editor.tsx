@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
-import { Button } from '#components/ui/button.js';
-import { Input } from '#components/ui/input.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
+import { cn } from '@taucad/ui/utils/cn';
 
 const inlineTextEditorVariants = cva('h-full px-[calc(var(--spacing)*1.75)] text-sm select-auto', {
   variants: {

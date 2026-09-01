@@ -19,7 +19,7 @@ import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import { tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import type { PendingFilePlacement } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const { mobileState, mockOpenPanel, mockProjectSend, mockToastError } = vi.hoisted(() => ({
   mobileState: { value: false },
@@ -32,7 +32,7 @@ vi.mock('sonner', () => ({ toast: { error: mockToastError } }));
 vi.mock('#components/panes/use-is-top-right-group.js', () => ({
   useIsTopRightGroup: () => true,
 }));
-vi.mock('#hooks/use-mobile.js', () => ({ useIsMobile: () => mobileState.value }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mobileState.value }));
 vi.mock('#components/panes/dockview-split-action.js', () => ({
   DockviewSplitAction: ({
     containerApi,
@@ -1252,6 +1252,8 @@ describe('Workbench file reconciliation', () => {
       'parameters',
       'model',
       'revisions',
+      'agents',
+      'jobs',
       'export',
       'share',
       'details',
@@ -1265,6 +1267,10 @@ describe('Workbench file reconciliation', () => {
   it('keeps Share editor-only while retaining shared viewer utilities', () => {
     expect(isWorkbenchSurfaceAllowed('share', 'editor')).toBe(true);
     expect(isWorkbenchSurfaceAllowed('share', 'shared')).toBe(false);
+    expect(isWorkbenchSurfaceAllowed('agents', 'editor')).toBe(true);
+    expect(isWorkbenchSurfaceAllowed('agents', 'shared')).toBe(false);
+    expect(isWorkbenchSurfaceAllowed('jobs', 'editor')).toBe(true);
+    expect(isWorkbenchSurfaceAllowed('jobs', 'shared')).toBe(false);
     expect(isWorkbenchSurfaceAllowed('export', 'shared')).toBe(true);
   });
 

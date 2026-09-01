@@ -1,9 +1,9 @@
 import { Accordion as AccordionPrimitive } from 'radix-ui';
 import { FolderIcon, FolderOpenIcon } from 'lucide-react';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 type TreeViewElement = {
   id: string;

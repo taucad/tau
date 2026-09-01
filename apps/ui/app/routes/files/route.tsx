@@ -15,17 +15,18 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { FileSystemBackend } from '@taucad/types';
 import { ExternalLink } from '#components/external-link.js';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Loader } from '#components/ui/loader.js';
 import { Tree, Folder, File } from '#components/magicui/file-tree.js';
 import type { TreeViewElement } from '#components/magicui/file-tree.js';
 import { useFileManager, useHomeStorageBackend } from '#hooks/use-file-manager.js';
+import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
 import type { Handle } from '#types/matches.types.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
-import { cn } from '#utils/ui.utils.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { cn } from '@taucad/ui/utils/cn';
 import { checkHandlePermission, getWorkspace, listWorkspaces } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
 import type { ProjectListItem } from '#types/project.types.js';
@@ -499,7 +500,11 @@ export default function FilesRoute(): React.JSX.Element {
   const resolveScope = useCallback(
     async (backend: FileSystemBackend, workspaceId?: string): Promise<WorkspaceScope | undefined> => {
       if (backend !== 'webaccess') {
-        return backend === 'memory' ? { backend, storageRootKey: 'memory:files' } : { backend };
+        return backend === 'memory'
+          ? { backend, storageRootKey: 'memory:files' }
+          : backend === 'node'
+            ? { backend, path: nodeHomeRoot() }
+            : { backend };
       }
       if (!workspaceId) {
         return undefined;

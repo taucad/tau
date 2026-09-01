@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppSidebar } from '#components/layout/app-sidebar.js';
 import { SidebarProvider } from '#components/ui/sidebar.js';
-import { TooltipProvider } from '#components/ui/tooltip.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { KeyboardProvider } from '#hooks/use-keyboard.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
 import type { FeatureFlags } from '#flags/flag.constants.js';
@@ -20,7 +20,7 @@ vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: <T,>(_name: string, defaultValue: T) => [defaultValue, vi.fn()] as const,
 }));
 
-vi.mock('#hooks/use-mobile.js', () => ({
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: () => false,
 }));
 

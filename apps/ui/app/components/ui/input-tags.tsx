@@ -1,11 +1,11 @@
 import { XIcon } from 'lucide-react';
 import { createContext, useContext, useMemo, useRef, useState } from 'react';
 import type { ComponentProps, MouseEventHandler, ReactNode } from 'react';
-import { Badge } from '#components/ui/badge.js';
-import type { CommandGroup } from '#components/ui/command.js';
-import { Command, CommandEmpty, CommandItem, CommandList } from '#components/ui/command.js';
-import { Popover, PopoverContent, PopoverTrigger } from '#components/ui/popover.js';
-import { cn } from '#utils/ui.utils.js';
+import { Badge } from '@taucad/ui/components/badge';
+import type { CommandGroup } from '@taucad/ui/components/command';
+import { Command, CommandEmpty, CommandItem, CommandList } from '@taucad/ui/components/command';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { cn } from '@taucad/ui/utils/cn';
 import { stringToColor } from '#utils/color.utils.js';
 
 type TagsContextType = {
@@ -247,4 +247,4 @@ export function TagsItem({ className, ...props }: TagsItemProps): React.JSX.Elem
 }
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- allowed for component reuse.
-export { CommandGroup as TagsGroup } from '#components/ui/command.js';
+export { CommandGroup as TagsGroup } from '@taucad/ui/components/command';

@@ -2,10 +2,10 @@ import { useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import { ModelComponentViewerMenuItems } from '#components/geometry/cad/model-component-action-menu.js';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
-import { Popover, PopoverAnchor, PopoverContent } from '#components/ui/popover.js';
-import { menuContentVariants } from '#components/ui/menu.variants.js';
+import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
+import { menuContentVariants } from '@taucad/ui/components/menu.variants';
 import { preventMenuSliderEscapeDismissal } from '#components/ui/menu-slider-item.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type ViewerModelComponentActionMenuPoint = {
   readonly clientX: number;

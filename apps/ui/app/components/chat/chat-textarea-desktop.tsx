@@ -1,18 +1,19 @@
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ChevronDown, Paperclip, Wrench, AtSign } from 'lucide-react';
+import { Bot, ChevronDown, Paperclip, Wrench, AtSign } from 'lucide-react';
 import type { Chat, ToolSelection } from '@taucad/chat';
 import type { FileEntry } from '@taucad/types';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { ChatModelSelector, openModelSelectorKeyCombination } from '#components/chat/chat-model-selector.js';
+import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatAgentSelector, toggleModeKeyCombination } from '#components/chat/chat-mode-selector.js';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextIndicator } from '#components/chat/chat-context-indicator.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
 import { ChatTextareaDesktopImages } from '#components/chat/chat-textarea-desktop-images.js';
@@ -45,6 +46,8 @@ type ChatTextareaDesktopProperties = {
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
+  readonly creationLocationControl?: React.ReactNode;
+  readonly isSubmitDisabled?: boolean;
 
   // State
   readonly dragKind: ChatTextareaDragKind | undefined;
@@ -108,6 +111,8 @@ export const ChatTextareaDesktop = memo(function ({
   enableAutoFocus = true,
   enableContextActions = true,
   enableKernelSelector = true,
+  creationLocationControl,
+  isSubmitDisabled = false,
 
   // State
   dragKind,
@@ -288,7 +293,7 @@ export const ChatTextareaDesktop = memo(function ({
     }
   }, []);
 
-  const isDisabled = inputText.trim().length === 0 && images.length === 0;
+  const isDisabled = isSubmitDisabled || (inputText.trim().length === 0 && images.length === 0);
 
   return (
     // Outer wrapper is purely a positioning context for the beam overlay
@@ -347,6 +352,7 @@ export const ChatTextareaDesktop = memo(function ({
           setDraftToolChoice={setDraftToolChoice}
           fileInputReference={fileInputReference}
           handleFileChange={handleFileChange}
+          creationLocationControl={creationLocationControl}
         />
 
         {/* Bottom-right controls */}
@@ -386,6 +392,7 @@ export const ChatTextareaLeftControls = memo(function ({
   setDraftToolChoice,
   fileInputReference,
   handleFileChange,
+  creationLocationControl,
 }: {
   readonly selectedModel: ResolvedModel;
   readonly enableKernelSelector: boolean;
@@ -395,51 +402,94 @@ export const ChatTextareaLeftControls = memo(function ({
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly fileInputReference: React.RefObject<HTMLInputElement | null>;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  readonly creationLocationControl?: React.ReactNode;
 }): React.JSX.Element {
   // Chat-scoped resolver — falls back to cookie kernel when no chat-local
   // selection exists. Display label follows the chat's active kernel so
   // cookie changes elsewhere can no longer flip the label mid-conversation.
   const {
     kernel: { kernel: selectedKernel },
+    execution: { execution },
+    agentActivity,
+    session,
   } = useChatComposer();
 
   return (
     <div className='absolute bottom-2 left-2 flex flex-row items-center gap-1 text-muted-foreground'>
       <ChatTextareaModeControl />
-      {/* Model selector */}
-      <Tooltip>
-        <ChatModelSelector
-          data-chat-textarea-focustrap
-          popoverProperties={{ align: 'start' }}
-          onSelect={focusEditor}
-          onClose={focusEditor}
-        >
-          {(_properties) => (
-            <TooltipTrigger asChild>
-              <Button
-                variant='outline'
-                size='sm'
-                className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
-              >
-                <span className='hidden truncate text-xs @[22rem]:block'>{selectedModel.name}</span>
-                <span className='relative flex size-4 items-center justify-center'>
-                  <ChevronDown className='absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100' />
-                  <SvgIcon
-                    id={selectedModel.family}
-                    className='absolute scale-100 grayscale transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0'
+      {session ? (
+        <Tooltip>
+          <ChatExecutionSelector
+            data-chat-textarea-focustrap
+            popoverProperties={{ align: 'start' }}
+            onSelect={focusEditor}
+            onClose={focusEditor}
+          >
+            {({ label, activity }) => (
+              <TooltipTrigger asChild>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  aria-label={`Select agent: ${label}`}
+                  aria-description={`Agent status: ${formatChatAgentActivity(activity)}`}
+                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground'
+                >
+                  <span
+                    className={cn(
+                      'size-1.5 rounded-full bg-muted-foreground',
+                      activity === 'working' && 'animate-pulse bg-sky-500',
+                      activity === 'approval-required' && 'bg-amber-500',
+                      activity === 'stopping' && 'animate-pulse bg-orange-500',
+                    )}
+                    aria-hidden='true'
                   />
-                </span>
-              </Button>
-            </TooltipTrigger>
-          )}
-        </ChatModelSelector>
-        <TooltipContent>
-          <span className='flex items-center gap-1.5'>
-            Select model ({selectedModel.name})
-            <KeyShortcut variant='tooltip'>{formatKeyCombination(openModelSelectorKeyCombination)}</KeyShortcut>
-          </span>
-        </TooltipContent>
-      </Tooltip>
+                  <span className='hidden max-w-24 truncate text-xs @[22rem]:block'>{label}</span>
+                  <Bot className='size-4 @[22rem]:hidden' aria-hidden='true' />
+                  <ChevronDown className='size-4' aria-hidden='true' />
+                </Button>
+              </TooltipTrigger>
+            )}
+          </ChatExecutionSelector>
+          <TooltipContent>Select agent · {formatChatAgentActivity(agentActivity)}</TooltipContent>
+        </Tooltip>
+      ) : null}
+      {/* Model selector */}
+      {execution.kind === 'tau' ? (
+        <Tooltip>
+          <ChatModelSelector
+            data-chat-textarea-focustrap
+            popoverProperties={{ align: 'start' }}
+            onSelect={focusEditor}
+            onClose={focusEditor}
+          >
+            {(_properties) => (
+              <TooltipTrigger asChild>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='h-7 cursor-pointer! rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7 @xs:max-w-fit @[22rem]:pr-2'
+                >
+                  <span className='hidden truncate text-xs @[22rem]:block'>{selectedModel.name}</span>
+                  <span className='relative flex size-4 items-center justify-center'>
+                    <ChevronDown className='absolute scale-0 transition-transform duration-200 ease-in-out group-hover:scale-0 @[22rem]:scale-100' />
+                    <SvgIcon
+                      id={selectedModel.family}
+                      className='absolute scale-100 grayscale transition-transform duration-200 ease-in-out group-hover:scale-100 @[22rem]:scale-0'
+                    />
+                  </span>
+                </Button>
+              </TooltipTrigger>
+            )}
+          </ChatModelSelector>
+          <TooltipContent>
+            <span className='flex items-center gap-1.5'>
+              Select model ({selectedModel.name})
+              <KeyShortcut variant='tooltip'>{formatKeyCombination(openModelSelectorKeyCombination)}</KeyShortcut>
+            </span>
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+      {creationLocationControl}
       {/* Kernel selector */}
       {enableKernelSelector ? (
         <Tooltip>
@@ -572,6 +622,7 @@ const ChatTextareaRightControls = memo(function ({
               data-chat-textarea-focustrap={focusTrapAttribute}
               variant='outline'
               size='icon'
+              aria-label='Add context'
               className='size-6 rounded-full text-muted-foreground hover:text-foreground'
               onClick={handleAtButtonClick}
             >

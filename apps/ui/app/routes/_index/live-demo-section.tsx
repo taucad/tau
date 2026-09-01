@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '#components/ui/tabs.js';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
 import { Loader } from '#components/ui/loader.js';
 import { GearDemo } from '#routes/_index/demo/gear-demo.js';
 

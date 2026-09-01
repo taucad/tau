@@ -1,12 +1,13 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Plus, Wrench, Paperclip, ChevronRight } from 'lucide-react';
 import type { ToolSelection } from '@taucad/chat';
-import { Button } from '#components/ui/button.js';
-import { Textarea } from '#components/ui/textarea.js';
+import { Button } from '@taucad/ui/components/button';
+import { Textarea } from '@taucad/ui/components/textarea';
 import { SvgIcon } from '#components/icons/svg-icon.js';
-import { cn } from '#utils/ui.utils.js';
-import { menuContentVariants, menuItemVariants } from '#components/ui/menu.variants.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { menuContentVariants, menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+import { ChatExecutionSelector, formatChatAgentActivity } from '#components/chat/chat-execution-selector.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
@@ -16,10 +17,11 @@ import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
 import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
-import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '#components/ui/drawer.js';
-import { Command, CommandGroup, CommandItem, CommandList } from '#components/ui/command.js';
+import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
+import { Command, CommandGroup, CommandItem, CommandList } from '@taucad/ui/components/command';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { DraftImageOptions } from '#hooks/use-chat.js';
+import { useChatComposer } from '#hooks/active-chat-provider.js';
 
 // Styled div that looks like CommandItem but works as a trigger for nested drawers.
 // Uses menuItemVariants with mobile-specific size overrides (gap-1, px-2, py-1.5, text-sm, size-5 icons).
@@ -39,6 +41,8 @@ type ChatTextareaMobileProperties = {
   readonly enableAutoFocus?: boolean;
   readonly enableContextActions?: boolean;
   readonly enableKernelSelector?: boolean;
+  readonly creationLocationControl?: React.ReactNode;
+  readonly isSubmitDisabled?: boolean;
 
   // State from hook
   readonly dragKind: ChatTextareaDragKind | undefined;
@@ -62,6 +66,7 @@ type ChatTextareaMobileProperties = {
   readonly fileInputReference: React.RefObject<HTMLInputElement | null>;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly containerReference: React.RefObject<HTMLDivElement | null>;
+  readonly closeOptionsRef?: React.RefObject<(() => void) | undefined>;
 
   // Handlers
   readonly handleSubmit: () => Promise<void>;
@@ -118,6 +123,8 @@ export const ChatTextareaMobile = memo(function ({
   enableAutoFocus = true,
   enableContextActions = true,
   enableKernelSelector = true,
+  creationLocationControl,
+  isSubmitDisabled = false,
 
   // State
   dragKind,
@@ -138,6 +145,7 @@ export const ChatTextareaMobile = memo(function ({
   textareaReference,
   fileInputReference,
   containerReference,
+  closeOptionsRef,
 
   // Handlers
   handleSubmit,
@@ -164,6 +172,23 @@ export const ChatTextareaMobile = memo(function ({
   setSelectedMenuIndex,
 }: ChatTextareaMobileProperties): React.JSX.Element {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const {
+    execution: { execution },
+    session,
+  } = useChatComposer();
+
+  useEffect(() => {
+    if (!closeOptionsRef) {
+      return;
+    }
+    closeOptionsRef.current = () => {
+      setIsDrawerOpen(false);
+      focusInput();
+    };
+    return () => {
+      closeOptionsRef.current = undefined;
+    };
+  }, [closeOptionsRef, focusInput]);
 
   const handleDrawerAddImage = (image: string, options?: DraftImageOptions): void => {
     handleAddImage(image, options);
@@ -210,6 +235,8 @@ export const ChatTextareaMobile = memo(function ({
         <Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
           <DrawerTrigger asChild>
             <Button
+              type='button'
+              aria-label='Open chat options'
               data-chat-textarea-focustrap={focusTrapAttribute}
               variant='outline'
               size='icon'
@@ -218,38 +245,83 @@ export const ChatTextareaMobile = memo(function ({
               <Plus className='size-5' />
             </Button>
           </DrawerTrigger>
-          <DrawerContent data-chat-textarea-focustrap={focusTrapAttribute}>
+          <DrawerContent
+            data-chat-textarea-focustrap={focusTrapAttribute}
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              focusInput();
+            }}
+          >
             <DrawerTitle className='sr-only'>Chat Options</DrawerTitle>
             <DrawerDescription className='sr-only'>Configure chat settings and add context</DrawerDescription>
             <Command className='bg-transparent'>
               <CommandList className='max-h-none'>
                 {/* Settings Group */}
                 <CommandGroup heading='Settings'>
-                  {/* Model Selector */}
-                  <ChatModelSelector
-                    isNested
-                    data-chat-textarea-focustrap={focusTrapAttribute}
-                    popoverProperties={{ align: 'start' }}
-                    onSelect={() => {
-                      setIsDrawerOpen(false);
-                      focusInput();
-                    }}
-                  >
-                    {() => (
-                      <div className={menuItemClassName}>
-                        <span className='flex w-full items-center justify-between'>
-                          <div className='flex items-center gap-2'>
-                            <SvgIcon id={selectedModel.family} className='size-4 grayscale' />
-                            <div className='flex flex-col items-start'>
-                              <span>{selectedModel.name}</span>
-                              <span className='text-xs text-muted-foreground'>AI model for responses</span>
+                  {session ? (
+                    <ChatExecutionSelector
+                      isNested
+                      data-chat-textarea-focustrap={focusTrapAttribute}
+                      onSelect={() => {
+                        setIsDrawerOpen(false);
+                        focusInput();
+                      }}
+                    >
+                      {({ label, activity }) => (
+                        <div className={menuItemClassName}>
+                          <span className='flex w-full items-center justify-between'>
+                            <div className='flex items-center gap-2'>
+                              <span
+                                className={cn(
+                                  'size-2 rounded-full bg-muted-foreground',
+                                  activity === 'working' && 'animate-pulse bg-sky-500',
+                                  activity === 'approval-required' && 'bg-amber-500',
+                                  activity === 'stopping' && 'animate-pulse bg-orange-500',
+                                )}
+                                aria-hidden='true'
+                              />
+                              <div className='flex flex-col items-start'>
+                                <span>{label}</span>
+                                <span className='text-xs text-muted-foreground'>
+                                  {formatChatAgentActivity(activity)}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                          <ChevronRight className='size-4 text-muted-foreground' />
-                        </span>
-                      </div>
-                    )}
-                  </ChatModelSelector>
+                            <ChevronRight className='size-4 text-muted-foreground' />
+                          </span>
+                        </div>
+                      )}
+                    </ChatExecutionSelector>
+                  ) : null}
+                  {/* Model Selector */}
+                  {execution.kind === 'tau' ? (
+                    <ChatModelSelector
+                      isNested
+                      data-chat-textarea-focustrap={focusTrapAttribute}
+                      popoverProperties={{ align: 'start' }}
+                      onSelect={() => {
+                        setIsDrawerOpen(false);
+                        focusInput();
+                      }}
+                    >
+                      {() => (
+                        <div className={menuItemClassName}>
+                          <span className='flex w-full items-center justify-between'>
+                            <div className='flex items-center gap-2'>
+                              <SvgIcon id={selectedModel.family} className='size-4 grayscale' />
+                              <div className='flex flex-col items-start'>
+                                <span>{selectedModel.name}</span>
+                                <span className='text-xs text-muted-foreground'>AI model for responses</span>
+                              </div>
+                            </div>
+                            <ChevronRight className='size-4 text-muted-foreground' />
+                          </span>
+                        </div>
+                      )}
+                    </ChatModelSelector>
+                  ) : null}
+
+                  {creationLocationControl}
 
                   {/* Kernel Selector */}
                   {enableKernelSelector ? (
@@ -326,7 +398,7 @@ export const ChatTextareaMobile = memo(function ({
                     <ChatContextActions
                       asPopoverMenu
                       data-chat-textarea-focustrap={focusTrapAttribute}
-                      imageInputSupported={imageInputSupported}
+                      isImageInputSupported={imageInputSupported}
                       addImage={handleDrawerAddImage}
                       addText={handleDrawerAddText}
                       onClose={() => {
@@ -383,6 +455,7 @@ export const ChatTextareaMobile = memo(function ({
               rows={1}
               autoFocus={enableAutoFocus}
               value={inputText}
+              aria-label='Ask Tau to build anything...'
               placeholder='Ask Tau to build anything...'
               disabled={isSubmitting}
               onChange={handleTextChange}
@@ -400,7 +473,7 @@ export const ChatTextareaMobile = memo(function ({
               searchQuery={contextSearchQuery}
               selectedIndex={selectedMenuIndex}
               onSelectedIndexChange={setSelectedMenuIndex}
-              imageInputSupported={imageInputSupported}
+              isImageInputSupported={imageInputSupported}
               addImage={handleContextImageAdd}
               addText={handleContextMenuSelect}
               onSelectItem={handleContextMenuSelect}
@@ -435,7 +508,7 @@ export const ChatTextareaMobile = memo(function ({
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}
-          isDisabled={inputText.trim().length === 0 && images.length === 0}
+          isDisabled={isSubmitDisabled || (inputText.trim().length === 0 && images.length === 0)}
           formattedCancelKeyCombination={formattedCancelKeyCombination}
           onSubmit={handleSubmit}
           onCancel={handleCancelClick}

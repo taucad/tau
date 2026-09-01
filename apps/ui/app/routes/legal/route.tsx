@@ -1,5 +1,5 @@
 import { Link, Outlet } from 'react-router';
-import { Button } from '#components/ui/button.js';
+import { Button } from '@taucad/ui/components/button';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {

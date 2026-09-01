@@ -1,9 +1,9 @@
 import type { LucideIcon } from 'lucide-react';
 import { Link } from 'react-router';
 import React, { useEffect, useRef } from 'react';
-import { cn } from '#utils/ui.utils.js';
-import { Tabs, TabsList, TabsTrigger, TabsContents } from '#components/ui/tabs.js';
-import { Separator } from '#components/ui/separator.js';
+import { cn } from '@taucad/ui/utils/cn';
+import { Tabs, TabsList, TabsTrigger, TabsContents } from '@taucad/ui/components/tabs';
+import { Separator } from '@taucad/ui/components/separator';
 
 export type ResponsiveTabItem = {
   label: string;

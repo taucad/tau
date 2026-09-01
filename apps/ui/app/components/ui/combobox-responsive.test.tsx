@@ -7,12 +7,12 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 
 const mobileState = vi.hoisted(() => ({ current: false }));
 
-vi.mock('#hooks/use-mobile.js', () => ({
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: (): boolean => mobileState.current,
 }));
 
 /** Flatten nested popovers so CommandList mounts without opening Radix modal state. */
-vi.mock('#components/ui/popover.js', () => ({
+vi.mock('@taucad/ui/components/popover', () => ({
   Popover: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='popover-root'>{children}</div>,
   PopoverTrigger: ({ children }: { readonly children: React.ReactNode }) => (
     <span data-testid='popover-trigger-inner'>{children}</span>
@@ -22,7 +22,7 @@ vi.mock('#components/ui/popover.js', () => ({
   ),
 }));
 
-vi.mock('#components/ui/drawer.js', () => ({
+vi.mock('@taucad/ui/components/drawer', () => ({
   Drawer: ({ children }: { readonly children: React.ReactNode }) => <div data-testid='drawer-root'>{children}</div>,
   DrawerNestedRoot: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='drawer-nested-root'>{children}</div>

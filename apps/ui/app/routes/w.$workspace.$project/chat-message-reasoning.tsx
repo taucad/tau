@@ -11,8 +11,8 @@ import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js
 import { ChatToolCard, ChatToolCardHeader, ChatToolCardTitle } from '#components/chat/chat-tool-card.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
-import { Button } from '#components/ui/button.js';
-import { cn } from '#utils/ui.utils.js';
+import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { formatReasoningDuration } from '#utils/format-reasoning-duration.js';
 import { useReasoningStopwatch } from '#utils/use-reasoning-stopwatch.js';
 

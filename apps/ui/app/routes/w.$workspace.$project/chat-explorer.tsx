@@ -18,8 +18,8 @@ import {
   FloatingPanelContentTitle,
   FloatingPanelContentBody,
 } from '#components/ui/floating-panel.js';
-import { ContextMenu, ContextMenuTrigger } from '#components/ui/context-menu.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
+import { ContextMenu, ContextMenuTrigger } from '@taucad/ui/components/context-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import {
   ModelComponentActionContextContent,
   ModelComponentActionDropdown,
@@ -29,7 +29,7 @@ import { useProject } from '#hooks/use-project.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import {
   PaneviewHeader,

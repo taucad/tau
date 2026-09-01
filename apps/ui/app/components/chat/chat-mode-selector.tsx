@@ -4,10 +4,10 @@ import { Bot, Check, FileText } from 'lucide-react';
 import type { ChatMode } from '@taucad/chat/constants';
 import { chatMode, chatModes } from '@taucad/chat/constants';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '#components/ui/hover-card.js';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
-import { cn } from '#utils/ui.utils.js';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type ModeConfig = {
   id: ChatMode;

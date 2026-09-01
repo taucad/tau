@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
 import type { FileSelectorDataSource, FileSelectorEntry } from '#components/files/file-selector.js';
 
-vi.mock('#hooks/use-mobile.js', () => ({
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: () => false,
 }));
 

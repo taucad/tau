@@ -195,13 +195,16 @@ describe('getEnvironment', () => {
 });
 
 describe('getClientEnvironment', () => {
-  const secretToken = 'ghp_pretend_this_is_a_real_token_00000';
+  const secretToken = 'pretend-this-is-a-real-server-only-secret';
 
+  // `AUTH_SECRET` is the API service's, not the UI's — it is absent from
+  // `environmentSchema` on purpose. Deployments that share one env file across
+  // both services still leak it into this process, so assert it is dropped.
   const setEnvironmentWithSecret = (): void => {
     setProcessEnvironment(
       withBaseEnvironment([
         ['TAU_FRONTEND_URL', 'https://taucad.dev'],
-        ['GITHUB_API_TOKEN', secretToken],
+        ['AUTH_SECRET', secretToken],
       ]),
     );
   };
@@ -212,21 +215,22 @@ describe('getClientEnvironment', () => {
 
   // This payload is serialised into page source for every visitor, so a
   // server-only key reaching it is a leak.
-  it('should omit GITHUB_API_TOKEN from the client payload', async () => {
+  it('should omit server-only secrets from the client payload', async () => {
     setEnvironmentWithSecret();
 
     const clientEnvironment = await getClientEnvironment();
 
-    expect(clientEnvironment).not.toHaveProperty('GITHUB_API_TOKEN');
+    expect(clientEnvironment).not.toHaveProperty('AUTH_SECRET');
     expect(JSON.stringify(clientEnvironment)).not.toContain(secretToken);
   });
 
-  it('should still expose GITHUB_API_TOKEN to server-side callers', async () => {
+  it('should omit server-only secrets from server-side UI environment parsing', async () => {
     setEnvironmentWithSecret();
 
     const environment = await getEnvironment();
 
-    expect(environment.GITHUB_API_TOKEN).toBe(secretToken);
+    expect(environment).not.toHaveProperty('AUTH_SECRET');
+    expect(JSON.stringify(environment)).not.toContain(secretToken);
   });
 
   it('should carry the client-safe keys through to the browser', async () => {

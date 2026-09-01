@@ -1,0 +1,7 @@
+{
+  "name": "taucad-ui",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/ui",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

@@ -778,5 +778,5 @@ The `getModels()` step dominates everything else combined.
 - `apps/ui/app/routes/api.github-avatar/route.ts` — GitHub avatar proxy (only route with proper cache headers today)
 - `apps/ui/server.ts` — local Express server with reference asset cache config (`immutable: true, maxAge: '1y'`)
 - `apps/ui/app/entry.server.tsx` — SSR entry; uses `renderToPipeableStream` (already streaming, good)
-- `repos/cloud-infra/stacks/cloud/prod-us/terraform.auto.tfvars` — production env-var declaration
-- `repos/cloud-infra/modules/netlify-site/main.tf` — Netlify site Terraform module
+- `repos/tau-cloud/stacks/cloud/prod-us/terraform.auto.tfvars` — production env-var declaration
+- `repos/tau-cloud/modules/netlify-site/main.tf` — Netlify site Terraform module

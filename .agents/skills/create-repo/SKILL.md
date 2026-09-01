@@ -256,7 +256,7 @@ link to `https://tau.new`. Never add postinstall messages or telemetry.
    to `taucad/@@CREATE_REPO_slug@@` and `ci.yml`; register only when the operator
    says a binding is absent.
 4. Create or verify the Vercel project when docs are enabled.
-5. Apply repository governance through the `cloud-infra` stack: read-only
+5. Apply repository governance through the `tau-cloud` stack: read-only
    default token, Actions cannot approve pull requests, secret scanning, push
    protection, private vulnerability reporting, and a `main` ruleset with
    linear history, no force-push, `ci-gate`, and zero required approvals.

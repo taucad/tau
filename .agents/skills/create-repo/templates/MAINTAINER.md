@@ -21,5 +21,5 @@ tags, GitHub Releases, and Vercel deployment. Do not publish from a workstation.
 ## Repository operations
 
 Repository rules, secret scanning, push protection, and private vulnerability
-reporting are managed through the `cloud-infra` stack. The npm Trusted
+reporting are managed through the `tau-cloud` stack. The npm Trusted
 Publisher is bound to `taucad/@@CREATE_REPO_slug@@` and `.github/workflows/ci.yml`.

@@ -130,7 +130,7 @@ groups:
   infra:
     description: Cloud infrastructure-as-code (Terraform/Fly.io/Netlify/Supabase)
     repos:
-      - cloud-infra
+      - tau-cloud
       - terraform-provider-netlify
 repos:
   langchainjs:
@@ -469,9 +469,9 @@ repos:
     commit: bbad36f3e1a2b80650a9d31831c8b1bb7443eefb
   terraform-provider-netlify:
     upstream: netlify/terraform-provider-netlify
-    description: Netlify Terraform provider source (schema/release reference for Tau cloud-infra stacks).
-  cloud-infra:
-    upstream: taucad/cloud-infra
+    description: Netlify Terraform provider source (schema/release reference for tau-cloud stacks).
+  tau-cloud:
+    upstream: taucad/tau-cloud
     description: Tau cloud infrastructure as code.
   VSCode_SysML_Extension:
     upstream: daltskin/VSCode_SysML_Extension

@@ -2,13 +2,13 @@
 title: 'Sharing MVP — manual provisioning runbook (Phase 0–1)'
 description: 'Operational checklist for Cloudflare R2, Fly secrets, CDN cache rules, and default OG/thumbnail seeding referenced by Sharing MVP todos M1–M6.'
 status: superseded
-superseded_by: docs/research/cloud-infra-activation-status.md
+superseded_by: docs/research/tau-cloud-activation-status.md
 created: '2026-05-04'
 updated: '2026-05-14'
 category: reference
 ---
 
-> **Superseded by [`docs/research/cloud-infra-activation-status.md`](cloud-infra-activation-status.md)** — M1 (R2 bucket creation), M2 (CDN + DNS), M3 (R2 credential push to Fly), and M5 (cache rules) are now managed by `module.cloudflare_r2` + `module.fly_api_secrets` in IaC. See operator gates **F1–F7** in the activation status doc for the apply sequence.
+> **Superseded by [`docs/research/tau-cloud-activation-status.md`](tau-cloud-activation-status.md)** — M1 (R2 bucket creation), M2 (CDN + DNS), M3 (R2 credential push to Fly), and M5 (cache rules) are now managed by `module.cloudflare_r2` + `module.fly_api_secrets` in IaC. See operator gates **F1–F7** in the activation status doc for the apply sequence.
 >
 > **Residual manual steps retained below:** M4 (seed default assets) and M6 (TLS/cert sanity check). These have corresponding IaC-coupled order requirements documented as **F5** and **F4** in the activation status doc.
 

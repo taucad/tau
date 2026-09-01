@@ -20,7 +20,7 @@ Tau keeps **one Netlify site per environment** with **standard SSR Functions (No
 
 The Netlify Terraform resource [`netlify_site_build_settings`](https://registry.terraform.io/providers/netlify/netlify/latest/docs/resources/site_build_settings) exposes **`functions_region`** as a **single string**, not a list. Each Netlify site therefore deploys its Functions bundle to **one** region per configuration change.
 
-Canonical module (not in this repo): `repos/cloud-infra/modules/netlify-site/` — sync via `pnpm repos sync`.
+Canonical module (not in this repo): `repos/tau-cloud/modules/netlify-site/` — sync via `pnpm repos sync`.
 
 ## Operational verification
 

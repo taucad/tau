@@ -59,14 +59,14 @@ const richRuntime = defineRuntime({ kernels: [kernel()], transcoders: [imageTran
 
 describe('createNodeClient configured type inference', () => {
   it('can widen to the public client contract at a dynamic consumer boundary', async () => {
-    const configuredClient = await createNodeClient(undefined, { runtime });
+    const configuredClient = await createNodeClient({ runtime });
     const client: RuntimeClient = configuredClient;
     const format = 'glb' as FileExtension;
     void client.export(format, { source: { files: { 'main.typed': 'fixture' } } });
   });
 
   it('keeps explicitly supplied kernel export typing', async () => {
-    const client = await createNodeClient(undefined, { runtime });
+    const client = await createNodeClient({ runtime });
     void client.export('glb', { source: { files: { 'main.typed': 'fixture' } } });
     void client.export('stl', { exportOptions: { tolerance: 0.01 } });
     // @ts-expect-error -- no image transcoder is registered.
@@ -74,7 +74,7 @@ describe('createNodeClient configured type inference', () => {
   });
 
   it('preserves explicitly supplied transcoder options and content declarations', async () => {
-    const client = await createNodeClient(undefined, { runtime: richRuntime });
+    const client = await createNodeClient({ runtime: richRuntime });
     const result = client.export('webp', {
       source: { files: { 'main.typed': 'fixture' } },
       content: { includeEdges: true },

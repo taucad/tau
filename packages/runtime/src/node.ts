@@ -16,6 +16,12 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
   'transport'
 > & {
   readonly runtime: Runtime;
+  /**
+   * Host filesystem directory exposed to the runtime as `/`. Omit for inline-source
+   * mode; the client provisions an in-memory filesystem on the first
+   * `render({ source })` / `export({ source })` call.
+   */
+  readonly projectPath?: string;
 };
 
 /**
@@ -24,10 +30,7 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
  * Composes a caller-owned runtime with `inProcessTransport`, backed by
  * `fromNodeFs(projectPath)` when supplied or `fromMemoryFs()` otherwise.
  *
- * @param projectPath - Host filesystem directory exposed to the runtime as `/`. Omit
- *   for inline-source mode; the client provisions an in-memory filesystem
- *   on the first `render({ source })` / `export({ source })` call.
- * @param options - Runtime definition and client options.
+ * @param options - Runtime definition, optional project path, and client options.
  * @returns Configured `RuntimeClient` ready for render and export operations
  *
  * @public
@@ -41,7 +44,7 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
  * declare const kernelPlugin: AnyPluginInstance;
  * declare const bundlerPlugin: AnyPluginInstance;
  * const runtime = defineRuntime({ plugins: [kernelPlugin, bundlerPlugin] });
- * const client = await createNodeClient(undefined, { runtime });
+ * const client = await createNodeClient({ runtime });
  * const result = await client.export('glb', {
  *   source: { files: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);' } },
  * });
@@ -54,17 +57,16 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
  * import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
  *
  * declare const runtime: AnyRuntimeDefinition;
- * const client = await createNodeClient('/path/to/project', { runtime });
+ * const client = await createNodeClient({ runtime, projectPath: '/path/to/project' });
  * const result = await client.export('glb', { source: { path: 'main.ts' } });
  * client.terminate();
  * ```
  */
 export async function createNodeClient<const Runtime extends AnyRuntimeDefinition>(
-  projectPath: string | undefined,
   options: NodeRuntimeClientOptions<Runtime>,
 ): Promise<RuntimeClient<Runtime, InProcessTransportFor<Runtime>>> {
+  const { runtime, projectPath, ...clientOptions } = options;
   const fileSystem: RuntimeFileSystem = projectPath ? fromNodeFs(projectPath) : fromMemoryFs();
-  const { runtime, ...clientOptions } = options;
   const transport = inProcessTransport({ runtime, fileSystem });
 
   return createRuntimeClient({

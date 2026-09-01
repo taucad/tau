@@ -21,7 +21,7 @@ import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
 
 const runtime = defineRuntime({ plugins: [esbuild(), replicad()] });
-const client = await createNodeClient(undefined, { runtime });
+const client = await createNodeClient({ runtime });
 const result = await client.export('glb', {
   source: {
     files: {

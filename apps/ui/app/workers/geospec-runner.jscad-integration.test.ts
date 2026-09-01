@@ -348,7 +348,7 @@ const exportProjectWithNodeRuntime = async (options: {
       import { esbuild } from '@taucad/esbuild';
       import { jscad } from '@taucad/jscad';
       const runtime = defineRuntime({ plugins: [esbuild(), jscad()] });
-      const client = await createNodeClient(${JSON.stringify(projectPath)}, { runtime });
+      const client = await createNodeClient({ runtime, projectPath: ${JSON.stringify(projectPath)} });
       const result = await client.export(${JSON.stringify(options.format)}, {
         source: {
           path: ${JSON.stringify(file)},

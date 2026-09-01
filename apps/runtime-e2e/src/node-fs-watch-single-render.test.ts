@@ -44,7 +44,7 @@ describe('autonomous re-render on the Node filesystem adapter', () => {
     const entryPath = join(root, 'main.ts');
     await writeFile(entryPath, mainSource(20), 'utf8');
 
-    const client = await createNodeClient(root, { runtime });
+    const client = await createNodeClient({ runtime, projectPath: root });
     const states: WorkerState[] = [];
     const stopStates = client.on('state', (state) => states.push(state));
     const settle = async (): Promise<void> => {

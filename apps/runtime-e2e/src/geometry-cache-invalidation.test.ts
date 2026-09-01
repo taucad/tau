@@ -44,7 +44,7 @@ const createCacheKeys = async (baseDirectory: string): Promise<Set<string>> => {
 const exportGlb = async (root: string): Promise<void> => {
   // Fresh client each run so the per-worker L1/file-hash caches don't mask a
   // stale on-disk key — this mirrors separate CLI invocations.
-  const client = await createNodeClient(root, { runtime });
+  const client = await createNodeClient({ runtime, projectPath: root });
   try {
     const result = await client.export('glb', { source: { path: 'test-exports/box.ts' } });
     if (!result.success) {

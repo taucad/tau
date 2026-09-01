@@ -30,7 +30,7 @@ const syntheticKernel = defineKernel({
 });
 
 const runtime = defineRuntime({ kernels: [syntheticKernel()] });
-const createClient = async (projectPath?: string) => createNodeClient(projectPath, { runtime });
+const createClient = async (projectPath?: string) => createNodeClient({ runtime, projectPath });
 
 describe('createNodeClient', () => {
   it('returns a lazily connected client with the command surface', async () => {

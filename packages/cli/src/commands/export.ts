@@ -141,7 +141,7 @@ export const exportCommand = defineCommand({
     profileLedger?.checkpoint('cli.load-configured-plugins');
     const runtime = await createCliRuntime({ explicitFactories: pluginFactories, configuredPlugins });
     profileLedger?.checkpoint('cli.create-runtime');
-    const client = await createNodeClient(inputDirectory, { runtime });
+    const client = await createNodeClient({ runtime, projectPath: inputDirectory });
     profileLedger?.checkpoint('runtime.create-client');
     const telemetryEntries: TelemetryEntry[] = [];
 

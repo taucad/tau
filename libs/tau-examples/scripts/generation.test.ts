@@ -100,7 +100,7 @@ describe('generated example artifacts', () => {
   // See docs/research/tau-examples-thumbnail-nondeterminism.md.
   it('exports a shell+fillet fixture byte-identically on fresh kernel instances', { timeout: 120_000 }, async () => {
     const exportOnFreshClient = async (): Promise<string> => {
-      const client = await createNodeClient(join(sourceDirectory, 'kernels'), { runtime: exampleRuntime });
+      const client = await createNodeClient({ runtime: exampleRuntime, projectPath: join(sourceDirectory, 'kernels') });
       try {
         const result = await client.export('glb', {
           source: { path: 'replicad/vase/main.ts' },

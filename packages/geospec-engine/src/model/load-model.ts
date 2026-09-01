@@ -155,7 +155,7 @@ const createDefaultRuntimeClient = async (projectPath: string | undefined): Prom
     import('@taucad/runtime/node'),
     import('#model/default-runtime.js'),
   ]);
-  return (await createNodeClient(projectPath, { runtime: defaultRuntime })) as unknown as GeoSpecRuntimeClient;
+  return (await createNodeClient({ runtime: defaultRuntime, projectPath })) as unknown as GeoSpecRuntimeClient;
 };
 
 /**

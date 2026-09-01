@@ -55,7 +55,7 @@ const createOpenScadSourceAdapter = (): GeoSpecRuntimeSourceAdapter => ({
   extensions: ['.scad'],
   async createRuntime({ projectPath }) {
     const runtime = defineRuntime({ plugins: [openrscad()] });
-    return (await createNodeClient(projectPath, { runtime })) as unknown as GeoSpecRuntimeClient;
+    return (await createNodeClient({ runtime, projectPath })) as unknown as GeoSpecRuntimeClient;
   },
 });
 

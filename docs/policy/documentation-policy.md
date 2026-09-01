@@ -1,14 +1,14 @@
 ---
 title: 'Documentation Policy'
-description: 'Standards for writing and maintaining Tau documentation: content types, templates, AI discoverability, API reference, sidebar navigation, and cross-linking. Applies to apps/ui/content/docs/ and docs/.'
+description: 'Standards for writing and maintaining Tau documentation: content types, templates, AI discoverability, API reference, sidebar navigation, and cross-linking. Applies to apps/docs/content/docs/ and docs/.'
 status: active
 created: '2026-02-23'
-updated: '2026-08-22'
+updated: '2026-09-01'
 ---
 
 # Documentation Policy
 
-Internal reference for writing and maintaining Tau documentation. Applies to all content under `apps/ui/content/docs/` and policy documents under `docs/`.
+Internal reference for writing and maintaining Tau documentation. Applies to all content under `apps/docs/content/docs/` and policy documents under `docs/`.
 
 ## Rationale
 
@@ -294,7 +294,7 @@ Documentation must be optimized for consumption by AI agents (ChatGPT, Claude, C
 
 ### llms.txt Standard
 
-Every documentation page is automatically indexed in `/llms.txt` via the fumadocs integration in `apps/ui/app/lib/fumadocs/get-llms-text.ts`. The `description` frontmatter field populates the annotation for each page in this index. **Every MDX page MUST have a `description` field** -- without it, the page appears as an unannotated link in the LLM index.
+Every documentation page is automatically indexed in `/llms.txt` via the fumadocs integration in `apps/docs/app/lib/fumadocs/get-llms-text.ts`. The `description` frontmatter field populates the annotation for each page in this index. **Every MDX page MUST have a `description` field** -- without it, the page appears as an unannotated link in the LLM index.
 
 ### Individual Page Markdown
 
@@ -348,7 +348,7 @@ For `@example` standards (compilable examples, real-world usage, language tags),
 Reference documentation is auto-generated from JSDoc using `fumadocs-typescript`'s `remarkAutoTypeTable` remark plugin. The workflow:
 
 1. JSDoc comments on source types in `packages/runtime/src/` are the source of truth.
-2. Dedicated props files in `apps/ui/content/docs/(runtime)/api/props/` re-export only the intended public API types.
+2. Dedicated props files in `apps/docs/content/docs/(runtime)/api/props/` re-export only the intended public API types.
 3. MDX reference pages use `<auto-type-table path="./props/[file].ts" name="[TypeName]" />` to render type tables.
 4. Only types explicitly re-exported in props files appear in docs. No internal types leak.
 
@@ -487,7 +487,7 @@ pages surface at the root level.
 }
 ```
 
-This is the pattern Tau's runtime docs (`apps/ui/content/docs/runtime/meta.json`) use.
+This is the pattern Tau's runtime docs (`apps/docs/content/docs/runtime/meta.json`) use.
 
 ### Forbidden pattern
 

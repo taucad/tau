@@ -1,0 +1,162 @@
+---
+title: Embedding in a Host
+description: Wire @taucad/runtime into an editor host with opaque rooted filesystems and explicit transport ownership.
+docType: how-to
+icon: lucide:plug-zap
+---
+
+The `transport` option on `createRuntimeClient` is the single seam where a host supplies an opaque filesystem to the runtime. Transport-owned signalling and geometry memory are closed over at construction; `client.connect()` takes no arguments and only runs the handshake for the transport supplied at construction.
+
+Wire the transport explicitly in three scenarios:
+
+1. **Worker-hosted filesystems** — trusted host code selects a project route and exposes a fresh rooted bridge via `fromFileSystemBridge(() => connection)`.
+2. **Deferred client creation** — the host constructs the client only once it knows which filesystem to bind.
+3. **Electron utility-process hosts** — the runtime executes outside the renderer behind the bundled main, preload, utility, and renderer helpers.
+
+When none of these apply, the [Quick Start](../getting-started/quick-start) and [Live Rendering](./live-rendering) paths are the canonical npm-consumer routes.
+
+## Opaque RuntimeFileSystem values
+
+The `fileSystem` field on `webWorkerTransport({ ... })`, `inProcessTransport({ ... })`, and friends accepts an opaque [`RuntimeFileSystem`](../api/filesystem) produced by the bundled factories (`fromMemoryFs`, `fromNodeFs`, `fromBrowserFs`, `fromFsLike`, `fromFileSystemBridge`) — see [Set Up the Filesystem](./filesystem-setup) for choosing one. `createWebWorkerClientOptions({ fileSystem, ... })` is the common browser seam; transport authors can call `webWorkerTransport({ fileSystem, ... })` directly.
+
+### Worker-hosted filesystems
+
+When the host owns a file-manager worker — the canonical editor pattern — trusted composition selects an authority-global project route. Pass a connection factory to `fromFileSystemBridge(...)`; every runtime binding or initialize retry receives a fresh bridge rooted at that project:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
+import { fromFileSystemBridge, openFileSystemBridge } from '@taucad/runtime/filesystem';
+
+const fileManagerWorker = new Worker(new URL('./fm-worker.ts', import.meta.url));
+
+const clientOptions = createWebWorkerClientOptions({
+  createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+  fileSystem: fromFileSystemBridge(() => openFileSystemBridge(fileManagerWorker, { root: '/projects/widget' })),
+});
+const client = createRuntimeClient(clientOptions);
+await client.connect();
+
+const result = await client.export('glb', { source: { path: 'main.ts' } });
+if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
+
+client.terminate();
+```
+
+The transport owns and disposes each connection the factory returns. The runtime does not know whether the authority is a Worker, iframe, Electron utility process, or another port broker, and it receives no project id, authority-global path, rights object, or mount table — it renders local paths only. Here the host-owned authority path `/projects/widget/main.ts` becomes runtime `main.ts`; kernels and bundlers see only the latter. See [Path Namespaces](../concepts/path-namespaces) for the equivalent Node, browser-handle, memory, and inline-source mappings.
+
+Do not pass the authority's shared file pool to a rooted runtime: a pool hit can return authority-global bytes before the scoped bridge handles the read, bypassing the filesystem boundary. Runtime file content always travels the rooted bridge's transfer path.
+
+### Deferred client creation
+
+When the project is chosen at user navigation rather than app boot, construct the client at that moment. Every wire concern is closed over at construction and the client stays `'unconnected'` until `connect()` — no worker spawns, no handshake runs:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+
+// ...later, once the user picks a project:
+const projectPath = '/Users/me/cad-projects/widget';
+const runtime = defineRuntime({ plugins: [replicad()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs(projectPath) }),
+});
+await client.connect();
+```
+
+## Electron utility-process hosts
+
+Electron runs one utility process per materialized runtime client. The bundled helpers exchange an opaque host lease internally so normal close and hard timeout recovery terminate exactly that process.
+
+Register the utility entry in the main process:
+
+```typescript @ts-nocheck
+// main.ts
+// @ts-nocheck: the docs resolver cannot resolve electron-vite's `?modulePath` virtual specifier.
+import { app } from 'electron';
+import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
+import utilityEntry from './runtime.utility?modulePath';
+
+await app.whenReady();
+installElectronRuntimeHeaders();
+const runtimeMain = registerElectronRuntimeMain({
+  utilityEntry,
+});
+
+app.once('before-quit', () => runtimeMain.dispose());
+```
+
+Expose the narrow bridge from preload:
+
+```typescript
+// preload.ts
+import { exposeElectronRuntime } from '@taucad/runtime/electron/preload';
+
+exposeElectronRuntime();
+```
+
+Serve the worker-owned runtime in the utility process:
+
+```typescript
+// runtime.utility.ts
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
+import { runtime } from './examples/runtime-definition';
+
+serveElectronRuntime({
+  runtime,
+  fileSystem: fromMemoryFs(),
+});
+```
+
+Create the renderer client through the async options provider:
+
+```typescript
+// renderer/runtime-client.ts
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
+
+const provideClientOptions = createElectronClientOptions({ renderTimeout: 60_000 });
+
+export const createElectronRuntimeClient = async () => createRuntimeClient(await provideClientOptions());
+```
+
+Renderer code never handles the host ID or releases the lease itself; the transport releases it through the preload bridge on `terminate()` and on hard timeout recovery. The identical config and `?modulePath` import cover electron-vite 5/Vite 7 and electron-vite 6 beta/Vite 8. See [Bundling](./bundling) for electron-vite configuration and [Configure Render Timeouts](./render-timeouts) for the typed restart flow.
+
+## Lifecycle
+
+The progression is `'unconnected' -> 'connecting' -> 'connected' -> 'terminated'`, readable at `client.lifecycleState`. `connect()` is idempotent — a second call while connected resolves without re-running the handshake. There is no rebinding: to switch projects, terminate the client and create a fresh one with new transport options.
+
+### Deterministic terminate() and graceful shutdown()
+
+`client.terminate()` is synchronous and observes seven invariants the host can rely on without timing-dependent choreography:
+
+1. `client.lifecycleState` becomes `'terminated'` synchronously.
+2. The transport's `close()` is invoked exactly once.
+3. Every in-flight `connect()` / `render()` / `updateParameters()` / `setOptions()` / `export()` Promise rejects on the next microtask with `RuntimeTerminatedError` (`causeKind: 'explicit'`).
+4. `client.on(...)` calls made after `terminate()` throw synchronously.
+5. Subsequent commands reject synchronously with `RuntimeTerminatedError` (`causeKind: 'explicit'`).
+6. A second `terminate()` is a no-op.
+7. Captured connect options are cleared, so a fresh client built from the same host primitives starts clean.
+
+For orderly shutdown paths (`beforeunload`, server graceful exit, test teardown), the asynchronous `shutdown({ drain? })` companion awaits in-flight intents first:
+
+```typescript
+function attachShutdown(client: { shutdown: (opts: { drain?: boolean }) => Promise<void> }): void {
+  window.addEventListener('beforeunload', () => {
+    void client.shutdown({ drain: true });
+  });
+}
+```
+
+`shutdown({ drain: true }){:ts}` closes command admission, waits for admitted intents, awaits the worker's one idempotent cleanup call, then closes the transport and owned bridge resources. `terminate(){:ts}` and `shutdown({ drain: false }){:ts}` are hard closes: they reject promptly and make no claim that remote cleanup ran. A concurrent hard terminate unblocks a drain, and every path is idempotent.
+
+## Further Reading
+
+- [API Reference: Client](../api/client) — `RuntimeClient.connect` and the lifecycle taxonomy
+- [API Reference: Filesystem](../api/filesystem) — `RuntimeFileSystem` and the `from*` factories
+- [Live Rendering](./live-rendering) — Drive the autonomous loop once the wiring is in place
+- [Cross-Origin Isolation](./cross-origin-isolation) — COOP/COEP headers for transport-owned shared memory

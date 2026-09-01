@@ -1,0 +1,165 @@
+---
+title: Test Kernels
+description: Test runtime plugins through the public client path and unit-test definitions with focused mocks.
+docType: how-to
+icon: lucide:flask-conical
+---
+
+Use `@taucad/runtime-testing` for runtime harnesses, mocks, and geometry assertions. Install it and Vitest as development dependencies, and compose the same kernel and bundler plugins your host uses — the testing package is not part of the production runtime payload.
+
+## Steps
+
+### 1. Render through a real client
+
+`createTestRuntimeClient` accepts a normal [`defineRuntime`](../api/client) result and drives the production `createRuntimeClient` and `inProcessTransport` path with an isolated `fromMemoryFs` filesystem. Use the public `render`, `export`, and event APIs; the caller owns shutdown:
+
+```typescript
+import { afterEach, describe, expect, it } from 'vitest';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { assertSuccess, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { defineRuntime } from '@taucad/runtime/worker';
+
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
+
+describe('Replicad kernel', () => {
+  const clients = new Set<ReturnType<typeof createTestRuntimeClient>>();
+
+  afterEach(async () => {
+    await Promise.all([...clients].map((client) => client.shutdown()));
+    clients.clear();
+  });
+
+  it('renders and exports a box', async () => {
+    const client = createTestRuntimeClient({
+      runtime,
+      files: {
+        'main.ts': `
+          import { makeBaseBox } from 'replicad';
+          export default () => makeBaseBox(30, 50, 10);
+        `,
+      },
+    });
+    clients.add(client);
+
+    const outcome = await client.render({ source: { path: 'main.ts' } });
+    expect(outcome.superseded).toBe(false);
+    if (outcome.superseded) return;
+    assertSuccess(outcome.geometry);
+
+    const exported = await client.export('step');
+    assertSuccess(exported);
+    expect(exported.data[0]?.bytes.byteLength).toBeGreaterThan(0);
+  });
+});
+```
+
+Passing `source` to `client.export(format, { source })` performs a request-scoped render and export; `client.export(format)` reuses the last settled render and rejects with `NoRenderOutcomeError` when none exists. To observe public events — `telemetry`, `renderStatus`, `log`, `error` — subscribe with `client.on(...)` before rendering.
+
+### 2. Use convenience helpers for one-shot tests
+
+`createTestGeometry` and `getTestParameters` create and close their own clients:
+
+```typescript
+import { expect, it } from 'vitest';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { assertSuccess, createTestGeometry, getTestParameters } from '@taucad/runtime-testing';
+import { defineRuntime } from '@taucad/runtime/worker';
+
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
+
+const files = {
+  'main.ts': `
+    import { makeBaseBox } from 'replicad';
+    export const defaultParams = { width: 10 };
+    export default (params = defaultParams) => makeBaseBox(params.width, 20, 30);
+  `,
+};
+
+it('exposes parameters and geometry', async () => {
+  const parameters = await getTestParameters({ runtime, files, mainFile: 'main.ts' });
+  expect(parameters.defaultParameters).toEqual({ width: 10 });
+
+  const result = await createTestGeometry({ runtime, files, mainFile: 'main.ts', parameters: { width: 25 } });
+  assertSuccess(result);
+});
+```
+
+### 3. Unit-test plugin definitions
+
+`resolveRuntimePluginDefinition` from `@taucad/runtime/plugin` with `createMockKernelRuntime` or `createMockRuntime` tests a plugin's own hooks in isolation. Runtime worker cache, filesystem watch, disposal, and transport invariants stay runtime-owned tests:
+
+```typescript
+import { expect, it } from 'vitest';
+import { defineMiddleware } from '@taucad/runtime/middleware';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import {
+  createMockCreateGeometryHandler,
+  createMockInput,
+  createMockRuntime,
+  createSuccessResult,
+} from '@taucad/runtime-testing';
+
+const passThrough = defineMiddleware({
+  id: 'pass-through',
+  name: 'PassThrough',
+  async wrapCreateGeometry(input, handler) {
+    return handler(input);
+  },
+});
+
+it('passes geometry through unchanged', async () => {
+  const definition = await resolveRuntimePluginDefinition('middleware', passThrough());
+  const runtime = createMockRuntime();
+  const input = createMockInput();
+  const expected = createSuccessResult({ format: 'gltf', content: new Uint8Array() });
+  const result = await definition.wrapCreateGeometry!(input, createMockCreateGeometryHandler(expected), runtime);
+  expect(result).toBe(expected);
+});
+```
+
+### 4. Assert geometry
+
+Geometry helpers accept the public render result shape and import no runtime internals:
+
+```typescript
+import { it } from 'vitest';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { assertSuccess, createGeometryTestHelpers, createTestGeometry } from '@taucad/runtime-testing';
+import { defineRuntime } from '@taucad/runtime/worker';
+
+const runtime = defineRuntime({
+  plugins: [replicad({ kernels: { default: { wasm: 'single' } } }), esbuild()],
+});
+
+it('checks the rendered mesh', async () => {
+  const result = await createTestGeometry({
+    runtime,
+    files: {
+      'main.ts': `
+        import { makeBaseBox } from 'replicad';
+        export default () => makeBaseBox(30, 50, 10);
+      `,
+    },
+    mainFile: 'main.ts',
+  });
+  assertSuccess(result);
+
+  const helpers = createGeometryTestHelpers();
+  await helpers.expectValidGltf(result);
+  await helpers.expectMeshCount(result, 1);
+  await helpers.expectBoundingBoxSize(result, [0.03, 0.01, 0.05], 0.001);
+});
+```
+
+## Related
+
+- [Create a Custom Kernel](./custom-kernel)
+- [Create Custom Middleware](./custom-middleware)
+- [API Reference: Testing](../api/testing)

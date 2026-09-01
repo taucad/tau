@@ -1,0 +1,60 @@
+# Static Tau documentation site. The Netlify site base directory is `apps/docs`.
+
+[build]
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build docs"
+publish = "build/client"
+ignore = "git diff --quiet \"$CACHED_COMMIT_REF\" \"$COMMIT_REF\" -- . ../../packages/ui ../../libs ../../pnpm-lock.yaml"
+
+[build.environment]
+NX_NO_CLOUD = "true"
+
+[dev]
+command = "pnpm nx dev docs"
+targetPort = 3002
+autoLaunch = false
+
+# The raw index page and its descendants cannot coexist as files in one POSIX
+# directory (`llms.mdx/runtime` vs `llms.mdx/runtime/...`). Static rewrites keep
+# the public path while serving collision-free, prerendered text files.
+[[redirects]]
+from = "/llms.mdx"
+to = "/llms.txt"
+status = 301
+
+[[redirects]]
+from = "/llms.mdx/*"
+to = "/_llms/:splat.txt"
+status = 200
+force = true
+
+# Per-page `<page>.mdx` rewrites are generated into `_redirects` at build time;
+# a Netlify splat only matches a trailing segment, so no static rule can express
+# them here.
+
+[[headers]]
+for = "/*"
+[headers.values]
+X-Content-Type-Options = "nosniff"
+X-Frame-Options = "DENY"
+Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
+Referrer-Policy = "strict-origin-when-cross-origin"
+Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+
+[[headers]]
+for = "/assets/*"
+[headers.values]
+Cache-Control = "public, max-age=31536000, immutable"
+Netlify-CDN-Cache-Control = "public, durable, max-age=31536000"
+
+[[headers]]
+for = "/fonts/*"
+[headers.values]
+Cache-Control = "public, max-age=2592000"
+Netlify-CDN-Cache-Control = "public, durable, max-age=2592000"
+
+[[headers]]
+for = "/llms*.txt"
+[headers.values]
+Cache-Control = "public, max-age=3600"
+Netlify-CDN-Cache-Control = "public, durable, max-age=86400"

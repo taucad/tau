@@ -1,0 +1,168 @@
+---
+title: Worker Model
+description: How Web Workers provide isolation, the autonomous render service, and the transport-owned abort channel.
+docType: explanation
+icon: lucide:cpu
+---
+
+The runtime worker is an **autonomous render service**: it watches file dependencies, debounces changes, renders geometry, and pushes results without the main thread telling it when to act. MessagePort carries commands and events; a transport-owned abort channel (backed by `SharedArrayBuffer` where the transport supports it) carries immediate render abort. The design mirrors the Language Server Protocol -- the worker is a "geometry server," the main thread a display client.
+
+Executable runtime composition lives in the worker or host process; deployment values reach it through a Zod `configSchema` and an allowlisted boot `config` ([Boot Config](../api/client#boot-config)). Filesystem stays separate: it is a transport-owned workspace resource, not runtime config.
+
+## Context and Motivation
+
+CAD kernels do heavy work -- WASM geometry computation, bundling, tessellation -- and on the main thread that freezes the UI. A Web Worker has its own global scope and event loop, so a crash or infinite loop in kernel code cannot lock the page, and WASM heaps and geometry buffers stay off the main thread's heap. The worker also owns scheduling: it knows the dependency graph, the cache state, and which renders are stale, which removes round-trips and allows early abort of superseded renders.
+
+## How It Works
+
+```mermaid
+flowchart TB
+    subgraph Main["Main Thread (display client)"]
+        Editor["Editor / App"]
+        Client["RuntimeClient"]
+        Scene["Three.js / UI"]
+        FMProxy["FileManager Proxy"]
+    end
+
+    subgraph Worker["Kernel Worker (autonomous render service)"]
+        RenderLoop["Render Loop + Debounce"]
+        KernelWorker["KernelRuntimeWorker"]
+        Middleware["Middleware Chain"]
+        Kernels["Kernel Modules"]
+        WatchSub["Watch Subscription"]
+        Caches["Caches (file, bundle, selection)"]
+    end
+
+    subgraph FSWorker["File Manager Worker (IndexedDB)"]
+        FS["Filesystem Backend"]
+        EventBus["EventBus + WatchRegistry"]
+    end
+
+    Editor -->|"render / updateParameters"| Client
+    Client -->|"MessagePort (kernel protocol)\n+ Transport abort channel"| RenderLoop
+    RenderLoop --> KernelWorker
+    KernelWorker --> Middleware
+    Middleware --> Kernels
+    KernelWorker -.->|"geometry / state events"| Scene
+
+    Editor -->|"file edits"| FMProxy
+    FMProxy -->|"MessagePort (FS bridge A)\nwriteFile / readFile"| FS
+
+    FS --> EventBus
+    EventBus -->|"MessagePort (FS bridge B)\nwatch events"| WatchSub
+    WatchSub -->|"file changed → invalidate + debounce"| RenderLoop
+```
+
+Commands and writes flow down from the main thread; watch events go from the File Manager Worker straight into the kernel worker; geometry and state events flow back to the UI.
+
+### KernelRuntimeWorker as Multi-Kernel Host
+
+One worker instance hosts every registered kernel. `KernelRuntimeWorker` loads kernel modules lazily, picks one per file ([Kernel Selection](./kernel-selection)), and delegates to its methods. One worker per kernel would multiply memory and startup cost for no isolation gain.
+
+### Autonomous Render Loop
+
+After `render`, the worker owns its lifecycle through one private serialized lane, so kernel work, exports, staging writes, and watch changes never race shared cache or native-handle state. File changes are debounced 200ms inside the worker, Vite-HMR style:
+
+1. **render(source, parameters)** -- reserve exactly one preview generation, normalize the entry, observe it before the first read, then discover dependencies from the esbuild metafile and kernel resolvers. The generation-local dependency candidate accumulates resolved, unresolved, and middleware paths even when later work fails.
+2. **Watch handoff** -- hold the old subscription until a complete replacement is acknowledged, revalidate only the additions, then swap atomically. A failed first render heals when its entry or a missing dependency changes.
+3. **Watch or change event** -- path events, renames, and staging writes take the exact-change route; reset and overflow signals take the loss-recovery route. Only a change intersecting the current preview, or a genuine loss signal, invalidates the published artifact and schedules a rerender.
+4. **updateParameters / setOptions** -- reserve one generation, schedule, and rerender under the same ownership and supersession rules.
+5. **Exact export of another source** -- materializes under a request-local owner: it may warm shared caches but cannot take over the active preview's watch map, published artifact, kernel, or native handle. Snapshot export without a source exports the last valid published preview.
+
+### Filesystem Bridge
+
+The File Manager Worker owns the virtual filesystem, accepting bridge connections via `exposeFileSystem(...)`; trusted host composition picks a project mount per rooted connection. Two bridges exist at startup.
+
+**Bridge A (main thread):** the editor and file manager UI pair `createFileSystemBridge(fsWorker)` with `createFileSystemBridgeProxy(bridge)` to write files and read directory trees. A write persists through the active provider and emits `fileWritten` on the EventBus.
+
+**Bridge B (kernel worker):** the active [transport](../api/transport) owns this bridge end to end. Consumers pass an opaque `RuntimeFileSystem` at construction -- `fromFileSystemBridge(() => openFileSystemBridge(fsWorker, { root: '/projects/widget' }))` for a worker-backed rooted arm, or an inline arm from the [Filesystem API](../api/filesystem) -- and the transport transfers a fresh filesystem `MessagePort` during `initialize`. That port is typed structurally (`MessagePortLike`), so an in-process or `node:worker_threads` host may pass its own instead of a transferable DOM one. The kernel worker reads, writes, resolves dependencies, and watches over it, and connections are disposed with the runtime session. Without a separate filesystem worker (Node.js, tests), the inline arms wire `createFileSystemBridgePort(fileSystem)` over the same protocol, auto-propagating `watch` when the inlined object exposes it.
+
+Bridge A writes therefore reach Bridge B with no relay: the main thread never sits on the hot path between a file change and a re-render.
+
+A [runtime path](./path-namespaces) names a file within the filesystem supplied to the client; worker-side paths are canonical and root-relative, with `''` naming the root. The filesystem decides reachability, preserves exact-path events, and signals reset/overflow when path information is lost; the runtime never sees authority-global `/projects/<id>` paths and never makes authorization decisions. Scoped writes carry an origin tag, so a runtime port receives peer writes but not its own echo.
+
+### Transport Abort Channel
+
+The abort signal must be readable during **synchronous WASM execution**, when the worker's event loop is blocked and cannot process messages. The active transport owns the channel end to end: SAB-capable transports back it with a `SharedArrayBuffer`, wire-only transports forward targeted abort notifications. Neither the client nor the application touches `Atomics` or the SAB.
+
+Reserving a preview (or targeting a timeout) bumps the abort generation that the worker's OC Proxy reads. On `render()`, `updateParameters()`, or `setOptions()`:
+
+1. `RuntimeTransportClient.reservePreview()` advances and captures the transport-owned generation synchronously, ahead of any staging or connection work.
+2. The worker may be mid-WASM with a blocked event loop, so the message queues.
+3. The next OC Proxy call sees the new generation and throws an internal abort marker -- never surfaced to consumers, who see `RenderOutcome.superseded`.
+4. The render unwinds; the event loop resumes and processes the queued message.
+5. The queued preview consumes its captured reservation unchanged: a stale one cannot be relabelled with a newer generation, reopen an old entry, commit watches, or publish geometry.
+
+For wall-clock deadlines, a terminable transport's `abortRender(target)` forwards the exact `renderId` and optional `abortGeneration`. If the host misses the bounded recovery grace, `terminate()` closes only that host and its `closed` promise resolves with `{ cause: 'render-timeout' }`.
+
+The channel is two main-to-worker `Int32` slots owned by the SAB-backed transport: slot 0 `abortGeneration` bumps whenever the main thread supersedes or times out the render, slot 1 `abortReason` carries `superseded` versus `timeout` so the worker can route the abort. That layout is internal to transports -- runtime code only calls `reservePreview()`. Every worker-to-main signal (state, progress, geometry, telemetry, parameters) travels over the single ordered, validated RPC channel and surfaces through `client.on(...)`.
+
+### Per-Kernel Abort Capabilities
+
+| Kernel          | Async abort | Proxy / mid-WASM abort | Worst-case latency   |
+| --------------- | ----------- | ---------------------- | -------------------- |
+| **Replicad**    | Yes         | Yes                    | < 1ms (next OC call) |
+| **OpenCASCADE** | Yes         | Yes                    | < 1ms (next OC call) |
+| **JSCAD**       | Yes         | N/A                    | < 10ms (next await)  |
+| **Manifold**    | Yes         | N/A                    | < 10ms               |
+| **Zoo/KCL**     | Yes         | N/A                    | < 50ms               |
+| **OpenRSCAD**   | No          | No                     | Full render duration |
+
+The generation counter backstops every row: even a kernel with no abort checkpoint cannot publish a stale result.
+
+### MessagePort-Based Communication Protocol
+
+`RuntimeTransportClient.open()` returns a validated `Channel<RuntimeProtocol>`. Browser, Node, and Electron transports adapt their native `MessagePort` or worker interface behind it, and `runtimeProtocolSchemas` validates calls and notifications at both boundaries. Application code sees typed `RuntimeClient` methods and events, never protocol frames.
+
+### Geometry Delivery Tiers
+
+Geometry bytes reach the main thread through the transport's delivery tiers: shared-memory pool where available, then `postMessage` transfer, then copy. Transfer moves the `ArrayBuffer` and the worker gives up access. The filesystem bridge extracts transferables too, so large CAD files move zero-copy between workers.
+
+## Topology Recipes
+
+Two orthogonal planes compose every shipped topology, with no environment detection or application-owned wiring: **transport** (the wire plus execution location) and **filesystem** (the source of truth for files).
+
+### T1 — Browser UI (Tau today)
+
+The host page owns a kernel `Worker` and a file-manager `Worker`: the transport runs the wire in the kernel worker, the filesystem lives in the FM worker behind a bridge.
+
+`createWebWorkerClientOptions` takes `createWorker` plus `fileSystem: fromFileSystemBridge(() => openFileSystemBridge(fmWorker, { root: '/projects/widget' })){:ts}`; the wiring in full is in [Embedding in a Host](../guides/embedding-in-a-host).
+
+The worker entry composes `defineRuntime(...)` and `serveWebWorkerRuntime({ runtime })`; Vite, React Router, and Next.js keep the app-owned `new Worker(new URL(...))` expression in their own graph. A config-backed runtime passes `typeof runtime` to `createWebWorkerClientOptions` to infer the client `config` input from the worker's Zod schema ([Boot Config](../api/client#boot-config)).
+
+### T2 — In-process Node CLI / tests
+
+One Node process owns everything: the in-process transport bridges to a same-isolate dispatcher, and the local-directory filesystem goes to the kernel inline, skipping the `MessagePort` round-trip. `createNodeClient({ runtime, projectPath }){:ts}` is the whole recipe ([Client API](../api/client)).
+
+### T3 — Electron renderer + utility-process runtime
+
+Electron runs one utility process per materialized client. Main owns each utility lease and relays a `MessagePort`; preload exposes a narrow request/release bridge; the utility calls `serveElectronRuntime`; the renderer awaits `createElectronClientOptions({ renderTimeout: 60_000 }){:ts}` and hands the result to `createRuntimeClient`. No kernel, filesystem, or bundler code enters the renderer graph.
+
+Process helpers and electron-vite configuration are in [Framework Integrations API](../api/frameworks#electron-process-boundaries). Each renderer client holds an independent host lease, so timeout recovery terminates a blocked utility without touching sibling clients.
+
+### Why two planes
+
+The transport knows the wire and the execution location; the filesystem knows reachability and storage. Separating them avoids a transport type per storage provider.
+
+## Key Relationships
+
+- **Transport and client** -- the client materializes its transport plugin into a `RuntimeTransportClient`; custom transports serve testing and alternative channels.
+- **Dispatcher and worker** -- the dispatcher is the worker-side message handler: it validates commands, invokes worker methods, emits events.
+- **Editor and filesystem** -- Bridge A writes emit EventBus changes that feed the worker's watch subscriptions, closing the loop between edits and re-renders.
+- **Filesystem and worker** -- the kernel worker reads and watches over Bridge B, scoped to the current dependency graph. An inline Node filesystem (`fromNodeFs`) has no File Manager Worker: it watches host directories itself, in-isolate.
+
+## Implications
+
+- **Async by design** -- every kernel operation is async; the client API is Promise-based or event-driven.
+- **Single-threaded worker** -- one render at a time; abort keeps stale renders short so the latest starts sooner.
+- **Transfer semantics** -- transferred buffers are moved, not copied; the worker must not retain references after transfer.
+- **Cross-origin isolation** -- the default worker transports back the abort channel and geometry pool with `SharedArrayBuffer`, requiring the COOP + COEP headers that OpenCASCADE's pthread support already needs. Degradation never throws: kernel initialization reads `getIsolationStatus()` and logs one warning naming the reason, the pool falls back to copy delivery, abort to wire notification, and OCCT runs single-threaded. See [Cross-Origin Isolation](../guides/cross-origin-isolation).
+
+## Further Reading
+
+- [Architecture](./architecture) -- the layered design
+- [Render Lifecycle](./render-lifecycle) -- cancellation and concurrency
+- [Kernel Selection](./kernel-selection) -- how the worker picks a kernel
+- [API: Transport](../api/transport) -- topology helpers and author contracts
+- [Framework Integrations API](../api/frameworks) -- Vite, Next.js, React Router, Electron
+- [Set Up the Filesystem](../guides/filesystem-setup) -- connecting a filesystem

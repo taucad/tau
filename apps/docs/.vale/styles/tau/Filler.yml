@@ -1,0 +1,20 @@
+extends: existence
+message: "Remove filler phrase '%s'."
+level: error
+ignorecase: true
+tokens:
+  - '\bsimply\b'
+  - '\bin order to\b'
+  - "\\bit(?:'|’)s worth noting(?: that)?\\b"
+  - '\bit is worth noting(?: that)?\b'
+  - '\bit is important to note(?: that)?\b'
+  - '\bplease note(?: that)?\b'
+  - "\\bin today(?:'|’)s fast-paced world\\b"
+  - '\bplays? (?:a )?(?:crucial|vital) role\b'
+  - '\bseamlessly integrates?\b'
+  - '\bdelve into\b'
+  - '\ba testament to\b'
+  - '\brich tapestry\b'
+  - '(?m)^Moreover,?\b'
+  - '(?m)^Furthermore,?\b'
+  - '(?m)^In conclusion,?\b'

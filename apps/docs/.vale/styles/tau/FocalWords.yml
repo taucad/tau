@@ -1,0 +1,29 @@
+# Provenance (reviewed 2026-09-01): docs/reference/juzek-2024-chatgpt-delve.md,
+# Table 2 (Juzek & Ward, 2024). Refresh this list as models drift; the paper's
+# GPT-4o replication already showed list churn.
+extends: existence
+message: "Review measured LLM focal word '%s'."
+level: warning
+ignorecase: true
+tokens:
+  - '\bdelves\b'
+  - '\bdelved\b'
+  - '\bdelving\b'
+  - '\bshowcasing\b'
+  - '\bdelve\b'
+  - '\bboasts\b'
+  - '\bunderscores\b'
+  - '\bcomprehending\b'
+  - '\bintricacies\b'
+  - '\bsurpassing\b'
+  - '\bintricate\b'
+  - '\bunderscoring\b'
+  - '\bgarnered\b'
+  - '\bshowcases\b'
+  - '\bemphasizing\b'
+  - '\bunderscore\b'
+  - '\brealm\b'
+  - '\bsurpasses\b'
+  - '\bgroundbreaking\b'
+  - '\badvancements\b'
+  - '\baligns\b'

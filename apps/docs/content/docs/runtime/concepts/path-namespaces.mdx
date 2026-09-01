@@ -1,0 +1,108 @@
+---
+title: Path Namespaces
+description: How consumer source paths, plugin entry paths, and host filesystem roots relate.
+docType: explanation
+icon: lucide:route
+---
+
+A **runtime path** identifies a file within the filesystem capability supplied to one runtime client. It is a canonical POSIX path relative to that capability -- `main.ts`, `models/main.ts`, or `''` for the capability root -- and never has a leading slash. That one definition lets consumers, plugin authors, and host integrators name the same file without exposing the host's storage layout.
+
+## Consumer Source Paths
+
+For a filesystem-backed source, `source.path` accepts one canonical root-relative path. The client validates that form before the request reaches a kernel:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const runtime = defineRuntime({ plugins: [replicad()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+
+await client.render({ source: { path: 'models/main.ts' } });
+```
+
+For inline source, `source.entry` is a key in `source.files` and may include directory segments:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const runtime = defineRuntime({ plugins: [replicad()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+const mainSource = 'export default () => null;';
+const partSource = 'export const part = null;';
+
+await client.render({
+  source: {
+    files: {
+      'models/main.ts': mainSource,
+      'lib/part.ts': partSource,
+    },
+    entry: 'models/main.ts',
+  },
+});
+```
+
+## Plugin Entry and Dependency Paths
+
+Kernel and bundler methods receive the canonical `entryPath` that names the model's evaluation root within the supplied runtime filesystem:
+
+```typescript
+import type { KernelDefinition } from '@taucad/runtime/kernel';
+
+const kernelMethods: Pick<KernelDefinition, 'getDependencies'> = {
+  async getDependencies({ entryPath }, { filesystem }) {
+    // entryPath === 'models/main.ts'
+    const source = await filesystem.readFile(entryPath, 'utf8');
+    return { resolved: [entryPath, 'lib/part.ts'], unresolved: source ? [] : [entryPath] };
+  },
+};
+```
+
+Middleware receives the same normalized `entryPath`. Dependency `path` values and all `KernelFileSystem` arguments use this namespace too: `entryPath` is the evaluation root, `path` is any dependency.
+
+## Host Filesystem Roots
+
+Filesystem adapters decide which host resource becomes the capability root:
+
+| Adapter                          | Host-owned input                    | Runtime view                                      |
+| -------------------------------- | ----------------------------------- | ------------------------------------------------- |
+| `fromNodeFs('/srv/cad/widget')`  | A host OS directory                 | `main.ts` maps to `/srv/cad/widget/main.ts`       |
+| `fromBrowserFs(directoryHandle)` | A browser directory handle          | `main.ts` is relative to that handle              |
+| `fromFileSystemBridge(open)`     | A bridge already rooted by the host | `main.ts` is relative to the selected bridge root |
+| `fromFsLike(fs)`                 | An already-confined filesystem      | `main.ts` is resolved by that confined filesystem |
+| `fromMemoryFs(files)`            | An in-memory file map               | Map keys are exposed as runtime paths             |
+
+The adapter or host chooses the boundary. Kernels, bundlers, and middleware receive runtime paths only -- never host OS paths, project IDs, or authority-global mount paths.
+
+## Related Path Names
+
+Other Tau layers deliberately use different namespaces:
+
+| Name                         | Meaning                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| Project manifest `entryPath` | Canonical project-root-relative entry path                                |
+| Runtime `source.path`        | Canonical capability-root-relative consumer input                         |
+| Plugin `entryPath`           | Canonical capability-root-relative evaluation entry                       |
+| Dependency `path`            | Canonical capability-root-relative path for any dependency                |
+| Authority-global path        | Host-owned route such as `/projects/widget/main.ts`; never a plugin input |
+| Host path                    | Native OS path used only at an adapter boundary                           |
+
+Keep each namespace at its owning boundary. In particular, do not pass `/projects/<id>/...` or a host OS path to a kernel to recreate access checks the filesystem adapter already owns.
+
+## Further Reading
+
+- [Architecture](./architecture) -- where filesystem adapters and plugins sit
+- [Filesystem API](../api/filesystem) -- constructors that establish a runtime filesystem root
+- [Custom Kernel](../guides/custom-kernel) -- consuming `entryPath` and returning dependencies
+- [Embedding in a Host](../guides/embedding-in-a-host) -- rooting a runtime in a host-owned filesystem

@@ -1,0 +1,140 @@
+---
+title: Configure the Bundler
+description: Configure the esbuild bundler for TypeScript and JavaScript kernel inputs, or define a custom bundler.
+docType: how-to
+icon: lucide:package
+---
+
+Give JS/TS kernels (Replicad, OpenCASCADE, Manifold, JSCAD) the bundler they require: it resolves imports, bundles model code, and executes it inside the worker.
+
+This is the **model-source bundler** inside the runtime. To configure the application bundler — Vite, React Router, Next.js, electron-vite — use [Bundling](./bundling) and the [Framework Integrations API](../api/frameworks).
+
+## Steps
+
+### 1. Add the esbuild toolkit to defineRuntime
+
+The `esbuild()` toolkit from `@taucad/esbuild` installs the default bundler beside your kernels:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+```
+
+### 2. Override the handled extensions
+
+The direct `esbuildBundler` factory accepts `EsbuildOptions`. Default extensions are `['ts', 'js', 'tsx', 'jsx']`; restrict them when your project has no plain JavaScript:
+
+```typescript
+import { esbuildBundler } from '@taucad/esbuild';
+
+const bundler = esbuildBundler({ extensions: ['ts', 'tsx'] });
+```
+
+### 3. Know the bundling flow
+
+For JS/TS kernels the flow is:
+
+1. **detectImports** — a lightweight externals-mode pass discovers bare-specifier imports (`replicad`, `@jscad/modeling`). This drives kernel selection.
+2. **Kernel initialization** — the selected kernel registers built-in modules (WASM-loaded libraries) via `runtime.bundler.registerModule`.
+3. **bundle** — a full bundle with all registered modules resolved produces runnable ESM code.
+4. **execute** — the bundled code runs via dynamic import (Blob URL in the browser, data URL in Node.js).
+
+Kernels reach the bundler through `runtime.bundler` and `runtime.execute`; the kernel lifecycle drives these, not your call site.
+
+### 4. Register built-in modules (kernel authors)
+
+A custom JS/TS kernel registers its built-in modules from the operation runtime before bundling:
+
+```typescript
+import type { KernelRuntime } from '@taucad/runtime/types';
+
+export const registerMyLibrary = (runtime: KernelRuntime): void => {
+  runtime.bundler.registerModule('my-library', {
+    code: 'export const greet = (name) => `hello, ${name}`;',
+    version: '1.0.0',
+    globalName: 'myLibrary',
+  });
+};
+```
+
+Call it inside `createGeometry` (or wherever the module must exist) — the Replicad and JSCAD kernel sources show complete implementations.
+
+### 5. Define a custom bundler
+
+For a different transpiler or execution model, use [`defineBundler`](../api/bundler). The definition requires `id`, `name`, `version`, `extensions`, `initialize`, `detectImports`, `bundle`, `execute`, and `registerModule`; `cleanup` is optional:
+
+```typescript
+import { defineBundler, type BuiltinModule } from '@taucad/runtime/bundler';
+
+export const myBundler = defineBundler({
+  id: 'my-bundler',
+  name: 'MyBundler',
+  version: '1.0.0',
+  extensions: ['ts', 'js'],
+
+  async initialize(_options, { filesystem }) {
+    const modules = new Map<string, BuiltinModule>();
+    return { filesystem, modules };
+  },
+
+  async detectImports({ entryPath }) {
+    return { detectedModules: [], dependencies: [entryPath] };
+  },
+
+  async bundle({ entryPath }) {
+    return {
+      code: `export default async () => { /* bundled from ${entryPath} */ };`,
+      success: true,
+      issues: [],
+      dependencies: [entryPath],
+      unresolvedPaths: [],
+    };
+  },
+
+  async execute({ code }) {
+    const dataUrl = `data:text/javascript;base64,${btoa(code)}`;
+    const module = (await import(dataUrl)) as { default: unknown };
+    return { success: true, value: module.default };
+  },
+
+  registerModule({ name, module }, context) {
+    context.modules.set(name, module);
+  },
+});
+```
+
+The returned value is already the [`BundlerPlugin`](../api/bundler) factory — register it in the worker-owned runtime:
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { myBundler } from './examples/my-bundler';
+
+export const runtime = defineRuntime({
+  bundlers: [myBundler()],
+});
+```
+
+`detectImports`, `bundle`, and dependency-resolution methods receive `entryPath` as a normalized [runtime path](../concepts/path-namespaces), never a host operating-system path, and must return dependencies in the same namespace. Operation methods also receive a fresh `BundlerRuntime.signal` on their second argument — see [Cooperate with Cancellation](./cooperate-with-cancellation).
+
+## Variations
+
+- **Multiple bundlers**: The worker matches the entry path's extension against each `bundler.extensions`; the first matching bundler wins.
+- **Test the production composition**: Pass `esbuild()` in the `defineRuntime` used by `createTestRuntimeClient`; unit tests of a definition can use `createMockKernelRuntime` when bundling is not part of the invariant.
+
+## Related
+
+- [Create a Custom Kernel](./custom-kernel) — Implement kernels that use the bundler
+- [Plugin System](../concepts/plugin-system) — How bundlers are loaded
+- [API Reference: Bundler](../api/bundler) — EsbuildOptions, defineBundler, BundlerDefinition

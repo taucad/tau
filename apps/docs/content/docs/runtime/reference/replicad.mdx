@@ -1,0 +1,25 @@
+---
+title: Replicad Examples
+description: Replicad model reference with runtime setup and source samples.
+docType: reference
+icon: lucide:box
+---
+
+A Replicad model is a TypeScript module whose default export returns a shape:
+
+```typescript
+export const modelCode = `
+  import { makeBaseBox } from 'replicad';
+  export default () => makeBaseBox(30, 20, 10).fillet(2);
+`;
+```
+
+This setup renders such models with the `replicad` kernel:
+
+<ReplicadReference />
+
+## Related
+
+- [Quick Start](../getting-started/quick-start) -- Render your first model with Replicad
+- [Choose a Kernel](../guides/choosing-a-kernel) -- Compare Replicad with other kernels
+- [API: Kernels](../api/kernels) -- Replicad factory function and options

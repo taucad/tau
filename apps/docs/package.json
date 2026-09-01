@@ -1,0 +1,47 @@
+{
+  "name": "@taucad/docs",
+  "version": "0.0.1",
+  "description": "Tau documentation site",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@react-router/node": "catalog:",
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/grammars": "workspace:*",
+    "@taucad/manifold": "workspace:*",
+    "@taucad/middleware": "workspace:*",
+    "@taucad/opencascade": "workspace:*",
+    "@taucad/replicad": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "@taucad/ui": "workspace:*",
+    "@taucad/zoo": "workspace:*",
+    "@xyflow/react": "catalog:",
+    "fumadocs-core": "^16.10.4",
+    "fumadocs-mdx": "15.4.0",
+    "fumadocs-typescript": "^5.2.6",
+    "fumadocs-ui": "^16.10.4",
+    "isbot": "^5",
+    "lucide-react": "catalog:",
+    "mermaid": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-router": "catalog:",
+    "tw-animate-css": "^1.4.0"
+  },
+  "devDependencies": {
+    "@nx/vite": "catalog:",
+    "@react-router/dev": "catalog:",
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "files": [
+    "build"
+  ]
+}

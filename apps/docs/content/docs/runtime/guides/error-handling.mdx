@@ -1,0 +1,116 @@
+---
+title: Handle Errors
+description: Handle KernelResult issues, render supersession, and typed lifecycle errors with stable codes and guards.
+docType: how-to
+icon: lucide:triangle-alert
+---
+
+Kernel operations resolve with a discriminated `KernelResult<T>`; lifecycle and render failures arrive as Promise rejections carrying typed error classes. Branch on the `success` field, the `KernelIssue.code`, or the error's `code` getter — never on message text, which may change.
+
+## Steps
+
+### 1. Narrow KernelResult with the success field
+
+`KernelResult<T>` has two shapes: `{ success: true, data, issues }` and `{ success: false, issues }`. `client.export(format, input)` resolves with it — the `success` branch narrows `result.data`, and the failure branch carries structured issues:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const userCode = `
+  import { drawCircle } from 'replicad';
+  export default () => drawCircle(10).sketchOnPlane('XY').extrude(5);
+`;
+
+const runtime = defineRuntime({ plugins: [replicad()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+const result = await client.export('glb', {
+  source: { files: { 'main.ts': userCode } },
+});
+
+if (result.success) {
+  for (const { bytes, name } of result.data) {
+    console.log(`Exported: ${name} (${bytes.byteLength} bytes)`);
+  }
+} else {
+  for (const issue of result.issues) {
+    console.error(`[${issue.severity}] ${issue.message}`);
+    if (issue.location) {
+      console.error(`  at ${issue.location.fileName}:${issue.location.startLineNumber}`);
+    }
+  }
+}
+```
+
+For autonomous-loop UIs, the same `KernelResult` shape arrives on the `geometry` event — see [Live Rendering](./live-rendering) for the subscription lifecycle.
+
+### 2. Inspect the KernelIssue structure
+
+| Field         | Type                                                                  | Purpose                                                          |
+| ------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `message`     | `string`                                                              | Human-readable error message                                     |
+| `code`        | `KernelIssueCode`                                                     | Stable typed discriminator — the branch key                      |
+| `severity`    | `'error' \| 'warning' \| 'info'`                                      | Issue severity                                                   |
+| `type`        | `'compilation' \| 'runtime' \| 'kernel' \| 'connection' \| 'unknown'` | Error origin                                                     |
+| `location`    | `ErrorLocation?`                                                      | File and range for editor integration                            |
+| `stack`       | `string?`                                                             | Raw stack trace                                                  |
+| `stackFrames` | `KernelStackFrame[]?`                                                 | Parsed frames with `context` (user, library, framework, runtime) |
+
+Use `issue.location` to place editor markers, and filter on `severity` — a `KernelSuccessResult` can still carry `warning` and `info` issues.
+
+### 3. Treat supersession as a normal outcome
+
+`render`, `updateParameters`, and `setOptions` settle with a `RenderOutcome` union. `{ superseded: true }` is benign: a newer public command or autonomous watched-filesystem preview took ownership, and the selected geometry arrives over the `geometry` event. Only real failures reject the Promise. See [Live Rendering](./live-rendering) for the pattern.
+
+### 4. Catch typed lifecycle and render errors
+
+Every error class exposes a stable `code` getter and a realm-safe type guard — prefer the guard over `instanceof` for cross-realm checks:
+
+| Error                          | Trigger                                                                                                               | `code`                              | Type guard                       |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | -------------------------------- |
+| `RuntimeNotConnectedError`     | `updateParameters` or `setOptions` issued before `connect()` completed.                                               | `'RUNTIME_NOT_CONNECTED'`           | `isRuntimeNotConnectedError`     |
+| `RuntimeConnectionError`       | Transport handshake failed. Carries `causeKind: 'transport-open' \| 'capabilities-resolution' \| 'kernel-binding'`.   | `'RUNTIME_CONNECTION_FAILED'`       | `isRuntimeConnectionError`       |
+| `RuntimeTerminatedError`       | Client became terminal. `causeKind: 'render-timeout'` marks a host killed after failed recovery; create a new client. | `'RUNTIME_TERMINATED'`              | `isRuntimeTerminatedError`       |
+| `RenderTimeoutError`           | Render exceeded the configured `renderTimeout`; the Promise rejects locally at the deadline.                          | `'RUNTIME_RENDER_TIMEOUT'`          | `isRenderTimeoutError`           |
+| `RenderAbortedError`           | Render aborted, typically superseded by a newer command.                                                              | `'RUNTIME_RENDER_ABORTED'`          | `isRenderAbortedError`           |
+| `NoRenderOutcomeError`         | `client.export(format)` called with no settled render.                                                                | `'RUNTIME_NO_RENDER_OUTCOME'`       | `isNoRenderOutcomeError`         |
+| `SharedPoolEntryNotFoundError` | Worker emitted a pooled geometry key the client could not resolve.                                                    | `'RUNTIME_SHARED_POOL_KEY_MISSING'` | `isSharedPoolEntryNotFoundError` |
+
+```typescript
+import { isRenderTimeoutError, isRuntimeTerminatedError, type RuntimeClient } from '@taucad/runtime';
+
+export const renderSafely = async (client: RuntimeClient, code: string): Promise<void> => {
+  try {
+    await client.render({ source: { files: { 'main.ts': code } } });
+  } catch (error) {
+    if (isRenderTimeoutError(error)) {
+      console.warn('Render exceeded its timeout budget');
+    } else if (isRuntimeTerminatedError(error)) {
+      console.warn('Client was terminated while a command was in flight');
+    } else {
+      throw error;
+    }
+  }
+};
+```
+
+### 5. Enrich errors in custom kernels
+
+Kernels map raw engine exceptions into `KernelIssue`s with location and stack — Replicad maps OpenCASCADE exceptions; JSCAD and Zoo map their engines' errors. In your own kernel, return `createKernelError([...])` with `message`, `code`, `severity`, `type`, and, when known, `location` — see [Create a Custom Kernel](./custom-kernel).
+
+## Variations
+
+- **Autonomous-mode errors**: subscribe to `client.on('error', (issues) => ...)` for issue batches, and `client.on('renderStatus', ...)` for the derived `'error'` status.
+- **Connection issues**: `type: 'connection'` marks transport or worker failures rather than kernel logic.
+
+## Related
+
+- [Configure Render Timeouts](./render-timeouts) — Deadline settlement and host recovery
+- [Render Lifecycle](../concepts/render-lifecycle) — How render cancellation works
+- [API Reference: Types](../api/types) — KernelResult, KernelIssue, ErrorLocation
+- [API Reference: Client](../api/client) — render and export return types

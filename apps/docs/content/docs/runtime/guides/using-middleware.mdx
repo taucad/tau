@@ -1,0 +1,83 @@
+---
+title: Use Middleware
+description: Add caching, parameter resolution, and glTF edge detection to your kernel pipeline.
+docType: how-to
+icon: lucide:layers
+---
+
+Install the first-party middleware stack so kernel operations gain caching, parameter-file resolution, and glTF edge detection without any kernel changes. Middleware intercepts kernel operations inside the worker; call sites stay untouched.
+
+## Prerequisites
+
+- [Install @taucad/runtime](../getting-started/installation)
+- Completed the [Quick Start](../getting-started/quick-start)
+
+## Steps
+
+### 1. Add the toolkit to defineRuntime
+
+The `@taucad/middleware` toolkit's default preset installs the standard stack. The preset fixes execution order; middleware runs in onion-model order, first registered outermost:
+
+```typescript @ts-nocheck
+// @ts-nocheck: the docs workspace does not install @taucad/middleware.
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { middleware } from '@taucad/middleware';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild(), middleware()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+```
+
+### 2. Know what each middleware does
+
+The default preset installs four middleware, in order:
+
+- **`parameterFileResolver()`** — merges persisted parameter-group values from `.tau/parameters/<entry>.json` over the request parameters.
+- **`parameterCache()`** — caches `getParameters` results under `.tau/cache/parameters/`, keyed by the dependency hash.
+- **`geometryCache()`** — caches `createGeometry` results as MessagePack binaries under `.tau/cache/geometry/`, skipping kernel computation when code and parameters are unchanged.
+- **`gltfEdgeDetection()`** — adds edge primitives to glTF meshes for sharp-edge rendering.
+
+### 3. Give caches a writable filesystem
+
+Caches persist only when the filesystem is writable and durable. Use `fromNodeFs` in Node.js; with `fromMemoryFs()` the caches still run but do not survive the session:
+
+```typescript @ts-nocheck
+// @ts-nocheck: the docs workspace does not install @taucad/middleware.
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { middleware } from '@taucad/middleware';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild(), middleware({ preset: 'cache' })],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
+});
+```
+
+The `'cache'` preset shown here installs only `parameterCache` and `geometryCache` — pick it when your viewer needs no edge rendering or parameter files.
+
+### 4. Render as usual
+
+Middleware runs automatically inside the worker. `client.export(format, input)` and the autonomous loop in [Live Rendering](./live-rendering) need no changes; cached results flow through the same result shapes as fresh ones.
+
+## Related
+
+- [Middleware Model](../concepts/middleware-model) — How the onion model works
+- [Create Custom Middleware](./custom-middleware) — Build your own middleware
+- [API Reference: Middleware](../api/middleware) — Middleware types and factories
+- [Set Up the Filesystem](./filesystem-setup) — Filesystem adapters for persistent caches

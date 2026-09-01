@@ -1,0 +1,140 @@
+---
+title: Configure Render Timeouts
+description: Enforce wall-clock preview deadlines, handle typed timeout failures, and recover isolated runtime hosts.
+docType: how-to
+icon: lucide:timer-off
+---
+
+Use a render timeout when a preview must stop occupying an isolated runtime host after a fixed wall-clock deadline. The deadline applies independently to `render`, `updateParameters`, and render-affecting `setOptions` calls. It is not an export timeout. All values are milliseconds; zero disables enforcement.
+
+## What the timeout guarantees
+
+When the deadline expires, the matching render Promise rejects immediately with `RenderTimeoutError`. Rejection does not wait for the worker to acknowledge cancellation, so the guarantee also holds without `SharedArrayBuffer`.
+
+The runtime then gives the isolated host a bounded recovery window:
+
+1. The timed-out render receives cooperative cancellation.
+2. New preview work is quarantined so it cannot overlap the timed-out operation.
+3. A host that acknowledges cancellation is retained, and the latest queued preview runs.
+4. A host that stays blocked is terminated — only that client's host. Queued work rejects with `RuntimeTerminatedError` and `causeKind === 'render-timeout'`.
+
+Supersession is unchanged: an older call still resolves with `{ superseded: true }` when a newer preview takes ownership. Supersession is neither a timeout nor an exception.
+
+## Set the deadline on a browser worker client
+
+Keep the reusable options spec at module scope; recovery recreates clients from it:
+
+```typescript
+// runtime-client.ts
+import { createRuntimeClient, isRenderTimeoutError } from '@taucad/runtime/client';
+import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
+
+const clientOptions = createWebWorkerClientOptions({
+  createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+  renderTimeout: 60_000,
+});
+
+let client = createRuntimeClient(clientOptions);
+
+export const renderModel = async (code: string) => {
+  try {
+    const outcome = await client.render({ source: { files: { 'main.ts': code } } });
+    if (outcome.superseded) return { kind: 'superseded' } as const;
+    return { kind: 'rendered', geometry: outcome.geometry } as const;
+  } catch (error) {
+    if (isRenderTimeoutError(error)) {
+      return { kind: 'timed-out', message: error.message } as const;
+    }
+    throw error;
+  }
+};
+```
+
+The worker entry owns the executable plugins:
+
+```typescript
+// runtime.worker.ts
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { serveWebWorkerRuntime } from '@taucad/runtime/worker/web';
+
+export const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
+
+await serveWebWorkerRuntime({ runtime });
+```
+
+## Change the deadline after connection
+
+`setRenderTimeout` is synchronous, requires a connected client, and affects only previews admitted after the call. It never changes the captured deadline of an in-flight render:
+
+```typescript
+import type { RuntimeClient } from '@taucad/runtime/client';
+
+export const relaxDeadline = (client: RuntimeClient): void => {
+  client.setRenderTimeout(120_000); // later previews get a two-minute deadline
+  client.setRenderTimeout(0); // later previews get no deadline
+};
+```
+
+## Recover after a blocked host is terminated
+
+A cooperating host stays usable. When a host cannot acknowledge cancellation, the preview queued during recovery rejects with `RuntimeTerminatedError` and `causeKind === 'render-timeout'`. Recreate the client from the module-scope options spec and retry:
+
+```typescript
+import { createRuntimeClient, isRuntimeTerminatedError, type RuntimeClient } from '@taucad/runtime/client';
+import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
+
+const clientOptions = createWebWorkerClientOptions({
+  createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
+  renderTimeout: 60_000,
+});
+let client = createRuntimeClient(clientOptions);
+
+export const renderWithHostRestart = async (input: Parameters<RuntimeClient['render']>[0]) => {
+  try {
+    return await client.render(input);
+  } catch (error) {
+    if (!isRuntimeTerminatedError(error) || error.causeKind !== 'render-timeout') {
+      throw error;
+    }
+    client = createRuntimeClient(clientOptions);
+    return client.render(input);
+  }
+};
+```
+
+Branch on the typed guard and `causeKind`, never on the message. Messages are human-facing prose; the discriminants are the contract.
+
+## Electron without SharedArrayBuffer
+
+Electron renderer-to-utility cancellation uses a wire notification. Synchronous native or WASM work can keep the utility process from reading it, so the Electron transport also holds an opaque host lease that lets the main process terminate exactly the blocked utility. Sibling runtime clients are unaffected.
+
+Use the renderer helper rather than handling ports or host IDs yourself:
+
+```typescript
+// renderer/runtime-client.ts
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
+
+const electronClientOptions = createElectronClientOptions({
+  renderTimeout: 60_000,
+});
+
+export const createElectronRuntimeClient = async () => createRuntimeClient(await electronClientOptions());
+```
+
+Each call requests a fresh utility-process port and host lease; the bundled preload and main-process helpers release the lease on normal termination and on hard timeout recovery. See [Embedding in a Host](./embedding-in-a-host) for the full Electron wiring.
+
+## Same-isolate transports cannot enforce the deadline
+
+Do not configure a non-zero timeout with `inProcessTransport`. The timer and the kernel share one event loop, so a synchronous block stops the timer itself — even when `SharedArrayBuffer` exists. Both a non-zero `renderTimeout` creation option and a later non-zero `setRenderTimeout` call fail synchronously with a `TypeError` naming the fix: use zero, or choose a worker-backed topology when enforcement is required.
+
+## Related
+
+- [Handle Errors](./error-handling)
+- [Cooperate with Cancellation](./cooperate-with-cancellation)
+- [Client API](../api/client)
+- [Transport API](../api/transport)

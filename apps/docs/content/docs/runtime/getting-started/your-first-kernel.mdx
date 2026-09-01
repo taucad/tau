@@ -1,0 +1,168 @@
+---
+title: Your First Kernel
+description: Build a parametric model with the Replicad kernel, override its parameters, and export glTF and STEP.
+docType: tutorial
+icon: lucide:graduation-cap
+---
+
+Build a parametric box with rounded corners, render it with overridden parameters, and export it to glTF and STEP.
+
+## Prerequisites
+
+- [Install @taucad/runtime](./installation)
+- Complete the [Quick Start](./quick-start)
+
+## Step 1: Set Up the Client
+
+Create a runtime client with the Replicad kernel and the esbuild bundler:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+```
+
+This is the explicit form of what `createNodeClient` did in the Quick Start: you supply the transport and filesystem yourself. Inline `source.files` input is staged into the filesystem you pass here.
+
+**Verify:** No output yet. The client initializes lazily — the worker spawns on the first command call.
+
+## Step 2: Write a Parametric Model
+
+Define a model whose dimensions are parameters, so callers can adjust them without editing code:
+
+```typescript
+const modelCode = `
+  import { drawRoundedRectangle } from 'replicad';
+
+  const defaultParams = {
+    width: 30,
+    height: 20,
+    depth: 10,
+    fillet: 3,
+  };
+
+  export default function main(params = defaultParams) {
+    const { width, height, depth, fillet } = params;
+    return drawRoundedRectangle(width, height, fillet)
+      .sketchOnPlane('XY')
+      .extrude(depth);
+  }
+`;
+```
+
+The default-exported `main` function is the entry point the kernel calls. The kernel infers the parameter shape from `defaultParams` and derives a JSON Schema from it for UI generation.
+
+**Verify:** This step assigns a string — nothing executes yet.
+
+## Step 3: Render with Parameter Overrides
+
+Hand the model code and a `parameters` override to `client.export('glb', input)`. The call renders the model and returns binary glTF in one step:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const modelCode = `
+  import { drawRoundedRectangle } from 'replicad';
+  export default function main(params = { width: 30, height: 20, depth: 10, fillet: 3 }) {
+    const { width, height, depth, fillet } = params;
+    return drawRoundedRectangle(width, height, fillet).sketchOnPlane('XY').extrude(depth);
+  }
+`;
+
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+const result = await client.export('glb', {
+  source: { files: { 'main.ts': modelCode } },
+  parameters: { width: 50, depth: 15 },
+});
+
+if (result.success) {
+  for (const file of result.data) {
+    console.log(`Rendered ${file.name}: ${file.bytes.byteLength} bytes (${file.mimeType})`);
+  }
+} else {
+  for (const issue of result.issues) {
+    console.error(`[${issue.severity}] ${issue.message}`);
+  }
+}
+```
+
+The `parameters` object overrides the model's defaults for this render — here the box widens to 50 and deepens to 15 while `height` and `fillet` keep their defaults. The result is a discriminated union: `result.success` narrows to `data` (an ordered, non-empty file array) on success, or to `issues` (structured errors with messages, locations, and severities) on failure.
+
+**Verify:** You should see output like `Rendered model.glb: 5824 bytes (model/gltf-binary)`. On errors, check that the model imports from `replicad` and default-exports `main`.
+
+## Step 4: Export to STEP and Clean Up
+
+Swap the format argument to export STEP from the same source, then terminate the client to shut down the worker:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+
+const modelCode = `
+  import { drawRoundedRectangle } from 'replicad';
+  export default function main(params = { width: 30, height: 20, depth: 10, fillet: 3 }) {
+    const { width, height, depth, fillet } = params;
+    return drawRoundedRectangle(width, height, fillet).sketchOnPlane('XY').extrude(depth);
+  }
+`;
+
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+const stepResult = await client.export('step', {
+  source: { files: { 'main.ts': modelCode } },
+  parameters: { width: 50, depth: 15 },
+});
+
+if (stepResult.success) {
+  for (const { name, bytes, mimeType } of stepResult.data) {
+    console.log(`Exported ${name}: ${bytes.byteLength} bytes (${mimeType})`);
+  }
+} else {
+  console.error('Export failed:', stepResult.issues);
+}
+
+client.terminate();
+```
+
+The runtime picks the export route from the active kernel's capabilities. STEP export is available on the Replicad and OpenCASCADE kernels; other kernels support different formats — see [Choose a Kernel](../guides/choosing-a-kernel).
+
+**Verify:** You should see a `.step` file logged, and the process should exit cleanly. If it hangs, `terminate()` was not called or a listener is keeping the event loop alive.
+
+## Recap
+
+1. Created a [`RuntimeClient`](../api/client) with an explicit transport and filesystem
+2. Wrote a parametric model with a default-exported `main` function
+3. Rendered to glTF with parameter overrides via `client.export('glb', input)`
+4. Re-exported to STEP by swapping the format argument, then terminated the client
+
+## Next Steps
+
+- [Live Rendering](../guides/live-rendering) — Drive UI viewers that react to parameter changes and file edits
+- [Use Middleware](../guides/using-middleware) — Add caching and post-processing to your pipeline
+- [Set Up the Filesystem](../guides/filesystem-setup) — Use Node.js or browser filesystems instead of in-memory
+- [Architecture](../concepts/architecture) — How client, transport, worker, and kernel layers interact

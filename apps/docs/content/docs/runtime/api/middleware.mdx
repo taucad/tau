@@ -1,0 +1,93 @@
+---
+title: Middleware API
+description: defineMiddleware and built-in middleware factories for caching, transforms, and edge detection.
+docType: reference
+icon: lucide:layers
+---
+
+Middleware wraps kernel operations in an onion-model pipeline for caching, coordinate transforms, and geometry post-processing.
+
+## Types
+
+<auto-type-table path='./props/middleware.ts' name='MiddlewareState' />
+
+<auto-type-table path='./props/middleware.ts' name='KernelMiddlewareRuntime' />
+
+<auto-type-table path='./props/middleware.ts' name='MiddlewareDependencyRuntime' />
+
+<auto-type-table path='./props/middleware.ts' name='MiddlewarePlugin' />
+
+## defineMiddleware
+
+`defineMiddleware` returns a `MiddlewarePluginFactory`; calling the factory yields the `MiddlewarePluginRegistration` (a `KernelMiddleware` carrier) that plugin expansion registers. The optional wrap hooks are `WrapGetParametersHook`, `WrapCreateGeometryHook`, `WrapMeshGeometryHook`, and `WrapExportGeometryHook`. Each receives `(input, handler, runtime)`: a request such as `MiddlewareCreateGeometryRequest` or `MiddlewareExportGeometryRequest`, the next handler (`CreateGeometryHandler`, `MeshGeometryHandler`, `ExportGeometryHandler`), and a `KernelMiddlewareRuntime`.
+
+Middleware is assumed to mutate artifact bytes and therefore participates in cache identity. A pure telemetry/logging tap may declare `mutates: false`; it must then return successful artifacts unchanged and declare no geometry dependencies.
+
+A middleware that can fulfill framework content declares the exact logical routes it supports. The bundled edge-detection middleware is one such provider:
+
+```typescript @ts-nocheck
+// @ts-nocheck: the docs site does not install `@taucad/middleware`.
+import { gltfEdgeDetection } from '@taucad/middleware';
+
+export const gltfEdges = gltfEdgeDetection();
+```
+
+The declaration makes the property available only on composed routes where the middleware can actually run. Middleware receives only its declared content subset.
+
+Middleware file inputs are declarative: `entryPath` and dependency `path` values are normalized [runtime paths](../concepts/path-namespaces). The `getDependencies` hook (`GetMiddlewareDependenciesHook`) returns `MiddlewareDependencyDeclaration` values; the same declaration participates in operation hashing and, for the current preview, rerender ownership:
+
+```typescript
+import { defineMiddleware } from '@taucad/runtime/middleware';
+
+export const settingsFiles = defineMiddleware({
+  id: 'settings',
+  name: 'settings',
+  getDependencies({ entryPath }) {
+    return [{ path: `.tau/settings/${entryPath}.json`, watchDebounce: 0 }];
+  },
+});
+```
+
+Middleware does not register watchers imperatively. A missing declaration is retained as an unresolved dependency so creating the file can heal the preview; non-not-found filesystem failures propagate.
+
+Every wrap hook receives a fresh operation-scoped `signal` on `KernelMiddlewareRuntime`; dependency hooks receive the same primitive on `MiddlewareDependencyRuntime`. Pass it to cancellable APIs and do not retain it after the hook settles. See [Cooperate with Cancellation](../guides/cooperate-with-cancellation).
+
+## Factories
+
+`@taucad/middleware` exports the `middleware()` toolkit (presets `default` and `cache`) plus four role factories:
+
+| Factory                   | Purpose                                               |
+| ------------------------- | ----------------------------------------------------- |
+| `parameterFileResolver()` | Resolve per-file parameter documents beside the entry |
+| `parameterCache()`        | Cache parameter definitions by dependency hash        |
+| `geometryCache()`         | Cache geometry output by dependency hash              |
+| `gltfEdgeDetection()`     | Add requested edge geometry to glTF meshes            |
+
+## Usage
+
+```typescript @ts-nocheck
+// @ts-nocheck: the docs site does not install `@taucad/middleware`.
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+import { middleware } from '@taucad/middleware';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild(), middleware()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+```
+
+## Related
+
+- [Use Middleware](../guides/using-middleware)
+- [Create Custom Middleware](../guides/custom-middleware)
+- [Cooperate with Cancellation](../guides/cooperate-with-cancellation)
+- [Middleware Model](../concepts/middleware-model)
+- [Path Namespaces](../concepts/path-namespaces)

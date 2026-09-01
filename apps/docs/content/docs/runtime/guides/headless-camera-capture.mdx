@@ -1,0 +1,162 @@
+---
+title: Capture Camera Views
+description: Render fitted views, exact viewer cameras, and editable preset batches to lossless images.
+docType: how-to
+icon: lucide:camera
+---
+
+`@taucad/image` can fit a model automatically or reproduce a complete camera sent by a viewer. Both paths use serializable camera objects, so the same request works in a worker, Node.js, or an RPC renderer.
+
+## Choose framing
+
+Tau viewer, thumbnail, and capture callers use `framing: 'bounds'` so every surface composes around the same conservative scene AABB; reserve `framing: 'fit'` for renderer-owned composition from exact visible geometry. `direction` points from the subject centre toward the camera — the renderer accepts Cartesian direction only — and `up` controls the top of the image:
+
+```ts
+const fittedCamera = {
+  framing: 'bounds',
+  direction: [1, -1, 0.7],
+  up: [0, 0, 1],
+  margin: 0.1,
+  projection: { kind: 'perspective', verticalFieldOfView: 45 },
+} as const;
+```
+
+Use `framing: 'fixed'` when the image must preserve position, target, roll, and magnification. Position, target, orthographic span, and clipping use the GLB world unit:
+
+```ts
+const fixedCamera = {
+  framing: 'fixed',
+  position: [0.09, -0.065, 0.045],
+  target: [0.005, 0, 0.008],
+  up: [0.16, 0.11, 0.98],
+  projection: {
+    kind: 'perspective',
+    verticalFieldOfView: 48,
+    zoom: 1.25,
+  },
+  clipping: { near: 0.0001, far: 2 },
+} as const;
+```
+
+Perspective field of view is vertical, in degrees. Zoom is a positive magnification: the effective field of view is `2 × atan(tan(verticalFieldOfView / 2) / zoom)`, and an orthographic projection uses `verticalSpan / zoom` as its visible span. A fixed camera requires `up` because position and target alone cannot preserve roll.
+
+Omit `clipping` to derive planes from model bounds; set it only when the caller owns the scene depth range. Geometry at or behind the near plane is clipped, and line segments crossing it are trimmed before screen-space expansion.
+
+## Capture a live Three.js camera
+
+Keep Three.js at the adapter boundary. `readThreeCameraState` copies world placement, roll, projection, zoom, clipping, and aspect from the active render frame into renderer-neutral `@taucad/camera` data; `toNanorasterCamera` preserves those values in the fixed-camera contract without applying another length scale:
+
+```ts
+import { readThreeCameraState } from '@taucad/three/camera';
+import { toNanorasterCamera } from '@taucad/image/camera';
+
+const tauWorld = { up: '+z', forward: '-y', unit: 'meter' } as const;
+
+const cameraState = readThreeCameraState({
+  camera,
+  target: controls.target,
+  renderFrame,
+});
+
+const width = 2400;
+const height = Math.round(width / cameraState.aspect);
+const capture = await client.export('webp', {
+  source: { path: 'main.ts' },
+  content: { includeEdges: true },
+  exportOptions: {
+    width,
+    height,
+    lineWidth: 3,
+    quality: 1,
+    background: '#242424',
+    label: 'main.ts',
+    axes: true,
+    scaleBar: true,
+    world: tauWorld,
+    camera: toNanorasterCamera({ cameraState }),
+  },
+});
+```
+
+Three rules keep the capture faithful:
+
+- Use the same aspect for output and source camera; a different output aspect deliberately changes horizontal composition.
+- `lineWidth: 3` is a flat 3 screen pixels at every output size — do not normalize it by image dimensions.
+- Copy camera state before awaiting geometry or network work, so the image represents the view at the moment of the capture request even if the viewer keeps moving.
+
+WebP `quality: 1` is lossless; lower values are lossy.
+
+## Render editable presets
+
+Each batch view owns its camera, so a UI can bind inputs to these plain objects and send the edited array to a local or remote renderer without mutating a shared camera:
+
+```ts
+const views = [
+  {
+    id: 'three-quarter',
+    label: 'Three-quarter',
+    camera: {
+      framing: 'bounds',
+      direction: [1, -1, 0.7],
+      up: [0, 0, 1],
+      margin: 0.1,
+      projection: { kind: 'perspective', verticalFieldOfView: 45 },
+    },
+  },
+  {
+    id: 'plan',
+    label: 'Plan',
+    camera: {
+      framing: 'fixed',
+      position: [0, 0, 0.2],
+      target: [0, 0, 0],
+      up: [0, 1, 0],
+      projection: { kind: 'orthographic', verticalSpan: 0.16, zoom: 1 },
+    },
+  },
+] as const;
+
+const captures = await client.export('webp', {
+  source: { path: 'main.ts' },
+  content: { includeEdges: true },
+  exportOptions: {
+    mode: 'batch',
+    width: 1600,
+    height: 1600,
+    lineWidth: 3,
+    quality: 1,
+    background: '#242424',
+    axes: true,
+    scaleBar: true,
+    views,
+  },
+});
+```
+
+Bounds and fit framing share one magnification control, `margin`; fixed perspective uses field of view and zoom; fixed orthographic uses span and zoom. Separate cases avoid competing fit and zoom rules.
+
+## Send the request over RPC
+
+Camera options contain JSON values only. Send the complete export request — never a renderer instance or a Three.js camera:
+
+```ts
+socket.send(
+  JSON.stringify({
+    id: crypto.randomUUID(),
+    method: 'capture',
+    params: {
+      source: { path: 'main.ts' },
+      format: 'webp',
+      exportOptions: { mode: 'batch', width: 1600, height: 1600, lineWidth: 3, views },
+    },
+  }),
+);
+```
+
+Validate at the receiver before rendering. The image plugin schemas reject non-finite vectors, coincident position and target, collinear direction and up, invalid projection values, inverted clip planes, duplicate view IDs, and unknown fields.
+
+## Related APIs
+
+- [`RuntimeClient.export`](../api/client) — submits the image export
+- [`@taucad/image`](https://www.npmjs.com/package/@taucad/image) — camera and annotation options
+- [`@taucad/camera`](https://www.npmjs.com/package/@taucad/camera) — renderer-neutral projection math

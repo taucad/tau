@@ -1,0 +1,107 @@
+---
+title: Set Up the Filesystem
+description: Configure Node.js, in-memory, or browser-based filesystems for kernel input.
+docType: how-to
+icon: lucide:folder-cog
+---
+
+Choose the filesystem backend kernels read project files from. Each factory returns an opaque [`RuntimeFileSystem`](../api/filesystem) value; hand it to the transport at construction (`inProcessTransport({ runtime, fileSystem })`, `webWorkerTransport({ fileSystem })`, …). Consumers cannot inspect its internals.
+
+| Factory                      | Use when                                                    |
+| ---------------------------- | ----------------------------------------------------------- |
+| `fromNodeFs(basePath)`       | Node.js, disk-based projects, persistent cache              |
+| `fromMemoryFs(files?)`       | Editor-driven content, tests, no disk I/O                   |
+| `fromFsLike(fs)`             | An already-rooted/confined virtual filesystem               |
+| `fromBrowserFs(root)`        | Browser File System Access directory handle                 |
+| `fromFileSystemBridge(open)` | Host-owned worker filesystem with a fresh rooted connection |
+
+`fromMemoryFs`, `fromFsLike`, and `fromFileSystemBridge` come from `@taucad/runtime/filesystem`; the environment-specific adapters use the `/filesystem/node` and `/filesystem/browser` subpaths.
+
+## Steps
+
+### 1. Node.js projects on disk
+
+Pass the base path; every runtime path resolves inside it, and the adapter enforces lexical and symlink containment at the boundary. Use this for CLIs, tests, servers, and whenever the geometry and parameter caches should persist:
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromNodeFs('/path/to/project') }),
+});
+```
+
+### 2. In-memory content
+
+Use `fromMemoryFs` when file content comes from an editor or a test fixture and nothing should touch disk. Optionally seed it with initial files:
+
+```typescript
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+
+export const filesystem = fromMemoryFs({
+  'main.ts': `
+    import { drawRoundedRectangle } from 'replicad';
+    export default function main() {
+      return drawRoundedRectangle(30, 50, 5).sketchOnPlane('XY').extrude(10);
+    }
+  `,
+  'lib/utils.ts': 'export function helper() { return 42; }',
+});
+```
+
+### 3. An already-confined fs-compatible object
+
+Use `fromFsLike` when an object with a `promises` namespace (BrowserFS, memfs) already exposes exactly the virtual tree the runtime may access. It adapts that namespace and does not select or enforce a root — for a raw Node filesystem use `fromNodeFs`, which does:
+
+```typescript
+import { fromFsLike, type FsLike } from '@taucad/runtime/filesystem';
+
+export const adaptConfinedFs = (alreadyConfinedVirtualFs: FsLike) => fromFsLike(alreadyConfinedVirtualFs);
+```
+
+### 4. A browser directory handle
+
+With `fromBrowserFs`, the granted `FileSystemDirectoryHandle` becomes the runtime root; runtime `main.ts` refers to `main.ts` beneath that handle, never to a host operating-system path:
+
+```typescript
+import { fromBrowserFs } from '@taucad/runtime/filesystem/browser';
+
+const directory = await (
+  window as typeof window & {
+    showDirectoryPicker(): Promise<Parameters<typeof fromBrowserFs>[0]>;
+  }
+).showDirectoryPicker();
+const filesystem = fromBrowserFs(directory);
+```
+
+### 5. A host-owned filesystem worker
+
+When an editor host owns the filesystem in its own worker, pass a connection factory to `fromFileSystemBridge(...)` so every runtime binding gets a fresh bridge rooted at the selected project. See [Embedding in a Host](./embedding-in-a-host) for the complete wiring, including `openFileSystemBridge` and the worker-side `exposeFileSystem`.
+
+## What kernels see
+
+Kernel, middleware, and bundler code receives a `KernelFileSystem`: the `fs.promises`-style base contract (`readFile`, `writeFile`, `mkdir`, `readdir`, `stat`, `exists`, …) plus worker-owned helpers — `readFiles`, `readdirContents`, `readdirStat`, and `ensureDir`. Every method takes a canonical root-relative [runtime path](../concepts/path-namespaces); `''` is the supplied root, and a backend cannot bypass path validation by overriding a helper.
+
+To implement a custom backend (cloud storage, virtual mounts), satisfy `RuntimeFileSystemBase` and wrap it with `fromFsLike` — the full interface is in the [Filesystem API reference](../api/filesystem).
+
+## Watching and autonomous re-render
+
+`fromNodeFs` is watch-capable: it opens one non-recursive `fs.watch` on the parent directory of each dependency path, filters events by filename, and classifies hits by `stat`. A Node- or Electron-hosted runtime therefore re-renders autonomously when anything outside the runtime edits a dependency. Concrete `.tau/cache/**` events are excluded; `node_modules/**` stays observable because package files may be live bundle inputs.
+
+Watcherless adapters (`fromMemoryFs`, `fromBrowserFs`, arbitrary `fromFsLike`) do not fabricate subscriptions. Each explicit source-bearing render or export rereads the current snapshot while kernel initialization and persistent `.tau/cache` entries stay reusable. Autonomous re-rendering requires a watch-capable filesystem — the in-process transport also auto-propagates `watch` events when a wrapped FS exposes a `watch` method.
+
+## Related
+
+- [Use Middleware](./using-middleware) — Caching middleware needs a writable filesystem
+- [Path Namespaces](../concepts/path-namespaces) — How each adapter establishes the runtime root
+- [Worker Model](../concepts/worker-model) — How the filesystem is bridged to the worker
+- [API Reference: Filesystem](../api/filesystem) — Full filesystem API reference

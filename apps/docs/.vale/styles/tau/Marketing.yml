@@ -1,0 +1,16 @@
+extends: substitution
+message: "Use '%s' instead of '%s'."
+level: error
+ignorecase: true
+action:
+  name: replace
+swap:
+  '\bseamless(?:ly)?\b': direct wording
+  '\bcutting-edge\b': a specific capability
+  '\bstate-of-the-art\b': a verifiable comparison
+  '\bworld-class\b': a verifiable comparison
+  '\bbest-in-class\b': a verifiable comparison
+  '\bnext-generation\b': the product version or capability
+  '\brevolutionary\b': a specific change
+  '\bgame-changing\b': a specific effect
+  '\b(?:blazing|lightning)[ -]fast\b': a measured result

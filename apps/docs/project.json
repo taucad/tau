@@ -1,0 +1,22 @@
+{
+  "name": "docs",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/docs",
+  "projectType": "application",
+  "tags": ["scope:ui", "type:app", "layer:feature"],
+  "targets": {
+    "build": {
+      "dependsOn": [],
+      "options": {
+        "env": {
+          "NODE_ENV": "production"
+        }
+      }
+    },
+    "lint": {
+      "options": {
+        "files": "app *.test.ts vite.config.ts vitest.config.ts react-router.config.ts vite-environment.d.ts"
+      }
+    }
+  }
+}

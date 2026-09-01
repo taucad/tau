@@ -1,0 +1,115 @@
+---
+title: Bundling
+description: One plugin import per supported bundler ships the runtime's WASM kernels and dynamic assets.
+docType: how-to
+icon: lucide:package
+---
+
+`@taucad/runtime` ships dozens of static and dynamic assets — kernel WASM blobs, font atlases, transcoder plugins, middleware modules — and every consumer needs the same bundler invariants for them to resolve at runtime. One plugin carries them all:
+
+```typescript
+import { tauRuntime } from '@taucad/runtime/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [tauRuntime()],
+});
+```
+
+That single plugin:
+
+- Sets the [cross-origin-isolation](./cross-origin-isolation) headers on dev and preview servers.
+- Keeps `.wasm` files out of the base64 inline path.
+- Forces `worker.format: 'es'` so worker bundles preserve `import.meta.url`.
+- Emits literal runtime assets in client and SSR builds.
+- Replaces dead Node builtin branches with actionable stubs in browser graphs.
+
+When any of these go missing, the runtime appears to load and then 404s on the first WASM fetch. One implementation covers Vite 7 and Vite 8; Webpack 5 and Parcel 2 recognize the same asset pattern but have no shipped plugin.
+
+## How asset emission works
+
+Every WASM, font, and dynamically imported plugin chunk inside `@taucad/runtime` is referenced via the static `new URL(literal, import.meta.url)` pattern. Vite, Webpack 5, Parcel 2, and esbuild all treat it as a first-class asset reference: the bundler copies the file into `dist/`, hashes the filename, and rewrites the literal. Any deviation — a variable, a function call, a template expression — opts out of emission, and the file silently fails to ship. A workspace lint rule enforces the invariant inside `packages/runtime`.
+
+Kernels, middleware, and transcoders are declared in a worker-owned `defineRuntime(...)` entry: the worker entry value-imports the executable plugin factories, and client code imports only the runtime type.
+
+## Common failure modes
+
+| Symptom                                                                        | Likely cause                                                                                                       |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Worker entry missing from a production build                                   | Reference the source entry with `new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' })`. |
+| WASM blob inlined as a base64 data URL; worker fails on `instantiateStreaming` | Asset inlined under the default 4 KB threshold or a custom rule. `tauRuntime()` opts WASM out.                     |
+| `Cannot find module ./middleware/parameter-cache.js`                           | The bundler folded the runtime into one chunk; keep the runtime package external.                                  |
+| `crossOriginIsolated === false`, `SharedArrayBuffer` undefined                 | Missing COI headers — see [Cross-Origin Isolation](./cross-origin-isolation).                                      |
+
+## Opting out of the COI middleware
+
+When the host already sets COOP/COEP through Express or deployment headers, pass `tauRuntime({ crossOriginIsolation: false })` to disable only the bundled middleware. The standalone `crossOriginIsolation()` export stays available for hosts composing their own isolation layers.
+
+## React Router
+
+Place Tau beside React Router's native Vite plugin — `tauRuntime()` returns a plugin array Vite flattens, so no spread is required:
+
+```typescript
+import { reactRouter } from '@react-router/dev/vite';
+import { tauRuntime } from '@taucad/runtime/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [tauRuntime(), reactRouter()],
+});
+```
+
+The identical configuration covers React Router 7/Vite 7 and React Router 8/Vite 8. For SSR response headers, also apply `applyHandleRequestHeaders()` or `coiMiddleware()` in an Express host.
+
+## Next.js
+
+Wrap the application config once. The composer preserves application headers and bundler settings, adds the isolation headers, and configures browser-worker assets for both supported production bundlers:
+
+```typescript
+import { withTauRuntime } from '@taucad/runtime/nextjs/config';
+import type { NextConfig } from 'next';
+
+export default withTauRuntime({
+  output: 'standalone',
+} satisfies NextConfig);
+```
+
+`withTauRuntime()` composes an existing `webpack` callback and `turbopack` object without inspecting the installed version.
+
+## Electron
+
+Wrap the ordinary electron-vite process config once. The adapter installs `tauRuntime()` in main and renderer, preserves preload isolation, and configures the native dependency externalizer:
+
+```typescript
+import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
+
+export default electronRuntimeConfig({
+  main: {},
+  preload: {},
+  renderer: {},
+});
+```
+
+Import the utility entry through electron-vite, not by naming an output file:
+
+```typescript @ts-nocheck
+// @ts-nocheck: the docs resolver cannot resolve electron-vite's `?modulePath` virtual specifier.
+import utilityEntry from '../tau/kernel-host?modulePath';
+```
+
+Add `electron-vite/node` to the app's TypeScript `types` for the `?modulePath` declaration. Unlike `?url`, which returns a static asset URL, `?modulePath` builds the imported graph as an executable Node entry and returns its filesystem path — the contract Electron utility and worker APIs require.
+
+## Qualified framework versions
+
+| Framework    | Maintained lane          | Current lane                  |
+| ------------ | ------------------------ | ----------------------------- |
+| Electron     | electron-vite 5 / Vite 7 | electron-vite 6 beta / Vite 8 |
+| React Router | React Router 7 / Vite 7  | React Router 8 / Vite 8       |
+| Next.js      | Next.js 15 / Webpack     | Next.js 16 / Turbopack        |
+
+The helpers do not inspect versions; the installed framework selects its own supported path. See [Framework Integrations API](../api/frameworks) for the complete public types and process-boundary helpers.
+
+## References
+
+- [docs/research/runtime-zero-config-bundling.md](https://github.com/taucad/tau/blob/main/docs/research/runtime-zero-config-bundling.md)
+- [Vite — Static Asset Handling](https://vite.dev/guide/assets.html)

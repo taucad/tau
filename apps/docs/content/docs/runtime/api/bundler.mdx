@@ -1,0 +1,58 @@
+---
+title: Bundler API
+description: defineBundler, esbuild factory, and bundler types for JS/TS kernel input processing.
+docType: reference
+icon: lucide:package
+---
+
+Bundlers resolve imports, transpile code, and produce executable bundles for JS/TS kernel inputs.
+
+## Types
+
+<auto-type-table path='./props/bundler.ts' name='EsbuildOptions' />
+
+<auto-type-table path='./props/bundler.ts' name='BundlerPlugin' />
+
+<auto-type-table path='./props/bundler.ts' name='BundlerDefinition' />
+
+<auto-type-table path='./props/bundler.ts' name='BundlerRuntime' />
+
+<auto-type-table path='./props/bundler.ts' name='KernelBundler' />
+
+<auto-type-table path='./props/bundler.ts' name='BundleResult' />
+
+## esbuild
+
+`esbuild()` installs the default esbuild-wasm bundler toolkit. Use `esbuildBundler(options)` only when configuring the role factory directly. Both handle `ts`, `js`, `tsx`, `jsx` by default.
+
+## defineBundler
+
+`defineBundler` creates a `BundlerPluginFactory` from a configuration object. Required methods: `initialize`, `detectImports`, `bundle`, `execute`, `registerModule`. Optional: `clearExecutionCache`, `cleanup`.
+
+Operation methods use `(input, runtime, context)`: a `BundleInput`, a `BundlerRuntime` carrying a fresh operation-scoped `AbortSignal`, and the persistent context returned by `initialize` (which receives a `BundlerInitRuntime`). `detectImports` returns a `DetectImportsResult`; `execute` returns an `ExecuteResult`. `entryPath` and returned dependency paths are canonical root-relative [runtime paths](../concepts/path-namespaces).
+
+## Usage
+
+```typescript
+import { createRuntimeClient } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+
+const runtime = defineRuntime({
+  plugins: [replicad(), esbuild()],
+});
+
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
+```
+
+## Related
+
+- [Configure the Bundler](../guides/bundler-configuration)
+- [Cooperate with Cancellation](../guides/cooperate-with-cancellation)
+- [Plugin System](../concepts/plugin-system)
+- [Path Namespaces](../concepts/path-namespaces)

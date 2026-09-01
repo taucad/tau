@@ -1,0 +1,7 @@
+{
+  "title": "Editor",
+  "description": "Web-based CAD editor with AI-assisted modeling",
+  "icon": "lucide:box text-purple",
+  "root": true,
+  "pages": ["index"]
+}

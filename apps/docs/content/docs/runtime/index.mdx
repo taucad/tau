@@ -1,0 +1,67 @@
+---
+title: 'Runtime'
+description: A multi-kernel CAD runtime for browser and Node.js with middleware, autonomous rendering, and Web Worker isolation.
+docType: explanation
+icon: 'lucide:blocks text-blue'
+---
+
+`@taucad/runtime` runs multiple CAD engines behind one client API. The package ships the framework only: kernels, bundlers, middleware, and transcoders are plugins that each application composes into a runtime definition.
+
+```typescript
+import { createNodeClient } from '@taucad/runtime/node';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+
+const runtime = defineRuntime({ plugins: [esbuild(), replicad()] });
+const client = await createNodeClient({ runtime });
+const result = await client.export('step', {
+  source: {
+    files: {
+      'box.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);',
+    },
+  },
+});
+// result.data (when result.success) -> [{ name, bytes, mimeType }]
+client.terminate();
+```
+
+The same client runs in browser Web Workers, Node.js worker threads, and Electron utility processes by swapping the transport — the application code does not change.
+
+## Supported Kernels
+
+| Kernel          | Language      | Strengths                                                                  |
+| --------------- | ------------- | -------------------------------------------------------------------------- |
+| **Replicad**    | TypeScript/JS | Parametric BRep modeling via OpenCASCADE. STEP export.                     |
+| **OpenCASCADE** | TypeScript/JS | Direct OpenCASCADE API access. Full BRep control.                          |
+| **Manifold**    | TypeScript/JS | Robust mesh booleans with `manifold-3d`.                                   |
+| **OpenRSCAD**   | OpenSCAD      | Rust/Wasm OpenSCAD implementation in [`@taucad/openrscad`](./api/kernels). |
+| **JSCAD**       | TypeScript/JS | Parametric CSG with `@jscad/modeling`.                                     |
+| **Zoo (KCL)**   | KCL           | Cloud CAD via the Zoo API.                                                 |
+| **glTF**        | glTF/GLB      | Mesh import and glTF/GLB transcoding via `@taucad/gltf`.                   |
+| **BRep**        | STEP/IGES     | BRep import via `@taucad/brep`.                                            |
+| **Rhino**       | 3DM           | Rhino import via `@taucad/rhino`.                                          |
+| **Assimp**      | Mesh formats  | Assimp-backed imports and transcodes via `@taucad/assimp`.                 |
+
+## Key Capabilities
+
+- **Multi-kernel selection** — the runtime picks a kernel by file type, or you select one explicitly.
+- **Autonomous rendering** — `render` and `updateParameters` hand the worker a `(source, parameters)` pair; the worker owns the render loop, watches files, debounces re-renders, and pushes geometry over the `geometry` event.
+- **Cancellation without exceptions** — when a newer command takes ownership, the older call resolves with `{ superseded: true }` instead of throwing. `try/catch` fires only for genuine failures.
+- **Plugin architecture** — extend with [`defineKernel`](./api/kernels), [`defineMiddleware`](./api/middleware), and [`defineBundler`](./api/bundler); add caching, coordinate transforms, and edge detection through the onion-model middleware pipeline.
+- **Worker isolation** — kernel computation runs in workers over MessagePort channels, with cooperative abort backed by `SharedArrayBuffer` on capable transports.
+- **Filesystem abstraction** — Node.js fs, in-memory, and browser filesystems are interchangeable.
+- **Framework integrations** — config helpers for Vite, React Router, Next.js, and Electron own the required assets, headers, and worker wiring.
+
+## Part of the Tau Ecosystem
+
+`@taucad/runtime` powers [Tau](https://tau.new), the AI-powered CAD platform, and stands alone: integrate it into any JavaScript application without the Tau editor.
+
+## Explore the Documentation
+
+- **[Installation](./getting-started/installation)** — Set up the package in your project
+- **[Quick Start](./getting-started/quick-start)** — Render your first 3D model
+- **[Guides](./guides/choosing-a-kernel)** — Task-oriented how-to guides
+- **[Concepts](./concepts/architecture)** — Architecture and design decisions
+- **[API Reference](./api/client)** — Type documentation for every public API
+- **[Framework Integrations](./api/frameworks)** — Vite, React Router, Next.js, Electron, and browser-worker transports

@@ -1,0 +1,78 @@
+---
+title: Plugin System
+description: Toolkit factories, presets, capability expansion, and direct buckets.
+docType: explanation
+icon: lucide:plug
+---
+
+A Tau plugin toolkit groups related kernel, middleware, bundler, and transcoder factories under one package. Applications compose toolkits into an app-owned runtime definition; the runtime never discovers capabilities implicitly.
+
+## Canonical package surface
+
+Every toolkit declares its package-named factory as the canonical authoring symbol and re-exports the same binding as `plugin` for mechanical loaders. There is no default export:
+
+```typescript
+import { replicad } from '@taucad/replicad';
+
+const toolkit = replicad();
+```
+
+Calling the factory selects its default preset. Presets select capability paths such as `kernels.default` and `transcoders.default`; role-nested options configure the factories that preset selected. Toolkits are authored with `definePlugin` from `@taucad/runtime/plugin`, which validates preset paths against the declared capability buckets. Expansion preserves plugin order, then preset path order, then direct bucket order.
+
+## Compose a runtime
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+
+export const runtime = defineRuntime({
+  plugins: [esbuild(), replicad({ kernels: { default: { wasm: 'auto' } } })],
+});
+```
+
+Configure packaged capabilities through their toolkit. Direct buckets remain for app-local capabilities, isolated tests, or whole-role ordering that must interleave outside plugin expansion.
+
+## Identity and collisions
+
+Capability IDs are flat and author-declared. `meta.name` identifies the toolkit, and diagnostics qualify selected capabilities as `<name>/<preset-path>` without rewriting their IDs. A duplicate kernel, middleware, bundler, or transcoder ID is rejected deterministically, with diagnostics naming the first and second origins.
+
+## Live capability manifest
+
+`RuntimeClient` reports a discriminated `capabilities.registrations` list. Kernel entries include their exact source `extensions`; middleware, bundler, and transcoder entries do not. Additive fields are preserved and unknown future `kind` values are tolerated. Consumers such as language selection should read the current manifest instead of maintaining a second extension table.
+
+## Compatibility at load boundaries
+
+Published toolkits declare `@taucad/runtime` in `peerDependencies`. Dynamic loaders warn when that range misses their bundled runtime; runtime composition itself never reads package manifests, and path-loaded modules without a resolvable manifest skip the check by design.
+
+Plugin factories and instances carry the exact `runtimePluginAbiVersion` in frozen global-registry slots so duplicate runtime copies can interoperate in one realm. These brands are construction markers, not a security boundary, and structured clone drops them; the validated capabilities manifest is the worker/process compatibility contract.
+
+## Backend lifecycle
+
+Executable definitions stay worker-owned. Heavy backends load in `defineKernel` or `defineTranscoder` `initialize()` and live in the returned context; module-level backend caches are not part of the capability model.
+
+Root-importing a toolkit exposes descriptors without fetching its WASM payload. Kernels and transcoders initialize when their selected route first executes, once per worker.
+
+## Capability-derived formats
+
+Static runtime definitions expose their actual import/export matrix without a separate registry. The derivation helpers preserve the concrete extension and target literals in their return types:
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { deriveExportTargets, deriveImportExtensions } from '@taucad/runtime/plugin';
+import { replicad } from '@taucad/replicad';
+
+const runtime = defineRuntime({ plugins: [replicad()] });
+const imports = deriveImportExtensions(runtime);
+const exports = deriveExportTargets(runtime);
+```
+
+The export helper follows the same direct and single-hop route semantics as the worker capabilities manifest.
+
+## Further Reading
+
+- [Architecture](./architecture) -- where plugins execute
+- [Kernel Selection](./kernel-selection) -- how declared extensions drive selection
+- [Create a Custom Kernel](../guides/custom-kernel) -- authoring a kernel definition
+- [Create Custom Middleware](../guides/custom-middleware) -- authoring middleware
+- [Kernels API](../api/kernels) -- kernel plugin types

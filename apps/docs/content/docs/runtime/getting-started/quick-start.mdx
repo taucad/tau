@@ -1,0 +1,90 @@
+---
+title: Quick Start
+description: Render your first 3D model with @taucad/runtime in under 4 minutes.
+docType: tutorial
+icon: lucide:rocket
+---
+
+Render a 3D model from TypeScript code with the Replicad kernel and export it to binary glTF.
+
+## Prerequisites
+
+- Node.js 24 or later
+- A package manager: npm, pnpm, or yarn
+
+## Install
+
+```bash tab="pnpm"
+pnpm add @taucad/runtime @taucad/replicad @taucad/esbuild zod
+```
+
+```bash tab="npm"
+npm install @taucad/runtime @taucad/replicad @taucad/esbuild zod
+```
+
+```bash tab="yarn"
+yarn add @taucad/runtime @taucad/replicad @taucad/esbuild zod
+```
+
+For framework wiring (Vite, Next.js, Electron), see [Installation](./installation).
+
+## Render a 3D Model
+
+Create a file called `render.ts` and paste the following code:
+
+```typescript
+import { defineRuntime } from '@taucad/runtime';
+import { createNodeClient } from '@taucad/runtime/node';
+import { esbuild } from '@taucad/esbuild';
+import { replicad } from '@taucad/replicad';
+
+const runtime = defineRuntime({ plugins: [esbuild(), replicad()] });
+const client = await createNodeClient({ runtime });
+const result = await client.export('glb', {
+  source: {
+    files: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(30, 50, 10);' },
+  },
+});
+if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
+console.log(`Exported ${result.data[0].name}: ${result.data[0].bytes.byteLength} bytes`);
+client.terminate();
+```
+
+Run it:
+
+```bash
+npx tsx render.ts
+```
+
+Your application owns the runtime definition: `defineRuntime` composes the kernel and bundler plugins, and `createNodeClient` supplies the transport and — with no project path — an in-memory filesystem. The inline `source.files` map is staged into that filesystem, and the first command call starts the worker.
+
+To read model files from disk instead, set `projectPath`: `createNodeClient({ runtime, projectPath: '/path/to/project' })`, then export with `source: { path: 'main.ts' }`.
+
+## Expected Output
+
+```
+Exported model.glb: 5824 bytes
+```
+
+The exact byte count depends on the model and tessellation settings. `result.data` is an ordered, non-empty array of export files. A GLB export returns one file; other formats may return companions (glTF + BIN, OBJ + MTL), so iterate the array when you switch formats:
+
+```typescript
+import type { ExportResult } from '@taucad/runtime';
+
+export const logFiles = (result: ExportResult): void => {
+  if (!result.success) return;
+  for (const file of result.data) {
+    console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes (${file.mimeType})`);
+  }
+};
+```
+
+Each file's `bytes` is a `Uint8Array` you can write to disk, stream over HTTP, or hand to a glTF viewer.
+
+This snippet runs one render-and-export cycle. For viewers that re-render on parameter changes or file edits, see [Live Rendering](../guides/live-rendering).
+
+## What's Next
+
+- [Your First Kernel](./your-first-kernel) — Build a parametric model and export STEP
+- [Choose a Kernel](../guides/choosing-a-kernel) — Compare the supported kernels
+- [API Reference: Client](../api/client) — Full documentation for `createRuntimeClient` and `client.export`

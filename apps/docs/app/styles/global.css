@@ -1,0 +1,196 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/preset.css';
+/* Enter/exit utilities used by the @taucad/ui overlay components. */
+@import 'tw-animate-css';
+@import '@taucad/ui/styles/tokens.css';
+
+@source '../../content/docs/**/*.{json,mdx}';
+@source '../../../../packages/ui/src/**/*.{ts,tsx}';
+
+/* Fumadocs registers its own palette. Re-register its utilities against Tau's
+   semantic tokens after the package token reset. */
+@theme inline {
+  --color-blue: var(--information);
+  --color-purple: var(--feature);
+  --color-yellow: var(--warning);
+
+  --color-fd-primary: var(--docs-accent-foreground);
+  --color-fd-primary-foreground: var(--background);
+  --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground);
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-muted: var(--muted);
+  --color-fd-muted-foreground: var(--muted-foreground);
+  --color-fd-border: var(--border);
+  --color-fd-card: var(--card);
+  --color-fd-card-foreground: var(--card-foreground);
+  --color-fd-accent: var(--accent);
+  --color-fd-accent-foreground: var(--accent-foreground);
+  --color-fd-ring: var(--ring);
+  --color-fd-popover: var(--popover);
+  --color-fd-popover-foreground: var(--popover-foreground);
+  --color-fd-info: var(--information);
+  --color-fd-warning: var(--warning);
+  --color-fd-error: var(--destructive);
+  --color-fd-success: var(--success);
+  --color-fd-idea: var(--feature);
+  --color-fd-diff-remove: color-mix(in oklch, var(--destructive) 12%, transparent);
+  --color-fd-diff-remove-symbol: var(--destructive);
+  --color-fd-diff-add: color-mix(in oklch, var(--success) 12%, transparent);
+  --color-fd-diff-add-symbol: var(--success);
+}
+
+:root,
+:root[class~='dark'],
+:root[class~='black'],
+:root[class~='high-contrast'] {
+  color-scheme: light;
+
+  /* Teal is derived from the active lightness scale so small links remain AA
+     in every theme while retaining Tau's single accent hue. */
+  --docs-accent-foreground: oklch(var(--l-high) 0.1 var(--hue-primary));
+
+  --color-fd-primary: var(--docs-accent-foreground);
+  --color-fd-primary-foreground: var(--background);
+  --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--secondary-foreground);
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-muted: var(--muted);
+  --color-fd-muted-foreground: var(--muted-foreground);
+  --color-fd-border: var(--border);
+  --color-fd-card: var(--card);
+  --color-fd-card-foreground: var(--card-foreground);
+  --color-fd-accent: var(--accent);
+  --color-fd-accent-foreground: var(--accent-foreground);
+  --color-fd-ring: var(--ring);
+  --color-fd-popover: var(--popover);
+  --color-fd-popover-foreground: var(--popover-foreground);
+  --color-fd-overlay: color-mix(in oklch, var(--foreground) 20%, transparent);
+  --color-fd-info: var(--information);
+  --color-fd-warning: var(--warning);
+  --color-fd-error: var(--destructive);
+  --color-fd-success: var(--success);
+  --color-fd-idea: var(--feature);
+  --color-fd-diff-remove: color-mix(in oklch, var(--destructive) 12%, transparent);
+  --color-fd-diff-remove-symbol: var(--destructive);
+  --color-fd-diff-add: color-mix(in oklch, var(--success) 12%, transparent);
+  --color-fd-diff-add-symbol: var(--success);
+
+  /* Documentation-only Mermaid tokens stay semantic and mode-responsive. */
+  --diagram-node: var(--muted);
+  --diagram-node-border: var(--border);
+  --diagram-node-text: var(--foreground);
+  --diagram-cluster: var(--background);
+  --diagram-cluster-border: var(--border);
+  --diagram-line: var(--muted-foreground);
+  --diagram-text: var(--muted-foreground);
+  --diagram-note: var(--secondary);
+  --diagram-note-border: var(--border);
+  --diagram-accent: var(--docs-accent-foreground);
+}
+
+:root[class~='dark'],
+:root[class~='black'],
+:root[class~='high-contrast'] {
+  color-scheme: dark;
+}
+
+/* The preset has a dark-sidebar special case; this keeps that surface on the
+   same Tau mapping instead of Fumadocs' stock HSL palette. */
+:root[class~='dark'] #nd-sidebar,
+:root[class~='black'] #nd-sidebar,
+:root[class~='high-contrast'] #nd-sidebar {
+  --color-fd-muted: var(--muted);
+  --color-fd-secondary: var(--secondary);
+  --color-fd-muted-foreground: var(--muted-foreground);
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border, currentColor);
+  }
+
+  body {
+    @apply min-h-svh bg-background font-sans text-base text-foreground antialiased;
+  }
+
+  :where(code, kbd, samp, pre) {
+    @apply font-mono text-sm;
+  }
+
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  ::selection {
+    @apply bg-highlighter text-highlighter-foreground;
+  }
+}
+
+@font-face {
+  font-family: 'Geist Sans';
+  src: url('/fonts/Geist-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Black is dark for syntax purposes; high contrast uses Shiki's dedicated
+   dark contrast palette. */
+.black .shiki:not(.not-fumadocs-codeblock *) code span,
+.black code.shiki:not(.not-fumadocs-code *) span {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style);
+}
+
+.high-contrast .shiki:not(.not-fumadocs-codeblock *) code span,
+.high-contrast code.shiki:not(.not-fumadocs-code *) span {
+  color: var(--shiki-high-contrast-dark);
+  font-style: var(--shiki-high-contrast-dark-font-style);
+}
+
+@media (prefers-contrast: more) {
+  :root:not([class~='dark'], [class~='black'], [class~='high-contrast'])
+    .shiki:not(.not-fumadocs-codeblock *)
+    code
+    span,
+  :root:not([class~='dark'], [class~='black'], [class~='high-contrast']) code.shiki:not(.not-fumadocs-code *) span {
+    color: var(--shiki-high-contrast-light);
+    font-style: var(--shiki-high-contrast-light-font-style);
+  }
+
+  :is(.dark, .black, .high-contrast) .shiki:not(.not-fumadocs-codeblock *) code span,
+  :is(.dark, .black, .high-contrast) code.shiki:not(.not-fumadocs-code *) span {
+    color: var(--shiki-high-contrast-dark);
+    font-style: var(--shiki-high-contrast-dark-font-style);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,41 @@
+---
+title: LLMs.txt
+description: Feed Tau Runtime docs into AI tools via llms.txt and per-page markdown endpoints.
+docType: tutorial
+icon: lucide:bot
+---
+
+Tau publishes machine-readable documentation in the [llms.txt](https://llmstxt.org/) style, so assistants can index the docs and answer integration questions from the published APIs.
+
+## Endpoints
+
+| Endpoint                           | Purpose                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------ |
+| [`/llms.txt`](/llms.txt)           | Index of every docs page with title, URL, and frontmatter `description`. |
+| [`/llms-full.txt`](/llms-full.txt) | Full processed markdown for every page, concatenated in one file.        |
+
+For a smaller context window, start with `llms.txt` and fetch individual pages as needed.
+
+## Per-Page Markdown
+
+Append `.mdx` to any docs URL to get that page as plain text — the app redirects to the text route. Example: [`/runtime/getting-started/installation.mdx`](/runtime/getting-started/installation.mdx).
+
+## Set Up an AI Tool
+
+**Cursor:** Open **Cursor Settings → Indexing & Docs → Add Doc** and paste `https://docs.tau.new/llms.txt`.
+
+**Chat clients:** Paste the same URL into the assistant's "add documentation" or context URL field.
+
+**Command line:**
+
+```bash
+curl -sSf https://docs.tau.new/llms.txt | head
+```
+
+Replace the origin when working against a local or staging docs server.
+
+## Related
+
+- [Installation](./installation) — package install and framework wiring
+- [Quick Start](./quick-start) — minimal render example
+- [API Reference: Client](../api/client) — `createRuntimeClient` surface

@@ -8,7 +8,7 @@ category: audit
 superseded_by: docs/research/tau-cloud-activation-status.md
 changelog:
   - date: '2026-05-14'
-    note: 'Superseded by `tau-cloud-activation-status.md`. Cloud-infra activation residuals (M1–M14) absorbed; orthogonal observability/Docker/COI scriptable tasks remain tracked by `production-observability-readiness.md`, `observability-implementation-status.md`, `api-docker-build-optimization.md`, and `runtime-cross-origin-isolation-distribution.md`.'
+    note: 'Superseded by `tau-cloud-activation-status.md`. Tau Cloud activation residuals (M1–M14) absorbed; orthogonal observability/Docker/COI scriptable tasks remain tracked by `production-observability-readiness.md`, `observability-implementation-status.md`, `api-docker-build-optimization.md`, and `runtime-cross-origin-isolation-distribution.md`.'
   - date: '2026-05-05'
     note: 'Netlify/DNS recommendation rows (R1/R10 of `netlify-ui-deployment-strategy.md`) adjusted for `repos/tau-cloud` ownership + registrar→Cloudflare NS migration; superseded provisioning-script narrative removed from matrices.'
   - date: '2026-04-20'
@@ -28,7 +28,7 @@ related:
   - docs/research/socketio-production-resilience.md
 ---
 
-> **Superseded.** Cloud-infra activation residuals (M1–M14 in the prior body) are consolidated into [`docs/research/tau-cloud-activation-status.md`](tau-cloud-activation-status.md). The orthogonal scriptable tasks catalogued here (observability instrumentation S1/S3/S4/S11–S13, Docker S2/S19/S20, COI S6–S9) remain tracked by their parent research docs: `production-observability-readiness.md`, `observability-implementation-status.md`, `api-docker-build-optimization.md`, `runtime-cross-origin-isolation-distribution.md`. Treat the body below as a historical scorecard.
+> **Superseded.** Tau Cloud activation residuals (M1–M14 in the prior body) are consolidated into [`docs/research/tau-cloud-activation-status.md`](tau-cloud-activation-status.md). The orthogonal scriptable tasks catalogued here (observability instrumentation S1/S3/S4/S11–S13, Docker S2/S19/S20, COI S6–S9) remain tracked by their parent research docs: `production-observability-readiness.md`, `observability-implementation-status.md`, `api-docker-build-optimization.md`, `runtime-cross-origin-isolation-distribution.md`. Treat the body below as a historical scorecard.
 
 # Prod + Staging UI Deployment Status
 

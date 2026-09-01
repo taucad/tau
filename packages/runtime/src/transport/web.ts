@@ -46,7 +46,7 @@ export { webWorkerClient } from '#transport/web-worker-client.js';
  *
  * @public
  */
-export type CreateWebWorkerClientOptionsOptions<Runtime extends AnyRuntimeDefinition | undefined = undefined> = Omit<
+export type WebWorkerClientOptionsInput<Runtime extends AnyRuntimeDefinition | undefined = undefined> = Omit<
   WebWorkerTransportOptions,
   'fileSystem'
 > & {
@@ -95,7 +95,7 @@ export type CreateWebWorkerClientOptionsOptions<Runtime extends AnyRuntimeDefini
  * ```
  */
 export const createWebWorkerClientOptions = <Runtime extends AnyRuntimeDefinition | undefined = undefined>(
-  options: CreateWebWorkerClientOptionsOptions<Runtime>,
+  options: WebWorkerClientOptionsInput<Runtime>,
 ): RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof webWorkerTransport>> => {
   if (options.files !== undefined && options.fileSystem !== undefined) {
     throw new TypeError('createWebWorkerClientOptions: pass either `files` or `fileSystem`, not both');

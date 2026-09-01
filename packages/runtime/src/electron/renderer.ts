@@ -63,7 +63,7 @@ export type RequestElectronRuntimePortOptions = {
  *
  * @public
  */
-export type CreateElectronClientOptionsOptions<Runtime extends AnyRuntimeDefinition | undefined = undefined> =
+export type ElectronClientOptionsInput<Runtime extends AnyRuntimeDefinition | undefined = undefined> =
   RequestElectronRuntimePortOptions & {
     /**
      * Wall-clock deadline applied independently to each preview. Milliseconds.
@@ -224,7 +224,7 @@ export const requestElectronRuntimePort = async (
  * ```
  */
 export const createElectronClientOptions = <Runtime extends AnyRuntimeDefinition | undefined = undefined>(
-  options: CreateElectronClientOptionsOptions<Runtime> = {} as CreateElectronClientOptionsOptions<Runtime>,
+  options: ElectronClientOptionsInput<Runtime> = {} as ElectronClientOptionsInput<Runtime>,
 ): (() => Promise<RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof electronUtilityTransport>>>) => {
   const { config, renderTimeout, ...portOptions } = options;
   return async () => {

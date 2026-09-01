@@ -58,9 +58,11 @@
   },
   "dependencies": {
     "@taucad/geometry-core": "workspace:*",
-    "libassimp": "^0.1.0"
+    "libassimp": "^0.2.0"
   },
   "devDependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/manifold": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "zod": "catalog:"

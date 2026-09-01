@@ -324,7 +324,7 @@ minimumReleaseAgeExclude:
   - '@rolldown/binding-win32-arm64-msvc@1.2.3'
   - '@rolldown/binding-win32-x64-msvc@1.2.3'
   - rolldown@1.2.3
-  - libassimp@0.1.0
+  - libassimp@0.2.0
 peerDependencyRules:
   allowedVersions:
     fumadocs-mdx>vite: ^8.0.0

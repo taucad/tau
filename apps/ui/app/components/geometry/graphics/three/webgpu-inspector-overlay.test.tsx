@@ -9,11 +9,9 @@ const hoistedMocks = vi.hoisted(() => {
   class MockInspector {
     public readonly domElement = globalThis.document.createElement('div');
 
-    /* oxlint-disable @typescript-eslint/naming-convention -- mock parity with three.js Inspector */
     public hide = (): void => {
       inspectorHideSpy();
     };
-    /* oxlint-enable @typescript-eslint/naming-convention */
   }
 
   return {

@@ -12,7 +12,7 @@ type TsWorkerLike = {
     strings: boolean,
     comments: boolean,
     prefixAndSuffix: boolean,
-  ): Promise<readonly { fileName: string }[] | undefined>;
+  ): Promise<ReadonlyArray<{ fileName: string }> | undefined>;
 };
 
 /**

@@ -8,7 +8,7 @@ describe('sniffNativeImageFormat', () => {
     ['png', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])],
     ['jpeg', new Uint8Array([0xff, 0xd8, 0xff, 0xdb])],
     ['gif', ascii('GIF89a')],
-    ['webp', ascii('RIFF\x10\x00\x00\x00WEBP')],
+    ['webp', ascii('RIFF\u0010\u0000\u0000\u0000WEBP')],
     ['bmp', ascii('BM')],
     ['ico', new Uint8Array([0x00, 0x00, 0x01, 0x00])],
     [
@@ -35,7 +35,7 @@ describe('sniffNativeImageFormat', () => {
 
   it.each([
     ['truncated png', new Uint8Array([0x89, 0x50, 0x4e])],
-    ['non-WebP RIFF', ascii('RIFF\x10\x00\x00\x00WAVE')],
+    ['non-WebP RIFF', ascii('RIFF\u0010\u0000\u0000\u0000WAVE')],
     ['HTML containing SVG', ascii('<html><svg></svg></html>')],
     ['arbitrary binary', new Uint8Array([0x00, 0x12, 0x34, 0x56])],
   ])('rejects %s', (_name, bytes) => {

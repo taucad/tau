@@ -8,7 +8,7 @@
  * authenticated publication file proxy.
  *
  * MUST stay in sync with:
- * - `repos/cloud-infra/modules/cloudflare-r2/main.tf` (buckets + zone cache rules)
+ * - `repos/tau-cloud/modules/cloudflare-r2/main.tf` (buckets + zone cache rules)
  * - `scripts/seed-r2-defaults.sh` (default seed object keys)
  * - `infra/docker-compose.yml` MinIO bootstrap (local parity, incl. private bucket)
  * - `apps/ui/netlify.toml` CSP `connect-src` (origin only; prefix not referenced)

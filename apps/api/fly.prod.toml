@@ -33,7 +33,7 @@ OTEL_EXPORTER_OTLP_COMPRESSION = 'gzip'
 # (no Git integration, no PR previews — those live on staging).
 ADDITIONAL_CORS_ORIGINS = '["https://taucad-prod-us.netlify.app"]'
 # TAU_S3_BUCKET, TAU_S3_ENDPOINT, TAU_S3_ACCESS_KEY_ID, TAU_S3_SECRET_ACCESS_KEY
-# are pushed as Fly secrets by module.fly_api_secrets (repos/cloud-infra) — not set here.
+# are pushed as Fly secrets by module.fly_api_secrets (repos/tau-cloud) — not set here.
 TAU_S3_PUBLIC_BASE_URL = 'https://cdn.tau.new'
 TAU_S3_REGION = 'auto'
 TAU_S3_FORCE_PATH_STYLE = 'false'

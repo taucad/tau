@@ -6,7 +6,7 @@ How `apps/ui` is built, hosted, and promoted across staging and production, plus
 
 Both staging and production UIs deploy on Netlify against Fly.io staging and production APIs. **Production promotions** are GitOps-style: a bot-managed trail PR merges `release/main-to-production` into `production`; that merge triggers native Netlify Git builds (`taucad-prod-us`) and pushes the Fly API via [`prod-deploy-on-merge.yml`](../../.github/workflows/prod-deploy-on-merge.yml).
 
-**DNS authority** is **Cloudflare** (zones `taucad.dev` + `tau.new`) declared under `repos/cloud-infra` HCP workspaces `tau-cloud-staging` / `tau-cloud-prod-us`. Registrar cutover sequencing lives in **`repos/cloud-infra/docs/dns-migration-plan.md`**.
+**DNS authority** is **Cloudflare** (zones `taucad.dev` + `tau.new`) declared under `repos/tau-cloud` HCP workspaces `tau-cloud-staging` / `tau-cloud-prod-us`. Registrar cutover sequencing lives in **`repos/tau-cloud/docs/dns-migration-plan.md`**.
 
 ### Operator sequencing
 
@@ -83,8 +83,8 @@ Investigation narrative: **[docs/research/netlify-ui-deployment-strategy.md](../
 
 **Single** [`apps/ui/netlify.toml`](../../apps/ui/netlify.toml) holds build commands + security headers. **Per-site** `TAU_API_URL`, `TAU_WEBSOCKET_URL`, `TAU_FRONTEND_URL`, `NODE_ENV`, `POSTHOG_CLI_*`, and build-only `NX_CLOUD_ACCESS_TOKEN` are written to each Netlify site by Terraform from committed non-secret tfvars plus HCP Sensitive variables in:
 
-- `repos/cloud-infra/stacks/cloud/staging/terraform.auto.tfvars`
-- `repos/cloud-infra/stacks/cloud/prod-us/terraform.auto.tfvars`
+- `repos/tau-cloud/stacks/cloud/staging/terraform.auto.tfvars`
+- `repos/tau-cloud/stacks/cloud/prod-us/terraform.auto.tfvars`
 
 `NODE_ENV` for Functions/SSR is **never** scoped to `builds` (pnpm would skip devDependencies and break the Vite build). `TAU_*` URLs use `builds+functions+runtime` so server pre-render matches runtime. Deploy previews do not get a static `TAU_FRONTEND_URL`; the UI build derives and embeds the preview origin from Netlify's `DEPLOY_PRIME_URL`.
 
@@ -156,7 +156,7 @@ Netlify sends `Cross-Origin-Embedder-Policy: require-corp` from [`apps/ui/netlif
 
 - [production-gitops-runbook.md](./production-gitops-runbook.md) — operators + HCP sequencing
 - [docs/research/netlify-ui-deployment-strategy.md](../research/netlify-ui-deployment-strategy.md)
-- [`repos/cloud-infra/stacks/cloud/{staging,prod-us}`](../../repos/cloud-infra/stacks/cloud/)
+- [`repos/tau-cloud/stacks/cloud/{staging,prod-us}`](../../repos/tau-cloud/stacks/cloud/)
 - [`.github/workflows/prepare-prod-release.yml`](../../.github/workflows/prepare-prod-release.yml)
 - [`.github/workflows/prod-deploy-on-merge.yml`](../../.github/workflows/prod-deploy-on-merge.yml)
 - [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml)

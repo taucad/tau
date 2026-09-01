@@ -29,7 +29,7 @@ export class S3HealthIndicator {
       if (!privateBucketReachable) {
         return indicator.down({
           responseTimeMs,
-          message: 'Private bucket missing — provision TAU_S3_PRIVATE_BUCKET (repos/cloud-infra pairing)',
+          message: 'Private bucket missing — provision TAU_S3_PRIVATE_BUCKET (repos/tau-cloud pairing)',
         });
       }
 

@@ -6,7 +6,7 @@
   "git.autoRepositoryDetection": "subFolders",
   "git.scanRepositories": [
     "repos/tau-brain",
-    "repos/cloud-infra",
+    "repos/tau-cloud",
     "repos/opencascade.js",
     "repos/replicad",
     "repos/openrscad",

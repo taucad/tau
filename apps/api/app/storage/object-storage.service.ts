@@ -302,7 +302,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   /**
    * Verifies the fail-closed private bucket is provisioned and reachable.
    * Used by `S3HealthIndicator` so a deploy missing the paired
-   * `repos/cloud-infra` private-bucket change fails readiness instead of
+   * `repos/tau-cloud` private-bucket change fails readiness instead of
    * 500ing on the first private publish.
    */
   public async headPrivateBucket(): Promise<boolean> {

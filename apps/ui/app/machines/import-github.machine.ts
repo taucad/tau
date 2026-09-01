@@ -68,9 +68,7 @@ function toMetadataFetchError(error: unknown): Error {
   }
 
   if (errorMessage.includes('403') || errorMessage.includes('rate limit')) {
-    return new Error(
-      'GitHub API rate limit exceeded. Please add a GITHUB_API_TOKEN to your environment or wait before trying again.',
-    );
+    return new Error('GitHub API rate limit exceeded. Please wait a few minutes and try again.');
   }
 
   return new Error(`Failed to fetch repository metadata: ${errorMessage}`);

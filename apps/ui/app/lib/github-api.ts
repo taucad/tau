@@ -44,8 +44,8 @@ export class GitHubTreeTruncatedError extends Error {
  * GitHub API client singleton.
  *
  * Unauthenticated by design: this runs in the browser, so it must never hold a
- * token. Endpoints that require authentication go through a server route
- * instead (see `listBranches`), which keeps `GITHUB_API_TOKEN` server-side.
+ * token. Endpoints that require authentication go through the Tau API instead
+ * (see `listBranches`), which holds the GitHub token server-side.
  * Public reads are subject to GitHub's unauthenticated rate limit.
  */
 class GitHubApiClient {
@@ -264,7 +264,7 @@ class GitHubApiClient {
  * Get the GitHub API client instance.
  *
  * Deliberately unauthenticated — see `GitHubApiClient`. Authenticated calls go
- * through server routes so `GITHUB_API_TOKEN` never reaches the browser.
+ * through the Tau API so the GitHub token never reaches the browser.
  */
 export function getGitHubClient(): GitHubApiClient {
   return GitHubApiClient.getInstance();

@@ -75,7 +75,7 @@ Document-Policy = "js-profiling"
 # Remove '-Report-Only' suffix to enforce
 # connect-src allowlist:
 #   - 'self' covers same-origin SSR fetches (proxied PostHog at /api/ph,
-#     proxied GitHub avatars at /api/github-avatar, health endpoints).
+#     health endpoints).
 #   - https://api.zoo.dev / https://api.kittycad.io: Zoo external converter API
 #     used by the @taucad/runtime transcoder pipeline (server-to-server).
 #   - https://api.tau.new + wss://api.tau.new: explicit production API +

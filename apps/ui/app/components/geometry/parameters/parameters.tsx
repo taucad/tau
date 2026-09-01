@@ -1,5 +1,5 @@
 import type { IChangeEvent } from '@rjsf/core';
-import validator from '@rjsf/validator-ajv8';
+import { customizeValidator } from '@rjsf/validator-ajv8';
 import { Info } from 'lucide-react';
 import React, { useCallback, useMemo, useState } from 'react';
 import Form from '@rjsf/core';
@@ -33,6 +33,8 @@ type ParametersProperties = {
   readonly isInitialExpanded?: boolean;
   readonly isAllExpanded?: boolean;
 };
+
+const validator = customizeValidator<Record<string, unknown>, RJSFSchema, RJSFContext>();
 
 export function Parameters({
   parameters,
@@ -187,12 +189,9 @@ export function Parameters({
             </div>
           ) : null}
           <Form<Record<string, unknown>, RJSFSchema, RJSFContext>
-            // @ts-expect-error -- TODO: fix this
             validator={validator}
-            // @ts-expect-error -- TODO: fix this
             templates={templates}
             schema={jsonSchema}
-            // @ts-expect-error -- TODO: fix this
             uiSchema={uiSchema}
             idPrefix={rjsfIdPrefix}
             idSeparator={rjsfIdSeparator}

@@ -7,7 +7,8 @@ import type { RuntimeContentInput } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ExportFile, FileExtension } from '@taucad/types';
 import Form from '@rjsf/core';
-import validator from '@rjsf/validator-ajv8';
+import validator, { customizeValidator } from '@rjsf/validator-ajv8';
+import type { RJSFSchema } from '@rjsf/utils';
 import type { IChangeEvent } from '@rjsf/core';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
@@ -56,6 +57,9 @@ import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { createExportArtifactZip, downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { downloadBlob } from '@taucad/utils/file';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
+
+// The default validator stays for leaf-value checks; the Form needs one typed to its own generics.
+const formValidator = customizeValidator<Record<string, unknown>, RJSFSchema, RJSFContext>();
 
 const toggleConverterKeyCombination = projectWorkspaceKeyCombinations.export;
 
@@ -559,10 +563,8 @@ export function ExportSchemaForm({
       <Form
         schema={activeResolved.schema}
         formData={activeFormData}
-        // @ts-expect-error -- RJSF generic type mismatch with strict TypeScript
-        validator={validator}
+        validator={formValidator}
         widgets={widgets}
-        // @ts-expect-error -- RJSF generic type mismatch with strict TypeScript
         templates={rjsfTemplates}
         idPrefix={idPrefix}
         idSeparator={rjsfIdSeparator}

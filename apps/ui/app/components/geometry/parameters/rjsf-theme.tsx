@@ -654,7 +654,9 @@ function CustomCheckboxWidget(props: WidgetProps): React.ReactNode {
   );
 }
 
-function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }): React.ReactNode {
+function SimpleInputWidget(
+  props: WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext> & { readonly inputType: string },
+): React.ReactNode {
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- value is untyped in RJSF
   const { id, value, onChange, onBlur, onFocus, inputType, name, disabled, readonly, autofocus } = props;
   const prettyLabel = name ? formatDisplayLabel(name) : '';
@@ -683,7 +685,7 @@ function SimpleInputWidget(props: WidgetProps & { readonly inputType: string }):
   );
 }
 
-export const widgets: RegistryWidgetsType = {
+export const widgets: RegistryWidgetsType<Record<string, unknown>, RJSFSchema, RJSFContext> = {
   CheckboxWidget: CustomCheckboxWidget,
   EmailWidget: (props) => <SimpleInputWidget {...props} inputType='email' />,
   HiddenWidget: (props) => <SimpleInputWidget {...props} inputType='hidden' />,
@@ -694,30 +696,30 @@ export const widgets: RegistryWidgetsType = {
   UpDownWidget: ParametersWidget,
 };
 
-export const templates: TemplatesType = {
+export const templates: TemplatesType<Record<string, unknown>, RJSFSchema, RJSFContext> = {
   ButtonTemplates: {
     SubmitButton: () => null,
-    AddButton: (props: IconButtonProps) => (
+    AddButton: (props: IconButtonProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => (
       <Button type='button' variant='outline' size='sm' disabled={props.disabled} onClick={props.onClick}>
         Add
       </Button>
     ),
-    CopyButton: (props: IconButtonProps) => (
+    CopyButton: (props: IconButtonProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => (
       <Button type='button' variant='outline' size='sm' disabled={props.disabled} onClick={props.onClick}>
         Copy
       </Button>
     ),
-    MoveDownButton: (props: IconButtonProps) => (
+    MoveDownButton: (props: IconButtonProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => (
       <Button type='button' variant='outline' size='sm' disabled={props.disabled} onClick={props.onClick}>
         ↓
       </Button>
     ),
-    MoveUpButton: (props: IconButtonProps) => (
+    MoveUpButton: (props: IconButtonProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => (
       <Button type='button' variant='outline' size='sm' disabled={props.disabled} onClick={props.onClick}>
         ↑
       </Button>
     ),
-    RemoveButton: (props: IconButtonProps) => (
+    RemoveButton: (props: IconButtonProps<Record<string, unknown>, RJSFSchema, RJSFContext>) => (
       <Button type='button' variant='outline' size='sm' disabled={props.disabled} onClick={props.onClick}>
         Remove
       </Button>
@@ -770,7 +772,7 @@ export const templates: TemplatesType = {
   TitleFieldTemplate: ({ title }) => (title ? <h2 className='mb-2 text-lg font-medium'>{title}</h2> : null),
   UnsupportedFieldTemplate({ reason, schema, idSchema, registry }) {
     const fieldId: unknown = idSchema?.$id;
-    const formContext = registry.formContext as RJSFContext;
+    const { formContext } = registry;
     const fieldPath = typeof fieldId === 'string' ? rjsfIdToJsonPath(fieldId, formContext.idPrefix) : [];
     const fieldName = fieldPath.at(-1) ?? 'root';
     const isArrayType = schema.type === 'array';
@@ -812,7 +814,7 @@ export const templates: TemplatesType = {
   WrapIfAdditionalTemplate: ({ children }) => children,
 };
 
-export const uiSchema: UiSchema = {
+export const uiSchema: UiSchema<Record<string, unknown>, RJSFSchema, RJSFContext> = {
   'ui:widget': 'ParametersWidget',
   'ui:globalOptions': {
     addable: true,
@@ -827,4 +829,4 @@ export const uiSchema: UiSchema = {
       norender: true,
     },
   },
-} as const satisfies UiSchema;
+} as const satisfies UiSchema<Record<string, unknown>, RJSFSchema, RJSFContext>;

@@ -190,8 +190,8 @@ vi.mock('@rjsf/core', () => ({
   ),
 }));
 
-vi.mock('@rjsf/validator-ajv8', () => ({
-  default: {
+vi.mock('@rjsf/validator-ajv8', () => {
+  const validator = {
     isValid: (schema: { type?: string }, value: unknown) => {
       if (schema.type === 'number' || schema.type === 'integer') {
         return typeof value === 'number' && Number.isFinite(value);
@@ -204,8 +204,9 @@ vi.mock('@rjsf/validator-ajv8', () => ({
       }
       return true;
     },
-  },
-}));
+  };
+  return { default: validator, customizeValidator: () => validator };
+});
 
 vi.mock('#components/geometry/parameters/rjsf-theme.js', () => ({
   widgets: {},

@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
-import validator from '@rjsf/validator-ajv8';
+import { customizeValidator } from '@rjsf/validator-ajv8';
 import type { WidgetProps, RJSFSchema, Registry } from '@rjsf/utils';
 import { mock } from 'vitest-mock-extended';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
@@ -19,10 +19,14 @@ const SelectWidget = widgets['SelectWidget']!;
 const CheckboxWidget = widgets['CheckboxWidget']!;
 const EmailWidget = widgets['EmailWidget']!;
 
+const validator = customizeValidator<Record<string, unknown>, RJSFSchema, RJSFContext>();
+
 const numberSchema: RJSFSchema = { type: 'number' };
 const stringSchema: RJSFSchema = { type: 'string' };
 
-function createWidgetProps(overrides: Partial<WidgetProps>): WidgetProps {
+function createWidgetProps(
+  overrides: Partial<WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext>>,
+): WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext> {
   return {
     id: 'test-select',
     name: 'testField',
@@ -37,7 +41,7 @@ function createWidgetProps(overrides: Partial<WidgetProps>): WidgetProps {
     onChange: vi.fn(),
     onBlur: vi.fn(),
     onFocus: vi.fn(),
-    registry: mock<Registry>(),
+    registry: mock<Registry<Record<string, unknown>, RJSFSchema, RJSFContext>>(),
     ...overrides,
   };
 }
@@ -94,12 +98,9 @@ const renderSchemaForm = ({
     <TooltipProvider>
       <Form
         schema={schema}
-        // @ts-expect-error -- TODO: fix this (mirrors parameters.tsx; rjsf-theme exports use default any generics)
         validator={validator}
         widgets={widgets}
-        // @ts-expect-error -- TODO: fix this (mirrors parameters.tsx; rjsf-theme exports use default any generics)
         templates={templates}
-        // @ts-expect-error -- TODO: fix this (mirrors parameters.tsx; rjsf-theme exports use default any generics)
         uiSchema={uiSchema}
         idPrefix={rjsfIdPrefix}
         idSeparator={rjsfIdSeparator}

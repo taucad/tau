@@ -1,7 +1,7 @@
 import Form from '@rjsf/core';
 import { createSchemaUtils } from '@rjsf/utils';
-import type { RJSFSchema, ValidatorType } from '@rjsf/utils';
-import validator from '@rjsf/validator-ajv8';
+import type { RJSFSchema } from '@rjsf/utils';
+import { customizeValidator } from '@rjsf/validator-ajv8';
 import { assimpEdgeSchemas } from '@taucad/assimp';
 import { imageEdgeSchemas } from '@taucad/image';
 import { jsonSchemaFromJson } from '@taucad/utils/schema';
@@ -61,12 +61,16 @@ const inputJsonSchema = (schema: unknown): RJSFSchema => {
   return active as RJSFSchema;
 };
 
+const validator = customizeValidator<Record<string, unknown>, RJSFSchema, RJSFContext>();
+
 const schemaUtilsFor = (schema: RJSFSchema) =>
-  createSchemaUtils<Record<string, unknown>, RJSFSchema, RJSFContext>(
-    validator as unknown as ValidatorType<Record<string, unknown>, RJSFSchema, RJSFContext>,
-    schema,
-    rjsfDefaultFormStateBehavior,
-  );
+  createSchemaUtils<Record<string, unknown>, RJSFSchema, RJSFContext>(validator, schema, rjsfDefaultFormStateBehavior);
+
+// `getDefaultFormState` widens to `T | T[] | undefined`; every schema under test hydrates to an object.
+const validationErrors = (
+  hydrated: Record<string, unknown> | Array<Record<string, unknown>> | undefined,
+  schema: RJSFSchema,
+) => validator.validateFormData(hydrated as Record<string, unknown> | undefined, schema).errors;
 
 const requireRjsfSchema = (value: unknown, message: string): RJSFSchema => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -81,7 +85,7 @@ describe('RJSF form-state policy', () => {
     const hydrated = schemaUtils.getDefaultFormState(optionalSectionsSchema, {});
 
     expect(hydrated).toEqual({});
-    expect(validator.validateFormData(hydrated, optionalSectionsSchema).errors).toEqual([]);
+    expect(validationErrors(hydrated, optionalSectionsSchema)).toEqual([]);
   });
 
   it('should not emit invalid synthetic form data when a real form mounts', () => {
@@ -137,7 +141,7 @@ describe('RJSF form-state policy', () => {
     const hydrated = schemaUtilsFor(schema).getDefaultFormState(schema, {});
 
     expect(hydrated).toEqual({ sections: { planes: [{ point: [0, 0, 0], normal: [0, 0, 1] }] } });
-    expect(validator.validateFormData(hydrated, schema).errors.map((error) => error.stack)).toEqual([]);
+    expect(validationErrors(hydrated, schema).map((error) => error.stack)).toEqual([]);
   });
 
   it('should hydrate every production Assimp and image option schema without validation errors', () => {
@@ -153,7 +157,7 @@ describe('RJSF form-state policy', () => {
       const parsed: unknown = schema.parse({});
       const defaults = requireRjsfSchema(parsed, `Expected object defaults for ${name}`);
       const hydrated = schemaUtilsFor(jsonSchema).getDefaultFormState(jsonSchema, defaults);
-      expect(validator.validateFormData(hydrated, jsonSchema).errors, name).toEqual([]);
+      expect(validationErrors(hydrated, jsonSchema), name).toEqual([]);
       expect(JSON.stringify(jsonSchema), name).not.toContain('"readOnly":true');
     }
   });
@@ -169,7 +173,7 @@ describe('RJSF form-state policy', () => {
     const item = schemaUtilsFor(jsonSchema).getDefaultFormState(itemSchema);
 
     expect(item).toEqual({ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 });
-    expect(validator.validateFormData(item, itemSchema).errors).toEqual([]);
+    expect(validationErrors(item, itemSchema)).toEqual([]);
   });
 
   it('should preserve representative inferred CAD parameter arrays and nested defaults', async () => {
@@ -182,6 +186,6 @@ describe('RJSF form-state policy', () => {
     const hydrated = schemaUtilsFor(schema).getDefaultFormState(schema, defaults);
 
     expect(hydrated).toEqual(defaults);
-    expect(validator.validateFormData(hydrated, schema).errors.map((error) => error.stack)).toEqual([]);
+    expect(validationErrors(hydrated, schema).map((error) => error.stack)).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@ import { convertToModelMessages, createUIMessageStreamResponse } from 'ai';
 import type { UIMessageChunk } from 'ai';
 import type { FastifyReply } from 'fastify';
 import type { AIMessageChunk, BaseMessage } from '@langchain/core/messages';
+import type { ChatTurnRequest } from '@taucad/chat/schemas';
 import type { ToolSelection, ChatSnapshot, ContextPayload } from '@taucad/chat';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
@@ -13,7 +14,7 @@ import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { ModelService } from '#api/models/model.service.js';
 import { FileEditService } from '#api/file-edit/file-edit.service.js';
 import { AuthGuard } from '#auth/auth.guard.js';
-import { CreateChatDto } from '#api/chat/chat.dto.js';
+import { ChatMessagesValidationPipe, CreateChatDto } from '#api/chat/chat.dto.js';
 import { sendSimpleModelStream } from '#api/chat/utils/simple-model-stream.js';
 import { buildSnapshotContextText } from '#api/chat/utils/snapshot-context.js';
 import { createStaticToolTransform } from '#api/chat/utils/static-tool-transform.js';
@@ -70,7 +71,10 @@ export class ChatController {
 
   @Post()
   @Span()
-  public async createChat(@Body() body: CreateChatDto, @Res() response: FastifyReply): Promise<void> {
+  public async createChat(
+    @Body(new ChatMessagesValidationPipe()) body: ChatTurnRequest,
+    @Res() response: FastifyReply,
+  ): Promise<void> {
     this.logger.debug(`Creating chat: ${body.id}`);
 
     switch (body.agent.profile) {

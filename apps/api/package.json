@@ -18,7 +18,8 @@
     "@taucad/utils": "workspace:*",
     "react": "catalog:",
     "react-email": "catalog:",
-    "resend": "catalog:"
+    "resend": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@taucad/geospec-engine": "workspace:*",

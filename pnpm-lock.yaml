@@ -1719,6 +1719,9 @@ importers:
       resend:
         specifier: 'catalog:'
         version: 6.14.0(@react-email/render@2.0.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@taucad/geospec-engine':
         specifier: workspace:*

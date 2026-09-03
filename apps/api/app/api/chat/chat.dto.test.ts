@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { HttpException } from '@nestjs/common';
 import type { MyUIMessage } from '@taucad/chat';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type { CadAgentConfigInput } from '@taucad/chat/schemas';
+import { ChatMessagesValidationPipe } from '#api/chat/chat.dto.js';
 
 const validUserMessage: MyUIMessage = {
   id: 'msg_1',
@@ -156,8 +158,8 @@ describe('chatTurnRequestSchema', () => {
       }
     });
 
-    it('should reject a body whose messages contain a malformed part with a path under messages.<i>', () => {
-      const result = chatTurnRequestSchema.safeParse({
+    it('should reject a body whose messages contain a malformed part through the async controller pipe', async () => {
+      const result = chatTurnRequestSchema.parse({
         ...baseBody,
         messages: [
           {
@@ -168,11 +170,30 @@ describe('chatTurnRequestSchema', () => {
         ],
       });
 
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const hasMessagePathIssue = result.error.issues.some((issue) => issue.path[0] === 'messages');
-        expect(hasMessagePathIssue).toBe(true);
+      // CL1 moves full message validation from the synchronous DTO schema to Nest's async pipe.
+      await expect(new ChatMessagesValidationPipe().transform(result)).rejects.toMatchObject({ status: 400 });
+    });
+
+    it('should redact rejected message payloads and preserve the validation error contract', async () => {
+      const canary = 'private-chat-canary';
+      const envelope = chatTurnRequestSchema.parse({
+        ...baseBody,
+        messages: [{ id: 'msg_bad', role: 'user', parts: [{ type: 'text', canary }] }],
+      });
+
+      const error: unknown = await new ChatMessagesValidationPipe()
+        .transform(envelope)
+        .catch((error: unknown) => error);
+
+      expect(error).toBeInstanceOf(HttpException);
+      if (!(error instanceof HttpException)) {
+        throw error;
       }
+      expect(error.getResponse()).toEqual({
+        code: 'VALIDATION_ERROR',
+        message: 'Validation failed: messages: Invalid input.',
+      });
+      expect(JSON.stringify({ message: error.message, response: error.getResponse() })).not.toContain(canary);
     });
   });
 

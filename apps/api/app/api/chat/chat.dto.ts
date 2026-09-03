@@ -1,17 +1,36 @@
 import { createZodDto } from 'nestjs-zod';
-import { chatTurnRequestSchema } from '@taucad/chat/schemas';
+import { BadRequestException } from '@nestjs/common';
+import type { PipeTransform } from '@nestjs/common';
+import { z } from 'zod';
+import { chatTurnRequestSchema, parseChatTurnRequest } from '@taucad/chat/schemas';
+import type { ChatTurnRequest } from '@taucad/chat/schemas';
 
 /**
- * NestJS Zod DTO bound to the shared `chatTurnRequestSchema` (which lives in
- * `@taucad/chat/schemas` so the UI chat-clients can also validate against it).
- * Validation, JSON-Schema generation and OpenAPI all flow through the shared
- * schema — there is no per-controller shape.
+ * NestJS Zod DTO for synchronous schema generation from the shared
+ * `chatTurnRequestSchema`. The controller's async pipe performs the actual
+ * trust-boundary validation through `parseChatTurnRequest`.
  *
- * The DTO class keeps the HTTP-layer name `CreateChatDto` because it is the
- * `@Body()`-bound type for `POST /v1/chat`; the underlying schema is named
- * after the domain concept (a single chat turn) so consumers outside the
- * HTTP layer don't have to import "body" vocabulary.
+ * The DTO keeps its existing HTTP-layer name for schema consumers; its
+ * `messages` property is deliberately `unknown[]` until async validation.
  *
  * @public
  */
 export class CreateChatDto extends createZodDto(chatTurnRequestSchema) {}
+
+/** Full async envelope and UI-message validation at the HTTP boundary. */
+export class ChatMessagesValidationPipe implements PipeTransform<unknown, Promise<ChatTurnRequest>> {
+  public async transform(value: unknown): Promise<ChatTurnRequest> {
+    try {
+      return await parseChatTurnRequest(value);
+    } catch (error) {
+      if (!(error instanceof z.ZodError)) {
+        throw error;
+      }
+      const path = String(error.issues[0]?.path[0] ?? 'request').slice(0, 64);
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: `Validation failed: ${path}: Invalid input.`,
+      });
+    }
+  }
+}

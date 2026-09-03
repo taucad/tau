@@ -52,8 +52,16 @@ const wasmBudgets: WasmBudget[] = [
     maxBytes: 11_993_088,
   },
   { name: 'BRep OCCT', path: 'packages/plugins/brep/src/wasm/occt-import-js.wasm', maxBytes: 7_798_784 },
-  { name: 'glTF Draco decoder', path: 'packages/plugins/gltf/src/wasm/draco_decoder_gltf.wasm', maxBytes: 196_608 },
-  { name: 'glTF Draco encoder', path: 'packages/plugins/gltf/src/wasm/draco_encoder.wasm', maxBytes: 393_216 },
+  {
+    name: 'glTF Draco decoder',
+    path: dependencyPath('packages/plugins/gltf', 'draco3dgltf/draco_decoder_gltf.wasm'),
+    maxBytes: 196_608,
+  },
+  {
+    name: 'glTF Draco encoder',
+    path: dependencyPath('packages/plugins/gltf', 'draco3dgltf/draco_encoder.wasm'),
+    maxBytes: 393_216,
+  },
   { name: 'Rhino', path: 'packages/plugins/rhino/src/wasm/rhino3dm.wasm', maxBytes: 2_686_976 },
   {
     name: 'OpenRSCAD',

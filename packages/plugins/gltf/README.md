@@ -11,9 +11,9 @@ glTF import and transcoding toolkit for Tau
 ## Why @taucad/gltf?
 
 - **`glb` and `gltf` import** — read an existing asset into the runtime instead of evaluating a model.
-- **Bidirectional transcoding** — `glb ⇄ gltf`, resources emitted as separate files on the way out.
-- **Draco included** — compressed meshes decode through `draco3dgltf`, registered as a glTF-Transform dependency.
-- **No module-scope work** — the Draco backend loads in `initialize()`, one instance per worker.
+- **Bidirectional transcoding** — all four `glb`/`gltf` routes, including same-format codec conversion.
+- **Standard Draco interchange** — `KHR_draco_mesh_compression` input decodes automatically; output compression is opt-in.
+- **Lazy dependency assets** — decoder and encoder WASM load independently from `draco3dgltf` only when needed.
 
 ## Install
 
@@ -43,16 +43,32 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 | `gltf`           | toolkit factory    | package-named authoring factory; presets select capabilities                  |
 | `plugin`         | toolkit factory    | the same factory under its mechanical name, for loaders that read a fixed key |
 | `gltfKernel`     | kernel factory     | direct `kernels` composition; reads `glb`, `gltf`                             |
-| `gltfTranscoder` | transcoder factory | direct `transcoders` composition; edges `glb → gltf`, `gltf → glb`            |
+| `gltfTranscoder` | transcoder factory | direct `transcoders` composition; all four `glb`/`gltf` source-target edges   |
 
 One preset, `default`, selecting `kernels.default`, `transcoders.default`.
 
+Compressed output is an explicit second step after any kernel export:
+
+```typescript
+const exported = await client.export('glb', { source });
+if (!exported.success) throw new Error('GLB export failed');
+
+const compressed = await client.transcode({
+  from: 'glb',
+  to: 'glb',
+  files: exported.data,
+  options: { compression: 'draco' },
+});
+```
+
+`compression` defaults to `none`. Draco output is rejected when a document carries Tau or KittyCAD topology metadata because compression can reorder vertices and invalidate its face/edge mappings.
+
 ## Environment
 
-| Host           | Supported | Notes                                                        |
-| -------------- | --------- | ------------------------------------------------------------ |
-| Browser worker | Yes       | single-threaded Draco WASM; no cross-origin isolation needed |
-| Node.js        | Yes       | `>=24`                                                       |
+| Host           | Supported | Notes                                                            |
+| -------------- | --------- | ---------------------------------------------------------------- |
+| Browser worker | Yes       | dependency-owned Draco WASM is emitted by Tau's Vite integration |
+| Node.js        | Yes       | `>=24`; codec WASM resolves from `draco3dgltf`                   |
 
 ## Versioning and stability
 
@@ -71,7 +87,7 @@ npm audit signatures
 
 ## License
 
-Apache-2.0 — see [LICENSE](./LICENSE). Bundled third-party payloads keep their own licenses.
+Apache-2.0 — see [LICENSE](./LICENSE). Runtime codec payloads retain their upstream licenses.
 
 ## Links
 

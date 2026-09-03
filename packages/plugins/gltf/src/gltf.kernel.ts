@@ -1,4 +1,3 @@
-import { NodeIO } from '@gltf-transform/core';
 import { unpartition } from '@gltf-transform/functions';
 import {
   coordinateSystemSchema,
@@ -9,16 +8,10 @@ import {
   unitSchema,
 } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
-import {
-  allExtensions,
-  createImportFileInventory,
-  normalizeGltfGeometryNames,
-  transformGltfExportBytes,
-} from '@taucad/geometry-core';
+import { createImportFileInventory, normalizeGltfGeometryNames, transformGltfExportBytes } from '@taucad/geometry-core';
 import { createFileResolverIo } from '#file-resolver-io.utils.js';
 
-import { dracoDependencies, loadDracoBackend } from '#draco-backend.js';
-import type { DracoBackend } from '#draco-backend.js';
+import { dracoExtensionName, loadDracoDecoder, usesDracoCompression } from '#draco-backend.js';
 
 const glbOptionsSchema = coordinateSystemSchema
   .extend(unitSchema.shape)
@@ -35,7 +28,7 @@ export const gltfKernel = defineKernel({
   exportFormats: { glb: { optionsSchema: glbOptionsSchema } },
 
   async initialize() {
-    return { draco: await loadDracoBackend() };
+    return {};
   },
 
   async getDependencies({ entryPath }, { filesystem }) {
@@ -50,14 +43,18 @@ export const gltfKernel = defineKernel({
     });
   },
 
-  async createGeometry({ entryPath }, { filesystem }, context: { draco: DracoBackend }) {
+  async createGeometry({ entryPath }, { filesystem }) {
     const inventory = await createImportFileInventory(filesystem, entryPath);
-    const dependencies = dracoDependencies(context.draco);
     const isJson = entryPath.toLowerCase().endsWith('.gltf');
-    const io = isJson
-      ? createFileResolverIo(inventory.resolver).registerDependencies(dependencies)
-      : new NodeIO().registerExtensions(allExtensions).registerDependencies(dependencies);
-    const document = isJson ? await io.read(basename(entryPath)) : await io.readBinary(inventory.entryBytes);
+    const io = createFileResolverIo(inventory.resolver);
+    const jsonDocument = isJson
+      ? await io.readAsJSON(basename(entryPath))
+      : await io.binaryToJSON(inventory.entryBytes);
+    if (usesDracoCompression(jsonDocument.json)) {
+      io.registerDependencies({ 'draco3d.decoder': await loadDracoDecoder() });
+    }
+    const document = await io.readJSON(jsonDocument);
+    document.disposeExtension(dracoExtensionName);
     await document.transform(unpartition());
     const glb = await io.writeBinary(document);
     const normalized = await normalizeGltfGeometryNames(glb, {

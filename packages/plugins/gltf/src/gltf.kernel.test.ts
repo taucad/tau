@@ -1,11 +1,14 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- defineKernel intentionally erases private backend context */
 import { readFileSync } from 'node:fs';
+import { NodeIO } from '@gltf-transform/core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createMockKernelRuntime, validateGlbData } from '@taucad/runtime-testing';
 import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
 import { gltfKernel } from '#gltf.kernel.js';
+
+import { dracoExtensionName } from '#draco-backend.js';
 
 const definition = await resolveRuntimePluginDefinition<AnyKernelDefinition>('kernel', gltfKernel());
 const runtime = createMockKernelRuntime();
@@ -33,6 +36,8 @@ describe('gltfKernel', () => {
     expect(result.geometry?.format).toBe('gltf');
     if (result.geometry?.format === 'gltf') {
       validateGlbData(result.geometry.content);
+      const { json } = await new NodeIO().binaryToJSON(result.geometry.content);
+      expect(json.extensionsUsed?.includes(dracoExtensionName)).not.toBe(true);
     }
   });
 
@@ -51,6 +56,8 @@ describe('gltfKernel', () => {
     expect(result.geometry?.format).toBe('gltf');
     if (result.geometry?.format === 'gltf') {
       validateGlbData(result.geometry.content);
+      const { json } = await new NodeIO().binaryToJSON(result.geometry.content);
+      expect(json.extensionsUsed?.includes(dracoExtensionName)).not.toBe(true);
     }
   });
 });

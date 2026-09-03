@@ -7,7 +7,6 @@ const baseConfig: UserConfig = {
   clean: true,
   dts: true,
   minify: true,
-  copy: ({ outDir }) => [{ from: 'src/wasm', to: outDir }],
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };

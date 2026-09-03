@@ -1,28 +1,68 @@
+import type { GLTF } from '@gltf-transform/core';
 import type { DecoderModule, EncoderModule } from 'draco3dgltf';
+import { loadWasmBinary } from '@taucad/runtime/transcoder';
 
-/** Draco codecs owned by one capability context. */
-export type DracoBackend = {
-  readonly decoder: DecoderModule;
-  readonly encoder: EncoderModule;
-};
+/** Khronos extension implemented by the injected codecs. */
+export const dracoExtensionName = 'KHR_draco_mesh_compression';
 
-/** Load Draco codecs for a kernel or transcoder worker context. */
-export const loadDracoBackend = async (): Promise<DracoBackend> => {
+const decoderUrl = new URL(import.meta.resolve('draco3dgltf/draco_decoder_gltf.wasm')).href;
+const encoderUrl = new URL(import.meta.resolve('draco3dgltf/draco_encoder.wasm')).href;
+
+let decoderPromise: Promise<DecoderModule> | undefined;
+let encoderPromise: Promise<EncoderModule> | undefined;
+
+/**
+ * Whether raw glTF declares Draco as used or required.
+ *
+ * @param json - Raw glTF JSON.
+ * @returns Whether the standard Draco extension is declared.
+ */
+export const usesDracoCompression = (json: GLTF.IGLTF): boolean =>
+  json.extensionsUsed?.includes(dracoExtensionName) === true ||
+  json.extensionsRequired?.includes(dracoExtensionName) === true;
+
+const createDecoder = async (): Promise<DecoderModule> => {
   const { default: draco } = await import('draco3dgltf');
-  const [decoder, encoder] = await Promise.all([
-    draco.createDecoderModule({
-      locateFile: () => new URL('wasm/draco_decoder_gltf.wasm', import.meta.url).href,
-    }),
-    draco.createEncoderModule({
-      locateFile: () => new URL('wasm/draco_encoder.wasm', import.meta.url).href,
-    }),
-  ]);
-  return { decoder, encoder };
+  return draco.createDecoderModule({ wasmBinary: await loadWasmBinary(decoderUrl) });
 };
 
-/** Register one context's codecs with glTF Transform IO. */
-export const dracoDependencies = (backend: DracoBackend): Record<string, unknown> => ({
-  'draco3d.decoder': backend.decoder,
+const createEncoder = async (): Promise<EncoderModule> => {
+  const { default: draco } = await import('draco3dgltf');
+  return draco.createEncoderModule({ wasmBinary: await loadWasmBinary(encoderUrl) });
+};
 
-  'draco3d.encoder': backend.encoder,
-});
+/**
+ * Load and cache the Draco decoder for this worker.
+ *
+ * @returns The initialized decoder module.
+ */
+export const loadDracoDecoder = async (): Promise<DecoderModule> => {
+  if (decoderPromise) {
+    return decoderPromise;
+  }
+  decoderPromise = createDecoder();
+  try {
+    return await decoderPromise;
+  } catch (error) {
+    decoderPromise = undefined;
+    throw error;
+  }
+};
+
+/**
+ * Load and cache the Draco encoder for this worker.
+ *
+ * @returns The initialized encoder module.
+ */
+export const loadDracoEncoder = async (): Promise<EncoderModule> => {
+  if (encoderPromise) {
+    return encoderPromise;
+  }
+  encoderPromise = createEncoder();
+  try {
+    return await encoderPromise;
+  } catch (error) {
+    encoderPromise = undefined;
+    throw error;
+  }
+};

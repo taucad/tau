@@ -612,12 +612,6 @@ const vendoredAssetReasons: Readonly<Record<string, Readonly<Record<string, stri
     'node_modules/occt-import-js/dist/occt-import-js.wasm':
       'occt-import-js declares no exports field, so the deep path is the only address',
   },
-  '@taucad/gltf': {
-    'node_modules/draco3dgltf/draco_decoder_gltf.wasm':
-      'draco3dgltf declares no exports field, so the deep path is the only address',
-    'node_modules/draco3dgltf/draco_encoder.wasm':
-      'draco3dgltf declares no exports field, so the deep path is the only address',
-  },
   '@taucad/image': {
     '../../../node_modules/geist/dist/fonts/geist-sans/Geist-Regular.ttf':
       'geist exports only ./font* JS entries, never the raw font files',
@@ -636,10 +630,6 @@ const vendoredAssetReasons: Readonly<Record<string, Readonly<Record<string, stri
       'geist exports only ./font* JS entries, never the raw font files',
     '../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2':
       'geist exports only ./font* JS entries, never the raw font files',
-    './node_modules/draco3dgltf/draco_decoder_gltf.wasm':
-      'draco3dgltf declares no exports field, so the deep path is the only address',
-    './node_modules/draco3dgltf/draco_encoder.wasm':
-      'draco3dgltf declares no exports field, so the deep path is the only address',
   },
   '@taucad/esbuild': {
     'node_modules/esbuild-wasm/esbuild.wasm':

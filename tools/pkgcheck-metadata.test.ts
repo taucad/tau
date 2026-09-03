@@ -604,7 +604,7 @@ describe('vendoredAssetIssues', () => {
         ignoredPaths: ['packages/plugins/rhino/src/wasm/rhino3dm.wasm'],
         assetFiles: [
           { project: '@taucad/rhino', path: 'src/wasm/rhino3dm.wasm' },
-          { project: '@taucad/gltf', path: 'src/wasm/draco_decoder_gltf.wasm' },
+          { project: '@taucad/example', path: 'src/wasm/orphan.wasm' },
         ],
         upstreamExports: [],
         reasons: {
@@ -612,7 +612,7 @@ describe('vendoredAssetIssues', () => {
         },
       }),
     ).toEqual([
-      '@taucad/gltf: src/wasm/draco_decoder_gltf.wasm is not written by any copy-assets entry; vendored binaries must be generated from a declared dependency',
+      '@taucad/example: src/wasm/orphan.wasm is not written by any copy-assets entry; vendored binaries must be generated from a declared dependency',
     ]);
   });
 

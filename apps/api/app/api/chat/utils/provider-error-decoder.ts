@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export type DecodedProviderErrorBody = {
   bodyKind: 'empty' | 'string' | 'json' | 'byte-list' | 'bytes' | 'object' | 'unknown';
   rawText?: string;
@@ -11,6 +13,26 @@ export type DecodedProviderErrorBody = {
 
 const maxDecodedTextLength = 8000;
 const textDecoder = new TextDecoder();
+const byteSchema = z.number().int().min(0).max(255);
+const byteArraySchema = z.array(byteSchema);
+const unknownArraySchema = z.array(z.unknown());
+const objectValueSchema = z.union([z.array(z.unknown()), z.looseObject({})]);
+
+const providerFieldValueSchema = z.union([z.string(), z.number()]);
+const providerFieldsSchema = z.looseObject({
+  code: providerFieldValueSchema.optional(),
+  status: providerFieldValueSchema.optional(),
+  type: z.string().optional(),
+  message: z.string().optional(),
+  reason: z.string().optional(),
+  errors: z.array(z.unknown()).optional(),
+});
+
+const providerErrorRecordSchema = z.union([
+  z.looseObject({ error: z.looseObject({ error: providerFieldsSchema }) }).transform((value) => value.error.error),
+  z.looseObject({ error: providerFieldsSchema }).transform((value) => value.error),
+  providerFieldsSchema,
+]);
 
 export const decodeProviderErrorBody = (value: unknown): DecodedProviderErrorBody => {
   const decoded = decodeValue(value);
@@ -29,8 +51,9 @@ const decodeValue = (value: unknown): DecodedProviderErrorBody => {
     return decodeText(value);
   }
 
-  if (Array.isArray(value) && value.every((item) => isByteNumber(item))) {
-    return decodeBytes(Uint8Array.from(value), 'bytes');
+  const bytes = byteArraySchema.safeParse(value);
+  if (bytes.success) {
+    return decodeBytes(Uint8Array.from(bytes.data), 'bytes');
   }
 
   if (value instanceof ArrayBuffer) {
@@ -41,7 +64,7 @@ const decodeValue = (value: unknown): DecodedProviderErrorBody => {
     return decodeBytes(copyArrayBufferView(value), 'bytes');
   }
 
-  if (typeof value === 'object') {
+  if (objectValueSchema.safeParse(value).success) {
     return {
       bodyKind: 'object',
       parsed: value,
@@ -125,20 +148,18 @@ const parseDecimalByteList = (text: string): Uint8Array<ArrayBuffer> | undefined
   }
 
   const values = text.split(',').map((part) => Number.parseInt(part.trim(), 10));
-  if (!values.every((value) => isByteNumber(value))) {
+  const bytes = byteArraySchema.safeParse(values);
+  if (!bytes.success) {
     return undefined;
   }
 
-  return Uint8Array.from(values);
+  return Uint8Array.from(bytes.data);
 };
 
 const startsJson = (text: string): boolean => {
   const trimmed = text.trimStart();
   return trimmed.startsWith('{') || trimmed.startsWith('[');
 };
-
-const isByteNumber = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255;
 
 const extractProviderFields = (
   parsed: unknown,
@@ -148,63 +169,40 @@ const extractProviderFields = (
   'httpStatus' | 'providerCode' | 'providerMessage' | 'providerReason' | 'providerStatus'
 > => {
   const errorRecord = getProviderErrorRecord(parsed);
-  const nestedFirstError = asRecord(readArray(errorRecord, 'errors')?.[0]);
+  const nestedFirstErrorResult = providerFieldsSchema.safeParse(errorRecord?.errors?.[0]);
+  const nestedFirstError = nestedFirstErrorResult.success ? nestedFirstErrorResult.data : undefined;
+  const parsedArray = unknownArraySchema.safeParse(parsed);
+  const rootResult = providerFieldsSchema.safeParse(parsedArray.success ? parsedArray.data[0] : parsed);
+  const root = rootResult.success ? rootResult.data : undefined;
 
   const httpStatus =
     fallbackStatus ??
-    readNumber(errorRecord, 'code') ??
-    readNumber(errorRecord, 'status') ??
-    readNumber(parsed, 'status');
+    (typeof errorRecord?.code === 'number' ? errorRecord.code : undefined) ??
+    (typeof errorRecord?.status === 'number' ? errorRecord.status : undefined) ??
+    (typeof root?.status === 'number' ? root.status : undefined);
   const providerStatus =
-    readString(errorRecord, 'status') ?? readString(errorRecord, 'type') ?? readString(nestedFirstError, 'status');
+    (typeof errorRecord?.status === 'string' ? errorRecord.status : undefined) ??
+    errorRecord?.type ??
+    (typeof nestedFirstError?.status === 'string' ? nestedFirstError.status : undefined);
   const providerCode =
     providerStatus ??
-    readString(errorRecord, 'code') ??
-    readNumber(errorRecord, 'code') ??
-    readString(errorRecord, 'type');
+    (typeof errorRecord?.code === 'string' ? errorRecord.code : undefined) ??
+    (typeof errorRecord?.code === 'number' ? errorRecord.code : undefined) ??
+    errorRecord?.type;
 
   return {
     httpStatus,
     providerCode,
     providerStatus,
-    providerMessage: readString(errorRecord, 'message') ?? readString(nestedFirstError, 'message'),
-    providerReason: readString(errorRecord, 'reason') ?? readString(nestedFirstError, 'reason'),
+    providerMessage: errorRecord?.message ?? nestedFirstError?.message,
+    providerReason: errorRecord?.reason ?? nestedFirstError?.reason,
   };
 };
 
-const getProviderErrorRecord = (parsed: unknown): Record<string, unknown> | undefined => {
-  const first: unknown = Array.isArray(parsed) ? parsed[0] : parsed;
-  const record = asRecord(first);
-  if (!record) {
-    return undefined;
-  }
-
-  const error = asRecord(record['error']);
-  if (!error) {
-    return record;
-  }
-
-  const nested = asRecord(error['error']);
-  return nested ?? error;
-};
-
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
-
-const readArray = (record: Record<string, unknown> | undefined, key: string): unknown[] | undefined => {
-  const value = record?.[key];
-  return Array.isArray(value) ? value : undefined;
-};
-
-const readString = (record: Record<string, unknown> | undefined, key: string): string | undefined => {
-  const value = record?.[key];
-  return typeof value === 'string' ? value : undefined;
-};
-
-const readNumber = (value: unknown, key: string): number | undefined => {
-  const record = asRecord(value);
-  const child = record?.[key];
-  return typeof child === 'number' ? child : undefined;
+const getProviderErrorRecord = (parsed: unknown): z.infer<typeof providerFieldsSchema> | undefined => {
+  const first = unknownArraySchema.safeParse(parsed);
+  const result = providerErrorRecordSchema.safeParse(first.success ? first.data[0] : parsed);
+  return result.success ? result.data : undefined;
 };
 
 const safeJsonStringify = (value: unknown): string => {

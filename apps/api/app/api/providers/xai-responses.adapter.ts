@@ -21,6 +21,8 @@ import type { BaseLanguageModelInput } from '@langchain/core/language_models/bas
 import type { Runnable } from '@langchain/core/runnables';
 import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
 import type { ChatGenerationChunk, ChatResult } from '@langchain/core/outputs';
+import { z } from 'zod';
+import { isRecord } from '@taucad/utils/schema';
 
 export type TauChatXaiResponsesInput = ChatXAIResponsesInput & {
   readonly conversationId?: string;
@@ -33,14 +35,11 @@ const modelProviderKey = 'model_provider';
 
 const headerSafe = (value: string): string => value.replaceAll(/[\n\r]/g, '').slice(0, 200);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const isResponseFunctionTool = (tool: Record<string, unknown>): boolean =>
-  tool['type'] === 'function' &&
-  typeof tool['name'] === 'string' &&
-  typeof tool['parameters'] === 'object' &&
-  tool['parameters'] !== null;
+const responseFunctionToolSchema = z.looseObject({
+  type: z.literal('function'),
+  name: z.string(),
+  parameters: z.unknown().refine((value) => typeof value === 'object' && value !== null),
+});
 
 const formatToolForXaiResponses = (tool: BindToolsInput): XAIResponsesTool => {
   if (isLangChainTool(tool) && tool.extras?.['providerToolDefinition']) {
@@ -51,7 +50,7 @@ const formatToolForXaiResponses = (tool: BindToolsInput): XAIResponsesTool => {
     return tool as unknown as XAIResponsesTool;
   }
 
-  if (isRecord(tool) && isResponseFunctionTool(tool)) {
+  if (responseFunctionToolSchema.safeParse(tool).success) {
     return tool as unknown as XAIResponsesTool;
   }
 

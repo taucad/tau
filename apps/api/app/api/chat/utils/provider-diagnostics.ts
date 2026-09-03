@@ -1,5 +1,6 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
+import { isRecord } from '@taucad/utils/schema';
 import { decodeProviderErrorBody } from '#api/chat/utils/provider-error-decoder.js';
 
 export type ProviderDiagnosticsLogger = {
@@ -515,12 +516,12 @@ const summarizeLegacyToolArguments = (value: unknown): { readonly summary: unkno
   }
 
   if (typeof value !== 'string') {
-    return { summary: summarizeValueShape(value), valid: isNonArrayRecord(value) };
+    return { summary: summarizeValueShape(value), valid: isRecord(value) };
   }
 
   try {
     const parsed = JSON.parse(value) as unknown;
-    return { summary: summarizeValueShape(parsed), valid: isNonArrayRecord(parsed) };
+    return { summary: summarizeValueShape(parsed), valid: isRecord(parsed) };
   } catch {
     return { summary: summarizeValueShape(value), valid: false };
   }
@@ -909,11 +910,7 @@ const parseJsonObject = (value: string): Record<string, unknown> | undefined => 
 const messageContentToString = (content: ToolMessage['content']): string =>
   typeof content === 'string' ? content : JSON.stringify(content);
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
-
-const isNonArrayRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+const asRecord = (value: unknown): Record<string, unknown> | undefined => (isRecord(value) ? value : undefined);
 
 const readArray = (record: Record<string, unknown> | undefined, key: string): unknown[] | undefined => {
   const value = record?.[key];

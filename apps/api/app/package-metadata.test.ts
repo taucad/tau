@@ -15,9 +15,8 @@ const readPackageJson = async (): Promise<PackageJson> =>
  * on the client (browser worker for the UI, Node for the CLI), so no geometry or
  * kernel package may be a production dependency here.
  *
- * A production edge on any of these also drags `copy-assets` back into the API
- * build graph — staging kernel wasm and fetching Draco decoders over the network
- * for a service that renders nothing.
+ * A production edge on any of these also drags browser-worker code and
+ * dependency-owned runtime assets into a service that renders nothing.
  *
  * See docs/research/api-server-side-geometry-prune.md.
  */

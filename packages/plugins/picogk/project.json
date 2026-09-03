@@ -1,0 +1,28 @@
+{
+  "name": "picogk",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/picogk",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test": {
+      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-picogk-dotnet" }]
+    },
+    "test-dotnet": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-picogk-dotnet" }],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/picogk/scripts/test-dotnet.mts"
+      }
+    },
+    "benchmark-native": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-picogk-dotnet" }],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/picogk/scripts/benchmark-native.mts"
+      }
+    }
+  }
+}

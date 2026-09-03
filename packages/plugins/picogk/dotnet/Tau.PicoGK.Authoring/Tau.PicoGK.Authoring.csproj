@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Tau.PicoGK.Authoring</AssemblyName>
+    <RootNamespace>Tau.PicoGK</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(PicoGKProject)" />
+  </ItemGroup>
+</Project>

@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
+import { z } from 'zod';
 import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
@@ -321,7 +322,8 @@ const locatorKey = (storageRootKey: string, providerBasePath: string): string =>
  * Disk-side mirror of the profile-local library row. IndexedDB is evictable,
  * the workspace folder is not, so trash judgment lives here too.
  */
-type ProjectLibraryFile = { readonly deletedAt?: number };
+const projectLibraryFileSchema = z.strictObject({ deletedAt: z.number().nonnegative().optional() });
+type ProjectLibraryFile = z.infer<typeof projectLibraryFileSchema>;
 
 /** Minimal slice of the worker filesystem client the library tombstone needs. */
 type ProjectLibraryFileClient = {
@@ -338,7 +340,8 @@ const readProjectLibraryFile = async (
 ): Promise<ProjectLibraryFile> => {
   try {
     const parsed: unknown = JSON.parse(await client.readFile(projectLibraryFilePath(projectId), 'utf8'));
-    return typeof parsed === 'object' && parsed !== null ? (parsed as ProjectLibraryFile) : {};
+    const result = projectLibraryFileSchema.safeParse(parsed);
+    return result.success ? result.data : {};
   } catch {
     return {};
   }

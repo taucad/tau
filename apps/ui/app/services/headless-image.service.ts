@@ -6,6 +6,7 @@ import { renderSvgPng } from '@taucad/image/svg';
 import type { SvgPngOptions } from '@taucad/image/svg';
 import { canonicalJson } from '@taucad/utils/hash';
 import { assertRootedPath } from '@taucad/utils/path';
+import { z } from 'zod';
 import type { AppRuntimeExportFormat, AppRuntimeExportOptions } from '#types/runtime-client.alias.js';
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
@@ -55,14 +56,19 @@ type QueuedJob = {
   readonly queueDepth: number;
 };
 
-export type HeadlessImageFailureCode =
-  | 'adapter-unavailable'
-  | 'device-lost'
-  | 'driver-unsupported'
-  | 'gpu'
-  | 'parse'
-  | 'encode'
-  | 'unknown';
+export const headlessImageFailureCodeSchema = z.enum([
+  'adapter-unavailable',
+  'device-lost',
+  'driver-unsupported',
+  'gpu',
+  'parse',
+  'encode',
+  'unknown',
+]);
+export type HeadlessImageFailureCode = z.infer<typeof headlessImageFailureCodeSchema>;
+
+const renderIssueDetailsSchema = z.object({ type: z.literal('render'), code: headlessImageFailureCodeSchema });
+const svgIssueSchema = z.object({ code: z.enum(['parse', 'encode']) });
 
 /** Stable image-render failure preserved from the runtime issue details. */
 export class HeadlessImageError extends Error {
@@ -85,31 +91,17 @@ export class HeadlessImageError extends Error {
 const issueToError = (
   issue: { readonly message: string; readonly details?: unknown } | undefined,
 ): HeadlessImageError => {
-  const details = issue?.details;
-  if (details && typeof details === 'object' && 'type' in details && 'code' in details) {
-    const { type, code } = details as { readonly type: unknown; readonly code: unknown };
-    if (
-      type === 'render' &&
-      (code === 'adapter-unavailable' ||
-        code === 'device-lost' ||
-        code === 'driver-unsupported' ||
-        code === 'gpu' ||
-        code === 'parse' ||
-        code === 'encode' ||
-        code === 'unknown')
-    ) {
-      return new HeadlessImageError(code, issue.message);
-    }
+  const details = renderIssueDetailsSchema.safeParse(issue?.details);
+  if (details.success) {
+    return new HeadlessImageError(details.data.code, issue?.message ?? 'Image render failed');
   }
   return new HeadlessImageError('unknown', issue?.message ?? 'Image render failed');
 };
 
 const svgIssueToError = (error: unknown): HeadlessImageError => {
-  if (error && typeof error === 'object' && 'code' in error) {
-    const { code } = error as { readonly code: unknown };
-    if (code === 'parse' || code === 'encode') {
-      return new HeadlessImageError(code, error instanceof Error ? error.message : 'SVG render failed');
-    }
+  const issue = svgIssueSchema.safeParse(error);
+  if (issue.success) {
+    return new HeadlessImageError(issue.data.code, error instanceof Error ? error.message : 'SVG render failed');
   }
   return new HeadlessImageError('unknown', error instanceof Error ? error.message : String(error));
 };

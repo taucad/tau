@@ -1155,6 +1155,21 @@ describe('useProjectManager.createProject', () => {
     );
   });
 
+  it('ignores a malformed disk tombstone instead of casting user-edited library metadata', async () => {
+    mockGetProjectLibraryState.mockResolvedValue(undefined);
+    libraryFileContent = JSON.stringify({ deletedAt: 'yesterday' });
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const listing = await result.current.getProjectListing();
+    expect(listing).toMatchObject({ projects: [{ library: { projectId: fakeProject.id } }], conflicts: [] });
+    expect(listing.projects[0]?.library).not.toHaveProperty('deletedAt');
+    expect(mockCreateProjectLibraryStates).toHaveBeenCalledWith([
+      expect.objectContaining({ projectId: fakeProject.id }),
+    ]);
+    expect(mockCreateProjectLibraryStates.mock.calls[0]?.[0][0]).not.toHaveProperty('deletedAt');
+  });
+
   it('seeds re-minted activity from the manifest mtime instead of the current time', async () => {
     mockGetProjectLibraryState.mockResolvedValue(undefined);
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);

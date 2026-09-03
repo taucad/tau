@@ -25,6 +25,7 @@ import type { GeoSpecWebRunnerOptions } from 'geospec/runner/web';
 import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
 import { GeoSpecModelLoadError, loadModel } from 'geospec/model';
 import type { GeoSpecModelLoader } from 'geospec/model';
+import { z } from 'zod';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { runnerResultToTestModelOutput } from '#lib/geospec-rpc-result.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
@@ -139,18 +140,8 @@ const createRuntimeFsLike = (proxy: ProjectFileSystemBridge): FsLike => {
 };
 
 const formatRuntimeConfigError = (error: unknown): string => {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'issues' in error &&
-    Array.isArray((error as { issues: unknown[] }).issues)
-  ) {
-    return (error as { issues: Array<{ path?: Array<string | number>; message?: string }> }).issues
-      .map((issue) => {
-        const path = issue.path?.join('.') ?? 'runtimeConfig';
-        return `${path}: ${issue.message ?? 'invalid value'}`;
-      })
-      .join('; ');
+  if (error instanceof z.ZodError) {
+    return z.prettifyError(error);
   }
   return error instanceof Error ? error.message : String(error);
 };

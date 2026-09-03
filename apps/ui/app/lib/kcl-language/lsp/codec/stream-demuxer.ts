@@ -4,7 +4,8 @@
  * Implements WritableStream for WASM compatibility.
  */
 
-import type { Message, NotificationMessage, RequestMessage, ResponseMessage } from 'vscode-languageserver-protocol';
+import type { NotificationMessage, RequestMessage, ResponseMessage } from 'vscode-languageserver-protocol';
+import { z } from 'zod';
 import { Queue } from '#lib/kcl-language/lsp/codec/queue.js';
 import { PromiseMap } from '#lib/kcl-language/lsp/codec/promise-map.js';
 import { decodeBytes } from '#lib/kcl-language/lsp/codec/bytes.js';
@@ -13,20 +14,21 @@ import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
 
 const log = createKclLogger('StreamDemuxer');
 
-/**
- * Type guard functions for JSON-RPC message types.
- */
-function isResponse(message: Message): message is ResponseMessage {
-  return 'id' in message && ('result' in message || 'error' in message);
-}
-
-function isNotification(message: Message): message is NotificationMessage {
-  return 'method' in message && !('id' in message);
-}
-
-function isRequest(message: Message): message is RequestMessage {
-  return 'method' in message && 'id' in message;
-}
+const jsonRpcIdSchema = z.union([z.string(), z.number()]);
+const jsonRpcResponseSchema = z.union([
+  z.object({ jsonrpc: z.literal('2.0').optional(), id: jsonRpcIdSchema.nullable(), result: z.unknown() }),
+  z.object({
+    jsonrpc: z.literal('2.0').optional(),
+    id: jsonRpcIdSchema.nullable(),
+    error: z.object({ code: z.number(), message: z.string(), data: z.unknown().optional() }),
+  }),
+]);
+const jsonRpcNotificationSchema = z.object({
+  jsonrpc: z.literal('2.0').optional(),
+  method: z.string(),
+  params: z.unknown().optional(),
+});
+const jsonRpcRequestSchema = jsonRpcNotificationSchema.extend({ id: jsonRpcIdSchema });
 
 /**
  * Demultiplexes incoming LSP messages into separate queues for
@@ -71,7 +73,7 @@ export class StreamDemuxer implements WritableStream<Uint8Array<ArrayBuffer>> {
 
     for (const jsonString of jsonMessages) {
       try {
-        const message = JSON.parse(jsonString) as Message;
+        const message: unknown = JSON.parse(jsonString);
         log.debug('Decoded message:', message);
         this.routeMessage(message);
       } catch (error) {
@@ -102,25 +104,28 @@ export class StreamDemuxer implements WritableStream<Uint8Array<ArrayBuffer>> {
   /**
    * Route a decoded message to the appropriate queue.
    */
-  private routeMessage(message: Message): void {
-    if (isResponse(message)) {
-      log.debug('Message is a Response, id:', message.id);
-      const responseId = message.id as string | number | undefined;
-
-      if (typeof responseId === 'string' || typeof responseId === 'number') {
+  private routeMessage(message: unknown): void {
+    const response = jsonRpcResponseSchema.safeParse(message);
+    if (response.success) {
+      const responseId = response.data.id;
+      if (responseId !== null) {
         log.debug('Setting response for id:', responseId);
-        this.responses.set(responseId, message);
+        this.responses.set(responseId, response.data as ResponseMessage);
       }
+      return;
     }
 
-    if (isNotification(message)) {
-      log.debug('Message is a Notification, method:', message.method);
-      this.notifications.enqueue(message);
+    const request = jsonRpcRequestSchema.safeParse(message);
+    if (request.success) {
+      log.debug('Message is a Request, method:', request.data.method, 'id:', request.data.id);
+      this.requests.enqueue(request.data as RequestMessage);
+      return;
     }
 
-    if (isRequest(message)) {
-      log.debug('Message is a Request, method:', message.method, 'id:', message.id);
-      this.requests.enqueue(message);
+    const notification = jsonRpcNotificationSchema.safeParse(message);
+    if (notification.success) {
+      log.debug('Message is a Notification, method:', notification.data.method);
+      this.notifications.enqueue(notification.data as NotificationMessage);
     }
   }
 }

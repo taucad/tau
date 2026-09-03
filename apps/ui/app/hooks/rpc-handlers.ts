@@ -48,6 +48,7 @@ import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#util
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { HeadlessImageService } from '#services/headless-image.service.js';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { z } from 'zod';
 import { canonicalCaptureViews, captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
 
 /** Source of file write operations */
@@ -71,14 +72,8 @@ type RpcHandlerTreeService = {
  * (chat-utils, error-text JSON) would have to defensively re-validate.
  */
 function extractRpcClientErrorCode(execError: unknown): RpcClientErrorCode {
-  if (execError && typeof execError === 'object' && 'code' in execError) {
-    const candidate: unknown = (execError as { code: unknown }).code;
-    const parsed = rpcClientErrorCodeSchema.safeParse(candidate);
-    if (parsed.success) {
-      return parsed.data;
-    }
-  }
-  return rpcClientErrorCode.unknown;
+  const parsed = z.object({ code: rpcClientErrorCodeSchema }).safeParse(execError);
+  return parsed.success ? parsed.data.code : rpcClientErrorCode.unknown;
 }
 
 /**

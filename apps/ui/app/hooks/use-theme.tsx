@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { z } from 'zod';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Preserve the existing enum-style public API with erasable object syntax. */
 export const Theme = {
@@ -10,11 +11,13 @@ export const Theme = {
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- Re-enable project naming checks. */
 
-export type Theme = (typeof Theme)[keyof typeof Theme];
+export const themeSchema = z.enum([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST]);
+export type Theme = z.infer<typeof themeSchema>;
 
 // Null is used to represent the system theme
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- null is used to represent the system theme, as it's serializable in JSON
 export type ThemeWithSystem = Theme | null;
+export const themePreferenceSchema = z.strictObject({ theme: themeSchema.nullable() });
 
 export type ThemeOption = {
   id: ThemeWithSystem;
@@ -59,6 +62,11 @@ type ThemeState = {
   metadata: ThemeMetadata;
 };
 
+const themeStateSchema = z.strictObject({
+  theme: themeSchema,
+  metadata: z.strictObject({ definedBy: z.enum(['USER', 'SYSTEM']) }),
+});
+
 type ThemeContextValue = ThemeState & {
   prefersMoreContrast: boolean;
   setTheme: (theme: ThemeWithSystem) => void;
@@ -76,7 +84,7 @@ const ThemeContext = createContext<ThemeContextValue>({
 const prefersLightMediaQuery = '(prefers-color-scheme: light)';
 const prefersMoreContrastMediaQuery = '(prefers-contrast: more)';
 
-export const isTheme = (value: unknown): value is Theme => Object.values(Theme).includes(value as Theme);
+export const isTheme = (value: unknown): value is Theme => themeSchema.safeParse(value).success;
 
 const getPreferredTheme = (): Theme =>
   globalThis.matchMedia(prefersLightMediaQuery).matches ? Theme.LIGHT : Theme.DARK;
@@ -106,17 +114,11 @@ export const ThemeProvider = ({
 
     const channel = new globalThis.BroadcastChannel('tau-theme');
     const handleMessage = ({ data }: MessageEvent<unknown>): void => {
-      if (!data || typeof data !== 'object') {
+      const parsed = themeStateSchema.safeParse(data);
+      if (!parsed.success) {
         return;
       }
-
-      const candidate = data as { theme?: unknown; metadata?: { definedBy?: unknown } };
-      const definedBy = candidate.metadata?.definedBy;
-      if (!isTheme(candidate.theme) || (definedBy !== 'USER' && definedBy !== 'SYSTEM')) {
-        return;
-      }
-
-      setState({ theme: candidate.theme, metadata: { definedBy } });
+      setState(parsed.data);
     };
     channel.addEventListener('message', handleMessage);
     broadcastChannel.current = channel;

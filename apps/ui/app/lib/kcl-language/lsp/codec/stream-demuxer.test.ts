@@ -109,6 +109,21 @@ describe('StreamDemuxer', () => {
     expect(response).toHaveProperty('error');
   });
 
+  it('should reject malformed JSON-RPC frames instead of routing them by property presence', async () => {
+    const demuxer = new StreamDemuxer();
+
+    demuxer.add(
+      encodeMessage({
+        jsonrpc: '2.0',
+        method: 42,
+        params: {},
+      } as unknown as JSONRPCRequest),
+    );
+
+    expect(demuxer.notifications.length).toBe(0);
+    expect(demuxer.requests.length).toBe(0);
+  });
+
   describe('WritableStream interface', () => {
     it('should expose locked property', () => {
       const demuxer = new StreamDemuxer();

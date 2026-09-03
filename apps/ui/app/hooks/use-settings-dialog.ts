@@ -1,18 +1,8 @@
 import { useSearchParams } from 'react-router';
 import type { SetURLSearchParams } from 'react-router';
+import { z } from 'zod';
 
-export type SettingsSection =
-  | 'general'
-  | 'filesystem'
-  | 'account'
-  | 'security'
-  | 'api-keys'
-  | 'billing'
-  | 'models'
-  | 'agents'
-  | 'experimental';
-
-const validSections = new Set<string>([
+const settingsSectionSchema = z.enum([
   'general',
   'filesystem',
   'account',
@@ -23,6 +13,8 @@ const validSections = new Set<string>([
   'agents',
   'experimental',
 ]);
+
+export type SettingsSection = z.infer<typeof settingsSectionSchema>;
 
 type SettingsDialogState = {
   readonly isOpen: boolean;
@@ -38,10 +30,6 @@ const defaultSection: SettingsSection = 'general';
  * manipulate the URL outside of React component context.
  */
 let setSearchParametersRef: SetURLSearchParams | undefined;
-
-function isValidSection(value: string): value is SettingsSection {
-  return validSections.has(value);
-}
 
 /**
  * Opens the settings dialog, optionally navigating to a specific section.
@@ -120,6 +108,7 @@ export function useSettingsDialog(): SettingsDialogState {
     return { isOpen: false, section: defaultSection };
   }
 
-  const section = isValidSection(rawSection) ? rawSection : defaultSection;
+  const parsed = settingsSectionSchema.safeParse(rawSection);
+  const section = parsed.success ? parsed.data : defaultSection;
   return { isOpen: true, section };
 }

@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
 import type {
   GeoSpecRunnerWorkerRequest,
@@ -709,12 +710,10 @@ describe('geospec-runner.worker', () => {
     vi.stubGlobal('close', vi.fn());
     workerMocks.uiRuntimeConfigSchema.safeParse.mockReturnValueOnce({
       success: false,
-      error: {
-        issues: [
-          { path: ['tauApiUrl'], message: 'expected string' },
-          { path: ['tauWebSocketUrl'], message: 'expected string' },
-        ],
-      },
+      error: new z.ZodError([
+        { code: 'custom', path: ['tauApiUrl'], message: 'expected string' },
+        { code: 'custom', path: ['tauWebSocketUrl'], message: 'expected string' },
+      ]),
     });
 
     await import('#workers/geospec-runner.worker.js');
@@ -736,7 +735,8 @@ describe('geospec-runner.worker', () => {
       expect(postMessage).toHaveBeenCalledWith({
         type: 'error',
         requestId: 'request-invalid-config',
-        message: 'RUNTIME_CONFIG_INVALID: tauApiUrl: expected string; tauWebSocketUrl: expected string',
+        message:
+          'RUNTIME_CONFIG_INVALID: ✖ expected string\n  → at tauApiUrl\n✖ expected string\n  → at tauWebSocketUrl',
       } satisfies GeoSpecRunnerWorkerResponse);
     });
     expect(workerMocks.createFileSystemBridgeProxy).not.toHaveBeenCalled();

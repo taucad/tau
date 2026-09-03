@@ -66,4 +66,9 @@ describe('derived Monaco language mapping', () => {
     expect(extensionToMonacoLanguage['sh']).toBe(monacoLanguages.bash);
     expect(extensionToMonacoLanguage['bash']).toBe(monacoLanguages.bash);
   });
+
+  it("should map C# files to Monaco's built-in C# language", () => {
+    expect(languageFromExtension.cs).toBe('csharp');
+    expect(extensionToMonacoLanguage['cs']).toBe(monacoLanguages.csharp);
+  });
 });

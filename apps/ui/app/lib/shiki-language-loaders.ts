@@ -8,6 +8,8 @@ export const runtimeShikiLanguageLoaders = [
   import('@shikijs/langs-precompiled/jsonc'),
   import('@shikijs/langs-precompiled/jsonl'),
   import('@shikijs/langs-precompiled/markdown'),
+  import('@shikijs/langs-precompiled/python'),
+  import('@shikijs/langs-precompiled/csharp'),
   import('@shikijs/langs-precompiled/tsx'),
   import('@shikijs/langs-precompiled/typescript'),
   import('@taucad/grammars/openscad'),

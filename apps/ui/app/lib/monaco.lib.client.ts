@@ -22,6 +22,8 @@ import { usdContribution } from '#lib/usd-language/usd-register-language.js';
 import { sysmlContribution } from '#lib/sysml-language/sysml-register-language.js';
 import { markdownContribution } from '#lib/markdown-language/markdown-register-language.js';
 import { bashContribution } from '#lib/bash-language/bash-register-language.js';
+import { pythonContribution } from '#lib/python-language/python-register-language.js';
+import { csharpContribution } from '#lib/csharp-language/csharp-register-language.js';
 import { jsContribution } from '#lib/javascript-contribution.js';
 import { tsContribution } from '#lib/typescript-contribution.js';
 
@@ -49,6 +51,8 @@ registry.addContribution(usdContribution);
 registry.addContribution(sysmlContribution);
 registry.addContribution(markdownContribution);
 registry.addContribution(bashContribution);
+registry.addContribution(pythonContribution);
+registry.addContribution(csharpContribution);
 registry.addContribution(tsContribution);
 registry.addContribution(jsContribution);
 

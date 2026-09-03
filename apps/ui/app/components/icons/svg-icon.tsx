@@ -5,6 +5,7 @@ import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
 const iconAliases = {
   llama: 'meta',
   glm: 'zai',
+  picogk: 'webassembly',
 } as const satisfies Record<string, SvgIcons>;
 
 /** Keys of {@link iconAliases} — non-canonical names that resolve to a sprite icon. */

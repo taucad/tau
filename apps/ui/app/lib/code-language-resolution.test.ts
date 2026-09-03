@@ -27,12 +27,13 @@ describe('code language resolution', () => {
     expect(resolveHighlightLanguage('scad').shikiLanguage).toBe('openscad');
     expect(resolveHighlightLanguage('stp').shikiLanguage).toBe('stepfile');
     expect(resolveHighlightLanguage('kerml').shikiLanguage).toBe('sysml');
+    expect(resolveHighlightLanguage('cs').shikiLanguage).toBe('csharp');
   });
 
   it('keeps unsupported display labels while falling back to plaintext', () => {
-    expect(resolveHighlightLanguage('python')).toEqual({
-      input: 'python',
-      displayLanguage: 'python',
+    expect(resolveHighlightLanguage('brainfuck')).toEqual({
+      input: 'brainfuck',
+      displayLanguage: 'brainfuck',
       shikiLanguage: 'plaintext',
       isSupported: false,
     });
@@ -52,6 +53,7 @@ describe('code language resolution', () => {
     expect(resolveHighlightLanguageForPath('docs/guide.markdown').shikiLanguage).toBe('markdown');
     expect(resolveHighlightLanguageForPath('main.scad').shikiLanguage).toBe('openscad');
     expect(resolveHighlightLanguageForPath('data.jsonl').shikiLanguage).toBe('jsonl');
+    expect(resolveHighlightLanguageForPath('main.cs').shikiLanguage).toBe('csharp');
     expect(resolveHighlightLanguageForPath('unknown.xyz').shikiLanguage).toBe('plaintext');
   });
 

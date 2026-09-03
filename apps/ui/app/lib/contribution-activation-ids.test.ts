@@ -17,6 +17,8 @@ import { usdContribution } from '#lib/usd-language/usd-register-language.js';
 import { sysmlContribution } from '#lib/sysml-language/sysml-register-language.js';
 import { markdownContribution } from '#lib/markdown-language/markdown-register-language.js';
 import { bashContribution } from '#lib/bash-language/bash-register-language.js';
+import { pythonContribution } from '#lib/python-language/python-register-language.js';
+import { csharpContribution } from '#lib/csharp-language/csharp-register-language.js';
 
 const contributions: ReadonlyArray<{
   readonly name: string;
@@ -72,6 +74,16 @@ const contributions: ReadonlyArray<{
     name: 'bashContribution',
     contribution: bashContribution,
     expectedIds: [codeLanguages.bash],
+  },
+  {
+    name: 'pythonContribution',
+    contribution: pythonContribution,
+    expectedIds: [codeLanguages.python],
+  },
+  {
+    name: 'csharpContribution',
+    contribution: csharpContribution,
+    expectedIds: [codeLanguages.csharp],
   },
 ];
 

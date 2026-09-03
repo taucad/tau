@@ -37,6 +37,8 @@ vi.mock('#lib/monaco.constants.js', () => ({
     javascript: 'javascript',
     javascriptreact: 'javascriptreact',
     bash: 'bash',
+    python: 'python',
+    csharp: 'csharp',
     json: 'json',
     jsonl: 'jsonl',
     jsonc: 'jsonc',
@@ -57,6 +59,8 @@ vi.mock('#lib/usd-language/usd-register-language.js', () => ({ usdContribution: 
 vi.mock('#lib/sysml-language/sysml-register-language.js', () => ({ sysmlContribution: {} }));
 vi.mock('#lib/markdown-language/markdown-register-language.js', () => ({ markdownContribution: {} }));
 vi.mock('#lib/bash-language/bash-register-language.js', () => ({ bashContribution: {} }));
+vi.mock('#lib/python-language/python-register-language.js', () => ({ pythonContribution: {} }));
+vi.mock('#lib/csharp-language/csharp-register-language.js', () => ({ csharpContribution: {} }));
 vi.mock('#lib/javascript-contribution.js', () => ({ jsContribution: {} }));
 vi.mock('#lib/typescript-contribution.js', () => ({ tsContribution: {} }));
 vi.mock('@taucad/lsp/language-fs-sync-host', () => ({

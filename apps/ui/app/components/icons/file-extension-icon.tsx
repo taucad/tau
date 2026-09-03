@@ -43,6 +43,14 @@ const iconConfigMap: Partial<Record<string, IconConfig>> = {
     type: 'lib',
     id: 'react',
   },
+  py: {
+    type: 'lib',
+    id: 'build123d',
+  },
+  cs: {
+    type: 'lib',
+    id: 'webassembly',
+  },
 
   // Special lib types for 3D formats
   gltf: {

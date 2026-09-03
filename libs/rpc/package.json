@@ -53,6 +53,7 @@
   "dependencies": {
     "@msgpack/msgpack": "catalog:",
     "@taucad/events": "workspace:*",
-    "@taucad/utils": "workspace:*"
+    "@taucad/utils": "workspace:*",
+    "zod": "catalog:"
   }
 }

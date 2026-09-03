@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { serializeBridgeError } from '#bridge/bridge-internal.js';
+import { isBridgeErrorWire, serializeBridgeError } from '#bridge/bridge-internal.js';
 
 describe('serializeBridgeError', () => {
   it('should not throw on non-object throwables and return a sane BridgeError', () => {
@@ -18,5 +18,20 @@ describe('serializeBridgeError', () => {
     expect(result.message).toBe('nope');
     expect(result.code).toBe('E_NOPE');
     expect(result.metadata).toEqual({ detail: 1 });
+  });
+
+  it('drops malformed optional fields instead of emitting an ill-typed peer error', () => {
+    const error = Object.assign(new Error('nope'), { code: 42, metadata: [] });
+    const result = serializeBridgeError(error);
+
+    expect(result.code).toBeUndefined();
+    expect(result.metadata).toBeUndefined();
+  });
+
+  it('rejects malformed bridge errors before reconstruction reads their fields', () => {
+    expect(isBridgeErrorWire({ __bridgeError: null })).toBe(false);
+    expect(isBridgeErrorWire({ __bridgeError: { message: 42, name: 'Error' } })).toBe(false);
+    expect(isBridgeErrorWire({ __bridgeError: { message: 'boom', name: 'Error', stack: 42 } })).toBe(false);
+    expect(isBridgeErrorWire({ __bridgeError: { message: 'boom', name: 'Error' } })).toBe(true);
   });
 });

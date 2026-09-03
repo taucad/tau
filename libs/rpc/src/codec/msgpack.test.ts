@@ -75,7 +75,7 @@ describe('msgpackCodec', () => {
   });
 
   /* The pincer: `ignoreUndefined: true` would drop `d` from the encoded map,
-   * `isResponseShape` requires `'d' in raw`, and the call would hang forever. */
+   * the wire schema requires the key, and the call would hang forever. */
   it('keeps the d key of a void response frame and decodes it as null', () => {
     const voidResponse = { v: 1, k: 'rs', i: 'c4', o: 1, d: undefined };
 

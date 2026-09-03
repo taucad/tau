@@ -2,7 +2,7 @@
  * MessagePack {@link Codec} for byte-oriented transports — `@taucad/rpc/codec/msgpack`.
  *
  * **Default options, deliberately.** `ignoreUndefined: true` drops the
- * envelope's `d` key from a void response, which `isResponseShape` then
+ * envelope's `d` key from a void response, which the wire schema then
  * rejects — the frame is silently dropped and the call hangs. The default
  * encoder writes `undefined` as nil instead, so a void result arrives as
  * `null`; the filesystem bridge's `voidResult` validator accepts both.

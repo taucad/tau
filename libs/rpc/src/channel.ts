@@ -1,5 +1,6 @@
 import { Topic } from '@taucad/events';
 import { randomUuid } from '@taucad/utils/id';
+import { z } from 'zod';
 import type { Port } from '#port.js';
 import type {
   WireMessage,
@@ -49,11 +50,20 @@ const validateWireFrame = (input: ValidateWireFrameInput): unknown => {
   if (outcome.success) {
     return outcome.data;
   }
-  const issues: readonly WireValidationIssue[] = outcome.error.issues.map((issue) => ({
-    path: issue.path,
-    message: issue.message,
-    code: issue.code,
-  }));
+  const issues: readonly WireValidationIssue[] = outcome.error.issues.flatMap((issue) => {
+    // A failed z.union reports one opaque "Invalid input"; surface the closest
+    // branch (fewest issues) so the message names the actual failing path.
+    const branches = (issue as { errors?: ReadonlyArray<readonly z.core.$ZodIssue[]> }).errors;
+    if (issue.code === 'invalid_union' && branches !== undefined && branches.length > 0) {
+      const closest = [...branches].sort((left, right) => left.length - right.length)[0] ?? [];
+      return closest.slice(0, 5).map((sub) => ({
+        path: [...issue.path, ...sub.path],
+        message: sub.message,
+        code: sub.code,
+      }));
+    }
+    return [{ path: issue.path, message: issue.message, code: issue.code }];
+  });
   throw new WireValidationError(site, entry, issues);
 };
 
@@ -80,17 +90,15 @@ export type WithTransferables<T> = {
   readonly transferables: readonly Transferable[];
 };
 
-const isWithTransferables = (value: unknown): value is WithTransferables<unknown> => {
-  if (value === null || typeof value !== 'object') {
-    return false;
-  }
-  const o = value as { value?: unknown; transferables?: unknown };
-  return 'value' in o && 'transferables' in o && Array.isArray(o.transferables);
-};
+const withTransferablesSchema: z.ZodType<WithTransferables<unknown>> = z.object({
+  value: z.unknown(),
+  transferables: z.array(z.custom<Transferable>()),
+});
 
 const unwrapTransferables = (payload: unknown): { value: unknown; transfer: readonly Transferable[] | undefined } => {
-  if (isWithTransferables(payload)) {
-    return { value: payload.value, transfer: payload.transferables };
+  const parsed = withTransferablesSchema.safeParse(payload);
+  if (parsed.success) {
+    return { value: parsed.data.value, transfer: parsed.data.transferables };
   }
   return { value: payload, transfer: undefined };
 };

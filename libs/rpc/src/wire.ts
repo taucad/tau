@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Internal wire codec between {@link createChannelClient} and {@link createChannelServer}.
  *
@@ -278,95 +280,89 @@ export type WireMessage =
   | WireFlowAck
   | WireFlowWindow;
 
-/** Set of known kind codes. Frames whose `k` is not in this set are dropped. */
-const knownKinds: ReadonlySet<string> = new Set<string>([
-  'rq',
-  'rs',
-  'rc',
-  'nt',
-  'ss',
-  'sn',
-  'sc',
-  'se',
-  'su',
-  'lh',
-  'lb',
-  'fa',
-  'fw',
+const nonEmptyStringSchema = z.string().min(1);
+const wireErrorSchema: z.ZodType<WireError> = z.object({
+  m: z.string(),
+  // Preserve the v1 guard's full JavaScript-number domain for error codes.
+  c: z.union([z.string(), z.number(), z.nan(), z.literal(Infinity), z.literal(-Infinity)]).optional(),
+  s: z.string().optional(),
+});
+
+const responseSchema = z.discriminatedUnion('o', [
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('rs'),
+    i: nonEmptyStringSchema,
+    o: z.literal(1),
+    d: z.unknown(),
+  }),
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('rs'),
+    i: nonEmptyStringSchema,
+    o: z.literal(0),
+    e: wireErrorSchema,
+  }),
 ]);
 
-const isString = (value: unknown): value is string => typeof value === 'string';
-const isNonEmptyString = (value: unknown): value is string => isString(value) && value.length > 0;
-const isWireErrorShape = (value: unknown): value is WireError => {
-  if (value === null || typeof value !== 'object') {
-    return false;
-  }
-  const o = value as { m?: unknown; c?: unknown; s?: unknown };
-  if (!isString(o.m)) {
-    return false;
-  }
-  if (o.c !== undefined && typeof o.c !== 'string' && typeof o.c !== 'number') {
-    return false;
-  }
-  if (o.s !== undefined && !isString(o.s)) {
-    return false;
-  }
-  return true;
-};
+const helloSchema = z.discriminatedUnion('o', [
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('lh'),
+    o: z.literal(1),
+    d: z.unknown().optional(),
+  }),
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('lh'),
+    o: z.literal(0),
+    e: wireErrorSchema,
+  }),
+]);
 
-type WireFrameLike = {
-  v?: unknown;
-  k?: unknown;
-  i?: unknown;
-  n?: unknown;
-  a?: unknown;
-  d?: unknown;
-  o?: unknown;
-  e?: unknown;
-  r?: unknown;
-  s?: unknown;
-};
-
-type WireRawFrame = Record<string, unknown>;
-
-const isResponseShape = (frame: WireFrameLike, raw: WireRawFrame): boolean => {
-  if (!isNonEmptyString(frame.i)) {
-    return false;
-  }
-  if (frame.o === 1) {
-    return 'd' in raw;
-  }
-  if (frame.o === 0) {
-    return isWireErrorShape(frame.e);
-  }
-  return false;
-};
-
-const isHelloShape = (frame: WireFrameLike): boolean => {
-  if (frame.o === 1) {
-    return true;
-  }
-  if (frame.o === 0) {
-    return isWireErrorShape(frame.e);
-  }
-  return false;
-};
-
-const perKindValidators: Readonly<Record<string, (frame: WireFrameLike, raw: WireRawFrame) => boolean>> = {
-  rq: (frame, raw) => isNonEmptyString(frame.i) && isNonEmptyString(frame.n) && 'a' in raw,
-  rs: isResponseShape,
-  rc: (frame) => isNonEmptyString(frame.i) && (frame.e === undefined || isWireErrorShape(frame.e)),
-  nt: (frame, raw) => isNonEmptyString(frame.n) && 'a' in raw,
-  ss: (frame, raw) => isNonEmptyString(frame.i) && isNonEmptyString(frame.n) && 'a' in raw,
-  sn: (frame, raw) => isNonEmptyString(frame.i) && 'd' in raw,
-  sc: (frame) => isNonEmptyString(frame.i),
-  su: (frame) => isNonEmptyString(frame.i),
-  se: (frame) => isNonEmptyString(frame.i) && isWireErrorShape(frame.e),
-  lh: isHelloShape,
-  lb: (frame) => frame.r === undefined || isString(frame.r),
-  fa: (frame) => isNonEmptyString(frame.i),
-  fw: (frame) => isNonEmptyString(frame.i) && typeof frame.s === 'number' && Number.isFinite(frame.s),
-};
+/** Canonical v1 wire-envelope schema. Its discriminators are the known-kind inventory. */
+export const wireMessageSchema: z.ZodType<WireMessage> = z.discriminatedUnion('k', [
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('rq'),
+    i: nonEmptyStringSchema,
+    n: nonEmptyStringSchema,
+    a: z.unknown(),
+  }),
+  responseSchema,
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('rc'),
+    i: nonEmptyStringSchema,
+    e: wireErrorSchema.optional(),
+  }),
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('nt'),
+    n: nonEmptyStringSchema,
+    a: z.unknown(),
+  }),
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('ss'),
+    i: nonEmptyStringSchema,
+    n: nonEmptyStringSchema,
+    a: z.unknown(),
+  }),
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('sn'),
+    i: nonEmptyStringSchema,
+    d: z.unknown(),
+  }),
+  z.object({ v: z.literal(wireVersion), k: z.literal('sc'), i: nonEmptyStringSchema }),
+  z.object({ v: z.literal(wireVersion), k: z.literal('se'), i: nonEmptyStringSchema, e: wireErrorSchema }),
+  z.object({ v: z.literal(wireVersion), k: z.literal('su'), i: nonEmptyStringSchema }),
+  helloSchema,
+  z.object({ v: z.literal(wireVersion), k: z.literal('lb'), r: z.string().optional() }),
+  z.object({ v: z.literal(wireVersion), k: z.literal('fa'), i: nonEmptyStringSchema }),
+  z.object({ v: z.literal(wireVersion), k: z.literal('fw'), i: nonEmptyStringSchema, s: z.number() }),
+]);
 
 /**
  * Type guard for {@link WireMessage}. Validates `v`, the kind code, and per-kind required
@@ -378,17 +374,16 @@ const perKindValidators: Readonly<Record<string, (frame: WireFrameLike, raw: Wir
  * @public
  */
 export const isWireMessage = (value: unknown, onVersionMismatch?: WireVersionMismatchHandler): value is WireMessage => {
-  if (typeof value !== 'object' || value === null) {
-    return false;
+  if (typeof value === 'object' && value !== null) {
+    const envelope = value as Record<string, unknown>;
+    if (envelope['v'] !== wireVersion) {
+      const kind = envelope['k'];
+      const parsed = wireMessageSchema.safeParse(value);
+      if (typeof kind === 'string' && !parsed.success && !parsed.error.issues.some((issue) => issue.path[0] === 'k')) {
+        onVersionMismatch?.({ expected: wireVersion, received: envelope['v'], kind });
+      }
+      return false;
+    }
   }
-  const frame = value as WireFrameLike;
-  if (!isString(frame.k) || frame.k.startsWith('_') || !knownKinds.has(frame.k)) {
-    return false;
-  }
-  if (frame.v !== wireVersion) {
-    onVersionMismatch?.({ expected: wireVersion, received: frame.v, kind: frame.k });
-    return false;
-  }
-  const validator = perKindValidators[frame.k];
-  return validator ? validator(frame, value as WireRawFrame) : false;
+  return wireMessageSchema.safeParse(value).success;
 };

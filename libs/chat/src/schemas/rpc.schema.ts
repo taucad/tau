@@ -11,11 +11,29 @@
 import type { z } from 'zod';
 import { z as zod } from 'zod';
 import { rpcName } from '#constants/rpc.constants.js';
-import { diffStatsWithContentSchema } from '#schemas/tools/diff.schema.js';
-import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
+import { readFileInputSchema, readFileOutputSchema } from '#schemas/tools/read-file.tool.schema.js';
+import { createFileInputSchema, createFileOutputSchema } from '#schemas/tools/create-file.tool.schema.js';
+import { deleteFileInputSchema, deleteFileOutputSchema } from '#schemas/tools/delete-file.tool.schema.js';
+import {
+  directoryEntrySchema,
+  listDirectoryInputSchema,
+  listDirectoryOutputSchema,
+} from '#schemas/tools/list-directory.tool.schema.js';
+import { grepInputSchema, grepOutputSchema } from '#schemas/tools/grep.tool.schema.js';
+import {
+  globEntrySchema,
+  globSearchInputSchema,
+  globSearchOutputSchema,
+} from '#schemas/tools/glob-search.tool.schema.js';
+import {
+  getKernelResultInputSchema,
+  getKernelResultOutputSchema,
+} from '#schemas/tools/get-kernel-result.tool.schema.js';
 import { geoSpecRunFilterInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
-import { exportGeometryFormatSchema } from '#schemas/tools/export-geometry.tool.schema.js';
-import { screenshotImageSchema } from '#schemas/tools/screenshot.tool.schema.js';
+import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
+import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
+import { useSkillInputSchema, useSkillOutputSchema } from '#schemas/tools/use-skill.tool.schema.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 
 // =============================================================================
@@ -120,132 +138,59 @@ function defineRpc<Input extends zod.ZodRawShape, Success extends zod.ZodRawShap
 // =============================================================================
 
 const readFileRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-    offset: zod.number().int().min(1).optional(),
-    limit: zod.number().int().min(1).max(2000).optional(),
-  }),
-  success: zod.object({
-    content: zod.string(),
-    size: byteSizeSchema,
-    contentKind: zod.literal('text'),
-    totalLines: zod.number(),
-    startLine: zod.number().optional(),
-    truncated: zod.boolean().optional(),
+  input: readFileInputSchema,
+  success: readFileOutputSchema.extend({
     createdAt: zod.string().optional(),
-    modifiedAt: zod.string().optional(),
   }),
 });
 
 const createFileRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-    content: zod.string(),
-  }),
-  success: zod.object({
-    message: zod.string().optional(),
-    diffStats: diffStatsWithContentSchema,
-  }),
+  input: createFileInputSchema,
+  success: createFileOutputSchema,
 });
 
 const deleteFileRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-  }),
-  success: zod.object({
-    message: zod.string(),
-    diffStats: diffStatsWithContentSchema.optional(),
-  }),
+  input: deleteFileInputSchema,
+  success: deleteFileOutputSchema,
 });
 
-const directoryEntryBaseSchema = zod.object({
-  name: zod.string(),
-  size: byteSizeSchema,
-  modifiedAt: zod.string().optional(),
-});
-
-const directoryEntrySchema = zod.union([
-  directoryEntryBaseSchema.extend({ type: zod.literal('dir') }).strict(),
-  directoryEntryBaseSchema.extend({ type: zod.literal('file'), ...textFileContentMetadataSchema.shape }).strict(),
-  directoryEntryBaseSchema.extend({ type: zod.literal('file'), ...binaryFileContentMetadataSchema.shape }).strict(),
+const rpcDirectoryEntrySchema = zod.union([
+  directoryEntrySchema.options[0].extend({ modifiedAt: zod.string().optional() }).strict(),
+  directoryEntrySchema.options[1].extend({ modifiedAt: zod.string().optional() }).strict(),
+  directoryEntrySchema.options[2].extend({ modifiedAt: zod.string().optional() }).strict(),
 ]);
 
 const listDirectoryRpc = defineRpc({
-  input: zod.object({
-    path: zod.string().optional(),
+  input: listDirectoryInputSchema,
+  success: listDirectoryOutputSchema.extend({
+    entries: zod.array(rpcDirectoryEntrySchema),
   }),
-  success: zod.object({
-    entries: zod.array(directoryEntrySchema),
-    path: zod.string(),
-  }),
-});
-
-const grepMatchSchema = zod.object({
-  file: zod.string(),
-  line: zod.number(),
-  content: zod.string(),
 });
 
 const grepRpc = defineRpc({
-  input: zod.object({
-    pattern: zod.string(),
-    path: zod.string().optional(),
-    glob: zod.string().optional(),
-    caseSensitive: zod.boolean().optional(),
-    headLimit: zod.number().int().min(1).max(1000).optional(),
-    offset: zod.number().int().min(0).optional(),
-  }),
-  success: zod.object({
-    matches: zod.array(grepMatchSchema),
-    totalMatches: zod.number(),
-    truncated: zod.boolean().optional(),
+  input: grepInputSchema,
+  success: grepOutputSchema.extend({
     appliedHeadLimit: zod.number().int().nonnegative(),
     appliedOffset: zod.number().int().nonnegative(),
   }),
 });
 
-const globEntryBaseSchema = zod.object({
-  path: zod.string(),
-  size: byteSizeSchema,
-  modifiedAt: zod.string().optional(),
-});
-
-const globFileEntrySchema = zod.union([
-  globEntryBaseSchema.extend({ isDirectory: zod.literal(true) }).strict(),
-  globEntryBaseSchema
-    .extend({
-      isDirectory: zod.literal(false).optional(),
-      ...textFileContentMetadataSchema.shape,
-    })
-    .strict(),
-  globEntryBaseSchema
-    .extend({
-      isDirectory: zod.literal(false).optional(),
-      ...binaryFileContentMetadataSchema.shape,
-    })
-    .strict(),
+const rpcGlobEntrySchema = zod.union([
+  globEntrySchema.options[0].extend({ modifiedAt: zod.string().optional() }).strict(),
+  globEntrySchema.options[1].extend({ modifiedAt: zod.string().optional() }).strict(),
+  globEntrySchema.options[2].extend({ modifiedAt: zod.string().optional() }).strict(),
 ]);
 
 const globSearchRpc = defineRpc({
-  input: zod.object({
-    pattern: zod.string(),
-    path: zod.string().optional(),
-  }),
-  success: zod.object({
-    files: zod.array(zod.string()),
-    entries: zod.array(globFileEntrySchema),
-    totalFiles: zod.number(),
+  input: globSearchInputSchema,
+  success: globSearchOutputSchema.extend({
+    entries: zod.array(rpcGlobEntrySchema),
   }),
 });
 
 const getKernelResultRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-  }),
-  success: zod.object({
-    status: zod.enum(['ready', 'error', 'pending']),
-    kernelIssues: zod.array(kernelIssueSchema).optional(),
-  }),
+  input: getKernelResultInputSchema,
+  success: getKernelResultOutputSchema,
 });
 
 const runGeoSpecTestsRpc = defineRpc({
@@ -254,39 +199,15 @@ const runGeoSpecTestsRpc = defineRpc({
 });
 
 const exportGeometryRpc = defineRpc({
-  input: zod.object({
+  input: exportGeometryInputSchema.extend({
     toolCallId: zod.string(),
-    targetFile: zod.string(),
-    format: exportGeometryFormatSchema,
   }),
-  success: zod.object({
-    format: exportGeometryFormatSchema,
-    files: zod
-      .array(
-        zod.object({
-          name: zod.string(),
-          artifactPath: zod.string(),
-          mimeType: zod.string(),
-          byteLength: zod.number().int().nonnegative(),
-        }),
-      )
-      .min(1),
-  }),
+  success: exportGeometryOutputSchema,
 });
 
 const captureImagesRpc = defineRpc({
-  input: zod
-    .object({
-      mode: zod.enum(['single', 'multi_angle']),
-      targetFile: zod.string(),
-      includeEdges: zod.boolean().optional(),
-    })
-    .strict(),
-  success: zod
-    .object({
-      images: zod.array(screenshotImageSchema).min(1),
-    })
-    .strict(),
+  input: screenshotInputSchema.extend({ includeEdges: zod.boolean().optional() }).strict(),
+  success: screenshotOutputSchema,
 });
 
 const appendFileRpc = defineRpc({
@@ -301,13 +222,8 @@ const appendFileRpc = defineRpc({
 });
 
 const editFileRpc = defineRpc({
-  input: zod.object({
-    targetFile: zod.string(),
-    oldString: zod.string(),
-    newString: zod.string(),
-    replaceAll: zod.boolean().optional(),
-  }),
-  success: zod.object({
+  input: editFileInputSchema,
+  success: editFileOutputSchema.extend({
     message: zod.string().optional(),
     occurrences: zod.number(),
   }),
@@ -322,24 +238,11 @@ const skillShadowedSourceSchema = zod.object({
 });
 
 const resolveSkillRpc = defineRpc({
-  input: zod.object({
-    skillName: zod.string(),
-  }),
-  success: zod.object({
-    skillName: zod.string(),
+  input: useSkillInputSchema.pick({ skillName: true }),
+  success: useSkillOutputSchema.extend({
     title: zod.string().optional(),
     description: zod.string(),
-    source: zod.string(),
     enabled: zod.boolean(),
-    resourceUri: zod.string(),
-    skillPath: zod.string().optional(),
-    baseDirectory: zod.string().optional(),
-    version: zod.string().optional(),
-    whenToUse: zod.string().optional(),
-    fingerprint: zod.string().optional(),
-    frontmatter: zod.record(zod.string(), zod.unknown()),
-    content: zod.string(),
-    supportingFiles: zod.array(zod.string()),
     shadowedSources: zod.array(skillShadowedSourceSchema).optional(),
   }),
 });

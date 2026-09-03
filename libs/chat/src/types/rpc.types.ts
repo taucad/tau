@@ -1,4 +1,5 @@
 import type { RpcClientError } from '#schemas/rpc.schema.js';
+import { z } from 'zod';
 import type { rpcExecutionErrorCode, rpcName } from '#constants/rpc.constants.js';
 import { rpcExecutionErrorCodes } from '#constants/rpc.constants.js';
 
@@ -24,6 +25,13 @@ export type RpcName = (typeof rpcName)[keyof typeof rpcName];
  * @public
  */
 export type RpcExecutionErrorCode = (typeof rpcExecutionErrorCode)[keyof typeof rpcExecutionErrorCode];
+
+/** Runtime schema for RPC infrastructure error codes. @public */
+export const rpcExecutionErrorCodeSchema = z.enum(rpcExecutionErrorCodes);
+
+const rpcExecutionErrorSchema = z.looseObject({
+  errorCode: rpcExecutionErrorCodeSchema,
+});
 
 /**
  * Base RPC execution error for infrastructure failures.
@@ -73,13 +81,7 @@ export type RpcValidationError = {
  * ```
  */
 export function isRpcExecutionError(result: unknown): result is RpcExecutionError {
-  return (
-    typeof result === 'object' &&
-    result !== null &&
-    'errorCode' in result &&
-    typeof (result as { errorCode: unknown }).errorCode === 'string' &&
-    rpcExecutionErrorCodes.includes((result as { errorCode: string }).errorCode as RpcExecutionErrorCode)
-  );
+  return rpcExecutionErrorSchema.safeParse(result).success;
 }
 
 /**

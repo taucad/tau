@@ -109,4 +109,16 @@ describe('normalizeGeoSpecRunFilterInputAliases', () => {
     });
     expect(geoSpecRunFilterInputSchema.safeParse(result.input).success).toBe(false);
   });
+
+  it('should leave objects with a custom prototype untouched', () => {
+    const input = Object.assign(Object.create({ marker: true }) as Record<string, unknown>, {
+      'files[0]': 'main.geospec.ts',
+    });
+
+    expect(normalizeGeoSpecRunFilterInputAliases(input)).toEqual({
+      input,
+      changed: false,
+      healedKeys: [],
+    });
+  });
 });

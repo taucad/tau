@@ -86,6 +86,24 @@ describe('grep RPC schema — additive envelope fields', () => {
   it('should reject headLimit greater than 1000 at the schema layer', () => {
     expect(grep.inputSchema.safeParse({ pattern: 'foo', headLimit: 1001 }).success).toBe(false);
   });
+
+  it('should reject regexes vulnerable to catastrophic backtracking through the RPC registry', () => {
+    expect(grep.inputSchema.safeParse({ pattern: '(a+)+$' }).success).toBe(false);
+  });
+});
+
+describe('edit_file RPC schema', () => {
+  const editFile = rpcSchemasRegistry[rpcName.editFile];
+
+  it('should reject edit text larger than the canonical 256 KB tool limit through the RPC registry', () => {
+    expect(
+      editFile.inputSchema.safeParse({
+        targetFile: 'main.ts',
+        oldString: 'old',
+        newString: 'x'.repeat(256 * 1024 + 1),
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('read_file RPC schema — metadata envelope fields', () => {

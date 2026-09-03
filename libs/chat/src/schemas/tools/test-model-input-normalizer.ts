@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 const bracketArrayAliasPattern = /^(files|include|exclude)\[(0|[1-9][0-9]*)\]$/u;
 const unsupportedUnindexedAliasPattern = /^(files|include|exclude)\[\]$/u;
 
@@ -21,14 +23,13 @@ export type GeoSpecRunFilterInputNormalization = {
   blockedReason?: 'canonical_collision' | 'non_contiguous_indexes' | 'unsupported_unindexed_array';
 };
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+const plainObjectSchema = z.custom<Record<string, unknown>>((value) => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
-
   const prototype = Reflect.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
-}
+});
 
 function contiguousFromZero(aliases: readonly IndexedAlias[]): boolean {
   return aliases.every((alias, index) => alias.index === index);
@@ -44,14 +45,16 @@ function contiguousFromZero(aliases: readonly IndexedAlias[]): boolean {
  * @public
  */
 export function normalizeGeoSpecRunFilterInputAliases(input: unknown): GeoSpecRunFilterInputNormalization {
-  if (!isPlainObject(input)) {
+  const parsed = plainObjectSchema.safeParse(input);
+  if (!parsed.success) {
     return { input, changed: false, healedKeys: [] };
   }
+  const inputRecord = parsed.data;
 
   const byField = new Map<GeoSpecRunFilterAliasField, IndexedAlias[]>();
   let sawUnsupportedUnindexedAlias = false;
 
-  for (const [key, value] of Object.entries(input)) {
+  for (const [key, value] of Object.entries(inputRecord)) {
     if (unsupportedUnindexedAliasPattern.test(key)) {
       sawUnsupportedUnindexedAlias = true;
       continue;
@@ -87,7 +90,7 @@ export function normalizeGeoSpecRunFilterInputAliases(input: unknown): GeoSpecRu
   const healedKeys = sortedEntries.flatMap(([, aliases]) => aliases.map((alias) => alias.key));
 
   for (const [field, aliases] of sortedEntries) {
-    if (Object.hasOwn(input, field)) {
+    if (Object.hasOwn(inputRecord, field)) {
       return { input, changed: false, healedKeys, blockedReason: 'canonical_collision' };
     }
 
@@ -98,7 +101,7 @@ export function normalizeGeoSpecRunFilterInputAliases(input: unknown): GeoSpecRu
 
   const healedKeySet = new Set(healedKeys);
   const normalized: Record<string, unknown> = Object.fromEntries(
-    Object.entries(input).filter(([key]) => !healedKeySet.has(key)),
+    Object.entries(inputRecord).filter(([key]) => !healedKeySet.has(key)),
   );
   for (const [field, aliases] of sortedEntries) {
     normalized[field] = aliases.map((alias) => alias.value);

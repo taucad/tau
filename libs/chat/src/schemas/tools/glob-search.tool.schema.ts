@@ -14,7 +14,8 @@ const baseGlobEntrySchema = z.object({
   modifiedAt: z.string().optional().describe('ISO-8601 modification timestamp when available.'),
 });
 
-const globEntrySchema = z.union([
+/** Canonical glob-entry schema shared with the RPC transport. @public */
+export const globEntrySchema = z.union([
   baseGlobEntrySchema.extend({
     isDirectory: z.literal(true).describe('This match is a directory.'),
   }),

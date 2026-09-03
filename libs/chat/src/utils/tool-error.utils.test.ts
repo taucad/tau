@@ -1,6 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import { rpcClientErrorCode } from '#schemas/rpc.schema.js';
-import { assertRpcSuccess, ToolError } from '#utils/tool-error.utils.js';
+import { isRpcExecutionError } from '#types/rpc.types.js';
+import { assertRpcSuccess, isToolExecutionError, parseToolErrorEnvelope, ToolError } from '#utils/tool-error.utils.js';
+
+describe('tool error schemas', () => {
+  it('parses the shared tool-result error envelope', () => {
+    expect(parseToolErrorEnvelope('{"errorCode":"USER_INTERRUPTED","message":"Stopped"}')).toEqual({
+      errorCode: 'USER_INTERRUPTED',
+      message: 'Stopped',
+    });
+    expect(parseToolErrorEnvelope('{"errorCode":42}')).toBeUndefined();
+    expect(parseToolErrorEnvelope('opaque')).toBeUndefined();
+  });
+
+  it('validates tool execution codes from the canonical code array', () => {
+    expect(isToolExecutionError({ errorCode: 'STREAM_ERROR' })).toBe(true);
+    expect(isToolExecutionError({ errorCode: 'NOT_A_TOOL_ERROR' })).toBe(false);
+  });
+
+  it('validates RPC execution codes from the canonical code array', () => {
+    expect(isRpcExecutionError({ errorCode: 'TIMEOUT' })).toBe(true);
+    expect(isRpcExecutionError({ errorCode: 'NOT_AN_RPC_ERROR' })).toBe(false);
+  });
+});
 
 describe('assertRpcSuccess', () => {
   const baseOptions = { toolName: 'grep', toolCallId: 'call-1' };

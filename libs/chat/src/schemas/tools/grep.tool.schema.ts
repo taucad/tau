@@ -32,7 +32,8 @@ export const grepInputSchema = z.object({
     .describe('Number of leading matches to skip before applying headLimit. Defaults to 0.'),
 });
 
-const grepMatchSchema = z.object({
+/** Canonical grep-match schema shared with the RPC transport. @public */
+export const grepMatchSchema = z.object({
   file: rootedFilePathSchema.describe('The file path where the match was found.'),
   line: z.number().describe('The line number of the match (1-based).'),
   content: z.string().describe('The content of the matching line.'),

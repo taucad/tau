@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ToolExecutionError } from '#types/tool.types.js';
 import type { RpcExecutionError, RpcValidationError } from '#types/rpc.types.js';
 import type { RpcClientError } from '#schemas/rpc.schema.js';
@@ -23,19 +24,39 @@ export const toolErrorCodes = [
 /** @public */
 export type ToolErrorCode = (typeof toolErrorCodes)[number];
 
+/** Runtime schema for tool execution error codes. @public */
+export const toolErrorCodeSchema = z.enum(toolErrorCodes);
+
+/** Shared envelope for structured tool-result errors. @public */
+export const toolErrorEnvelopeSchema = z.looseObject({
+  errorCode: z.string(),
+  message: z.unknown().optional(),
+});
+
+/** @public */
+export type ToolErrorEnvelope = z.infer<typeof toolErrorEnvelopeSchema>;
+
+/** Parse a JSON tool-result error envelope, returning undefined for opaque results. @public */
+export const parseToolErrorEnvelope = (content: string): ToolErrorEnvelope | undefined => {
+  try {
+    const result = toolErrorEnvelopeSchema.safeParse(JSON.parse(content));
+    return result.success ? result.data : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const toolExecutionErrorSchema = z.looseObject({
+  errorCode: toolErrorCodeSchema,
+});
+
 /**
  * Type guard to check if a value is a ToolExecutionError.
  * Use in tool component output-available case before accessing typed properties.
  * @public
  */
 export function isToolExecutionError(value: unknown): value is ToolExecutionError {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'errorCode' in value &&
-    typeof (value as { errorCode: unknown }).errorCode === 'string' &&
-    toolErrorCodes.includes((value as { errorCode: string }).errorCode as ToolErrorCode)
-  );
+  return toolExecutionErrorSchema.safeParse(value).success;
 }
 
 /**

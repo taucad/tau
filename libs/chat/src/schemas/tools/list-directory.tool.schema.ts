@@ -12,7 +12,8 @@ const baseDirectoryEntrySchema = z.object({
   size: z.number().int().nonnegative().describe('Byte size when available; directories may report 0 when unknown.'),
 });
 
-const directoryEntrySchema = z.union([
+/** Canonical directory-entry schema shared with the RPC transport. @public */
+export const directoryEntrySchema = z.union([
   baseDirectoryEntrySchema.extend({
     type: z.literal('dir').describe('This entry is a directory.'),
   }),

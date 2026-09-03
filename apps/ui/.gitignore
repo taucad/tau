@@ -7,8 +7,6 @@ public/build
 public/entry.worker.js
 
 # Vendored assets generated from node_modules dependencies (copy-files-from-to.cjson)
-public/draco_decoder_gltf.wasm
-public/draco_encoder.wasm
 public/fonts/Geist-Variable.woff2
 public/fonts/GeistMono-Variable.woff2
 

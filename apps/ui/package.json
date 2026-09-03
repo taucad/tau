@@ -76,8 +76,7 @@
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/spatial": "workspace:*",
     "@taucad/vite": "workspace:*",
-    "@types/express": "^5.0.6",
-    "draco3dgltf": "^1.5.7"
+    "@types/express": "^5.0.6"
   },
   "files": [
     "build"

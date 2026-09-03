@@ -22,6 +22,13 @@ function findFirstWorkerAsset(): string | undefined {
   return entries.find((name) => /\.worker-[^.]+\.js$/.test(name));
 }
 
+function findFirstWasmAsset(): string | undefined {
+  if (!existsSync(buildClientAssets)) {
+    return undefined;
+  }
+  return readdirSync(buildClientAssets).find((name) => name.endsWith('.wasm'));
+}
+
 const buildExists = existsSync(buildServerEntry);
 const describeIfBuilt = buildExists ? describe : describe.skip;
 
@@ -33,6 +40,7 @@ if (!buildExists) {
 }
 
 const workerAsset = buildExists ? findFirstWorkerAsset() : undefined;
+const wasmAsset = buildExists ? findFirstWasmAsset() : undefined;
 
 describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
   let server: Server;
@@ -79,11 +87,12 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
     }
   });
 
-  it('should serve WASM static assets with all three COI headers', async () => {
-    const response = await fetch(`${baseUrl}/draco_decoder_gltf.wasm`);
+  it.runIf(wasmAsset !== undefined)('should serve WASM static assets with all three COI headers', async () => {
+    const response = await fetch(`${baseUrl}/assets/${wasmAsset}`);
     expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/wasm');
     for (const [name, value] of Object.entries(requiredHeaders)) {
-      expect(response.headers.get(name), `${name} on /draco_decoder_gltf.wasm`).toBe(value);
+      expect(response.headers.get(name), `${name} on /assets/${wasmAsset}`).toBe(value);
     }
   });
 });

@@ -1,0 +1,29 @@
+{
+  "name": "build123d",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/build123d",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test": {
+      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-build123d-python" }]
+    },
+    "test-python": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-build123d-python" }],
+      "outputs": ["{workspaceRoot}/out/reports/coverage/packages/plugins/build123d-python"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/test-python.mts"
+      }
+    },
+    "benchmark-native": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["desktop"], "target": "prepare-build123d-python" }],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register packages/plugins/build123d/scripts/benchmark-native.mts"
+      }
+    }
+  }
+}

@@ -3401,6 +3401,25 @@ packages:
       zod: ^3.23.8
 
   '@alcalzone/ansi-tokenize@0.2.5':
+  packages/plugins/build123d:
+    dependencies:
+      '@taucad/native-process-core':
+        specifier: workspace:*
+        version: link:../../core/native-process
+    devDependencies:
+      '@taucad/geometry-core':
+        specifier: workspace:*
+        version: link:../../core/geometry
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+
     resolution: {integrity: sha512-3NX/MpTdroi0aKz134A6RC2Gb2iXVECN4QaAXnvCIxxIm3C3AVB1mkUe8NaaiyvOpDfsrqWhYtj+Q6a62RrTsw==}
     engines: {node: '>=18'}
 

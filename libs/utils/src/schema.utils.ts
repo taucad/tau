@@ -1,6 +1,10 @@
 import type { JSONSchema7, JSONSchema7Type } from '@taucad/json-schema';
 import { toJsonSchema } from '@taucad/json-schema';
 
+/** True for non-null objects whose keys are strings, excluding arrays. @public */
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 /**
  * Capitalizes the first letter of a string
  */

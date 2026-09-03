@@ -2386,6 +2386,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../utils
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
 
   libs/events: {}
 

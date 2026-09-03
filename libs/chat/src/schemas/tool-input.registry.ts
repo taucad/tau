@@ -1,36 +1,31 @@
-import { z } from 'zod';
-import { editFileInputSchema } from '#schemas/tools/edit-file.tool.schema.js';
-import { webBrowserInputSchema } from '#schemas/tools/web-browser.tool.schema.js';
-import { webSearchInputSchema } from '#schemas/tools/web-search.tool.schema.js';
-import { readFileInputSchema } from '#schemas/tools/read-file.tool.schema.js';
-import { useSkillInputSchema } from '#schemas/tools/use-skill.tool.schema.js';
-import { listDirectoryInputSchema } from '#schemas/tools/list-directory.tool.schema.js';
-import { createFileInputSchema } from '#schemas/tools/create-file.tool.schema.js';
-import { deleteFileInputSchema } from '#schemas/tools/delete-file.tool.schema.js';
-import { grepInputSchema } from '#schemas/tools/grep.tool.schema.js';
-import { globSearchInputSchema } from '#schemas/tools/glob-search.tool.schema.js';
-import { getKernelResultInputSchema } from '#schemas/tools/get-kernel-result.tool.schema.js';
-import { screenshotInputSchema } from '#schemas/tools/screenshot.tool.schema.js';
-import { exportGeometryInputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
-import { testModelInputSchema } from '#schemas/tools/test-model.tool.schema.js';
+import type { z } from 'zod';
+import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
+import { webBrowserInputSchema, webBrowserOutputSchema } from '#schemas/tools/web-browser.tool.schema.js';
+import { webSearchInputSchema, webSearchOutputSchema } from '#schemas/tools/web-search.tool.schema.js';
+import { readFileInputSchema, readFileOutputSchema } from '#schemas/tools/read-file.tool.schema.js';
+import { useSkillInputSchema, useSkillOutputSchema } from '#schemas/tools/use-skill.tool.schema.js';
+import { listDirectoryInputSchema, listDirectoryOutputSchema } from '#schemas/tools/list-directory.tool.schema.js';
+import { createFileInputSchema, createFileOutputSchema } from '#schemas/tools/create-file.tool.schema.js';
+import { deleteFileInputSchema, deleteFileOutputSchema } from '#schemas/tools/delete-file.tool.schema.js';
+import { grepInputSchema, grepOutputSchema } from '#schemas/tools/grep.tool.schema.js';
+import { globSearchInputSchema, globSearchOutputSchema } from '#schemas/tools/glob-search.tool.schema.js';
+import {
+  getKernelResultInputSchema,
+  getKernelResultOutputSchema,
+} from '#schemas/tools/get-kernel-result.tool.schema.js';
+import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
+import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
+import { transferToolInputSchema, transferToolOutputSchema } from '#schemas/tools/transfer-tool.schema.js';
+import { toolName } from '#constants/tool.constants.js';
 import type { ToolName } from '#types/tool.types.js';
-
-/**
- * Empty-input schema enforced by `createEmptyInputToolSchemas` in
- * `message.schema.ts`. Transfer tools with no parameters only
- * accept the literal empty object on the wire; anything else is invalid input
- * and must be forensically demoted to `rawInput` by the server-side healing
- * transform. Defined locally to keep this registry the single source of truth
- * for "is this input legal for this tool?".
- */
-const emptyInputSchema = z.record(z.string(), z.never());
 
 /** @public */
 export type ToolPartType = `tool-${ToolName}`;
 
 /**
  * Maps every static tool part type (e.g. `tool-read_file`) to the strict Zod
- * schema enforced by `uiMessagesSchema` for that tool's `input` field.
+ * schema enforced by `safeValidateUiMessages` for that tool's `input` field.
  *
  * Used by the server-side healing preprocess in `message.schema.ts` to detect
  * persisted tool parts in `output-error` state whose `input` no longer
@@ -41,32 +36,35 @@ export type ToolPartType = `tool-${ToolName}`;
  * `messageContentSanitizerMiddleware` and a synthetic `tool_result` can be
  * paired with the dangling `tool_use` block.
  *
- * Keys must remain in lock-step with the `toolPartSchemas` aggregation in
- * `message.schema.ts`. Keep this file as the single source of truth — adding
- * a tool means updating both places, but every consumer of the registry stays
- * compile-checked against `ToolPartType`.
+ * This registry is the single source of truth consumed by both AI SDK message
+ * validation and Tau's lifecycle checks.
  *
  * @public
  */
-export const toolInputSchemas: Record<ToolPartType, z.ZodType> = {
-  'tool-web_search': webSearchInputSchema,
-  'tool-web_browser': webBrowserInputSchema,
-  'tool-test_model': testModelInputSchema,
-  'tool-use_skill': useSkillInputSchema,
-  'tool-read_file': readFileInputSchema,
-  'tool-list_directory': listDirectoryInputSchema,
-  'tool-create_file': createFileInputSchema,
-  'tool-edit_file': editFileInputSchema,
-  'tool-delete_file': deleteFileInputSchema,
-  'tool-grep': grepInputSchema,
-  'tool-glob_search': globSearchInputSchema,
-  'tool-get_kernel_result': getKernelResultInputSchema,
-  'tool-export_geometry': exportGeometryInputSchema,
-  'tool-screenshot': screenshotInputSchema,
-  'tool-transfer_to_cad_expert': emptyInputSchema,
-  'tool-transfer_to_research_expert': emptyInputSchema,
-  'tool-transfer_back_to_supervisor': emptyInputSchema,
-};
+export const uiMessageTools = {
+  [toolName.webSearch]: { inputSchema: webSearchInputSchema, outputSchema: webSearchOutputSchema },
+  [toolName.webBrowser]: { inputSchema: webBrowserInputSchema, outputSchema: webBrowserOutputSchema },
+  [toolName.testModel]: { inputSchema: testModelInputSchema, outputSchema: testModelOutputSchema },
+  [toolName.useSkill]: { inputSchema: useSkillInputSchema, outputSchema: useSkillOutputSchema },
+  [toolName.readFile]: { inputSchema: readFileInputSchema, outputSchema: readFileOutputSchema },
+  [toolName.listDirectory]: { inputSchema: listDirectoryInputSchema, outputSchema: listDirectoryOutputSchema },
+  [toolName.createFile]: { inputSchema: createFileInputSchema, outputSchema: createFileOutputSchema },
+  [toolName.editFile]: { inputSchema: editFileInputSchema, outputSchema: editFileOutputSchema },
+  [toolName.deleteFile]: { inputSchema: deleteFileInputSchema, outputSchema: deleteFileOutputSchema },
+  [toolName.grep]: { inputSchema: grepInputSchema, outputSchema: grepOutputSchema },
+  [toolName.globSearch]: { inputSchema: globSearchInputSchema, outputSchema: globSearchOutputSchema },
+  [toolName.getKernelResult]: { inputSchema: getKernelResultInputSchema, outputSchema: getKernelResultOutputSchema },
+  [toolName.exportGeometry]: { inputSchema: exportGeometryInputSchema, outputSchema: exportGeometryOutputSchema },
+  [toolName.screenshot]: { inputSchema: screenshotInputSchema, outputSchema: screenshotOutputSchema },
+  [toolName.transferToCadExpert]: { inputSchema: transferToolInputSchema, outputSchema: transferToolOutputSchema },
+  [toolName.transferToResearchExpert]: { inputSchema: transferToolInputSchema, outputSchema: transferToolOutputSchema },
+  [toolName.transferBackToSupervisor]: { inputSchema: transferToolInputSchema, outputSchema: transferToolOutputSchema },
+} as const;
+
+/** Static tool-part input schemas used by lifecycle normalization. @public */
+export const toolInputSchemas = Object.fromEntries(
+  Object.entries(uiMessageTools).map(([name, tool]) => [`tool-${name}`, tool.inputSchema]),
+) as unknown as Record<ToolPartType, z.ZodType>;
 
 /**
  * Type-guard variant of {@link toolInputSchemas} lookup that accepts the

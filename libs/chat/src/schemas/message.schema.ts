@@ -1,531 +1,16 @@
-/**
- * This file is a copy of the ai library's core/prompt/message.ts file.
- * It is used to validate the messages sent to the ai library.
- */
-
+import { isStaticToolUIPart, safeValidateUIMessages } from 'ai';
+import type { SafeValidateUIMessagesResult } from 'ai';
 import { z } from 'zod';
+import { isRecord } from '@taucad/utils/schema';
 import {
   normalizeProjectPathToolInputAliases,
   normalizeProjectPathToolOutputAliases,
 } from '#schemas/tools/project-path-input-normalizer.js';
 import { messageMetadataSchema } from '#schemas/metadata.schema.js';
-import { providerMetadataSchema } from '#schemas/message-provider.schema.js';
 import { commonReasoningMetadataSchema } from '#schemas/common-reasoning-metadata.schema.js';
+import { dataPartSchema } from '#schemas/message-data.schema.js';
+import { getToolInputSchema, uiMessageTools } from '#schemas/tool-input.registry.js';
 import type { MyUIMessage } from '#types/message.types.js';
-import { usageDataSchema, contextCompactionDataSchema, contextUsageDataSchema } from '#schemas/message-data.schema.js';
-import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
-import { webBrowserInputSchema, webBrowserOutputSchema } from '#schemas/tools/web-browser.tool.schema.js';
-import { webSearchInputSchema, webSearchOutputSchema } from '#schemas/tools/web-search.tool.schema.js';
-import { readFileInputSchema, readFileOutputSchema } from '#schemas/tools/read-file.tool.schema.js';
-import { useSkillInputSchema, useSkillOutputSchema } from '#schemas/tools/use-skill.tool.schema.js';
-import { listDirectoryInputSchema, listDirectoryOutputSchema } from '#schemas/tools/list-directory.tool.schema.js';
-import { createFileInputSchema, createFileOutputSchema } from '#schemas/tools/create-file.tool.schema.js';
-import { deleteFileInputSchema, deleteFileOutputSchema } from '#schemas/tools/delete-file.tool.schema.js';
-import { grepInputSchema, grepOutputSchema } from '#schemas/tools/grep.tool.schema.js';
-import { globSearchInputSchema, globSearchOutputSchema } from '#schemas/tools/glob-search.tool.schema.js';
-import {
-  getKernelResultInputSchema,
-  getKernelResultOutputSchema,
-} from '#schemas/tools/get-kernel-result.tool.schema.js';
-import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
-import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
-import { toolName } from '#constants/tool.constants.js';
-import type { ToolName } from '#types/tool.types.js';
-import { getToolInputSchema } from '#schemas/tool-input.registry.js';
-import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
-
-// Copied from https://github.com/vercel/ai/blob/0ed1ee6f34a252a9d1970d99ea8585529cbceeed/packages/ai/src/ui/validate-ui-messages.ts.
-// This is necessary as the AI SDK's `validateUIMessages` function is async and nestjs-zod does
-// not support async validation.
-// @see https://github.com/BenLorantfy/nestjs-zod/issues/145
-//
-// Modifications:
-// - static tool states emit AI SDK-compatible typed inputs; opaque recovery data stays in rawInput
-// - interrupted/historical tool lifecycle states are normalized in preprocess
-
-const approvalRequestedSchema = z.object({
-  id: z.string(),
-  approved: z.never().optional(),
-  reason: z.never().optional(),
-});
-
-const approvalRespondedSchema = z.object({
-  id: z.string(),
-  approved: z.boolean(),
-  reason: z.string().optional(),
-});
-
-const approvalApprovedSchema = z
-  .object({
-    id: z.string(),
-    approved: z.literal(true),
-    reason: z.string().optional(),
-  })
-  .optional();
-
-const approvalDeniedSchema = z.object({
-  id: z.string(),
-  approved: z.literal(false),
-  reason: z.string().optional(),
-});
-
-// Helper function to create tool schemas for a specific tool
-// Uses proper generic constraints to preserve exact schema types
-const createToolSchemasFromStreaming = <
-  Name extends string,
-  Input extends z.ZodType,
-  Output extends z.ZodObject<z.ZodRawShape> | z.ZodArray<z.ZodType> | z.ZodString,
-  StreamingInput extends z.ZodType,
-  CompletedInput extends z.ZodType,
->({
-  toolName,
-  inputSchema,
-  outputSchema,
-  streamingInputSchema,
-  completedInputSchema,
-}: {
-  toolName: Name;
-  inputSchema: Input;
-  outputSchema: Output;
-  streamingInputSchema: StreamingInput;
-  completedInputSchema: CompletedInput;
-}) => {
-  const toolType = `tool-${toolName}` as const;
-  return [
-    // Input-streaming state
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('input-streaming'),
-      providerExecuted: z.boolean().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      input: z.union([streamingInputSchema, z.undefined()]),
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      approval: z.never().optional(),
-    }),
-    // Input-available state
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('input-available'),
-      providerExecuted: z.boolean().optional(),
-      input: inputSchema,
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: z.never().optional(),
-    }),
-    // Output-available state
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('output-available'),
-      providerExecuted: z.boolean().optional(),
-      input: completedInputSchema,
-      rawInput: z.unknown().optional(),
-      output: outputSchema,
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      preliminary: z.boolean().optional(),
-      approval: approvalApprovedSchema,
-    }),
-    // Output-error state — `input` may be absent because the LLM stream was
-    // interrupted before arguments fully serialised; invalid static input is
-    // moved to `rawInput` by the lifecycle normalizer at the schema boundary.
-    // See docs/policy/interrupted-tool-call-contract.md.
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('output-error'),
-      providerExecuted: z.boolean().optional(),
-      input: z.union([inputSchema, z.undefined()]),
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.string(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: approvalApprovedSchema,
-    }),
-    // Static approval-lifecycle states require complete typed tool input,
-    // matching the AI SDK ToolUIPart output contract.
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('approval-requested'),
-      providerExecuted: z.boolean().optional(),
-      input: inputSchema,
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: approvalRequestedSchema,
-    }),
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('approval-responded'),
-      providerExecuted: z.boolean().optional(),
-      input: inputSchema,
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: approvalRespondedSchema,
-    }),
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('output-denied'),
-      providerExecuted: z.boolean().optional(),
-      input: inputSchema,
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: approvalDeniedSchema,
-    }),
-  ] as const;
-};
-
-const createToolSchemas = <
-  Name extends string,
-  Input extends z.ZodType,
-  Output extends z.ZodObject<z.ZodRawShape> | z.ZodArray<z.ZodType> | z.ZodString,
->(
-  toolName: Name,
-  inputSchema: Input,
-  outputSchema: Output,
-) =>
-  createToolSchemasFromStreaming({
-    toolName,
-    inputSchema,
-    outputSchema,
-    streamingInputSchema: inputSchema instanceof z.ZodObject ? inputSchema.partial() : inputSchema,
-    completedInputSchema: inputSchema,
-  });
-
-// Specialized helper for tools with empty input schemas
-// Uses z.record(z.never()) for input which correctly types to Record<string, never>
-const createEmptyInputToolSchemas = <Name extends ToolName, Output extends z.ZodObject<z.ZodRawShape> | z.ZodString>(
-  toolName: Name,
-  outputSchema: Output,
-) => {
-  const toolType = `tool-${toolName}` as const;
-  // Empty input schema that correctly resolves to Record<string, never>
-  const emptyInput = z.record(z.string(), z.never());
-  return [
-    // Input-streaming state
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('input-streaming'),
-      providerExecuted: z.boolean().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      input: z.union([emptyInput, z.undefined()]),
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      approval: z.never().optional(),
-    }),
-    // Input-available state
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('input-available'),
-      providerExecuted: z.boolean().optional(),
-      input: emptyInput,
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: z.never().optional(),
-    }),
-    // Output-available state
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('output-available'),
-      providerExecuted: z.boolean().optional(),
-      input: emptyInput,
-      rawInput: z.unknown().optional(),
-      output: outputSchema,
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      preliminary: z.boolean().optional(),
-      approval: approvalApprovedSchema,
-    }),
-    // Output-error state — see comment in createToolSchemas above.
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('output-error'),
-      providerExecuted: z.boolean().optional(),
-      input: z.union([emptyInput, z.undefined()]),
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.string(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: approvalApprovedSchema,
-    }),
-    // Approval-lifecycle states use the same complete empty-input contract.
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('approval-requested'),
-      providerExecuted: z.boolean().optional(),
-      input: emptyInput,
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: approvalRequestedSchema,
-    }),
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('approval-responded'),
-      providerExecuted: z.boolean().optional(),
-      input: emptyInput,
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: approvalRespondedSchema,
-    }),
-    z.object({
-      type: z.literal(toolType),
-      toolCallId: z.string(),
-      title: z.string().optional(),
-      state: z.literal('output-denied'),
-      providerExecuted: z.boolean().optional(),
-      input: emptyInput,
-      rawInput: z.unknown().optional(),
-      output: z.never().optional(),
-      errorText: z.never().optional(),
-      callProviderMetadata: providerMetadataSchema.optional(),
-      approval: approvalDeniedSchema,
-    }),
-  ] as const;
-};
-
-// Generate tool part schemas by iterating over tools and preserving discriminated unions
-const toolPartSchemas = [
-  ...createToolSchemas(toolName.webSearch, webSearchInputSchema, webSearchOutputSchema),
-  ...createToolSchemas(toolName.webBrowser, webBrowserInputSchema, webBrowserOutputSchema),
-  // Testing tools
-  ...createToolSchemas(toolName.testModel, testModelInputSchema, testModelOutputSchema),
-  // Filesystem tools
-  ...createToolSchemas(toolName.useSkill, useSkillInputSchema, useSkillOutputSchema),
-  ...createToolSchemas(toolName.readFile, readFileInputSchema, readFileOutputSchema),
-  ...createToolSchemas(toolName.listDirectory, listDirectoryInputSchema, listDirectoryOutputSchema),
-  ...createToolSchemas(toolName.createFile, createFileInputSchema, createFileOutputSchema),
-  ...createToolSchemas(toolName.editFile, editFileInputSchema, editFileOutputSchema),
-  ...createToolSchemas(toolName.deleteFile, deleteFileInputSchema, deleteFileOutputSchema),
-  ...createToolSchemas(toolName.grep, grepInputSchema, grepOutputSchema),
-  ...createToolSchemas(toolName.globSearch, globSearchInputSchema, globSearchOutputSchema),
-  // Kernel tools
-  ...createToolSchemas(toolName.getKernelResult, getKernelResultInputSchema, getKernelResultOutputSchema),
-  ...createToolSchemas(toolName.exportGeometry, exportGeometryInputSchema, exportGeometryOutputSchema),
-  // Screenshot tool
-  ...createToolSchemas(toolName.screenshot, screenshotInputSchema, screenshotOutputSchema),
-  // Transfer tools use empty input schemas with string output
-  ...createEmptyInputToolSchemas(toolName.transferToCadExpert, z.string()),
-  ...createEmptyInputToolSchemas(toolName.transferToResearchExpert, z.string()),
-  ...createEmptyInputToolSchemas(toolName.transferBackToSupervisor, z.string()),
-];
-
-const rawUiMessagesSchema = z
-  .array(
-    z.object({
-      id: z.string(),
-      role: z.enum(['system', 'user', 'assistant']),
-      metadata: messageMetadataSchema.optional(),
-      parts: z
-        .array(
-          z.union([
-            z.object({
-              type: z.literal('text'),
-              text: z.string(),
-              state: z.enum(['streaming', 'done']).optional(),
-              providerMetadata: providerMetadataSchema.optional(),
-            }),
-            z.object({
-              type: z.literal('reasoning'),
-              text: z.string(),
-              state: z.enum(['streaming', 'done']).optional(),
-              // Narrow `common` to typed reasoning timing (server-stamped on
-              // reasoning-start/end); sibling provider namespaces stay on the
-              // loose record schema.
-              providerMetadata: providerMetadataSchema
-                .and(z.object({ common: commonReasoningMetadataSchema.optional() }))
-                .optional(),
-            }),
-            z.object({
-              type: z.literal('source-url'),
-              sourceId: z.string(),
-              url: z.string(),
-              title: z.string().optional(),
-              providerMetadata: providerMetadataSchema.optional(),
-            }),
-            z.object({
-              type: z.literal('source-document'),
-              sourceId: z.string(),
-              mediaType: z.string(),
-              title: z.string(),
-              filename: z.string().optional(),
-              providerMetadata: providerMetadataSchema.optional(),
-            }),
-            z.object({
-              type: z.literal('file'),
-              mediaType: z.string(),
-              filename: z.string().optional(),
-              url: z.string(),
-              providerMetadata: providerMetadataSchema.optional(),
-            }),
-            z.object({
-              type: z.literal('step-start'),
-            }),
-            z.object({
-              type: z.literal('data-usage'),
-              id: z.string().optional(),
-              data: usageDataSchema,
-            }),
-            z.object({
-              type: z.literal('data-context-compaction'),
-              id: z.string().optional(),
-              data: contextCompactionDataSchema,
-            }),
-            z.object({
-              type: z.literal('data-context-usage'),
-              id: z.string().optional(),
-              data: contextUsageDataSchema,
-            }),
-            z.object({
-              type: z.literal('dynamic-tool'),
-              toolName: z.string(),
-              toolCallId: z.string(),
-              title: z.string().optional(),
-              state: z.literal('input-streaming'),
-              input: z.unknown().optional(),
-              rawInput: z.unknown().optional(),
-              providerExecuted: z.boolean().optional(),
-              callProviderMetadata: providerMetadataSchema.optional(),
-              output: z.never().optional(),
-              errorText: z.never().optional(),
-              approval: z.never().optional(),
-            }),
-            z.object({
-              type: z.literal('dynamic-tool'),
-              toolName: z.string(),
-              toolCallId: z.string(),
-              title: z.string().optional(),
-              state: z.literal('input-available'),
-              input: z.unknown(),
-              rawInput: z.unknown().optional(),
-              providerExecuted: z.boolean().optional(),
-              output: z.never().optional(),
-              errorText: z.never().optional(),
-              callProviderMetadata: providerMetadataSchema.optional(),
-              approval: z.never().optional(),
-            }),
-            z.object({
-              type: z.literal('dynamic-tool'),
-              toolName: z.string(),
-              toolCallId: z.string(),
-              title: z.string().optional(),
-              state: z.literal('output-available'),
-              input: z.unknown(),
-              rawInput: z.unknown().optional(),
-              providerExecuted: z.boolean().optional(),
-              output: z.unknown(),
-              errorText: z.never().optional(),
-              callProviderMetadata: providerMetadataSchema.optional(),
-              preliminary: z.boolean().optional(),
-              approval: approvalApprovedSchema,
-            }),
-            z.object({
-              type: z.literal('dynamic-tool'),
-              toolName: z.string(),
-              toolCallId: z.string(),
-              title: z.string().optional(),
-              state: z.literal('output-error'),
-              input: z
-                .unknown()
-                .optional()
-                .transform((value): unknown => value),
-              rawInput: z.unknown().optional(),
-              providerExecuted: z.boolean().optional(),
-              output: z.never().optional(),
-              errorText: z.string(),
-              callProviderMetadata: providerMetadataSchema.optional(),
-              approval: approvalApprovedSchema,
-            }),
-            // Approval-lifecycle states for dynamic tool parts. Mirrors
-            // upstream `validateUIMessages`.
-            z.object({
-              type: z.literal('dynamic-tool'),
-              toolName: z.string(),
-              toolCallId: z.string(),
-              title: z.string().optional(),
-              state: z.literal('approval-requested'),
-              input: z.unknown(),
-              rawInput: z.unknown().optional(),
-              providerExecuted: z.boolean().optional(),
-              output: z.never().optional(),
-              errorText: z.never().optional(),
-              callProviderMetadata: providerMetadataSchema.optional(),
-              approval: approvalRequestedSchema,
-            }),
-            z.object({
-              type: z.literal('dynamic-tool'),
-              toolName: z.string(),
-              toolCallId: z.string(),
-              title: z.string().optional(),
-              state: z.literal('approval-responded'),
-              input: z.unknown(),
-              rawInput: z.unknown().optional(),
-              providerExecuted: z.boolean().optional(),
-              output: z.never().optional(),
-              errorText: z.never().optional(),
-              callProviderMetadata: providerMetadataSchema.optional(),
-              approval: approvalRespondedSchema,
-            }),
-            z.object({
-              type: z.literal('dynamic-tool'),
-              toolName: z.string(),
-              toolCallId: z.string(),
-              title: z.string().optional(),
-              state: z.literal('output-denied'),
-              input: z.unknown(),
-              rawInput: z.unknown().optional(),
-              providerExecuted: z.boolean().optional(),
-              output: z.never().optional(),
-              errorText: z.never().optional(),
-              callProviderMetadata: providerMetadataSchema.optional(),
-              approval: approvalDeniedSchema,
-            }),
-            ...toolPartSchemas,
-          ]),
-        )
-        .nonempty('Message must contain at least one part'),
-    }),
-  )
-  .nonempty('Messages array must not be empty');
 
 type RawMessageWithParts = {
   readonly role?: unknown;
@@ -542,9 +27,6 @@ type RawToolLikePart = {
   readonly errorText?: unknown;
   readonly output?: unknown;
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isStaticToolPartType = (type: string): boolean => type.startsWith('tool-');
 
@@ -694,18 +176,93 @@ const normalizeToolLifecycleParts = (input: unknown): unknown => {
   return nextMessages ?? input;
 };
 
-/** @public */
-export const uiMessagesSchema: z.ZodType<MyUIMessage[]> = z.preprocess(
-  normalizeToolLifecycleParts,
-  rawUiMessagesSchema,
-);
+const validateCommonReasoningMetadata = (messages: MyUIMessage[]): z.ZodError | undefined => {
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type === 'reasoning' && part.providerMetadata?.['common'] !== undefined) {
+        const result = commonReasoningMetadataSchema.safeParse(part.providerMetadata['common']);
+        if (!result.success) {
+          return result.error;
+        }
+      }
+    }
+  }
+  return undefined;
+};
+
+const withMessageInputPath = (error: z.ZodError, messageIndex: number, partIndex: number): z.ZodError =>
+  new z.ZodError(
+    error.issues.map((issue) => ({
+      ...issue,
+      path: ['messages', messageIndex, 'parts', partIndex, 'input', ...issue.path],
+    })),
+  );
+
+const validateStaticToolLifecycleInputs = (messages: MyUIMessage[]): z.ZodError | undefined => {
+  for (const [messageIndex, message] of messages.entries()) {
+    for (const [partIndex, part] of message.parts.entries()) {
+      if (!isStaticToolUIPart(part)) {
+        continue;
+      }
+      const inputSchema = getToolInputSchema(part.type);
+      if (!inputSchema) {
+        continue;
+      }
+      const schema =
+        part.state === 'input-streaming' && inputSchema instanceof z.ZodObject ? inputSchema.partial() : inputSchema;
+      if (
+        part.state !== 'input-streaming' &&
+        part.state !== 'approval-requested' &&
+        part.state !== 'approval-responded' &&
+        part.state !== 'output-denied'
+      ) {
+        continue;
+      }
+      if (part.state === 'input-streaming' && part.input === undefined) {
+        continue;
+      }
+      const result = schema.safeParse(part.input);
+      if (!result.success) {
+        return withMessageInputPath(result.error, messageIndex, partIndex);
+      }
+    }
+  }
+  return undefined;
+};
+
+/** Validates and normalizes Tau UI messages through the installed AI SDK. @public */
+export const safeValidateUiMessages = async (messages: unknown): Promise<SafeValidateUIMessagesResult<MyUIMessage>> => {
+  const result = await safeValidateUIMessages<MyUIMessage>({
+    messages: normalizeToolLifecycleParts(messages),
+    metadataSchema: messageMetadataSchema.optional(),
+    dataSchemas: dataPartSchema.shape,
+    tools: uiMessageTools,
+  });
+  if (!result.success) {
+    return result;
+  }
+
+  const extensionError = validateStaticToolLifecycleInputs(result.data) ?? validateCommonReasoningMetadata(result.data);
+  return extensionError ? { success: false, error: extensionError } : result;
+};
+
+/** Validates Tau UI messages or throws the validation error. @public */
+export const validateUiMessages = async (messages: unknown): Promise<MyUIMessage[]> => {
+  const result = await safeValidateUiMessages(messages);
+  if (!result.success) {
+    throw result.error;
+  }
+  return result.data;
+};
 
 /**
- * Test-only export of the raw preprocess. Asserts reference-identity behavior
- * (no allocation on the no-heal path, copy-on-write on the heal path) without
- * going through Zod's discriminated-union resolver, which always copies.
- *
- * @internal
+ * Synchronous envelope used only for DTO typing and JSON Schema generation.
+ * Elements remain `unknown` until the shared async chat-turn parser performs
+ * full AI SDK message validation.
+ * @public
  */
+export const uiMessagesSchema = z.array(z.unknown()).nonempty('Messages array must not be empty');
+
+/** @internal */
 // oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- @internal test-only export
 export const _normalizeToolLifecyclePartsForTesting = normalizeToolLifecycleParts;

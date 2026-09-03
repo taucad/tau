@@ -1,5 +1,6 @@
 import { toolName } from '#constants/tool.constants.js';
 import { resolveRootedPath } from '@taucad/utils/path';
+import { isRecord } from '@taucad/utils/schema';
 
 type ProjectPathInputNormalization = {
   readonly input: unknown;
@@ -21,9 +22,6 @@ const singlePathFields = new Map<string, 'targetFile' | 'path'>([
   [toolName.grep, 'path'],
   [toolName.globSearch, 'path'],
 ]);
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const repairModelPath = (value: unknown): string | undefined => {
   if (typeof value !== 'string') {

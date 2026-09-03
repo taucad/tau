@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { uiMessagesSchema } from '#schemas/message.schema.js';
+import { safeValidateUiMessages, uiMessagesSchema } from '#schemas/message.schema.js';
 import { agentConfigSchema } from '#schemas/agent-config.schema.js';
 import type { MyUIMessage } from '#types/message.types.js';
 import type { AgentConfig } from '#schemas/agent-config.schema.js';
@@ -17,10 +17,11 @@ import type { AgentConfig } from '#schemas/agent-config.schema.js';
  * or a new field is a single edit on the union; the API controller's
  * `switch (body.agent.profile)` then forces an exhaustive update.
  *
- * User-message metadata is validated by `messageMetadataSchema` inside
- * `uiMessagesSchema` for display-side fields only (creation timestamp +
- * lifecycle status). The current turn's configuration is *only* read from
- * `agent` — never from `messages[N].metadata`.
+ * `chatTurnRequestSchema` validates only the synchronous envelope. Untrusted
+ * boundaries must call `parseChatTurnRequest`, which also validates every
+ * message through the AI SDK and Tau's metadata, data-part, and tool schemas.
+ * The current turn's configuration is *only* read from `agent` — never from
+ * `messages[N].metadata`.
  *
  * Lives in `@taucad/chat` (not `apps/api`) so the UI chat-clients can use it
  * to assert that the request they emit on the wire conforms to the server
@@ -39,9 +40,24 @@ export const chatTurnRequestSchema = z
 /** Wire-shape (input) of a chat-turn request. @public */
 export type ChatTurnRequestInput = z.input<typeof chatTurnRequestSchema>;
 
-/** Parsed (server-side) shape of a chat-turn request. @public */
-export type ChatTurnRequest = {
-  id: string;
+/** Synchronously parsed envelope whose messages remain untrusted. @public */
+export type ChatTurnRequestEnvelope = z.output<typeof chatTurnRequestSchema>;
+
+/** Fully parsed server-side chat-turn request. @public */
+export type ChatTurnRequest = Omit<ChatTurnRequestEnvelope, 'messages' | 'agent'> & {
   messages: MyUIMessage[];
   agent: AgentConfig;
+};
+
+const invalidMessagesError = (): z.ZodError =>
+  new z.ZodError([{ code: 'custom', path: ['messages'], message: 'Invalid chat messages.' }]);
+
+/** Parses the envelope and every UI message at an untrusted chat-turn boundary. @public */
+export const parseChatTurnRequest = async (input: unknown): Promise<ChatTurnRequest> => {
+  const envelope = chatTurnRequestSchema.parse(input);
+  const messages = await safeValidateUiMessages(envelope.messages);
+  if (!messages.success) {
+    throw invalidMessagesError();
+  }
+  return { ...envelope, messages: messages.data };
 };

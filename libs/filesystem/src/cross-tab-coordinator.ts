@@ -7,27 +7,43 @@
  * Progressive enhancement: no-op when `navigator.locks` is unavailable.
  */
 
+import { z } from 'zod';
+import { assertRootedPath, resolveAuthorityPath } from '@taucad/utils/path';
+
 const lockPrefix = 'tau-fs-write:';
 const channelName = 'tau-fs-changes';
 
+const canonicalAuthorityPathSchema = z.string().refine((value) => {
+  try {
+    return resolveAuthorityPath(value) === value;
+  } catch {
+    return false;
+  }
+});
+const canonicalProviderPathSchema = z.string().refine((value) => {
+  try {
+    return assertRootedPath(value) === value;
+  } catch {
+    return false;
+  }
+});
+const physicalAuthoritySchema = z.object({
+  storageRootKey: z.string().min(1),
+  providerBasePath: canonicalProviderPathSchema,
+});
+const changeNotificationSchema = z.object({
+  type: z.enum(['write', 'mkdir', 'delete', 'rmdir', 'directory-change', 'project-unavailable']),
+  path: canonicalAuthorityPathSchema,
+  authority: physicalAuthoritySchema,
+});
+
 /** Cloneable canonical physical authority identity. @public */
-export type PhysicalAuthority = {
-  readonly storageRootKey: string;
-  readonly providerBasePath: string;
-};
+export type PhysicalAuthority = Readonly<z.infer<typeof physicalAuthoritySchema>>;
 
 /** Cross-authority invalidation published to sibling tabs. @public */
-export type ChangeNotification =
-  | {
-      readonly type: 'write' | 'mkdir' | 'delete' | 'rmdir' | 'directory-change';
-      readonly path: string;
-      readonly authority: PhysicalAuthority;
-    }
-  | {
-      readonly type: 'project-unavailable';
-      readonly path: string;
-      readonly authority: PhysicalAuthority;
-    };
+export type ChangeNotification = Readonly<
+  Omit<z.infer<typeof changeNotificationSchema>, 'authority'> & { authority: PhysicalAuthority }
+>;
 
 /**
  * Coordinates filesystem writes across browser tabs.
@@ -101,8 +117,13 @@ export class CrossTabCoordinator {
     this._changeHandler = handler;
 
     if (this._channel) {
-      this._channel.addEventListener('message', (event: MessageEvent<ChangeNotification>) => {
-        this._changeHandler?.(event.data);
+      this._channel.addEventListener('message', (event: MessageEvent<unknown>) => {
+        const result = changeNotificationSchema.safeParse(event.data);
+        if (!result.success) {
+          console.warn('[CrossTabCoordinator] Dropped invalid change notification.');
+          return;
+        }
+        this._changeHandler?.(result.data);
       });
     }
   }

@@ -2406,6 +2406,9 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       vitest:
         specifier: 4.1.11

@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 
 describe('CrossTabCoordinator', () => {
   let coordinator: CrossTabCoordinator;
-  const authority = { storageRootKey: 'indexeddb:test', providerBasePath: '/' };
+  const authority = { storageRootKey: 'indexeddb:test', providerBasePath: '' };
 
   beforeEach(() => {
     coordinator = new CrossTabCoordinator();
@@ -73,7 +73,7 @@ describe('CrossTabCoordinator', () => {
       sibling.postMessage({
         type: 'directory-change',
         path: '/projects/proj_aaaaaaaaaaaaaaaaaaaaa',
-        authority: { storageRootKey: 'opfs:origin', providerBasePath: '/projects/model' },
+        authority: { storageRootKey: 'opfs:origin', providerBasePath: 'model' },
       });
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
@@ -83,11 +83,40 @@ describe('CrossTabCoordinator', () => {
         {
           type: 'directory-change',
           path: '/projects/proj_aaaaaaaaaaaaaaaaaaaaa',
-          authority: { storageRootKey: 'opfs:origin', providerBasePath: '/projects/model' },
+          authority: { storageRootKey: 'opfs:origin', providerBasePath: 'model' },
         },
       ]);
     } finally {
       sibling.close();
+    }
+  });
+
+  it('should drop malformed change notifications with a diagnostic', async () => {
+    const received: unknown[] = [];
+    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    coordinator.onRemoteChange((notification) => received.push(notification));
+    const sibling = new BroadcastChannel('tau-fs-changes');
+    try {
+      for (const notification of [
+        { type: 'write', path: 42, authority },
+        { type: 'write', path: 'relative.txt', authority },
+        { type: 'write', path: '/src/../main.ts', authority },
+        { type: 'write', path: '/main.ts', authority: { ...authority, storageRootKey: '' } },
+        { type: 'write', path: '/main.ts', authority: { ...authority, providerBasePath: '/rooted' } },
+        { type: 'write', path: '/main.ts', authority: { ...authority, providerBasePath: 'src/../main' } },
+      ]) {
+        sibling.postMessage(notification);
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+
+      expect(received).toEqual([]);
+      expect(diagnostic).toHaveBeenCalledTimes(6);
+      expect(diagnostic).toHaveBeenCalledWith('[CrossTabCoordinator] Dropped invalid change notification.');
+    } finally {
+      sibling.close();
+      diagnostic.mockRestore();
     }
   });
 });

@@ -11,6 +11,8 @@
  * @public
  */
 
+import { z } from 'zod';
+
 /**
  * Thrown when a `webaccess` operation is attempted without a usable
  * `{ directoryHandle, workspaceId }` pair. The discriminated
@@ -97,14 +99,24 @@ export class RootedFileSystemError extends Error {
  *
  * @public
  */
-export type WorkspaceMutationErrorCode =
-  | 'NAME_EXISTS'
-  | 'INVALID_NAME'
-  | 'READ_ONLY_MOUNT'
-  | 'BUNDLED_TYPES_WORKSPACE'
-  | 'MISSING_WORKSPACE_HANDLE'
-  | 'NOT_FOUND'
-  | 'OPERATION_FAILED';
+const workspaceMutationErrorCodeSchema = z.enum([
+  'NAME_EXISTS',
+  'INVALID_NAME',
+  'READ_ONLY_MOUNT',
+  'BUNDLED_TYPES_WORKSPACE',
+  'MISSING_WORKSPACE_HANDLE',
+  'NOT_FOUND',
+  'OPERATION_FAILED',
+]);
+/* eslint-disable @typescript-eslint/naming-convention -- The structured-clone brand is a public wire contract. */
+const clonedWorkspaceMutationErrorSchema = z.object({
+  __workspaceMutationError__: z.literal(true),
+  code: workspaceMutationErrorCodeSchema,
+});
+/* eslint-enable @typescript-eslint/naming-convention -- Restore the repository naming convention. */
+
+/** Stable machine-readable workspace mutation failure categories. @public */
+export type WorkspaceMutationErrorCode = z.infer<typeof workspaceMutationErrorCodeSchema>;
 
 /**
  * Structured error returned by the `can*` preflight family. Pairs the
@@ -185,9 +197,5 @@ export function isWorkspaceMutationError(error: unknown): error is WorkspaceMuta
   if (error instanceof WorkspaceMutationError) {
     return true;
   }
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  const record = error as { __workspaceMutationError__?: unknown; code?: unknown };
-  return record.__workspaceMutationError__ === true && typeof record.code === 'string';
+  return clonedWorkspaceMutationErrorSchema.safeParse(error).success;
 }

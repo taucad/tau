@@ -59,7 +59,8 @@
     "@taucad/spatial": "workspace:*",
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/extensions": "catalog:",
-    "@gltf-transform/functions": "catalog:"
+    "@gltf-transform/functions": "catalog:",
+    "manifold-3d": "catalog:"
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0"

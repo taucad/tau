@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { NodeIO } from '@gltf-transform/core';
+import { Accessor, Document, NodeIO, Primitive } from '@gltf-transform/core';
 import type { JSONDocument } from '@gltf-transform/core';
+import { EXTManifold } from 'manifold-3d/manifold-gltf';
 
 import { normalizeGltfGeometryNames } from '#utils/gltf-geometry-name-normalizer.js';
+import { transformGltfExportBytes } from '#utils/gltf-export-transform.js';
 import { writeGlb, writeGltfJson } from '#utils/glb-writer.js';
 import type { GlbInput, GlbPrimitive } from '#utils/glb-writer.js';
 
@@ -50,6 +52,47 @@ const withSceneName = async (bytes: Uint8Array<ArrayBuffer>, sceneName: string):
   const document = await io.readBinary(bytes);
   document.getRoot().listScenes()[0]!.setName(sceneName);
   return io.writeBinary(document);
+};
+
+const createManifoldGlb = async (): Promise<Uint8Array<ArrayBuffer>> => {
+  const document = new Document();
+  const buffer = document.createBuffer();
+  const positions = document
+    .createAccessor('positions')
+    .setBuffer(buffer)
+    .setType(Accessor.Type['VEC3']!)
+    .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]));
+  const primitive = document
+    .createPrimitive()
+    .setMode(Primitive.Mode['TRIANGLES']!)
+    .setAttribute('POSITION', positions)
+    .setIndices(
+      document
+        .createAccessor('render indices')
+        .setBuffer(buffer)
+        .setType(Accessor.Type['SCALAR']!)
+        .setArray(new Uint32Array([0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3])),
+    );
+  const mesh = document.createMesh('Tetrahedron').addPrimitive(primitive);
+  const manifold = document.createExtension(EXTManifold).createManifoldPrimitive();
+  manifold
+    .setIndices(
+      document
+        .createAccessor('manifold indices')
+        .setBuffer(buffer)
+        .setType(Accessor.Type['SCALAR']!)
+        .setArray(new Uint32Array([0, 2, 1, 0, 1, 3, 1, 2, 3, 2, 0, 3])),
+    )
+    .setRunIndex([0, 12]);
+  mesh.setExtension(EXTManifold.EXTENSION_NAME, manifold);
+  document.createScene().addChild(document.createNode('Tetrahedron').setMesh(mesh));
+  return new NodeIO().registerExtensions([EXTManifold]).writeBinary(document);
+};
+
+const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): JSONDocument['json'] => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const length = view.getUint32(12, true);
+  return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + length))) as JSONDocument['json'];
 };
 
 describe('normalizeGltfGeometryNames', () => {
@@ -141,5 +184,29 @@ describe('normalizeGltfGeometryNames', () => {
     expect(document.getRoot().listNodes()[0]!.getName()).toBe('Shape 1');
     expect(document.getRoot().listMeshes()[0]!.getName()).toBe('Shape 1');
     expect(document.getRoot().listMaterials()[0]!.getName()).toBe('');
+  });
+
+  it('should preserve EXT_mesh_manifold while normalizing names', async () => {
+    const normalized = await normalizeGltfGeometryNames(await createManifoldGlb(), { format: 'glb' });
+    const json = readGlbJson(normalized);
+
+    expect(json.extensionsUsed).toContain('EXT_mesh_manifold');
+    expect(json.meshes?.[0]?.extensions?.['EXT_mesh_manifold']).toMatchObject({
+      manifoldPrimitive: { mode: Primitive.Mode['TRIANGLES'] },
+    });
+  });
+
+  it('should preserve EXT_mesh_manifold while transforming an export', async () => {
+    const transformed = await transformGltfExportBytes(await createManifoldGlb(), {
+      format: 'glb',
+      coordinateSystem: 'z-up',
+      unit: { length: 'millimeter' },
+    });
+    const json = readGlbJson(transformed);
+
+    expect(json.extensionsUsed).toContain('EXT_mesh_manifold');
+    expect(json.meshes?.[0]?.extensions?.['EXT_mesh_manifold']).toMatchObject({
+      manifoldPrimitive: { mode: Primitive.Mode['TRIANGLES'] },
+    });
   });
 });

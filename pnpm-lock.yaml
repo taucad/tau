@@ -2603,6 +2603,9 @@ importers:
       '@gltf-transform/functions':
         specifier: 'catalog:'
         version: 4.4.0
+      manifold-3d:
+        specifier: 'catalog:'
+        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.27.7)
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
@@ -2911,6 +2914,9 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
+      manifold-3d:
+        specifier: 'catalog:'
+        version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.27.7)
       zod:
         specifier: 'catalog:'
         version: 4.4.3

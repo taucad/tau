@@ -78,6 +78,12 @@ const extractGltfBytes = (result: { data: GeometryResponse }): Uint8Array<ArrayB
   return result.data.content;
 };
 
+const readGlbJson = (bytes: Uint8Array<ArrayBuffer>): Record<string, unknown> => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const jsonLength = view.getUint32(12, true);
+  return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))) as Record<string, unknown>;
+};
+
 describe('ManifoldWorker', () => {
   describe('getParameters', () => {
     it('should extract defaultParams from ESM module', async () => {
@@ -168,6 +174,11 @@ describe('ManifoldWorker', () => {
       await geometryHelpers.expectMeshCount(result, 1);
       await geometryHelpers.expectBoundingBoxSize(result, [0.01, 0.01, 0.01], 0.0005);
       if (result.success) {
+        const json = readGlbJson(extractGltfBytes(result));
+        expect(json['extensionsUsed']).toContain('EXT_mesh_manifold');
+        expect(json['meshes']?.[0]?.['extensions']?.['EXT_mesh_manifold']).toMatchObject({
+          manifoldPrimitive: { mode: 4 },
+        });
         const { nodeNames, meshNames } = await readGltfNodeMeshNames(extractGltfBytes(result));
         expect(nodeNames).toEqual(['Shape 1']);
         expect(meshNames).toEqual(['Shape 1']);

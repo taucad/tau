@@ -48,15 +48,17 @@ const exported = await transformGltfExportBytes(named, {
 
 ## API
 
-| Area                            | Exports                                                                                                                                                        |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| glTF extension contract         | `allExtensions`, `registerTauGltfExtensions`, `TauCadTopology`, `TauCadTopologyRoot`, `KittyCadBoundaryRepresentation`, `KittyCadBrepNode`, `KittyCadBrepRoot` |
-| glTF IO and document transforms | `createNodeIo`, `createCoordinateTransform`, `createScalingTransform`, `createReverseCoordinateTransform`                                                      |
-| Serialized-bytes pipeline       | `normalizeGltfGeometryNames`, `transformGltfExportBytes`                                                                                                       |
-| GLB writing                     | `writeGlb`, `writeGltfJson`, `createEmptyGlb`, `createEmptyGltf`, `createEmptyGltfGeometry`, types `GlbInput`, `GlbNode`, `GlbPrimitive`, `GlbMaterial`        |
-| Import staging                  | `createImportFileInventory`, `ImportLoader`, types `ImportFile`, `ImportFileInventory`, `FileResolver`                                                         |
-| Names and color                 | `resolveShapeName`, `uniqueShapeName`, `formatShapeName`, `isLegacyGeneratedShapeName`, `srgbToLinear`, `srgbTupleToLinear`, `srgbHexToLinearTuple`            |
-| Coordinate and unit transforms  | `transformVertexArray`, `transformNormalArray`, types `GeometryOutputTransformOptions`, `OutputCoordinateSystem`, `OutputLengthUnit`                           |
+| Area                            | Exports                                                                                                                                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| glTF extension contract         | `allExtensions`, `registerTauGltfExtensions`, `TauCadTopology`, `TauCadTopologyRoot`, `KittyCadBoundaryRepresentation`, `KittyCadBrepNode`, `KittyCadBrepRoot`                 |
+| glTF IO and document transforms | `createNodeIo`, `createCoordinateTransform`, `createScalingTransform`, `createReverseCoordinateTransform`                                                                      |
+| Serialized-bytes pipeline       | `normalizeGltfGeometryNames`, `transformGltfExportBytes`                                                                                                                       |
+| GLB writing                     | `writeGlb`, `writeGltfJson`, `createEmptyGlb`, `createEmptyGltf`, `createEmptyGltfGeometry`, types `GlbInput`, `GlbNode`, `GlbPrimitive`, `GlbMaterial`, `GlbManifoldTopology` |
+| Import staging                  | `createImportFileInventory`, `ImportLoader`, types `ImportFile`, `ImportFileInventory`, `FileResolver`                                                                         |
+| Names and color                 | `resolveShapeName`, `uniqueShapeName`, `formatShapeName`, `isLegacyGeneratedShapeName`, `srgbToLinear`, `srgbTupleToLinear`, `srgbHexToLinearTuple`                            |
+| Coordinate and unit transforms  | `transformVertexArray`, `transformNormalArray`, types `GeometryOutputTransformOptions`, `OutputCoordinateSystem`, `OutputLengthUnit`                                           |
+
+The shared glTF-Transform registry preserves `EXT_mesh_manifold`.
 
 | Entry                   | Purpose                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------- |

@@ -58,7 +58,7 @@ type VertexTransformFunction = (vertex: readonly [number, number, number]) => [n
  * @public
  */
 export function transformVertexArray(
-  vertices: number[],
+  vertices: ArrayLike<number>,
   options: GeometryOutputTransformOptions = {},
 ): Float32Array<ArrayBuffer> {
   const transformedVertices = new Float32Array(vertices.length);
@@ -94,7 +94,7 @@ export function transformVertexArray(
  * @public
  */
 export function transformNormalArray(
-  normals: number[],
+  normals: ArrayLike<number>,
   options: Pick<GeometryOutputTransformOptions, 'coordinateSystem'> = {},
 ): Float32Array<ArrayBuffer> {
   const transformedNormals = new Float32Array(normals.length);

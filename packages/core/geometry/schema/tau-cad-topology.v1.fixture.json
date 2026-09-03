@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "id": "component:cover",
+      "name": "Cover",
+      "kind": "part",
+      "selector": "node/0",
+      "nodeIndex": 0,
+      "meshIndex": 0,
+      "primitiveRefs": [
+        { "nodeIndex": 0, "meshIndex": 0, "primitiveIndex": 0 },
+        { "nodeIndex": 0, "meshIndex": 0, "primitiveIndex": 1 }
+      ],
+      "faceGroups": [{ "start": 0, "count": 3, "faceId": 1 }],
+      "edgeGroups": [{ "start": 0, "count": 2, "edgeId": 1 }],
+      "capabilities": {
+        "hasPreciseTopology": true,
+        "exports": [{ "fidelity": "brep", "formats": ["step", "stp"], "available": true }]
+      }
+    }
+  ]
+}

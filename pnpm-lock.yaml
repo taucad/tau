@@ -351,6 +351,9 @@ catalogs:
     consola:
       specifier: ^3.4.2
       version: 3.4.2
+    ajv:
+      specifier: ^8.20.0
+      version: 8.20.0
     culori:
       specifier: ^4.0.2
       version: 4.0.2
@@ -3143,6 +3146,18 @@ importers:
       cdn-resolve:
         specifier: 'catalog:'
         version: 2.1.2
+      ajv:
+        specifier: 'catalog:'
+        version: 8.20.0
+
+  packages/core/native-process:
+    devDependencies:
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
+      '@taucad/runtime-testing':
+        specifier: workspace:*
+        version: link:../../runtime-testing
       deepmerge:
         specifier: 'catalog:'
         version: 4.3.1

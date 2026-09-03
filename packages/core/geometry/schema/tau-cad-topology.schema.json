@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tau.new/schemas/tau-cad-topology-v1.schema.json",
+  "title": "TAU_cad_topology payload",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schemaVersion", "components"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/component" },
+      "maxItems": 1000000
+    }
+  },
+  "$defs": {
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "primitiveRef": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["nodeIndex", "meshIndex", "primitiveIndex"],
+      "properties": {
+        "nodeIndex": { "$ref": "#/$defs/nonNegativeInteger" },
+        "meshIndex": { "$ref": "#/$defs/nonNegativeInteger" },
+        "primitiveIndex": { "$ref": "#/$defs/nonNegativeInteger" }
+      }
+    },
+    "faceGroup": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["start", "count", "faceId"],
+      "properties": {
+        "start": { "$ref": "#/$defs/nonNegativeInteger" },
+        "count": { "type": "integer", "minimum": 0, "multipleOf": 3 },
+        "faceId": { "$ref": "#/$defs/nonNegativeInteger" }
+      }
+    },
+    "edgeGroup": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["start", "count", "edgeId"],
+      "properties": {
+        "start": { "$ref": "#/$defs/nonNegativeInteger" },
+        "count": { "type": "integer", "minimum": 0, "multipleOf": 2 },
+        "edgeId": { "$ref": "#/$defs/nonNegativeInteger" }
+      }
+    },
+    "export": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["fidelity", "formats", "available"],
+      "properties": {
+        "fidelity": { "enum": ["mesh", "brep"] },
+        "formats": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "available": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "name", "kind", "selector"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "selector": { "type": "string", "minLength": 1 },
+        "color": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0, "maximum": 1 },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "nodeIndex": { "$ref": "#/$defs/nonNegativeInteger" },
+        "meshIndex": { "$ref": "#/$defs/nonNegativeInteger" },
+        "parentId": { "type": "string", "minLength": 1 },
+        "childIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "primitiveIndices": { "type": "array", "items": { "$ref": "#/$defs/nonNegativeInteger" } },
+        "primitiveRefs": { "type": "array", "items": { "$ref": "#/$defs/primitiveRef" } },
+        "faceGroups": { "type": "array", "items": { "$ref": "#/$defs/faceGroup" } },
+        "edgeGroups": { "type": "array", "items": { "$ref": "#/$defs/edgeGroup" } },
+        "sourceRefs": { "type": "object" },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "hasPreciseTopology": { "type": "boolean" },
+            "exports": { "type": "array", "items": { "$ref": "#/$defs/export" } }
+          }
+        }
+      }
+    }
+  }
+}

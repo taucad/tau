@@ -1,0 +1,7 @@
+{
+  "name": "native-process-core",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/core/native-process",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

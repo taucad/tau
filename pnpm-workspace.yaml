@@ -33,6 +33,7 @@ catalog:
   '@ai-sdk/provider-utils': ^4.0.30
   '@arethetypeswrong/cli': ^0.18.3
   '@aws-sdk/client-s3': ^3.1073.0
+  ajv: ^8.20.0
   '@aws-sdk/lib-storage': ^3.1073.0
   '@aws-sdk/s3-request-presigner': ^3.1073.0
   '@base-ui/react': ^1.6.0

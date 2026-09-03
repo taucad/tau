@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "id": "component:invalid",
+      "name": "Invalid",
+      "kind": "part",
+      "selector": "node/0",
+      "primitiveRefs": [{ "nodeIndex": 0, "meshIndex": 0, "primitiveIndex": 2 }],
+      "faceGroups": [{ "start": 0, "count": 4, "faceId": 0 }]
+    }
+  ]
+}

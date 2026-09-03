@@ -8,6 +8,19 @@ export {
   TauCadTopology,
   TauCadTopologyRoot,
 } from '#extensions/index.js';
+export type {
+  TauCadTopologyComponent,
+  TauCadTopologyEdgeGroup,
+  TauCadTopologyExport,
+  TauCadTopologyFaceGroup,
+  TauCadTopologyPayload,
+  TauCadTopologyPrimitiveRef,
+} from '#extensions/tau-cad-topology.types.js';
+export { validateTauCadTopology } from '#extensions/tau-cad-topology-validation.js';
+export type {
+  TauCadTopologyDocumentBounds,
+  TauCadTopologyPrimitiveBounds,
+} from '#extensions/tau-cad-topology-validation.js';
 
 // GlTF IO + document transforms
 export { createNodeIo } from '#gltf.utils.js';
@@ -44,6 +57,12 @@ export {
 export type { GlbInput, GlbMaterial, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
 
 // Names
+export {
+  formatComponentId,
+  formatNamedComponentId,
+  formatNodeSelector,
+  formatPrimitiveSelector,
+} from '#utils/component-names.js';
 export { formatShapeName, isLegacyGeneratedShapeName, resolveShapeName, uniqueShapeName } from '#utils/shape-names.js';
 
 // Color

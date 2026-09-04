@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 
 const root = resolve(import.meta.dirname, '../..');
-const quickstartPath = resolve(root, 'apps/ui/content/docs/runtime/getting-started/quick-start.mdx');
+const quickstartPath = resolve(root, 'apps/docs/content/docs/runtime/getting-started/quick-start.mdx');
 
 const maxLines = 15;
 /*

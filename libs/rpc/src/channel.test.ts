@@ -834,9 +834,10 @@ describe('createChannelClient / createChannelServer', () => {
       }
     })();
 
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
+    /* Wait for the value, never for a tick: the yield travels client → server
+     * → client over two real port hops, which under a loaded event loop takes
+     * more than one macrotask. */
+    await vi.waitUntil(() => collected.length === 1);
 
     handle.dispose();
 

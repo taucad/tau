@@ -60,6 +60,7 @@ type AnyAsync = (...args: unknown[]) => Promise<unknown>;
 function makeMutatingFakeHandlers() {
   return {
     writeFile: vi.fn<AnyAsync>().mockResolvedValue(undefined),
+    appendFile: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     writeFiles: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     mkdir: vi.fn<AnyAsync>().mockResolvedValue(undefined),
     move: vi.fn<AnyAsync>().mockResolvedValue({ type: 'file', size: 0, mtimeMs: 0 }),
@@ -92,6 +93,14 @@ describe('bindMutationContextForPort', () => {
       await wrapper.writeFile('/x.txt', data);
       expect(handlers.writeFile).toHaveBeenCalledTimes(1);
       expect(handlers.writeFile.mock.calls[0]).toEqual(['/x.txt', data, mutationContext]);
+    });
+
+    it('appendFile(path, data) lands as service.appendFile(path, data, context)', async () => {
+      const handlers = makeMutatingFakeHandlers();
+      const wrapper = bindMutationContextForPort(handlers, mutationContext);
+      const data = new TextEncoder().encode('tail');
+      await wrapper.appendFile('/x.txt', data);
+      expect(handlers.appendFile.mock.calls[0]).toEqual(['/x.txt', data, mutationContext]);
     });
 
     it('writeFiles(files) lands as service.writeFiles(files, context)', async () => {
@@ -883,7 +892,7 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     chB.port2.close();
   });
 
-  it('should deliver a batch write to a peer exact watcher while suppressing the author echo', async () => {
+  it('should append through the workspace bridge while suppressing the author echo', async () => {
     const providerRegistry = new ProviderRegistry();
     const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:bridge-test' });
     const mountTable = new MountTable();
@@ -927,12 +936,17 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     try {
       await peerWatch.ready;
       await clientA.writeFiles({ [path]: { content: 'cube([10, 10, 10]);' } });
+      await clientA.appendFile(path, '\nsphere(5);');
       await vi.waitFor(() => {
         expect(peerWatchEvents).toEqual([{ type: 'change', path }]);
-        expect(peerEvents).toEqual([{ type: 'fileWritten', path, backend: 'memory' }]);
+        expect(peerEvents).toEqual([
+          { type: 'fileWritten', path, backend: 'memory' },
+          { type: 'fileWritten', path, backend: 'memory' },
+        ]);
       });
 
       expect(authorEvents).toEqual([]);
+      await expect(clientA.readFile(path, 'utf8')).resolves.toBe('cube([10, 10, 10]);\nsphere(5);');
     } finally {
       peerWatch.unsubscribe();
       stopAuthorEvents();
@@ -984,6 +998,11 @@ describe('exposeFileSystem skip-originator dispatch', () => {
     {
       name: 'writeFile',
       args: ['/x.txt', new TextEncoder().encode('hi')],
+      handler: buildEmitter((a) => ({ type: 'fileWritten', path: a[0] as string, backend: 'memory' })),
+    },
+    {
+      name: 'appendFile',
+      args: ['/x.txt', new TextEncoder().encode('tail')],
       handler: buildEmitter((a) => ({ type: 'fileWritten', path: a[0] as string, backend: 'memory' })),
     },
     {

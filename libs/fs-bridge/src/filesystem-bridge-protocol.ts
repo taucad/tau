@@ -74,6 +74,7 @@ export type FileSystemBridgeHello =
 type WorkspaceBridgeMethodName =
   | 'readFile'
   | 'writeFile'
+  | 'appendFile'
   | 'writeFiles'
   | 'mkdir'
   | 'readdir'
@@ -508,6 +509,7 @@ const callSchemas = {
     result: z.union([z.string(), bytesSchema]),
   },
   writeFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
+  appendFile: { args: z.tuple([z.string(), writePayloadSchema]), result: voidResult },
   writeFiles: {
     args: z.tuple([z.record(z.string(), z.looseObject({ content: writePayloadSchema }))]),
     result: voidResult,

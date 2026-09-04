@@ -138,7 +138,7 @@ const cloneFileMapForTransfer = (value: unknown): Record<string, unknown> => {
 };
 
 const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] => {
-  if (method === 'writeFile' && args.length >= 2) {
+  if ((method === 'writeFile' || method === 'appendFile') && args.length >= 2) {
     return [args[0], cloneWritePayloadForTransfer(args[1]), ...args.slice(2)];
   }
 
@@ -177,6 +177,7 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
  */
 type MutationMethodName =
   | 'writeFile'
+  | 'appendFile'
   | 'writeFiles'
   | 'mkdir'
   | 'move'
@@ -207,6 +208,7 @@ type MutationOverrideMap = {
 };
 
 type WriteFileParameters = Parameters<MutatingMethods['writeFile']>;
+type AppendFileParameters = Parameters<MutatingMethods['appendFile']>;
 type WriteFilesParameters = Parameters<MutatingMethods['writeFiles']>;
 type DuplicateFileParameters = Parameters<MutatingMethods['duplicateFile']>;
 type CopyDirectoryParameters = Parameters<MutatingMethods['copyDirectory']>;
@@ -297,6 +299,8 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
   const overrides: MutationOverrideMap = {
     writeFile: async (path: WriteFileParameters[0], data: WriteFileParameters[1]): Promise<void> =>
       mutatingService.writeFile(path, data, context),
+    appendFile: async (path: AppendFileParameters[0], data: AppendFileParameters[1]): Promise<void> =>
+      mutatingService.appendFile(path, data, context),
     writeFiles: async (files: WriteFilesParameters[0]): Promise<void> => mutatingService.writeFiles(files, context),
     mkdir: async (path: string, options?: MkdirOptions): Promise<void> => mutatingService.mkdir(path, options, context),
     move: async (source: string, target: string): Promise<FileStat> => mutatingService.move(source, target, context),

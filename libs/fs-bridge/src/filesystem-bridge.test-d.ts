@@ -69,6 +69,7 @@ describe('bindMutationContextForPort — type guarantees', () => {
     expectTypeOf<MutationOverrideMapInternal['unlink']>().toEqualTypeOf<WorkspaceFileService['unlink']>();
     expectTypeOf<MutationOverrideMapInternal['rmdir']>().toEqualTypeOf<WorkspaceFileService['rmdir']>();
     expectTypeOf<MutationOverrideMapInternal['writeFile']>().toEqualTypeOf<WorkspaceFileService['writeFile']>();
+    expectTypeOf<MutationOverrideMapInternal['appendFile']>().toEqualTypeOf<WorkspaceFileService['appendFile']>();
     expectTypeOf<MutationOverrideMapInternal['writeFiles']>().toEqualTypeOf<WorkspaceFileService['writeFiles']>();
     expectTypeOf<MutationOverrideMapInternal['mkdir']>().toEqualTypeOf<WorkspaceFileService['mkdir']>();
     expectTypeOf<MutationOverrideMapInternal['move']>().toEqualTypeOf<WorkspaceFileService['move']>();

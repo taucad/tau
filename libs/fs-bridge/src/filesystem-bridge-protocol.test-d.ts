@@ -38,6 +38,7 @@ describe('filesystem bridge protocol contract', () => {
 
   it('preserves canonical method overloads, arguments, and results on the proxy', () => {
     expectTypeOf<FileSystemBridgeProxy['readFile']>().toEqualTypeOf<FileSystemBridgeService['readFile']>();
+    expectTypeOf<FileSystemBridgeProxy['appendFile']>().toEqualTypeOf<FileSystemBridgeService['appendFile']>();
     expectTypeOf<FileSystemBridgeProxy['rename']>().toEqualTypeOf<RootedFileSystem['rename']>();
     expectTypeOf<FileSystemBridgeProxy['stat']>().toEqualTypeOf<FileSystemBridgeService['stat']>();
     expectTypeOf(createFileSystemBridgeProxy).returns.toEqualTypeOf<FileSystemBridgeProxy>();
@@ -65,6 +66,7 @@ describe('filesystem bridge protocol contract', () => {
 
   it('exports an exact validator inventory for every bridged call and listen', () => {
     expectTypeOf(fileSystemBridgeSchemas.calls).toHaveProperty('readFile');
+    expectTypeOf(fileSystemBridgeSchemas.calls).toHaveProperty('appendFile');
     expectTypeOf(fileSystemBridgeSchemas.calls).toHaveProperty('rename');
     expectTypeOf(fileSystemBridgeSchemas.listens).toHaveProperty('watch');
     expectTypeOf(fileSystemBridgeSchemas.listens).toHaveProperty('broadcast');

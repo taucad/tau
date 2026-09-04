@@ -1,12 +1,15 @@
 import type { ProjectManifest } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
+import type { PersistedRevisionGraphState } from '#types/revision.types.js';
 
 /** Browser-profile-local revision pointer. It is meaningful only with local chats. */
 export type PersistedRevisionState = {
   readonly headTurnId: string;
   readonly supersededTurnIds: string[];
   readonly dirty: boolean;
+  /** Optional during migration from the original linear restore pointer. */
+  readonly graph?: PersistedRevisionGraphState;
 };
 
 /** Local library state that cannot be reconstructed from portable project files. */

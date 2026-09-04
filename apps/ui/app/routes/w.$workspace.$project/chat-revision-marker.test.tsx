@@ -5,6 +5,7 @@ import { useVisibleRevisions } from '#hooks/use-revisions.js';
 import type { RevisionsView } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import type { Revision } from '#lib/file-restore-timeline.js';
+import { emptyRevisionGraph } from '#lib/revision-graph.js';
 
 vi.mock('#hooks/use-revisions.js', () => ({ useVisibleRevisions: vi.fn() }));
 vi.mock('#hooks/use-restore-to-point.js', () => ({ useRestoreToPoint: vi.fn() }));
@@ -26,14 +27,14 @@ const restore = vi.fn();
 
 const setRevisions = (view: Partial<RevisionsView>): void => {
   vi.mocked(useVisibleRevisions).mockReturnValue({
-    revisions: [],
-    byMessageId: new Map(),
-    headRevision: undefined,
-    maxRevision: 0,
-    headTurnId: '',
-    isDirty: false,
-    canReturnToLatest: false,
-    ...view,
+    revisions: view.revisions ?? [],
+    byMessageId: view.byMessageId ?? new Map<string, Revision>(),
+    headRevision: view.headRevision,
+    maxRevision: view.maxRevision ?? 0,
+    headTurnId: view.headTurnId ?? '',
+    isDirty: view.isDirty ?? false,
+    canReturnToLatest: view.canReturnToLatest ?? false,
+    graph: view.graph ?? emptyRevisionGraph(),
   });
 };
 

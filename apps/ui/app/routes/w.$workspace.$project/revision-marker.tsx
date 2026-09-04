@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Check, ChevronDown, ChevronUp, Pencil, RotateCcw, Undo2 } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -63,6 +63,13 @@ export function RevisionMarker({
 }: RevisionMarkerProps): React.JSX.Element {
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [isActionRequested, setIsActionRequested] = useState(false);
+  const [previousIsBusy, setPreviousIsBusy] = useState(isBusy);
+  if (previousIsBusy !== isBusy) {
+    setPreviousIsBusy(isBusy);
+    if (!isBusy) {
+      setIsActionRequested(false);
+    }
+  }
   const date = new Date(revision.anchor);
   const timestamp = date.toLocaleString(undefined, {
     dateStyle: 'medium',
@@ -71,12 +78,6 @@ export function RevisionMarker({
   const time = date.toLocaleTimeString(undefined, { timeStyle: 'short' });
   const visibleFiles = revision.files.slice(0, visibleFileCount);
   const hiddenFiles = revision.files.slice(visibleFileCount);
-
-  useEffect(() => {
-    if (!isBusy) {
-      setIsActionRequested(false);
-    }
-  }, [isBusy]);
 
   return (
     <div

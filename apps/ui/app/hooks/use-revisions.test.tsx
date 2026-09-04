@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { Chat, MyUIMessage } from '@taucad/chat';
+import type { PersistedRevisionGraphNode, PersistedRevisionGraphState } from '#types/revision.types.js';
 import { useRevisions, useVisibleRevisions } from '#hooks/use-revisions.js';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
@@ -22,7 +23,12 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 // baseline" even though Revisions exist and "Return to latest" is offered.
 // ---------------------------------------------------------------------------
 
-const actorContext = { headTurnId: '', supersededTurnIds: [] as string[], dirty: false };
+const actorContext: {
+  headTurnId: string;
+  supersededTurnIds: string[];
+  dirty: boolean;
+  graph: PersistedRevisionGraphState;
+} = { headTurnId: '', supersededTurnIds: [], dirty: false, graph: { activeBranch: 'main', nodes: {}, branches: {} } };
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) =>
@@ -94,6 +100,27 @@ const chat = (createdAt: number, messages: MyUIMessage[], id = 'chatA'): Chat =>
 const sessions = new Map<string, ChatSession>();
 const sessionStore = mock<ChatSessionStore>();
 
+const authorizeTurns = (...turnIds: string[]): void => {
+  actorContext.graph = {
+    activeBranch: 'main',
+    nodes: Object.fromEntries(
+      turnIds.map((turnId) => [
+        turnId,
+        {
+          turnId,
+          parentTurnIds: [],
+          branchName: 'main',
+          chatId: 'chatA',
+          jobIds: [],
+          status: 'complete',
+          revisionId: `rev-${turnId}`,
+        } satisfies PersistedRevisionGraphNode,
+      ]),
+    ),
+    branches: {},
+  };
+};
+
 const installSession = (
   chatId: string,
   messages: MyUIMessage[],
@@ -123,6 +150,7 @@ const installSession = (
 
 beforeEach(() => {
   sessions.clear();
+  actorContext.graph = { activeBranch: 'main', nodes: {}, branches: {} };
   sessionStore.get.mockImplementation((chatId) => sessions.get(chatId));
   sessionStore.subscribeMembership.mockReturnValue(() => undefined);
   sessionStore.subscribeChat.mockReturnValue(() => undefined);
@@ -161,6 +189,7 @@ describe('useRevisions — stale head derivation (REGRESSION)', () => {
     actorContext.headTurnId = 'stale-drifted-id';
     actorContext.supersededTurnIds = [];
     actorContext.dirty = false;
+    authorizeTurns('u1', 'u2');
 
     const { result } = renderHook(() => useRevisions());
 
@@ -174,6 +203,7 @@ describe('useRevisions — stale head derivation (REGRESSION)', () => {
     actorContext.headTurnId = 'does-not-exist';
     actorContext.supersededTurnIds = [];
     actorContext.dirty = false;
+    authorizeTurns('u1', 'u2');
 
     const { result } = renderHook(() => useRevisions());
 
@@ -187,6 +217,7 @@ describe('useRevisions — stale head derivation (REGRESSION)', () => {
     actorContext.headTurnId = '';
     actorContext.supersededTurnIds = [];
     actorContext.dirty = false;
+    authorizeTurns('u1', 'u2');
 
     const { result } = renderHook(() => useRevisions());
 
@@ -199,6 +230,7 @@ describe('useRevisions — stale head derivation (REGRESSION)', () => {
     actorContext.headTurnId = 'u1'; // Parked at the first Revision.
     actorContext.supersededTurnIds = [];
     actorContext.dirty = false;
+    authorizeTurns('u1', 'u2');
 
     const { result } = renderHook(() => useRevisions());
 
@@ -209,6 +241,19 @@ describe('useRevisions — stale head derivation (REGRESSION)', () => {
 });
 
 describe('useVisibleRevisions — turn completion visibility', () => {
+  it('should keep a cancelled partial file mutation out of committed and current revisions', () => {
+    const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'partial')])];
+    chatsRef.current = [chat(50, messages)];
+    actorContext.graph = { activeBranch: 'main', nodes: {}, branches: {} };
+    installSession('chatA', messages, { requestLifecycle: 'idle', status: 'error' });
+
+    const { result } = renderHook(() => useVisibleRevisions());
+
+    expect(result.current.revisions).toEqual([]);
+    expect(result.current.headRevision).toBeUndefined();
+    expect(result.current.maxRevision).toBe(0);
+  });
+
   it.each(['invoking', 'retrying', 'stopping'] as const)(
     'should withhold the latest mutating turn while its request lifecycle is %s',
     (requestLifecycle) => {
@@ -219,6 +264,7 @@ describe('useVisibleRevisions — turn completion visibility', () => {
         assistant(400, [editPart('main.scad', 'a', 'b')]),
       ];
       chatsRef.current = [chat(50, messages)];
+      authorizeTurns('u1');
       installSession('chatA', messages, {
         requestLifecycle,
         status: requestLifecycle === 'retrying' ? 'error' : 'streaming',
@@ -233,9 +279,10 @@ describe('useVisibleRevisions — turn completion visibility', () => {
     },
   );
 
-  it('should reveal a partial mutating turn after terminal failure settles to idle', () => {
+  it('should reveal a terminal mutating turn only after authoritative finalization', () => {
     const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'a')])];
     chatsRef.current = [chat(50, messages)];
+    authorizeTurns('u1');
     installSession('chatA', messages, { requestLifecycle: 'idle', status: 'error' });
 
     const { result } = renderHook(() => useVisibleRevisions());
@@ -248,6 +295,7 @@ describe('useVisibleRevisions — turn completion visibility', () => {
     const firstMessages = [user('u1', 100), assistant(200, [createPart('a.scad', 'a')])];
     const secondMessages = [user('u2', 300), assistant(400, [createPart('b.scad', 'b')])];
     chatsRef.current = [chat(50, firstMessages, 'chatA'), chat(60, secondMessages, 'chatB')];
+    authorizeTurns('u1');
     installSession('chatB', secondMessages, { requestLifecycle: 'invoking' });
 
     const { result } = renderHook(() => useVisibleRevisions());
@@ -267,6 +315,7 @@ describe('useVisibleRevisions — turn completion visibility', () => {
       chat(70, chatC, 'chatC'),
       chat(80, chatD, 'chatD'),
     ];
+    authorizeTurns('u1', 'u3');
     installSession('chatB', chatB, { requestLifecycle: 'invoking' });
     installSession('chatD', chatD, { requestLifecycle: 'stopping' });
 
@@ -279,15 +328,31 @@ describe('useVisibleRevisions — turn completion visibility', () => {
     expect(result.current.maxRevision).toBe(2);
   });
 
-  it('should leave raw milestone revisions available while the visible view withholds them', () => {
+  it('should retain pending graph evidence while withholding an unfinalized transcript revision', () => {
     const messages = [user('u1', 100), assistant(200, [createPart('main.scad', 'a')])];
     chatsRef.current = [chat(50, messages)];
+    actorContext.graph = {
+      activeBranch: 'main',
+      nodes: {
+        u1: {
+          turnId: 'u1',
+          parentTurnIds: [],
+          branchName: 'main',
+          chatId: 'chatA',
+          jobIds: [],
+          status: 'pending',
+        },
+      },
+      branches: {},
+    };
     installSession('chatA', messages, { requestLifecycle: 'invoking' });
 
     const raw = renderHook(() => useRevisions());
     const visible = renderHook(() => useVisibleRevisions());
 
-    expect(raw.result.current.revisions.map((revision) => revision.messageId)).toEqual(['u1']);
+    expect(raw.result.current.revisions).toEqual([]);
     expect(visible.result.current.revisions).toEqual([]);
+    expect(raw.result.current.graph.byTurnId.has('u1')).toBe(true);
+    expect(visible.result.current.graph.byTurnId.has('u1')).toBe(false);
   });
 });

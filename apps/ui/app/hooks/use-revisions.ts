@@ -6,6 +6,8 @@ import { useProject } from '#hooks/use-project.js';
 import { useRevisionActor } from '#routes/w.$workspace.$project/revision-provider.js';
 import { activeOps, buildRevisions, buildTimeline } from '#lib/file-restore-timeline.js';
 import type { Revision } from '#lib/file-restore-timeline.js';
+import { buildRevisionGraph, filterRevisionGraph } from '#lib/revision-graph.js';
+import type { RevisionGraph } from '#lib/revision-graph.js';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
 
 export type RevisionsView = {
@@ -20,6 +22,8 @@ export type RevisionsView = {
   headTurnId: string;
   isDirty: boolean;
   canReturnToLatest: boolean;
+  /** Full branch projection, including inspect-only superseded revisions. */
+  graph: RevisionGraph;
 };
 
 /**
@@ -43,9 +47,15 @@ export function useRevisions(): RevisionsView {
   const headTurnId = useSelector(actor, (s) => s.context.headTurnId);
   const supersededTurnIds = useSelector(actor, (s) => s.context.supersededTurnIds);
   const isDirty = useSelector(actor, (s) => s.context.dirty);
+  const persistedGraph = useSelector(actor, (s) => s.context.graph);
 
   return useMemo(() => {
-    const revisions = buildRevisions(chats, buildTimeline(activeOps(chats, supersededTurnIds)));
+    const timeline = buildTimeline(activeOps(chats, supersededTurnIds));
+    const authoritativeTurnIds = new Set(
+      Object.values(persistedGraph.nodes).flatMap((node) => (node.revisionId === undefined ? [] : [node.turnId])),
+    );
+    const committedTimeline = timeline.filter((operation) => authoritativeTurnIds.has(operation.turnMessageId));
+    const revisions = buildRevisions(chats, committedTimeline);
     const byMessageId = new Map(revisions.map((r) => [r.messageId, r]));
     const latest = revisions.at(-1);
     // The FS reflects the Revision identified by `headTurnId`. '' is the tip
@@ -54,6 +64,18 @@ export function useRevisions(): RevisionsView {
     // Revisions exist (kills the stale "Revision 0 · baseline" chip).
     const headRevision = headTurnId === '' ? latest : (revisions.find((r) => r.messageId === headTurnId) ?? latest);
     const maxRevision = latest?.n ?? 0;
+    const projectedGraph = buildRevisionGraph({
+      chats,
+      persisted: persistedGraph,
+      supersededTurnIds,
+      headTurnId,
+    });
+    const transcriptOnlyTurnIds = new Set(
+      buildRevisions(chats, timeline)
+        .filter((revision) => persistedGraph.nodes[revision.messageId] === undefined)
+        .map((revision) => revision.messageId),
+    );
+    const graph = filterRevisionGraph(projectedGraph, transcriptOnlyTurnIds, revisions);
     return {
       revisions,
       byMessageId,
@@ -62,8 +84,9 @@ export function useRevisions(): RevisionsView {
       headTurnId,
       isDirty,
       canReturnToLatest: maxRevision > 0 && (headRevision?.n ?? 0) < maxRevision,
+      graph,
     };
-  }, [chats, supersededTurnIds, headTurnId, isDirty]);
+  }, [chats, supersededTurnIds, headTurnId, isDirty, persistedGraph]);
 }
 
 const inFlightTurnIdDelimiter = '\0';
@@ -188,6 +211,7 @@ export function useVisibleRevisions(): RevisionsView {
       headTurnId: raw.headTurnId,
       isDirty: raw.isDirty,
       canReturnToLatest: maxRevision > 0 && (headRevision?.n ?? 0) < maxRevision,
+      graph: filterRevisionGraph(raw.graph, inFlightTurnIds, revisions),
     };
   }, [raw, inFlightTurnIds]);
 }

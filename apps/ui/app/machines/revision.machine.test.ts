@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor } from 'xstate';
 import type { AnyActorRef } from 'xstate';
-import type { PersistedRevisionState } from '@taucad/types';
+import type { PersistedRevisionState } from '#types/project.types.js';
+import type { AuthoritativeRevisionFinalization } from '#types/revision.types.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { RestorePlan } from '#lib/file-restore-timeline.js';
 import { revisionMachine } from '#machines/revision.machine.js';
@@ -22,6 +23,29 @@ const makePlan = (over: Partial<RestorePlan> = {}): RestorePlan => ({
   unrecoverable: over.unrecoverable ?? new Set<string>(),
 });
 
+const finalization = (over: Partial<AuthoritativeRevisionFinalization> = {}): AuthoritativeRevisionFinalization => ({
+  turnId: 'u1',
+  revisionId: 'rev-auth-1',
+  baseRevisionId: 'rev-base',
+  treeId: 'tree-auth-1',
+  branchName: 'main',
+  publication: {
+    status: 'updated',
+    branchName: 'main',
+    expectedHeadRevisionId: 'rev-base',
+    previousHeadRevisionId: 'rev-base',
+    headRevisionId: 'rev-auth-1',
+  },
+  changedPaths: ['main.ts'],
+  provenance: { source: 'agent', actorId: 'tau-chat-runner', runId: 'run-1', createdAt: 100 },
+  generatedSummary: 'Created the bracket',
+  chatId: 'chat-a',
+  jobIds: ['job-1'],
+  workspaceId: 'workspace-1',
+  nativeGit: { status: 'not-configured' },
+  ...over,
+});
+
 let live: AnyActorRef[] = [];
 afterEach(() => {
   for (const actor of live) {
@@ -37,6 +61,11 @@ type Options = {
   computeFails?: boolean;
   applyFails?: boolean;
 };
+
+type EmittedEvent =
+  | { readonly type: 'toast.restored'; readonly n: number; readonly unrecoverable: string[] }
+  | { readonly type: 'toast.error'; readonly message: string }
+  | { readonly type: 'forkMarker'; readonly atRevision: number };
 
 function harness(options: Options = {}) {
   const computeSpy = vi.fn<(input: ComputePlanInput) => void>();
@@ -82,7 +111,7 @@ function harness(options: Options = {}) {
     },
   });
 
-  const emitted: Array<{ type: string; [k: string]: unknown }> = [];
+  const emitted: EmittedEvent[] = [];
   actor.on('toast.restored', (event) => emitted.push(event));
   actor.on('toast.error', (event) => emitted.push(event));
   actor.on('forkMarker', (event) => emitted.push(event));
@@ -368,5 +397,250 @@ describe('revisionMachine', () => {
     });
 
     expect(actor.getSnapshot().context.dirty).toBe(false);
+  });
+
+  it('marks transcript completion without inventing a revision identity or expected-old publication', () => {
+    const { actor, persist } = harness();
+    actor.send({
+      type: 'NEW_USER_TURN',
+      abandonedTurnIds: [],
+      atRevision: 0,
+      newTurnId: 'u1',
+      chatId: 'chat-a',
+    });
+    actor.send({ type: 'TURN_COMPLETED', turnId: 'u1', chatId: 'chat-a' });
+
+    const { graph } = actor.getSnapshot().context;
+    expect(graph.nodes['u1']).toMatchObject({
+      turnId: 'u1',
+      parentTurnIds: [],
+      branchName: 'main',
+      status: 'complete',
+    });
+    expect(graph.nodes['u1']?.revisionId).toBeUndefined();
+    expect(graph.nodes['u1']?.publication).toBeUndefined();
+    expect(graph.branches['main']).toEqual({ name: 'main' });
+    expect(persist).toHaveBeenLastCalledWith(expect.objectContaining({ graph }));
+  });
+
+  it('registers a self-parenting turn as a root and records the anomaly instead of persisting a cycle', () => {
+    const { actor } = harness();
+    actor.send({
+      type: 'NEW_USER_TURN',
+      abandonedTurnIds: [],
+      atRevision: 1,
+      newTurnId: 'u1',
+      chatId: 'chat-a',
+      parentTurnId: 'u1',
+    });
+
+    const { graph } = actor.getSnapshot().context;
+    expect(graph.nodes['u1']).toMatchObject({
+      turnId: 'u1',
+      parentTurnIds: [],
+      parentAnomaly: 'self-parent',
+      branchName: 'main',
+    });
+    expect(graph.nodes['u1']?.forkPointTurnId).toBeUndefined();
+    expect(graph.branches['main']).toEqual({ name: 'main' });
+  });
+
+  it('places simultaneous children of one parent on isolated branches', () => {
+    const { actor } = harness();
+    actor.send({
+      type: 'NEW_USER_TURN',
+      abandonedTurnIds: [],
+      atRevision: 1,
+      newTurnId: 'u2',
+      chatId: 'chat-a',
+      parentTurnId: 'u1',
+    });
+    actor.send({
+      type: 'NEW_USER_TURN',
+      abandonedTurnIds: [],
+      atRevision: 1,
+      newTurnId: 'u3',
+      chatId: 'chat-b',
+      parentTurnId: 'u1',
+    });
+
+    const { graph } = actor.getSnapshot().context;
+    expect(graph.nodes['u2']?.branchName).toBe('main');
+    expect(graph.nodes['u3']?.branchName).toMatch(/^explore\//);
+    expect(graph.nodes['u3']).toMatchObject({ parentTurnIds: ['u1'], forkPointTurnId: 'u1' });
+    expect(graph.nodes['u2']?.branchName).not.toBe(graph.nodes['u3']?.branchName);
+  });
+
+  it('retires a chat-only pending turn so later work does not become a false fork', () => {
+    const { actor } = harness();
+    actor.send({
+      type: 'NEW_USER_TURN',
+      abandonedTurnIds: [],
+      atRevision: 0,
+      newTurnId: 'chat-only',
+      chatId: 'chat-a',
+    });
+    actor.send({ type: 'DISCARD_PENDING_TURN', turnId: 'chat-only' });
+    actor.send({
+      type: 'NEW_USER_TURN',
+      abandonedTurnIds: [],
+      atRevision: 0,
+      newTurnId: 'u1',
+      chatId: 'chat-b',
+    });
+
+    const { graph } = actor.getSnapshot().context;
+    expect(graph.nodes['chat-only']).toBeUndefined();
+    expect(graph.nodes['u1']?.branchName).toBe('main');
+  });
+
+  it('persists an authoritative stale-head outcome without recalculating CAS in the projection', () => {
+    const { actor } = harness();
+    actor.send({
+      type: 'authoritativeRevisionFinalized',
+      result: finalization({
+        turnId: 'u2',
+        revisionId: 'rev-auth-2',
+        treeId: 'tree-auth-2',
+        publication: {
+          status: 'conflicted',
+          branchName: 'main',
+          expectedHeadRevisionId: 'rev-base',
+          actualHeadRevisionId: 'rev-auth-9',
+          proposedHeadRevisionId: 'rev-auth-2',
+        },
+      }),
+    });
+
+    const { graph } = actor.getSnapshot().context;
+    expect(graph.branches['main']?.headRevisionId).toBe('rev-auth-9');
+    expect(graph.branches['main']?.publication).toEqual({
+      status: 'conflicted',
+      branchName: 'main',
+      expectedHeadRevisionId: 'rev-base',
+      actualHeadRevisionId: 'rev-auth-9',
+      proposedHeadRevisionId: 'rev-auth-2',
+    });
+    expect(graph.nodes['u2']?.conflict).toEqual({
+      type: 'stale-head',
+      branchName: 'main',
+      expectedHeadRevisionId: 'rev-base',
+      actualHeadRevisionId: 'rev-auth-9',
+      proposedHeadRevisionId: 'rev-auth-2',
+    });
+
+    actor.send({
+      type: 'authoritativeRevisionFinalized',
+      result: finalization({
+        turnId: 'u2',
+        revisionId: 'rev-auth-2',
+        treeId: 'tree-auth-2',
+        publication: {
+          status: 'updated',
+          branchName: 'main',
+          expectedHeadRevisionId: 'rev-auth-9',
+          previousHeadRevisionId: 'rev-auth-9',
+          headRevisionId: 'rev-auth-2',
+        },
+      }),
+    });
+    expect(actor.getSnapshot().context.graph.nodes['u2']?.conflict).toBeUndefined();
+  });
+
+  it('records a background branch finalization without changing the viewed branch', () => {
+    const { actor } = harness({
+      initial: { headTurnId: 'u-viewed', supersededTurnIds: [], dirty: true },
+    });
+    actor.send({
+      type: 'authoritativeRevisionFinalized',
+      result: finalization({
+        turnId: 'u-background',
+        revisionId: 'rev-background',
+        treeId: 'tree-background',
+        branchName: 'exploration',
+        publication: {
+          status: 'updated',
+          branchName: 'exploration',
+          expectedHeadRevisionId: 'rev-base',
+          previousHeadRevisionId: 'rev-base',
+          headRevisionId: 'rev-background',
+        },
+      }),
+    });
+
+    const { graph } = actor.getSnapshot().context;
+    expect(graph.activeBranch).toBe('main');
+    expect(graph.branches['exploration']?.headRevisionId).toBe('rev-background');
+    expect(actor.getSnapshot().context).toMatchObject({ headTurnId: '', dirty: false });
+  });
+
+  it('keeps a merge conflict inspectable after terminal transcript cleanup removed the pending node', () => {
+    const { actor } = harness();
+    actor.send({
+      type: 'SET_REVISION_CONFLICT',
+      turnId: 'u-conflicted',
+      chatId: 'chat-a',
+      branchName: 'explore/conflict',
+      conflict: { type: 'merge', kind: 'text', paths: ['main.scad'] },
+    });
+
+    expect(actor.getSnapshot().context.graph.nodes['u-conflicted']).toMatchObject({
+      status: 'pending',
+      chatId: 'chat-a',
+      branchName: 'explore/conflict',
+      conflict: { type: 'merge', kind: 'text', paths: ['main.scad'] },
+    });
+  });
+
+  it('serializes and reloads every finalized identity, provenance, publication, path, and native Git field', () => {
+    const first = harness();
+    const result = finalization({
+      nativeGit: { status: 'stored', commitId: 'abcdef', objectFormat: 'sha1' },
+      changedPaths: ['z.ts', 'main.ts', 'main.ts'],
+    });
+    first.actor.send({ type: 'authoritativeRevisionFinalized', result });
+    first.actor.send({ type: 'TURN_COMPLETED', turnId: result.turnId, chatId: result.chatId });
+
+    const persisted = structuredClone(first.persist.mock.lastCall?.[0]);
+    expect(persisted?.graph?.nodes['u1']).toMatchObject({
+      revisionId: 'rev-auth-1',
+      baseRevisionId: 'rev-base',
+      treeId: 'tree-auth-1',
+      changedPaths: ['main.ts', 'z.ts'],
+      provenance: { runId: 'run-1' },
+      nativeGit: { status: 'stored', commitId: 'abcdef' },
+      publication: { status: 'updated', headRevisionId: 'rev-auth-1' },
+    });
+
+    const second = harness({ initial: persisted });
+    expect(second.actor.getSnapshot().context.graph).toEqual(persisted?.graph);
+  });
+
+  it('persists editable summaries, job associations, and merge-conflict metadata as serializable graph state', () => {
+    const { actor } = harness();
+    actor.send({
+      type: 'NEW_USER_TURN',
+      abandonedTurnIds: [],
+      atRevision: 0,
+      newTurnId: 'u1',
+      chatId: 'chat-a',
+    });
+    actor.send({ type: 'EDIT_SUMMARY', turnId: 'u1', summary: '  Stable bracket exploration  ' });
+    actor.send({ type: 'ASSOCIATE_JOB', turnId: 'u1', jobId: 'job-9' });
+    actor.send({ type: 'ASSOCIATE_JOB', turnId: 'u1', jobId: 'job-9' });
+    actor.send({
+      type: 'SET_REVISION_CONFLICT',
+      turnId: 'u1',
+      conflict: { type: 'merge', kind: 'modify-delete', paths: ['main.ts'] },
+    });
+
+    const { graph } = actor.getSnapshot().context;
+    expect(graph.nodes['u1']).toMatchObject({
+      editedSummary: 'Stable bracket exploration',
+      jobIds: ['job-9'],
+      conflict: { type: 'merge', kind: 'modify-delete', paths: ['main.ts'] },
+    });
+    expect(structuredClone(graph)).toEqual(graph);
+    expect(() => JSON.stringify(graph)).not.toThrow();
   });
 });

@@ -131,7 +131,9 @@ function RevisionGraphMetadata({
   const displayedSummary = node.summary.edited ?? node.summary.generated;
   const [summary, setSummary] = useState(displayedSummary);
   useEffect(() => {
-    setSummary(displayedSummary);
+    queueMicrotask(() => {
+      setSummary(displayedSummary);
+    });
   }, [displayedSummary]);
 
   return (

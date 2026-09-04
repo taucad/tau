@@ -8,26 +8,27 @@
  * under this graph would only ever surface as the client's init timeout. Behind
  * a dynamic import the same failure is a rejected promise the entry can report.
  *
+ * What remains here is only the browser half: the engine's browser
+ * registration, the bridge-backed filesystems, the kernel worker, and the
+ * request queue. Discovery, model loading and result projection are
+ * `@taucad/agent-tools/geospec`, which the daemon runs too.
+ *
  * @module
  */
 
 import '@taucad/geospec-engine/register';
+import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import type { FsLike } from '@taucad/runtime/filesystem';
 import type { FileStat } from '@taucad/types';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { assertRootedPath } from '@taucad/utils/path';
-import { discoverGeoSpecFiles } from 'geospec/runner';
 import type { GeoSpecDiscoveryFileSystem } from 'geospec/runner';
 import { createGeoSpecWebRunner } from 'geospec/runner/web';
 import type { GeoSpecWebRunnerOptions } from 'geospec/runner/web';
-import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
-import { GeoSpecModelLoadError, loadModel } from 'geospec/model';
-import type { GeoSpecModelLoader } from 'geospec/model';
 import { z } from 'zod';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
-import { runnerResultToTestModelOutput } from '#lib/geospec-rpc-result.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.definition.js';
 import type {
   GeoSpecRunnerWorkerInitializeRequest,
@@ -100,14 +101,6 @@ function createDiscoveryFileSystem(proxy: ProjectFileSystemBridge): GeoSpecDisco
   };
 }
 
-const hasGeoSpecSelectionFilters = (args: GeoSpecRunnerWorkerRunRequest['args']): boolean =>
-  Boolean(
-    (args.files !== undefined && args.files.length > 0) ||
-    (args.include !== undefined && args.include.length > 0) ||
-    (args.exclude !== undefined && args.exclude.length > 0) ||
-    (args.testNamePattern ?? '') !== '',
-  );
-
 const createProjectFileSystemProxy = async (port: MessagePort): Promise<ProjectFileSystemBridge> => {
   const { createTransferredFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
   const proxy = createTransferredFileSystemBridgeProxy(port);
@@ -146,23 +139,12 @@ const formatRuntimeConfigError = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
-const isFatalRuntimeBootError = (error: unknown): boolean => {
-  if (error instanceof GeoSpecModelLoadError) {
-    return error.diagnostics.some((diagnostic) => diagnostic.code === 'RUNTIME_UNAVAILABLE');
-  }
-  return false;
-};
-
-type WorkerModelState = {
-  fatalModelLoadError?: Error;
-};
-
 type WorkerSession = {
   sessionId: string;
   fileSystem: ProjectFileSystemBridge;
   runtimeClient: ReturnType<typeof createRuntimeClient>;
   runner: ReturnType<typeof createGeoSpecWebRunner>;
-  modelState: WorkerModelState;
+  resetFatalModelLoadError: () => void;
 };
 
 type QueuedRun = {
@@ -227,48 +209,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
         runtimeConfig: runtimeConfigResult.data,
       }),
     );
-    const modelState: WorkerModelState = {};
-    const modelLoader: GeoSpecModelLoader = async (input) => {
-      if (modelState.fatalModelLoadError) {
-        throw modelState.fatalModelLoadError;
-      }
-      const load = async () => {
-        if ('source' in input) {
-          return loadModel(input);
-        }
-        if ('code' in input) {
-          const code = Object.fromEntries(
-            Object.entries(input.code).map(([file, content]) => [assertRootedPath(file), content]),
-          );
-          return loadModel({
-            ...input,
-            code,
-            file: assertRootedPath(input.file),
-            projectPath: '',
-            runtime: runtimeClient,
-          });
-        }
-        const file = assertRootedPath(input.file);
-        return loadModel({
-          ...input,
-          file,
-          projectPath: '',
-          runtime: runtimeClient,
-        });
-      };
-
-      if ('source' in input) {
-        return load();
-      }
-      try {
-        return await load();
-      } catch (error) {
-        if (isFatalRuntimeBootError(error)) {
-          modelState.fatalModelLoadError = error instanceof Error ? error : new Error(String(error));
-        }
-        throw error;
-      }
-    };
+    const { modelLoader, resetFatalError } = createProjectModelLoader({ runtime: runtimeClient });
     runner = createGeoSpecWebRunner({
       filesystem: createBridgeVmFileSystem(fileSystem),
       modelLoader,
@@ -278,7 +219,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       fileSystem,
       runtimeClient,
       runner,
-      modelState,
+      resetFatalModelLoadError: resetFatalError,
     };
     session = activeSession;
     workerScope.postMessage({ type: 'initialized', requestId: request.requestId, sessionId: request.sessionId });
@@ -303,27 +244,15 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
     return;
   }
 
-  delete activeSession.modelState.fatalModelLoadError;
+  // A new run gets a fresh chance at the runtime; a boot failure only latches
+  // for the rest of the run that observed it.
+  activeSession.resetFatalModelLoadError();
 
   try {
-    const discovery = await discoverGeoSpecFiles({
-      filesystem: createDiscoveryFileSystem(activeSession.fileSystem),
-      projectPath: '',
-      files: request.args.files,
-      include: request.args.include,
-      exclude: request.args.exclude,
-    });
-    const entryPaths = discovery.files;
-    const runResult: GeoSpecRunnerResult =
-      entryPaths.length === 0
-        ? { success: false, passed: 0, failed: 1, selectedTests: 0, files: [] }
-        : await activeSession.runner.run({
-            files: entryPaths,
-            testNamePattern: request.args.testNamePattern,
-            testTimeout: request.args.testTimeout,
-          });
-    const output = runnerResultToTestModelOutput(runResult, entryPaths, {
-      filtersApplied: hasGeoSpecSelectionFilters(request.args),
+    const output = await runGeoSpecTests({
+      discovery: createDiscoveryFileSystem(activeSession.fileSystem),
+      runner: activeSession.runner,
+      args: request.args,
     });
     workerScope.postMessage({
       type: 'result',

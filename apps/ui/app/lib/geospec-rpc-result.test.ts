@@ -115,4 +115,39 @@ describe('runnerResultToTestModelOutput', () => {
       }),
     ]);
   });
+
+  it('should not treat arrays with record-like properties as diagnostic detail records', () => {
+    const details = Object.assign([], {
+      issues: [{ code: 'SHOULD_NOT_SURFACE', message: 'array property' }],
+    });
+    const result: GeoSpecRunnerResult = {
+      success: false,
+      passed: 0,
+      failed: 1,
+      selectedTests: 1,
+      files: [
+        {
+          file: 'main.geospec.ts',
+          result: {
+            success: true,
+            passed: false,
+            bundle: emptyBundle(),
+            tests: [
+              {
+                suite: [],
+                name: 'array details',
+                status: 'failed',
+                assertions: [],
+                diagnostics: [{ code: 'TEST', severity: 'error', message: 'Top-level issue', details }],
+              },
+            ],
+          },
+        },
+      ],
+    };
+
+    const output = runnerResultToTestModelOutput(result, ['main.geospec.ts']);
+
+    expect(output.failures[0]?.reason).toBe('Top-level issue');
+  });
 });

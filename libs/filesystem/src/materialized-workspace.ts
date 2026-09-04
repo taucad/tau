@@ -72,6 +72,8 @@ type PersistedWorkspaceIdentity = Readonly<{
   version: 1;
   workspaceId: string;
   baseRevisionId: string;
+  /** `local` workspaces bind a caller-owned root and materialize no tree. */
+  mode?: 'local';
   metrics?: MaterializedWorkspaceMetrics;
 }>;
 
@@ -375,6 +377,77 @@ export class MaterializedWorkspaceAuthority {
         await removeTree(this.#filesystem, workspaceDirectory);
         throw error;
       }
+    });
+  }
+
+  /**
+   * Bind a caller-owned writable root as this workspace's tree instead of
+   * copying one. Only `identity.json` and `metadata/` are materialized, so the
+   * workspace writes straight through to the caller's filesystem and
+   * finalization's three-way merge degenerates to a no-op. Idempotent: an
+   * existing identity record is adopted (not rewritten), which is how a claim
+   * reclaims its binding after a reload with the base tree recovered from the
+   * revision authority.
+   */
+  public async bindInPlace(
+    input: MaterializeWorkspaceInput & { readonly filesystem: RootedFileSystem },
+  ): Promise<MaterializedWorkspace> {
+    return this.#resourceQueue.queueFor(`materialized-workspace:${input.workspaceId}`, async () => {
+      if (this.#states.get(input.workspaceId)?.active) {
+        throw new MaterializedWorkspaceError('WORKSPACE_EXISTS', `Workspace is already open: ${input.workspaceId}`);
+      }
+      const workspaceDirectory = joinRelativePath(this.#storageDirectory, input.workspaceId);
+      const identityPath = joinRelativePath(workspaceDirectory, 'identity.json');
+      const metadataDirectory = joinRelativePath(workspaceDirectory, 'metadata');
+      const startedAt = this.#now();
+      const persisted = (await this.#filesystem.exists(identityPath))
+        ? (JSON.parse(await this.#filesystem.readFile(identityPath, 'utf8')) as Partial<PersistedWorkspaceIdentity>)
+        : undefined;
+      if (persisted !== undefined && (persisted.version !== 1 || persisted.workspaceId !== input.workspaceId)) {
+        throw new MaterializedWorkspaceError(
+          'WORKSPACE_DISPOSED',
+          `Workspace identity is invalid: ${input.workspaceId}`,
+        );
+      }
+      await this.#filesystem.mkdir(metadataDirectory, { recursive: true });
+      const identity: MaterializedWorkspaceIdentity = Object.freeze({
+        workspaceId: input.workspaceId,
+        baseRevisionId:
+          persisted?.baseRevisionId === undefined ? input.baseRevisionId : revisionId(persisted.baseRevisionId),
+      });
+      const metrics = Object.freeze(
+        persisted?.metrics ?? {
+          files: input.tree.size,
+          bytes: input.tree.byteLength,
+          durationMs: Math.max(0, this.#now() - startedAt),
+        },
+      );
+      if (persisted === undefined) {
+        await this.#filesystem.writeFile(
+          identityPath,
+          JSON.stringify({
+            version: 1,
+            workspaceId: input.workspaceId,
+            baseRevisionId: input.baseRevisionId,
+            mode: 'local',
+            metrics,
+          } satisfies PersistedWorkspaceIdentity),
+        );
+      }
+      const state: WorkspaceCapabilityState = { active: true, inFlight: new Set(), watches: new Set() };
+      this.#states.set(input.workspaceId, state);
+      return Object.freeze({
+        identity,
+        baseTree: input.tree,
+        filesystem: input.filesystem,
+        metadata: createWorkspaceFileSystem({
+          source: this.#filesystem,
+          prefix: metadataDirectory,
+          identity,
+          state,
+        }),
+        metrics,
+      });
     });
   }
 

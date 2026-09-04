@@ -10,12 +10,17 @@
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@taucad/agent-host": "workspace:*",
+    "@taucad/agent-tools": "workspace:*",
+    "@taucad/chat": "workspace:*",
+    "@taucad/mcp": "workspace:*",
     "@msgpack/msgpack": "catalog:",
     "@taucad/host": "workspace:*",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
+    "@taucad/geospec-engine": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",

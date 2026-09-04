@@ -6,6 +6,23 @@
   "tags": ["scope:shared", "type:e2e"],
   "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine"],
   "targets": {
+    "test": {
+      "inputs": ["default", "^default", { "env": "TAU_EXAMPLE_PATTERN" }, { "env": "TAU_GEOSPEC_CACHE" }]
+    },
+    "example-health": {
+      "command": "vitest run src/tau-examples-health.test.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "inputs": ["default", "^default", { "env": "TAU_EXAMPLE_PATTERN" }, { "env": "TAU_GEOSPEC_CACHE" }]
+    },
+    "benchmark-example-health": {
+      "command": "tsx scripts/benchmark-example-health.mts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
     "performance-gate": {
       "command": "vitest run src/benchmarks/wasm-size.test.ts src/benchmarks/benchmark-comparator.test.ts src/benchmarks/native-speedup.bench.test.ts",
       "options": {

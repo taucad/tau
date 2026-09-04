@@ -609,6 +609,47 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
 });
 
 describe('createWorkspaceMirror', () => {
+  it('excludes only exact rooted paths before stat or read, preserving nested assets and context', async () => {
+    const filesystem = createMockFileSystem({
+      readdirResult: (directory) =>
+        directory === '' ? ['thumbnail.webp', 'nested', 'tau.json', 'package.json'] : ['thumbnail.webp'],
+      readFileResult: 'x',
+    });
+    filesystem.mocks.lstat.mockImplementation(async (path: string) => {
+      if (path === 'thumbnail.webp') {
+        throw new Error('Generated thumbnail changed');
+      }
+      return path === 'nested'
+        ? { type: 'dir', size: 0, mtimeMs: 0 }
+        : { type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' };
+    });
+    const options = { temporaryPrefix: 'tau-mirror-test-', displayName: 'Test', excludedPaths: ['thumbnail.webp'] };
+    const mirror = await createWorkspaceMirror(options);
+    try {
+      await expect(mirror.sync(filesystem)).resolves.toEqual(['nested/thumbnail.webp', 'package.json', 'tau.json']);
+      expect(filesystem.mocks.readFile.mock.calls).toEqual([
+        ['nested/thumbnail.webp', undefined],
+        ['package.json', undefined],
+        ['tau.json', undefined],
+      ]);
+    } finally {
+      await mirror.cleanup();
+    }
+  });
+
+  it.each(['lstat', 'readFile'] as const)('propagates unrelated %s failures', async (operation) => {
+    const filesystem = createMockFileSystem({ readdirResult: ['main.cs'], readFileResult: 'x' });
+    filesystem.mocks.lstat.mockResolvedValue({ type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' });
+    const error = new Error('Workspace unavailable');
+    filesystem.mocks[operation].mockRejectedValue(error);
+    const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
+    try {
+      await expect(mirror.sync(filesystem)).rejects.toBe(error);
+    } finally {
+      await mirror.cleanup();
+    }
+  });
+
   it('projects sorted files, skips exclusions, updates, deletes, and cleans up', async () => {
     const exitListeners = process.listenerCount('exit');
     const interruptListeners = process.listenerCount('SIGINT');

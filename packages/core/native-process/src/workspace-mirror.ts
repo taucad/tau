@@ -20,6 +20,8 @@ export type WorkspaceMirrorOptions = {
   readonly displayName: string;
   readonly excludedDirectories?: readonly string[];
   readonly excludedFileSuffixes?: readonly string[];
+  /** Exact workspace-relative paths excluded before metadata or content reads. */
+  readonly excludedPaths?: readonly string[];
 };
 
 /** Private physical projection owned by one native kernel context. @public */
@@ -33,6 +35,7 @@ export type WorkspaceMirror = {
 
 /** Create a bounded, disposable physical projection of Tau's rooted filesystem. @public */
 export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Promise<WorkspaceMirror> => {
+  const excludedPaths = new Set((options.excludedPaths ?? []).map((path) => assertRootedPath(path)));
   const temporaryRoot = await mkdtemp(join(tmpdir(), options.temporaryPrefix));
   const rootPath = await realpath(temporaryRoot);
   const workspacePath = join(rootPath, 'workspace');
@@ -62,6 +65,9 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
       const names = await filesystem.readdir(directory);
       for (const name of names.toSorted()) {
         const path = assertRootedPath(joinRelativePath(directory, name));
+        if (excludedPaths.has(path)) {
+          continue;
+        }
         const canonicalName = path.toLocaleLowerCase('en-US');
         const collision = folded.get(canonicalName);
         if (collision && collision !== path) {

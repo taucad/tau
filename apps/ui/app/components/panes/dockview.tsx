@@ -50,6 +50,7 @@ export const dockviewStyleOverrides = cn(
   // ── Drag & drop ──
   '[--dv-drag-over-background-color:color-mix(in_oklch,var(--primary),transparent_80%)]',
   '[--dv-drag-over-border-color:var(--primary)]',
+  '[&_.dv-drop-target-selection]:[border-radius:var(--dv-tab-border-radius)]',
   // ── Sash (resize handles) ──
   '[--dv-sash-color:transparent]',
   '[--dv-active-sash-color:var(--primary)]',

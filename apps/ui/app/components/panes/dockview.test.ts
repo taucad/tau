@@ -482,6 +482,16 @@ describe('dockviewStyleOverrides', () => {
     expect(dockviewStyleOverrides).toContain(`${dividerSelector}:!bg-border`);
     expect(dockviewStyleOverrides).toContain('[&_.dv-tabs-container]:border-b-border');
   });
+
+  it('uses the native green drop overlay with the standard tab radius', () => {
+    expect(dockviewStyleOverrides).toContain('[--dv-drag-over-border-color:var(--primary)]');
+    expect(dockviewStyleOverrides).toContain(
+      '[--dv-drag-over-background-color:color-mix(in_oklch,var(--primary),transparent_80%)]',
+    );
+    expect(dockviewStyleOverrides).toContain(
+      '[&_.dv-drop-target-selection]:[border-radius:var(--dv-tab-border-radius)]',
+    );
+  });
 });
 
 describe('Dockview', () => {

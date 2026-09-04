@@ -18,4 +18,11 @@ describe('detectEdges', () => {
 
     expect(detectEdges(positions, indices).positions).toHaveLength(5 * 2 * 3);
   });
+
+  it('does not weld metre-space vertices beyond the pre-migration physical tolerance', () => {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1e-9, 0, 0, 1e-9, 0, 1, -1, 0]);
+    const indices = new Uint32Array([0, 1, 2, 3, 4, 5]);
+
+    expect(detectEdges(positions, indices).positions).toHaveLength(6 * 2 * 3);
+  });
 });

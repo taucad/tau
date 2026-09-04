@@ -61,3 +61,6 @@ repos/**/*
 **/graphify-out/
 
 packages/geospec-engine/provenance.json
+
+# Codex spike build scratch
+.codex-spike-build/

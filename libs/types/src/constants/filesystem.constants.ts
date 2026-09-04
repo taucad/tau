@@ -9,7 +9,7 @@
  *
  * @public
  */
-export const filesystemBackends = ['indexeddb', 'opfs', 'webaccess', 'memory'] as const;
+export const filesystemBackends = ['indexeddb', 'opfs', 'webaccess', 'memory', 'node'] as const;
 
 /**
  * Filesystem backend metadata.
@@ -34,5 +34,9 @@ export const filesystemBackendMeta = {
   memory: {
     label: 'Memory',
     description: 'Temporary in-memory storage. Data is cleared on page reload.',
+  },
+  node: {
+    label: 'This computer',
+    description: 'On your disk.',
   },
 } as const satisfies Record<(typeof filesystemBackends)[number], { label: string; description: string }>;

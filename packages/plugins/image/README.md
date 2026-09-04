@@ -47,7 +47,7 @@ Hand the definition to a client — `createNodeClient`, `createRuntimeWorker`, o
 | `imageEdgeSchemas`   | zod schemas        | size, background, camera, annotations, line width, and single or batch views    |
 | `toNanorasterCamera` | camera adapter     | map a renderer-neutral `CameraState` to the image renderer's fixed camera       |
 
-One preset, `default`, selecting `transcoders.export`.
+One preset, `default`, selecting `transcoders.export` and `transcoders.svg`.
 
 WebP defaults to `quality: 1`, which is lossless. Set a value below `1` for lossy output, for example
 `exportOptions: { quality: 0.9 }`. PNG does not accept quality; JPEG defaults to `0.92`.

@@ -3,7 +3,12 @@ title: 'Lint Policy'
 description: 'Hybrid oxlint + ESLint architecture, performance principles, rule-specific decisions, and caching for the Tau monorepo.'
 status: active
 created: '2026-03-04'
-updated: '2026-03-05'
+updated: '2026-09-04'
+related:
+  - nx.json
+  - .oxlintrc.json
+  - eslint.config.mjs
+  - .oxfmtrc.json
 ---
 
 # Lint Policy
@@ -12,7 +17,7 @@ Linting architecture and performance best practices for this monorepo.
 
 ## Rationale
 
-A hybrid oxlint-first setup delivers fast feedback in the editor while ESLint handles rules that require Nx project graph or cross-file resolution. Separating formatting (oxfmt) from linting avoids duplicate work and keeps CI fast. Performance principles (no TypeScript duplication, CI-only expensive rules, aggressive caching) prevent lint from becoming a bottleneck.
+A hybrid oxlint-first setup delivers fast feedback in the editor while ESLint handles rules that require Nx project graph or cross-file resolution. Separating formatting (oxfmt) from linting avoids duplicate work and keeps CI fast. Avoid duplicate rules and profile expensive checks before changing their scope.
 
 ## Hybrid oxlint + ESLint architecture
 
@@ -20,8 +25,8 @@ This project uses a **hybrid linting** setup where **oxlint** runs first as a fa
 
 ### How it works
 
-1. `pnpm nx lint <project>` runs `oxlint . && eslint .` (configured in `nx.json` `targetDefaults`).
-2. `eslint-plugin-oxlint` (last entry in `eslint.config.mjs`) reads `.oxlintrc.json` and disables every ESLint rule that oxlint handles natively, so ESLint only evaluates residual rules.
+1. `pnpm nx lint <project>` chains oxlint and ESLint through `nx.json` `targetDefaults`. `--files=<path>` passes the same file selection to both tools; oxlint receives the workspace-root `.oxlintrc.json` explicitly.
+2. `.oxlintrc.json` owns native and JavaScript-plugin rules. `eslint.config.mjs` explicitly configures the remaining ESLint rules; it does not load `eslint-plugin-oxlint` or automatically disable overlapping rules.
 3. In VS Code, the Oxc extension provides real-time oxlint diagnostics, formatting via oxfmt, and the ESLint extension handles residual rules. Both support fix-on-save.
 4. CI (`pnpm nx affected -t lint`) chains both tools transparently via the Nx lint target.
 
@@ -32,7 +37,7 @@ This project uses a **hybrid linting** setup where **oxlint** runs first as a fa
 - ESLint core rules (curly, no-restricted-imports, etc.)
 - `unicorn/*` rules (native) + `unicorn-js/*` gap rules via jsPlugins (better-regex, prevent-abbreviations, etc.)
 - `@typescript-eslint/*` rules (including type-aware via tsgolint)
-- `react/*` rules
+- `react/*` rules plus `react-js/*` gaps through jsPlugins
 - `import/*` rules where natively supported (no-duplicates, no-cycle, no-self-import, etc.)
 - `jsdoc/*` rules (native) + `jsdoc-js/*` gap rules via jsPlugins (require-jsdoc, require-description, etc.)
 - `promise/*` and `node/*` rules
@@ -49,14 +54,15 @@ This project uses a **hybrid linting** setup where **oxlint** runs first as a fa
 
 **ESLint** (retained, slim):
 
-- `@typescript-eslint/naming-convention` (not yet in tsgolint)
+- `@typescript-eslint/naming-convention`
 - `@nx/enforce-module-boundaries` (requires Nx project graph)
 - `import-x/no-extraneous-dependencies` (monorepo package.json resolution)
-- `import-x/extensions` (enforce `.js` extension)
-- `import-x/consistent-type-specifier-style`
+- `@typescript-eslint/member-ordering`
 - `@typescript-eslint/explicit-member-accessibility`
 - `eslint-plugin-max-params-no-constructor`
-- `react/boolean-prop-naming` (custom regex not in oxlint)
+- `object-shorthand`, identifier restrictions, and scoped architecture rules
+
+Import extensions and type-specifier style are configured in oxlint. Treat the checked-in rule configurations as the exact inventory; this list summarizes ownership.
 
 ### jsPlugins (oxlint JavaScript plugin API)
 
@@ -68,15 +74,15 @@ Prefer oxlint's native support when available. Check [oxlint rule reference](htt
 
 ### Future: drop ESLint entirely
 
-When tsgolint lands `naming-convention` (PR #664), the remaining ESLint-only rules shrink significantly. At that point, ESLint can be reduced to running only Nx/import-specific rules or replaced entirely.
+Reassess ESLint when oxlint supports the remaining rules with equivalent behavior. An upstream implementation alone is not enough: verify compatibility with Tau's installed versions and scoped configurations before migrating a rule.
 
 ## Performance principles
 
 1. **Formatting is not linting.** Oxfmt handles formatting via `oxfmt --check` (CI) and format-on-save (editor). Formatting rules are disabled in ESLint.
 2. **Don't duplicate TypeScript.** Disable any ESLint rule whose check is already performed by `tsc`.
-3. **Expensive rules run at CI only.** Rules that resolve the dependency graph or do cross-file analysis belong in CI, not in the editor's real-time feedback loop.
+3. **Profile expensive rules.** Keep editor latency and CI coverage in view; do not describe a rule as CI-only unless configuration actually gates it.
 4. **No unused plugins.** Disable rule sets from frameworks not used by the project (e.g. Ava rules when using Vitest).
-5. **Cache aggressively.** Always pass `--cache` to ESLint in local and CI invocations.
+5. **Use the Nx target.** Keep cache inputs aligned with rule configuration. The shared lint command currently does not add ESLint's `--cache` flag.
 
 ## Specific rules
 
@@ -84,47 +90,41 @@ When tsgolint lands `naming-convention` (PR #664), the remaining ESLint-only rul
 
 Prettier has been fully replaced by **oxfmt** (Oxc formatter). The `eslint-plugin-prettier` integration that ran Prettier as an ESLint rule has been removed. Formatting is now handled entirely by oxfmt via the Oxc VS Code extension (format-on-save) and `oxfmt --check` in CI.
 
-### `import-x/namespace` — DISABLED (redundant with TypeScript)
+### `import/namespace` — DISABLED (redundant with TypeScript)
 
-TypeScript already validates namespace imports. Enabling this rule forces `import-x` to do its own module resolution and AST parsing — pure overhead.
+TypeScript already validates namespace imports. The native oxlint rule is explicitly disabled in `.oxlintrc.json`; keep the equivalent ESLint check disabled too.
 
 Source: [typescript-eslint import plugin recommendations](https://typescript-eslint.io/troubleshooting/typed-linting/performance/#eslint-plugin-import)
 
-### `import-x/no-named-as-default-member` — DISABLED (redundant with TypeScript)
+### Default-export member checks — OXLINT
 
-TypeScript checks default-export member access. Same double-resolution cost as above.
+`import/no-named-as-default-member` and `import/no-named-as-default` are enabled as errors in `.oxlintrc.json`. Do not add duplicate ESLint equivalents.
 
-### `import-x/no-cycle` — CI-ONLY
+### `import/no-cycle` — OXLINT
 
-Builds a full dependency graph with O(N × M²) complexity. Has caused 3× regressions between minor versions and OOM on large monorepos. Run in CI pipelines, never in the editor.
+Enabled as an error with `ignoreExternal: true` in `.oxlintrc.json`. The rule runs through the shared lint target; it is not gated to CI. Profile the installed implementation before changing its scope.
 
 Source: [import plugin no-cycle performance](https://github.com/import-js/eslint-plugin-import/issues/3047)
 
-### `import-x/no-named-as-default` — CI-ONLY
-
-Requires cross-file resolution. Safe to defer to CI.
-
-Source: [typescript-eslint import plugin recommendations](https://typescript-eslint.io/troubleshooting/typed-linting/performance/#eslint-plugin-import)
-
 ### `ava/*` rules — DISABLED
 
-XO enables 24 Ava test-runner rules by default. This project uses Vitest, not Ava. These rules add plugin initialisation cost and per-file evaluation for no benefit.
+This project uses Vitest, not Ava. Do not load Ava rule sets.
 
-### `import-x/extensions` — MONITOR
+### `import/extensions` — OXLINT
 
-Performs disk lookups to resolve each import and check for file-extension presence. Currently necessary because the project enforces `.js` extensions. If `moduleResolution` is switched to `nodenext`/`node16`, TypeScript enforces extensions natively and this rule can be dropped.
+The `.js` extension rule lives in `.oxlintrc.json`. Reassess redundant checks only after verifying the behavior of the workspace's actual TypeScript module-resolution configuration.
 
 ## Typed linting
 
-- Use `parserOptions.projectService: true` (already configured). This is the recommended approach in typescript-eslint v8+.
+- Oxlint enables `options.typeAware: true`; ESLint configures `parserOptions.projectService` with a scoped default-project allowlist.
 - Keep tsconfig `include` patterns narrow. Broad globs like `**/*` cause TypeScript to pre-parse build artifacts.
 - If linting is memory-constrained, increase the semi-space: `NODE_OPTIONS=--max-semi-space-size=256`.
 
 ## Caching
 
-- Local: `eslint --cache` stores results in `.eslintcache`. Only changed files are re-linted.
-- CI: Use `--cache` with cache restore between runs (e.g. via Nx's computation cache or GitHub Actions cache).
-- Cache location: default is `.eslintcache` in the working directory. Add to `.gitignore`.
+- The Nx lint target declares inputs for the ESLint/oxlint configs, custom rules, and tool versions in `nx.json`.
+- ESLint's file cache is a separate opt-in for direct profiling runs (`eslint --cache`). It is not enabled by the shared lint command.
+- If enabling that file cache, ignore its `.eslintcache` artifact and include configuration changes in invalidation checks.
 
 ## Profiling
 

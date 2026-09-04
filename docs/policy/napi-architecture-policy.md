@@ -1,20 +1,21 @@
 ---
 title: 'NAPI Architecture Policy'
-description: 'Rules for configuring, building, packaging, testing, and publishing first-party Rust Node-API addons with NAPI-RS.'
+description: 'Rules for configuring, building, packaging, testing, and publishing first-party Node-API addons with NAPI-RS.'
 status: active
 created: '2026-08-22'
-updated: '2026-08-23'
+updated: '2026-09-04'
 related:
   - docs/policy/npm-policy.md
   - docs/policy/release-policy.md
   - docs/policy/testing-policy.md
   - docs/policy/compatibility-policy.md
+  - docs/research/libassimp-native-node-addon-overhaul-blueprint.md
   - docs/research/nanoraster-native-architecture-publishing-blueprint.md
 ---
 
 # NAPI Architecture Policy
 
-Internal reference for first-party repositories that distribute Rust as Node-API addons through NAPI-RS. This policy covers target authority, generated loaders and packages, cross-platform evidence, and multi-package publication. The general package and CI rules in `docs/policy/npm-policy.md` and `docs/policy/release-policy.md` still apply.
+Internal reference for first-party repositories that distribute Node-API addons through NAPI-RS. The native producer may be Rust or another language, such as C++, when the repository uses NAPI-RS's packaging APIs. This policy covers target authority, generated loaders and packages, cross-platform evidence, and multi-package publication. The general package and CI rules in `docs/policy/npm-policy.md` and `docs/policy/release-policy.md` still apply.
 
 ## Rationale
 
@@ -22,7 +23,7 @@ A native Node package is a coordinated release of one JavaScript root package an
 
 ## Scope
 
-This policy applies when a Tau-managed repository publishes one or more Rust `cdylib` artifacts as Node-API `.node` addons with `@napi-rs/cli`.
+This policy applies when a Tau-managed repository publishes one or more Node-API `.node` addons and uses `@napi-rs/cli` to generate their loader and platform-package release set. Rust `cdylib` and externally compiled addons share the packaging, evidence, and publication rules below. Language-specific compiler, linker, sanitizer, and lint rules apply only to producers that use that language.
 
 It does not turn other artifact classes into N-API targets. Browser Wasm, WASI components, iOS frameworks, Electron universal applications, and standalone CLI binaries have different loaders or deployment contracts and require separate release paths.
 
@@ -30,7 +31,7 @@ It does not turn other artifact classes into N-API targets. Browser Wasm, WASI c
 
 ### 1. Make `package.json.napi` the target authority
 
-Declare the binary name, platform-package naming scheme, and complete Rust target list once under the root package's `napi` configuration. Pin `@napi-rs/cli` to an exact reviewed version.
+Declare the binary name, platform-package naming scheme, and complete native target list once under the root package's `napi` configuration. Pin `@napi-rs/cli` to an exact reviewed version.
 
 Derive generated package directories, platform manifests, root `optionalDependencies`, inventory expectations, and documentation fixtures from that target set. Do not keep a second handwritten architecture list when generation can provide it.
 
@@ -66,7 +67,7 @@ The incorrect example combines a floating release tool with a source-maintained 
 
 ### 2. Use the NAPI-RS-generated native loader
 
-Configure `napi build` to generate the ESM loader and declarations at a stable build path:
+Generate the ESM loader and declarations at a stable build path. Rust producers may configure `napi build` directly:
 
 ```sh
 pnpm napi build --esm --platform \
@@ -76,6 +77,8 @@ pnpm napi build --esm --platform \
 ```
 
 `--js` and `--dts` resolve relative to `--output-dir`. Generate into a source-adjacent ignored directory and copy the loader into the build output after any `clean` step; ship the loader, not the declarations (they are a build input). The loader is a generic template covering every NAPI-RS platform — it is not filtered by `napi.targets`, it bakes the root version in at build time, and its runtime version check is opt-in through `NAPI_RS_ENFORCE_VERSION_CHECK`. Treat it as build output. Do not hand-edit it or reproduce its OS, CPU, libc, colocated-addon, optional-package, or native-load-error logic in application source.
+
+A non-Rust producer must call the pinned CLI package's public `writeJsBinding` API with the same binary name, package name, version, and identifiers. It must not invoke a dummy Rust build or copy the generated template into source.
 
 The loader imports Node builtins and has no browser-safe mode. A package that also serves browsers must keep the loader out of browser resolution: give the Node path its own entry behind the `node` export condition and keep the default entry free of Node builtins and of any reference to the loader. Advise server-side bundler users to externalize the package.
 
@@ -125,7 +128,7 @@ Copy any repository file NAPI-RS does not generate, such as the physical license
 
 ### 4. Give every target an explicit build recipe
 
-Every target must have one reviewed matrix row that records its target triple, toolchain, runner, and evidence tier. Prefer maintained NAPI-RS recipes.
+Every target must have one reviewed matrix row that records its target triple, toolchain, runner, and evidence tier. Prefer maintained NAPI-RS recipes for Rust producers.
 
 | Target family                 | Build approach                                                                                                                             |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -137,7 +140,7 @@ Every target must have one reviewed matrix row that records its target triple, t
 | Windows ia32 MSVC             | Host cross-link plus NAPI-RS's documented `CARGO_PROFILE_RELEASE_LTO=false` and `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=32` for that row only |
 | Exceptional target            | Documented one-off recipe with a blocking check                                                                                            |
 
-Pin third-party actions and auxiliary toolchains according to repository workflow policy. Do not restore deprecated NAPI-RS build images or pay for larger runners when standard public-repository runners and maintained cross-build paths suffice. Copy another project's row-specific environment (for example a `CFLAGS` linker override) only when the dependency graph actually compiles C for that target; record the `cargo tree` evidence either way.
+For a non-Rust producer, replace `napi build` and `cargo tree` evidence with its target-explicit native build and linker/dependency evidence; do not add a Rust build solely to satisfy this table. Pin third-party actions and auxiliary toolchains according to repository workflow policy. Do not restore deprecated NAPI-RS build images or pay for larger runners when standard public-repository runners and maintained cross-build paths suffice. Copy another project's row-specific environment (for example a `CFLAGS` linker override) only when the dependency graph actually compiles C for that target; record the dependency evidence either way.
 
 Successful compilation proves only that a target can build. It does not prove the addon loads, finds a graphics or system backend, or produces correct results.
 

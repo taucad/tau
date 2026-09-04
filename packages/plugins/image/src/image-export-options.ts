@@ -4,19 +4,24 @@ import { z } from 'zod';
 import type { FileExtension } from '@taucad/runtime/types';
 import {
   renderImageAnnotatedMinDimension,
+  renderImageAmbientRange,
   renderImageBackgroundPattern,
   renderImageDimensionRange,
+  renderImageExposureRange,
   renderImageLabelMaxLength,
   renderImageLabelPattern,
+  renderImageLightColorRange,
   renderImageLineWidthRange,
   renderImageMarginRange,
+  renderImageMaxLights,
+  renderImageMaxSections,
   renderImageQualityRange,
   renderImageVerticalFieldOfViewRange,
   renderImageViewIdPattern,
   renderImageZoomRange,
 } from 'nanoraster';
 
-const imageMaxSections = 6;
+const minimumVectorLength = 1e-6;
 const worldAxisSchema = z.enum(['+x', '-x', '+y', '-y', '+z', '-z']);
 const worldSchema = z
   .object({
@@ -56,9 +61,38 @@ const finiteNumber = z.number();
 const positiveNumber = finiteNumber.positive();
 const cameraVectorSchema = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
 const nonZeroCameraVectorSchema = cameraVectorSchema.refine(
-  (value) => Math.hypot(...value) > 1e-6,
+  (value) => Math.hypot(...value) >= minimumVectorLength,
   'Camera vector must have non-zero length',
 );
+const lightColorSchema = z.tuple([
+  finiteNumber.min(renderImageLightColorRange[0]).max(renderImageLightColorRange[1]),
+  finiteNumber.min(renderImageLightColorRange[0]).max(renderImageLightColorRange[1]),
+  finiteNumber.min(renderImageLightColorRange[0]).max(renderImageLightColorRange[1]),
+]);
+const lightingSchema = z.union([
+  z.literal('studio'),
+  z
+    .object({
+      lights: z
+        .array(
+          z
+            .object({
+              direction: cameraVectorSchema.refine(
+                (value) => Math.hypot(...value) >= minimumVectorLength,
+                'Light direction must have non-zero length',
+              ),
+              color: lightColorSchema,
+            })
+            .strict(),
+        )
+        .max(renderImageMaxLights),
+      ambient: finiteNumber.min(renderImageAmbientRange[0]).max(renderImageAmbientRange[1]).optional(),
+      environment: z.enum(['studio', 'none']).optional(),
+      space: z.enum(['view', 'world']).optional(),
+      exposure: finiteNumber.min(renderImageExposureRange[0]).max(renderImageExposureRange[1]).optional(),
+    })
+    .strict(),
+]);
 const imageExportModeSchema = z.enum(['single', 'batch']);
 const imageLabelSchema = z
   .string()
@@ -104,7 +138,7 @@ const sectionPlaneSchema = z
   .strict();
 const sectionsSchema = z
   .object({
-    planes: z.array(sectionPlaneSchema).min(1).max(imageMaxSections),
+    planes: z.array(sectionPlaneSchema).min(1).max(renderImageMaxSections),
     clipSurfaces: z.boolean().default(true),
     clipLines: z.boolean().default(true),
   })
@@ -159,12 +193,13 @@ const fixedCameraSchema = z
   .strict()
   .meta({ title: 'Fixed' });
 
-const crossLength = (left: readonly number[], right: readonly number[]): number =>
+const normalizedCrossLength = (left: readonly number[], right: readonly number[]): number =>
   Math.hypot(
     left[1]! * right[2]! - left[2]! * right[1]!,
     left[2]! * right[0]! - left[0]! * right[2]!,
     left[0]! * right[1]! - left[1]! * right[0]!,
-  );
+  ) /
+  (Math.hypot(...left) * Math.hypot(...right));
 
 const imageCameraSchema = z
   .discriminatedUnion('framing', [fitCameraSchema, boundsCameraSchema, fixedCameraSchema])
@@ -177,9 +212,9 @@ const imageCameraSchema = z
             camera.position[2] - camera.target[2],
           ] as const)
         : camera.direction;
-    if (Math.hypot(...direction) <= 1e-6) {
+    if (Math.hypot(...direction) < minimumVectorLength) {
       context.addIssue({ code: 'custom', path: ['position'], message: 'Camera position must differ from target' });
-    } else if (crossLength(direction, camera.up) <= 1e-6) {
+    } else if (normalizedCrossLength(direction, camera.up) < minimumVectorLength) {
       context.addIssue({ code: 'custom', path: ['up'], message: 'Camera direction and up must not be collinear' });
     }
     if (camera.framing === 'fixed' && camera.clipping && camera.clipping.far <= camera.clipping.near) {
@@ -219,6 +254,7 @@ const baseImageShape = {
     .boolean()
     .default(false)
     .describe('Include a physical scale bar at the fitted centre or fixed camera target plane'),
+  lighting: lightingSchema.optional().describe('Studio lighting or an explicit directional-light rig'),
 } as const;
 
 const validateAnnotatedDimensions = (
@@ -357,7 +393,10 @@ const webpImageSchema = createImageSchema({
 const jpegImageSchema = createImageSchema({
   sharedShape: {
     quality: imageQualitySchema.default(0.92).describe('JPEG encoder quality 0–1'),
-    background: hexColor.default('#FFFFFF').describe('sRGB #RRGGBB background (JPEG is always opaque)'),
+    background: hexColor
+      .refine((background) => background.length === 7, 'JPEG background must be opaque #RRGGBB')
+      .default('#FFFFFF')
+      .describe('sRGB #RRGGBB background (JPEG is always opaque)'),
   },
   viewShape: { quality: imageQualitySchema.optional().describe('JPEG quality override for this view') },
 });

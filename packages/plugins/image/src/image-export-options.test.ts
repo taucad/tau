@@ -175,6 +175,19 @@ describe('imageEdgeSchemas', () => {
       );
     });
 
+    it('should compare camera direction and up after normalizing their magnitudes', () => {
+      expect(
+        imageEdgeSchemas.png.safeParse({
+          camera: { framing: 'fit', direction: [2e-6, 0, 0], up: [0, 2e-6, 0] },
+        }).success,
+      ).toBe(true);
+      expect(
+        imageEdgeSchemas.png.safeParse({
+          camera: { framing: 'fit', direction: [1e9, 0, 0], up: [1e9, 1, 0] },
+        }).success,
+      ).toBe(false);
+    });
+
     it('should validate presentation state at the renderer boundary', () => {
       const presentation = {
         surfaces: false,
@@ -204,6 +217,12 @@ describe('imageEdgeSchemas', () => {
       ).toBe(false);
       expect(imageEdgeSchemas.png.safeParse({ sections: { planes: [] } }).success).toBe(false);
       expect(
+        imageEdgeSchemas.png.safeParse({ sections: { planes: Array.from({ length: 6 }, () => ({})) } }).success,
+      ).toBe(true);
+      expect(
+        imageEdgeSchemas.png.safeParse({ sections: { planes: Array.from({ length: 7 }, () => ({})) } }).success,
+      ).toBe(false);
+      expect(
         imageEdgeSchemas.png.safeParse({ sections: { planes: [{ point: [0, 0, 0], normal: [0, 0, 0] }] } }).success,
       ).toBe(false);
       expect(
@@ -225,10 +244,33 @@ describe('imageEdgeSchemas', () => {
 
     it('should reject an invalid background string', () => {
       expect(() => imageEdgeSchemas.jpeg.parse({ background: '#fff' })).toThrow();
+      expect(() => imageEdgeSchemas.jpeg.parse({ background: '#FFFFFF00' })).toThrow('JPEG background must be opaque');
     });
 
     it('should accept a caller-supplied opaque background for png', () => {
       expect(imageEdgeSchemas.png.parse({ background: '#FFFFFFFF' }).background).toBe('#FFFFFFFF');
+    });
+
+    it('should pass through a strict nanoraster lighting preset or rig', () => {
+      expect(imageEdgeSchemas.png.parse({ lighting: 'studio' }).lighting).toBe('studio');
+      const lighting = {
+        lights: [{ direction: [0, 1, 0], color: [2.09, 2.09, 2.09] }],
+        ambient: 0,
+        environment: 'none',
+        space: 'world',
+        exposure: 0.01,
+      } as const;
+      expect(imageEdgeSchemas.webp.parse({ lighting }).lighting).toEqual(lighting);
+      expect(imageEdgeSchemas.png.safeParse({ lighting: { ...lighting, glow: 1 } }).success).toBe(false);
+      expect(
+        imageEdgeSchemas.png.safeParse({
+          lighting: { lights: Array.from({ length: 9 }, () => lighting.lights[0]) },
+        }).success,
+      ).toBe(false);
+      expect(
+        imageEdgeSchemas.png.safeParse({ lighting: { lights: [{ direction: [0, 0, 0], color: [1, 1, 1] }] } }).success,
+      ).toBe(false);
+      expect(imageEdgeSchemas.png.safeParse({ lighting: { lights: [], exposure: 17 } }).success).toBe(false);
     });
 
     it('should treat a supported label as its own switch and reject unsupported characters', () => {

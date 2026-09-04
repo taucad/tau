@@ -41,15 +41,26 @@ describe('SVG image transcoder', () => {
     );
   });
 
-  it('requires complete geometry and physical units when a scale bar is requested', async () => {
-    await expect(renderSvgPng('<svg/>')).rejects.toMatchObject({ code: 'parse' });
+  it('lets resvg parse the document and requires physical units when a scale bar is requested', async () => {
+    await expect(renderSvgPng('<svg')).rejects.toMatchObject({ code: 'parse' });
     await expect(renderSvgPng(fixture, { scaleBar: true })).rejects.toThrow('CAD length symbol');
     await expect(
-      renderSvgPng('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>', {
+      renderSvgPng('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>', {
         scaleBar: true,
         lengthSymbol: 'mm',
       }),
-    ).rejects.toThrow('finite viewBox');
+    ).resolves.toMatchObject({ mimeType: 'image/png' });
+  });
+
+  it('ignores nested symbol viewBox values when resolving the root drawing dimensions', async () => {
+    const source = (viewBox: string) =>
+      `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><symbol id="unused" viewBox="${viewBox}"/><rect width="100" height="50" fill="#2563eb"/></svg>`;
+    const options = { width: 320, height: 240, scaleBar: true, lengthSymbol: 'mm' } as const;
+
+    const tallSymbol = await renderSvgPng(source('0 0 1 100'), options);
+    const wideSymbol = await renderSvgPng(source('0 0 100 1'), options);
+
+    expect(tallSymbol.bytes).toEqual(wideSymbol.bytes);
   });
 
   it('declares one strict svg→png edge and returns a typed runtime failure', async () => {
@@ -61,7 +72,7 @@ describe('SVG image transcoder', () => {
     const invalid: ExportFile = {
       name: 'drawing.svg',
       mimeType: 'image/svg+xml',
-      bytes: new TextEncoder().encode('<svg/>'),
+      bytes: new TextEncoder().encode('<svg'),
     };
     const result = await definition.transcode(
       { from: 'svg', to: 'png', files: [invalid], options: {} },

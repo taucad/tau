@@ -80,7 +80,7 @@ export const svgPngOptionsSchema = z
 /** SVG rendering options accepted by {@link renderSvgPng}. @public */
 export type SvgPngOptions = z.input<typeof svgPngOptionsSchema>;
 type ParsedSvgPngOptions = z.output<typeof svgPngOptionsSchema>;
-type SvgFailureCode = 'parse' | 'encode';
+type SvgFailureCode = 'parse' | 'backend' | 'encode';
 
 /** Stable failure returned by direct SVG rendering and mapped by the service. @public */
 export class SvgRenderError extends Error {
@@ -122,22 +122,6 @@ const escapeXml = (value: string): string =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
-
-const viewBoxPattern = /\bviewBox\s*=\s*(["'])([^"']+)\1/u;
-const parseViewBox = (svg: string): readonly [number, number, number, number] | undefined => {
-  const match = viewBoxPattern.exec(svg);
-  if (!match) {
-    return undefined;
-  }
-  const values = match[2]!
-    .trim()
-    .split(/[\s,]+/u)
-    .map(Number);
-  if (values.length !== 4 || values.some((value) => !Number.isFinite(value)) || values[2]! <= 0 || values[3]! <= 0) {
-    throw new SvgRenderError('parse', 'SVG viewBox must contain four finite numbers with positive width and height');
-  }
-  return values as unknown as readonly [number, number, number, number];
-};
 
 const niceLength = (target: number): number => {
   if (!(target > 0) || !Number.isFinite(target)) {
@@ -229,14 +213,11 @@ const labelMarkup = (options: ParsedSvgPngOptions, layout: Layout): string => {
   return `${chip({ x: layout.inset, y, width, height: layout.chipHeight, radius: layout.fontSize * 0.55 })}<text x="${layout.inset + width / 2}" y="${y + layout.chipHeight * 0.67}" text-anchor="middle" font-family="Geist" font-size="${fontSize}" fill="#000000">${escapeXml(options.label)}</text>`;
 };
 
-const scaleMarkup = (options: ParsedSvgPngOptions, layout: Layout, viewBoxWidth: number | undefined): string => {
+const scaleMarkup = (options: ParsedSvgPngOptions, layout: Layout, sourceWidth: number): string => {
   if (!options.scaleBar) {
     return '';
   }
-  if (viewBoxWidth === undefined) {
-    throw new SvgRenderError('parse', 'SVG scale bar requires a finite viewBox');
-  }
-  const unitsPerPixel = viewBoxWidth / layout.contentWidth;
+  const unitsPerPixel = sourceWidth / layout.contentWidth;
   const targetPixels = layout.scaleWidth * 0.55;
   const length = niceLength(unitsPerPixel * targetPixels);
   const barWidth = length / unitsPerPixel;
@@ -309,27 +290,36 @@ export const renderSvgPng = async (svg: string, rawOptions: SvgPngOptions = {}):
   } catch (error) {
     throw new SvgRenderError('parse', error instanceof Error ? error.message : String(error), { cause: error });
   }
-  if (!svg.trim().startsWith('<svg') || !svg.includes('</svg>')) {
-    throw new SvgRenderError('parse', 'Expected a complete SVG document');
+
+  let backend: ResvgBackend;
+  try {
+    backend = await loadBackend();
+  } catch (error) {
+    throw new SvgRenderError('backend', error instanceof Error ? error.message : String(error), { cause: error });
+  }
+
+  const { resvgConstructor, font } = backend;
+  let sourceProbe: InstanceType<ResvgConstructor>;
+  try {
+    // oxlint-disable-next-line new-cap -- The dynamically imported class is held in a camel-case variable by naming policy.
+    sourceProbe = new resvgConstructor(svg, resvgOptions(font));
+  } catch (error) {
+    throw new SvgRenderError('parse', error instanceof Error ? error.message : String(error), { cause: error });
+  }
+  let sourceWidth: number;
+  let sourceHeight: number;
+  try {
+    sourceWidth = sourceProbe.width;
+    sourceHeight = sourceProbe.height;
+  } finally {
+    sourceProbe.free();
+  }
+  if (!(sourceWidth > 0) || !Number.isFinite(sourceWidth) || !(sourceHeight > 0) || !Number.isFinite(sourceHeight)) {
+    throw new SvgRenderError('parse', 'SVG has invalid intrinsic dimensions');
   }
 
   try {
-    const { resvgConstructor, font } = await loadBackend();
-    const viewBox = parseViewBox(svg);
-    const sourceAspect = viewBox ? viewBox[2] / viewBox[3] : undefined;
-    // oxlint-disable-next-line new-cap -- The dynamically imported class is held in a camel-case variable by naming policy.
-    const sourceProbe = new resvgConstructor(svg, resvgOptions(font));
-    let resolvedAspect: number;
-    try {
-      resolvedAspect = sourceAspect ?? sourceProbe.width / sourceProbe.height;
-    } finally {
-      sourceProbe.free();
-    }
-    if (!(resolvedAspect > 0) || !Number.isFinite(resolvedAspect)) {
-      throw new SvgRenderError('parse', 'SVG has invalid intrinsic dimensions');
-    }
-
-    const layout = createLayout(options, resolvedAspect);
+    const layout = createLayout(options, sourceWidth / sourceHeight);
     // oxlint-disable-next-line new-cap -- The dynamically imported class is held in a camel-case variable by naming policy.
     const sourceRenderer = new resvgConstructor(svg, {
       ...resvgOptions(font),
@@ -346,13 +336,13 @@ export const renderSvgPng = async (svg: string, rawOptions: SvgPngOptions = {}):
       options.background.length === 9
         ? `<rect width="100%" height="100%" fill="${options.background.slice(0, 7)}" fill-opacity="${Number.parseInt(options.background.slice(7), 16) / 255}"/>`
         : `<rect width="100%" height="100%" fill="${options.background}"/>`;
-    const wrapper = `<svg xmlns="http://www.w3.org/2000/svg" width="${options.width}" height="${options.height}" viewBox="0 0 ${options.width} ${options.height}" color="#111827">${background}<image href="${internalImageUrl}" x="${layout.contentX}" y="${layout.contentY}" width="${layout.contentWidth}" height="${layout.contentHeight}"/>${labelMarkup(options, layout)}${scaleMarkup(options, layout, viewBox?.[2])}${axesMarkup(options, layout)}</svg>`;
+    const wrapper = `<svg xmlns="http://www.w3.org/2000/svg" width="${options.width}" height="${options.height}" viewBox="0 0 ${options.width} ${options.height}" color="#111827">${background}<image href="${internalImageUrl}" x="${layout.contentX}" y="${layout.contentY}" width="${layout.contentWidth}" height="${layout.contentHeight}"/>${labelMarkup(options, layout)}${scaleMarkup(options, layout, sourceWidth)}${axesMarkup(options, layout)}</svg>`;
     // oxlint-disable-next-line new-cap -- The dynamically imported class is held in a camel-case variable by naming policy.
     const finalRenderer = new resvgConstructor(wrapper, resvgOptions(font));
     try {
       const unresolved = finalRenderer.imagesToResolve() as unknown[];
       if (!unresolved.includes(internalImageUrl)) {
-        throw new SvgRenderError('parse', 'resvg did not expose the internal drawing image for resolution');
+        throw new SvgRenderError('backend', 'resvg did not expose the internal drawing image for resolution');
       }
       finalRenderer.resolveImage(internalImageUrl, sourcePng);
       const bytes = renderPng(finalRenderer);
@@ -365,7 +355,7 @@ export const renderSvgPng = async (svg: string, rawOptions: SvgPngOptions = {}):
     if (error instanceof SvgRenderError) {
       throw error;
     }
-    throw new SvgRenderError('parse', error instanceof Error ? error.message : String(error), { cause: error });
+    throw new SvgRenderError('backend', error instanceof Error ? error.message : String(error), { cause: error });
   }
 };
 

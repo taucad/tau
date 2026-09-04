@@ -6,9 +6,24 @@ import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { OPFSProvider } from '#backend/opfs-provider.js';
+import { NodeFsProvider } from '#backend/node/provider.js';
+import { NodeFsChannel, NodeFsProviderClient } from '#backend/node/client.js';
+import { serveNodeFsProvider } from '#backend/node/host.js';
 import { createMockRootHandle } from '#testing/mock-handle-factory.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 let databaseSequence = 0;
+
+const temporaryRoots: string[] = [];
+const disposers: Array<() => void> = [];
+
+const createTemporaryRoot = (): string => {
+  const root = mkdtempSync(join(tmpdir(), 'tau-node-provider-'));
+  temporaryRoots.push(root);
+  return root;
+};
 
 const providers: ReadonlyArray<{
   name: string;
@@ -40,10 +55,37 @@ const providers: ReadonlyArray<{
       return provider;
     },
   },
+  {
+    name: 'Node',
+    create: async () => new NodeFsProvider(createTemporaryRoot()),
+  },
+  {
+    // The same contract has to survive the process seam, or the client half is
+    // a second, unverified implementation of the path tree.
+    name: 'Node over a port',
+    create: async () => {
+      const { port1, port2 } = new MessageChannel();
+      const root = createTemporaryRoot();
+      const stop = serveNodeFsProvider(port2, { allowRoot: (candidate) => candidate === root });
+      const channel = new NodeFsChannel(port1);
+      disposers.push(() => {
+        channel.close();
+        stop();
+        port2.close();
+      });
+      return new NodeFsProviderClient(channel, root);
+    },
+  },
 ];
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  for (const dispose of disposers.splice(0)) {
+    dispose();
+  }
+  for (const root of temporaryRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 const expectCode = async (operation: Promise<unknown>, code: string): Promise<void> => {

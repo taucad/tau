@@ -3,6 +3,8 @@ import { MemoryProvider } from '#backend/memory-provider.js';
 import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { OPFSProvider } from '#backend/opfs-provider.js';
 import { FileSystemAccessProvider } from '#backend/fs-access-provider.js';
+import { NodeFsChannel, NodeFsProviderClient } from '#backend/node/client.js';
+import type { NodeFsPort } from '#backend/node/port.js';
 import type { WorkspaceScope } from '#mount-table.js';
 import { resolveStorageRootKey } from '#storage-root-key.js';
 import { MissingWorkspaceHandleError } from '#workspace-errors.js';
@@ -12,6 +14,13 @@ import { MissingWorkspaceHandleError } from '#workspace-errors.js';
  */
 export type ProviderRegistryOptions = {
   databasePrefix?: string;
+  /**
+   * Opens the port to the node filesystem host. Injected rather than statically
+   * imported so `node:fs` never follows a static import into this bundle: the
+   * host lives in another process and only the shell knows how to reach it.
+   * Absent on the web build, where a `node` scope is simply unreachable.
+   */
+  createNodeFsPort?: () => Promise<NodeFsPort>;
 };
 
 /**
@@ -32,6 +41,11 @@ export type ProviderRegistryOptions = {
 export class ProviderRegistry {
   private readonly _providers = new Map<string, Promise<FileSystemProvider>>();
   private readonly _databasePrefix: string;
+  private readonly _createNodeFsPort: (() => Promise<NodeFsPort>) | undefined;
+  /** One channel serves every node root; each request names its own rooted view. */
+  private _nodeFsChannel: Promise<NodeFsChannel> | undefined;
+  /** The channel the memo above resolved to, so a stale close cannot evict a newer one. */
+  private _liveNodeFsChannel: NodeFsChannel | undefined;
 
   /**
    * Create a ProviderRegistry.
@@ -40,6 +54,7 @@ export class ProviderRegistry {
    */
   public constructor(options?: ProviderRegistryOptions) {
     this._databasePrefix = options?.databasePrefix ?? 'tau';
+    this._createNodeFsPort = options?.createNodeFsPort;
   }
 
   /**
@@ -140,6 +155,28 @@ export class ProviderRegistry {
     return resolveStorageRootKey(scope, this._databasePrefix);
   }
 
+  private async _openNodeFsChannel(createPort: () => Promise<NodeFsPort>): Promise<NodeFsChannel> {
+    const channel = new NodeFsChannel(await createPort());
+    this._liveNodeFsChannel = channel;
+    // A dead host would otherwise stay memoized forever: every later provider
+    // resolution would hand back a client bound to a channel that can only
+    // reject. Dropping both the memo and the providers built on it makes the
+    // next resolution ask the shell for a fresh port.
+    channel.onClose(() => {
+      if (this._liveNodeFsChannel !== channel) {
+        return;
+      }
+      this._liveNodeFsChannel = undefined;
+      this._nodeFsChannel = undefined;
+      // Snapshot first: `disposeRoot` mutates the map being read.
+      const nodeRootKeys = [...this._providers.keys()].filter((key) => key.startsWith('node:'));
+      for (const storageRootKey of nodeRootKeys) {
+        this.disposeRoot(storageRootKey);
+      }
+    });
+    return channel;
+  }
+
   private async _createProvider(scope: WorkspaceScope): Promise<FileSystemProvider> {
     switch (scope.backend) {
       case 'indexeddb': {
@@ -166,6 +203,13 @@ export class ProviderRegistry {
       }
       case 'memory': {
         return new MemoryProvider();
+      }
+      case 'node': {
+        if (this._createNodeFsPort === undefined) {
+          throw new Error('This host has no node filesystem transport; a node storage root is unreachable.');
+        }
+        this._nodeFsChannel ??= this._openNodeFsChannel(this._createNodeFsPort);
+        return new NodeFsProviderClient(await this._nodeFsChannel, scope.path);
       }
       default: {
         throw new Error(`Unknown backend: ${(scope as { backend: string }).backend}`);

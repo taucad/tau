@@ -314,4 +314,41 @@ describe('ProviderRegistry', () => {
       });
     });
   });
+
+  describe('node backend', () => {
+    const nodeScope: WorkspaceScope = { backend: 'node', path: '/tmp/tau-root' };
+
+    it('re-requests a port after the host dies instead of serving a dead channel', async () => {
+      const ports: MessagePort[] = [];
+      const createNodeFsPort = vi.fn(async () => {
+        const { port1, port2 } = new MessageChannel();
+        ports.push(port2);
+        return port1;
+      });
+      const nodeRegistry = new ProviderRegistry({ databasePrefix: 'tau-', createNodeFsPort });
+
+      const first = await nodeRegistry.getProvider(nodeScope);
+      expect(createNodeFsPort).toHaveBeenCalledOnce();
+      // Cached while the channel is live.
+      expect(await nodeRegistry.getProvider(nodeScope)).toBe(first);
+
+      ports[0]!.close();
+      await vi.waitFor(() => {
+        expect(nodeRegistry.getOwnedProvider('node:/tmp/tau-root')).toBeUndefined();
+      });
+
+      const second = await nodeRegistry.getProvider(nodeScope);
+      expect(createNodeFsPort).toHaveBeenCalledTimes(2);
+      expect(second).not.toBe(first);
+      for (const port of ports) {
+        port.close();
+      }
+    });
+
+    it('refuses a node scope on a host with no transport', async () => {
+      await expect(new ProviderRegistry({ databasePrefix: 'tau-' }).getProvider(nodeScope)).rejects.toThrow(
+        /no node filesystem transport/,
+      );
+    });
+  });
 });

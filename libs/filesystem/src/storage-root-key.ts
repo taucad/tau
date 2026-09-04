@@ -8,7 +8,16 @@
 export type StorageRootIdentity =
   | { readonly backend: 'indexeddb' | 'opfs' }
   | { readonly backend: 'webaccess'; readonly workspaceId: string }
-  | { readonly backend: 'memory'; readonly storageRootKey: string };
+  | { readonly backend: 'memory'; readonly storageRootKey: string }
+  | { readonly backend: 'node'; readonly path: string };
+
+/**
+ * Lexical `path.isAbsolute` — POSIX root, Windows drive (`C:\` or `C:/`), and
+ * UNC (`\\server\share`). Written out rather than imported: this module is
+ * bundled into the browser worker, where `node:path` must never follow it.
+ */
+const isAbsoluteHostPath = (path: string): boolean =>
+  path.startsWith('/') || path.startsWith('\\') || /^[A-Za-z]:[/\\]/.test(path);
 
 /**
  * Resolve the canonical physical storage-root identity used for provider
@@ -34,6 +43,15 @@ export const resolveStorageRootKey = (identity: StorageRootIdentity, databasePre
     }
     case 'webaccess': {
       return `webaccess:${identity.workspaceId}`;
+    }
+    case 'node': {
+      const { path } = identity;
+      // The absolute host path is the physical identity of a node root, the way
+      // `workspaceId` is for webaccess. A relative path would alias two roots.
+      if (!isAbsoluteHostPath(path)) {
+        throw new TypeError('Node storage root must be an absolute host path.');
+      }
+      return `node:${path}`;
     }
     case 'memory': {
       const { storageRootKey } = identity;

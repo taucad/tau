@@ -52,6 +52,11 @@ export type MountConfig =
   | (MountConfigCommon & {
       readonly backend: 'memory';
       readonly storageRootKey: string;
+    })
+  | (MountConfigCommon & {
+      readonly backend: 'node';
+      /** Absolute host directory; the physical identity of a node root. */
+      readonly path: string;
     });
 
 /**
@@ -79,6 +84,13 @@ export type ProjectRootConfig =
       readonly backend: 'memory';
       readonly storageRootKey: string;
       readonly providerBasePath: string;
+    }
+  | {
+      readonly projectId: string;
+      readonly backend: 'node';
+      /** Absolute host directory of the node root this project lives in. */
+      readonly path: string;
+      readonly providerBasePath: string;
     };
 
 /**
@@ -93,6 +105,11 @@ export type StorageRootConfig =
     }
   | {
       readonly backend: 'indexeddb' | 'opfs';
+    }
+  | {
+      readonly backend: 'node';
+      /** Absolute host directory scanned for project manifests. */
+      readonly path: string;
     };
 
 /** Complete persisted project-route and discovery-root configuration. @public */
@@ -118,6 +135,12 @@ export type ProjectLocator =
       readonly storageRootKey: string;
       readonly relativeDirectory: string;
       readonly workspaceId: string;
+    }
+  | {
+      readonly backend: 'node';
+      readonly storageRootKey: string;
+      readonly relativeDirectory: string;
+      readonly path: string;
     };
 
 /** Validated or quarantined result from project discovery. @public */
@@ -220,6 +243,10 @@ export type WorkspaceScope =
   | {
       readonly backend: 'memory';
       readonly storageRootKey: string;
+    }
+  | {
+      readonly backend: 'node';
+      readonly path: string;
     };
 
 /** Authority-resolved metadata installed in the low-level mount table. @public */

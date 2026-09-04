@@ -19,6 +19,26 @@ describe('resolveStorageRootKey', () => {
     expect(resolveStorageRootKey({ backend: 'memory', storageRootKey: 'memory:preview:1' }, 'tau-')).toBe(
       'memory:preview:1',
     );
+    expect(resolveStorageRootKey({ backend: 'node', path: '/Users/tau/home' }, 'tau-')).toBe('node:/Users/tau/home');
+  });
+
+  it('accepts every absolute host-path spelling, not just POSIX', () => {
+    // This is the canonical identity for a node root on *any* host; rejecting a
+    // Windows path here would throw from provider caching, authority locks, and
+    // cross-tab invalidation alike.
+    expect(resolveStorageRootKey({ backend: 'node', path: String.raw`C:\Users\tau\home` }, 'tau-')).toBe(
+      String.raw`node:C:\Users\tau\home`,
+    );
+    expect(resolveStorageRootKey({ backend: 'node', path: 'D:/Projects/tau' }, 'tau-')).toBe('node:D:/Projects/tau');
+    expect(resolveStorageRootKey({ backend: 'node', path: String.raw`\\server\share\tau` }, 'tau-')).toBe(
+      String.raw`node:\\server\share\tau`,
+    );
+  });
+
+  it('rejects a node scope without an absolute host path', () => {
+    expect(() => resolveStorageRootKey({ backend: 'node', path: 'relative/home' }, 'tau-')).toThrow(TypeError);
+    expect(() => resolveStorageRootKey({ backend: 'node', path: 'C:relative' }, 'tau-')).toThrow(TypeError);
+    expect(() => resolveStorageRootKey({ backend: 'node', path: '' }, 'tau-')).toThrow(TypeError);
   });
 
   it('rejects a memory scope that carries no scoped root', () => {

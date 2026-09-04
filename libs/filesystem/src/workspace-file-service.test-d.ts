@@ -25,7 +25,9 @@ describe('WorkspaceFileService explicit-workspace contract', () => {
     }>();
 
     type NonWebaccessMount = Exclude<MountConfigArgument, { backend: 'webaccess' }>;
-    expectTypeOf<NonWebaccessMount>().toExtend<{ backend: 'indexeddb' | 'opfs' | 'memory' }>();
+    expectTypeOf<NonWebaccessMount>().toExtend<{ backend: 'indexeddb' | 'opfs' | 'memory' | 'node' }>();
+    type NodeMount = Extract<MountConfigArgument, { backend: 'node' }>;
+    expectTypeOf<NodeMount>().toExtend<{ path: string }>();
   });
 
   it('readShallowDirectory accepts WorkspaceScope inside an options bag', () => {

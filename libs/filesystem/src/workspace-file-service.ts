@@ -30,6 +30,7 @@ import type { ResourceQueue } from '#resource-queue.js';
 import type { ChangeEventBus } from '#change-event-bus.js';
 import { InMemoryFileTree } from '#in-memory-file-tree.js';
 import { WatchRegistry } from '#watch-registry.js';
+import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import { isChromiumSwapArtifactName } from '#backend/fs-access-provider.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
@@ -93,7 +94,7 @@ const missingExternalSnapshot = '<missing>';
 
 type NativeFileSystemChangeRecord = {
   readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
-  readonly changedHandle?: FileSystemHandle;
+  readonly changedHandle?: { readonly kind: FileSystemHandle['kind'] };
   readonly relativePathComponents: readonly string[];
   readonly relativePathMovedFrom?: readonly string[];
 };
@@ -107,14 +108,44 @@ type NativeFileSystemObserverConstructor = new (
   callback: (records: readonly NativeFileSystemChangeRecord[]) => void,
 ) => NativeFileSystemObserver;
 
-type ObservedWebAccessRoot = {
+type ObservedExternalRoot = {
   readonly storageRootKey: string;
-  readonly directoryHandle: FileSystemDirectoryHandle;
+  readonly backend: FileSystemBackend;
+  /** Present for `webaccess` roots only; node roots are addressed by host path. */
+  readonly directoryHandle?: FileSystemDirectoryHandle;
   readonly provider: FileSystemProvider;
   observer?: NativeFileSystemObserver;
+  /** Releases a node root's host-side watch subscription. */
+  unwatch?: () => void;
   nativeActive: boolean;
   readonly pollSnapshots: Map<string, string>;
   tail: Promise<void>;
+};
+
+/**
+ * A provider that reports its own external changes. Node roots do; browser
+ * roots are observed through `FileSystemObserver` plus snapshot polling.
+ */
+type SelfObservingProvider = FileSystemProvider & {
+  watch(request: WatchRequest, handler: (event: NodeFsWatchEvent) => void): Promise<() => void>;
+};
+
+const isSelfObserving = (provider: FileSystemProvider): provider is SelfObservingProvider =>
+  typeof (provider as Partial<SelfObservingProvider>).watch === 'function';
+
+/** The kernel's own cache burst must never reach the tree (blueprint Q-R3). */
+const externalWatchExcludes = ['.tau/cache/**'];
+
+/** Translate one host watch event into the record shape the emitters consume. */
+const toExternalRecord = (event: Exclude<NodeFsWatchEvent, { type: 'reset' }>): NativeFileSystemChangeRecord => {
+  const relativePathComponents = event.path === '' ? [] : event.path.split('/');
+  return event.type === 'delete'
+    ? { type: 'disappeared', relativePathComponents }
+    : {
+        type: 'modified',
+        changedHandle: { kind: event.kind === 'dir' ? 'directory' : 'file' },
+        relativePathComponents,
+      };
 };
 
 type ExternalLogicalMapping = {
@@ -314,7 +345,7 @@ export class WorkspaceFileService {
     scope: WorkspaceScope;
     storageRootKey: string;
   }> = [];
-  private readonly _observedWebAccessRoots = new Map<string, ObservedWebAccessRoot>();
+  private readonly _observedExternalRoots = new Map<string, ObservedExternalRoot>();
   /** Absolute path passed to the first {@link getDirectoryStat} that populated the tree; in-memory paths are relative to this root. */
   private _directoryStatRoot: string | undefined;
 
@@ -1583,7 +1614,7 @@ export class WorkspaceFileService {
    */
   public async pollExternalChanges(root?: string): Promise<boolean> {
     if (root === undefined) {
-      const states = [...this._observedWebAccessRoots.values()];
+      const states = [...this._observedExternalRoots.values()];
       await Promise.all(states.map(async (state) => this._pollExternalRoot(state)));
       return states.length > 0 && states.every(({ nativeActive }) => nativeActive);
     }
@@ -1592,7 +1623,7 @@ export class WorkspaceFileService {
     if (entry?.storageRootKey === undefined) {
       return false;
     }
-    const state = [...this._observedWebAccessRoots.values()].find(
+    const state = [...this._observedExternalRoots.values()].find(
       (candidate) => candidate.provider === resolution.provider && candidate.storageRootKey === entry.storageRootKey,
     );
     if (state === undefined) {
@@ -1675,7 +1706,9 @@ export class WorkspaceFileService {
                 relativeDirectory,
                 workspaceId: root.workspaceId,
               }
-            : { backend: root.backend, storageRootKey, relativeDirectory };
+            : root.backend === 'node'
+              ? { backend: root.backend, storageRootKey, relativeDirectory, path: root.path }
+              : { backend: root.backend, storageRootKey, relativeDirectory };
         let bytes: Uint8Array<ArrayBuffer>;
         try {
           bytes = await provider.readFile(joinRelativePath(relativeDirectory, 'tau.json'));
@@ -1717,6 +1750,8 @@ export class WorkspaceFileService {
       indexeddb: 0,
       opfs: 1,
       webaccess: 2,
+      // Disk beats every browser engine: on desktop it is the only real root.
+      node: 3,
     };
     discovered.sort((left, right) => {
       const backendOrder = priority[left.locator.backend] - priority[right.locator.backend];
@@ -2046,7 +2081,7 @@ export class WorkspaceFileService {
 
   /** Release all resources: watches, providers, caches, and event bus. */
   public dispose(): void {
-    for (const storageRootKey of this._observedWebAccessRoots.keys()) {
+    for (const storageRootKey of this._observedExternalRoots.keys()) {
       this._disconnectExternalRoot(storageRootKey);
     }
     this._filePool?.clear();
@@ -2110,7 +2145,9 @@ export class WorkspaceFileService {
         scope =
           config.backend === 'memory'
             ? this._toScope({ backend: 'memory', storageRootKey: config.storageRootKey })
-            : this._toScope({ backend: config.backend });
+            : config.backend === 'node'
+              ? this._toScope({ backend: 'node', path: config.path })
+              : this._toScope({ backend: config.backend });
       }
       const storageRootKey = this._registry.resolveStorageRootKey(scope);
       const physicalRoute = `${storageRootKey}\0${providerBasePath}`;
@@ -2125,18 +2162,19 @@ export class WorkspaceFileService {
       if (staged.root.backend !== 'webaccess') {
         continue;
       }
-      const observed = this._observedWebAccessRoots.get(staged.storageRootKey);
-      if (observed === undefined || observed.directoryHandle === staged.root.directoryHandle) {
+      const observed = this._observedExternalRoots.get(staged.storageRootKey);
+      const observedHandle = observed?.directoryHandle;
+      if (observed === undefined || observedHandle === undefined || observedHandle === staged.root.directoryHandle) {
         continue;
       }
       let sameEntry = false;
       try {
         // oxlint-disable-next-line no-await-in-loop -- Provider staging must not retain a handle for a different entry.
-        sameEntry = await observed.directoryHandle.isSameEntry(staged.root.directoryHandle);
+        sameEntry = await observedHandle.isSameEntry(staged.root.directoryHandle);
       } catch {
         // A failed identity check cannot prove that the cached provider still owns this root.
       }
-      if (!sameEntry && this._observedWebAccessRoots.get(staged.storageRootKey) === observed) {
+      if (!sameEntry && this._observedExternalRoots.get(staged.storageRootKey) === observed) {
         this._disconnectExternalRoot(staged.storageRootKey);
         // oxlint-disable-next-line no-await-in-loop -- Do not dispose a provider while an admitted root operation uses it.
         await observed.tail;
@@ -2205,9 +2243,10 @@ export class WorkspaceFileService {
         workspaceId: config.workspaceId,
       };
     }
-    return config.backend === 'memory'
-      ? { backend: 'memory', storageRootKey: config.storageRootKey }
-      : { backend: config.backend };
+    if (config.backend === 'memory') {
+      return { backend: 'memory', storageRootKey: config.storageRootKey };
+    }
+    return config.backend === 'node' ? { backend: 'node', path: config.path } : { backend: config.backend };
   }
 
   private _previewInstance(prefix: string): string | undefined {
@@ -2230,16 +2269,25 @@ export class WorkspaceFileService {
         scope: Extract<WorkspaceScope, { backend: 'webaccess' }>;
       } => entry.root.backend === 'webaccess' && entry.scope.backend === 'webaccess',
     );
-    const retainedKeys = new Set(webRoots.map(({ storageRootKey }) => storageRootKey));
-    for (const storageRootKey of this._observedWebAccessRoots.keys()) {
+    const nodeRoots = roots.filter(
+      (
+        entry,
+      ): entry is typeof entry & {
+        root: Extract<StorageRootConfig, { backend: 'node' }>;
+        scope: Extract<WorkspaceScope, { backend: 'node' }>;
+      } => entry.root.backend === 'node' && entry.scope.backend === 'node',
+    );
+    const retainedKeys = new Set([...webRoots, ...nodeRoots].map(({ storageRootKey }) => storageRootKey));
+    for (const storageRootKey of this._observedExternalRoots.keys()) {
       if (!retainedKeys.has(storageRootKey)) {
         this._disconnectExternalRoot(storageRootKey);
       }
     }
+    await this._observeNodeRoots(nodeRoots);
 
     const additions = await Promise.all(
       webRoots
-        .filter(({ storageRootKey }) => !this._observedWebAccessRoots.has(storageRootKey))
+        .filter(({ storageRootKey }) => !this._observedExternalRoots.has(storageRootKey))
         .map(async ({ root, scope, storageRootKey }) => {
           try {
             return { root, storageRootKey, provider: await this._registry.getProvider(scope) };
@@ -2253,18 +2301,19 @@ export class WorkspaceFileService {
         continue;
       }
       const { root, storageRootKey, provider } = addition;
-      const state: ObservedWebAccessRoot = {
+      const state: ObservedExternalRoot = {
         storageRootKey,
+        backend: 'webaccess',
         directoryHandle: root.directoryHandle,
         provider,
         nativeActive: false,
         pollSnapshots: new Map(),
         tail: Promise.resolve(),
       };
-      this._observedWebAccessRoots.set(storageRootKey, state);
+      this._observedExternalRoots.set(storageRootKey, state);
       const pendingRecords: NativeFileSystemChangeRecord[] = [];
       const observer = this._createNativeFileSystemObserver((records) => {
-        if (this._observedWebAccessRoots.get(storageRootKey) !== state) {
+        if (this._observedExternalRoots.get(storageRootKey) !== state) {
           return;
         }
         if (!state.nativeActive) {
@@ -2284,7 +2333,7 @@ export class WorkspaceFileService {
       state.observer = observer;
       const observation = async (): Promise<void> => {
         try {
-          if (this._observedWebAccessRoots.get(storageRootKey) !== state) {
+          if (this._observedExternalRoots.get(storageRootKey) !== state) {
             return;
           }
           try {
@@ -2295,7 +2344,7 @@ export class WorkspaceFileService {
             return;
           }
           await this._queueExternalRootOperation(state, async () => {
-            if (this._observedWebAccessRoots.get(storageRootKey) !== state) {
+            if (this._observedExternalRoots.get(storageRootKey) !== state) {
               observer.disconnect();
               return;
             }
@@ -2314,6 +2363,81 @@ export class WorkspaceFileService {
     }
   }
 
+  /**
+   * Attach every new node root to its host-side watcher.
+   *
+   * The watcher lives with the bytes in the services utility (substrate
+   * invariant 3); its events land on the same `ChangeEventBus` path the
+   * browser's `FileSystemObserver` records take, so the file tree, the file
+   * pool, and cross-tab coordination need no node-specific arm.
+   */
+  private async _observeNodeRoots(
+    entries: ReadonlyArray<{ scope: Extract<WorkspaceScope, { backend: 'node' }>; storageRootKey: string }>,
+  ): Promise<void> {
+    const additions = await Promise.all(
+      entries
+        .filter(({ storageRootKey }) => !this._observedExternalRoots.has(storageRootKey))
+        .map(async ({ scope, storageRootKey }) => {
+          try {
+            return { storageRootKey, provider: await this._registry.getProvider(scope) };
+          } catch {
+            return undefined;
+          }
+        }),
+    );
+    for (const addition of additions) {
+      if (addition === undefined || !isSelfObserving(addition.provider)) {
+        continue;
+      }
+      const { storageRootKey, provider } = addition;
+      const state: ObservedExternalRoot = {
+        storageRootKey,
+        backend: 'node',
+        provider,
+        nativeActive: true,
+        pollSnapshots: new Map(),
+        tail: Promise.resolve(),
+      };
+      this._observedExternalRoots.set(storageRootKey, state);
+      // async-iife: bootstrap — arming crosses a process boundary; mounting must not block on it.
+      void (async () => {
+        try {
+          const unwatch = await provider.watch(
+            { paths: [''], recursive: true, excludes: externalWatchExcludes },
+            (event) => {
+              if (this._observedExternalRoots.get(storageRootKey) !== state) {
+                return;
+              }
+              if (event.type === 'reset') {
+                // The host lost a watcher: drop every derivative and resummarize,
+                // exactly as a lost browser observer does.
+                this._disableNativeObservation(state);
+                return;
+              }
+              // async-iife: bootstrap — a watch callback cannot await its own serialization.
+              void (async () => {
+                try {
+                  await this._queueExternalRootOperation(state, async () => {
+                    await this._applyNativeExternalRecords(state, [toExternalRecord(event)]);
+                  });
+                } catch {
+                  this._disableNativeObservation(state);
+                }
+              })();
+            },
+          );
+          if (this._observedExternalRoots.get(storageRootKey) === state) {
+            state.unwatch = unwatch;
+          } else {
+            unwatch();
+          }
+        } catch {
+          this._disableNativeObservation(state);
+        }
+      })();
+    }
+  }
+
   private _createNativeFileSystemObserver(
     callback: (records: readonly NativeFileSystemChangeRecord[]) => void,
   ): NativeFileSystemObserver | undefined {
@@ -2324,8 +2448,9 @@ export class WorkspaceFileService {
   }
 
   private _disconnectExternalRoot(storageRootKey: string): void {
-    const state = this._observedWebAccessRoots.get(storageRootKey);
-    this._observedWebAccessRoots.delete(storageRootKey);
+    const state = this._observedExternalRoots.get(storageRootKey);
+    this._observedExternalRoots.delete(storageRootKey);
+    state?.unwatch?.();
     state?.observer?.disconnect();
     if (state !== undefined) {
       state.pollSnapshots.clear();
@@ -2333,7 +2458,7 @@ export class WorkspaceFileService {
   }
 
   private async _handleNativeExternalRecords(
-    state: ObservedWebAccessRoot,
+    state: ObservedExternalRoot,
     observer: NativeFileSystemObserver,
     records: readonly NativeFileSystemChangeRecord[],
   ): Promise<void> {
@@ -2350,7 +2475,7 @@ export class WorkspaceFileService {
   }
 
   private async _queueExternalRootOperation(
-    state: ObservedWebAccessRoot,
+    state: ObservedExternalRoot,
     operation: () => Promise<void>,
   ): Promise<void> {
     const predecessor = state.tail;
@@ -2364,7 +2489,7 @@ export class WorkspaceFileService {
       } catch {
         // A rejected record must not strand later native or polling facts.
       }
-      if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
+      if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
         return;
       }
       await operation();
@@ -2373,7 +2498,7 @@ export class WorkspaceFileService {
     }
   }
 
-  private async _pollExternalRoot(state: ObservedWebAccessRoot, providerBasePath?: string): Promise<void> {
+  private async _pollExternalRoot(state: ObservedExternalRoot, providerBasePath?: string): Promise<void> {
     const scope = providerBasePath ?? '*';
     const snapshot = await this._createExternalSnapshot(state, providerBasePath);
     await this._queueExternalRootOperation(state, async () => {
@@ -2382,7 +2507,7 @@ export class WorkspaceFileService {
   }
 
   private async _applyNativeExternalRecords(
-    state: ObservedWebAccessRoot,
+    state: ObservedExternalRoot,
     records: readonly NativeFileSystemChangeRecord[],
   ): Promise<void> {
     const admittedRecords = records.filter(
@@ -2424,7 +2549,7 @@ export class WorkspaceFileService {
       oldPhysicalPath === undefined ? [physicalPath] : [physicalPath, oldPhysicalPath],
     );
     await state.provider.refresh?.(physicalPaths);
-    if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
+    if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
       return;
     }
     this._invalidateExternalDerivatives({ state, physicalPaths });
@@ -2507,10 +2632,7 @@ export class WorkspaceFileService {
     return previous !== undefined && isChromiumSwapArtifactName(previous);
   }
 
-  private _logicalMappingsForPhysicalPath(
-    state: ObservedWebAccessRoot,
-    physicalPath: string,
-  ): ExternalLogicalMapping[] {
+  private _logicalMappingsForPhysicalPath(state: ObservedExternalRoot, physicalPath: string): ExternalLogicalMapping[] {
     const mappings: ExternalLogicalMapping[] = [];
     for (const entry of this._mountTable.listMounts()) {
       if (entry.provider !== state.provider || entry.storageRootKey !== state.storageRootKey) {
@@ -2599,7 +2721,7 @@ export class WorkspaceFileService {
     this._crossTabCoordinator.notifyDirectoryChange(logicalPath, this._physicalAuthority(mapping.resolution));
   }
 
-  private _emitExternalRootSummaries(state: ObservedWebAccessRoot, providerBasePath?: string): void {
+  private _emitExternalRootSummaries(state: ObservedExternalRoot, providerBasePath?: string): void {
     for (const entry of this._mountTable.listMounts()) {
       if (
         entry.provider !== state.provider ||
@@ -2623,8 +2745,8 @@ export class WorkspaceFileService {
     }
   }
 
-  private _disableNativeObservation(state: ObservedWebAccessRoot): void {
-    if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
+  private _disableNativeObservation(state: ObservedExternalRoot): void {
+    if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
       return;
     }
     state.observer?.disconnect();
@@ -2636,7 +2758,7 @@ export class WorkspaceFileService {
       try {
         await this._queueExternalRootOperation(state, async () => {
           await state.provider.refresh?.();
-          if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
+          if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
             return;
           }
           this._invalidateExternalDerivatives();
@@ -2656,7 +2778,7 @@ export class WorkspaceFileService {
    *                 for a full drop when the change cannot be localized.
    */
   private _invalidateExternalDerivatives(scoped?: {
-    state: ObservedWebAccessRoot;
+    state: ObservedExternalRoot;
     physicalPaths: readonly string[];
   }): void {
     if (scoped === undefined) {
@@ -2706,8 +2828,8 @@ export class WorkspaceFileService {
     return changed.length > maxLocalizedExternalChanges ? undefined : changed;
   }
 
-  private _emitGlobalDiscoveryChange(state: ObservedWebAccessRoot): void {
-    this._emitChangeEvent({ type: 'directoryChanged', path: '/', backend: 'webaccess' });
+  private _emitGlobalDiscoveryChange(state: ObservedExternalRoot): void {
+    this._emitChangeEvent({ type: 'directoryChanged', path: '/', backend: state.backend });
     this._crossTabCoordinator.notifyDirectoryChange('/', {
       storageRootKey: state.storageRootKey,
       providerBasePath: '',
@@ -2722,7 +2844,7 @@ export class WorkspaceFileService {
     return segments.length <= 1 || (segments.length === 2 && segments[1] === 'tau.json');
   }
 
-  private async _createExternalSnapshot(state: ObservedWebAccessRoot, providerBasePath?: string): Promise<string> {
+  private async _createExternalSnapshot(state: ObservedExternalRoot, providerBasePath?: string): Promise<string> {
     const rows: string[] = [];
     type EntryHandle = FileSystemDirectoryHandle | FileSystemFileHandle;
     type IterableDirectoryHandle = FileSystemDirectoryHandle & {
@@ -2777,10 +2899,16 @@ export class WorkspaceFileService {
         }
       }
     };
+    const rootHandle = state.directoryHandle;
+    if (rootHandle === undefined) {
+      // Snapshot polling exists to cover a browser observer that cannot be
+      // trusted. A node root reports its own changes and never reaches here.
+      throw new Error(`Snapshot polling is unavailable for a ${state.backend} root.`);
+    }
     try {
       if (providerBasePath !== undefined) {
         const parts = providerBasePath.split('/').filter(Boolean);
-        let handle = state.directoryHandle;
+        let handle = rootHandle;
         for (const part of parts) {
           // oxlint-disable-next-line no-await-in-loop -- Directory-handle traversal is necessarily ordered.
           handle = await handle.getDirectoryHandle(part);
@@ -2789,7 +2917,7 @@ export class WorkspaceFileService {
         return rows.join('\n');
       }
       // App state under a dot-prefixed root child never feeds discovery (F1).
-      const rootEntries = await admittedEntries(state.directoryHandle);
+      const rootEntries = await admittedEntries(rootHandle);
       const entries = rootEntries.filter(([name]) => !name.startsWith('.'));
       const topLevelRows = await resolveRows(entries, async ([name, child]) => {
         if (child.kind === 'file') {
@@ -2828,7 +2956,7 @@ export class WorkspaceFileService {
   }
 
   private async _reconcileUnknownExternalRecords(
-    state: ObservedWebAccessRoot,
+    state: ObservedExternalRoot,
     records: readonly NativeFileSystemChangeRecord[],
   ): Promise<void> {
     const providerBasePaths = new Set<string>();
@@ -2851,15 +2979,15 @@ export class WorkspaceFileService {
     await this._applyExternalSnapshot(state, providerBasePath, next);
   }
 
-  private async _applyExternalSnapshot(state: ObservedWebAccessRoot, scope: string, next: string): Promise<void> {
-    if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
+  private async _applyExternalSnapshot(state: ObservedExternalRoot, scope: string, next: string): Promise<void> {
+    if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
       return;
     }
     const previous = state.pollSnapshots.get(scope);
     if (previous === undefined) {
       if (state.nativeActive) {
         await state.provider.refresh?.();
-        if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
+        if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
           return;
         }
         this._invalidateExternalDerivatives();
@@ -2874,7 +3002,7 @@ export class WorkspaceFileService {
     }
     const physicalPaths = this._diffExternalSnapshot(previous, next);
     await state.provider.refresh?.(physicalPaths);
-    if (this._observedWebAccessRoots.get(state.storageRootKey) !== state) {
+    if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
       return;
     }
     this._invalidateExternalDerivatives(physicalPaths === undefined ? undefined : { state, physicalPaths });

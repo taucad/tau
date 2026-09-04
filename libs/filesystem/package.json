@@ -26,6 +26,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./backend": "./src/backend/index.ts",
+    "./backend/node": "./src/backend/node/index.ts",
     "./bundled-types-mount": "./src/bundled-types-mount.ts",
     "./revisions": "./src/revisions/index.ts",
     "./storage-root-key": "./src/storage-root-key.ts"
@@ -42,6 +43,11 @@
         "types": "./dist/backend/index.d.mts",
         "import": "./dist/backend/index.mjs",
         "default": "./dist/backend/index.mjs"
+      },
+      "./backend/node": {
+        "types": "./dist/backend/node/index.d.mts",
+        "import": "./dist/backend/node/index.mjs",
+        "default": "./dist/backend/node/index.mjs"
       },
       "./bundled-types-mount": {
         "types": "./dist/bundled-types-mount.d.mts",

@@ -5,6 +5,7 @@ const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
     'src/backend/index.ts',
+    'src/backend/node/index.ts',
     'src/bundled-types-mount.ts',
     'src/revisions/index.ts',
     'src/storage-root-key.ts',

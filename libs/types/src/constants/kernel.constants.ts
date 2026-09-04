@@ -7,7 +7,7 @@ import type { CodeLanguage } from '#types/code.types.js';
 export type KernelDimensions = 2 | 3;
 
 /** @public */
-export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad';
+export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'build123d';
 
 /**
  * Product catalog entry for a kernel offering, not an engine registry.
@@ -38,10 +38,44 @@ export type KernelConfiguration = {
   recommended: string;
   tags: string[];
   features: string[];
+  /** Runtime capability required before this offering may be selected. */
+  requiresRuntimeKernelId?: string;
+  /** Executing the project requires a separate native-code trust grant. */
+  requiresNativeCodeTrust?: boolean;
 };
 
 /** @public */
 export const kernelConfigurations = [
+  {
+    id: 'build123d',
+    name: 'Build123d',
+    dimensions: [2, 3],
+    language: 'python',
+    description: 'Native Python BRep CAD for desktop engineering',
+    mainFile: 'main.py',
+    backendProvider: 'build123d',
+    longDescription:
+      'A best-in-class Python CAD API backed by native OpenCascade. Build precise parametric parts and assemblies with direct STEP export and topology-aware rendering in the Tau desktop app.',
+    emptyCode: `from dataclasses import dataclass
+from build123d import Box, Shape
+
+@dataclass(frozen=True)
+class Params:
+    width: float = 40.0
+    depth: float = 30.0
+    height: float = 20.0
+
+def main(params: Params) -> Shape:
+    result = Box(params.width, params.depth, params.height)
+    result.label = "Body"
+    return result
+`,
+    recommended: 'Native Python Engineering CAD',
+    tags: ['Python', 'OpenCascade', 'BRep', 'Desktop', 'Precision'],
+    features: ['Native performance', 'Python CAD API', 'Topology-aware GLB', 'STEP export'],
+    requiresRuntimeKernelId: 'build123d',
+    requiresNativeCodeTrust: true,
+  },
   {
     id: 'openscad',
     name: 'OpenSCAD',

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 const authEmailDraftStorageKey = 'tau.auth.emailDraft';
 
@@ -16,15 +16,9 @@ export type AuthEmailDraftProviderProps = {
 const canUseSessionStorage = (): boolean => 'sessionStorage' in globalThis;
 
 export function AuthEmailDraftProvider({ children }: AuthEmailDraftProviderProps): React.JSX.Element {
-  const [emailDraft, setEmailDraftState] = useState('');
-
-  useEffect(() => {
-    if (!canUseSessionStorage()) {
-      return;
-    }
-
-    setEmailDraftState(globalThis.sessionStorage.getItem(authEmailDraftStorageKey) ?? '');
-  }, []);
+  const [emailDraft, setEmailDraftState] = useState(() =>
+    canUseSessionStorage() ? (globalThis.sessionStorage.getItem(authEmailDraftStorageKey) ?? '') : '',
+  );
 
   const setEmailDraft = useCallback((value: string) => {
     setEmailDraftState(value);

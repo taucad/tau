@@ -4,7 +4,7 @@ import { authMutationKeys, parseAdditionalFieldValue } from '@better-auth-ui/cor
 import { useAuth, useFetchOptions, useSignUpEmail } from '@better-auth-ui/react';
 import { useIsMutating } from '@tanstack/react-query';
 import { Eye, EyeOff } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@taucad/ui/components/button';
@@ -63,12 +63,6 @@ export function SignUp({ className, socialLayout, socialPosition = 'bottom' }: S
   const [email, setEmail] = useState(emailDraft);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-
-  useEffect(() => {
-    if (!email && emailDraft) {
-      setEmail(emailDraft);
-    }
-  }, [email, emailDraft]);
 
   const { mutate: signUpEmail, isPending: signUpEmailPending } = useSignUpEmail(authClient, {
     onError: (error) => {

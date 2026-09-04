@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth, useFetchOptions, useRequestPasswordReset } from '@better-auth-ui/react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
@@ -51,12 +51,6 @@ export function ForgotPassword({ className }: ForgotPasswordProps): React.JSX.El
 
   const { fetchOptions, resetFetchOptions } = useFetchOptions();
   const [email, setEmail] = useState(emailDraft);
-
-  useEffect(() => {
-    if (!email && emailDraft) {
-      setEmail(emailDraft);
-    }
-  }, [email, emailDraft]);
 
   const { mutate: requestPasswordReset, isPending } = useRequestPasswordReset(authClient, {
     onError: (error: unknown) => {

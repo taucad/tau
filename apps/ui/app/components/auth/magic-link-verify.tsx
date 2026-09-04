@@ -32,16 +32,14 @@ export type MagicLinkVerifyProps = {
 export function MagicLinkVerify({ className }: MagicLinkVerifyProps): React.JSX.Element {
   const { authClient, basePaths, viewPaths, navigate, Link } = useAuth();
   const location = useLocation();
-  const [status, setStatus] = useState<MagicLinkVerifyStatus>('verifying');
-
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const token = searchParams.get('token');
+  const [status, setStatus] = useState<MagicLinkVerifyStatus>(() => (token ? 'verifying' : 'missing-token'));
   const redirectTo = sanitizeVerifyEmailRedirectTo(searchParams.get('redirectTo') ?? undefined);
   const signInPath = `${basePaths.auth}/${viewPaths.auth.signIn}`;
 
   useEffect(() => {
     if (!token) {
-      setStatus('missing-token');
       return;
     }
 

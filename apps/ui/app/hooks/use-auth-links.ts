@@ -20,11 +20,11 @@ type AuthLinks = {
  * return <NavLink to={signIn}>Sign In</NavLink>;
  * ```
  */
-export function useAuthLinks(): AuthLinks {
+export function useAuthLinks(options?: { readonly redirectTo?: string }): AuthLinks {
   const { pathname, search } = useLocation();
 
   return useMemo(() => {
-    const redirectTo = encodeURIComponent(pathname + search);
+    const redirectTo = encodeURIComponent(options?.redirectTo ?? pathname + search);
 
     return {
       signIn: `/auth/sign-in?redirectTo=${redirectTo}`,
@@ -32,5 +32,5 @@ export function useAuthLinks(): AuthLinks {
       signUp: `/auth/sign-up?redirectTo=${redirectTo}`,
       signOut: `/auth/sign-out?redirectTo=${redirectTo}`,
     };
-  }, [pathname, search]);
+  }, [options?.redirectTo, pathname, search]);
 }

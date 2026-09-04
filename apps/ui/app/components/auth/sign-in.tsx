@@ -1,7 +1,7 @@
 import { authMutationKeys } from '@better-auth-ui/core';
 import { useAuth, useFetchOptions, useSendVerificationEmail, useSignInEmail } from '@better-auth-ui/react';
 import { useIsMutating } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
@@ -52,12 +52,6 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
 
   const [email, setEmail] = useState(emailDraft);
   const [password, setPassword] = useState('');
-
-  useEffect(() => {
-    if (!email && emailDraft) {
-      setEmail(emailDraft);
-    }
-  }, [email, emailDraft]);
 
   const { mutate: sendVerificationEmail } = useSendVerificationEmail(authClient, {
     onSuccess: () => toast.success(localization.auth.verificationEmailSent),

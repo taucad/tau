@@ -4,7 +4,7 @@ import { authMutationKeys } from '@better-auth-ui/core';
 import { useAuth, useAuthPlugin, useSignInMagicLink } from '@better-auth-ui/react';
 import type { MagicLinkAuthClient } from '@better-auth-ui/react';
 import { useIsMutating } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { SyntheticEvent } from 'react';
 import { toast } from 'sonner';
 
@@ -50,12 +50,6 @@ export function MagicLink({ className, socialLayout, socialPosition = 'bottom' }
 
   const [email, setEmail] = useState(emailDraft);
   const [isMagicLinkSubmitActive, setIsMagicLinkSubmitActive] = useState(false);
-
-  useEffect(() => {
-    if (!email && emailDraft) {
-      setEmail(emailDraft);
-    }
-  }, [email, emailDraft]);
 
   const { mutate: signInMagicLink, isPending: signInMagicLinkPending } = useSignInMagicLink(
     authClient as MagicLinkAuthClient,

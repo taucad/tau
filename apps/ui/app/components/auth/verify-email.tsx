@@ -32,16 +32,14 @@ export const sanitizeVerifyEmailRedirectTo = (value?: string): string => {
 export function VerifyEmail({ className }: VerifyEmailProps): React.JSX.Element {
   const { authClient, basePaths, viewPaths, navigate, Link } = useAuth();
   const location = useLocation();
-  const [status, setStatus] = useState<VerifyEmailStatus>('verifying');
-
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const token = searchParams.get('token');
+  const [status, setStatus] = useState<VerifyEmailStatus>(() => (token ? 'verifying' : 'missing-token'));
   const redirectTo = sanitizeVerifyEmailRedirectTo(searchParams.get('redirectTo') ?? undefined);
   const signInPath = `${basePaths.auth}/${viewPaths.auth.signIn}`;
 
   useEffect(() => {
     if (!token) {
-      setStatus('missing-token');
       return;
     }
 

@@ -7,7 +7,9 @@ import '@testing-library/jest-dom';
 // HTTP server, so load those same real bytes directly while preserving normal fetches.
 const networkFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const url = new URL(input instanceof Request ? input.url : input.toString(), globalThis.location.href);
+  // `location` is absent in `@vitest-environment node` files (server.test.ts); their URLs are already absolute.
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the DOM lib types `location` as always present.
+  const url = new URL(input instanceof Request ? input.url : input.toString(), globalThis.location?.href);
   const isLocalAsset = url.pathname.startsWith('/@fs/') && /\.(?:ttf|wasm)$/u.test(url.pathname);
   if (!isLocalAsset) {
     return networkFetch(input, init);

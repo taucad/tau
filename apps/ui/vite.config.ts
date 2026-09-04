@@ -7,14 +7,16 @@ import netlifyReactRouter from '@netlify/vite-plugin-react-router';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import devtoolsJson from '@silvenon/vite-plugin-devtools-json';
 import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
 import { visualizer } from 'rollup-plugin-visualizer';
 import { defineConfig } from 'vite';
-import type { Plugin } from 'vite';
+import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
+const uiReactCompilerPluginName = 'vite:react-compiler';
 
 const toOriginOrRaw = (value: string | undefined): string | undefined => {
   if (!value) {
@@ -116,6 +118,36 @@ export const createUiSourceAliasPlugin = (): Plugin => ({
   },
 });
 
+/**
+ * Applies the native React Compiler without admitting the second JSX and Fast
+ * Refresh pipeline returned by the full Vite React plugin. React Router owns
+ * those transforms for this framework-mode app.
+ */
+export const createUiReactCompilerPlugin = (): Plugin => {
+  const compilerPlugins = react({
+    compiler: { target: '19', logDiagnostics: true },
+    include: ['**/apps/ui/app/**/*.{js,jsx,ts,tsx}'],
+    exclude: [
+      '**/node_modules/**',
+      '**/*.{test,spec}.{js,jsx,ts,tsx}',
+      // Oxc 0.148 cannot reset compiler caches during route-module HMR.
+      '**/apps/ui/app/root.{js,jsx,ts,tsx}',
+      '**/apps/ui/app/routes/*.{js,jsx,ts,tsx}',
+      '**/apps/ui/app/routes/**/route.{js,jsx,ts,tsx}',
+    ],
+  }).filter((plugin) => plugin.name === uiReactCompilerPluginName);
+
+  const [compilerPlugin] = compilerPlugins;
+  if (compilerPlugins.length !== 1 || compilerPlugin === undefined) {
+    throw new Error(`Expected one ${uiReactCompilerPluginName} plugin, received ${compilerPlugins.length}.`);
+  }
+
+  return {
+    ...compilerPlugin,
+    applyToEnvironment: (environment) => environment.config.consumer === 'client',
+  };
+};
+
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
   const isNetlify = process.env['NETLIFY'] === 'true';
@@ -156,6 +188,7 @@ export default defineConfig(({ mode }) => {
         ? []
         : // In non-test mode, include the React Router plugin and the Netlify plugin
           [
+            createUiReactCompilerPlugin(),
             reactRouter(),
             // Netlify plugin is only needed for Netlify builds
             ...(isNetlify ? [netlifyReactRouter()] : []),
@@ -186,19 +219,7 @@ export default defineConfig(({ mode }) => {
       alias: isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : [],
     },
 
-    /*
-     * Externalise only the three packages that emit sibling SSR chunks via
-     * static `new URL('./<file>.js', import.meta.url)` patterns (kernel plugins,
-     * worker bootstraps, middleware factories). Bundling those re-emits many
-     * `build/server/assets/*` chunks SSR never executes. Other `@taucad/*`
-     * packages bundle into the SSR output.
-     *
-     * Audit first-party sources: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/
-     */
-    ssr: {
-      noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js'],
-      external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
-    },
+    ssr: uiSsrOptions,
 
     server: {
       port: 3000,
@@ -206,6 +227,9 @@ export default defineConfig(({ mode }) => {
       // HTTPS is intentionally a `nx serve ui --https` concern (handled by `apps/ui/server.ts`),
       // not a `nx dev ui` concern; dev is plain HTTP regardless of TTY/--host.
       allowedHosts: true,
+      // System-tier kernel skills are ?raw-imported from packages/plugins/*/agent/SKILL.md;
+      // allow the workspace root explicitly so the fs check admits them under Vite 8.
+      fs: { allow: [path.resolve(__dirname, '../..')] },
     },
     build: {
       /*
@@ -230,7 +254,9 @@ export default defineConfig(({ mode }) => {
     test: {
       globals: true, // Required by @testing-library/jest-dom, which uses `expect` implicitly
       environment: 'jsdom',
-      exclude: ['**/node_modules/**', '**/dist/**'],
+      // *.browser.test.ts files need a real browser (OPFS, Web Locks) and run
+      // under their own vitest browser configs, not the jsdom sweep.
+      exclude: ['**/node_modules/**', '**/dist/**', '**/*.browser.test.ts'],
       typecheck: {
         enabled: true,
         include: ['**/*.test-d.ts'],

@@ -54,7 +54,7 @@
           "env": "STATS"
         }
       ],
-      "command": "react-router build --sourcemapClient hidden",
+      "command": "node ../../tools/build-lock.mjs build -- react-router build --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}",
         "env": {
@@ -107,7 +107,7 @@
       "outputs": ["{projectRoot}/build"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "react-router build",
+        "command": "node ../../tools/build-lock.mjs build -- react-router build",
         "env": {
           "NODE_OPTIONS": "--max-old-space-size=8192",
           "TAU_API_URL": "http://localhost:4000",

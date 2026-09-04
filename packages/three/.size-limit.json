@@ -1,7 +1,7 @@
 [
   {
-    "name": "measure before release — placeholder budget",
+    "name": "@taucad/three runtime",
     "path": "dist/**/*.mjs",
-    "limit": "100 kB"
+    "limit": "3 kB"
   }
 ]

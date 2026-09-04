@@ -434,6 +434,24 @@ readline.on('line',(line)=>{const request=JSON.parse(line);if(active)process.exi
     await duplicate.session.cleanup();
   });
 
+  it('should preserve sibling trust revocation watches when one session is cleaned up', async () => {
+    const value = fixture(`${ready}${keepAlive}`);
+    const sibling = new NativeProcessSession<Issue>(value.options);
+    try {
+      await value.session.cleanup();
+      const operation = request(sibling);
+      const rejection = expect(operation).rejects.toThrow('Native-code trust was revoked.');
+      await vi.waitFor(() => {
+        expect(privateSession(sibling).pending.size).toBe(1);
+      });
+      unlinkSync(value.trustFile);
+      await rejection;
+    } finally {
+      await value.session.cleanup();
+      await sibling.cleanup();
+    }
+  });
+
   it('bounds the queue and handles abort, timeout, trust revocation, spawn, and write failures', async () => {
     const stalled = fixture(`${ready}${keepAlive}`, 5000);
     const operations = Array.from({ length: 16 }, async () => request(stalled.session));

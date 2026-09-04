@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createReadStream, unwatchFile, watchFile } from 'node:fs';
+import type { Stats } from 'node:fs';
 import { lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -243,11 +244,7 @@ export class NativeProcessSession<Issue> {
 
   public constructor(options: NativeProcessSessionOptions<Issue>) {
     this.options = options;
-    watchFile(options.trustFile, { interval: 250, persistent: false }, (current) => {
-      if (current.nlink === 0) {
-        this.requestTermination(new Error('Native-code trust was revoked.'));
-      }
-    });
+    watchFile(options.trustFile, { interval: 250, persistent: false }, this.onTrustChanged);
   }
 
   /** Assert that the host-owned physical project trust marker remains valid. */
@@ -355,7 +352,7 @@ export class NativeProcessSession<Issue> {
       return;
     }
     this.closed = true;
-    unwatchFile(this.options.trustFile);
+    unwatchFile(this.options.trustFile, this.onTrustChanged);
     await this.termination;
     const { child } = this;
     if (!child) {
@@ -375,6 +372,12 @@ export class NativeProcessSession<Issue> {
     }
     await terminateProcessTree(child);
   }
+
+  private readonly onTrustChanged = (current: Stats): void => {
+    if (current.nlink === 0) {
+      this.requestTermination(new Error('Native-code trust was revoked.'));
+    }
+  };
 
   private requestTermination(error: Error): void {
     this.termination = this.recycle(error);

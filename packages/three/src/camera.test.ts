@@ -228,6 +228,7 @@ describe('createThreeCameraRig', () => {
     const orthographicId = rig.orthographicCamera.uuid;
     rig.actorRef.start();
 
+    expect(rig.actorRef.getSnapshot().children['cameraDriver']).toBeDefined();
     expect(rig.activeCamera).toBe(rig.perspectiveCamera);
     expect(rig.activeCamera).toBeInstanceOf(PerspectiveCamera);
     const perspectiveTarget = new Vector3(...initialView.target).project(rig.activeCamera);
@@ -254,6 +255,40 @@ describe('createThreeCameraRig', () => {
     expect(rig.perspectiveCamera.uuid).toBe(perspectiveId);
     expect(rig.orthographicCamera.uuid).toBe(orthographicId);
 
+    rig.dispose();
+  });
+
+  it('reconnects the native driver from the current camera revision', () => {
+    const revisions: number[] = [];
+    const rig = createThreeCameraRig({
+      initialView,
+      onUpdate(_camera, snapshot) {
+        revisions.push(snapshot.revision);
+      },
+    });
+    rig.actorRef.start();
+    rig.actorRef.send({ type: 'setViewport', viewport: { width: 900, height: 600, pixelRatio: 1 } });
+    rig.actorRef.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
+    const rootSnapshot = rig.actorRef.getSnapshot();
+    const driver = rootSnapshot.children['cameraDriver']!;
+    const driverSnapshot = driver.getSnapshot();
+    const systemSnapshot = rig.actorRef.system.getSnapshot();
+
+    rig.actorRef.stop();
+    Reflect.set(rig.actorRef.system, '_snapshot', systemSnapshot);
+    Reflect.set(rig.actorRef, '_processingStatus', 0);
+    Reflect.set(rig.actorRef, '_snapshot', rootSnapshot);
+    Reflect.set(driver, '_processingStatus', 0);
+    Reflect.set(driver, '_snapshot', driverSnapshot);
+    revisions.length = 0;
+    rig.actorRef.start();
+
+    expect(revisions).toEqual([2]);
+    expect(rig.activeCamera).toBe(rig.orthographicCamera);
+    expect(
+      (rig.orthographicCamera.right - rig.orthographicCamera.left) /
+        (rig.orthographicCamera.top - rig.orthographicCamera.bottom),
+    ).toBeCloseTo(1.5, 12);
     rig.dispose();
   });
 

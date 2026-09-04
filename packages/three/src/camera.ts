@@ -353,14 +353,18 @@ const synchronizeCameras = ({
 
 const createThreeCameraDriver = (
   options: ThreeCameraDriverOptions,
-): CallbackActorLogic<CameraDriverEvent, CameraDriverInput> =>
-  fromCallback<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
-    synchronizeCameras({ options, snapshot: input.snapshot });
+): CallbackActorLogic<CameraDriverEvent, CameraDriverInput> => {
+  let latestSnapshot: CameraDriverSnapshot | undefined;
+  return fromCallback<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
+    latestSnapshot ??= input.snapshot;
+    synchronizeCameras({ options, snapshot: latestSnapshot });
     receive((event) => {
-      synchronizeCameras({ options, snapshot: event.snapshot });
+      latestSnapshot = event.snapshot;
+      synchronizeCameras({ options, snapshot: latestSnapshot });
     });
     return () => undefined;
   });
+};
 
 /**
  * Creates two persistent native endpoint cameras driven by one canonical actor.

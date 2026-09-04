@@ -21,7 +21,7 @@ export const panelMinSizeWorkbench = 360;
 export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
 
 /** Default render timeout. Milliseconds. */
-export const defaultRenderTimeout = 60_000;
+export const defaultRenderTimeout = 180_000;
 
 /** Existing mobile drawer surfaces; desktop utilities are Workbench tabs. */
 export const mobilePanelIds = [

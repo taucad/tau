@@ -38,7 +38,7 @@ describe('editor constants – panel consistency', () => {
 
 describe('graphics view settings parsing', () => {
   it('should default render timeout to 60_000ms', () => {
-    expect(defaultRenderTimeout).toBe(60_000);
+    expect(defaultRenderTimeout).toBe(180_000);
     expect(defaultGraphicsSettings.renderTimeout).toBe(defaultRenderTimeout);
   });
 

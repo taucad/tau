@@ -548,20 +548,46 @@ export class MaterializedWorkspaceAuthority {
   }
 }
 
-/** Capture a rooted filesystem as an immutable file-only revision tree. @public */
+/**
+ * Capture a rooted filesystem as an immutable file-only revision tree.
+ *
+ * A listing is a snapshot, not a lock: on a real filesystem an entry can be
+ * gone before the `stat`/`readFile` that follows it — an atomic write's temp
+ * file is renamed over its target, a workspace sweep removes a run directory.
+ * A vanished entry is therefore *skipped*, never a failed capture (which is how
+ * a `.<name>.<pid>.<uuid>.tmp` sibling took down workspace admission).
+ *
+ * @public
+ */
 export const captureRevisionTree = async (filesystem: RootedFileSystem): Promise<ImmutableRevisionTree> => {
   const entries: Array<readonly [string, Uint8Array<ArrayBuffer>]> = [];
+  const skipIfVanished = async <T>(operation: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
+  };
   const visit = async (path: string): Promise<void> => {
-    const children = await filesystem.readdir(path);
+    const children = await skipIfVanished(async () => filesystem.readdir(path));
     await Promise.all(
-      children.map(async (child) => {
+      (children ?? []).map(async (child) => {
         const childPath = joinRelativePath(path, child);
-        const stat = await filesystem.stat(childPath);
+        const stat = await skipIfVanished(async () => filesystem.stat(childPath));
+        if (stat === undefined) {
+          return;
+        }
         if (stat.type === 'dir') {
           await visit(childPath);
           return;
         }
-        entries.push([childPath, await filesystem.readFile(childPath)]);
+        const content = await skipIfVanished(async () => filesystem.readFile(childPath));
+        if (content !== undefined) {
+          entries.push([childPath, content]);
+        }
       }),
     );
   };

@@ -10,7 +10,7 @@ import type { RootedFileSystem } from '#workspace-file-service.js';
 import { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
 import { captureRevisionTree, MaterializedWorkspaceAuthority } from '#materialized-workspace.js';
 import { materializedWorkspaceId } from '#workspace-identity.js';
-import type { WatchEvent } from '#types.js';
+import type { FileStat, WatchEvent } from '#types.js';
 
 type Harness = {
   authority: MaterializedWorkspaceAuthority;
@@ -72,6 +72,56 @@ const baseTree = (): ImmutableRevisionTree =>
     ['delete-me.txt', 'delete base'],
     ['nested/rename-me.txt', 'rename base'],
   ]);
+
+/**
+ * A real filesystem can drop an entry between `readdir` and the `stat` that
+ * follows it — an atomic write's temp file is renamed away, a sweep removes a
+ * workspace directory. `vanishing` reproduces that: every listed name in
+ * `missing` is gone by the time the walker asks about it.
+ */
+const vanishingFileSystem = (
+  entries: Readonly<Record<string, readonly string[] | string>>,
+  missing: ReadonlySet<string>,
+): RootedFileSystem => {
+  const enoent = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+  const encoder = new TextEncoder();
+  return {
+    id: 'vanishing',
+    capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
+    readFile: (async (path: string) => {
+      if (missing.has(path)) {
+        throw enoent(path);
+      }
+      const value = entries[path];
+      if (typeof value !== 'string') {
+        throw enoent(path);
+      }
+      return encoder.encode(value);
+    }) as RootedFileSystem['readFile'],
+    readdir: async (path: string): Promise<string[]> => {
+      if (missing.has(path)) {
+        throw enoent(path);
+      }
+      const value = entries[path];
+      if (typeof value !== 'object') {
+        throw enoent(path);
+      }
+      return [...value];
+    },
+    stat: async (path: string): Promise<FileStat> => {
+      if (missing.has(path)) {
+        throw enoent(path);
+      }
+      const value = entries[path];
+      if (value === undefined) {
+        throw enoent(path);
+      }
+      return typeof value === 'string'
+        ? { type: 'file', size: value.length, mtimeMs: 0, contentKind: 'text', lineCount: 1 }
+        : { type: 'dir', size: 0, mtimeMs: 0 };
+    },
+  } as unknown as RootedFileSystem;
+};
 
 describe('MaterializedWorkspaceAuthority', () => {
   it('isolates concurrent reads, edits, deletes, and renames from one immutable base', async () => {
@@ -218,6 +268,40 @@ describe('MaterializedWorkspaceAuthority', () => {
       'nested/result.ts',
     ]);
     expect(new TextDecoder().decode(captured.get('nested/result.ts'))).toBe('result');
+  });
+
+  it('skips entries that vanish between the listing and the read instead of failing the capture', async () => {
+    /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed object: keys are workspace paths and run ids, not identifiers */
+    const filesystem = vanishingFileSystem(
+      {
+        '': ['main.ts', '.main.ts.json.4821.9f3a.tmp', 'gone', 'nested'],
+        'main.ts': 'kept',
+        nested: ['keep.txt'],
+        'nested/keep.txt': 'nested kept',
+      },
+      new Set(['.main.ts.json.4821.9f3a.tmp', 'gone']),
+    );
+
+    const captured = await captureRevisionTree(filesystem);
+
+    expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts', 'nested/keep.txt']);
+  });
+
+  it('treats a directory that vanishes mid-walk as empty rather than aborting the capture', async () => {
+    const filesystem = vanishingFileSystem(
+      { '': ['main.ts', 'run_a'], 'main.ts': 'kept', run_a: ['tree'] },
+      new Set(['run_a']),
+    );
+
+    // `stat` resolves before the sweep removes the directory, `readdir` does not.
+    const racing: RootedFileSystem = {
+      ...filesystem,
+      stat: async (path) => (path === 'run_a' ? { type: 'dir', size: 0, mtimeMs: 0 } : filesystem.stat(path)),
+    };
+
+    const captured = await captureRevisionTree(racing);
+
+    expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts']);
   });
 
   it('rejects duplicate identities, traversal, and use after destruction', async () => {

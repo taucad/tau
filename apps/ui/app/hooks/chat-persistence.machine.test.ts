@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
-import type { Chat, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
@@ -508,15 +508,15 @@ describe('chatPersistenceMachine', () => {
   });
 
   // ===========================================================================
-  // activeSelectionPersistence — setActiveModel / setActiveKernel
-  // patches Chat.activeModel / Chat.activeKernel via patchChat. Hydrates
+  // activeSelectionPersistence — setActiveExecution / setActiveKernel
+  // patches Chat.activeExecution / Chat.activeKernel via patchChat. Hydrates
   // from the loaded Chat row so reload preserves the chat-local choice.
   // ===========================================================================
   describe('activeSelectionPersistence', () => {
-    it('should hydrate activeModel and activeKernel from the loaded Chat row', async () => {
+    it('should hydrate activeExecution and activeKernel from the loaded Chat row', async () => {
       const mockChat = createMockChat({
         id: 'chat_abc',
-        activeModel: 'gpt-5.4-medium',
+        activeExecution: { kind: 'tau', model: 'gpt-5.4-medium' },
         activeKernel: 'manifold',
       });
       const actor = createTestActor({ loadResult: mockChat });
@@ -524,12 +524,12 @@ describe('chatPersistenceMachine', () => {
       actor.send({ type: 'setActiveChatId', chatId: 'chat_abc' });
       await waitFor(actor, (s) => s.matches({ chatLoading: 'idle' }));
 
-      expect(actor.getSnapshot().context.activeModel).toBe('gpt-5.4-medium');
+      expect(actor.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model: 'gpt-5.4-medium' });
       expect(actor.getSnapshot().context.activeKernel).toBe('manifold');
       actor.stop();
     });
 
-    it('should patch context and invoke persistActiveModelActor when setActiveModel fires', async () => {
+    it('should patch context and invoke persistActiveExecutionActor when setActiveExecution fires', async () => {
       const persistCalls: Array<{ chatId: string; model: string | undefined }> = [];
       const machine = chatPersistenceMachine.provide({
         actors: {
@@ -543,11 +543,15 @@ describe('chatPersistenceMachine', () => {
           persistErrorActor: fromSafeAsync(async () => {}),
           // oxlint-disable-next-line no-empty-function -- mock stub
           clearErrorActor: fromSafeAsync(async () => {}),
-          persistActiveModelActor: fromSafeAsync<void, { chatId: string; activeModel: string | undefined }>(
-            async ({ input }) => {
-              persistCalls.push({ chatId: input.chatId, model: input.activeModel });
-            },
-          ),
+          persistActiveExecutionActor: fromSafeAsync<
+            void,
+            { chatId: string; activeExecution: CadAgentExecution | undefined }
+          >(async ({ input }) => {
+            persistCalls.push({
+              chatId: input.chatId,
+              model: input.activeExecution?.kind === 'tau' ? input.activeExecution.model : undefined,
+            });
+          }),
           // oxlint-disable-next-line no-empty-function -- mock stub
           persistActiveKernelActor: fromSafeAsync(async () => {}),
         },
@@ -555,10 +559,10 @@ describe('chatPersistenceMachine', () => {
       const actor = createActor(machine, { input: { activeChatId: 'chat_abc' } });
       actor.start();
 
-      actor.send({ type: 'setActiveModel', model: 'gpt-5.4-medium' });
+      actor.send({ type: 'setActiveExecution', execution: { kind: 'tau', model: 'gpt-5.4-medium' } });
 
-      expect(actor.getSnapshot().context.activeModel).toBe('gpt-5.4-medium');
-      await waitFor(actor, (s) => s.matches({ activeModelPersistence: 'idle' }));
+      expect(actor.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model: 'gpt-5.4-medium' });
+      await waitFor(actor, (s) => s.matches({ activeExecutionPersistence: 'idle' }));
       expect(persistCalls).toEqual([{ chatId: 'chat_abc', model: 'gpt-5.4-medium' }]);
       actor.stop();
     });
@@ -578,7 +582,7 @@ describe('chatPersistenceMachine', () => {
           // oxlint-disable-next-line no-empty-function -- mock stub
           clearErrorActor: fromSafeAsync(async () => {}),
           // oxlint-disable-next-line no-empty-function -- mock stub
-          persistActiveModelActor: fromSafeAsync(async () => {}),
+          persistActiveExecutionActor: fromSafeAsync(async () => {}),
           persistActiveKernelActor: fromSafeAsync<void, { chatId: string; activeKernel: KernelId | undefined }>(
             async ({ input }) => {
               persistCalls.push({ chatId: input.chatId, kernel: input.activeKernel });
@@ -597,7 +601,7 @@ describe('chatPersistenceMachine', () => {
       actor.stop();
     });
 
-    it('should ignore setActiveModel when no valid chatId is set', () => {
+    it('should ignore setActiveExecution when no valid chatId is set', () => {
       const persistCalls: string[] = [];
       const machine = chatPersistenceMachine.provide({
         actors: {
@@ -611,11 +615,12 @@ describe('chatPersistenceMachine', () => {
           persistErrorActor: fromSafeAsync(async () => {}),
           // oxlint-disable-next-line no-empty-function -- mock stub
           clearErrorActor: fromSafeAsync(async () => {}),
-          persistActiveModelActor: fromSafeAsync<void, { chatId: string; activeModel: string | undefined }>(
-            async ({ input }) => {
-              persistCalls.push(input.chatId);
-            },
-          ),
+          persistActiveExecutionActor: fromSafeAsync<
+            void,
+            { chatId: string; activeExecution: CadAgentExecution | undefined }
+          >(async ({ input }) => {
+            persistCalls.push(input.chatId);
+          }),
           // oxlint-disable-next-line no-empty-function -- mock stub
           persistActiveKernelActor: fromSafeAsync(async () => {}),
         },
@@ -623,16 +628,16 @@ describe('chatPersistenceMachine', () => {
       const actor = createActor(machine, { input: {} });
       actor.start();
 
-      actor.send({ type: 'setActiveModel', model: 'gpt-5.4-medium' });
+      actor.send({ type: 'setActiveExecution', execution: { kind: 'tau', model: 'gpt-5.4-medium' } });
 
       // Context should not update without a valid chat id, and the actor must
       // never be invoked. The selection only makes sense bound to a chat.
-      expect(actor.getSnapshot().context.activeModel).toBeUndefined();
+      expect(actor.getSnapshot().context.activeExecution).toBeUndefined();
       expect(persistCalls).toEqual([]);
       actor.stop();
     });
 
-    it('should replace prior activeModel writes with the latest value when setActiveModel races', async () => {
+    it('should replace prior activeExecution writes with the latest value when setActiveExecution races', async () => {
       const persistCalls: string[] = [];
       const machine = chatPersistenceMachine.provide({
         actors: {
@@ -646,11 +651,12 @@ describe('chatPersistenceMachine', () => {
           persistErrorActor: fromSafeAsync(async () => {}),
           // oxlint-disable-next-line no-empty-function -- mock stub
           clearErrorActor: fromSafeAsync(async () => {}),
-          persistActiveModelActor: fromSafeAsync<void, { chatId: string; activeModel: string | undefined }>(
-            async ({ input }) => {
-              persistCalls.push(input.activeModel ?? '<undef>');
-            },
-          ),
+          persistActiveExecutionActor: fromSafeAsync<
+            void,
+            { chatId: string; activeExecution: CadAgentExecution | undefined }
+          >(async ({ input }) => {
+            persistCalls.push(input.activeExecution?.kind === 'tau' ? input.activeExecution.model : '<undef>');
+          }),
           // oxlint-disable-next-line no-empty-function -- mock stub
           persistActiveKernelActor: fromSafeAsync(async () => {}),
         },
@@ -658,11 +664,11 @@ describe('chatPersistenceMachine', () => {
       const actor = createActor(machine, { input: { activeChatId: 'chat_abc' } });
       actor.start();
 
-      actor.send({ type: 'setActiveModel', model: 'first' });
-      actor.send({ type: 'setActiveModel', model: 'second' });
+      actor.send({ type: 'setActiveExecution', execution: { kind: 'tau', model: 'first' } });
+      actor.send({ type: 'setActiveExecution', execution: { kind: 'tau', model: 'second' } });
 
-      await waitFor(actor, (s) => s.matches({ activeModelPersistence: 'idle' }));
-      expect(actor.getSnapshot().context.activeModel).toBe('second');
+      await waitFor(actor, (s) => s.matches({ activeExecutionPersistence: 'idle' }));
+      expect(actor.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model: 'second' });
       expect(persistCalls.at(-1)).toBe('second');
       actor.stop();
     });

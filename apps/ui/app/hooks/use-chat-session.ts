@@ -43,9 +43,9 @@ type Acquisition = {
  *   the prior one is released in the effect cleanup the next time the
  *   effect commits — this guarantees the new session is live before the
  *   old one is dropped, so consumers never observe a torn state.
- * - **Unmount**: the active acquisition is released, decrementing the
- *   refcount; the store disposes the underlying actors only when no other
- *   consumer holds the chat.
+ * - **Unmount**: the active acquisition releases its view reference; the
+ *   store disposes the underlying actors only when no other view or active
+ *   run holds the chat.
  */
 export function useChatSession(chatId: string): ChatSession {
   const store = useChatSessionStore();

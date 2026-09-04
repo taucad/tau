@@ -703,7 +703,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
       messages: chat.messages,
       draft: chat.draft,
       messageEdits: chat.messageEdits,
-      activeModel: chat.activeModel,
+      activeExecution: chat.activeExecution,
       activeKernel: chat.activeKernel,
     });
   }
@@ -721,7 +721,7 @@ export class IndexedDbStorageProvider implements StorageProvider {
           messages: chat.messages,
           draft: chat.draft,
           messageEdits: chat.messageEdits,
-          activeModel: chat.activeModel,
+          activeExecution: chat.activeExecution,
           activeKernel: chat.activeKernel,
         });
         return { oldId: chat.id, newId: newChat.id };

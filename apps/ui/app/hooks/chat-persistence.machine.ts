@@ -9,7 +9,7 @@
  */
 
 import { setup, assign, emit, raise } from 'xstate';
-import type { Chat, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { getRetryDelay } from '#utils/backoff.utils.js';
@@ -124,15 +124,13 @@ export type ChatPersistenceMachineContext = {
   // Request queued while a previous request is being stopped; consumed on requestFinished
   pendingRequest?: ChatRequest;
   /**
-   * Chat-scoped active model id. Hydrated from the loaded `Chat.activeModel`
-   * row and updated by `setActiveModel`. Mirrors the chat row so consumers
-   * can read the chat-local choice off the persistence machine snapshot
-   * without an extra storage read per render.
+   * Chat-scoped execution target. Paseo selections contain opaque connection
+   * and agent ids only; pairing credentials never enter durable chat state.
    */
-  activeModel?: string;
+  activeExecution?: CadAgentExecution;
   /**
    * Chat-scoped active CAD kernel. Same hydration + propagation semantics
-   * as {@link ChatPersistenceMachineContext.activeModel}.
+   * as {@link ChatPersistenceMachineContext.activeExecution}.
    */
   activeKernel?: KernelId;
   /**
@@ -176,8 +174,8 @@ type ChatPersistenceMachineEvents =
        */
       isDisconnect: boolean;
     }
-  // Active selection (chat-scoped model / kernel)
-  | { type: 'setActiveModel'; model: string | undefined }
+  // Active selection (chat-scoped execution / kernel)
+  | { type: 'setActiveExecution'; execution: CadAgentExecution | undefined }
   | { type: 'setActiveKernel'; kernel: KernelId | undefined }
   /**
    * AI SDK entered `status: 'streaming'` again — bytes are flowing after a
@@ -287,8 +285,11 @@ const clearErrorActor = fromSafeAsync<void, { chatId: string }>(async () => {
   throw new Error('clearErrorActor not provided');
 });
 
-const persistActiveModelActor = fromSafeAsync<void, { chatId: string; activeModel: string | undefined }>(async () => {
-  throw new Error('persistActiveModelActor not provided');
+const persistActiveExecutionActor = fromSafeAsync<
+  void,
+  { chatId: string; activeExecution: CadAgentExecution | undefined }
+>(async () => {
+  throw new Error('persistActiveExecutionActor not provided');
 });
 
 const persistActiveKernelActor = fromSafeAsync<void, { chatId: string; activeKernel: KernelId | undefined }>(
@@ -313,7 +314,7 @@ export const chatPersistenceMachine = setup({
     persistMessagesActor,
     persistErrorActor,
     clearErrorActor,
-    persistActiveModelActor,
+    persistActiveExecutionActor,
     persistActiveKernelActor,
   },
   guards: {
@@ -364,7 +365,7 @@ export const chatPersistenceMachine = setup({
       pendingChatId: undefined,
       persistedError: undefined,
       pendingRequest: undefined,
-      activeModel: undefined,
+      activeExecution: undefined,
       activeKernel: undefined,
       retryAttempt: 0,
       retryMaxAttempts: input.retryMaxAttempts ?? defaultRetryMaxAttempts,
@@ -413,7 +414,7 @@ export const chatPersistenceMachine = setup({
             chatRetrieved: {
               actions: assign({
                 persistedError: ({ event }) => event.chat?.error,
-                activeModel: ({ event }) => event.chat?.activeModel,
+                activeExecution: ({ event }) => event.chat?.activeExecution,
                 activeKernel: ({ event }) => event.chat?.activeKernel,
               }),
             },
@@ -671,40 +672,40 @@ export const chatPersistenceMachine = setup({
         },
       },
     },
-    // Active model persistence — chat-scoped active model.
+    // Active execution persistence — chat-scoped execution target.
     // Mirrors errorPersistence: idle → persisting → idle, where the second
-    // `setActiveModel` while persisting re-enters so the latest value wins.
-    activeModelPersistence: {
+    // `setActiveExecution` while persisting re-enters so the latest value wins.
+    activeExecutionPersistence: {
       initial: 'idle',
       states: {
         idle: {
           on: {
-            setActiveModel: {
+            setActiveExecution: {
               target: 'persisting',
               guard: 'hasValidChatId',
               actions: assign({
-                activeModel: ({ event }) => event.model,
+                activeExecution: ({ event }) => event.execution,
               }),
             },
           },
         },
         persisting: {
           invoke: {
-            src: 'persistActiveModelActor',
+            src: 'persistActiveExecutionActor',
             input: ({ context }) => ({
               chatId: context.activeChatId!,
-              activeModel: context.activeModel,
+              activeExecution: context.activeExecution,
             }),
             onDone: { target: 'idle' },
             onError: { target: 'idle' },
           },
           on: {
-            setActiveModel: {
+            setActiveExecution: {
               target: 'persisting',
               reenter: true,
               guard: 'hasValidChatId',
               actions: assign({
-                activeModel: ({ event }) => event.model,
+                activeExecution: ({ event }) => event.execution,
               }),
             },
           },
@@ -712,7 +713,7 @@ export const chatPersistenceMachine = setup({
       },
     },
     // Active kernel persistence — chat-scoped active CAD kernel. Same shape
-    // as activeModelPersistence.
+    // as activeExecutionPersistence.
     activeKernelPersistence: {
       initial: 'idle',
       states: {

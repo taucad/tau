@@ -41,7 +41,7 @@
 import type { Chat as AiSdkChat } from '@ai-sdk/react';
 import { useSelector } from '@xstate/react';
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import type { MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import type { ActorRefFrom } from 'xstate';
@@ -174,12 +174,8 @@ export type CombinedChatState = {
   /** Persisted error survives reload (from the chat entity in IndexedDB). */
   persistedError: ChatError | undefined;
   isLoading: boolean;
-  /**
-   * Chat-scoped active model id, mirrored from the persistence machine's
-   * `Chat.activeModel`. When undefined the consumer falls back to the
-   * cookie default (see `useActiveChatModel`).
-   */
-  activeModel: string | undefined;
+  /** Chat-scoped execution target mirrored from durable persistence. */
+  activeExecution: CadAgentExecution | undefined;
   /**
    * Chat-scoped active CAD kernel, mirrored from the persistence machine's
    * `Chat.activeKernel`. When undefined the consumer falls back to the
@@ -198,13 +194,13 @@ export type CombinedChatState = {
 
 type PersistenceSliceFields = {
   persistedError: ChatError | undefined;
-  activeModel: string | undefined;
+  activeExecution: CadAgentExecution | undefined;
   activeKernel: KernelId | undefined;
 };
 
 const emptyPersistenceSlice: PersistenceSliceFields = {
   persistedError: undefined,
-  activeModel: undefined,
+  activeExecution: undefined,
   activeKernel: undefined,
 };
 
@@ -215,7 +211,7 @@ const persistenceSliceCache = new WeakMap<
 
 /**
  * Subscribe to a possibly-undefined persistence actor's chat-scoped fields
- * (`persistedError`, `activeModel`, `activeKernel`) without violating the
+ * (`persistedError`, `activeExecution`, `activeKernel`) without violating the
  * rules of hooks when the actor is not yet present. Slices are cached per
  * actor + context reference so `useSyncExternalStore` returns the same
  * object reference across notifications that did not change the slice.
@@ -245,14 +241,14 @@ function usePersistenceSlice(
       cached &&
       cached.context === context &&
       cached.slice.persistedError === context.persistedError &&
-      cached.slice.activeModel === context.activeModel &&
+      cached.slice.activeExecution === context.activeExecution &&
       cached.slice.activeKernel === context.activeKernel
     ) {
       return cached.slice;
     }
     const slice: PersistenceSliceFields = {
       persistedError: context.persistedError,
-      activeModel: context.activeModel,
+      activeExecution: context.activeExecution,
       activeKernel: context.activeKernel,
     };
     persistenceSliceCache.set(persistenceActorRef, { context, slice });
@@ -296,7 +292,7 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       error,
       persistedError: persistenceSlice.persistedError,
       isLoading,
-      activeModel: persistenceSlice.activeModel,
+      activeExecution: persistenceSlice.activeExecution,
       activeKernel: persistenceSlice.activeKernel,
       draftText: draftContext.draftText,
       draftImages: draftContext.draftImages,

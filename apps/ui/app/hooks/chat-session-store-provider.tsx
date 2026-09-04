@@ -9,8 +9,8 @@
  *
  * The provider mirrors the closures from `useProjectManager()` into the
  * store on every render via `setDependencies`, so the store always invokes
- * the latest worker-backed methods. The pattern matches `useChatRpcConnection`
- * (deps held in a ref so effect identity doesn't churn).
+ * the latest worker-backed methods. Deps are held in a ref so effect identity
+ * doesn't churn.
  */
 
 import { createContext, useContext, useState } from 'react';

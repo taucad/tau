@@ -98,8 +98,11 @@ describe('ChatExamples — submit routes through useCadChatClient', () => {
     };
     const wireBody = {
       id: 'chat_test',
+      projectId: 'project_test',
       messages: [userMessage],
       agent: cadAgent,
+      admission: { version: 1, idempotencyKey: 'request_0000000001' },
+      execution: { workspaceId: 'workspace_test', baseRevisionId: 'rev_test', hostId: 'host_test' },
     };
 
     expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();

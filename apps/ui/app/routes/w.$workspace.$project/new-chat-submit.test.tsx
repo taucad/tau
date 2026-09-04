@@ -130,6 +130,9 @@ vi.mock('@ai-sdk/react', () => ({
 vi.mock('ai', () => ({
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
+  // `shared-chat-transport` hands this predicate to `Chat` as
+  // `sendAutomaticallyWhen`; the fake `Chat` above never calls it.
+  lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(() => false),
 }));
 
 vi.mock('#environment.config.js', () => ({
@@ -141,6 +144,24 @@ vi.mock('#machines/inspector.js', () => ({
 }));
 
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
+
+// Every dispatched verb carries the per-turn wire body the chat-client
+// composes (`chatTurnRequestSchema` shape). A bodyless `send` now parks in
+// `#waitForLatestAgentBody` until a client publishes one, so the regression
+// below must attach the body the way `useCadChatClient` does.
+const testRunBody = Object.freeze({
+  agent: Object.freeze({
+    profile: 'cad',
+    execution: Object.freeze({ kind: 'tau', model: 'openai-gpt-5.5' }),
+    kernel: 'replicad',
+    mode: 'agent',
+    toolChoice: 'auto',
+    testingEnabled: true,
+  }),
+  projectId: 'project_test',
+  execution: Object.freeze({ workspaceId: 'workspace_test', baseRevisionId: 'revision_test', hostId: 'host_test' }),
+  admission: Object.freeze({ version: 1, idempotencyKey: 'req_test_new_chat_submit' }),
+});
 
 describe('new chat submit regression', () => {
   beforeEach(() => {
@@ -186,6 +207,7 @@ describe('new chat submit regression', () => {
       request: {
         kind: 'send',
         message: { id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'hello chat_new' }] },
+        body: testRunBody,
       },
     });
 
@@ -247,13 +269,13 @@ describe('new chat submit regression', () => {
 
     newSession.persistenceActorRef.send({
       type: 'startRequest',
-      request: { kind: 'send', message: userMessage },
+      request: { kind: 'send', message: userMessage, body: testRunBody },
     });
 
     await Promise.resolve();
     await Promise.resolve();
 
     const newChat = harness.created.find((c) => c.id === 'chat_new');
-    expect(newChat?.sendMessage).toHaveBeenCalledWith(userMessage);
+    expect(newChat?.sendMessage).toHaveBeenCalledWith(userMessage, { body: testRunBody });
   });
 });

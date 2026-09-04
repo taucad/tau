@@ -1,7 +1,7 @@
 /**
  * ChatSessionStore
  *
- * Vanilla, reference-counted store that owns the long-lived per-chat objects:
+ * Vanilla, dual-lifetime store that owns the long-lived per-chat objects:
  * the AI SDK `Chat` instance, the `chatPersistenceMachine` actor, and the
  * `draftMachine` actor. React components subscribe but never own — every
  * lifetime survives subtree unmount/remount cycles, eliminating the class of
@@ -10,11 +10,12 @@
  * draft `setChatId` lost across an async hop, draft state leaking across
  * chats, cross-chat persist mis-targeting).
  *
- * Reference counting:
- * - `acquire(chatId)` lazily creates the session on first call and bumps a
- *   refcount on every subsequent call.
- * - `release(chatId)` decrements; the session stops both XState actors at
- *   refcount zero and is GC'd along with its `Chat` instance.
+ * Lifetime ownership:
+ * - `acquire(chatId)` / `release(chatId)` track React views only.
+ * - `startRun(chatId)` owns the session independently while a request is
+ *   active, so navigation cannot stop its transport or persistence actor.
+ * - A session is disposed only when its final view and active run are both
+ *   released.
  *
  * Subscriptions:
  * - `subscribeMembership` wakes on first acquire / final release per chatId.
@@ -25,17 +26,19 @@
  *
  * Dependencies (`setDependencies`) are mirrored on every render of the
  * provider so the store always invokes the latest closures from
- * `useProjectManager()` (mirrors the `useProjectManager` ref pattern used
- * by `useChatRpcConnection`).
+ * `useProjectManager()`, held in a ref so effect identity does not churn.
  */
 
 import type { Chat } from '@ai-sdk/react';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
+import { z } from 'zod';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { isAnyToolPart } from '@taucad/chat';
+import { generatePrefixedId } from '@taucad/utils/id';
+import { idPrefix } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type { ChatRequest } from '#hooks/chat-persistence.machine.js';
@@ -45,8 +48,18 @@ import { inspect } from '#machines/inspector.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import { extractMimeTypeFromDataUrl, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
-import { createChatInstance } from '#chat-clients/_internal/shared-chat-transport.js';
+import {
+  bindDurableChatRun,
+  createChatInstance,
+  getBoundDurableChatRunId,
+} from '#chat-clients/_internal/shared-chat-transport.js';
+import { registerAgentHostRunReset } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
+
+const admissionEnvelopeSchema = z.strictObject({
+  version: z.literal(1),
+  idempotencyKey: z.string().min(1),
+});
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -126,7 +139,7 @@ function buildEditedMessage(original: MyUIMessage, request: Extract<ChatRequest,
 /**
  * Slices the message tail so a subsequent `chat.regenerate(...)` re-runs
  * the assistant turn after the retried message. Model overrides (e.g. "Try
- * with a different model") travel via `request.body.agent.model` composed
+ * with a different model") travel via `request.body.agent.execution` composed
  * by `useCadChatClient.retry`, not by mutating persisted metadata.
  */
 function buildRetryMessages(
@@ -224,19 +237,47 @@ function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
 // ChatSessionStore
 // ---------------------------------------------------------------------------
 
+/**
+ * Composes one per-request wire body, admitting the chat's durable workspace on
+ * the way. Owned by the profile-scoped chat client; called by the store only for
+ * dispatches that carry no body of their own.
+ *
+ * @public
+ */
+export type LatestAgentBodyFactory = () => Promise<Readonly<Record<string, unknown>>>;
+
 type InternalSession = ChatSession & {
-  refcount: number;
+  /** React/view consumers currently observing this session. */
+  viewRefcount: number;
+  /** Non-view ownership held while one logical run is active. */
+  runHeld: boolean;
+  /** Exact server-authoritative run selected by project reload discovery. */
+  durableRunId: string | undefined;
+  durableRunState: 'reattaching' | 'active' | 'terminal' | undefined;
+  /** Host this session has already reattached to; see `reattachHostChat`. */
+  reattachedHostId: string | undefined;
+  /**
+   * This load dispatched the chat's seeded first turn, so the host stream is
+   * this page's own and there is nothing to reattach to; see
+   * {@link ChatSessionStore.reattachHostChat}.
+   */
+  seededDispatch: boolean;
+  /** Immutable wire body for the active logical run, including admission. */
+  activeRunBody: Readonly<Record<string, unknown>> | undefined;
   status: ChatStatus;
   usage: UsageSnapshot | undefined;
   /**
-   * Latest per-request body the active profile-scoped chat client has
-   * computed for this chat. Populated via {@link ChatSessionStore.setLatestAgentBody}
-   * from `useCadChatClient` on every render. The `dispatchRequest` listener
-   * falls back to this body when a request enters the persistence machine
-   * without an explicit `body` (currently the startup-request hydration
-   * regenerate in `loadChatActor` and manual continue paths).
+   * How the active profile-scoped chat client composes a per-request body for
+   * this chat. Published via {@link ChatSessionStore.setLatestAgentBody} from
+   * `useCadChatClient`. The `dispatchRequest` listener calls it when a request
+   * enters the persistence machine without an explicit `body` (the
+   * startup-request hydration regenerate in `loadChatActor`), so the seeded turn
+   * admits the same workspace an explicit submit would — a stored snapshot
+   * could name a workspace that a later `prepare` had already discarded.
    */
-  latestAgentBody: Readonly<Record<string, unknown>> | undefined;
+  latestAgentBody: LatestAgentBodyFactory | undefined;
+  /** Bodyless startup/continue dispatches waiting for the profile client to publish its body factory. */
+  latestAgentBodyWaiters: Set<(compose: LatestAgentBodyFactory | undefined) => void>;
   /** Cleanups for the per-chat subscriptions wired up at session creation. */
   dispose: () => void;
 };
@@ -305,7 +346,7 @@ export class ChatSessionStore {
   public acquire(chatId: string): ChatSession {
     const existing = this.#sessions.get(chatId);
     if (existing) {
-      existing.refcount += 1;
+      existing.viewRefcount += 1;
       return existing;
     }
 
@@ -316,24 +357,148 @@ export class ChatSessionStore {
     return session;
   }
 
+  /**
+   * Rehydrate an API-discovered durable run without acquiring a React view.
+   * Its non-view hold keeps the session alive while the exact run resumes.
+   */
+  public retainDurableRun(input: {
+    readonly chatId: string;
+    readonly runId: string;
+    readonly state?: 'active' | 'terminal';
+  }): ChatSession {
+    bindDurableChatRun(input.chatId, input.runId);
+    const existing = this.#sessions.get(input.chatId);
+    if (existing) {
+      const runChanged = existing.durableRunId !== input.runId;
+      const priorState = existing.durableRunState;
+      const nextState = !runChanged && priorState === 'terminal' ? 'terminal' : (input.state ?? 'reattaching');
+      const shouldResume =
+        nextState !== 'terminal' &&
+        existing.status === 'ready' &&
+        !existing.persistenceActorRef.getSnapshot().context.isLoadingChat &&
+        (runChanged || priorState === undefined);
+      existing.runHeld = true;
+      existing.durableRunId = input.runId;
+      existing.durableRunState = nextState;
+      this.#statusTopics.get(input.chatId)?.emit();
+      if (shouldResume) {
+        queueMicrotask(() => {
+          if (
+            this.#sessions.get(input.chatId) === existing &&
+            existing.durableRunId === input.runId &&
+            existing.durableRunState !== 'terminal'
+          ) {
+            void existing.chat.resumeStream();
+          }
+        });
+      }
+      return existing;
+    }
+    const session = this.#createSession(input.chatId);
+    session.viewRefcount = 0;
+    session.runHeld = true;
+    session.durableRunId = input.runId;
+    session.durableRunState = input.state ?? 'reattaching';
+    this.#sessions.set(input.chatId, session);
+    this.#refreshSnapshot();
+    this.#notifyMembership();
+    return session;
+  }
+
+  /**
+   * Reattach one host-placed chat to its host's durable log.
+   *
+   * Reload discovery substantiates a run from this browser's *workspace claim*
+   * (`ProjectChatRpcBindings` → {@link ChatSessionStore.retainDurableRun}). A
+   * chat placed on a daemon writes no claim — the daemon owns its workspace,
+   * its files and its tools — so nothing ever retained its run, the load-time
+   * resume gate never opened, and a reloaded page rebuilt its transcript from
+   * local storage while the daemon finished the turn unattended.
+   *
+   * The host's log is the authority (PH19) and the transport resolves the run
+   * from it, so the trigger here is the *placement*, not a run id. Idempotent
+   * per host: the caller is the host registration effect, which re-runs
+   * whenever the per-turn agent config changes.
+   *
+   * A chat whose seeded first turn *this load* dispatched is excluded: that
+   * dispatch is already the host stream, and reattaching over it opened a
+   * second one — on rung 2, a second relay session, refused by a capacity-1
+   * daemon with 409 BUSY before the seeded turn had run at all. `status` alone
+   * does not cover it: the registration effect can observe `ready` in the same
+   * tick the dispatch is queued.
+   *
+   * @param input - The chat and the host it is placed on.
+   */
+  public reattachHostChat(input: { readonly chatId: string; readonly hostId: string }): void {
+    const session = this.#sessions.get(input.chatId);
+    if (
+      !session ||
+      session.reattachedHostId === input.hostId ||
+      session.seededDispatch ||
+      session.status !== 'ready' ||
+      session.persistenceActorRef.getSnapshot().context.isLoadingChat
+    ) {
+      // Marked only when it actually reattaches, so a later registration pass
+      // still reattaches a chat that was loading or busy on this one.
+      return;
+    }
+    session.reattachedHostId = input.hostId;
+    queueMicrotask(() => {
+      if (this.#sessions.get(input.chatId) === session) {
+        void session.chat.resumeStream();
+      }
+    });
+  }
+
+  /** Release reload-discovery ownership after project-wide settlement. */
+  public releaseDurableRun(input: { readonly chatId: string; readonly runId: string }): void {
+    const session = this.#sessions.get(input.chatId);
+    if (!session || session.durableRunId !== input.runId) {
+      return;
+    }
+    session.durableRunId = undefined;
+    session.durableRunState = undefined;
+    this.#disposeIfUnreferenced(session);
+  }
+
+  /** Idempotently restore the canonical user row ahead of its durable assistant run. */
+  public reconcileDurableUserMessage(input: {
+    readonly chatId: string;
+    readonly runId: string;
+    readonly message: MyUIMessage;
+  }): boolean {
+    const session = this.#sessions.get(input.chatId);
+    if (!session || session.durableRunId !== input.runId || input.message.role !== 'user') {
+      return false;
+    }
+    const existingIndex = session.chat.messages.findIndex((message) => message.id === input.message.id);
+    if (existingIndex === -1) {
+      const assistantIndex = session.chat.messages.findIndex(
+        (message) => message.role === 'assistant' && message.id === input.runId,
+      );
+      const insertAt = assistantIndex === -1 ? session.chat.messages.length : assistantIndex;
+      session.chat.messages = [
+        ...session.chat.messages.slice(0, insertAt),
+        input.message,
+        ...session.chat.messages.slice(insertAt),
+      ];
+    } else {
+      if (session.chat.messages[existingIndex] === input.message) {
+        return false;
+      }
+      session.chat.messages = session.chat.messages.with(existingIndex, input.message);
+    }
+    session.persistenceActorRef.send({ type: 'queuePersist', messages: session.chat.messages });
+    return true;
+  }
+
   public release(chatId: string): void {
     const session = this.#sessions.get(chatId);
     if (!session) {
       return;
     }
-    session.refcount -= 1;
-    if (session.refcount > 0) {
-      return;
-    }
-
-    session.dispose();
-    session.persistenceActorRef.stop();
-    session.draftActorRef.stop();
-    this.#sessions.delete(chatId);
-    clearLedger(chatId);
-    this.#disposeChatTopics(chatId);
-    this.#refreshSnapshot();
-    this.#notifyMembership();
+    session.viewRefcount -= 1;
+    this.#disposeIfUnreferenced(session);
   }
 
   public get(chatId: string): ChatSession | undefined {
@@ -356,6 +521,14 @@ export class ChatSessionStore {
     return this.#sessions.get(chatId)?.status;
   }
 
+  public getDurableRunState(chatId: string): InternalSession['durableRunState'] {
+    return this.#sessions.get(chatId)?.durableRunState;
+  }
+
+  public getDurableRunId(chatId: string): string | undefined {
+    return this.#sessions.get(chatId)?.durableRunId;
+  }
+
   public subscribeStatus(chatId: string, listener: () => void): () => void {
     return this.#addPerChatListener({ bucket: this.#statusTopics, namePrefix: 'status', chatId, listener });
   }
@@ -369,22 +542,57 @@ export class ChatSessionStore {
   }
 
   /**
-   * Publish the latest per-request body the active profile-scoped chat
-   * client (`useCadChatClient` today, future name/commit clients tomorrow)
-   * has composed for this chat. The `dispatchRequest` listener inside
-   * `#createSession` falls back to this when a request hits the persistence
-   * machine without an explicit `body` (notably the startup-request
-   * hydration regenerate — see `loadChatActor` in `#createSession`).
+   * Publish how the active profile-scoped chat client (`useCadChatClient`
+   * today, future name/commit clients tomorrow) composes a per-request body for
+   * this chat. The `dispatchRequest` listener inside `#createSession` calls it
+   * when a request hits the persistence machine without an explicit `body`
+   * (notably the startup-request hydration regenerate — see `loadChatActor`).
    *
-   * Stored as a snapshot, not subscribed to, because the listener only
-   * needs a single read at dispatch time.
+   * A factory, not a snapshot: composing at dispatch time is what makes the
+   * seeded first turn admit the workspace it is about to write to.
    */
-  public setLatestAgentBody(chatId: string, body: Readonly<Record<string, unknown>> | undefined): void {
+  public setLatestAgentBody(chatId: string, compose: LatestAgentBodyFactory | undefined): void {
     const session = this.#sessions.get(chatId);
     if (!session) {
       return;
     }
-    session.latestAgentBody = body;
+    session.latestAgentBody = compose;
+    if (!compose) {
+      return;
+    }
+    for (const resolve of session.latestAgentBodyWaiters) {
+      resolve(compose);
+    }
+    session.latestAgentBodyWaiters.clear();
+  }
+
+  /**
+   * Begin non-view ownership for one logical run and return its immutable,
+   * versioned wire body. Repeated calls while the persistence machine
+   * preempts or retries a run keep one hold but may replace the active body
+   * when a newly admitted user operation supplies its own idempotency key.
+   */
+  public startRun(chatId: string, body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+    const session = this.#sessions.get(chatId);
+    if (!session) {
+      throw new Error(`ChatSessionStore: cannot start a run for inactive chat ${chatId}`);
+    }
+
+    const admittedBody = this.#withAdmission(body);
+    session.runHeld = true;
+    session.activeRunBody = admittedBody;
+    return admittedBody;
+  }
+
+  /** Release a direct run that failed before AI SDK could emit `onFinish`. */
+  public endRun(chatId: string): void {
+    const session = this.#sessions.get(chatId);
+    if (!session || !session.runHeld) {
+      return;
+    }
+    session.runHeld = false;
+    session.activeRunBody = undefined;
+    this.#disposeIfUnreferenced(session);
   }
 
   // -------------------------------------------------------------------------
@@ -416,6 +624,11 @@ export class ChatSessionStore {
             const loadedChat = await depsRef().getChat(input.chatId);
 
             if (!loadedChat) {
+              if (session.durableRunId && session.durableRunState !== 'terminal') {
+                queueMicrotask(() => {
+                  void session.chat.resumeStream();
+                });
+              }
               if (session.chat.messages.length === 0) {
                 session.chat.messages = [];
               }
@@ -448,6 +661,12 @@ export class ChatSessionStore {
                 session.draftActorRef.send({ type: 'initializeFromChat', chat: consumedChat });
                 session.chat.messages = consumedChat.messages;
 
+                /* This dispatch *is* the host stream for the chat's first turn.
+                 * Marked before it is sent, because the host registration that
+                 * would otherwise reattach lands in the same tick and would open
+                 * a second stream — a second relay session on rung 2, which a
+                 * capacity-1 daemon refuses. */
+                session.seededDispatch = true;
                 persistenceActorRef.send({
                   type: 'startRequest',
                   request: { kind: 'regenerate' },
@@ -478,6 +697,17 @@ export class ChatSessionStore {
             }
 
             session.draftActorRef.send({ type: 'initializeFromChat', chat: hydratedChat });
+            // Reattach to any admitted queued/running/waiting run after a
+            // reload. The host transport replays the whole durable log from
+            // cursor 0 — nothing persists a cursor — and drops this
+            // transcript's copy of the run it is about to rebuild through the
+            // reset registered above, so the replay cannot double any part it
+            // already applied.
+            if (session.durableRunId && session.durableRunState !== 'terminal') {
+              queueMicrotask(() => {
+                void session.chat.resumeStream();
+              });
+            }
             return { type: 'chatRetrieved', chat: hydratedChat };
           }),
           persistMessagesActor: fromSafeAsync(async ({ input }) => {
@@ -489,8 +719,8 @@ export class ChatSessionStore {
           clearErrorActor: fromSafeAsync(async ({ input }) => {
             await depsRef().patchChat(input.chatId, 'error', undefined);
           }),
-          persistActiveModelActor: fromSafeAsync(async ({ input }) => {
-            await depsRef().patchChat(input.chatId, 'activeModel', input.activeModel);
+          persistActiveExecutionActor: fromSafeAsync(async ({ input }) => {
+            await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
           }),
           persistActiveKernelActor: fromSafeAsync(async ({ input }) => {
             await depsRef().patchChat(input.chatId, 'activeKernel', input.activeKernel);
@@ -531,7 +761,13 @@ export class ChatSessionStore {
 
     const chat = createChatInstance({
       chatId,
-      onFinish({ messages, isAbort, isError, isDisconnect }) {
+      onFinish: ({ messages, isAbort, isError, isDisconnect }) => {
+        const durableRunId = session.durableRunId ?? getBoundDurableChatRunId(chatId);
+        if (durableRunId && !isDisconnect) {
+          session.durableRunId = durableRunId;
+          session.durableRunState = 'terminal';
+          this.#statusTopics.get(chatId)?.emit();
+        }
         persistenceActorRef.send({ type: 'requestFinished', messages, isAbort, isError, isDisconnect });
         if (!isAbort && !isDisconnect) {
           markUnreadIfUnattended();
@@ -580,108 +816,91 @@ export class ChatSessionStore {
     // its `chat.messages = sanitized` mutation is observable to the deferred
     // `chat.sendMessage(B)` call when it fires on the next tick.
     const dispatchSubscription = persistenceActorRef.on('dispatchRequest', ({ request }) => {
+      const availableBody = request.body ? this.startRun(chatId, request.body) : session.activeRunBody;
+
       queueMicrotask(() => {
-        // The chat-client always supplies `request.body` when it dispatches
-        // a verb it originated (submit / retry / regenerateTail / stop). Two
-        // request kinds are *bodyless* by construction:
-        //
-        //   - Startup-request hydration regenerate (see `loadChatActor`),
-        //     which may fire before any client has attached a body.
-        //   - `continue` (manual Try again on a transient-network banner via
-        //     `continueChat`, and the persistence machine's transparent
-        //     auto-retry in `retrying`), which resumes the in-flight stream
-        //     and has no producer that owns the per-turn agent payload.
-        //
-        // Every wire call must still carry the Tau wire shape's top-level
-        // `agent` block (see `chatTurnRequestSchema`), so we fall back to the
-        // latest body the chat-client published via `setLatestAgentBody`. This
-        // keeps the `agent` invariant true for every transport call, not just
-        // the verbs that originated with an explicit body.
-        const requestBody = request.body ?? session.latestAgentBody;
-        switch (request.kind) {
-          case 'send': {
-            if (requestBody) {
-              void chat.sendMessage(request.message, { body: requestBody });
-            } else {
-              void chat.sendMessage(request.message);
-            }
+        // A bodyless dispatch composes its body *now*, through the chat
+        // client's own admission path. It used to reuse a body snapshot the
+        // client had published at mount, whose `execution` named a workspace
+        // that a later `prepare` had already discarded: the run then executed
+        // against a workspace id no claim on disk carried, nothing ever marked
+        // the claim admitted, and the turn could never settle.
+        const composeBody = async (): Promise<Readonly<Record<string, unknown>> | undefined> => {
+          const compose = session.latestAgentBody ?? (await this.#waitForLatestAgentBody(session));
+          if (!compose) {
+            return undefined;
+          }
+          try {
+            return await compose();
+          } catch (error) {
+            console.error('[ChatSessionStore] durable workspace admission failed for a seeded dispatch', error);
+            return undefined;
+          }
+        };
+        const dispatch = async (): Promise<void> => {
+          const composed = availableBody ?? (await composeBody());
+          if (!composed || this.#sessions.get(chatId) !== session) {
             return;
           }
+          const requestBody = availableBody ?? this.startRun(chatId, composed);
 
-          case 'regenerate': {
-            if (requestBody) {
-              void chat.regenerate({ body: requestBody });
-            } else {
-              void chat.regenerate();
-            }
-            return;
-          }
-
-          case 'edit': {
-            const messageIndex = chat.messages.findIndex((m) => m.id === request.messageId);
-            if (messageIndex === -1) {
-              return;
-            }
-            const originalMessage = chat.messages[messageIndex]!;
-            chat.messages = [...chat.messages.slice(0, messageIndex), buildEditedMessage(originalMessage, request)];
-            if (requestBody) {
-              void chat.regenerate({ body: requestBody });
-            } else {
-              void chat.regenerate();
-            }
-            return;
-          }
-
-          case 'retry': {
-            const next = buildRetryMessages(chat.messages, request);
-            if (!next) {
-              return;
-            }
-            chat.messages = next;
-            if (requestBody) {
-              void chat.regenerate({ body: requestBody });
-            } else {
-              void chat.regenerate();
-            }
-            return;
-          }
-
-          // Resume an interrupted stream WITHOUT slicing chat.messages.
-          // AI SDK's public surface only ships `sendMessage`/`regenerate`/
-          // `resumeStream` (the latter requires a server-side resumable-stream
-          // backend we don't run yet -- see docs/research/resumable-chat-streams.md).
-          // The private `Chat.makeRequest({ trigger: 'submit-message' })` is the
-          // exact pathway both `sendMessage` and `regenerate` use internally,
-          // minus the message mutation step. Pinned to ai@6.0.x; the contract
-          // test in chat-session-store.contract.test.ts fails loudly the moment
-          // AI SDK renames or removes this method.
+          // The chat-client always supplies `request.body` when it dispatches
+          // a verb it originated (submit / retry / regenerateTail / stop). Two
+          // request kinds are *bodyless* by construction:
           //
-          // `body` MUST be forwarded here so the resumed POST still carries the
-          // top-level `agent` block required by `chatTurnRequestSchema`. Without
-          // it the API rejects the retry with `agent: expected object, received
-          // undefined` and the user sees a fresh "Processing Error" banner the
-          // moment they click Try again on a network drop.
-          case 'continue': {
-            type ChatMakeRequestShim = {
-              makeRequest: (args: {
-                trigger: 'submit-message' | 'resume-stream' | 'regenerate-message';
-                body?: Readonly<Record<string, unknown>>;
-              }) => Promise<void>;
-            };
-            // `makeRequest` is declared `private` in AI SDK's source so a direct
-            // intersection collapses to `never`. We hop through `unknown` to
-            // forcibly re-shape the runtime value -- the contract test in
-            // chat-session-store.contract.test.ts asserts the method exists at
-            // runtime so this assertion can never silently rot.
-            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- typed shim over AI SDK's private method, guarded by chat-session-store.contract.test.ts
-            const chatShim = chat as unknown as ChatMakeRequestShim;
-            if (requestBody) {
-              void chatShim.makeRequest({ trigger: 'submit-message', body: requestBody });
-            } else {
-              void chatShim.makeRequest({ trigger: 'submit-message' });
+          //   - Startup-request hydration regenerate (see `loadChatActor`),
+          //     which may fire before any client has attached a body.
+          //   - `continue` (manual Try again on a transient-network banner via
+          //     `continueChat`, and the persistence machine's transparent
+          //     auto-retry in `retrying`), which resumes the in-flight stream
+          //     and has no producer that owns the per-turn agent payload.
+          //
+          // Every wire call must still carry the Tau wire shape's top-level
+          // `agent` block (see `chatTurnRequestSchema`), so we fall back to the
+          // latest body the chat-client published via `setLatestAgentBody`. This
+          // keeps the `agent` invariant true for every transport call, not just
+          // the verbs that originated with an explicit body.
+          switch (request.kind) {
+            case 'send': {
+              void chat.sendMessage(request.message, { body: requestBody });
+              return;
+            }
+
+            case 'regenerate': {
+              void chat.regenerate({ body: requestBody });
+              return;
+            }
+
+            case 'edit': {
+              const messageIndex = chat.messages.findIndex((m) => m.id === request.messageId);
+              if (messageIndex === -1) {
+                return;
+              }
+              const originalMessage = chat.messages[messageIndex]!;
+              chat.messages = [...chat.messages.slice(0, messageIndex), buildEditedMessage(originalMessage, request)];
+              void chat.regenerate({ body: requestBody });
+              return;
+            }
+
+            case 'retry': {
+              const next = buildRetryMessages(chat.messages, request);
+              if (!next) {
+                return;
+              }
+              chat.messages = next;
+              void chat.regenerate({ body: requestBody });
+              return;
+            }
+
+            // Resume the exact admitted run without slicing chat.messages. The
+            // transport decides whether this attaches to a browser-host log or
+            // the API's resumable stream.
+            case 'continue': {
+              void chat.resumeStream({ body: requestBody });
             }
           }
-        }
+        };
+        void dispatch();
       });
     });
 
@@ -751,6 +970,29 @@ export class ChatSessionStore {
       persistenceActorRef.send({ type: 'queuePersist', messages: sanitized });
     });
 
+    /*
+     * A host reattach replays the whole durable log from cursor 0, because the
+     * host may have finished the turn with no client attached. The AI SDK
+     * *continues* a trailing assistant message on a resume instead of starting
+     * a new one, and it keys tool parts by `toolCallId` and data parts by `id`
+     * but keys text and reasoning parts by nothing — so a replay over the
+     * transcript this store restored from local persistence merged the tool
+     * cards in place and appended a second copy of every text block. Each later
+     * turn then froze that doubling into history: the operator's four-run chat
+     * rendered its third turn four times and its first turn twice
+     * (2026-09-03).
+     *
+     * The log is the authority (PH19), so the transport hands over the
+     * transcript the whole log implies and this store splices it in — every run
+     * the log names is replaced, healing whatever earlier reloads left behind.
+     * It is called only once the host has answered `attach`, so a chat whose
+     * log this host does not hold keeps the transcript it had.
+     */
+    const unregisterRunReset = registerAgentHostRunReset(chatId, (rebuild) => {
+      resetMilestonePersistTracking();
+      chat.messages = [...rebuild(chat.messages)];
+    });
+
     // Wire the AI SDK Chat's snapshot callbacks into per-chatId subscriber
     // sets. `~registerMessagesCallback` etc. are public (the `~` prefix is
     // the AI SDK's "internal-but-intended-for-subscribers" marker — see
@@ -778,7 +1020,7 @@ export class ChatSessionStore {
 
       // Track per-turn cost aggregated across `data-usage` parts.
       const totalCost = aggregateUsageCost(chat.messages);
-      if (totalCost > 0 && totalCost !== session.usage?.totalCost) {
+      if (totalCost !== session.usage?.totalCost) {
         session.usage = { totalCost, lastUpdatedAt: Date.now() };
         this.#usageTopics.get(chatId)?.emit();
       }
@@ -790,6 +1032,9 @@ export class ChatSessionStore {
         session.status = next;
         if (next === 'streaming') {
           persistenceActorRef.send({ type: 'streamResumed' });
+        }
+        if (session.durableRunId && (next === 'submitted' || next === 'streaming')) {
+          session.durableRunState = 'active';
         }
         this.#statusTopics.get(chatId)?.emit();
       }
@@ -810,24 +1055,109 @@ export class ChatSessionStore {
       chat,
       persistenceActorRef,
       draftActorRef,
-      refcount: 1,
+      viewRefcount: 1,
+      runHeld: false,
+      durableRunId: undefined,
+      durableRunState: undefined,
+      reattachedHostId: undefined,
+      seededDispatch: false,
+      activeRunBody: undefined,
       status: chat.status,
       usage: undefined,
       latestAgentBody: undefined,
+      latestAgentBodyWaiters: new Set(),
       dispose: () => {
+        for (const resolve of session.latestAgentBodyWaiters) {
+          resolve(undefined);
+        }
+        session.latestAgentBodyWaiters.clear();
         dispatchSubscription.unsubscribe();
         stopSubscription.unsubscribe();
         finishedSubscription.unsubscribe();
         stoppedSubscription.unsubscribe();
         restoreSubscription.unsubscribe();
         resumedSubscription.unsubscribe();
+        lifecycleSubscription?.unsubscribe();
+        unregisterRunReset();
         unregisterMessages();
         unregisterStatus();
         unregisterError();
       },
     };
 
+    lifecycleSubscription = persistenceActorRef.subscribe((snapshot) => {
+      const idle = snapshot.matches({ requestLifecycle: 'idle' });
+      if (!idle) {
+        requestLifecycleWasActive = true;
+        return;
+      }
+      if (!requestLifecycleWasActive) {
+        return;
+      }
+      requestLifecycleWasActive = false;
+      this.#scheduleRunReleaseIfTerminal(session);
+    });
+
+    // Kick off chat hydration only after the session record exists. The load
+    // actor may dispatch a startup run, whose non-view hold must be able to
+    // reference the fully initialised session.
+    persistenceActorRef.send({ type: 'setActiveChatId', chatId });
+
     return session;
+  }
+
+  #withAdmission(body: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+    if (admissionEnvelopeSchema.safeParse(body['admission']).success) {
+      return body;
+    }
+
+    return Object.freeze({
+      ...body,
+      admission: Object.freeze({
+        version: 1,
+        idempotencyKey: generatePrefixedId(idPrefix.request),
+      }),
+    });
+  }
+
+  async #waitForLatestAgentBody(session: InternalSession): Promise<LatestAgentBodyFactory | undefined> {
+    if (session.latestAgentBody) {
+      return session.latestAgentBody;
+    }
+    return new Promise((resolve) => {
+      session.latestAgentBodyWaiters.add(resolve);
+    });
+  }
+
+  #scheduleRunReleaseIfTerminal(session: InternalSession): void {
+    queueMicrotask(() => {
+      if (!session.runHeld || !session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })) {
+        return;
+      }
+      session.runHeld = false;
+      session.activeRunBody = undefined;
+      this.#disposeIfUnreferenced(session);
+    });
+  }
+
+  #disposeIfUnreferenced(session: InternalSession): void {
+    if (
+      session.viewRefcount > 0 ||
+      session.runHeld ||
+      session.durableRunId !== undefined ||
+      this.#sessions.get(session.chatId) !== session
+    ) {
+      return;
+    }
+
+    session.dispose();
+    session.persistenceActorRef.stop();
+    session.draftActorRef.stop();
+    this.#sessions.delete(session.chatId);
+    clearLedger(session.chatId);
+    this.#disposeChatTopics(session.chatId);
+    this.#refreshSnapshot();
+    this.#notifyMembership();
   }
 
   #addPerChatListener({

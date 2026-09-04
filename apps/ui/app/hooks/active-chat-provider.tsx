@@ -30,9 +30,11 @@ import { useActorRef, useSelector } from '@xstate/react';
 import { createContext, useCallback, useContext, useMemo } from 'react';
 import type { Chat } from '@ai-sdk/react';
 import type { ActorRefFrom } from 'xstate';
-import type { ContextUsageData, MyUIMessage } from '@taucad/chat';
+import { isAnyToolPart } from '@taucad/chat';
+import type { CadAgentExecution, ContextUsageData, MyUIMessage } from '@taucad/chat';
 import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
+import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
@@ -44,6 +46,7 @@ import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js'
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
+import { withTauExecutionModel } from '#utils/chat-execution.js';
 
 type ChatInstance = Chat<MyUIMessage>;
 
@@ -59,7 +62,7 @@ type ChatInstance = Chat<MyUIMessage>;
 export type ActiveChatModel = {
   /**
    * Chat-scoped active model id. Under the session provider this prefers
-   * `Chat.activeModel`, falling back to the cookie default. Under the
+   * the model within `Chat.activeExecution`, falling back to the cookie default. Under the
    * composer provider this is the cookie default.
    */
   modelId: string;
@@ -72,6 +75,14 @@ export type ActiveChatModel = {
    */
   setActiveModel: (modelId: string) => void;
 };
+
+/** Durable execution target for the active chat. */
+export type ActiveChatExecution = {
+  execution: CadAgentExecution;
+  setActiveExecution: (execution: CadAgentExecution) => void;
+};
+
+export type ChatAgentActivity = 'ready' | 'working' | 'approval-required' | 'stopping';
 
 /**
  * Resolved chat-scoped CAD kernel state. Same dual-strategy shape as
@@ -111,6 +122,8 @@ export type ChatComposerContextValue = {
   draftActorRef: ActorRefFrom<typeof draftMachine>;
   /** Chat-scoped model resolver (composer-cookie vs session dual-write). */
   model: ActiveChatModel;
+  /** Chat-scoped execution target. */
+  execution: ActiveChatExecution;
   /** Chat-scoped kernel resolver (composer-cookie vs session dual-write). */
   kernel: ActiveChatKernel;
   /**
@@ -118,6 +131,8 @@ export type ChatComposerContextValue = {
    * stream); reflects the AI SDK `Chat.status` under the session provider.
    */
   status: ChatInstance['status'];
+  /** User-facing activity for the selected execution target. */
+  agentActivity: ChatAgentActivity;
   /**
    * Cancel-in-flight callback. No-op under the composer provider;
    * dispatches `stopRequest` to the persistence machine under the session
@@ -183,19 +198,22 @@ export function ChatComposerProvider({ children }: { readonly children: React.Re
   useDraftImageErrorToast(draftActorRef);
 
   const model = useCookieModel();
+  const execution = useCookieExecution(model);
   const kernel = useCookieKernel();
 
   const value = useMemo<ChatComposerContextValue>(
     () => ({
       draftActorRef,
       model,
+      execution,
       kernel,
       status: 'ready',
+      agentActivity: 'ready',
       stop: noopStop,
       contextUsage: undefined,
       session: undefined,
     }),
-    [draftActorRef, model, kernel],
+    [draftActorRef, model, execution, kernel],
   );
 
   return <ChatComposerContext.Provider value={value}>{children}</ChatComposerContext.Provider>;
@@ -223,9 +241,11 @@ export function ActiveChatProvider({
   // `useDraftImageErrorToast` JSDoc.
   useDraftImageErrorToast(session.draftActorRef);
 
-  const model = useSessionModel(session);
+  const execution = useSessionExecution(session);
+  const model = useSessionModel(execution);
   const kernel = useSessionKernel(session);
   const status = useSessionStatus(chatId);
+  const agentActivity = useSessionAgentActivity(session, chatId, status);
   const stop = useSessionStop(session);
   const contextUsage = useSessionContextUsage(chatId);
 
@@ -243,13 +263,15 @@ export function ActiveChatProvider({
     () => ({
       draftActorRef: session.draftActorRef,
       model,
+      execution,
       kernel,
       status,
+      agentActivity,
       stop,
       contextUsage,
       session: sessionValue,
     }),
-    [session.draftActorRef, model, kernel, status, stop, contextUsage, sessionValue],
+    [session.draftActorRef, model, execution, kernel, status, agentActivity, stop, contextUsage, sessionValue],
   );
 
   return (
@@ -319,6 +341,38 @@ function useCookieModel(): ActiveChatModel {
 }
 
 /**
+ * Cookie-only execution resolver — always this browser's own host at the cookie
+ * model, which is also what `<NewProjectChatComposer>` seeds a new chat with on
+ * these surfaces.
+ *
+ * That is exact rather than lossy *only* because both textareas gate the agent
+ * chip on `session` (`chat-textarea-desktop.tsx`, `chat-textarea-mobile.tsx`):
+ * under this provider there is no control that can select a placement, so
+ * `setActiveExecution` has no reachable caller and rebuilding the execution from
+ * the model discards nothing. The home hero is session-backed
+ * (`<ActiveChatProvider chatId='chat_homepage_main'>`) and keeps its chip's
+ * choice in the chat row, which is the placement the composer carries across.
+ *
+ * ponytail: un-gate the chip here and this hook has to hold the selection in
+ * state instead — a `hostId`, or an `acp`/`paseo` choice, would otherwise
+ * evaporate between the click and the submit. Recorded as residue in
+ * `docs/research/agent-host-transports-and-offline.md`
+ * (§ Addendum: FIX-SEEDED-PLACEMENT).
+ */
+function useCookieExecution(model: ActiveChatModel): ActiveChatExecution {
+  const execution = useMemo<CadAgentExecution>(() => ({ kind: 'tau', model: model.modelId }), [model.modelId]);
+  const setActiveExecution = useCallback(
+    (next: CadAgentExecution) => {
+      if (next.kind === 'tau') {
+        model.setActiveModel(next.model);
+      }
+    },
+    [model],
+  );
+  return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
+}
+
+/**
  * Cookie-only kernel resolver. Same role as {@link useCookieModel} for the
  * CAD kernel. The cookie boundary is already healed by `useKernel` itself,
  * so the resolved `kernel` is a definite `KernelConfiguration`.
@@ -342,7 +396,7 @@ function useCookieKernel(): ActiveChatKernel {
 // ---------------------------------------------------------------------------
 
 /**
- * Session-backed model resolver. Prefers `Chat.activeModel` from the
+ * Session-backed model resolver. Prefers the Tau model in `Chat.activeExecution` from the
  * persistence machine; falls back to the cookie default. `setActiveModel`
  * dual-writes (cookie + chat row) so reload preserves the chat-local
  * value and future new chats inherit the most recent choice.
@@ -351,22 +405,39 @@ function useCookieKernel(): ActiveChatKernel {
  * deleted) but is provider-internal: external consumers read
  * `useChatComposer().model` instead.
  */
-function useSessionModel(session: ChatSession): ActiveChatModel {
-  const chatActiveModel = useSelector(session.persistenceActorRef, (state) => state.context.activeModel);
-  const { selectedModelId, selectedModel, setSelectedModelId, resolveModel } = useModels();
-  const modelId = chatActiveModel ?? selectedModelId;
+function useSessionModel(activeExecution: ActiveChatExecution): ActiveChatModel {
+  const { selectedModelId, selectedModel, resolveModel } = useModels();
+  const modelId = activeExecution.execution.kind === 'tau' ? activeExecution.execution.model : selectedModelId;
   const model = useMemo<ResolvedModel>(
     () => (modelId === selectedModelId ? selectedModel : resolveModel(modelId)),
     [modelId, selectedModel, selectedModelId, resolveModel],
   );
   const setActiveModel = useCallback(
     (next: string) => {
-      setSelectedModelId(next);
-      session.persistenceActorRef.send({ type: 'setActiveModel', model: next });
+      activeExecution.setActiveExecution(withTauExecutionModel(activeExecution.execution, next));
+    },
+    [activeExecution],
+  );
+  return useMemo<ActiveChatModel>(() => ({ modelId, model, setActiveModel }), [modelId, model, setActiveModel]);
+}
+
+function useSessionExecution(session: ChatSession): ActiveChatExecution {
+  const persisted = useSelector(session.persistenceActorRef, (state) => state.context.activeExecution);
+  const { selectedModelId, setSelectedModelId } = useModels();
+  const execution = useMemo<CadAgentExecution>(
+    () => persisted ?? { kind: 'tau', model: selectedModelId },
+    [persisted, selectedModelId],
+  );
+  const setActiveExecution = useCallback(
+    (next: CadAgentExecution) => {
+      if (next.kind === 'tau') {
+        setSelectedModelId(next.model);
+      }
+      session.persistenceActorRef.send({ type: 'setActiveExecution', execution: next });
     },
     [session.persistenceActorRef, setSelectedModelId],
   );
-  return useMemo<ActiveChatModel>(() => ({ modelId, model, setActiveModel }), [modelId, model, setActiveModel]);
+  return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
 }
 
 /**
@@ -379,7 +450,8 @@ function useSessionModel(session: ChatSession): ActiveChatModel {
 function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const chatActiveKernel = useSelector(session.persistenceActorRef, (state) => state.context.activeKernel);
   const { kernel: cookieKernel, setKernel: setCookieKernel } = useKernel();
-  const sessionKernel = isKernelId(chatActiveKernel) ? chatActiveKernel : undefined;
+  const sessionKernel =
+    isKernelId(chatActiveKernel) && isKernelAvailable(chatActiveKernel) ? chatActiveKernel : undefined;
   const kernelId: KernelId = sessionKernel ?? cookieKernel;
   const kernel = resolveKernel(kernelId);
   const setActiveKernel = useCallback(
@@ -399,6 +471,28 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
  */
 function useSessionStatus(chatId: string): ChatInstance['status'] {
   return useChatSessionSnapshot(chatId, (s) => s?.chat.status ?? 'ready');
+}
+
+function useSessionAgentActivity(
+  session: ChatSession,
+  chatId: string,
+  status: ChatInstance['status'],
+): ChatAgentActivity {
+  const approvalRequired = useChatSessionSnapshot(chatId, (snapshot) =>
+    snapshot?.chat.messages.some((message) =>
+      message.parts.some((part) => isAnyToolPart(part) && part.state === 'approval-requested'),
+    ),
+  );
+  const stopping = useSelector(session.persistenceActorRef, (snapshot) =>
+    snapshot.matches({ requestLifecycle: 'stopping' }),
+  );
+  if (approvalRequired) {
+    return 'approval-required';
+  }
+  if (stopping) {
+    return 'stopping';
+  }
+  return status === 'submitted' || status === 'streaming' ? 'working' : 'ready';
 }
 
 /**

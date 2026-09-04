@@ -44,6 +44,7 @@ vi.mock('@ai-sdk/react', () => ({
 vi.mock('ai', () => ({
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
+  lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(() => false),
 }));
 
 vi.mock('#environment.config.js', () => ({

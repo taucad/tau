@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
+import type { AgentHostClient } from '#services/agent-host-client.js';
 import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
 
 // ---------------------------------------------------------------------------
@@ -25,10 +26,8 @@ type FakeChatInstance = {
   messages: MyUIMessage[];
   sendMessage: ReturnType<typeof vi.fn>;
   regenerate: ReturnType<typeof vi.fn>;
+  resumeStream: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
-  // Private in AI SDK source; the chat-session-store reaches it via a typed
-  // shim. The mock exposes it as a public spy so tests can assert the
-  // continuation path calls it with the expected arg shape.
   makeRequest: ReturnType<typeof vi.fn>;
   finish: (options?: Partial<{ isAbort: boolean; isError: boolean; isDisconnect: boolean }>) => void;
   // Test driver — invoke any registered messages callback
@@ -54,6 +53,7 @@ vi.mock('@ai-sdk/react', () => ({
     public messages: MyUIMessage[] = [];
     public sendMessage = vi.fn().mockResolvedValue(undefined);
     public regenerate = vi.fn().mockResolvedValue(undefined);
+    public resumeStream = vi.fn().mockResolvedValue(undefined);
     public stop = vi.fn().mockResolvedValue(undefined);
     public makeRequest = vi.fn().mockResolvedValue(undefined);
     readonly #messagesListeners = new Set<() => void>();
@@ -126,6 +126,7 @@ vi.mock('@ai-sdk/react', () => ({
 vi.mock('ai', () => ({
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
+  lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(() => false),
 }));
 
 vi.mock('#environment.config.js', () => ({
@@ -137,6 +138,8 @@ vi.mock('#machines/inspector.js', () => ({
 }));
 
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
+const { bindDurableChatRun, sharedChatTransport } = await import('#chat-clients/_internal/shared-chat-transport.js');
+const { registerAgentHost } = await import('#chat-clients/_internal/browser-agent-host-transport.js');
 type StoreType = InstanceType<typeof ChatSessionStore>;
 type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
 
@@ -168,6 +171,20 @@ function createStore(): StoreType {
   store.setDependencies(createStubDeps());
   return store;
 }
+
+const testRunBody = Object.freeze({
+  agent: Object.freeze({
+    profile: 'cad',
+    execution: Object.freeze({ kind: 'tau', model: 'openai-gpt-5.5' }),
+    kernel: 'replicad',
+    mode: 'agent',
+    toolChoice: 'auto',
+    testingEnabled: true,
+  }),
+  projectId: 'project_test',
+  execution: Object.freeze({ workspaceId: 'workspace_test', baseRevisionId: 'revision_test', hostId: 'host_test' }),
+  admission: Object.freeze({ version: 1, idempotencyKey: 'req_test_chat_session_store' }),
+});
 
 describe('ChatSessionStore', () => {
   beforeEach(() => {
@@ -279,6 +296,97 @@ describe('ChatSessionStore', () => {
   // ===========================================================================
 
   describe('acquire / release', () => {
+    it('retains and resumes an API-discovered run without a focused view', async () => {
+      const store = createStore();
+
+      const session = store.retainDurableRun({ chatId: 'chat_background', runId: 'run_background' });
+
+      expect(store.list()).toContain('chat_background');
+      expect(session).toBe(store.get('chat_background'));
+      await vi.waitFor(() => {
+        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
+      });
+    });
+
+    it('restores one canonical user row before its durable assistant idempotently', () => {
+      const store = createStore();
+      const session = store.retainDurableRun({
+        chatId: 'chat_durable_user',
+        runId: 'run_durable_user',
+        state: 'terminal',
+      });
+      session.chat.messages = [{ id: 'run_durable_user', role: 'assistant', parts: [] }];
+      const message: MyUIMessage = {
+        id: 'message_durable_user',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Restore me.' }],
+        metadata: { status: 'success' },
+      };
+
+      expect(
+        store.reconcileDurableUserMessage({
+          chatId: 'chat_durable_user',
+          runId: 'run_durable_user',
+          message,
+        }),
+      ).toBe(true);
+      expect(
+        store.reconcileDurableUserMessage({
+          chatId: 'chat_durable_user',
+          runId: 'run_durable_user',
+          message,
+        }),
+      ).toBe(false);
+      expect(session.chat.messages.map(({ id }) => id)).toEqual(['message_durable_user', 'run_durable_user']);
+    });
+
+    it('resumes a durable run discovered after the mounted chat finished loading', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue({
+        id: 'chat_recovery',
+        resourceId: 'project_test',
+        name: 'Recovery chat',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        recencyAt: 1,
+      });
+      store.setDependencies(deps);
+      const session = store.acquire('chat_recovery');
+
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      store.retainDurableRun({ chatId: 'chat_recovery', runId: 'run_recovery', state: 'active' });
+
+      await vi.waitFor(() => {
+        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
+      });
+    });
+
+    it('fences release of a waiting run after an approval admission replaces its runId', () => {
+      const store = createStore();
+      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_waiting', state: 'active' });
+      store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_approval', state: 'active' });
+
+      store.releaseDurableRun({ chatId: 'chat_approval', runId: 'run_waiting' });
+
+      expect(store.getDurableRunId('chat_approval')).toBe('run_approval');
+      expect(store.get('chat_approval')).toBeDefined();
+    });
+
+    it('adopts a freshly admitted transport run before settling a waiting response', () => {
+      const store = createStore();
+      store.acquire('chat_fresh_waiting');
+      bindDurableChatRun('chat_fresh_waiting', 'run_fresh_waiting');
+
+      harness.created[0]?.finish();
+
+      expect(store.getDurableRunId('chat_fresh_waiting')).toBe('run_fresh_waiting');
+      expect(store.getDurableRunState('chat_fresh_waiting')).toBe('terminal');
+    });
+
     it('creates a session lazily on first acquire', () => {
       const store = createStore();
       const session = store.acquire('chat_a');
@@ -288,6 +396,182 @@ describe('ChatSessionStore', () => {
       expect(session.persistenceActorRef).toBeDefined();
       expect(session.draftActorRef).toBeDefined();
       expect(harness.created).toHaveLength(1);
+    });
+
+    it('does not resume a loaded chat without a durable run', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue({
+        id: 'chat_idle',
+        resourceId: 'project_test',
+        name: 'Idle chat',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        recencyAt: 1,
+      });
+      store.setDependencies(deps);
+
+      store.acquire('chat_idle');
+
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledWith('chat_idle');
+      });
+      expect(harness.created[0]?.resumeStream).not.toHaveBeenCalled();
+    });
+
+    it('reattaches a host-placed chat to its host log, once per host', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue({
+        id: 'chat_daemon',
+        resourceId: 'project_test',
+        name: 'Daemon chat',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        recencyAt: 1,
+      });
+      store.setDependencies(deps);
+      const session = store.acquire('chat_daemon');
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+
+      // The registration effect re-runs whenever the per-turn agent config
+      // changes; only the first one may reattach.
+      store.reattachHostChat({ chatId: 'chat_daemon', hostId: 'origin' });
+      store.reattachHostChat({ chatId: 'chat_daemon', hostId: 'origin' });
+
+      await vi.waitFor(() => {
+        expect(harness.created[0]?.resumeStream).toHaveBeenCalledOnce();
+      });
+    });
+
+    /*
+     * A chat whose seeded first turn this page is dispatching has nothing to
+     * reattach to: the dispatch opens the host stream itself. Reattaching
+     * anyway opened a *second* one — and on rung 2 that means a second relay
+     * session, which the daemon (capacity 1) refused with 409 BUSY 325 ms after
+     * the first, so the seeded turn never ran (live proof 2026-09-03 06:20:33).
+     */
+    it('leaves a seeded first turn to its own dispatch instead of reattaching over it', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      const seededMessage: MyUIMessage = {
+        id: 'msg_seeded_pending',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Build a bracket.' }],
+        metadata: { createdAt: 1_700_000_000_000, status: 'pending' },
+      };
+      const seededChat: ChatEntity = {
+        id: 'chat_seeded_daemon',
+        resourceId: 'project_test',
+        name: 'Seeded daemon chat',
+        messages: [seededMessage],
+        startupRequest: {
+          id: 'req_seeded',
+          kind: 'regenerate-tail',
+          messageId: seededMessage.id,
+          source: 'homepage-initial-message',
+          createdAt: 1_700_000_000_000,
+        },
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+      };
+      deps.getChat.mockResolvedValue(seededChat);
+      deps.consumeChatStartupRequest.mockResolvedValue({ ...seededChat, startupRequest: undefined });
+      store.setDependencies(deps);
+      store.acquire('chat_seeded_daemon');
+      await vi.waitFor(() => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seeded_daemon', 'req_seeded');
+      });
+
+      store.reattachHostChat({ chatId: 'chat_seeded_daemon', hostId: 'origin' });
+
+      await Promise.resolve();
+      const seededSession = harness.created.find((entry) => entry.id === 'chat_seeded_daemon');
+      expect(seededSession?.resumeStream).not.toHaveBeenCalled();
+    });
+
+    it('never reattaches a host-placed chat over a run of its own', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue({
+        id: 'chat_daemon_busy',
+        resourceId: 'project_test',
+        name: 'Busy daemon chat',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        recencyAt: 1,
+      });
+      store.setDependencies(deps);
+      const session = store.acquire('chat_daemon_busy');
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      const chat = harness.created[0]!;
+      chat.status = 'streaming';
+      chat.emitStatusChange();
+
+      store.reattachHostChat({ chatId: 'chat_daemon_busy', hostId: 'origin' });
+
+      await Promise.resolve();
+      expect(chat.resumeStream).not.toHaveBeenCalled();
+    });
+
+    /*
+     * The transcript this store restored from local persistence already holds
+     * the run the host is about to replay from cursor 0, and the AI SDK
+     * *continues* a trailing assistant message on a resume — so the replay used
+     * to append a second copy of every text block to it (tool and data parts
+     * are keyed and merge; text parts are keyed by nothing). The log is the
+     * authority: the transport names the run once `attach` has answered, and
+     * the store drops that run's own message so the replay rebuilds it.
+     */
+    it('drops the run a host reattach is about to rebuild from its transcript', async () => {
+      const store = createStore();
+      const chatId = 'chat_reattach_rebuild';
+      const runId = 'run_reattach_rebuild';
+      const userMessage: MyUIMessage = {
+        id: 'msg_reattach_rebuild',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Build it.' }],
+      };
+      const session = store.acquire(chatId);
+      session.chat.messages = [userMessage, { id: runId, role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] }];
+      const hostClient: AgentHostClient = {
+        start: vi.fn(),
+        steer: vi.fn(),
+        cancel: vi.fn(),
+        resume: vi.fn(),
+        resolveInterrupt: vi.fn(),
+        attach: vi.fn(async () => ({
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+          snapshot: { chatId, runId, turnId: userMessage.id, state: 'completed', messages: [] } as const,
+        })),
+        tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
+        subscribe: vi.fn(() => () => undefined),
+        close: vi.fn(async () => undefined),
+      };
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => {
+          throw new Error('A daemon-placed turn reads its workspace from the daemon.');
+        },
+        createClient: async () => hostClient,
+        markRunId: async () => undefined,
+      });
+
+      const stream = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
+
+      expect(session.chat.messages).toEqual([userMessage]);
+      await stream?.getReader().cancel();
+      unregister();
+      store.release(chatId);
     });
 
     it('returns the same session on subsequent acquires for the same chatId', () => {
@@ -356,6 +640,65 @@ describe('ChatSessionStore', () => {
       expect(second).not.toBe(first);
       expect(second.chat).not.toBe(first.chat);
       expect(harness.created).toHaveLength(2);
+    });
+
+    it('keeps a streaming chat alive across focused navigation and releases only its view reference', async () => {
+      const store = createStore();
+      const chatA = store.acquire('chat_a');
+      chatA.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'continue', body: testRunBody },
+      });
+
+      store.release('chat_a');
+      const chatB = store.acquire('chat_b');
+
+      expect(store.get('chat_a')).toBe(chatA);
+      expect(store.get('chat_b')).toBe(chatB);
+      expect(chatA.persistenceActorRef.getSnapshot().status).toBe('active');
+
+      chatA.persistenceActorRef.send({
+        type: 'requestFinished',
+        messages: [],
+        isAbort: false,
+        isError: false,
+        isDisconnect: false,
+      });
+      await Promise.resolve();
+
+      expect(store.get('chat_a')).toBeUndefined();
+      expect(store.get('chat_b')).toBe(chatB);
+    });
+
+    it('releases the non-view run hold after cancellation reaches terminal state', async () => {
+      const store = createStore();
+      const session = store.acquire('chat_cancelled');
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'continue', body: testRunBody },
+      });
+      store.release('chat_cancelled');
+
+      session.persistenceActorRef.send({ type: 'stopRequest' });
+      session.persistenceActorRef.send({
+        type: 'requestFinished',
+        messages: [
+          {
+            id: 'msg_cancelled',
+            role: 'user',
+            parts: [{ type: 'text', text: 'cancel me' }],
+            metadata: { createdAt: 1, status: 'pending' },
+          },
+        ],
+        isAbort: true,
+        isError: false,
+        isDisconnect: false,
+      });
+      await Promise.resolve();
+
+      expect(store.get('chat_cancelled')).toBeUndefined();
+      expect(session.persistenceActorRef.getSnapshot().status).toBe('stopped');
+      expect(session.draftActorRef.getSnapshot().status).toBe('stopped');
     });
   });
 
@@ -638,6 +981,30 @@ describe('ChatSessionStore', () => {
 
       expect(statusA).toHaveBeenCalledTimes(1);
       expect(statusB).toHaveBeenCalledTimes(1);
+    });
+
+    it('publishes a zero usage aggregate after the only priced turn is removed', () => {
+      const store = createStore();
+      store.acquire('chat_usage_zero');
+      const fake = harness.created.find((chat) => chat.id === 'chat_usage_zero')!;
+      const usage = vi.fn();
+      store.subscribeUsage('chat_usage_zero', usage);
+      fake.messages = [
+        {
+          id: 'assistant_priced',
+          role: 'assistant',
+          metadata: { createdAt: 1 },
+          parts: [{ type: 'data-usage', data: { totalCost: 0.42 } }],
+        } as unknown as MyUIMessage,
+      ];
+      fake.emitMessagesChange();
+      expect(store.getUsage('chat_usage_zero')?.totalCost).toBe(0.42);
+
+      fake.messages = [];
+      fake.emitMessagesChange();
+
+      expect(store.getUsage('chat_usage_zero')?.totalCost).toBe(0);
+      expect(usage).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -981,14 +1348,14 @@ describe('ChatSessionStore', () => {
       store.setDependencies(deps);
 
       const firstSession = store.acquire(chatId);
-      store.setLatestAgentBody(chatId, { agent: { profile: 'cad', model: 'cad-default', kernel: 'replicad' } });
-
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      store.setLatestAgentBody(chatId, async () => ({
+        agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
+      }));
 
       const firstFake = harness.created.find((entry) => entry.id === chatId)!;
-      expect(firstFake.regenerate).toHaveBeenCalledTimes(1);
+      await vi.waitFor(() => {
+        expect(firstFake.regenerate).toHaveBeenCalledTimes(1);
+      });
 
       firstFake.messages = [cancelledUser, emptyAssistant];
       firstSession.persistenceActorRef.send({ type: 'stopRequest' });
@@ -1045,7 +1412,7 @@ describe('ChatSessionStore', () => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a');
     });
 
-    it('consumes a matching startup request before hydration regenerate and uses latestAgentBody for the wire body', async () => {
+    it('waits for latestAgentBody before dispatching a consumed startup request', async () => {
       const store = new ChatSessionStore();
       const deps = createStubDeps();
       store.setDependencies(deps);
@@ -1087,32 +1454,41 @@ describe('ChatSessionStore', () => {
       deps.getChat.mockResolvedValue(startupChat);
       deps.consumeChatStartupRequest.mockResolvedValue(consumedChat);
 
-      // Publish the *current* agent body before acquiring — mirrors what
-      // `useCadChatClient`'s mount effect does for the active chat.
       const liveBody = {
         agent: {
           profile: 'cad',
-          model: 'openai-gpt-5.5',
+          execution: { kind: 'tau', model: 'openai-gpt-5.5' },
           kernel: 'replicad',
           mode: 'agent',
           toolChoice: 'auto',
           testingEnabled: true,
         },
+        projectId: 'project_startup',
+        execution: { workspaceId: 'workspace_startup', baseRevisionId: 'revision_startup', hostId: 'host_startup' },
       };
       store.acquire('chat_startup_hydration');
-      store.setLatestAgentBody('chat_startup_hydration', liveBody);
 
-      // Allow hydration → startup consume → regenerate dispatch → microtask deferral to drain.
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_startup_hydration', 'req_startup');
+      // Reproduce the real mount order: IndexedDB hydration can consume the
+      // startup marker before workspace preparation publishes the required
+      // project/agent/execution body.
+      await vi.waitFor(() => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_startup_hydration', 'req_startup');
+      });
 
       const fake = harness.created.find((entry) => entry.id === 'chat_startup_hydration')!;
+      expect(fake.regenerate).not.toHaveBeenCalled();
+
+      store.setLatestAgentBody('chat_startup_hydration', async () => liveBody);
+      await vi.waitFor(() => {
+        expect(fake.regenerate).toHaveBeenCalledTimes(1);
+      });
+
       expect(fake.regenerate).toHaveBeenCalledTimes(1);
       const dispatchedOptions = fake.regenerate.mock.calls[0]![0] as { body?: Record<string, unknown> } | undefined;
-      expect(dispatchedOptions?.body).toBe(liveBody);
+      expect(dispatchedOptions?.body).toEqual({
+        ...liveBody,
+        admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
+      });
 
       const wireBody = {
         id: 'chat_startup_hydration',
@@ -1123,7 +1499,7 @@ describe('ChatSessionStore', () => {
       expect(parsed.agent).toMatchObject({
         profile: 'cad',
         // Live agent values survive — never the legacy persisted metadata.
-        model: 'openai-gpt-5.5',
+        execution: { kind: 'tau', model: 'openai-gpt-5.5' },
         testingEnabled: true,
       });
 
@@ -1241,7 +1617,7 @@ describe('ChatSessionStore', () => {
   // calls makeRequest({trigger:'submit-message'}) without slicing chat.messages
   // ===========================================================================
   describe('resumable streams (R4 plumbing + R1 continue dispatch)', () => {
-    it('dispatchRequest { kind: "continue" } calls chat.makeRequest({ trigger: "submit-message" }) and does NOT mutate chat.messages', async () => {
+    it('dispatchRequest { kind: "continue" } calls chat.resumeStream() and does NOT mutate chat.messages', async () => {
       const store = createStore();
       const session = store.acquire('chat_resume');
       const fake = harness.created.find((entry) => entry.id === 'chat_resume')!;
@@ -1252,20 +1628,23 @@ describe('ChatSessionStore', () => {
           role: 'user',
           parts: [{ type: 'text', text: 'hi' }],
           metadata: { createdAt: 0 },
-        } as MyUIMessage,
+        },
       ];
       fake.messages = before;
       const beforeRef = fake.messages;
 
-      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'continue', body: testRunBody },
+      });
 
       // The dispatchRequest listener defers AI SDK calls onto a microtask
       // so they never run nested inside an outer makeRequest's finally
       // (see docs/research/chat-followup-message-swallow.md).
       await Promise.resolve();
 
-      expect(fake.makeRequest).toHaveBeenCalledTimes(1);
-      expect(fake.makeRequest).toHaveBeenCalledWith({ trigger: 'submit-message' });
+      expect(fake.resumeStream).toHaveBeenCalledTimes(1);
+      expect(fake.resumeStream).toHaveBeenCalledWith({ body: testRunBody });
       // Identity check: chat.messages reference unchanged.
       expect(fake.messages).toBe(beforeRef);
       expect(fake.regenerate).not.toHaveBeenCalled();
@@ -1277,7 +1656,7 @@ describe('ChatSessionStore', () => {
      * `ChatErrorServiceUnavailable` banner (or the persistence machine's
      * transparent auto-retry fires), the resumed POST must still carry the
      * top-level `agent` block required by `chatTurnRequestSchema`. Before the
-     * fix the `continue` dispatch called `makeRequest({ trigger: 'submit-message' })`
+     * fix the `continue` dispatch resumed without forwarding a body,
      * with no body, the AI SDK transport produced `{ id, messages, trigger }`,
      * and the API rejected it with `agent: expected object, received undefined`.
      */
@@ -1286,15 +1665,22 @@ describe('ChatSessionStore', () => {
       const session = store.acquire('chat_resume_agent');
       const fake = harness.created.find((entry) => entry.id === 'chat_resume_agent')!;
 
-      const latestBody = { agent: { profile: 'cad', model: 'cad-default', kernel: 'replicad' } };
-      store.setLatestAgentBody('chat_resume_agent', latestBody);
+      const latestBody = {
+        agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
+      };
+      store.setLatestAgentBody('chat_resume_agent', async () => latestBody);
 
       session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
 
-      await Promise.resolve();
-
-      expect(fake.makeRequest).toHaveBeenCalledTimes(1);
-      expect(fake.makeRequest).toHaveBeenCalledWith({ trigger: 'submit-message', body: latestBody });
+      await vi.waitFor(() => {
+        expect(fake.resumeStream).toHaveBeenCalledTimes(1);
+      });
+      expect(fake.resumeStream).toHaveBeenCalledWith({
+        body: {
+          ...latestBody,
+          admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
+        },
+      });
     });
   });
 
@@ -1322,7 +1708,9 @@ describe('ChatSessionStore', () => {
       };
       fake.messages = [originalMessage];
 
-      const overrideBody = { agent: { profile: 'cad', model: 'new-model', kernel: 'replicad' } };
+      const overrideBody = {
+        agent: { profile: 'cad', execution: { kind: 'tau', model: 'new-model' }, kernel: 'replicad' },
+      };
       session.persistenceActorRef.send({
         type: 'startRequest',
         request: {
@@ -1336,7 +1724,12 @@ describe('ChatSessionStore', () => {
       await Promise.resolve();
 
       expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      expect(fake.regenerate).toHaveBeenCalledWith({ body: overrideBody });
+      expect(fake.regenerate).toHaveBeenCalledWith({
+        body: {
+          ...overrideBody,
+          admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
+        },
+      });
       const rebuilt = fake.messages.at(-1)!;
       expect(rebuilt.id).toBe('msg_original');
       expect(rebuilt.role).toBe('user');
@@ -1351,7 +1744,7 @@ describe('ChatSessionStore', () => {
   // Retry rebuild
   //
   // The retry helper slices the assistant tail and forwards `request.body`
-  // to `chat.regenerate`; model selection travels via `body.agent.model`
+  // to `chat.regenerate`; model selection travels via `body.agent.execution`
   // (composed by the chat-client), never via metadata patching.
   // ===========================================================================
   describe('retry rebuild', () => {
@@ -1374,7 +1767,9 @@ describe('ChatSessionStore', () => {
       };
       fake.messages = [userMessage, assistantMessage];
 
-      const overrideBody = { agent: { profile: 'cad', model: 'new-model', kernel: 'replicad' } };
+      const overrideBody = {
+        agent: { profile: 'cad', execution: { kind: 'tau', model: 'new-model' }, kernel: 'replicad' },
+      };
       session.persistenceActorRef.send({
         type: 'startRequest',
         request: {
@@ -1387,10 +1782,15 @@ describe('ChatSessionStore', () => {
       await Promise.resolve();
 
       expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      expect(fake.regenerate).toHaveBeenCalledWith({ body: overrideBody });
+      expect(fake.regenerate).toHaveBeenCalledWith({
+        body: {
+          ...overrideBody,
+          admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
+        },
+      });
       // The assistant turn was sliced off; the previous user message is
       // unchanged (no metadata patching — model selection lives in
-      // `body.agent.model`).
+      // `body.agent.execution`).
       expect(fake.messages).toHaveLength(1);
       expect(fake.messages[0]!.id).toBe('msg_user_retry');
     });
@@ -1410,15 +1810,22 @@ describe('ChatSessionStore', () => {
       const session = store.acquire('chat_hydration_regen');
       const fake = harness.created.find((entry) => entry.id === 'chat_hydration_regen')!;
 
-      const latestBody = { agent: { profile: 'cad', model: 'cad-default', kernel: 'replicad' } };
-      store.setLatestAgentBody('chat_hydration_regen', latestBody);
+      const latestBody = {
+        agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
+      };
+      store.setLatestAgentBody('chat_hydration_regen', async () => latestBody);
 
       session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate' } });
 
-      await Promise.resolve();
-
-      expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      expect(fake.regenerate).toHaveBeenCalledWith({ body: latestBody });
+      await vi.waitFor(() => {
+        expect(fake.regenerate).toHaveBeenCalledTimes(1);
+      });
+      expect(fake.regenerate).toHaveBeenCalledWith({
+        body: {
+          ...latestBody,
+          admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
+        },
+      });
     });
   });
 
@@ -1457,7 +1864,10 @@ describe('ChatSessionStore', () => {
         metadata: { createdAt: 0, status: 'pending' },
       } as MyUIMessage;
 
-      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'send', message } });
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'send', message, body: testRunBody },
+      });
 
       // Synchronous assertion: the listener has NOT touched the AI SDK yet.
       // This is the core fix -- a synchronous call would re-enter
@@ -1468,7 +1878,7 @@ describe('ChatSessionStore', () => {
       await Promise.resolve();
 
       expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-      expect(fake.sendMessage).toHaveBeenCalledWith(message);
+      expect(fake.sendMessage).toHaveBeenCalledWith(message, { body: testRunBody });
     });
 
     it('does NOT call chat.regenerate synchronously inside startRequest dispatch', async () => {
@@ -1476,7 +1886,10 @@ describe('ChatSessionStore', () => {
       const session = store.acquire('chat_clobber_regen');
       const fake = harness.created.find((entry) => entry.id === 'chat_clobber_regen')!;
 
-      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate' } });
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'regenerate', body: testRunBody },
+      });
 
       expect(fake.regenerate).not.toHaveBeenCalled();
 
@@ -1485,19 +1898,22 @@ describe('ChatSessionStore', () => {
       expect(fake.regenerate).toHaveBeenCalledTimes(1);
     });
 
-    it('does NOT call chat.makeRequest synchronously inside continue dispatch', async () => {
+    it('does NOT call chat.resumeStream synchronously inside continue dispatch', async () => {
       const store = createStore();
       const session = store.acquire('chat_clobber_continue');
       const fake = harness.created.find((entry) => entry.id === 'chat_clobber_continue')!;
 
-      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+      session.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'continue', body: testRunBody },
+      });
 
-      expect(fake.makeRequest).not.toHaveBeenCalled();
+      expect(fake.resumeStream).not.toHaveBeenCalled();
 
       await Promise.resolve();
 
-      expect(fake.makeRequest).toHaveBeenCalledTimes(1);
-      expect(fake.makeRequest).toHaveBeenCalledWith({ trigger: 'submit-message' });
+      expect(fake.resumeStream).toHaveBeenCalledTimes(1);
+      expect(fake.resumeStream).toHaveBeenCalledWith({ body: testRunBody });
     });
 
     it('end-to-end preempt path: applyResumedRequest mutates chat.messages SYNCHRONOUSLY, dispatchRequest defers chat.sendMessage onto the next microtask', async () => {
@@ -1518,7 +1934,7 @@ describe('ChatSessionStore', () => {
           role: 'user',
           parts: [{ type: 'text', text: 'first turn' }],
           metadata: { createdAt: 0 },
-        } as MyUIMessage,
+        },
       ];
       fake.messages = initialMessages;
 
@@ -1533,7 +1949,7 @@ describe('ChatSessionStore', () => {
       // Kick off A (idle -> invoking).
       session.persistenceActorRef.send({
         type: 'startRequest',
-        request: { kind: 'send', message: initialMessages[0]! },
+        request: { kind: 'send', message: initialMessages[0]!, body: testRunBody },
       });
       // Drain the microtask so the listener fires for A.
       await Promise.resolve();
@@ -1542,7 +1958,7 @@ describe('ChatSessionStore', () => {
       // Preempt with B (invoking -> stopping, pendingRequest = B-send).
       session.persistenceActorRef.send({
         type: 'startRequest',
-        request: { kind: 'send', message: pendingMessage },
+        request: { kind: 'send', message: pendingMessage, body: testRunBody },
       });
       expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'stopping' })).toBe(true);
 
@@ -1570,7 +1986,7 @@ describe('ChatSessionStore', () => {
       // Drain the microtask: chat.sendMessage(B) now fires.
       await Promise.resolve();
       expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-      expect(fake.sendMessage).toHaveBeenCalledWith(pendingMessage);
+      expect(fake.sendMessage).toHaveBeenCalledWith(pendingMessage, { body: testRunBody });
     });
 
     it('should finalize static and dynamic in-progress tool parts before dispatching a preempting follow-up', async () => {
@@ -1584,7 +2000,7 @@ describe('ChatSessionStore', () => {
           role: 'user',
           parts: [{ type: 'text', text: 'first turn' }],
           metadata: { createdAt: 0 },
-        } as MyUIMessage,
+        },
         {
           id: 'msg_assistant_A',
           role: 'assistant',
@@ -1593,7 +2009,7 @@ describe('ChatSessionStore', () => {
               type: 'tool-edit_file',
               toolCallId: 'tc_edit',
               state: 'input-available',
-              input: {},
+              input: { targetFile: 'main.scad', codeEdit: 'cube([1, 1, 1]);' },
             },
             {
               type: 'dynamic-tool',
@@ -1604,7 +2020,7 @@ describe('ChatSessionStore', () => {
             },
           ],
           metadata: { createdAt: 1 },
-        } as MyUIMessage,
+        },
       ];
       fake.messages = interruptedMessages;
 
@@ -1613,18 +2029,18 @@ describe('ChatSessionStore', () => {
         role: 'user',
         parts: [{ type: 'text', text: 'preempting follow-up' }],
         metadata: { createdAt: 2, status: 'pending' },
-      } as MyUIMessage;
+      };
 
       session.persistenceActorRef.send({
         type: 'startRequest',
-        request: { kind: 'send', message: interruptedMessages[0]! },
+        request: { kind: 'send', message: interruptedMessages[0]!, body: testRunBody },
       });
       await Promise.resolve();
       fake.sendMessage.mockClear();
 
       session.persistenceActorRef.send({
         type: 'startRequest',
-        request: { kind: 'send', message: pendingMessage },
+        request: { kind: 'send', message: pendingMessage, body: testRunBody },
       });
       session.persistenceActorRef.send({
         type: 'requestFinished',
@@ -1672,7 +2088,7 @@ describe('ChatSessionStore', () => {
 
       await Promise.resolve();
       expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-      expect(fake.sendMessage).toHaveBeenCalledWith(pendingMessage);
+      expect(fake.sendMessage).toHaveBeenCalledWith(pendingMessage, { body: testRunBody });
     });
   });
 

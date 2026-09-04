@@ -78,7 +78,7 @@ const cadChatRef: {
     submit: submitMock,
     agent: {
       profile: 'cad',
-      model: 'openai-gpt-5.5',
+      execution: { kind: 'tau', model: 'openai-gpt-5.5' },
       kernel: 'replicad',
       mode: 'agent',
       toolChoice: 'auto',
@@ -261,8 +261,11 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     };
     const wireBody = {
       id: 'chat_test',
+      projectId: 'project_test',
       messages: [userMessage],
       agent: cadChatRef.current.agent,
+      admission: { version: 1, idempotencyKey: 'request_0000000001' },
+      execution: { workspaceId: 'workspace_test', baseRevisionId: 'rev_test', hostId: 'host_test' },
     };
 
     expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();

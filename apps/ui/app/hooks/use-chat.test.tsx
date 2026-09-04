@@ -41,6 +41,7 @@ type FakeChat = {
   // Private in AI SDK source; chat-session-store uses a typed shim. Exposed
   // as a public spy here so we can assert continuation flows.
   makeRequest: ReturnType<typeof vi.fn>;
+  resumeStream: ReturnType<typeof vi.fn>;
   onFinish: (event: { messages: MyUIMessage[]; isAbort: boolean; isError: boolean; isDisconnect: boolean }) => void;
   onError: (error: Error) => void;
 };
@@ -76,6 +77,7 @@ vi.mock('@ai-sdk/react', () => ({
     public regenerate = vi.fn().mockResolvedValue(undefined);
     public stop = vi.fn().mockResolvedValue(undefined);
     public makeRequest = vi.fn().mockResolvedValue(undefined);
+    public resumeStream = vi.fn().mockResolvedValue(undefined);
     readonly #messagesListeners = new Set<() => void>();
     readonly #statusListeners = new Set<() => void>();
     readonly #errorListeners = new Set<() => void>();
@@ -128,6 +130,7 @@ vi.mock('@ai-sdk/react', () => ({
 vi.mock('ai', () => ({
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
+  lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(() => false),
 }));
 
 vi.mock('#environment.config.js', () => ({
@@ -266,14 +269,37 @@ function createComposerWrapper() {
   };
 }
 
-function renderProvider(chatId: string | undefined = defaultTestChatId) {
-  return renderHook(
+/**
+ * The per-turn `agent` block a chat client publishes at mount.
+ *
+ * Not optional decoration: `ChatSessionStore`'s dispatch composes its body
+ * through the client's admission path and dispatches nothing without one —
+ * that is the fix for a run executing against a workspace id no claim carried.
+ * A test that omits it is asserting the absence of the invariant.
+ */
+const defaultAgentBody = {
+  agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
+};
+
+/** `defaultAgentBody` as it reaches the wire, with the store's admission fence. */
+const dispatchedBody: Readonly<Record<string, unknown>> = {
+  ...defaultAgentBody,
+  admission: { version: 1, idempotencyKey: expect.any(String) as unknown as string },
+};
+
+function renderProvider(chatId: string = defaultTestChatId) {
+  const rendered = renderHook(
     () => ({
       actions: useChatActions(),
       context: useChatContext(),
+      store: useChatSessionStore(),
     }),
     { wrapper: createWrapper(chatId) },
   );
+  act(() => {
+    rendered.result.current.store.setLatestAgentBody(chatId, async () => defaultAgentBody);
+  });
+  return rendered;
 }
 
 describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
@@ -306,7 +332,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     const user = makeUserMessage('msg_user_activity', 'activity');
     const assistant = makeAssistantMessage('msg_assistant_activity', 'answer');
     getFake(defaultTestChatId).messages = [user, assistant];
-    result.current.store.setLatestAgentBody(defaultTestChatId, { agent: { profile: 'cad' } });
+    result.current.store.setLatestAgentBody(defaultTestChatId, async () => ({ agent: { profile: 'cad' } }));
 
     act(() => {
       result.current.actions.sendMessage(user, { body: { agent: { profile: 'cad' } } });
@@ -338,11 +364,11 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     });
     // `dispatchRequest` defers the AI SDK call onto a microtask to dodge
     // the preempt-clobber bug (see chat-session-store.ts docstring).
-    await Promise.resolve();
-
     const fake = getFake(defaultTestChatId);
-    expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-    expect(fake.sendMessage).toHaveBeenCalledWith(message);
+    await waitFor(() => {
+      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(fake.sendMessage).toHaveBeenCalledWith(message, { body: dispatchedBody });
     expect(harness.touchChatRecency).toHaveBeenCalledOnce();
     expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, message.metadata?.createdAt);
     expect(fake.regenerate).not.toHaveBeenCalled();
@@ -355,25 +381,26 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     act(() => {
       result.current.actions.regenerate();
     });
-    await Promise.resolve();
-
     const fake = getFake(defaultTestChatId);
-    expect(fake.regenerate).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(fake.regenerate).toHaveBeenCalledTimes(1);
+    });
+    expect(fake.regenerate).toHaveBeenCalledWith({ body: dispatchedBody });
     expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, expect.any(Number));
     expect(fake.sendMessage).not.toHaveBeenCalled();
   });
 
-  it('routes a `continueChat` request through to chat.makeRequest({ trigger: "submit-message" })', async () => {
+  it('routes a `continueChat` request through to chat.resumeStream', async () => {
     const { result } = renderProvider();
 
     act(() => {
       result.current.actions.continueChat();
     });
-    await Promise.resolve();
-
     const fake = getFake(defaultTestChatId);
-    expect(fake.makeRequest).toHaveBeenCalledTimes(1);
-    expect(fake.makeRequest).toHaveBeenCalledWith({ trigger: 'submit-message' });
+    await waitFor(() => {
+      expect(fake.resumeStream).toHaveBeenCalledTimes(1);
+    });
+    expect(fake.resumeStream).toHaveBeenCalledWith({ body: dispatchedBody });
     expect(fake.regenerate).not.toHaveBeenCalled();
     expect(fake.sendMessage).not.toHaveBeenCalled();
     expect(harness.touchChatRecency).toHaveBeenCalledWith(defaultTestChatId, expect.any(Number));
@@ -385,7 +412,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
    * the active chat-client published via `setLatestAgentBody`. Otherwise the
    * API rejects the retry with `agent: expected object, received undefined`.
    */
-  it('threads latestAgentBody onto the resumed makeRequest body for continueChat', async () => {
+  it('threads latestAgentBody onto the resumed stream body for continueChat', async () => {
     const { result } = renderHook(
       () => ({
         actions: useChatActions(),
@@ -394,35 +421,41 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       { wrapper: createWrapper(defaultTestChatId) },
     );
 
-    const latestBody = { agent: { profile: 'cad', model: 'cad-default', kernel: 'replicad' } };
+    const latestBody = {
+      agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
+    };
     act(() => {
-      result.current.store.setLatestAgentBody(defaultTestChatId, latestBody);
+      result.current.store.setLatestAgentBody(defaultTestChatId, async () => latestBody);
     });
 
     act(() => {
       result.current.actions.continueChat();
     });
-    await Promise.resolve();
-
     const fake = getFake(defaultTestChatId);
-    expect(fake.makeRequest).toHaveBeenCalledTimes(1);
-    expect(fake.makeRequest).toHaveBeenCalledWith({ trigger: 'submit-message', body: latestBody });
+    await waitFor(() => {
+      expect(fake.resumeStream).toHaveBeenCalledTimes(1);
+    });
+    expect(fake.resumeStream).toHaveBeenCalledWith({
+      body: { ...latestBody, admission: { version: 1, idempotencyKey: expect.any(String) as unknown as string } },
+    });
   });
 
   it('routes a `stop` request through to chat.stop', async () => {
     const { result } = renderProvider();
 
     // Need an in-flight request so stopRequest is accepted by the lifecycle.
+    const fake = getFake(defaultTestChatId);
     act(() => {
       result.current.actions.regenerate();
     });
-    await Promise.resolve();
+    await waitFor(() => {
+      expect(fake.regenerate).toHaveBeenCalledTimes(1);
+    });
 
     act(() => {
       result.current.actions.stop();
     });
 
-    const fake = getFake(defaultTestChatId);
     expect(fake.stop).toHaveBeenCalledTimes(1);
     expect(harness.touchChatRecency).toHaveBeenCalledTimes(1);
   });
@@ -436,7 +469,9 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     act(() => {
       result.current.actions.editMessage('msg_1', 'second try');
     });
-    await Promise.resolve();
+    await waitFor(() => {
+      expect(fake.regenerate).toHaveBeenCalledTimes(1);
+    });
 
     expect(fake.messages).toHaveLength(1);
     expect(fake.messages[0]!.id).toBe('msg_1');
@@ -469,7 +504,9 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     act(() => {
       result.current.actions.retryMessage('msg_assistant');
     });
-    await Promise.resolve();
+    await waitFor(() => {
+      expect(fake.regenerate).toHaveBeenCalledTimes(1);
+    });
 
     expect(fake.messages).toHaveLength(1);
     expect(fake.messages[0]!.id).toBe('msg_user');
@@ -522,8 +559,9 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       });
 
       expect(persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
-      await Promise.resolve();
-      expect(getFake('chat_abc').sendMessage).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(getFake('chat_abc').sendMessage).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('clears persistedError synchronously when editMessage starts', async () => {
@@ -550,8 +588,9 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       });
 
       expect(persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
-      await Promise.resolve();
-      expect(getFake('chat_abc').regenerate).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(getFake('chat_abc').regenerate).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('clears persistedError synchronously when retryMessage starts', async () => {
@@ -579,8 +618,9 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
       });
 
       expect(persistenceActorRef.getSnapshot().context.persistedError).toBeUndefined();
-      await Promise.resolve();
-      expect(getFake('chat_abc').regenerate).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(getFake('chat_abc').regenerate).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
@@ -595,18 +635,20 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     const first = makeUserMessage('msg_first', 'one');
     const second = makeUserMessage('msg_second', 'two');
 
+    const fake = getFake(defaultTestChatId);
     act(() => {
       result.current.actions.sendMessage(first);
     });
-    await Promise.resolve();
+    await waitFor(() => {
+      expect(fake.sendMessage).toHaveBeenCalledTimes(1);
+    });
 
     act(() => {
       result.current.actions.sendMessage(second);
     });
 
-    const fake = getFake(defaultTestChatId);
     expect(fake.sendMessage).toHaveBeenCalledTimes(1);
-    expect(fake.sendMessage).toHaveBeenLastCalledWith(first);
+    expect(fake.sendMessage).toHaveBeenLastCalledWith(first, { body: dispatchedBody });
     expect(fake.stop).toHaveBeenCalledTimes(1);
 
     // Simulate the AI SDK aborting and calling onFinish — the store wired
@@ -614,10 +656,10 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     act(() => {
       fake.onFinish({ messages: [first], isAbort: true, isError: false, isDisconnect: false });
     });
-    await Promise.resolve();
-
-    expect(fake.sendMessage).toHaveBeenCalledTimes(2);
-    expect(fake.sendMessage).toHaveBeenLastCalledWith(second);
+    await waitFor(() => {
+      expect(fake.sendMessage).toHaveBeenCalledTimes(2);
+    });
+    expect(fake.sendMessage).toHaveBeenLastCalledWith(second, { body: dispatchedBody });
     expect(result.current.context.persistenceActorRef!.getSnapshot().matches({ requestLifecycle: 'invoking' })).toBe(
       true,
     );
@@ -808,8 +850,7 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
         await vi.advanceTimersByTimeAsync(700);
       });
 
-      expect(fake.makeRequest).toHaveBeenCalledTimes(1);
-      expect(fake.makeRequest).toHaveBeenCalledWith({ trigger: 'submit-message' });
+      expect(fake.resumeStream).toHaveBeenCalledTimes(1);
       expect(persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'invoking' })).toBe(true);
 
       act(() => {
@@ -980,18 +1021,18 @@ describe('hooks resolution rules', () => {
   });
 
   // =========================================================================
-  // activeModel / activeKernel surfaced through CombinedChatState so
+  // activeExecution / activeKernel surfaced through CombinedChatState so
   // chat-scoped consumers can read them without poking the persistence
   // machine directly.
   // =========================================================================
 
-  it('surfaces activeModel and activeKernel on the chat snapshot once the persistence machine reports them', async () => {
+  it('surfaces activeExecution and activeKernel on the chat snapshot once persistence reports them', async () => {
     harness.getChat.mockResolvedValue({
       id: 'chat_active_selection',
       resourceId: 'resource_1',
       name: '',
       messages: [],
-      activeModel: 'gpt-5.4-medium',
+      activeExecution: { kind: 'tau', model: 'gpt-5.4-medium' },
       activeKernel: 'manifold',
       createdAt: 0,
       updatedAt: 0,
@@ -999,19 +1040,19 @@ describe('hooks resolution rules', () => {
 
     const { result } = renderHook(
       () => ({
-        activeModel: useChatSelector((s) => s.activeModel),
+        activeExecution: useChatSelector((s) => s.activeExecution),
         activeKernel: useChatSelector((s) => s.activeKernel),
       }),
       { wrapper: createWrapper('chat_active_selection') },
     );
 
     await waitFor(() => {
-      expect(result.current.activeModel).toBe('gpt-5.4-medium');
+      expect(result.current.activeExecution).toEqual({ kind: 'tau', model: 'gpt-5.4-medium' });
       expect(result.current.activeKernel).toBe('manifold');
     });
   });
 
-  it('returns undefined activeModel/activeKernel for chats with no chat-scoped selection', async () => {
+  it('returns undefined activeExecution/activeKernel for chats with no chat-scoped selection', async () => {
     harness.getChat.mockResolvedValue({
       id: 'chat_no_selection',
       resourceId: 'resource_1',
@@ -1023,7 +1064,7 @@ describe('hooks resolution rules', () => {
 
     const { result } = renderHook(
       () => ({
-        activeModel: useChatSelector((s) => s.activeModel),
+        activeExecution: useChatSelector((s) => s.activeExecution),
         activeKernel: useChatSelector((s) => s.activeKernel),
       }),
       { wrapper: createWrapper('chat_no_selection') },
@@ -1032,7 +1073,7 @@ describe('hooks resolution rules', () => {
     await waitFor(() => {
       // Wait for the load to settle so the snapshot reflects the persisted
       // (undefined) values rather than the pre-load default.
-      expect(result.current.activeModel).toBeUndefined();
+      expect(result.current.activeExecution).toBeUndefined();
     });
     expect(result.current.activeKernel).toBeUndefined();
   });

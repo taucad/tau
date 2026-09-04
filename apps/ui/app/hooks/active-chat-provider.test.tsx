@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import type { Chat, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import { resolveKernel } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
@@ -55,6 +55,8 @@ vi.mock('@ai-sdk/react', () => ({
     public sendMessage = vi.fn().mockResolvedValue(undefined);
     public regenerate = vi.fn().mockResolvedValue(undefined);
     public stop = vi.fn().mockResolvedValue(undefined);
+    public makeRequest = vi.fn().mockResolvedValue(undefined);
+    public resumeStream = vi.fn().mockResolvedValue(undefined);
     readonly #messagesListeners = new Set<() => void>();
     readonly #statusListeners = new Set<() => void>();
     readonly #errorListeners = new Set<() => void>();
@@ -108,6 +110,7 @@ vi.mock('@ai-sdk/react', () => ({
 vi.mock('ai', () => ({
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
+  lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(),
 }));
 
 vi.mock('#environment.config.js', () => ({
@@ -328,6 +331,26 @@ describe('ChatComposerProvider', () => {
     expect(result.current.model.model.id).toBe('cookie-model');
   });
 
+  /*
+   * `<NewProjectChatComposer>` seeds a created chat with this execution
+   * verbatim, so what it tracks is what a project started from the marketing
+   * hero, the final CTA or the empty library runs on. There is no agent chip on
+   * those surfaces (both textareas gate it on `session`), so the browser host at
+   * the cookie model is the whole contract.
+   */
+  it('should expose an execution tracking the cookie model on this browser’s own host', () => {
+    const { result, rerender } = renderHook(() => useChatComposer(), {
+      wrapper: createComposerWrapper(),
+    });
+
+    expect(result.current.execution.execution).toEqual({ kind: 'tau', model: 'cookie-model' });
+
+    harness.selectedModelId = 'new-model';
+    rerender();
+
+    expect(result.current.execution.execution).toEqual({ kind: 'tau', model: 'new-model' });
+  });
+
   it('should expose the cookie-resolved kernel', () => {
     const { result } = renderHook(() => useChatComposer(), {
       wrapper: createComposerWrapper(),
@@ -494,6 +517,7 @@ describe('ActiveChatProvider', () => {
     });
 
     expect(result.current.status).toBe('ready');
+    expect(result.current.agentActivity).toBe('ready');
 
     act(() => {
       const live = harness.created[0]!;
@@ -502,6 +526,44 @@ describe('ActiveChatProvider', () => {
     });
 
     expect(result.current.status).toBe('streaming');
+    expect(result.current.agentActivity).toBe('working');
+  });
+
+  it('should surface approval and cancellation activity independently from the execution provider', () => {
+    const { result } = renderHook(() => ({ composer: useChatComposer(), session: useActiveChatSession() }), {
+      wrapper: createSessionWrapper('chat_activity'),
+    });
+
+    act(() => {
+      const live = harness.created[0]!;
+      live.messages = [
+        {
+          id: 'approval-message',
+          role: 'assistant',
+          metadata: { createdAt: 1, status: 'pending' },
+          parts: [
+            {
+              type: 'tool-delete_file',
+              toolCallId: 'tool-1',
+              state: 'approval-requested',
+              input: { targetFile: 'main.ts' },
+              approval: { id: 'approval-1' },
+            } as unknown as MyUIMessage['parts'][number],
+          ],
+        },
+      ];
+      live.emitMessagesChange();
+    });
+    expect(result.current.composer.agentActivity).toBe('approval-required');
+
+    act(() => {
+      const live = harness.created[0]!;
+      live.messages = [];
+      live.emitMessagesChange();
+      result.current.session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+      result.current.composer.stop();
+    });
+    expect(result.current.composer.agentActivity).toBe('stopping');
   });
 
   it('should dispatch stopRequest on the persistence machine when stop() is called', () => {
@@ -560,11 +622,11 @@ describe('ActiveChatProvider', () => {
   // ── Session-backed model resolver (chat row preferred, cookie fallback,
   // dual-write on set) ──
   describe('model resolver', () => {
-    it('should prefer Chat.activeModel when present', async () => {
+    it('should prefer a Tau Chat.activeExecution when present', async () => {
       harness.getChat.mockResolvedValue(
         makeChat({
           id: 'chat_with_model',
-          activeModel: 'chat-local-model',
+          activeExecution: { kind: 'tau', model: 'chat-local-model' },
         }),
       );
 
@@ -578,7 +640,7 @@ describe('ActiveChatProvider', () => {
       expect(result.current.model.model.id).toBe('chat-local-model');
     });
 
-    it('should fall back to the cookie when Chat.activeModel is undefined', async () => {
+    it('should fall back to the cookie when Chat.activeExecution is undefined', async () => {
       harness.getChat.mockResolvedValue(makeChat({ id: 'chat_no_model' }));
 
       const { result } = renderHook(() => useChatComposer(), {
@@ -607,9 +669,41 @@ describe('ActiveChatProvider', () => {
       });
 
       await waitFor(() => {
-        expect(harness.patchChat).toHaveBeenCalledWith('chat_dual_write', 'activeModel', 'new-model');
+        expect(harness.patchChat).toHaveBeenCalledWith('chat_dual_write', 'activeExecution', {
+          kind: 'tau',
+          model: 'new-model',
+        });
       });
       expect(harness.setSelectedModelId).toHaveBeenCalledWith('new-model');
+    });
+
+    it('drops a persisted browser-host placement when the active model changes', async () => {
+      harness.getChat.mockResolvedValue(
+        makeChat({
+          id: 'chat_browser_model',
+          activeExecution: { kind: 'tau', model: 'old-model', placement: 'browser-host' } as CadAgentExecution,
+        }),
+      );
+
+      const { result } = renderHook(() => useChatComposer(), {
+        wrapper: createSessionWrapper('chat_browser_model'),
+      });
+
+      await waitFor(() => {
+        expect(result.current.model.modelId).toBe('old-model');
+      });
+      act(() => {
+        result.current.model.setActiveModel('new-model');
+      });
+
+      await waitFor(() => {
+        // The browser host is the only Tau placement now: the pre-cutover
+        // property still parses, and is dropped rather than propagated.
+        expect(harness.patchChat).toHaveBeenCalledWith('chat_browser_model', 'activeExecution', {
+          kind: 'tau',
+          model: 'new-model',
+        });
+      });
     });
   });
 
@@ -647,7 +741,7 @@ describe('ActiveChatProvider', () => {
     });
 
     it('should heal a retired openscad chat value through the cookie fallback', async () => {
-      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_retired_kernel', activeKernel: 'openscad' as never }));
+      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_retired_kernel', activeKernel: 'openscad' }));
 
       const { result } = renderHook(() => useChatComposer(), {
         wrapper: createSessionWrapper('chat_retired_kernel'),

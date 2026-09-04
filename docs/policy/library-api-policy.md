@@ -1,9 +1,9 @@
 ---
 title: 'Library API Policy'
-description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, flat options, max 3 params, naming, subpath exports, events, plugins, lazy init, escape hatches.'
+description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, named operation inputs, max 3 params, naming, subpath exports, events, plugins, and lazy init.'
 status: active
 created: '2026-02-23'
-updated: '2026-08-28'
+updated: '2026-09-03'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -91,6 +91,31 @@ render({ source, parameters, renderOptions });
 // INCORRECT: positional args for same-concern data
 render(source, parameters, renderOptions);
 ```
+
+### Evolving public operations use named input objects
+
+Every public operation that performs I/O, crosses a process/provider/plugin boundary, or is expected to gain controls over time uses one **named, exported, readonly object for its operation-data parameter**. Distinct framework-owned `runtime` or provider-owned `context` parameters may still follow under the rules below. This applies even when the input's only current field is `signal`: cancellation is part of the operation envelope, and an `AbortSignal` must not become the sole positional parameter.
+
+```typescript
+export type MachineSnapshotInput = {
+  readonly signal: AbortSignal;
+};
+
+// CORRECT: future freshness, consistency, or tracing controls can be added
+getSnapshot(input: MachineSnapshotInput): Promise<MachineSnapshot>;
+
+// INCORRECT: the next operation field requires a breaking signature change
+getSnapshot(signal: AbortSignal): Promise<MachineSnapshot>;
+
+// INCORRECT: technically extensible, but the public contract has no reusable name
+getSnapshot(input: { readonly signal: AbortSignal }): Promise<MachineSnapshot>;
+```
+
+Add future fields to the same operation object only when they share that operation's ownership. Provider-owned option keyspaces remain nested under a named property as required by §21; do not flatten them beside runtime-owned fields.
+
+This rule does not wrap conventional scalar utilities, standard callback/event shapes such as `on(event, handler)`, or zero-input lifecycle methods such as `close()` and `dispose()`. Those signatures are already stable conventions rather than evolving operation envelopes.
+
+**Why**: A named object lets an operation acquire cancellation, freshness, pagination, request identity, tracing, or other same-concern controls without a breaking positional change. Naming the type also gives documentation, tests, transports, and adapters one contract to reference instead of repeating anonymous object shapes.
 
 **2 params (primary + config)** -- When there is one clear "subject" and a bag of optional configuration. The first param answers "what", the second answers "how".
 

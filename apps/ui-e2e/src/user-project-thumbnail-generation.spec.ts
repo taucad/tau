@@ -1,10 +1,11 @@
 import { expect, test } from 'vitest';
-import { page as selectors, server } from 'vitest/browser';
+import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { foregroundMaskIntersectionOverUnion, measureProjectCardForeground } from '#support/project-card-framing.js';
 
 const projectName = 'Thumbnail Generation E2E';
+const curvedProjectName = 'Thumbnail Curved Parity E2E';
 
 type ThumbnailState = {
   readonly digest: string;
@@ -12,10 +13,10 @@ type ThumbnailState = {
   readonly height: number;
 };
 
-async function openProjectThumbnail(): Promise<Locator> {
+async function openProjectThumbnail(name = projectName): Promise<Locator> {
   await target.navigate('/projects', 'secondary');
-  await target.fill(selectors.getByPlaceholder('Search projects...'), projectName, 'secondary');
-  const thumbnail = selectors.getByRole('img', { name: projectName });
+  await target.fill(selectors.getByPlaceholder('Search projects...'), name, 'secondary');
+  const thumbnail = selectors.getByRole('img', { name, exact: true });
   await target.expectVisible(thumbnail, 60_000, 'secondary');
   return thumbnail;
 }
@@ -45,18 +46,63 @@ async function readGeneratedThumbnail(image: Locator): Promise<ThumbnailState | 
   );
 }
 
-test('user project thumbnails follow settled sources, persist, and match the live card preview', async ({ skip }) => {
-  await target.navigate('/__e2e/user-project-thumbnail-generation');
-  const hasWebGpu = await target.evaluate(() => 'gpu' in navigator);
-  skip(!hasWebGpu || server.browser !== 'chromium', 'WebGPU is not available in this browser runtime.');
+async function expectProjectCardParity(name: string, minimumMaskIoU = 0.94): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const thumbnail = await openProjectThumbnail(name);
+        const state = await readGeneratedThumbnail(thumbnail);
+        return state?.digest;
+      },
+      { timeout: 120_000, interval: 1000 },
+    )
+    .toBeTypeOf('string');
 
-  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  const card = `[data-slot="card"]:has(img[alt="${name}"])`;
+  const toggle = `${card} button[aria-label="Preview model"]`;
+  const media = `${card} div:has(> button[aria-label="Preview model"])`;
+  const thumbnailForeground = await measureProjectCardForeground(media, 'secondary');
+  expect(thumbnailForeground?.pixels).toBeGreaterThan(100);
+
+  await target.click(toggle, undefined, 'secondary');
+  const activeMedia = 'div:has(> button[aria-label="Preview model"][aria-pressed="true"])';
+  await target.expectVisible(`${activeMedia} canvas`, 60_000, 'secondary');
+  let previewForeground: Awaited<ReturnType<typeof measureProjectCardForeground>>;
+  await expect
+    .poll(
+      async () => {
+        previewForeground = await measureProjectCardForeground(activeMedia, 'secondary');
+        return previewForeground?.pixels ?? 0;
+      },
+      { timeout: 60_000 },
+    )
+    .toBeGreaterThan(100);
+
+  expect(thumbnailForeground).toBeDefined();
+  expect(previewForeground).toBeDefined();
+  expect(Math.abs(previewForeground!.centerX - thumbnailForeground!.centerX)).toBeLessThanOrEqual(3);
+  expect(Math.abs(previewForeground!.centerY - thumbnailForeground!.centerY)).toBeLessThanOrEqual(3);
+  expect(Math.abs(previewForeground!.width - thumbnailForeground!.width)).toBeLessThanOrEqual(
+    Math.max(4, thumbnailForeground!.width * 0.015),
+  );
+  expect(Math.abs(previewForeground!.height - thumbnailForeground!.height)).toBeLessThanOrEqual(
+    Math.max(4, thumbnailForeground!.height * 0.015),
+  );
+  expect(foregroundMaskIntersectionOverUnion(thumbnailForeground!, previewForeground!)).toBeGreaterThanOrEqual(
+    minimumMaskIoU,
+  );
+}
+
+test('user project thumbnails follow settled sources, persist, and match the live card preview', async () => {
+  await target.navigate('/__e2e/user-project-thumbnail-generation');
+  await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu$/u, 60_000);
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
   await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), 'Open parameters');
   await target.click(selectors.getByText('Open parameters', { exact: true }));
   const widthInput = selectors.getByLabelText('Input for Width');
   await target.expectCount(widthInput, 1, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  await target.expectGraphicsBackend('webgpu');
 
   await target.openSecondary('/projects');
   try {
@@ -96,8 +142,26 @@ test('user project thumbnails follow settled sources, persist, and match the liv
 
     await target.reload('secondary');
     await target.fill(selectors.getByPlaceholder('Search projects...'), projectName, 'secondary');
-    const reloadedThumbnail = selectors.getByRole('img', { name: projectName });
-    await target.expectVisible(reloadedThumbnail, 60_000, 'secondary');
+    await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+    await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions...'), 'Update thumbnail');
+    await target.click(selectors.getByText('Update thumbnail', { exact: true }));
+    /* The operation's terminal state, not its progress. `toast.promise` shows
+     * this only once `regenerateThumbnail()` resolves, and it throws on a
+     * skipped or failed result (`project-command-items.tsx`), so reaching it is
+     * the proof that the command really regenerated. The progress toast this
+     * used to wait on is not an observable: against a warm render the promise
+     * can settle inside a single poll round trip, so the label was already gone
+     * — which is why this leg failed about half the time.
+     *
+     * The card on the secondary surface cannot serve as the observable either:
+     * its object URL is minted per `thumbnail.webp` write, but the write
+     * happens in the primary tab and the change channel is per-tab, so a
+     * measured 120 s of polling never saw it change. */
+    await target.expectVisible(selectors.getByText('Thumbnail updated', { exact: true }), 120_000);
+
+    // Regeneration is deterministic: re-rendering the same settled source is
+    // byte-identical, and the bytes survive a fresh load of the projects page.
+    const reloadedThumbnail = await openProjectThumbnail();
     await expect
       .poll(
         async () => {
@@ -108,37 +172,22 @@ test('user project thumbnails follow settled sources, persist, and match the liv
       )
       .toBe(updatedThumbnail!.digest);
 
-    const card = `[data-slot="card"]:has(img[alt="${projectName}"])`;
-    const toggle = `${card} button[aria-label="Preview model"]`;
-    const media = `${card} div:has(> button[aria-label="Preview model"])`;
-    const thumbnailForeground = await measureProjectCardForeground(media, 'secondary');
-    expect(thumbnailForeground?.pixels).toBeGreaterThan(100);
+    await expectProjectCardParity(projectName);
+  } finally {
+    await target.closeSecondary();
+  }
+});
 
-    await target.click(toggle, undefined, 'secondary');
-    const activeMedia = 'div:has(> button[aria-label="Preview model"][aria-pressed="true"])';
-    await target.expectVisible(`${activeMedia} canvas`, 60_000, 'secondary');
-    let previewForeground: Awaited<ReturnType<typeof measureProjectCardForeground>>;
-    await expect
-      .poll(
-        async () => {
-          previewForeground = await measureProjectCardForeground(activeMedia, 'secondary');
-          return previewForeground?.pixels ?? 0;
-        },
-        { timeout: 60_000 },
-      )
-      .toBeGreaterThan(100);
-
-    expect(thumbnailForeground).toBeDefined();
-    expect(previewForeground).toBeDefined();
-    expect(Math.abs(previewForeground!.centerX - thumbnailForeground!.centerX)).toBeLessThanOrEqual(3);
-    expect(Math.abs(previewForeground!.centerY - thumbnailForeground!.centerY)).toBeLessThanOrEqual(3);
-    expect(Math.abs(previewForeground!.width - thumbnailForeground!.width)).toBeLessThanOrEqual(
-      Math.max(4, thumbnailForeground!.width * 0.015),
-    );
-    expect(Math.abs(previewForeground!.height - thumbnailForeground!.height)).toBeLessThanOrEqual(
-      Math.max(4, thumbnailForeground!.height * 0.015),
-    );
-    expect(foregroundMaskIntersectionOverUnion(thumbnailForeground!, previewForeground!)).toBeGreaterThanOrEqual(0.94);
+test('curved user project thumbnail matches the live AABB-framed card preview', async () => {
+  await target.navigate('/__e2e/user-project-thumbnail-generation?fixture=curved');
+  await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu$/u, 60_000);
+  await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
+  await target.expectGraphicsBackend('webgpu');
+  await target.openSecondary('/projects');
+  try {
+    // The pale curved surface crosses the two renderers' foreground-color threshold differently,
+    // while center and extent retain the strict framing tolerances above.
+    await expectProjectCardParity(curvedProjectName, 0.85);
   } finally {
     await target.closeSecondary();
   }

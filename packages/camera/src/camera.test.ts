@@ -174,20 +174,6 @@ describe('@taucad/camera', () => {
     expect(orthographic.clipping.far / orthographic.clipping.near).toBeLessThan(100);
   });
 
-  it('keeps a target-aligned plane in front at shallow orthographic elevations', () => {
-    const elevation = (5 * Math.PI) / 180;
-    const view = createCameraView({
-      ...createView(),
-      requestedVerticalFieldOfView: 0,
-      target: [0, 0, 0],
-      direction: [Math.cos(elevation), 0, Math.sin(elevation)],
-    });
-    const frame = resolveCameraFrame({ view });
-    const lowerViewportClearance = frame.distance * Math.sin(elevation) - (view.verticalSpan / 2) * Math.cos(elevation);
-
-    expect(lowerViewportClearance).toBeGreaterThan(0);
-  });
-
   it('frames off-origin bounds without changing orientation or viewport', () => {
     const view = createView();
     const framed = frameCameraBounds({

@@ -1,5 +1,4 @@
 const maximumPerspectiveVerticalFieldOfView = 179;
-const minimumOrthographicPlaneIncidence = 1e-3;
 
 /** A renderer-neutral three-dimensional vector. @public */
 export type CameraVector = readonly [number, number, number];
@@ -347,7 +346,7 @@ export const orthographicFrustumForVerticalSpan = ({
 };
 
 /**
- * Resolves a finite orthographic camera distance that keeps the bounds and target plane in front.
+ * Resolves a finite orthographic camera distance that keeps the bounds in front.
  *
  * @param options - Canonical view values.
  * @returns Distance from target along the camera direction.
@@ -357,25 +356,17 @@ export const orthographicCameraDistance = ({
   bounds,
   target,
   direction,
-  up,
   verticalSpan,
-}: Pick<CameraView, 'bounds' | 'direction' | 'target' | 'up' | 'verticalSpan'>): number => {
+}: Pick<CameraView, 'bounds' | 'direction' | 'target' | 'verticalSpan'>): number => {
   const validBounds = validateBounds(bounds);
   const validTarget = vector(target, 'target');
   const validDirection = normalize(direction, 'direction');
-  const validUp = normalize(up, 'up');
-  const screenUp = cameraBasis({ direction: validDirection, up: validUp }).up;
   assertPositive(verticalSpan, 'verticalSpan');
   const diagonal = boundsDiagonal(validBounds);
   const foregroundExtent = Math.max(
     ...boundsCorners(validBounds).map((corner) => dot(subtract(corner, validTarget), validDirection)),
   );
-  const boundsDistance = foregroundExtent + Math.max(diagonal, verticalSpan);
-  const planeIncidence = Math.max(Math.abs(dot(validDirection, validUp)), minimumOrthographicPlaneIncidence);
-  const planeDistance =
-    ((verticalSpan / 2) * Math.abs(dot(screenUp, validUp))) / planeIncidence +
-    Math.max(diagonal * 0.05, verticalSpan * 1e-6);
-  return Math.max(boundsDistance, planeDistance);
+  return foregroundExtent + Math.max(diagonal, verticalSpan);
 };
 
 /**

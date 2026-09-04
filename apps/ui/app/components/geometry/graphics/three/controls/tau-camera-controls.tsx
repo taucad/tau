@@ -12,7 +12,7 @@ import {
   Vector4,
 } from 'three';
 import type { EventDispatcher, PerspectiveCamera } from 'three';
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { forwardRef, useEffect, useLayoutEffect, useState } from 'react';
 import { extend, useFrame, useThree } from '@react-three/fiber';
 import type { EventManager, ThreeElement } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
@@ -134,9 +134,9 @@ export const TauCameraControls = forwardRef<CameraControlsImpl, TauCameraControl
       ...restProperties
     } = props;
 
-    useMemo(() => {
+    useState(() => {
       installCameraControlsImpl();
-    }, []);
+    });
 
     const defaultCamera = useThree((state) => state.camera);
     const gl = useThree((state) => state.gl);

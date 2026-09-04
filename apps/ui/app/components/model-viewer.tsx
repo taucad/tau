@@ -32,6 +32,25 @@ export type ModelViewerGraphicsOptions = {
  */
 export type ModelViewerState = 'loading' | 'ready';
 
+export type RuntimeErrorOverlayProps = {
+  readonly message: string;
+  readonly className?: string;
+};
+
+/** Shared accessible presentation for CAD runtime failures. */
+export function RuntimeErrorOverlay({ message, className }: RuntimeErrorOverlayProps): React.JSX.Element {
+  return (
+    <div
+      role='alert'
+      aria-label='CAD runtime error'
+      className={cn('flex items-center gap-2 text-destructive', className)}
+    >
+      <AlertTriangle className='size-5 shrink-0 opacity-60' strokeWidth={1.5} />
+      <span className='max-w-sm text-sm'>{message}</span>
+    </div>
+  );
+}
+
 export type ModelViewerProps = {
   /** Geometry to display. Undefined shows a loading state unless `viewerState` overrides. */
   readonly geometry: Geometry | undefined;
@@ -85,18 +104,12 @@ const ModelViewerCore = memo(function ModelViewerCore({
 
   const effectiveState: ModelViewerState = viewerState ?? (geometry ? 'ready' : 'loading');
 
-  if (error) {
+  if (error && !geometry) {
     return (
-      <div
-        role='alert'
-        aria-label='Preview error'
-        className={cn('flex size-full items-center justify-center', className)}
-      >
-        <div className='flex flex-col items-center gap-3 text-destructive'>
-          <AlertTriangle className='size-10 opacity-60' strokeWidth={1.5} />
-          <span className='max-w-sm text-center text-sm'>{error.message}</span>
-        </div>
-      </div>
+      <RuntimeErrorOverlay
+        message={error.message}
+        className={cn('size-full flex-col justify-center gap-3 text-center [&>svg]:size-10', className)}
+      />
     );
   }
 
@@ -114,22 +127,30 @@ const ModelViewerCore = memo(function ModelViewerCore({
   }
 
   return (
-    <div role='img' aria-label='3D model preview' className={cn('size-full', className)}>
-      <GraphicsProvider graphicsRef={graphicsRef} initialVerticalFieldOfView={initialVerticalFieldOfView}>
-        <CadViewer
-          geometry={geometry}
-          enablePan={enablePan}
-          enableZoom={enableZoom}
-          enableGrid={graphicsOptions?.enableGrid}
-          enableAxes={graphicsOptions?.enableAxes}
-          enableLines={graphicsOptions?.enableLines}
-          enableSurfaces={graphicsOptions?.enableSurfaces}
-          enableMatcap={graphicsOptions?.enableMatcap}
-          enableGizmo={graphicsOptions?.enableGizmo}
-          className={graphicsOptions?.viewerClassName}
-          stageOptions={stageOptions}
+    <div className='relative size-full'>
+      <div role='img' aria-label='3D model preview' className={cn('size-full', className)}>
+        <GraphicsProvider graphicsRef={graphicsRef} initialVerticalFieldOfView={initialVerticalFieldOfView}>
+          <CadViewer
+            geometry={geometry}
+            enablePan={enablePan}
+            enableZoom={enableZoom}
+            enableGrid={graphicsOptions?.enableGrid}
+            enableAxes={graphicsOptions?.enableAxes}
+            enableLines={graphicsOptions?.enableLines}
+            enableSurfaces={graphicsOptions?.enableSurfaces}
+            enableMatcap={graphicsOptions?.enableMatcap}
+            enableGizmo={graphicsOptions?.enableGizmo}
+            className={graphicsOptions?.viewerClassName}
+            stageOptions={stageOptions}
+          />
+        </GraphicsProvider>
+      </div>
+      {error ? (
+        <RuntimeErrorOverlay
+          message={error.message}
+          className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-destructive/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
         />
-      </GraphicsProvider>
+      ) : null}
     </div>
   );
 });

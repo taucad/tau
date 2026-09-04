@@ -17,6 +17,13 @@ export const infiniteGridProxyDistanceVisibleSpans = 20;
 export const infiniteGridFadeStartRatio = 0.05;
 export const infiniteGridFadeEndRatio = 0.2;
 
+/** Physical zero-plane policy for each supported grid orientation. */
+export const infiniteGridPresentationPlaneByUpDirection = {
+  x: { normal: [1, 0, 0], offsetMeters: 0 },
+  y: { normal: [0, 1, 0], offsetMeters: 0 },
+  z: { normal: [0, 0, 1], offsetMeters: 0 },
+} as const;
+
 /** Physical visible-span radius at which the authored grid is fully transparent. */
 export const infiniteGridFadeEndVisibleSpans = infiniteGridProxyDistanceVisibleSpans * infiniteGridFadeEndRatio;
 

@@ -9,6 +9,7 @@ import type {
   GeometryComponentPrimitiveRef,
   JSONObject,
 } from '@taucad/types';
+import type { TauCadTopologyComponent } from '@taucad/geometry-core';
 
 type JsonObject = JSONObject;
 
@@ -69,23 +70,7 @@ type GltfMaterial = {
   };
 };
 
-type TopologyComponent = {
-  id?: string;
-  name?: string;
-  kind?: GeometryComponentKind;
-  selector?: string;
-  nodeIndex?: number;
-  meshIndex?: number;
-  parentId?: string;
-  childIds?: string[];
-  primitiveIndices?: number[];
-  primitiveRefs?: GeometryComponentPrimitiveRef[];
-  sourceRefs?: JsonObject;
-  capabilities?: {
-    hasPreciseTopology?: boolean;
-    exports?: Array<{ fidelity: 'mesh' | 'brep'; formats: string[]; available: boolean; reason?: string }>;
-  };
-};
+type TopologyComponent = Partial<TauCadTopologyComponent> & { readonly kind?: GeometryComponentKind };
 
 type ParsedGltf = {
   json: GltfJson;

@@ -29,6 +29,14 @@ function isTransformControlsDomElement(value: unknown): value is HTMLElement {
   );
 }
 
+const retargetControlsCamera = (controls: TransformControlsImpl, camera: THREE.Camera): void => {
+  controls.camera = camera;
+};
+
+const setControlsHighlightAxis = (controls: TransformControlsImpl, axis: string | undefined): void => {
+  controls.highlightAxis = axis;
+};
+
 export type TransformControlsProps = Omit<ThreeElement<typeof TransformControlsImpl>, 'ref' | 'args' | 'object'> &
   Omit<ThreeElements['group'], 'ref'> & {
     readonly object?: THREE.Object3D | React.RefObject<THREE.Object3D | undefined>;
@@ -101,14 +109,14 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
       const explCamera = camera ?? cameraRig.activeCamera;
       const explDomElement =
         domElement ?? (isTransformControlsDomElement(events.connected) ? events.connected : gl.domElement);
-      const initialCameraRef = React.useRef(explCamera);
+      const [initialCamera] = React.useState(explCamera);
       const controls = React.useMemo(
-        () => new TransformControlsImpl(initialCameraRef.current, explDomElement),
-        [explDomElement],
+        () => new TransformControlsImpl(initialCamera, explDomElement),
+        [explDomElement, initialCamera],
       );
       const retargetCamera = React.useCallback(
         (activeCamera: THREE.Camera): void => {
-          controls.camera = camera ?? activeCamera;
+          retargetControlsCamera(controls, camera ?? activeCamera);
         },
         [camera, controls],
       );
@@ -172,7 +180,7 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
       }, [onObjectChange]);
 
       React.useLayoutEffect(() => {
-        controls.highlightAxis = highlightAxis;
+        setControlsHighlightAxis(controls, highlightAxis);
       }, [controls, highlightAxis]);
 
       React.useEffect(() => {

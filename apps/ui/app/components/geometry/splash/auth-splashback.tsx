@@ -190,11 +190,17 @@ function TypewriterPrompt({
 
   // Reset when shouldReset changes to true
   useEffect(() => {
-    if (shouldReset) {
-      setDisplayedText('');
-      setIsTyping(false);
-      setTypingComplete(false);
-    }
+    const resetTimeout = globalThis.setTimeout(() => {
+      if (shouldReset) {
+        setDisplayedText('');
+        setIsTyping(false);
+        setTypingComplete(false);
+      }
+    });
+
+    return () => {
+      globalThis.clearTimeout(resetTimeout);
+    };
   }, [shouldReset]);
 
   // Start typing after delay

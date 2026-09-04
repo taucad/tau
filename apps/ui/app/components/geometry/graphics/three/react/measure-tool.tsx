@@ -1,5 +1,5 @@
 /* oxlint-disable complexity -- Label/line sizing and camera-facing math in a single component */
-import { useEffect, useRef, useState, useMemo, useCallback, useReducer } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, useReducer, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { createActor } from 'xstate';
@@ -141,7 +141,6 @@ export function MeasureTool(): React.JSX.Element {
   const lastSnapPointsRef = useRef<SnapPoint[] | undefined>(undefined);
 
   const currentStartRef = useRef(currentStart);
-  currentStartRef.current = currentStart;
 
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
@@ -158,13 +157,16 @@ export function MeasureTool(): React.JSX.Element {
   const cachedMeshKeyRef = useRef<string | undefined>(undefined);
   // Keep scene ref in sync for getCachedMeshes (stable callback reference)
   const sceneRef = useRef(scene);
-  sceneRef.current = scene;
   const geometryKeyRef = useRef(geometryKey);
-  geometryKeyRef.current = geometryKey;
   const pickableMeshesVersionRef = useRef(pickableMeshesVersion);
-  pickableMeshesVersionRef.current = pickableMeshesVersion;
   const modelDisplayRevisionRef = useRef(modelDisplayRevision);
-  modelDisplayRevisionRef.current = modelDisplayRevision;
+  useLayoutEffect(() => {
+    currentStartRef.current = currentStart;
+    sceneRef.current = scene;
+    geometryKeyRef.current = geometryKey;
+    pickableMeshesVersionRef.current = pickableMeshesVersion;
+    modelDisplayRevisionRef.current = modelDisplayRevision;
+  }, [currentStart, geometryKey, modelDisplayRevision, pickableMeshesVersion, scene]);
 
   // Cache detectSnapPoints results keyed by (mesh.id, faceIndex) to avoid
   // running the expensive geometry pipeline on every mouse move over the same face.
@@ -709,6 +711,7 @@ function MeasurementLine({
 
   // Memoize measurement line direction and quaternions to avoid per-render allocations
   const lineDirection = useMemo(() => new THREE.Vector3().subVectors(endVec, startVec).normalize(), [startVec, endVec]);
+  const lineDistance = useMemo(() => startVec.distanceTo(endVec), [startVec, endVec]);
 
   // Billboard behavior - rotate around line axis to face camera
   // All scratch objects are module-scoped to avoid per-frame GC pressure.
@@ -780,7 +783,6 @@ function MeasurementLine({
   });
 
   // Memoize direction, distance, and quaternions for cylinder/cone rotation
-  const lineDistance = useMemo(() => startVec.distanceTo(endVec), [startVec, endVec]);
   const { startQuaternion, endQuaternion, cylinderQuaternion } = useMemo(() => {
     const up = new THREE.Vector3(0, 1, 0);
     const startQ = new THREE.Quaternion().setFromUnitVectors(up, lineDirection.clone().negate());

@@ -36,7 +36,6 @@ const createDriverSnapshot = (projection: CameraProjection, revision: number): C
     viewport: { width: 800, height: 600, pixelRatio: 1 },
     bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
   }),
-  effectiveVerticalFieldOfView: projection.kind === 'orthographic' ? 0 : projection.verticalFieldOfView,
   perspectiveVerticalFieldOfView: projection.kind === 'orthographic' ? 60 : projection.verticalFieldOfView,
   revision,
 });
@@ -72,11 +71,11 @@ describe('ActorBridge', () => {
         getSnapshot: () => ({
           context: {
             view: {
+              requestedVerticalFieldOfView: 60,
               target: [0, 0, 0],
               verticalSpan: 10,
               viewport: { width: 800, height: 600, pixelRatio: 1 },
             },
-            effectiveVerticalFieldOfView: 60,
             lastPerspectiveVerticalFieldOfView: 60,
             pixelBudget: 0.25,
             revision: 0,

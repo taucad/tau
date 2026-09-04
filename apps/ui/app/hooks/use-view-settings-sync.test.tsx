@@ -70,11 +70,13 @@ function SyncHarness({
   editorRef,
   onRig,
   persistCameraView,
+  enabled,
 }: {
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
   readonly onRig?: (rig: ThreeCameraRig) => void;
   readonly persistCameraView?: boolean | 'pending';
+  readonly enabled?: boolean;
 }): React.JSX.Element {
   const cameraRig = useCameraRig();
   useViewSettingsSync({
@@ -83,6 +85,7 @@ function SyncHarness({
     cadRef: undefined,
     editorRef,
     persistCameraView,
+    enabled,
   });
   useLayoutEffect(() => {
     onRig?.(cameraRig);
@@ -91,6 +94,28 @@ function SyncHarness({
 }
 
 describe('useViewSettingsSync', () => {
+  it('should not persist settings while a live preview owns the view', async () => {
+    const graphicsRef = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      { input: {} },
+    ).start();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+
+    render(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} enabled={false} />
+      </GraphicsProvider>,
+    );
+    act(() => {
+      graphicsRef.send({ type: 'setGridVisibility', payload: false });
+    });
+
+    await waitFor(() => expect(graphicsRef.getSnapshot().context.enableGrid).toBe(false));
+    expect(editorSend).not.toHaveBeenCalled();
+    graphicsRef.stop();
+  });
+
   it('should keep model display mutations out of per-view settings', async () => {
     const providedMachine = graphicsMachine.provide({
       actors: {

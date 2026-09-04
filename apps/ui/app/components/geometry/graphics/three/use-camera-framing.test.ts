@@ -59,7 +59,6 @@ describe('useCameraFraming portable camera events', () => {
     renderHook(() =>
       useCameraFraming({
         geometryRadius: 12,
-        geometryCenter: new Vector3(),
         geometryBounds: bounds,
         stageOptions: { rotation: { side: 0, vertical: Math.PI / 2 } },
       }),
@@ -82,7 +81,7 @@ describe('useCameraFraming portable camera events', () => {
     beginCameraViewInitialization.mockReturnValue({ initialize: true, cameraView });
     const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
 
-    renderHook(() => useCameraFraming({ geometryRadius: 4, geometryCenter: new Vector3(), geometryBounds: bounds }));
+    renderHook(() => useCameraFraming({ geometryRadius: 4, geometryBounds: bounds }));
 
     const saveHomeIndex = send.mock.calls.findIndex(([event]) => event.type === 'saveHome');
     const restoreIndex = send.mock.calls.findIndex(
@@ -96,13 +95,11 @@ describe('useCameraFraming portable camera events', () => {
   it('preserves the provider-owned view when the canvas framing hook remounts', () => {
     beginCameraViewInitialization.mockReturnValueOnce({ initialize: true }).mockReturnValue({ initialize: false });
     const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
-    const first = renderHook(() =>
-      useCameraFraming({ geometryRadius: 4, geometryCenter: new Vector3(), geometryBounds: bounds }),
-    );
+    const first = renderHook(() => useCameraFraming({ geometryRadius: 4, geometryBounds: bounds }));
     first.unmount();
     send.mockClear();
 
-    renderHook(() => useCameraFraming({ geometryRadius: 4, geometryCenter: new Vector3(), geometryBounds: bounds }));
+    renderHook(() => useCameraFraming({ geometryRadius: 4, geometryBounds: bounds }));
 
     expect(send).toHaveBeenCalledWith({ type: 'setBounds', bounds: { min: [-2, -2, -2], max: [2, 2, 2] } });
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'frame' }));
@@ -111,9 +108,7 @@ describe('useCameraFraming portable camera events', () => {
 
   it('preserves orientation on aspect-only reframing and routes reset to the camera actor', () => {
     const bounds = new Box3(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
-    const hook = renderHook(() =>
-      useCameraFraming({ geometryRadius: 2, geometryCenter: new Vector3(), geometryBounds: bounds }),
-    );
+    const hook = renderHook(() => useCameraFraming({ geometryRadius: 2, geometryBounds: bounds }));
     send.mockClear();
 
     size.width = 1400;
@@ -128,9 +123,7 @@ describe('useCameraFraming portable camera events', () => {
   });
 
   it('does not frame empty geometry', () => {
-    renderHook(() =>
-      useCameraFraming({ geometryRadius: 0, geometryCenter: new Vector3(), geometryBounds: new Box3() }),
-    );
+    renderHook(() => useCameraFraming({ geometryRadius: 0, geometryBounds: new Box3() }));
     expect(send).not.toHaveBeenCalled();
     expect(beginCameraViewInitialization).not.toHaveBeenCalled();
   });

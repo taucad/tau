@@ -32,16 +32,17 @@ const directionFromRotation = ({
  * The first real geometry uses configured angles and becomes the reset home.
  * Later significant bounds/aspect changes preserve the user's direction.
  */
-export function useCameraFraming({
+export function useCameraFraming<
+  Options extends {
+    geometryRadius: number;
+    geometryBounds: THREE.Box3;
+    stageOptions?: StageOptions;
+  },
+>({
   geometryRadius,
   geometryBounds,
   stageOptions = defaultStageOptions,
-}: {
-  geometryRadius: number;
-  geometryCenter: THREE.Vector3;
-  geometryBounds: THREE.Box3;
-  stageOptions?: StageOptions;
-}): (options?: { enableConfiguredAngles?: boolean }) => void {
+}: Options): (options?: { enableConfiguredAngles?: boolean }) => void {
   const rig = useCameraRig();
   const cameraViewInitialization = useCameraViewInitialization();
   const graphicsActor = useGraphics();
@@ -60,13 +61,15 @@ export function useCameraFraming({
   const previousAspectRef = useRef(viewportAspect);
   const hasHomeRef = useRef(false);
   const cameraViewIdentityRef = useRef(cameraViewInitialization.identity);
-  if (cameraViewIdentityRef.current !== cameraViewInitialization.identity) {
-    cameraViewIdentityRef.current = cameraViewInitialization.identity;
-    previousRadiusRef.current = undefined;
-    previousBoundsRef.current = undefined;
-    previousAspectRef.current = viewportAspect;
-    hasHomeRef.current = false;
-  }
+  useLayoutEffect(() => {
+    if (cameraViewIdentityRef.current !== cameraViewInitialization.identity) {
+      cameraViewIdentityRef.current = cameraViewInitialization.identity;
+      previousRadiusRef.current = undefined;
+      previousBoundsRef.current = undefined;
+      previousAspectRef.current = viewportAspect;
+      hasHomeRef.current = false;
+    }
+  }, [cameraViewInitialization.identity, viewportAspect]);
 
   const frame = useCallback(
     (options?: { enableConfiguredAngles?: boolean }) => {

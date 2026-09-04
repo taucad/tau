@@ -3,6 +3,10 @@ import { useLayoutEffect } from 'react';
 import { useThree } from '@react-three/fiber';
 import type { WebGPURenderer } from 'three/webgpu';
 
+const setInspector = (renderer: WebGPURenderer, inspector: WebGPURenderer['inspector']): void => {
+  renderer.inspector = inspector;
+};
+
 /**
  * Default export for `React.lazy`: mounts Three.js {@link Inspector} on the shared WebGPU renderer.
  *
@@ -38,7 +42,7 @@ export default function ThreeWebGpuInspectorBootstrap(): ReactNode {
 
       const inspector = new Inspector();
 
-      gpuRenderer.inspector = inspector;
+      setInspector(gpuRenderer, inspector);
       globalThis.document.body.append(inspector.domElement);
 
       detach = (): void => {
@@ -46,7 +50,7 @@ export default function ThreeWebGpuInspectorBootstrap(): ReactNode {
 
         inspector.domElement.remove();
 
-        gpuRenderer.inspector = previousInspector as WebGPURenderer['inspector'];
+        setInspector(gpuRenderer, previousInspector as WebGPURenderer['inspector']);
       };
     })();
 

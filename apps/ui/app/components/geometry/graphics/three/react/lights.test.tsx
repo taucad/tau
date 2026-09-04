@@ -37,7 +37,6 @@ vi.mock('#components/geometry/graphics/three/utils/lights.utils.js', () => ({
   headlampBaseIntensity: 0.3,
   environmentBaseIntensity: 1,
   defaultHeadlampConfig: {},
-  lightingUserDataKeys: { config: 'lightConfig', ambient: 'ambient', headlamp: 'headlamp' },
   darkModeIntensityScale: 0.5,
   darkModeAmbientBoost: 1.15,
 }));

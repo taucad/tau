@@ -143,6 +143,7 @@ const stopActorForReactReconnect = (actorRef: AnyActorRef): void => {
  * Owns the per-view portable camera rig and registry entry.
  * Placed in ChatViewer (and standalone viewers like hero-viewer, converter).
  */
+/* oxlint-disable react/refs -- The `use no memo` compiler opt-out preserves this imperative XState/graphics bridge contract: stable callbacks synchronously rebind mutable per-actor state during render. */
 export function GraphicsProvider({
   graphicsRef,
   cameraViewRestore,
@@ -154,6 +155,8 @@ export function GraphicsProvider({
   readonly initialVerticalFieldOfView?: number;
   readonly children: React.ReactNode;
 }): React.JSX.Element {
+  'use no memo';
+
   const cameraConnectorRef = useRef<CameraUpdateHandler | undefined>(undefined);
   const cameraConsumersRef = useRef(new Set<CameraUpdateHandler>());
   const renderFrameOwnerRef = useRef({
@@ -278,6 +281,7 @@ export function GraphicsProvider({
 
   return <GraphicsContext.Provider value={value}>{children}</GraphicsContext.Provider>;
 }
+/* oxlint-enable react/refs */
 
 /**
  * Returns the per-view graphics actor ref from the nearest GraphicsProvider.

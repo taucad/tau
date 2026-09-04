@@ -127,14 +127,12 @@ describe('GraphicsProvider camera rig ownership', () => {
 
   it('unregisters and stops the committed rig after StrictMode unmount', async () => {
     const graphicsActor = createGraphicsActor();
-    let rig: ThreeCameraRig | undefined;
     let stop: ReturnType<typeof vi.spyOn> | undefined;
     const mounted = render(
       <StrictMode>
         <GraphicsProvider graphicsRef={graphicsActor}>
           <RigProbe
             onRig={(value) => {
-              rig = value;
               stop ??= vi.spyOn(value.actorRef, 'stop');
             }}
           />

@@ -8,9 +8,14 @@ type RendererMock = { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?
 
 const mocks = vi.hoisted(() => {
   const gl: RendererMock = {};
+  const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
   return {
     camera: { name: 'perspective' },
     cameraRig: {
+      actorRef: {
+        getSnapshot: () => ({ context: { view: { bounds: sceneBounds } } }),
+        send: vi.fn(),
+      },
       perspectiveCamera: { name: 'perspective', updateProjectionMatrix: vi.fn() },
       orthographicCamera: { name: 'orthographic', updateProjectionMatrix: vi.fn() },
     },
@@ -26,7 +31,7 @@ const mocks = vi.hoisted(() => {
     gl,
     invalidate: vi.fn(),
     modelUnit: {
-      focusedComponentId: undefined,
+      focusedComponentId: undefined as string | undefined,
       hiddenComponentIds: [],
       hoveredComponentId: undefined,
       isolatedComponentIds: [],
@@ -34,6 +39,12 @@ const mocks = vi.hoisted(() => {
       opacityByComponentId: {},
       selectedComponentIds: [],
     },
+    renderFrame: {
+      anchorFrameId: 'tau:root',
+      originMeters: [0, 0, 0],
+      metersPerRenderUnit: 1,
+    },
+    sceneBounds,
   };
 });
 
@@ -61,7 +72,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => mocks.cameraRig,
   useGraphics: () => mocks.graphicsActor,
   useGraphicsSelector: () => false,
-  useRenderFrame: () => ({ anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 }),
+  useRenderFrame: () => mocks.renderFrame,
   useModelInteractionRef: () => mocks.graphicsActor,
   useModelInteractionSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
     selector({ context: {} }),
@@ -101,6 +112,7 @@ vi.mock('#components/geometry/graphics/metadata/gltf-component-manifest.js', () 
         path: ['Model'],
         primitiveIndices: [],
         selector: 'root',
+        bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
       },
     },
     rootId: 'root',
@@ -125,6 +137,13 @@ describe('GltfMesh camera lifecycle', () => {
     cleanup();
     vi.restoreAllMocks();
     mocks.camera = { name: 'perspective' };
+    mocks.cameraRig.actorRef.send.mockClear();
+    mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: undefined };
+    mocks.renderFrame = {
+      anchorFrameId: 'tau:root',
+      originMeters: [0, 0, 0],
+      metersPerRenderUnit: 1,
+    };
     delete mocks.gl.compileAsync;
     delete mocks.gl.coordinateSystem;
   });
@@ -150,6 +169,47 @@ describe('GltfMesh camera lifecycle', () => {
     mocks.camera = { name: 'orthographic' };
     view.rerender(<GltfMesh gltfFile={gltfFile} geometryHash='camera-warmup' enableMatcap={false} />);
     expect(compileAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it('frames physical component bounds transiently and restores scene bounds when focus clears', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(createGltf());
+    mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: 'root' };
+    mocks.renderFrame = {
+      anchorFrameId: 'tau:root',
+      originMeters: [10, 20, 30],
+      metersPerRenderUnit: 0.001,
+    };
+
+    const view = render(
+      <GltfMesh gltfFile={new Uint8Array([1, 2, 3])} geometryHash='focused-component' enableMatcap={false} />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.cameraRig.actorRef.send).toHaveBeenNthCalledWith(1, {
+        type: 'frame',
+        bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+        margin: 0.1,
+      });
+      expect(mocks.cameraRig.actorRef.send).toHaveBeenNthCalledWith(2, {
+        type: 'setBounds',
+        bounds: mocks.sceneBounds,
+      });
+      expect(mocks.cameraRig.actorRef.send).toHaveBeenCalledTimes(2);
+    });
+
+    mocks.modelUnit = { ...mocks.modelUnit, focusedComponentId: undefined };
+    view.rerender(
+      <GltfMesh gltfFile={new Uint8Array([1, 2, 3])} geometryHash='focused-component' enableMatcap={false} />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.cameraRig.actorRef.send).toHaveBeenLastCalledWith({
+        type: 'setBounds',
+        bounds: mocks.sceneBounds,
+      });
+      expect(mocks.cameraRig.actorRef.send).toHaveBeenCalledTimes(3);
+    });
   });
 
   it('keeps the parsed scene mounted when the active camera identity changes', async () => {

@@ -63,7 +63,10 @@ export function AnimatedGroup({
 
   // Stable callback ref for rotation changes
   const onRotationChangeRef = useRef(onRotationChange);
-  onRotationChangeRef.current = onRotationChange;
+
+  useEffect(() => {
+    onRotationChangeRef.current = onRotationChange;
+  }, [onRotationChange]);
 
   // Reset hasReachedTarget when target changes
   useEffect(() => {

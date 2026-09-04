@@ -128,6 +128,10 @@ const phaseOffset8 = (1.9 * Math.PI) / gear8Teeth;
 const initialXaxisRotation = Math.PI / 12;
 const initialYaxisRotation = (Math.PI / 4) * 2.5;
 
+const setMeshOpacity = (mesh: LoadedMesh, opacity: number): void => {
+  mesh.material.opacity = opacity;
+};
+
 // ============================================================================
 // Internal Scene Components
 // ============================================================================
@@ -291,23 +295,15 @@ function SceneContent({
 
   // Derive visibility from phase
   const showGear12 = phase === 'gear12' || phase === 'preparingMorph' || phase === 'loadingCrossfading';
-  const showLoadingPointCloud =
-    phase === 'loadingMorphing' || phase === 'loadingCrossfading' || loadingCrossfadeIsActiveRef.current;
-  const showPointCloud = phase === 'morphing' || phase === 'crossfading' || crossfadeIsActiveRef.current;
-  const showGear8Mesh =
-    phase === 'crossfading' || phase === 'gear8' || phase === 'preparingMorph2' || crossfadeIsActiveRef.current;
-  const showSplitPointCloud =
-    phase === 'morphingToAssembly' || phase === 'crossfadingToAssembly' || splitCrossfadeIsActiveRef.current;
+  const showLoadingPointCloud = phase === 'loadingMorphing' || phase === 'loadingCrossfading';
+  const showPointCloud = phase === 'morphing' || phase === 'crossfading';
+  const showGear8Mesh = phase === 'crossfading' || phase === 'gear8' || phase === 'preparingMorph2';
+  const showSplitPointCloud = phase === 'morphingToAssembly' || phase === 'crossfadingToAssembly';
   // Assembly meshes shown during crossfade AND assembly phases AND while unloading meshes are still fading out
   const showAssemblyMeshes =
-    phase === 'crossfadingToAssembly' ||
-    phase === 'assembly' ||
-    phase === 'unloadingCrossfading' ||
-    splitCrossfadeIsActiveRef.current ||
-    unloadingCrossfadeIsActiveRef.current;
+    phase === 'crossfadingToAssembly' || phase === 'assembly' || phase === 'unloadingCrossfading';
   // Per-gear unloading point clouds visible during the unload crossfade and outward morph
-  const showUnloadingPointClouds =
-    phase === 'unloadingCrossfading' || phase === 'unloadingMorphing' || unloadingCrossfadeIsActiveRef.current;
+  const showUnloadingPointClouds = phase === 'unloadingCrossfading' || phase === 'unloadingMorphing';
   // Track if we're in the counter-rotating assembly phase (auto-rotate continues through unload)
   const isAssemblyRotating = phase === 'assembly' || phase === 'unloadingCrossfading' || phase === 'unloadingMorphing';
 
@@ -315,7 +311,7 @@ function SceneContent({
   // Snap mesh opacity to 0 first so it doesn't flash at full opacity for one frame.
   useEffect(() => {
     if (gear12Mesh && phase === 'loadingCrossfading' && !loadingCrossfadeIsActiveRef.current) {
-      gear12Mesh.material.opacity = 0;
+      setMeshOpacity(gear12Mesh, 0);
       startCrossfade({
         progressRef: loadingCrossfadeProgressRef,
         isActiveRef: loadingCrossfadeIsActiveRef,
@@ -369,10 +365,16 @@ function SceneContent({
 
   // Reset unloading-morph progress when entering unloadingMorphing so each cycle starts fresh
   useEffect(() => {
-    if (phase === 'unloadingMorphing') {
-      unloadingMorphProgressRef.current = 0;
-      setUnloadingMorphOpacity(1);
-    }
+    const resetTimeout = globalThis.setTimeout(() => {
+      if (phase === 'unloadingMorphing') {
+        unloadingMorphProgressRef.current = 0;
+        setUnloadingMorphOpacity(1);
+      }
+    });
+
+    return () => {
+      globalThis.clearTimeout(resetTimeout);
+    };
   }, [phase]);
 
   // Handle morph complete
@@ -437,7 +439,7 @@ function SceneContent({
         mesh: gear12Opacity.target,
       });
       if (gear12Mesh) {
-        gear12Mesh.material.opacity = gear12Opacity.target;
+        setMeshOpacity(gear12Mesh, gear12Opacity.target);
       }
     }
 
@@ -461,7 +463,7 @@ function SceneContent({
         mesh: gear8Opacity.target,
       });
       if (gear8Mesh) {
-        gear8Mesh.material.opacity = gear8Opacity.target;
+        setMeshOpacity(gear8Mesh, gear8Opacity.target);
       }
     }
 
@@ -485,11 +487,11 @@ function SceneContent({
         mesh: assemblyOpacity.target,
       });
       if (assemblyGear12Mesh) {
-        assemblyGear12Mesh.material.opacity = assemblyOpacity.target;
+        setMeshOpacity(assemblyGear12Mesh, assemblyOpacity.target);
       }
 
       if (assemblyGear8Mesh) {
-        assemblyGear8Mesh.material.opacity = assemblyOpacity.target;
+        setMeshOpacity(assemblyGear8Mesh, assemblyOpacity.target);
       }
     }
 
@@ -513,11 +515,11 @@ function SceneContent({
         pointCloud: unloadingOpacity.target,
       });
       if (assemblyGear12Mesh) {
-        assemblyGear12Mesh.material.opacity = unloadingOpacity.source;
+        setMeshOpacity(assemblyGear12Mesh, unloadingOpacity.source);
       }
 
       if (assemblyGear8Mesh) {
-        assemblyGear8Mesh.material.opacity = unloadingOpacity.source;
+        setMeshOpacity(assemblyGear8Mesh, unloadingOpacity.source);
       }
     }
 
@@ -557,12 +559,13 @@ function SceneContent({
     }
   });
 
-  const loadingPointCloudOpacity = loadingCrossfadeIsActiveRef.current ? loadingCrossfadeOpacity.pointCloud : 1;
-  const unloadingPointCloudOpacity = unloadingCrossfadeIsActiveRef.current
-    ? unloadingCrossfadeOpacity.pointCloud
-    : phase === 'unloadingMorphing'
-      ? unloadingMorphOpacity
-      : 1;
+  const loadingPointCloudOpacity = phase === 'loadingCrossfading' ? loadingCrossfadeOpacity.pointCloud : 1;
+  const unloadingPointCloudOpacity =
+    phase === 'unloadingCrossfading'
+      ? unloadingCrossfadeOpacity.pointCloud
+      : phase === 'unloadingMorphing'
+        ? unloadingMorphOpacity
+        : 1;
   const unloadingTargetProgress = phase === 'unloadingMorphing' ? 1 : 0;
 
   return (
@@ -603,7 +606,7 @@ function SceneContent({
             sourceColor={gear12Color}
             targetColor={gear8Color}
             isVisible={showPointCloud}
-            opacity={crossfadeIsActiveRef.current ? crossfadeOpacity.pointCloud : 1}
+            opacity={phase === 'crossfading' ? crossfadeOpacity.pointCloud : 1}
             onMorphComplete={handleMorphComplete}
           />
         ) : undefined}
@@ -628,7 +631,7 @@ function SceneContent({
               targetColorB={gear8Color}
               pointSize={1.5}
               explosionStrength={3}
-              opacity={splitCrossfadeIsActiveRef.current ? splitCrossfadeOpacity.pointCloud : 1}
+              opacity={phase === 'crossfadingToAssembly' ? splitCrossfadeOpacity.pointCloud : 1}
               sharedRotationRef={assemblyRotationRef}
               gearRatio={gearRatio}
               gear12OffsetX={-pitchRadius12 + centerOffset}

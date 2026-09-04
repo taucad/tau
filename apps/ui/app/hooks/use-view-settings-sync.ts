@@ -39,6 +39,7 @@ export function useViewSettingsSync({
   cadRef,
   editorRef,
   persistCameraView = true,
+  enabled = true,
 }: {
   viewId: string;
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
@@ -46,6 +47,8 @@ export function useViewSettingsSync({
   editorRef: ActorRefFrom<typeof editorMachine>;
   /** `pending` defers the first emission until the renderer format is known. */
   persistCameraView?: boolean | 'pending';
+  /** False while a live Dockview preview owns the graphics actor. */
+  enabled?: boolean;
 }): void {
   // Track whether we've emitted at least once (skip the first emission)
   const hasEmittedRef = useRef(false);
@@ -84,7 +87,7 @@ export function useViewSettingsSync({
   const renderTimeout = useSelector(cadRef, (s) => s?.context.renderTimeout ?? defaultRenderTimeout);
 
   useEffect(() => {
-    if (persistCameraView === 'pending') {
+    if (!enabled || persistCameraView === 'pending') {
       return;
     }
 
@@ -143,6 +146,7 @@ export function useViewSettingsSync({
   }, [
     viewId,
     editorRef,
+    enabled,
     enableSurfaces,
     enableLines,
     enableGizmo,

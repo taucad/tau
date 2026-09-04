@@ -48,6 +48,7 @@ const timeoutOptions: TimeoutOption[] = [
   { value: 15_000, label: '15s' },
   { value: 30_000, label: '30s' },
   { value: 60_000, label: '1 min' },
+  { value: 180_000, label: '3 min' },
   { value: 300_000, label: '5 min' },
   { value: 600_000, label: '10 min' },
 ];

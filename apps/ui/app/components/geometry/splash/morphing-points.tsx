@@ -36,6 +36,38 @@ export type MorphingPointerState = {
 /** Scratch vector for the per-frame world→local pointer conversion. */
 const localPointerScratch = new THREE.Vector3();
 
+const updatePointerRadius = (material: THREE.ShaderMaterial, radius: number): void => {
+  const uniform = material.uniforms['uPointerRadius'];
+  if (uniform) {
+    uniform.value = radius;
+  }
+};
+
+type NodeHandles = ReturnType<typeof createMorphingPointsNodeMaterial>['handles'];
+
+const updateNodeHandles = ({
+  handles,
+  progress,
+  elapsedTime,
+  opacity,
+  pointer,
+}: {
+  handles: NodeHandles;
+  progress: number;
+  elapsedTime: number;
+  opacity: number;
+  pointer: MorphingPointerState | undefined;
+}): void => {
+  handles.uProgress.value = progress;
+  handles.uTime.value = elapsedTime;
+  handles.uOpacity.value = opacity;
+  if (pointer) {
+    (handles.uPointer.value as THREE.Vector3).copy(localPointerScratch);
+    handles.uPointerStrength.value = pointer.strength;
+    handles.uPointerRadius.value = pointer.radius;
+  }
+};
+
 export type MorphingPointsProperties = {
   /**
    * Sampled points from the source geometry.
@@ -161,8 +193,6 @@ export function MorphingPoints({
   pointerRef,
 }: MorphingPointsProperties): React.JSX.Element {
   const backend = useThreeGraphicsBackend();
-  const nodeHandlesRef = useRef<ReturnType<typeof createMorphingPointsNodeMaterial>['handles'] | undefined>(undefined);
-
   const pointsRef = useRef<Mesh>(null);
   const rotationGroupRef = useRef<Group>(null);
   const currentRotationYaxisRef = useRef(initialRotationY);
@@ -183,7 +213,7 @@ export function MorphingPoints({
   }, [sourcePoints, targetPoints]);
 
   // Create the morphing points material — GLSL ShaderMaterial or TSL PointsNodeMaterial.
-  const material = useMemo(() => {
+  const { material, nodeHandles } = useMemo(() => {
     if (backend === 'webgpu') {
       const built = createMorphingPointsNodeMaterial({
         color: sourceColor,
@@ -191,17 +221,18 @@ export function MorphingPoints({
         pointSize,
         explosionStrength,
       });
-      nodeHandlesRef.current = built.handles;
-      return built.material;
+      return { material: built.material, nodeHandles: built.handles };
     }
 
-    nodeHandlesRef.current = undefined;
-    return createMorphingPointsMaterial({
-      color: sourceColor,
-      targetColor,
-      pointSize,
-      explosionStrength,
-    });
+    return {
+      material: createMorphingPointsMaterial({
+        color: sourceColor,
+        targetColor,
+        pointSize,
+        explosionStrength,
+      }),
+      nodeHandles: undefined,
+    };
   }, [backend, explosionStrength, pointSize, sourceColor, targetColor]);
 
   // Reset hasReachedTarget when target changes
@@ -269,26 +300,23 @@ export function MorphingPoints({
       pointsRef.current.worldToLocal(localPointerScratch.copy(pointer.position));
     }
 
-    if (nodeHandlesRef.current) {
-      nodeHandlesRef.current.uProgress.value = currentProgress;
-      nodeHandlesRef.current.uTime.value = state.clock.elapsedTime;
-      nodeHandlesRef.current.uOpacity.value = opacity;
-      if (pointer) {
-        (nodeHandlesRef.current.uPointer.value as THREE.Vector3).copy(localPointerScratch);
-        nodeHandlesRef.current.uPointerStrength.value = pointer.strength;
-        nodeHandlesRef.current.uPointerRadius.value = pointer.radius;
-      }
+    if (nodeHandles) {
+      updateNodeHandles({
+        handles: nodeHandles,
+        progress: currentProgress,
+        elapsedTime: state.clock.elapsedTime,
+        opacity,
+        pointer,
+      });
     } else {
-      const shaderMaterial = material as THREE.ShaderMaterial;
+      const shaderMaterial = material;
       updateMorphProgress(shaderMaterial, currentProgress);
       updateMorphTime(shaderMaterial, state.clock.elapsedTime);
       updateMorphOpacity(shaderMaterial, opacity);
       updateMorphViewport(shaderMaterial, state.size.width, state.size.height);
       if (pointer) {
         updateMorphPointer(shaderMaterial, localPointerScratch, pointer.strength);
-        if (shaderMaterial.uniforms['uPointerRadius']) {
-          shaderMaterial.uniforms['uPointerRadius'].value = pointer.radius;
-        }
+        updatePointerRadius(shaderMaterial, pointer.radius);
       }
     }
   });

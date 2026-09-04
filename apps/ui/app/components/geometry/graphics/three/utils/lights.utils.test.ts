@@ -4,12 +4,10 @@ import {
   computeEnvironmentRotation,
   computeHeadlampTransform,
   applyLightingForCamera,
-  findTaggedLights,
   defaultHeadlampConfig,
   ambientBaseIntensity,
   headlampBaseIntensity,
   environmentBaseIntensity,
-  lightingUserDataKeys,
   poleFadeAngleDeg,
   darkModeIntensityScale,
   darkModeAmbientBoost,
@@ -844,57 +842,5 @@ describe('applyLightingForCamera', () => {
       // base value AND the dark-mode-only value (both FOV and theme dim it)
       expect(scene.environmentIntensity).toBeLessThan(environmentBaseIntensity * darkModeIntensityScale);
     });
-  });
-});
-
-// ── findTaggedLights ────────────────────────────────────────────────────────
-
-describe('findTaggedLights', () => {
-  it('should find tagged headlamp and ambient light in a scene', () => {
-    const scene = createTestScene();
-    const headlamp = new THREE.DirectionalLight('white', 1);
-    headlamp.userData[lightingUserDataKeys.headlamp] = true;
-    const ambient = new THREE.AmbientLight('white', 1);
-    ambient.userData[lightingUserDataKeys.ambient] = true;
-    scene.add(headlamp);
-    scene.add(ambient);
-
-    const result = findTaggedLights(scene);
-
-    expect(result.headlamp).toBe(headlamp);
-    expect(result.ambient).toBe(ambient);
-  });
-
-  it('should return undefined for missing lights', () => {
-    const scene = createTestScene();
-
-    const result = findTaggedLights(scene);
-
-    expect(result.headlamp).toBeUndefined();
-    expect(result.ambient).toBeUndefined();
-  });
-
-  it('should find lights nested in groups', () => {
-    const scene = createTestScene();
-    const group = new THREE.Group();
-    const headlamp = new THREE.DirectionalLight('white', 1);
-    headlamp.userData[lightingUserDataKeys.headlamp] = true;
-    group.add(headlamp);
-    scene.add(group);
-
-    const result = findTaggedLights(scene);
-
-    expect(result.headlamp).toBe(headlamp);
-  });
-
-  it('should not return untagged lights', () => {
-    const scene = createTestScene();
-    const untaggedLight = new THREE.DirectionalLight('white', 1);
-    scene.add(untaggedLight);
-
-    const result = findTaggedLights(scene);
-
-    expect(result.headlamp).toBeUndefined();
-    expect(result.ambient).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { useDeferredValue, useRef } from 'react';
+import { useDeferredValue, useLayoutEffect, useRef } from 'react';
 import type * as THREE from 'three';
 import { useThree, useFrame } from '@react-three/fiber';
 import { Environment, Lightformer } from '@react-three/drei';
@@ -8,23 +8,15 @@ import {
   headlampBaseIntensity,
   environmentBaseIntensity,
   defaultHeadlampConfig,
-  lightingUserDataKeys,
   darkModeIntensityScale,
   darkModeAmbientBoost,
 } from '#components/geometry/graphics/three/utils/lights.utils.js';
-import type { SceneLightingConfig } from '#components/geometry/graphics/three/utils/lights.utils.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 
 type UpDirection = 'x' | 'y' | 'z';
 
 /** Environment cubemap resolution (px). Higher = sharper specular reflections. */
 const envResolution = 512;
-
-/** Reused every frame — avoid allocating a fresh object for screenshot `userData` consumers. */
-const scratchSceneLightingUserData: SceneLightingConfig = {
-  sceneRadius: 1,
-  upDirection: 'z',
-};
 
 // Studio preset Lightformer intensities ──────────────────────────────────────
 // Asymmetric camera-space rig matching Onshape's observed pattern.
@@ -119,23 +111,16 @@ export function Lights({
 
   // Keep clamped radius accessible in useFrame without re-subscribing
   const radiusRef = useRef(clampedSceneRadius);
-  radiusRef.current = clampedSceneRadius;
+  useLayoutEffect(() => {
+    radiusRef.current = clampedSceneRadius;
+  }, [clampedSceneRadius]);
 
   // Theme-based intensity factors (1.0 in light mode, reduced in dark mode)
   const themeIntensityScale = isDark ? darkModeIntensityScale : 1;
   const themeAmbientBoost = isDark ? darkModeAmbientBoost : 1;
 
-  // Per-frame updates delegated to the shared applyLightingForCamera utility.
-  // This ensures the live renderer and the offline screenshot renderer apply
-  // identical lighting for any camera orientation.
+  // Per-frame updates delegated to the shared camera-relative lighting utility.
   useFrame(() => {
-    // Persist lighting config on scene.userData so the screenshot capture
-    // system can read it from a cloned scene without prop-drilling.
-    scratchSceneLightingUserData.sceneRadius = radiusRef.current;
-    scratchSceneLightingUserData.upDirection = upDirection;
-    scratchSceneLightingUserData.themeIntensityScale = themeIntensityScale;
-    scene.userData[lightingUserDataKeys.config] = scratchSceneLightingUserData;
-
     applyLightingForCamera({
       scene,
       camera,
@@ -162,19 +147,10 @@ export function Lights({
   return (
     <>
       {/* Base ambient fill -- always present for minimum illumination */}
-      <ambientLight
-        ref={ambientReference}
-        intensity={ambientBaseIntensity}
-        userData={{ [lightingUserDataKeys.ambient]: true }}
-      />
+      <ambientLight ref={ambientReference} intensity={ambientBaseIntensity} />
 
       {/* Headlamp -- positioned above camera in world space for top-down gradients */}
-      <directionalLight
-        ref={cameraLightReference}
-        intensity={headlampBaseIntensity}
-        color='white'
-        userData={{ [lightingUserDataKeys.headlamp]: true }}
-      />
+      <directionalLight ref={cameraLightReference} intensity={headlampBaseIntensity} color='white' />
 
       {showEnvironment ? (
         <Environment resolution={envResolution} near={clampedSceneRadius * 0.01} far={clampedSceneRadius * 20}>

@@ -21,6 +21,22 @@ export type SectionClippingGroupProperties = Readonly<{
   children: React.ReactNode;
 }>;
 
+const setLocalClippingEnabled = (renderer: THREE.WebGLRenderer, enabled: boolean): void => {
+  renderer.localClippingEnabled = enabled;
+};
+
+const resetClippingGroup = (group: ClippingGroup): void => {
+  group.clippingPlanes = [];
+  group.enabled = false;
+  group.clipIntersection = false;
+  group.clipShadows = false;
+};
+
+const applyClippingGroupPlane = (group: ClippingGroup, plane: THREE.Plane | undefined): void => {
+  group.clippingPlanes = plane ? [plane] : [];
+  group.enabled = Boolean(plane);
+};
+
 /**
  * Backend-aware clipping boundary for section view: `THREE.ClippingGroup` on WebGPU
  * (scene-graph clipping context), per-material `clippingPlanes` + `gl.localClippingEnabled` on WebGL.
@@ -36,22 +52,15 @@ export function SectionClippingGroup({
 }: SectionClippingGroupProperties): React.ReactNode {
   const backend = useThreeGraphicsBackend();
   const { gl } = useThree();
-  const clippingGroupRef = React.useRef<ClippingGroup | undefined>(undefined);
+  const [clippingGroup] = React.useState(() => new ClippingGroup());
   const webGlMeshesRef = React.useRef<readonly THREE.Mesh[]>([]);
   const webGlLinesRef = React.useRef<ReadonlyArray<THREE.LineSegments | LineSegments2>>([]);
-
-  clippingGroupRef.current ??= new ClippingGroup();
-
-  const clippingGroup = clippingGroupRef.current;
 
   React.useLayoutEffect(() => {
     if (backend !== 'webgpu') {
       return;
     }
-    clippingGroup.clippingPlanes = [];
-    clippingGroup.enabled = false;
-    clippingGroup.clipIntersection = false;
-    clippingGroup.clipShadows = false;
+    resetClippingGroup(clippingGroup);
   }, [backend, clippingGroup]);
 
   React.useLayoutEffect(() => {
@@ -76,11 +85,10 @@ export function SectionClippingGroup({
     const committed = enabled ? snapshotRef.current.committed : undefined;
     const committedPlane = committed?.plane ?? (enabled && !enableMesh && enableLines ? plane : undefined);
     if (backend === 'webgpu') {
-      clippingGroup.clippingPlanes = committedPlane ? [committedPlane] : [];
-      clippingGroup.enabled = Boolean(committedPlane);
+      applyClippingGroupPlane(clippingGroup, committedPlane);
       return;
     }
-    gl.localClippingEnabled = Boolean(committedPlane);
+    setLocalClippingEnabled(gl, Boolean(committedPlane));
     enforceMaterialClipping([...webGlMeshesRef.current], committedPlane ?? plane, Boolean(committed && enableMesh));
     enforceMaterialClipping(
       [...webGlLinesRef.current],
@@ -95,7 +103,7 @@ export function SectionClippingGroup({
   React.useEffect(
     () => () => {
       if (backend === 'webgl') {
-        gl.localClippingEnabled = false;
+        setLocalClippingEnabled(gl, false);
       }
     },
     [backend, gl],

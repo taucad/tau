@@ -84,14 +84,21 @@ describe('ModelViewer', () => {
       expect(screen.queryByTestId('loader')).not.toBeInTheDocument();
     });
 
-    it('should render error state when error prop is provided', () => {
+    it('should render a blocking error state when error is provided without geometry', () => {
       const error = new Error('Something went wrong');
 
-      render(<ModelViewer geometry={testGeometry} error={error} />);
+      render(<ModelViewer geometry={undefined} error={error} />);
 
       expect(screen.getByRole('alert')).toBeInTheDocument();
       expect(screen.getByText('Something went wrong')).toBeInTheDocument();
       expect(screen.queryByTestId('cad-viewer')).not.toBeInTheDocument();
+    });
+
+    it('should retain geometry and show a non-blocking alert after a failed rerender', () => {
+      render(<ModelViewer geometry={testGeometry} error={new Error('rerender sentinel')} />);
+
+      expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
+      expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toHaveTextContent('rerender sentinel');
     });
   });
 
@@ -199,7 +206,7 @@ describe('ModelViewer', () => {
       expect(screen.getByTestId('loader')).toBeInTheDocument();
     });
 
-    it('should render error state with external graphicsRef when error is provided', () => {
+    it('should retain geometry with an external graphicsRef when error is provided', () => {
       const externalRef = { send: vi.fn(), getSnapshot: () => ({ context: {} }) };
       const error = new Error('External error');
 
@@ -213,6 +220,7 @@ describe('ModelViewer', () => {
 
       expect(screen.getByRole('alert')).toBeInTheDocument();
       expect(screen.getByText('External error')).toBeInTheDocument();
+      expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
     });
   });
 });

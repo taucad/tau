@@ -84,7 +84,6 @@ const createDriverSnapshot = (requestedVerticalFieldOfView: number, revision: nu
     viewport: { width: 800, height: 600, pixelRatio: 1 },
     bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
   }),
-  effectiveVerticalFieldOfView: requestedVerticalFieldOfView,
   perspectiveVerticalFieldOfView: requestedVerticalFieldOfView === 0 ? 60 : requestedVerticalFieldOfView,
   revision,
 });

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type { Camera, Group, Object3D, Material, Texture, Intersection, Ray, BufferGeometry, Mesh } from 'three';
@@ -57,7 +58,6 @@ import {
   useGraphicsSelector,
   useModelInteractionRef,
   useModelInteractionSelector,
-  useRenderFrame,
 } from '#hooks/use-graphics.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
@@ -68,7 +68,6 @@ import {
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import type { GeometryComponentManifest, GeometryComponentNode, GeometryComponentPrimitiveRef } from '@taucad/types';
-import { toThreeRenderBounds } from '@taucad/three/spatial';
 import {
   applyCanonicalGltfBounds,
   createCanonicalGltfToTauMatrix,
@@ -80,6 +79,25 @@ import type { SectionTopologyGltfParser } from '#components/geometry/graphics/th
 // so creating a fresh instance per parse wastes initialization overhead and GC pressure.
 const gltfLoader = new GLTFLoader();
 const modelHitBlockingSceneTags = new Set<SceneTagKey>([sceneTag.sectionViewHelper, sceneTag.measurementUi]);
+
+const clearGltfScenes = (
+  setBaseScene: Dispatch<SetStateAction<Group | undefined>>,
+  setScene: Dispatch<SetStateAction<Group | undefined>>,
+  setManifest: Dispatch<SetStateAction<GeometryComponentManifest | undefined>>,
+): void => {
+  setBaseScene((previous) => {
+    if (previous) {
+      disposeSceneResources(previous);
+    }
+    return undefined;
+  });
+  setScene(undefined);
+  setManifest(undefined);
+};
+
+const setRenderedScene = (setter: Dispatch<SetStateAction<Group | undefined>>, scene: Group): void => {
+  setter(scene);
+};
 
 function isFatLineSegmentsMesh(child: Object3D): boolean {
   return child.type === 'LineSegments2';
@@ -969,8 +987,7 @@ export function GltfMesh({
   const graphicsBackendThree = useThreeGraphicsBackend();
   const sectionView = useSectionView();
   const cameraRig = useCameraRig();
-  const renderFrame = useRenderFrame();
-  const assetMatrix = useMemo(createCanonicalGltfToTauMatrix, []);
+  const assetMatrix = useMemo(() => createCanonicalGltfToTauMatrix(), []);
   // The "base scene" is the parsed GLTF with line segments converted but no material overrides.
   // It serves as the template from which material modes (matcap/original) are derived.
   const [baseScene, setBaseScene] = useState<Group | undefined>(undefined);
@@ -978,7 +995,6 @@ export function GltfMesh({
   const [scene, setScene] = useState<Group | undefined>(undefined);
   const [componentManifest, setComponentManifest] = useState<GeometryComponentManifest | undefined>(undefined);
   const { size, invalidate, gl, camera } = useThree();
-  const { controls } = useThree();
   const { theme } = useTheme();
   const activeEdgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
   const matcapTint = theme === Theme.DARK ? darkModeIntensityScale : 1;
@@ -1145,15 +1161,7 @@ export function GltfMesh({
     };
 
     // Dispose previous base scene and saved materials before loading new one
-    setBaseScene((previous) => {
-      if (previous) {
-        disposeSceneResources(previous);
-      }
-
-      return undefined;
-    });
-    setScene(undefined);
-    setComponentManifest(undefined);
+    clearGltfScenes(setBaseScene, setScene, setComponentManifest);
 
     void loadGltf();
 
@@ -1216,7 +1224,7 @@ export function GltfMesh({
     applyMaterials(baseScene);
     applyGltfSurfaceDepthBiasToScene(baseScene, graphicsBackendThree);
     seedSceneMaterialAppearances(baseScene);
-    setScene(baseScene);
+    setRenderedScene(setScene, baseScene);
     invalidate();
   }, [baseScene, applyMaterials, graphicsBackendThree, invalidate]);
 
@@ -1251,7 +1259,18 @@ export function GltfMesh({
   }, [modelVisualState.hoveredComponentId, modelVisualState.isViewerHoverSuppressed]);
 
   useEffect(() => {
-    if (!componentManifest || !modelVisualState.focusedComponentId) {
+    if (!componentManifest) {
+      return;
+    }
+
+    if (!modelVisualState.focusedComponentId) {
+      if (lastFocusedComponentIdRef.current !== undefined) {
+        cameraRig.actorRef.send({
+          type: 'setBounds',
+          bounds: cameraRig.actorRef.getSnapshot().context.view.bounds,
+        });
+        invalidate();
+      }
       lastFocusedComponentIdRef.current = undefined;
       return;
     }
@@ -1269,38 +1288,18 @@ export function GltfMesh({
     const physicalBox = applyCanonicalGltfBounds(
       new Box3(new Vector3(...focusedNode.bounds.min), new Vector3(...focusedNode.bounds.max)),
     );
-    const box = toThreeRenderBounds({
-      renderFrame,
+    const sceneBounds = cameraRig.actorRef.getSnapshot().context.view.bounds;
+    cameraRig.actorRef.send({
+      type: 'frame',
       bounds: {
         min: [physicalBox.min.x, physicalBox.min.y, physicalBox.min.z],
         max: [physicalBox.max.x, physicalBox.max.y, physicalBox.max.z],
       },
+      margin: 0.1,
     });
-    const cameraControls = controls as
-      | {
-          fitToBox?: (
-            box: Box3,
-            enableTransition: boolean,
-            options?: { paddingLeft?: number; paddingRight?: number; paddingTop?: number; paddingBottom?: number },
-          ) => Promise<unknown>;
-        }
-      | undefined;
-
-    if (typeof cameraControls?.fitToBox === 'function') {
-      void cameraControls.fitToBox(box, true, {
-        paddingLeft: 24,
-        paddingRight: 24,
-        paddingTop: 24,
-        paddingBottom: 24,
-      });
-      invalidate();
-      return;
-    }
-
-    const center = box.getCenter(new Vector3());
-    camera.lookAt(center);
+    cameraRig.actorRef.send({ type: 'setBounds', bounds: sceneBounds });
     invalidate();
-  }, [camera, componentManifest, controls, invalidate, modelVisualState.focusedComponentId, renderFrame]);
+  }, [cameraRig, componentManifest, invalidate, modelVisualState.focusedComponentId]);
 
   const handlePointerMove = useCallback(
     (event: ThreeEvent<PointerEvent>) => {

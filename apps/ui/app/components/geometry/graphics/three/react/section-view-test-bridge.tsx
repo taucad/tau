@@ -26,7 +26,10 @@ import type { SectionCapPerformanceDebugSummary } from '#components/geometry/gra
 import { useViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
 import type { ViewportGizmoInteractionLock } from '#components/geometry/graphics/three/controls/viewport-gizmo-interaction-lock.js';
 import { getSceneRenderRoots } from '#components/geometry/graphics/three/scene-overlay.js';
-import { infiniteGridFadeEndVisibleSpans } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
+import {
+  infiniteGridFadeEndVisibleSpans,
+  infiniteGridPresentationPlaneByUpDirection,
+} from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 
 type SectionPlaneId = 'xy' | 'xz' | 'yz';
 
@@ -531,11 +534,12 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         graphicsActor.send({ type: 'setPostProcessingVisibility', payload: enabled });
       },
       setGridPresentationClipPolicy(policy) {
+        const { upDirection } = graphicsActor.getSnapshot().context;
         cameraRig.setClipPlanes(
           policy.far || policy.near
             ? {
                 farPaddingVerticalSpans: policy.far ? infiniteGridFadeEndVisibleSpans : 0,
-                ...(policy.near ? { presentationPlaneOffsetMeters: 0 } : {}),
+                ...(policy.near ? { presentationPlane: infiniteGridPresentationPlaneByUpDirection[upDirection] } : {}),
               }
             : undefined,
         );

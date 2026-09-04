@@ -1,21 +1,17 @@
 /**
  * Pure lighting utilities extracted from the Lights component.
  *
- * These functions encapsulate the per-frame camera-relative lighting logic so
- * that both the live renderer (via `useFrame`) and the offline screenshot
- * renderer can apply identical lighting for any camera orientation.
+ * These functions encapsulate the live renderer's per-frame camera-relative
+ * lighting logic.
  */
 
 import * as THREE from 'three';
 import { calculateFovLightingCompensation } from '#components/geometry/graphics/three/utils/math.utils.js';
 
-/** Output buffer for camera world rotation — reused by every `applyLightingForCamera` call (live + screenshot). */
+/** Output buffer for camera world rotation — reused by every `applyLightingForCamera` call. */
 const scratchCameraWorldQuaternionForLighting = new THREE.Quaternion();
 
 // ── Lighting constants ─────────────────────────────────────────────────────
-// Exported so that both the Lights component and the screenshot capture
-// system reference the same tuning values.
-
 /** Ambient fill -- provides base illumination floor so no surface is fully dark. */
 export const ambientBaseIntensity = 0.05;
 
@@ -62,24 +58,6 @@ export const defaultHeadlampConfig: HeadlampConfig = {
   upOffset: 2.1,
   targetRightSkew: 0.2,
   targetUpSkew: 0.1,
-};
-
-// ── userData tag constants ─────────────────────────────────────────────────
-// Used to identify lights in a cloned scene for screenshot rendering.
-
-export const lightingUserDataKeys = {
-  headlamp: 'isScreenshotHeadlamp',
-  ambient: 'isScreenshotAmbient',
-  config: 'lightingConfig',
-} as const;
-
-// ── Lighting config stored on scene.userData ───────────────────────────────
-
-export type SceneLightingConfig = {
-  sceneRadius: number;
-  upDirection: 'x' | 'y' | 'z';
-  /** Theme intensity scale persisted for screenshot system consumption. */
-  themeIntensityScale?: number;
 };
 
 // ── Combined config for applyLightingForCamera ─────────────────────────────
@@ -257,11 +235,6 @@ export type ApplyLightingOptions = {
 /**
  * Applies camera-relative lighting to a scene for the given camera.
  *
- * This function is the single source of truth for per-camera lighting setup.
- * It is called by:
- * - The `Lights` component's `useFrame` callback (live rendering)
- * - The `captureScreenshots` function (offline screenshot rendering)
- *
  * It performs:
  * 1. FOV-dependent intensity compensation
  * 2. Theme-based intensity scaling (dark mode dims all lights uniformly)
@@ -306,32 +279,4 @@ export function applyLightingForCamera({ scene, camera, headlamp, ambient, confi
     headlamp.target.position.copy(transform.targetPosition);
     headlamp.target.updateMatrixWorld();
   }
-}
-
-/**
- * Discovers tagged lights in a scene graph by traversing and checking
- * `userData` markers. Used by the screenshot capture system to find the
- * headlamp and ambient light in a cloned scene.
- *
- * @param scene - The scene to search.
- * @returns The tagged headlamp and ambient light, or undefined if not found.
- */
-export function findTaggedLights(scene: THREE.Scene): {
-  headlamp: THREE.DirectionalLight | undefined;
-  ambient: THREE.AmbientLight | undefined;
-} {
-  let headlamp: THREE.DirectionalLight | undefined;
-  let ambient: THREE.AmbientLight | undefined;
-
-  scene.traverse((object) => {
-    if (object.userData[lightingUserDataKeys.headlamp]) {
-      headlamp = object as THREE.DirectionalLight;
-    }
-
-    if (object.userData[lightingUserDataKeys.ambient]) {
-      ambient = object as THREE.AmbientLight;
-    }
-  });
-
-  return { headlamp, ambient };
 }

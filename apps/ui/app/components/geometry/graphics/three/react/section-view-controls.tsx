@@ -35,6 +35,10 @@ const sectionControlCoreColor = '#ffffff';
 const sectionSelectorBorderWidth = 0.06;
 const sectionSelectorLabelSurfaceGap = 0.004;
 
+const setCanvasCursor = (element: HTMLElement, cursor: string): void => {
+  element.style.cursor = cursor;
+};
+
 export type PlaneId = 'xy' | 'xz' | 'yz';
 export type PlaneSelectorId = 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
 export type UpDirection = 'x' | 'y' | 'z';
@@ -333,14 +337,14 @@ function PlaneSelector({
   const handlePointerOver = (event: ThreeEvent<PointerEvent>): void => {
     event.stopPropagation();
     setIsHovered(true);
-    gl.domElement.style.cursor = 'pointer';
+    setCanvasCursor(gl.domElement, 'pointer');
     onHover(planeId);
   };
 
   const handlePointerOut = (event: ThreeEvent<PointerEvent>): void => {
     event.stopPropagation();
     setIsHovered(false);
-    gl.domElement.style.cursor = 'auto';
+    setCanvasCursor(gl.domElement, 'auto');
     onHover(undefined);
   };
 
@@ -525,6 +529,12 @@ type HoveredTransformAxis = {
   readonly axis: string;
 };
 
+const clearHoveredTransformAxis = (
+  setter: React.Dispatch<React.SetStateAction<HoveredTransformAxis | undefined>>,
+): void => {
+  setter(undefined);
+};
+
 export function SectionViewControls({
   isActive,
   selectedPlaneId,
@@ -560,9 +570,11 @@ export function SectionViewControls({
   // Render-local pivot point to keep the plane anchored during rotation.
   const pivotPointRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
-  onTransformDragStartRef.current = onTransformDragStart;
-  onTransformDragMoveRef.current = onTransformDragMove;
-  onTransformDragEndRef.current = onTransformDragEnd;
+  React.useLayoutEffect(() => {
+    onTransformDragStartRef.current = onTransformDragStart;
+    onTransformDragMoveRef.current = onTransformDragMove;
+    onTransformDragEndRef.current = onTransformDragEnd;
+  }, [onTransformDragEnd, onTransformDragMove, onTransformDragStart]);
 
   const planes = React.useMemo(() => {
     /* oxlint-disable tau-lint/no-hardcoded-color -- Three.js plane selector colors */
@@ -688,7 +700,7 @@ export function SectionViewControls({
   const highlightedTransformAxis = hoveredTransformAxis?.axis;
 
   React.useEffect(() => {
-    setHoveredTransformAxisState(undefined);
+    clearHoveredTransformAxis(setHoveredTransformAxisState);
   }, [isActive, selectedPlaneId]);
 
   if (!isActive) {

@@ -6,7 +6,10 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { PerspectiveCamera } from 'three';
 
 import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-canvas-instance.js';
-import { infiniteGridFadeEndVisibleSpans } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
+import {
+  infiniteGridFadeEndVisibleSpans,
+  infiniteGridPresentationPlaneByUpDirection,
+} from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
 
 /**
  * Dispatches context-loss handlers registered via the latest stub `<Canvas>`
@@ -253,7 +256,7 @@ describe('ThreeCanvasInstance', () => {
 
     expect(setClipPlanes).toHaveBeenLastCalledWith({
       farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-      presentationPlaneOffsetMeters: 0,
+      presentationPlane: infiniteGridPresentationPlaneByUpDirection.z,
     });
     const installedCallCount = setClipPlanes.mock.calls.length;
 
@@ -269,7 +272,11 @@ describe('ThreeCanvasInstance', () => {
         {null}
       </ThreeCanvasInstance>,
     );
-    expect(setClipPlanes).toHaveBeenCalledTimes(installedCallCount);
+    expect(setClipPlanes).toHaveBeenCalledTimes(installedCallCount + 1);
+    expect(setClipPlanes).toHaveBeenLastCalledWith({
+      farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
+      presentationPlane: infiniteGridPresentationPlaneByUpDirection.x,
+    });
 
     rerender(
       <ThreeCanvasInstance enableGrid={false} graphicsBackend='webgl' onRetry={() => undefined}>
@@ -285,7 +292,7 @@ describe('ThreeCanvasInstance', () => {
     );
     expect(setClipPlanes).toHaveBeenLastCalledWith({
       farPaddingVerticalSpans: infiniteGridFadeEndVisibleSpans,
-      presentationPlaneOffsetMeters: 0,
+      presentationPlane: infiniteGridPresentationPlaneByUpDirection.z,
     });
 
     const clearCallsBeforeUnmount = setClipPlanes.mock.calls.filter(([policy]) => policy === undefined).length;

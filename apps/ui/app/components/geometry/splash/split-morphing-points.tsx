@@ -22,6 +22,8 @@ import {
   gearRatio as defaultGearRatio,
 } from '#components/geometry/splash/auth-splashback.constants.js';
 
+const random = (): number => Math.random();
+
 export type SplitMorphingPointsProperties = {
   /**
    * Sampled points from the source geometry (gear8 centered).
@@ -171,13 +173,6 @@ export function SplitMorphingPoints({
   onProgressChange,
 }: SplitMorphingPointsProperties): React.JSX.Element {
   const backend = useThreeGraphicsBackend();
-  const gear12NodeHandlesRef = useRef<ReturnType<typeof createMorphingPointsNodeMaterial>['handles'] | undefined>(
-    undefined,
-  );
-  const gear8NodeHandlesRef = useRef<ReturnType<typeof createMorphingPointsNodeMaterial>['handles'] | undefined>(
-    undefined,
-  );
-
   const gear12PointsRef = useRef<Mesh>(null);
   const gear8PointsRef = useRef<Mesh>(null);
   const gear12RotationRef = useRef<Group>(null);
@@ -211,7 +206,7 @@ export function SplitMorphingPoints({
       targetPositions[i * 3 + 1] = targetPointsA.positions[i * 3 + 1] ?? 0;
       targetPositions[i * 3 + 2] = targetPointsA.positions[i * 3 + 2] ?? 0;
 
-      randomOffsets[i] = sourcePoints.randomOffsets[i] ?? Math.random();
+      randomOffsets[i] = sourcePoints.randomOffsets[i] ?? random();
     }
 
     return createMorphingPointsGeometry({
@@ -242,7 +237,7 @@ export function SplitMorphingPoints({
       targetPositions[i * 3 + 1] = targetPointsB.positions[sourceIndex * 3 + 1] ?? 0;
       targetPositions[i * 3 + 2] = targetPointsB.positions[sourceIndex * 3 + 2] ?? 0;
 
-      randomOffsets[i] = sourcePoints.randomOffsets[sourceIndex] ?? Math.random();
+      randomOffsets[i] = sourcePoints.randomOffsets[sourceIndex] ?? random();
     }
 
     return createMorphingPointsGeometry({
@@ -253,7 +248,7 @@ export function SplitMorphingPoints({
   }, [sourcePoints, targetPointsB, pointCount, pointCountA, gear8OffsetX]);
 
   // Create materials for each group
-  const gear12Material = useMemo(() => {
+  const { material: gear12Material, nodeHandles: gear12NodeHandles } = useMemo(() => {
     if (backend === 'webgpu') {
       const built = createMorphingPointsNodeMaterial({
         color: sourceColor,
@@ -261,20 +256,21 @@ export function SplitMorphingPoints({
         pointSize,
         explosionStrength,
       });
-      gear12NodeHandlesRef.current = built.handles;
-      return built.material;
+      return { material: built.material, nodeHandles: built.handles };
     }
 
-    gear12NodeHandlesRef.current = undefined;
-    return createMorphingPointsMaterial({
-      color: sourceColor,
-      targetColor: targetColorA,
-      pointSize,
-      explosionStrength,
-    });
+    return {
+      material: createMorphingPointsMaterial({
+        color: sourceColor,
+        targetColor: targetColorA,
+        pointSize,
+        explosionStrength,
+      }),
+      nodeHandles: undefined,
+    };
   }, [backend, explosionStrength, pointSize, sourceColor, targetColorA]);
 
-  const gear8Material = useMemo(() => {
+  const { material: gear8Material, nodeHandles: gear8NodeHandles } = useMemo(() => {
     if (backend === 'webgpu') {
       const built = createMorphingPointsNodeMaterial({
         color: sourceColor,
@@ -282,17 +278,18 @@ export function SplitMorphingPoints({
         pointSize,
         explosionStrength,
       });
-      gear8NodeHandlesRef.current = built.handles;
-      return built.material;
+      return { material: built.material, nodeHandles: built.handles };
     }
 
-    gear8NodeHandlesRef.current = undefined;
-    return createMorphingPointsMaterial({
-      color: sourceColor,
-      targetColor: targetColorB,
-      pointSize,
-      explosionStrength,
-    });
+    return {
+      material: createMorphingPointsMaterial({
+        color: sourceColor,
+        targetColor: targetColorB,
+        pointSize,
+        explosionStrength,
+      }),
+      nodeHandles: undefined,
+    };
   }, [backend, explosionStrength, pointSize, sourceColor, targetColorB]);
 
   // Reset hasReachedTarget when target changes
@@ -336,8 +333,8 @@ export function SplitMorphingPoints({
     // Notify parent of progress change (for animating assembly tilt)
     onProgressChange?.(progress);
 
-    if (gear12NodeHandlesRef.current && gear8NodeHandlesRef.current) {
-      for (const handles of [gear12NodeHandlesRef.current, gear8NodeHandlesRef.current]) {
+    if (gear12NodeHandles && gear8NodeHandles) {
+      for (const handles of [gear12NodeHandles, gear8NodeHandles]) {
         handles.uProgress.value = progress;
         handles.uTime.value = state.clock.elapsedTime;
         handles.uOpacity.value = opacity;

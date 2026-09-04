@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useRef } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 
 export type ViewportGizmoInteractionLock = {
   readonly activeRef: React.RefObject<boolean>;
@@ -50,13 +50,10 @@ export function ViewportGizmoInteractionLockProvider({
 }: {
   readonly children: React.ReactNode;
 }): React.JSX.Element {
-  const lockRef = useRef<ViewportGizmoInteractionLock | undefined>(undefined);
-  lockRef.current ??= createViewportGizmoInteractionLock();
+  const [lock] = useState(createViewportGizmoInteractionLock);
 
   return (
-    <ViewportGizmoInteractionLockContext.Provider value={lockRef.current}>
-      {children}
-    </ViewportGizmoInteractionLockContext.Provider>
+    <ViewportGizmoInteractionLockContext.Provider value={lock}>{children}</ViewportGizmoInteractionLockContext.Provider>
   );
 }
 

@@ -5,6 +5,7 @@ import {
   infiniteGridFadeEndRatio,
   infiniteGridFadeEndVisibleSpans,
   infiniteGridFadeStartRatio,
+  infiniteGridPresentationPlaneByUpDirection,
   infiniteGridProxyDistanceVisibleSpans,
   resolveInfiniteGridFrame,
 } from '#components/geometry/graphics/three/utils/infinite-grid-frame.js';
@@ -24,6 +25,14 @@ const physicalUvAt = ({
 }): number => (coordinateMeters - originMeters) / metersPerRenderUnit / (spacingMeters / metersPerRenderUnit) + phase;
 
 describe('resolveInfiniteGridFrame', () => {
+  it('maps each grid up direction to its physical zero plane', () => {
+    expect(infiniteGridPresentationPlaneByUpDirection).toEqual({
+      x: { normal: [1, 0, 0], offsetMeters: 0 },
+      y: { normal: [0, 1, 0], offsetMeters: 0 },
+      z: { normal: [0, 0, 1], offsetMeters: 0 },
+    });
+  });
+
   it('keeps physical grid phase invariant across origin-only rebases and 1000x render rescaling', () => {
     const frames: readonly RenderFrame[] = [
       { anchorFrameId: 'tau:root', originMeters: [10.25, -20.75, 30.5], metersPerRenderUnit: 0.001 },

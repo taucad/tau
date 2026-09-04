@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { useThree } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
 import { OrthographicCamera, Vector3 } from 'three';
@@ -25,6 +25,20 @@ import type { CameraControlsAdapter } from '#machines/controls-listener.machine.
 const getPixelRatio = (): number => {
   const pixelRatio = Reflect.get(globalThis, 'devicePixelRatio');
   return Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2);
+};
+
+const setCameraConnector = (
+  ref: RefObject<((camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void) | undefined>,
+  connector: ((camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void) | undefined,
+): void => {
+  ref.current = connector;
+};
+
+const publishInitialCamera = (
+  publish: (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void,
+  rig: ReturnType<typeof useCameraRig>,
+): void => {
+  publish(rig.activeCamera, selectCameraDriverSnapshot(rig.actorRef.getSnapshot()));
 };
 
 /**
@@ -91,11 +105,11 @@ export function ActorBridge(): ReactNode {
       invalidate();
     };
 
-    connectorRef.current = publish;
-    publish(rig.activeCamera, selectCameraDriverSnapshot(rig.actorRef.getSnapshot()));
+    setCameraConnector(connectorRef, publish);
+    publishInitialCamera(publish, rig);
     return () => {
       if (connectorRef.current === publish) {
-        connectorRef.current = undefined;
+        setCameraConnector(connectorRef, undefined);
       }
     };
   }, [connectorRef, consumersRef, get, graphicsActor, invalidate, rig, set]);

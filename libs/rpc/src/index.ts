@@ -19,6 +19,7 @@ export type {
   CloseInfo,
   EmptyRpcProtocol,
   RpcProtocol,
+  StreamFlowControlOptions,
   WithTransferables,
 } from '#channel.js';
 export {

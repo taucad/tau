@@ -217,7 +217,7 @@ describe('isWireMessage — lifecycle family', () => {
   });
 });
 
-describe('isWireMessage — flow control family (reserved)', () => {
+describe('isWireMessage — flow control family', () => {
   it('accepts a flow-ack frame so receivers can drop without crashing', () => {
     const frame: WireFlowAck = { v: 1, k: 'fa', i: 'r1' };
     expect(isWireMessage(frame)).toBe(true);
@@ -230,6 +230,10 @@ describe('isWireMessage — flow control family (reserved)', () => {
 
   it('rejects a flow-window frame with a non-finite slot count', () => {
     expect(isWireMessage({ v: 1, k: 'fw', i: 's1', s: Number.POSITIVE_INFINITY })).toBe(false);
+  });
+
+  it.each([0, -1, 1.5])('rejects an invalid flow-window slot count (%s)', (slots) => {
+    expect(isWireMessage({ v: 1, k: 'fw', i: 's1', s: slots })).toBe(false);
   });
 });
 

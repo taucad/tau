@@ -227,13 +227,11 @@ export type WireBye = {
 };
 
 /* ============================================================================ *
- * Flow control family (`f*`) — RESERVED for a future revision                  *
+ * Flow control family (`f*`)                                                   *
  * ============================================================================ */
 
 /**
- * Reserved: acknowledge frames up to id `i`. Not implemented; receivers log once
- * and drop. Reserving the kind code prevents wire-format break when flow control
- * lands.
+ * Consumer → producer: acknowledge one handed-off frame for stream id `i`.
  *
  * @public
  */
@@ -244,8 +242,7 @@ export type WireFlowAck = {
 };
 
 /**
- * Reserved: grant `s` more stream-frame slots for stream id `i`. Not implemented;
- * receivers log once and drop.
+ * Consumer → producer: grant `s` more stream-frame slots for stream id `i`.
  *
  * @public
  */
@@ -361,7 +358,12 @@ export const wireMessageSchema: z.ZodType<WireMessage> = z.discriminatedUnion('k
   helloSchema,
   z.object({ v: z.literal(wireVersion), k: z.literal('lb'), r: z.string().optional() }),
   z.object({ v: z.literal(wireVersion), k: z.literal('fa'), i: nonEmptyStringSchema }),
-  z.object({ v: z.literal(wireVersion), k: z.literal('fw'), i: nonEmptyStringSchema, s: z.number() }),
+  z.object({
+    v: z.literal(wireVersion),
+    k: z.literal('fw'),
+    i: nonEmptyStringSchema,
+    s: z.number().int().positive(),
+  }),
 ]);
 
 /**

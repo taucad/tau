@@ -469,6 +469,23 @@ type RuntimeFileSystem = {
 };
 ```
 
+When a capability is genuinely unavailable on some implementations and cannot be composed from required primitives, expose one required discriminated facet rather than an optional method:
+
+```typescript
+type StillCaptureCapability =
+  | { readonly type: 'unsupported' }
+  | {
+      readonly type: 'supported';
+      capture(input: CaptureStillInput): Promise<StillImage>;
+    };
+
+type MachineSession = {
+  readonly stillCapture: StillCaptureCapability;
+};
+```
+
+The discriminant makes absence explicit, gives consumers exhaustive narrowing, and leaves room for capability-specific metadata without multiplying optional properties.
+
 ## 12. TypeScript-First Design
 
 - Export types separately using `export type`

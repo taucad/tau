@@ -2,7 +2,7 @@ import { OrthographicCamera, PerspectiveCamera, Quaternion, Vector3 } from 'thre
 import type { ActorRefFrom, CallbackActorLogic } from 'xstate';
 import { createActor, fromCallback } from 'xstate';
 import { createCameraState, createCameraView, resolveCameraState } from '@taucad/camera';
-import type { CameraState } from '@taucad/camera';
+import type { CameraState, CameraVector } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
 import { cameraMachine, selectCameraDriverSnapshot } from '@taucad/camera/machine';
 import type {
@@ -84,7 +84,10 @@ type ThreeCameraRigOptions = CameraMachineInput &
 /** Host clipping policy applied after each bounds-derived endpoint synchronization. */
 type ThreeCameraClipPlanePolicy = Readonly<{
   farPaddingVerticalSpans: number;
-  presentationPlaneOffsetMeters?: number;
+  presentationPlane?: Readonly<{
+    normal: CameraVector;
+    offsetMeters: number;
+  }>;
 }>;
 
 /** Persistent native endpoint cameras and their canonical actor. @public */
@@ -104,16 +107,32 @@ const validateClipPlanes = (clipPlanes: ThreeCameraClipPlanePolicy): ThreeCamera
   if (!Number.isFinite(clipPlanes.farPaddingVerticalSpans) || clipPlanes.farPaddingVerticalSpans < 0) {
     throw new RangeError('clipPlanes.farPaddingVerticalSpans must be finite and non-negative.');
   }
-  if (
-    clipPlanes.presentationPlaneOffsetMeters !== undefined &&
-    !Number.isFinite(clipPlanes.presentationPlaneOffsetMeters)
-  ) {
-    throw new RangeError('clipPlanes.presentationPlaneOffsetMeters must be finite.');
+  const plane = clipPlanes.presentationPlane;
+  if (plane === undefined) {
+    return { farPaddingVerticalSpans: clipPlanes.farPaddingVerticalSpans };
   }
-  return { ...clipPlanes };
+  const normal: [number, number, number] = [plane.normal[0], plane.normal[1], plane.normal[2]];
+  for (const [index, value] of normal.entries()) {
+    if (!Number.isFinite(value)) {
+      throw new RangeError(`clipPlanes.presentationPlane.normal[${index}] must be finite.`);
+    }
+  }
+  if (Math.hypot(...normal) === 0) {
+    throw new RangeError('clipPlanes.presentationPlane.normal must have non-zero length.');
+  }
+  if (!Number.isFinite(plane.offsetMeters)) {
+    throw new RangeError('clipPlanes.presentationPlane.offsetMeters must be finite.');
+  }
+  return {
+    farPaddingVerticalSpans: clipPlanes.farPaddingVerticalSpans,
+    presentationPlane: { normal, offsetMeters: plane.offsetMeters },
+  };
 };
 
 const presentationViewportGuardPhysicalPixels = 2;
+
+const strictlyBeforePlaneDepth = (depth: number): number =>
+  depth - Math.max(Math.abs(depth) * Number.EPSILON, Number.MIN_VALUE);
 
 const resolveNativeNear = ({
   clipPlanes,
@@ -126,8 +145,8 @@ const resolveNativeNear = ({
   readonly snapshot: CameraDriverSnapshot;
   readonly state: CameraState;
 }): number => {
-  const planeOffsetMeters = clipPlanes?.presentationPlaneOffsetMeters;
-  if (planeOffsetMeters === undefined) {
+  const plane = clipPlanes?.presentationPlane;
+  if (plane === undefined) {
     return state.clipping.near / renderFrame.metersPerRenderUnit;
   }
 
@@ -139,12 +158,16 @@ const resolveNativeNear = ({
   const normalizedDirectionY = directionY / distance;
   const normalizedDirectionZ = directionZ / distance;
   const upLength = Math.hypot(state.up[0], state.up[1], state.up[2]);
-  const normalX = state.up[0] / upLength;
-  const normalY = state.up[1] / upLength;
-  const normalZ = state.up[2] / upLength;
-  const rightX = normalY * normalizedDirectionZ - normalZ * normalizedDirectionY;
-  const rightY = normalZ * normalizedDirectionX - normalX * normalizedDirectionZ;
-  const rightZ = normalX * normalizedDirectionY - normalY * normalizedDirectionX;
+  const upX = state.up[0] / upLength;
+  const upY = state.up[1] / upLength;
+  const upZ = state.up[2] / upLength;
+  const normalLength = Math.hypot(...plane.normal);
+  const normalX = plane.normal[0] / normalLength;
+  const normalY = plane.normal[1] / normalLength;
+  const normalZ = plane.normal[2] / normalLength;
+  const rightX = upY * normalizedDirectionZ - upZ * normalizedDirectionY;
+  const rightY = upZ * normalizedDirectionX - upX * normalizedDirectionZ;
+  const rightZ = upX * normalizedDirectionY - upY * normalizedDirectionX;
   const rightLength = Math.hypot(rightX, rightY, rightZ);
   const normalizedRightX = rightX / rightLength;
   const normalizedRightY = rightY / rightLength;
@@ -152,79 +175,63 @@ const resolveNativeNear = ({
   const screenUpX = normalizedDirectionY * normalizedRightZ - normalizedDirectionZ * normalizedRightY;
   const screenUpY = normalizedDirectionZ * normalizedRightX - normalizedDirectionX * normalizedRightZ;
   const screenUpZ = normalizedDirectionX * normalizedRightY - normalizedDirectionY * normalizedRightX;
-  const guardedViewportMagnitude =
+  const guardedViewportX =
+    1 +
+    (2 * presentationViewportGuardPhysicalPixels) / (snapshot.view.viewport.width * snapshot.view.viewport.pixelRatio);
+  const guardedViewportY =
     1 +
     (2 * presentationViewportGuardPhysicalPixels) / (snapshot.view.viewport.height * snapshot.view.viewport.pixelRatio);
   const forwardX = -normalizedDirectionX;
   const forwardY = -normalizedDirectionY;
   const forwardZ = -normalizedDirectionZ;
-  let lowerRayOriginX = state.position[0];
-  let lowerRayOriginY = state.position[1];
-  let lowerRayOriginZ = state.position[2];
-  let upperRayOriginX = state.position[0];
-  let upperRayOriginY = state.position[1];
-  let upperRayOriginZ = state.position[2];
-  let lowerRayDirectionX = forwardX;
-  let lowerRayDirectionY = forwardY;
-  let lowerRayDirectionZ = forwardZ;
-  let upperRayDirectionX = forwardX;
-  let upperRayDirectionY = forwardY;
-  let upperRayDirectionZ = forwardZ;
-
-  if (state.projection.kind === 'perspective') {
-    const guardedSlope =
-      (guardedViewportMagnitude * Math.tan((state.projection.verticalFieldOfView * Math.PI) / 360)) /
-      state.projection.zoom;
-    lowerRayDirectionX -= guardedSlope * screenUpX;
-    lowerRayDirectionY -= guardedSlope * screenUpY;
-    lowerRayDirectionZ -= guardedSlope * screenUpZ;
-    upperRayDirectionX += guardedSlope * screenUpX;
-    upperRayDirectionY += guardedSlope * screenUpY;
-    upperRayDirectionZ += guardedSlope * screenUpZ;
-  } else {
-    const guardedVerticalOffset = guardedViewportMagnitude * (state.projection.verticalSpan / 2);
-    lowerRayOriginX -= guardedVerticalOffset * screenUpX;
-    lowerRayOriginY -= guardedVerticalOffset * screenUpY;
-    lowerRayOriginZ -= guardedVerticalOffset * screenUpZ;
-    upperRayOriginX += guardedVerticalOffset * screenUpX;
-    upperRayOriginY += guardedVerticalOffset * screenUpY;
-    upperRayOriginZ += guardedVerticalOffset * screenUpZ;
-  }
-
-  const lowerPlaneSignedDistance =
-    planeOffsetMeters - (normalX * lowerRayOriginX + normalY * lowerRayOriginY + normalZ * lowerRayOriginZ);
-  const upperPlaneSignedDistance =
-    planeOffsetMeters - (normalX * upperRayOriginX + normalY * upperRayOriginY + normalZ * upperRayOriginZ);
-  const lowerPlaneDenominator =
-    normalX * lowerRayDirectionX + normalY * lowerRayDirectionY + normalZ * lowerRayDirectionZ;
-  const upperPlaneDenominator =
-    normalX * upperRayDirectionX + normalY * upperRayDirectionY + normalZ * upperRayDirectionZ;
-  const lowerPlaneDepth = lowerPlaneSignedDistance / lowerPlaneDenominator;
-  const upperPlaneDepth = upperPlaneSignedDistance / upperPlaneDenominator;
+  const verticalSlopeOrHalfSpan =
+    state.projection.kind === 'perspective'
+      ? Math.tan((state.projection.verticalFieldOfView * Math.PI) / 360) / state.projection.zoom
+      : state.projection.verticalSpan / 2;
+  const guardedViewportCorners = [
+    [-guardedViewportX, -guardedViewportY],
+    [-guardedViewportX, guardedViewportY],
+    [guardedViewportX, -guardedViewportY],
+    [guardedViewportX, guardedViewportY],
+  ] as const;
+  const planeSamples = guardedViewportCorners.map(([viewportX, viewportY]) => {
+    const horizontalOffset = viewportX * verticalSlopeOrHalfSpan * state.aspect;
+    const verticalOffset = viewportY * verticalSlopeOrHalfSpan;
+    const offsetX = horizontalOffset * normalizedRightX + verticalOffset * screenUpX;
+    const offsetY = horizontalOffset * normalizedRightY + verticalOffset * screenUpY;
+    const offsetZ = horizontalOffset * normalizedRightZ + verticalOffset * screenUpZ;
+    const rayOriginX = state.position[0] + (state.projection.kind === 'orthographic' ? offsetX : 0);
+    const rayOriginY = state.position[1] + (state.projection.kind === 'orthographic' ? offsetY : 0);
+    const rayOriginZ = state.position[2] + (state.projection.kind === 'orthographic' ? offsetZ : 0);
+    const rayDirectionX = forwardX + (state.projection.kind === 'perspective' ? offsetX : 0);
+    const rayDirectionY = forwardY + (state.projection.kind === 'perspective' ? offsetY : 0);
+    const rayDirectionZ = forwardZ + (state.projection.kind === 'perspective' ? offsetZ : 0);
+    const signedDistance = plane.offsetMeters - (normalX * rayOriginX + normalY * rayOriginY + normalZ * rayOriginZ);
+    const denominator = normalX * rayDirectionX + normalY * rayDirectionY + normalZ * rayDirectionZ;
+    return { denominator, depth: signedDistance / denominator, signedDistance };
+  });
   const minimumNear = Math.max(distance * 1e-9, Number.MIN_VALUE);
-  const minimumPlaneSignedDistance = Math.min(lowerPlaneSignedDistance, upperPlaneSignedDistance);
-  const maximumPlaneSignedDistance = Math.max(lowerPlaneSignedDistance, upperPlaneSignedDistance);
+  const minimumPlaneSignedDistance = Math.min(...planeSamples.map(({ signedDistance }) => signedDistance));
+  const maximumPlaneSignedDistance = Math.max(...planeSamples.map(({ signedDistance }) => signedDistance));
+  const orthographicPlaneDenominator = planeSamples[0]!.denominator;
   const orthographicPlaneApproachesZeroFromForward =
     state.projection.kind === 'orthographic' &&
-    Number.isFinite(lowerPlaneSignedDistance) &&
-    Number.isFinite(upperPlaneSignedDistance) &&
-    Number.isFinite(lowerPlaneDenominator) &&
-    Number.isFinite(lowerPlaneDepth) &&
-    Number.isFinite(upperPlaneDepth) &&
-    lowerPlaneDenominator !== 0 &&
+    planeSamples.every(({ denominator, depth, signedDistance }) =>
+      [denominator, depth, signedDistance].every((value) => Number.isFinite(value)),
+    ) &&
+    orthographicPlaneDenominator !== 0 &&
     minimumPlaneSignedDistance <= 0 &&
     maximumPlaneSignedDistance >= 0 &&
-    (lowerPlaneDenominator > 0 ? maximumPlaneSignedDistance > 0 : minimumPlaneSignedDistance < 0);
+    (orthographicPlaneDenominator > 0 ? maximumPlaneSignedDistance > 0 : minimumPlaneSignedDistance < 0);
   let nearMeters = state.clipping.near;
   if (orthographicPlaneApproachesZeroFromForward) {
     // Orthographic projection is affine: preserve the guarded plane on both sides of the camera plane.
-    nearMeters = Math.min(lowerPlaneDepth, upperPlaneDepth);
+    nearMeters = strictlyBeforePlaneDepth(Math.min(...planeSamples.map(({ depth }) => depth)));
   } else {
-    if (Number.isFinite(lowerPlaneDepth) && lowerPlaneDepth > 0) {
-      nearMeters = Math.min(nearMeters, lowerPlaneDepth);
-    }
-    if (Number.isFinite(upperPlaneDepth) && upperPlaneDepth > 0) {
-      nearMeters = Math.min(nearMeters, upperPlaneDepth);
+    for (const { depth } of planeSamples) {
+      if (Number.isFinite(depth) && depth > 0) {
+        nearMeters = Math.min(nearMeters, strictlyBeforePlaneDepth(depth));
+      }
     }
   }
   return (
@@ -464,7 +471,10 @@ export const createThreeCameraRig = (options: ThreeCameraRigOptions): ThreeCamer
       const validated = nextClipPlanes ? validateClipPlanes(nextClipPlanes) : undefined;
       if (
         validated?.farPaddingVerticalSpans === clipPlanes?.farPaddingVerticalSpans &&
-        validated?.presentationPlaneOffsetMeters === clipPlanes?.presentationPlaneOffsetMeters
+        validated?.presentationPlane?.offsetMeters === clipPlanes?.presentationPlane?.offsetMeters &&
+        validated?.presentationPlane?.normal.every(
+          (value, index) => value === clipPlanes?.presentationPlane?.normal[index],
+        ) !== false
       ) {
         return;
       }

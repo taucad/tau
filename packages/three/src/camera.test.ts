@@ -1,6 +1,7 @@
 import { OrthographicCamera, PerspectiveCamera, Raycaster, Vector2, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta } from '@taucad/camera';
+import type { CameraVector } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
 import { selectCameraDriverSnapshot, selectCameraProjection } from '@taucad/camera/machine';
 import * as threeModule from '#index.js';
@@ -18,6 +19,11 @@ const initialView = createCameraView({
   bounds: { min: [-220, -180, -55], max: [220, 180, 55] },
 });
 
+const presentationClipPlanes = (normal: CameraVector, offsetMeters = 0, farPaddingVerticalSpans = 4) => ({
+  farPaddingVerticalSpans,
+  presentationPlane: { normal, offsetMeters },
+});
+
 const planeDepthAtViewportGuard = ({
   camera,
   edge,
@@ -29,7 +35,7 @@ const planeDepthAtViewportGuard = ({
   readonly edge: 'lower' | 'upper';
   readonly normal: readonly [number, number, number];
   readonly offset: number;
-  readonly viewport: Readonly<{ height: number; pixelRatio: number }>;
+  readonly viewport: Readonly<{ width: number; height: number; pixelRatio: number }>;
 }): number => {
   const guardedViewportMagnitude = 1 + 4 / (viewport.height * viewport.pixelRatio);
   const guardedViewportY = edge === 'lower' ? -guardedViewportMagnitude : guardedViewportMagnitude;
@@ -50,55 +56,43 @@ const presentationPlaneGuardOracle = ({
   readonly camera: PerspectiveCamera | OrthographicCamera;
   readonly normal: readonly [number, number, number];
   readonly offset: number;
-  readonly viewport: Readonly<{ height: number; pixelRatio: number }>;
+  readonly viewport: Readonly<{ width: number; height: number; pixelRatio: number }>;
 }): Readonly<{
   approachesZeroFromForward: boolean;
-  lowerDepth: number;
-  lowerSignedDistance: number;
   requiredDepth: number;
-  upperDepth: number;
-  upperSignedDistance: number;
 }> => {
-  const guardedViewportMagnitude = 1 + 4 / (viewport.height * viewport.pixelRatio);
+  const guardedViewportX = 1 + 4 / (viewport.width * viewport.pixelRatio);
+  const guardedViewportY = 1 + 4 / (viewport.height * viewport.pixelRatio);
   const planeNormal = new Vector3(...normal).normalize();
-  const readRay = (guardedViewportY: number) => {
+  const readDepth = (guardedViewportX: number, guardedViewportY: number) => {
     const raycaster = new Raycaster();
-    raycaster.setFromCamera(new Vector2(0, guardedViewportY), camera);
+    raycaster.setFromCamera(new Vector2(guardedViewportX, guardedViewportY), camera);
     const signedDistance = offset - planeNormal.dot(raycaster.ray.origin);
     const denominator = planeNormal.dot(raycaster.ray.direction);
     const distance = signedDistance / denominator;
     const intersection = raycaster.ray.at(distance, new Vector3());
-    return {
-      denominator,
-      depth: -camera.worldToLocal(intersection).z,
-      signedDistance,
-    };
+    return -camera.worldToLocal(intersection).z;
   };
-  const lower = readRay(-guardedViewportMagnitude);
-  const upper = readRay(guardedViewportMagnitude);
-  const minimumSignedDistance = Math.min(lower.signedDistance, upper.signedDistance);
-  const maximumSignedDistance = Math.max(lower.signedDistance, upper.signedDistance);
+  const depths = [
+    readDepth(-guardedViewportX, -guardedViewportY),
+    readDepth(-guardedViewportX, guardedViewportY),
+    readDepth(guardedViewportX, -guardedViewportY),
+    readDepth(guardedViewportX, guardedViewportY),
+  ];
+  const depthTolerance = Math.max(1, ...depths.map((depth) => Math.abs(depth))) * Number.EPSILON * 8;
+  const guardedDepths = depths.map((depth) => (Math.abs(depth) <= depthTolerance ? 0 : depth));
+  const minimumDepth = Math.min(...guardedDepths);
+  const maximumDepth = Math.max(...guardedDepths);
   const approachesZeroFromForward =
     camera instanceof OrthographicCamera &&
-    Number.isFinite(lower.signedDistance) &&
-    Number.isFinite(upper.signedDistance) &&
-    Number.isFinite(lower.denominator) &&
-    lower.denominator !== 0 &&
-    minimumSignedDistance <= 0 &&
-    maximumSignedDistance >= 0 &&
-    (lower.denominator > 0 ? maximumSignedDistance > 0 : minimumSignedDistance < 0);
-  const minimumPositiveDepth = Math.min(
-    ...[lower.depth, upper.depth].filter((depth) => Number.isFinite(depth) && depth > 0),
-  );
-  const crossingDepth = Math.min(lower.depth, upper.depth);
+    guardedDepths.every((depth) => Number.isFinite(depth)) &&
+    minimumDepth < 0 &&
+    maximumDepth >= 0;
+  const minimumPositiveDepth = Math.min(...depths.filter((depth) => Number.isFinite(depth) && depth > 0));
 
   return {
     approachesZeroFromForward,
-    lowerDepth: lower.depth,
-    lowerSignedDistance: lower.signedDistance,
-    requiredDepth: approachesZeroFromForward ? crossingDepth : minimumPositiveDepth,
-    upperDepth: upper.depth,
-    upperSignedDistance: upper.signedDistance,
+    requiredDepth: approachesZeroFromForward ? minimumDepth : minimumPositiveDepth,
   };
 };
 
@@ -115,7 +109,7 @@ const expectedPresentationNear = ({
   readonly normal: readonly [number, number, number];
   readonly offset: number;
   readonly target: readonly [number, number, number];
-  readonly viewport: Readonly<{ height: number; pixelRatio: number }>;
+  readonly viewport: Readonly<{ width: number; height: number; pixelRatio: number }>;
 }): Readonly<{ floor: number; near: number; oracle: ReturnType<typeof presentationPlaneGuardOracle> }> => {
   const oracle = presentationPlaneGuardOracle({ camera, normal, offset, viewport });
   const floor = camera.position.distanceTo(new Vector3(...target)) * 1e-9;
@@ -374,10 +368,7 @@ describe('createThreeCameraRig', () => {
     const fadeEndVerticalSpans = 4;
     const expectedFarPadding = initialView.verticalSpan * fadeEndVerticalSpans;
 
-    rig.setClipPlanes({
-      farPaddingVerticalSpans: fadeEndVerticalSpans,
-      presentationPlaneOffsetMeters: 0,
-    });
+    rig.setClipPlanes(presentationClipPlanes(initialView.up, 0, fadeEndVerticalSpans));
 
     const paddedState = rig.readState();
     expect(paddedState.position).toEqual(boundsDerivedState.position);
@@ -430,10 +421,7 @@ describe('createThreeCameraRig', () => {
     const tightOrthographicNear = rig.orthographicCamera.near;
     const tightOrthographicFar = rig.orthographicCamera.far;
 
-    rig.setClipPlanes({
-      farPaddingVerticalSpans: fadeEndVerticalSpans,
-      presentationPlaneOffsetMeters: 0,
-    });
+    rig.setClipPlanes(presentationClipPlanes(initialView.up, 0, fadeEndVerticalSpans));
     rig.setClipPlanes(undefined);
     expect(rig.perspectiveCamera.near).toBe(tightPerspectiveNear);
     expect(rig.perspectiveCamera.far).toBe(tightPerspectiveFar);
@@ -457,12 +445,24 @@ describe('createThreeCameraRig', () => {
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
     'rejects an invalid presentation-plane offset (%s)',
-    (presentationPlaneOffsetMeters) => {
+    (offsetMeters) => {
       const rig = createThreeCameraRig({ initialView });
 
       expect(() => {
-        rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters });
-      }).toThrow('clipPlanes.presentationPlaneOffsetMeters must be finite.');
+        rig.setClipPlanes(presentationClipPlanes(initialView.up, offsetMeters));
+      }).toThrow('clipPlanes.presentationPlane.offsetMeters must be finite.');
+      rig.dispose();
+    },
+  );
+
+  it.each([{ normal: [0, 0, 0] }, { normal: [Number.NaN, 0, 1] }] as const)(
+    'rejects an invalid presentation-plane normal ($normal)',
+    ({ normal }) => {
+      const rig = createThreeCameraRig({ initialView });
+
+      expect(() => {
+        rig.setClipPlanes(presentationClipPlanes(normal));
+      }).toThrow('clipPlanes.presentationPlane.normal');
       rig.dispose();
     },
   );
@@ -497,7 +497,7 @@ describe('createThreeCameraRig', () => {
       orthographic: rig.orthographicCamera.near,
     };
 
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+    rig.setClipPlanes(presentationClipPlanes(up));
 
     const perspectivePlaneDepth = planeDepthAtViewportGuard({
       camera: rig.perspectiveCamera,
@@ -520,6 +520,65 @@ describe('createThreeCameraRig', () => {
     rig.dispose();
   });
 
+  it('guards a top view against the explicit plane instead of the rolled camera up vector', () => {
+    const view = createCameraView({
+      ...initialView,
+      bounds: { min: [-2, -2, -2], max: [2, 2, 2] },
+      direction: [0, 0, 1],
+      target: [0, 0, 0],
+      up: [1, 0, 0],
+      verticalSpan: 8,
+    });
+    const rig = createThreeCameraRig({ initialView: view });
+    const camera = rig.perspectiveCamera;
+    const boundsNear = camera.near;
+    const planeOffsetMeters = camera.position.z - boundsNear / 2;
+
+    rig.setClipPlanes(presentationClipPlanes([0, 0, 1], planeOffsetMeters));
+
+    const expected = expectedPresentationNear({
+      boundsNear,
+      camera,
+      normal: [0, 0, 1],
+      offset: planeOffsetMeters,
+      target: view.target,
+      viewport: view.viewport,
+    });
+    expect(camera.near).toBeCloseTo(expected.near, 10);
+    expect(camera.near).toBeLessThan(expected.oracle.requiredDepth);
+    expect(camera.near).toBeLessThan(boundsNear);
+    rig.dispose();
+  });
+
+  it.each(['perspective', 'orthographic'] as const)(
+    'contains a plane whose closest guarded point is at the horizontal viewport edge for %s',
+    (projection) => {
+      const view = createCameraView({
+        ...initialView,
+        requestedVerticalFieldOfView: projection === 'perspective' ? 60 : 0,
+        viewport: { width: 2400, height: 400, pixelRatio: 2 },
+      });
+      const rig = createThreeCameraRig({ initialView: view });
+      const camera = projection === 'perspective' ? rig.perspectiveCamera : rig.orthographicCamera;
+      const boundsNear = camera.near;
+      const desiredDepth = boundsNear / 2;
+      const forward = camera.getWorldDirection(new Vector3());
+      const right = new Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+      const normal = right.addScaledVector(forward, 0.2).normalize();
+      const guardedX = 1 + 4 / (view.viewport.width * view.viewport.pixelRatio);
+      const guardedY = 1 + 4 / (view.viewport.height * view.viewport.pixelRatio);
+      const raycaster = new Raycaster();
+      raycaster.setFromCamera(new Vector2(guardedX, guardedY), camera);
+      const point = raycaster.ray.at(desiredDepth / raycaster.ray.direction.dot(forward), new Vector3());
+
+      rig.setClipPlanes(presentationClipPlanes([normal.x, normal.y, normal.z], normal.dot(point)));
+
+      expect(camera.near).toBeCloseTo(desiredDepth, 10);
+      expect(camera.near).toBeLessThan(boundsNear);
+      rig.dispose();
+    },
+  );
+
   it.each([
     { fov: 30, zoom: 0.75, viewport: { width: 1600, height: 500, pixelRatio: 1 } },
     { fov: 60, zoom: 1, viewport: { width: 900, height: 900, pixelRatio: 2 } },
@@ -534,7 +593,7 @@ describe('createThreeCameraRig', () => {
     const rig = createThreeCameraRig({ initialView: view });
     const boundsNear = rig.perspectiveCamera.near;
 
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+    rig.setClipPlanes(presentationClipPlanes(view.up));
 
     const planeDepth = planeDepthAtViewportGuard({
       camera: rig.perspectiveCamera,
@@ -552,7 +611,7 @@ describe('createThreeCameraRig', () => {
     const before = rig.readState();
     const planeOffsetMeters = 10;
 
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: planeOffsetMeters });
+    rig.setClipPlanes(presentationClipPlanes(initialView.up, planeOffsetMeters));
 
     expect(rig.perspectiveCamera.near).toBeCloseTo(
       planeDepthAtViewportGuard({
@@ -584,7 +643,7 @@ describe('createThreeCameraRig', () => {
       const camera = projection === 'perspective' ? rig.perspectiveCamera : rig.orthographicCamera;
       const boundsNear = camera.near;
 
-      rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: planeOffsetMeters });
+      rig.setClipPlanes(presentationClipPlanes(view.up, planeOffsetMeters));
 
       const upperDepth = planeDepthAtViewportGuard({
         camera,
@@ -624,7 +683,7 @@ describe('createThreeCameraRig', () => {
       perspective: rig.perspectiveCamera.near,
       orthographic: rig.orthographicCamera.near,
     };
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+    rig.setClipPlanes(presentationClipPlanes(view.up));
 
     for (const [projection, camera] of [
       ['perspective', rig.perspectiveCamera],
@@ -712,7 +771,7 @@ describe('createThreeCameraRig', () => {
               orthographic: rig.orthographicCamera.far,
             };
 
-            rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+            rig.setClipPlanes(presentationClipPlanes(up));
 
             for (const [projection, camera] of [
               ['perspective', rig.perspectiveCamera],
@@ -812,7 +871,7 @@ describe('createThreeCameraRig', () => {
       const rig = createThreeCameraRig({ initialView: view });
       const boundsNear = rig.orthographicCamera.near;
 
-      rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+      rig.setClipPlanes(presentationClipPlanes(up));
 
       const expected = expectedPresentationNear({
         boundsNear,
@@ -847,7 +906,7 @@ describe('createThreeCameraRig', () => {
       const normal = new Vector3(...initialView.up).normalize();
       const planeOffsetMeters = normal.dot(raycaster.ray.origin);
 
-      rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: planeOffsetMeters });
+      rig.setClipPlanes(presentationClipPlanes(initialView.up, planeOffsetMeters));
 
       const expected = expectedPresentationNear({
         boundsNear,
@@ -871,7 +930,7 @@ describe('createThreeCameraRig', () => {
     const referenceRig = createThreeCameraRig({ initialView: transitionView });
     const protectedRig = createThreeCameraRig({
       initialView: transitionView,
-      clipPlanes: { farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 },
+      clipPlanes: presentationClipPlanes(transitionView.up),
     });
     referenceRig.actorRef.start();
     protectedRig.actorRef.start();
@@ -937,7 +996,7 @@ describe('createThreeCameraRig', () => {
     const rig = createThreeCameraRig({ initialView: horizontalView });
     const boundsNear = rig.orthographicCamera.near;
 
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+    rig.setClipPlanes(presentationClipPlanes(horizontalView.up));
 
     expect(rig.orthographicCamera.near).toBe(boundsNear);
     rig.dispose();
@@ -954,7 +1013,7 @@ describe('createThreeCameraRig', () => {
     const normal = new Vector3(...initialView.up).normalize();
     const planeOffsetMeters = normal.dot(camera.position) + offsetFromCamera;
 
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: planeOffsetMeters });
+    rig.setClipPlanes(presentationClipPlanes(initialView.up, planeOffsetMeters));
 
     const expected = expectedPresentationNear({
       boundsNear,
@@ -975,7 +1034,7 @@ describe('createThreeCameraRig', () => {
     const normal = new Vector3(...initialView.up).normalize();
     const planeOffsetMeters = normal.dot(camera.position) + 1;
 
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: planeOffsetMeters });
+    rig.setClipPlanes(presentationClipPlanes(initialView.up, planeOffsetMeters));
 
     const expected = expectedPresentationNear({
       boundsNear,
@@ -1002,7 +1061,7 @@ describe('createThreeCameraRig', () => {
     const planePoint = raycaster.ray.at(desiredPlaneDepth / raycaster.ray.direction.dot(forward), new Vector3());
     const planeOffsetMeters = new Vector3(...initialView.up).normalize().dot(planePoint);
 
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: planeOffsetMeters });
+    rig.setClipPlanes(presentationClipPlanes(initialView.up, planeOffsetMeters));
 
     expect(camera.near).toBeCloseTo(cameraDistance * 1e-9, 12);
     rig.dispose();
@@ -1017,10 +1076,10 @@ describe('createThreeCameraRig', () => {
       },
     });
     rig.actorRef.start();
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+    rig.setClipPlanes(presentationClipPlanes(initialView.up));
     const afterFirstPolicy = updates;
 
-    rig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+    rig.setClipPlanes(presentationClipPlanes(initialView.up));
 
     expect(updates).toBe(afterFirstPolicy);
     rig.dispose();
@@ -1032,7 +1091,7 @@ describe('createThreeCameraRig', () => {
     const secondNear = secondRig.perspectiveCamera.near;
     const secondFar = secondRig.perspectiveCamera.far;
 
-    firstRig.setClipPlanes({ farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 });
+    firstRig.setClipPlanes(presentationClipPlanes(initialView.up));
 
     expect(secondRig.perspectiveCamera.near).toBe(secondNear);
     expect(secondRig.perspectiveCamera.far).toBe(secondFar);
@@ -1059,11 +1118,11 @@ describe('createThreeCameraRig', () => {
           originMeters: [0, 0, 0],
           metersPerRenderUnit: scale,
         },
-        clipPlanes: { farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 },
+        clipPlanes: presentationClipPlanes(scaledView.up),
       });
       const referenceRig = createThreeCameraRig({
         initialView,
-        clipPlanes: { farPaddingVerticalSpans: 4, presentationPlaneOffsetMeters: 0 },
+        clipPlanes: presentationClipPlanes(initialView.up),
       });
 
       expect(rig.perspectiveCamera.near).toBeCloseTo(referenceRig.perspectiveCamera.near, 8);

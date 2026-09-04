@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { isKernelId, kernelConfigurations, languageFromKernel } from '#constants/kernel.constants.js';
 
 describe('kernel configuration identity', () => {
+  it('should expose PicoGK as a native C# desktop offering', () => {
+    const configuration = kernelConfigurations.find(({ id }) => id === 'picogk');
+    expect(configuration).toMatchObject({
+      language: 'csharp',
+      mainFile: 'main.cs',
+      requiresRuntimeKernelId: 'picogk',
+      requiresNativeCodeTrust: true,
+    });
+    expect(configuration?.emptyCode).toContain('public static class Params');
+    expect(configuration?.emptyCode).toContain('[Range(0.05, 5.0)]');
+  });
+
   it('presents exactly one OpenSCAD-language kernel with engine-independent copy', () => {
     const scadKernels = kernelConfigurations.filter(({ language }) => language === 'openscad');
 

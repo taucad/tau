@@ -7,7 +7,7 @@ import type { CodeLanguage } from '#types/code.types.js';
 export type KernelDimensions = 2 | 3;
 
 /** @public */
-export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'build123d';
+export type KernelBackend = 'manifold' | 'opencascade' | 'zoo' | 'jscad' | 'build123d' | 'picogk';
 
 /**
  * Product catalog entry for a kernel offering, not an engine registry.
@@ -46,6 +46,43 @@ export type KernelConfiguration = {
 
 /** @public */
 export const kernelConfigurations = [
+  {
+    id: 'picogk',
+    name: 'PicoGK',
+    dimensions: [3],
+    language: 'csharp',
+    description: 'Native C# voxel CAD for computational engineering',
+    mainFile: 'main.cs',
+    backendProvider: 'picogk',
+    longDescription:
+      'A native C# computational-engineering workflow backed by PicoGK and OpenVDB. Author strongly typed voxel models with live desktop rendering and mesh export.',
+    emptyCode: `using System.ComponentModel.DataAnnotations;
+using System.Numerics;
+using PicoGK;
+
+Library.Go(Params.VoxelSizeMm, () =>
+{
+    Library.oViewer().SetGroupMaterial(0, "4f7dd9", 0f, 0.7f);
+    Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, Params.RadiusMm), 0);
+});
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    [Display(Name = "Voxel size", Description = "OpenVDB voxel size in millimetres", Order = 0)]
+    public static float VoxelSizeMm { get; set; } = 0.5f;
+
+    [Range(1.0, 100.0)]
+    [Display(Name = "Radius", Description = "Sphere radius in millimetres", Order = 1)]
+    public static float RadiusMm { get; set; } = 20f;
+}
+`,
+    recommended: 'Native C# Voxel Engineering',
+    tags: ['C#', 'PicoGK', 'OpenVDB', 'Voxels', 'Desktop'],
+    features: ['CoreCLR JIT', 'Upstream PicoGK API', 'Interactive parameters', 'Topology-aware GLB'],
+    requiresRuntimeKernelId: 'picogk',
+    requiresNativeCodeTrust: true,
+  },
   {
     id: 'build123d',
     name: 'Build123d',

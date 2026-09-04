@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
 import type { KernelProvider } from '@taucad/runtime';
-import { kernelConfigurations } from '@taucad/types/constants';
+import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import { Button } from '@taucad/ui/components/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@taucad/ui/components/card';
 import { Input } from '@taucad/ui/components/input';
@@ -262,7 +262,7 @@ export default function ProjectsNew(): React.JSX.Element {
                     }
                   }}
                 >
-                  {kernelConfigurations.map((option) => (
+                  {availableKernelConfigurations().map((option) => (
                     <AccordionItem
                       key={option.id}
                       value={option.id}
@@ -325,7 +325,7 @@ export default function ProjectsNew(): React.JSX.Element {
                       setSelectedKernel(value as KernelProvider);
                     }}
                   >
-                    {kernelConfigurations.map((option) => (
+                    {availableKernelConfigurations().map((option) => (
                       <Label
                         key={option.id}
                         htmlFor={option.id}

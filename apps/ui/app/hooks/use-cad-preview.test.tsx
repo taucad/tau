@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mock fns ──────────────────────────────────────────────────────────────────
@@ -6,6 +6,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockClientWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>>();
 const mockMount = vi.fn<(prefix: string, config: unknown) => Promise<void>>();
 const mockUnmount = vi.fn<(prefix: string) => void>();
+const mockProjectKernelOptions = vi.fn(() => ({
+  kernelOptionsFactory: vi.fn(),
+  key: 'local:0',
+  isLocal: true,
+}));
+const mockCadSelection = vi.hoisted(() => ({
+  failureIssues: undefined as
+    | readonly [
+        { readonly message: string; readonly severity: 'error'; readonly code: 'RUNTIME'; readonly type: 'runtime' },
+      ]
+    | undefined,
+}));
 
 // `xstate.waitFor` is what `prepareFiles` uses to read the FM snapshot. The
 // real `fileManagerRef` is a heavyweight machine actor we don't need to
@@ -34,6 +46,10 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     },
     backendType: 'indexeddb',
   }),
+}));
+
+vi.mock('#hooks/use-project-kernel-options.js', () => ({
+  useProjectKernelOptions: mockProjectKernelOptions,
 }));
 
 // `cadMachine` is invoked via `useActorRef` for its lifecycle but its outputs
@@ -68,7 +84,7 @@ vi.mock('#machines/cad.machine.js', async () => {
       },
       states: { idle: {} },
     });
-  return { cadMachine };
+  return { cadMachine, selectCadFailureIssues: () => mockCadSelection.failureIssues };
 });
 
 vi.mock('#machines/graphics.machine.js', async () => {
@@ -82,7 +98,12 @@ vi.mock('#machines/graphics.machine.js', async () => {
 });
 
 // Dynamic import after mocks are registered.
-const { CadPreviewProvider } = await import('#hooks/use-cad-preview.js');
+const { CadPreviewProvider, useCadPreview } = await import('#hooks/use-cad-preview.js');
+
+const PreviewError = (): React.JSX.Element => {
+  const { error } = useCadPreview();
+  return <span>{error?.message}</span>;
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -108,6 +129,8 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
     mockClientWriteFiles.mockResolvedValue(undefined);
     mockMount.mockResolvedValue(undefined);
     mockUnmount.mockReturnValue(undefined);
+    mockProjectKernelOptions.mockClear();
+    mockCadSelection.failureIssues = undefined;
   });
 
   it('uses an instance-scoped preview root even when its project id matches a persistent project', async () => {
@@ -154,8 +177,38 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
 
     expect(mockMount).not.toHaveBeenCalled();
     expect(mockClientWriteFiles).not.toHaveBeenCalled();
+    expect(mockProjectKernelOptions).toHaveBeenCalledWith({
+      projectId: 'proj_X',
+      nativeKernelId: undefined,
+    });
     result.unmount();
     expect(mockUnmount).not.toHaveBeenCalled();
+  });
+
+  it('requests native-code trust placement for a persistent Python project', () => {
+    const result = render(
+      <CadPreviewProvider projectId='proj_python' mainFile='main.py'>
+        <div data-testid='child' />
+      </CadPreviewProvider>,
+    );
+
+    expect(mockProjectKernelOptions).toHaveBeenCalledWith({
+      projectId: 'proj_python',
+      nativeKernelId: 'build123d',
+    });
+    result.unmount();
+  });
+
+  it('keeps explicit factories authoritative without consulting project placement', () => {
+    const explicitFactory = vi.fn();
+    const result = render(
+      <CadPreviewProvider projectId='proj_explicit' mainFile='main.py' kernelOptionsFactory={explicitFactory}>
+        <div data-testid='child' />
+      </CadPreviewProvider>,
+    );
+
+    expect(mockProjectKernelOptions).not.toHaveBeenCalled();
+    result.unmount();
   });
 
   it('still unmounts the preview-owned prefix when client.writeFiles rejects', async () => {
@@ -190,5 +243,25 @@ describe('CadPreviewProvider isolated filesystem contract', () => {
 
     result.unmount();
     expect(mockUnmount).toHaveBeenCalledWith(previewPrefix);
+  });
+
+  it('gives preview initialization failures precedence over selected CAD issues', async () => {
+    mockCadSelection.failureIssues = [
+      { message: 'CAD issue must not win', severity: 'error', code: 'RUNTIME', type: 'runtime' },
+    ];
+    mockClientWriteFiles.mockRejectedValueOnce(new Error('preview initialization sentinel'));
+
+    render(
+      <CadPreviewProvider
+        projectId='import-preview-init-error'
+        mainFile='main.scad'
+        files={makeFiles([['main.scad', [1, 2, 3]]])}
+      >
+        <PreviewError />
+      </CadPreviewProvider>,
+    );
+
+    expect(await screen.findByText('preview initialization sentinel')).toBeInTheDocument();
+    expect(screen.queryByText('CAD issue must not win')).not.toBeInTheDocument();
   });
 });

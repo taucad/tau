@@ -6,7 +6,7 @@ import type { ActorRefFrom } from 'xstate';
 import type { Geometry } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { cadMachine } from '#machines/cad.machine.js';
+import { cadMachine, selectCadFailureIssues } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -14,6 +14,8 @@ import { joinPath } from '@taucad/utils/path';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import { defaultKernelOptions } from '#constants/kernel-options.presets.js';
+import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
+import { nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 
 /**
  * Status of the CAD preview.
@@ -125,15 +127,47 @@ export const deriveCadPreviewStatus = (args: {
  * </CadPreviewProvider>
  * ```
  */
-export function CadPreviewProvider({
+type CadPreviewPipelineProps = Omit<CadPreviewProviderProps, 'kernelOptionsFactory'> & {
+  readonly kernelOptionsFactory: LazyKernelOptionsFactory;
+};
+
+function PersistentCadPreviewProvider(props: Omit<CadPreviewProviderProps, 'files'>): React.JSX.Element {
+  const requirement = nativeKernelRequirementForEntryPath(props.mainFile);
+  const selection = useProjectKernelOptions({
+    projectId: props.projectId,
+    nativeKernelId: requirement?.runtimeKernelId,
+  });
+
+  return (
+    <CadPreviewPipeline
+      key={`${props.projectId}:${props.mainFile}:${selection.key}`}
+      {...props}
+      kernelOptionsFactory={selection.kernelOptionsFactory}
+    />
+  );
+}
+
+export function CadPreviewProvider(props: CadPreviewProviderProps): React.JSX.Element {
+  if (props.kernelOptionsFactory) {
+    return <CadPreviewPipeline {...props} kernelOptionsFactory={props.kernelOptionsFactory} />;
+  }
+  if (props.files !== undefined) {
+    return <CadPreviewPipeline {...props} kernelOptionsFactory={defaultKernelOptions} />;
+  }
+  return <PersistentCadPreviewProvider {...props} />;
+}
+
+function CadPreviewPipeline({
   projectId,
   mainFile,
   files,
   parameters,
   isEnabled = true,
-  kernelOptionsFactory = defaultKernelOptions,
+  kernelOptionsFactory,
   children,
-}: CadPreviewProviderProps): React.JSX.Element {
+}: CadPreviewPipelineProps): React.JSX.Element {
+  'use no memo';
+
   const { fileManagerRef, client, workspace } = useFileManager();
   const previewInstance = useId().replaceAll(':', '');
   const previewPrefix = joinPath('/previews', previewInstance);
@@ -144,7 +178,10 @@ export function CadPreviewProvider({
   // Capture `workspace.unmount` so the cleanup effect uses a stable reference
   // even if the gated facade re-renders.
   const unmountRef = useRef(workspace.unmount);
-  unmountRef.current = workspace.unmount;
+
+  useEffect(() => {
+    unmountRef.current = workspace.unmount;
+  }, [workspace.unmount]);
 
   const cadRef = useActorRef(cadMachine, {
     input: {
@@ -180,6 +217,7 @@ export function CadPreviewProvider({
   const previewRef = useActorRef(
     cadPreviewMachine.provide({
       actors: {
+        /* oxlint-disable react/refs -- XState's stable ActorRef is an imperative public API, not a mutable React ref read during render. */
         prepareFiles: fromSafeAsync(async ({ input, signal }) => {
           if (input.files) {
             const snapshot = await waitFor(fileManagerRef, (state) => state.matches('ready') || state.matches('error'));
@@ -208,6 +246,7 @@ export function CadPreviewProvider({
             await client.writeFiles(projectFiles);
           }
         }),
+        /* oxlint-enable react/refs -- End XState ActorRef boundary. */
       },
     }),
     {
@@ -247,22 +286,15 @@ export function CadPreviewProvider({
   // Selectors on cadRef for reactive state
   const geometry = useSelector(cadRef, (s) => s.context.geometry);
   const cadStateValue = useSelector(cadRef, (state) => {
-    if (state.matches('connecting')) {
-      return 'connecting';
-    }
-    if (state.matches('buffering')) {
-      return 'buffering';
-    }
-    if (state.matches('rendering')) {
-      return 'rendering';
-    }
-    if (state.matches('error')) {
+    if (state.hasTag('cad-runtime-error')) {
       return 'error';
+    }
+    if (state.hasTag('cad-loading')) {
+      return 'rendering';
     }
     return 'idle';
   });
-  const kernelIssues = useSelector(cadRef, (s) => s.context.kernelIssues);
-  const latestGeometryOutcome = useSelector(cadRef, (s) => s.context.latestGeometryOutcome);
+  const failureIssues = useSelector(cadRef, selectCadFailureIssues);
   const defaultParameters = useSelector(cadRef, (s) => s.context.defaultParameters);
   const jsonSchema = useSelector(cadRef, (s) => s.context.jsonSchema);
   const cadUnits = useSelector(cadRef, (s) => s.context.units);
@@ -275,9 +307,9 @@ export function CadPreviewProvider({
       deriveCadPreviewStatus({
         initError,
         cadState: cadStateValue,
-        geometryFailed: latestGeometryOutcome === 'failure' && geometry === undefined,
+        geometryFailed: failureIssues !== undefined && geometry === undefined,
       }),
-    [initError, cadStateValue, latestGeometryOutcome, geometry],
+    [initError, cadStateValue, failureIssues, geometry],
   );
 
   const error = useMemo(() => {
@@ -285,17 +317,13 @@ export function CadPreviewProvider({
       return initError;
     }
 
-    if (status !== 'error') {
-      return undefined;
-    }
-
-    const firstIssue = [...kernelIssues.values()].flat()[0];
+    const firstIssue = failureIssues?.find((issue) => issue.severity === 'error') ?? failureIssues?.[0];
     if (firstIssue) {
       return new Error(firstIssue.message);
     }
 
-    return new Error('Unknown CAD error');
-  }, [status, kernelIssues, initError]);
+    return undefined;
+  }, [failureIssues, initError]);
 
   // Forward geometry to graphics machine
   useEffect(() => {

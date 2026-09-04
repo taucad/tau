@@ -1,11 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
-import type { Model, ModelFamily, ModelProvider } from '@taucad/chat';
+import type { ModelFamily, ModelProvider } from '@taucad/chat';
+/* oxlint-disable import/extensions -- TypeScript ESM resolves the authoritative source through its emitted .js path. */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- Type-only reuse keeps the API's Zod-inferred response authoritative.
+import type { Model as ApiModel } from '../../../api/app/api/models/model.schema.js';
+/* oxlint-enable import/extensions -- Re-enable project import checks. */
 import { ENV } from '#environment.config.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { defaultChatModel } from '#constants/chat.constants.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
+
+export type Model = ApiModel;
 
 /**
  * UI-local resolved view of a {@link Model}. Always non-null so call sites can

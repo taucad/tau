@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CadPreviewViewer } from '#components/cad-preview.js';
 import type { CadPreviewStatus } from '#hooks/use-cad-preview.js';
 
 const cadPreviewMocks = vi.hoisted(() => ({
   geometry: undefined as { format: 'gltf'; content: Uint8Array<ArrayBuffer>; hash: string } | undefined,
   status: 'idle' as CadPreviewStatus,
+  error: undefined as Error | undefined,
   graphicsRef: {
     send: vi.fn(),
     getSnapshot: () => ({
@@ -27,7 +28,7 @@ vi.mock('#hooks/use-cad-preview.js', () => ({
     geometry: cadPreviewMocks.geometry,
     graphicsRef: cadPreviewMocks.graphicsRef,
     status: cadPreviewMocks.status,
-    error: undefined,
+    error: cadPreviewMocks.error,
     cadRef: {},
     defaultParameters: {},
     jsonSchema: undefined,
@@ -48,6 +49,12 @@ vi.mock('#components/ui/loader.js', () => ({
 }));
 
 describe('CadPreviewViewer', () => {
+  beforeEach(() => {
+    cadPreviewMocks.geometry = undefined;
+    cadPreviewMocks.status = 'idle';
+    cadPreviewMocks.error = undefined;
+  });
+
   it('should show loading while render has not settled and no geometry yet', () => {
     cadPreviewMocks.geometry = undefined;
     cadPreviewMocks.status = 'loading';
@@ -66,5 +73,16 @@ describe('CadPreviewViewer', () => {
 
     expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
     expect(screen.queryByTestId('loader')).not.toBeInTheDocument();
+  });
+
+  it('should keep the last model visible with the exact failed-rerender message', () => {
+    cadPreviewMocks.geometry = { format: 'gltf', content: new Uint8Array([1, 2, 3]), hash: 'stale' };
+    cadPreviewMocks.status = 'ready';
+    cadPreviewMocks.error = new Error('preview rerender sentinel');
+
+    render(<CadPreviewViewer className='size-full' />);
+
+    expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
+    expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toHaveTextContent('preview rerender sentinel');
   });
 });

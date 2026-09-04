@@ -1,4 +1,4 @@
-import { kernelConfigurations } from '@taucad/types/constants';
+import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import { Badge } from '@taucad/ui/components/badge';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
@@ -22,7 +22,7 @@ export function KernelsBand(): React.JSX.Element {
         </div>
 
         <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-          {kernelConfigurations.map((kernel) => (
+          {availableKernelConfigurations().map((kernel) => (
             <HoverCard key={kernel.id} openDelay={200} closeDelay={100}>
               <HoverCardTrigger asChild>
                 <div className='group flex cursor-pointer items-center gap-3 rounded-xl border bg-background p-4 transition-all hover:border-primary/50 hover:shadow-md'>

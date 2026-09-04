@@ -1,5 +1,5 @@
 import type { KernelProvider } from '@taucad/runtime';
-import { kernelConfigurations } from '@taucad/types/constants';
+import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import { isKernelAllowed } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
@@ -25,7 +25,7 @@ export function KernelSelector({
 
   return (
     <div className="flex flex-wrap gap-3 max-md:-mx-4 max-md:snap-x max-md:snap-mandatory max-md:scroll-px-4 max-md:[scrollbar-width:none] max-md:flex-nowrap max-md:overflow-x-auto max-md:pb-2 max-md:pl-4 max-md:[-webkit-overflow-scrolling:touch] max-md:after:block max-md:after:w-1 max-md:after:shrink-0 max-md:after:content-[''] max-md:[&::-webkit-scrollbar]:hidden">
-      {kernelConfigurations.map((option) => (
+      {availableKernelConfigurations().map((option) => (
         <HoverCard key={option.id}>
           <HoverCardTrigger asChild>
             <Button

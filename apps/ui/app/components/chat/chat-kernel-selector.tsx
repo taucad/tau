@@ -4,6 +4,7 @@ import { Check } from 'lucide-react';
 import type { KernelProvider } from '@taucad/runtime';
 import type { KernelConfiguration } from '@taucad/types/constants';
 import { kernelConfigurations } from '@taucad/types/constants';
+import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
@@ -29,6 +30,10 @@ function formatKernelLanguage(language: KernelConfiguration['language']): string
 
     case 'typescript': {
       return 'TypeScript';
+    }
+
+    case 'python': {
+      return 'Python';
     }
 
     default: {
@@ -63,7 +68,7 @@ export const ChatKernelSelector = memo(function ({
 
   const handleSelectKernel = useCallback(
     (item: string) => {
-      const kernel = kernelConfigurations.find((k) => k.id === item);
+      const kernel = availableKernelConfigurations().find((k) => k.id === item);
 
       if (kernel) {
         // T3: Pro kernels route to the upgrade surface for un-entitled users
@@ -91,7 +96,7 @@ export const ChatKernelSelector = memo(function ({
       groupedItems={[
         {
           name: 'CAD Kernels',
-          items: [...kernelConfigurations],
+          items: [...availableKernelConfigurations()],
         },
       ]}
       renderLabel={(item, selectedItem) => (

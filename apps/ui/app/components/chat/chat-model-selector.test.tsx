@@ -54,41 +54,44 @@ vi.mock('#hooks/use-settings-dialog.js', () => ({
   openSettingsDialog: openSettingsDialogMock,
 }));
 
+// `details.cost` is required by the catalog schema; the hover card renders it.
+const stubCost = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 1, cacheWriteTokens: 1 };
+
 const modelCatalogue: Model[] = [
   {
     id: 'cookie-model',
     name: 'Cookie Model',
     description: '',
     provider: { id: 'openai', name: 'OpenAI' },
-    details: { family: 'gpt' },
+    details: { cost: stubCost, family: 'gpt' },
   } as unknown as Model,
   {
     id: 'next-model',
     name: 'Next Model',
     description: '',
     provider: { id: 'openai', name: 'OpenAI' },
-    details: { family: 'gpt' },
+    details: { cost: stubCost, family: 'gpt' },
   } as unknown as Model,
   {
     id: 'chat-local-model',
     name: 'Chat Local Model',
     description: '',
     provider: { id: 'openai', name: 'OpenAI' },
-    details: { family: 'gpt' },
+    details: { cost: stubCost, family: 'gpt' },
   } as unknown as Model,
   {
     id: 'xai-grok-4.6',
     name: 'Grok 4.6',
     description: '',
     provider: { id: 'xai', name: 'xAI' },
-    details: { family: 'grok' },
+    details: { cost: stubCost, family: 'grok' },
   } as unknown as Model,
   {
     id: 'together-kimi-k3',
     name: 'Kimi K3',
     description: '',
     provider: { id: 'together', name: 'Together AI' },
-    details: { family: 'kimi' },
+    details: { cost: stubCost, family: 'kimi' },
   } as unknown as Model,
 ];
 

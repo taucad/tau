@@ -3,6 +3,16 @@
 declare const tauBuildFrontendUrl: string;
 declare const tauBuildId: number;
 
+interface ImportMetaEnv {
+  /**
+   * Compile-time host seam (charter D2). Substituted by `define` in
+   * `vite.config.ts` (`'web'`) and `desktop/vite.config.ts` (`'desktop'`);
+   * left undefined under `mode === 'test'` so unit tests can stub it.
+   */
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Vite env keys are SCREAMING_SNAKE_CASE.
+  readonly TAU_TARGET?: 'web' | 'desktop';
+}
+
 declare module '*?base64' {
   const value: string;
   export = value;

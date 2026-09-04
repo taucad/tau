@@ -215,11 +215,41 @@ vi.mock('#filesystem/handle-store.js', () => ({
   repairWorkspaceBindings: mockRepairWorkspaceBindings,
 }));
 
+vi.mock('#filesystem/desktop-bridge.js', () => ({
+  isDesktopTarget: false,
+  desktopBridge: () => undefined,
+  hostPathName: (path: string) => /[^/\\]+(?=[/\\]*$)/.exec(path)?.[0] ?? path,
+  nodeHomeRoot: () => '/Users/tester/Library/Application Support/Tau/home',
+}));
+
 let mockIsFileSystemAccessSupported = false;
+/** Which pick the host's directory picker produces; `node` is the desktop dialog. */
+let mockPickerBackend: 'webaccess' | 'node' = 'webaccess';
 vi.mock('#constants/browser.constants.js', () => ({
   get isFileSystemAccessSupported() {
     return mockIsFileSystemAccessSupported;
   },
+  directoryPicker: () => ({
+    available: mockIsFileSystemAccessSupported,
+    backend: mockPickerBackend,
+    pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) => {
+      if (mockPickerBackend === 'node') {
+        return { backend: 'node', path: nodeWorkspacePath } as const;
+      }
+      const handle = await globalThis.window.showDirectoryPicker({
+        id: options?.id,
+        mode: options?.mode ?? 'readwrite',
+      });
+      return { backend: 'webaccess' as const, handle };
+    },
+  }),
+  webAccessDirectoryPicker: () =>
+    mockIsFileSystemAccessSupported
+      ? {
+          pick: async (options?: { id?: string; mode?: 'read' | 'readwrite' }) =>
+            globalThis.window.showDirectoryPicker({ id: options?.id, mode: options?.mode ?? 'readwrite' }),
+        }
+      : undefined,
 }));
 
 let mockBuildSuperseded = false;
@@ -1510,23 +1540,23 @@ describe('useProjectManager.createProject', () => {
     expect(prepared?.manifest.name).toBe(expectedName);
   });
 
-  it('creates no durable operation when the project naming request fails', async () => {
+  it('falls back to the default name when the project naming request fails', async () => {
+    /* Naming is a courtesy from the API, not a prerequisite: a daemon-served
+     * page or a desktop app with the API unreachable still creates the project. */
     mockGenerateProjectName.mockRejectedValueOnce(new Error('naming unavailable'));
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
-    await expect(
-      act(async () =>
-        result.current.createProject({
-          kernel: 'openscad',
-          initialMessage: { content: 'Please make the object in this image' },
-          location: { kind: 'home' },
-        }),
-      ),
-    ).rejects.toThrow('naming unavailable');
+    await act(async () =>
+      result.current.createProject({
+        kernel: 'openscad',
+        initialMessage: { content: 'Please make the object in this image' },
+        location: { kind: 'home' },
+      }),
+    );
 
-    expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
-    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
-    expect(mockCommitPendingProjectDirectory).not.toHaveBeenCalled();
+    const prepared = mockPrepareProjectCreation.mock.calls.at(-1)?.[0];
+    expect(prepared?.manifest.name).toBe('New Project');
+    expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
   });
 
   it('leaves the pending row intact when the manifest commit fails', async () => {

@@ -5,9 +5,53 @@ import { Topic } from '@taucad/events';
 import type { loader } from '#root.js';
 import { metaConfig } from '#constants/meta.constants.js';
 import { isFunction } from '#utils/function.utils.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import type { CookieName } from '#constants/cookie.constants.js';
 
 type Listener = () => void;
+
+/**
+ * `app://` is not a cookieable scheme: Chromium drops every write with
+ * `EXCLUDE_NONCOOKIEABLE_SCHEME`, so on desktop nothing this hook stores ever
+ * survives a reload. The desktop build keeps the same names and the same JSON
+ * in `localStorage` instead — same API, same cache, storage swapped.
+ */
+
+const readRaw = (name: string): string | undefined => {
+  if (!isDesktopTarget()) {
+    return Cookies.get(name);
+  }
+  try {
+    return globalThis.localStorage.getItem(name) ?? undefined;
+  } catch {
+    // No localStorage during the SPA index.html prerender, or when blocked.
+    return undefined;
+  }
+};
+
+const writeRaw = (name: string, value: string): void => {
+  if (!isDesktopTarget()) {
+    Cookies.set(name, value);
+    return;
+  }
+  try {
+    globalThis.localStorage.setItem(name, value);
+  } catch {
+    // Persistence is best-effort; a blocked store must not break the setting.
+  }
+};
+
+const removeRaw = (name: string): void => {
+  if (!isDesktopTarget()) {
+    Cookies.remove(name);
+    return;
+  }
+  try {
+    globalThis.localStorage.removeItem(name);
+  } catch {
+    // Persistence is best-effort; a blocked store must not break the setting.
+  }
+};
 
 const cookieStore = () => {
   const cache = new Map<string, unknown>();

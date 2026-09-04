@@ -11,6 +11,7 @@ import {
   getHomeStorageBackend,
   getProjectRootConfigs,
 } from '#filesystem/handle-store.js';
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { fileManagerWorkerName } from '#machines/file-manager-worker-name.js';
 import type { WorkspaceRootSkip } from '#filesystem/handle-store.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -159,8 +160,33 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     // resolved here because `handle-store` owns the pin and runs on the main
     // thread only. Inherited workers already carry the mount, so nested file
     // managers never pay for the lookup.
-    const worker =
-      context.sharedWorker ?? new FileManagerWorker({ name: fileManagerWorkerName(await getHomeStorageBackend()) });
+    let worker = context.sharedWorker;
+    if (!worker) {
+      const homeBackend = await getHomeStorageBackend();
+      worker = new FileManagerWorker({ name: fileManagerWorkerName(homeBackend) });
+      // A node-backed Home needs its provider host before the worker can mount
+      // `/`, so the brokered port is handed over immediately after construction
+      // and the worker's module evaluation waits on it. One port per concern:
+      // the runtime's kernel port is brokered separately.
+      const bridge = homeBackend === 'node' ? desktopBridge() : undefined;
+      if (bridge) {
+        const deliverNodeFsPort = async (target: Worker): Promise<void> => {
+          const nodeFsPort = await bridge.nodeFs.connect();
+          target.postMessage({ type: 'nodeFsPort', port: nodeFsPort, homeRoot: bridge.nodeFs.homeRoot }, [nodeFsPort]);
+        };
+        // The services utility can die; main forks a fresh one on the next
+        // `connect()`. The worker asks for a replacement once its channel
+        // closes, so a host crash costs a resync instead of wedging the
+        // filesystem for the rest of the session.
+        const nodeWorker = worker;
+        nodeWorker.addEventListener('message', (event: MessageEvent<{ type?: string }>) => {
+          if (event.data.type === 'nodeFsPortRequest') {
+            void deliverNodeFsPort(nodeWorker);
+          }
+        });
+        await deliverNodeFsPort(nodeWorker);
+      }
+    }
 
     // Crash-aware error/messageerror/envelope listeners. Listeners are
     // installed before any await so a synchronous load failure (404 served as

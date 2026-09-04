@@ -18,7 +18,7 @@ import type {
   StorageRootConfig,
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
-import type { Chat } from '@taucad/chat';
+import type { CadAgentExecution, Chat } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
@@ -52,7 +52,9 @@ import type {
 } from '#filesystem/handle-store.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
-import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
+import { directoryPicker } from '#constants/browser.constants.js';
+import type { DirectoryPick } from '#constants/browser.constants.js';
+import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { createInitialProject } from '#constants/project.constants.js';
 import { createMessage } from '#utils/chat.utils.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
@@ -372,15 +374,27 @@ const readManifestActivityAt = async (client: ProjectLibraryFileClient, projectI
 
 type PersistentStorageRoot =
   | { readonly backend: 'indexeddb' | 'opfs' }
-  | { readonly backend: 'webaccess'; readonly workspaceId: string };
+  | { readonly backend: 'webaccess'; readonly workspaceId: string }
+  /** `path` is absent on persisted rows, which name Home implicitly (see `ProjectFileSystemConfig`). */
+  | { readonly backend: 'node'; readonly path?: string };
 
 /**
  * The worker's own derivation, bound to this app shell's database prefix —
  * never a second implementation: the blocking decision in discovery compares
  * these keys across the worker boundary (R12).
  */
+/**
+ * Durable node-root discriminator: a picked folder names its absolute path, and
+ * Home names nothing — its `userData/home` path is ambient, so a Home row stays
+ * free of a machine-specific path (L2 deviation 1).
+ */
+const nodeRootPath = (path: string): { readonly path?: string } => (path === nodeHomeRoot() ? {} : { path });
+
 const persistentStorageRootKey = (root: PersistentStorageRoot): string =>
-  resolveStorageRootKey(root, metaConfig.databasePrefix);
+  resolveStorageRootKey(
+    root.backend === 'node' ? { backend: 'node', path: root.path ?? nodeHomeRoot() } : root,
+    metaConfig.databasePrefix,
+  );
 
 /**
  * Allocate the physical directory for a new project at `root`: the name slug,
@@ -453,6 +467,9 @@ const resolveWorkspaceForWrite = async (workspaceId: string): Promise<WorkspaceE
 };
 
 const pendingStorageToScope = async (storage: PendingProjectStorage): Promise<StorageRootConfig> => {
+  if (storage.backend === 'node') {
+    return { backend: 'node', path: storage.path ?? nodeHomeRoot() };
+  }
   if (storage.backend !== 'webaccess') {
     return { backend: storage.backend };
   }
@@ -729,10 +746,17 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         const { projectName: requestedProjectName } = options;
         let projectName = requestedProjectName;
         if (!projectName && options.initialMessage) {
-          const generated = await projectNameClient.generate({
-            text: options.initialMessage.content,
-            imageUrls: options.initialMessage.imageUrls,
-          });
+          const generated = await projectNameClient
+            .generate({
+              projectId,
+              text: options.initialMessage.content,
+              imageUrls: options.initialMessage.imageUrls,
+            })
+            /* Naming is a courtesy from the API, not a prerequisite: with the
+             * API unreachable (a daemon-served page, desktop offline) the
+             * project is still created, under the same default an empty
+             * suggestion gets. */
+            .catch((): string => '');
           projectName = generated.trim() || defaultProjectName;
         }
         const mainFileName = getMainFile(options.kernel);

@@ -48,6 +48,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { allocateSlug, projectNameToSlug } from '#utils/project-directory.utils.js';
 import { toStorageWriteError, WorkspaceIdentityConflictError } from '#filesystem/workspace-errors.js';
 import { probeHomeOpfs } from '#filesystem/home-opfs-probe.js';
+import { hostPathName, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
@@ -62,7 +63,12 @@ const projectRootConfigurationChannelName = `${metaConfig.databasePrefix}project
 const homeBackendMetaKey = 'home-storage-backend';
 const projectCreationLocationMetaKey = 'project-creation-location';
 
-export type HomeStorageBackend = 'indexeddb' | 'opfs';
+/**
+ * Physical engine backing the system-owned Home workspace. `node` is the
+ * desktop arm (charter ruling C1): Home lives on real disk under `userData`,
+ * and the browser engines never enter the desktop data path.
+ */
+export type HomeStorageBackend = 'indexeddb' | 'opfs' | 'node';
 
 type HomeBackendMeta = {
   readonly key: typeof homeBackendMetaKey;
@@ -168,7 +174,21 @@ export type Workspace = {
    * origin is evictable and the UI may warn.
    */
   storagePersisted?: boolean;
+  /**
+   * Absolute host directory, present only on a **node** workspace — a folder
+   * picked through the desktop dialog. A webaccess workspace is identified by
+   * the `FileSystemDirectoryHandle` retained in the `handles` store; a picked
+   * node folder has no handle, and its path *is* its physical identity
+   * (`resolveStorageRootKey` keys node roots on it), so the row carries it.
+   * Desktop Home is not a workspace row and keeps its ambient path — see
+   * {@link ProjectFileSystemConfig}.
+   */
+  readonly path?: string;
 };
+
+/** True when this workspace is a picked node folder rather than a webaccess handle. */
+export const isNodeWorkspace = (workspace: Workspace): workspace is Workspace & { readonly path: string } =>
+  workspace.path !== undefined;
 
 /**
  * Per-project filesystem configuration, discriminated by `backend`.
@@ -179,6 +199,24 @@ export type ProjectFileSystemConfig =
   | {
       readonly projectId: string;
       readonly backend: 'indexeddb' | 'opfs';
+      readonly providerBasePath: string;
+    }
+  | {
+      /**
+       * A project on real disk. `path` names the node root it lives in and is
+       * **absent for Home**, whose `userData/home` path is ambient and resolved
+       * from the shell at read time — so a Home row still bakes no
+       * machine-specific path (L2 deviation 1). A project in a *picked* folder
+       * carries the root's absolute path, which is that root's physical
+       * identity everywhere else too (`resolveStorageRootKey`,
+       * `ProjectLocator`, `StorageRootConfig`); routing it through the
+       * workspace row instead would need a path lookup threaded into every
+       * discovery-reconcile comparison for no durability gain — the workspace
+       * row stores the same path.
+       */
+      readonly projectId: string;
+      readonly backend: 'node';
+      readonly path?: string;
       readonly providerBasePath: string;
     }
   | {
@@ -421,10 +459,18 @@ export async function resolveWorkspaceBySlug(slug: string): Promise<Workspace | 
 
 // ============ Home storage engine pin ============
 
-const isHomeStorageBackend = (value: unknown): value is HomeStorageBackend => value === 'indexeddb' || value === 'opfs';
+const isHomeStorageBackend = (value: unknown): value is HomeStorageBackend =>
+  value === 'indexeddb' || value === 'opfs' || value === 'node';
 
+/**
+ * Ruling C1 is a property of the build, not of the runtime: the preload bridge
+ * is installed asynchronously, so a boot-time probe can run before
+ * `window.tau` exists. Deciding from the bridge would let one early call pin
+ * Home to OPFS **durably** and silently put the desktop data path in the
+ * browser. `isDesktopTarget` is a build-time define and cannot race.
+ */
 const detectHomeStorageBackend = async (): Promise<HomeStorageBackend> =>
-  (await probeHomeOpfs()) ? 'opfs' : 'indexeddb';
+  isDesktopTarget ? 'node' : (await probeHomeOpfs()) ? 'opfs' : 'indexeddb';
 
 const readHomeBackendPin = async (db: IDBDatabase): Promise<HomeStorageBackend | undefined> =>
   new Promise((resolve, reject) => {
@@ -450,6 +496,11 @@ export async function getHomeStorageBackend(): Promise<HomeStorageBackend> {
 
 /** Pin Home immediately before its first materializing write. */
 export async function pinHomeStorageBackend(backend: HomeStorageBackend): Promise<HomeStorageBackend> {
+  if (isDesktopTarget && backend !== 'node') {
+    // Durable and irreversible: refuse loudly rather than write a pin that puts
+    // the desktop data path in browser storage forever (ruling C1).
+    throw new Error(`Refusing to pin desktop Home to ${backend}; the desktop data path is node-backed.`);
+  }
   return withProjectRootConfigurationMutation(async () =>
     withDb(
       async (db) =>
@@ -717,6 +768,51 @@ async function createWorkspaceLocked(
 
       return { ...workspace, minted: adopted === undefined };
     }),
+  );
+}
+
+/** Trailing separators are cosmetic; the key derived from the path is not. */
+const normalizeHostPath = (path: string): string => path.replace(/[/\\]+$/, '') || path;
+
+/**
+ * Create (or re-adopt) the workspace for a picked node folder.
+ *
+ * The absolute host path is the identity — the same identity
+ * `resolveStorageRootKey` derives — so re-picking the same folder returns the
+ * same `workspaceId` and every project bound to it stays valid. There is no
+ * `.tau/workspace.json` step: the renderer cannot read disk directly, and node
+ * project rows are keyed on the path rather than on `workspaceId`, so a lost
+ * IndexedDB re-mints an id without stranding a single project.
+ *
+ * ponytail: no marker sync for node roots. Add one through the file-manager
+ * service if a node workspace ever needs to survive being moved on disk.
+ *
+ * @param hostPath - Absolute host directory chosen in the desktop dialog.
+ * @param options - Optional display name; defaults to the folder name.
+ * @returns The workspace row plus whether this call minted its identity.
+ */
+export async function createNodeWorkspace(hostPath: string, options?: { name?: string }): Promise<WorkspaceConnection> {
+  const path = normalizeHostPath(hostPath);
+  const folderName = hostPathName(path);
+  return withWorkspaceMintLock(async () =>
+    withProjectRootConfigurationMutation(async () =>
+      withDb(async (db) => {
+        const existing = await readAllWorkspaces(db);
+        const matched = existing.find((workspace) => workspace.path === path);
+        const others = existing.filter((workspace) => workspace.workspaceId !== matched?.workspaceId);
+        const workspace: Workspace = {
+          workspaceId: matched?.workspaceId ?? generatePrefixedId(idPrefix.workspace),
+          name: options?.name ?? matched?.name ?? folderName,
+          // Re-slugged every connect so a folder renamed on disk follows the URL
+          // grammar, exactly as the webaccess path does.
+          slug: allocateWorkspaceSlug(folderName, others),
+          lastConnectedAt: Date.now(),
+          path,
+        };
+        await putWorkspace(db, workspace);
+        return { ...workspace, minted: matched === undefined };
+      }),
+    ),
   );
 }
 
@@ -1378,8 +1474,19 @@ export async function getProjectRootConfigs(
     ]);
     return { configs, handles, workspaces };
   });
+  // A node workspace is a folder on disk with no permission to lose and no
+  // handle to revoke, so its probe short-circuits to granted: it is connected
+  // whenever its row exists.
+  const nodeRoots = new Map(
+    workspaces
+      .filter((workspace) => isNodeWorkspace(workspace))
+      .map((workspace) => [workspace.path, workspace] as const),
+  );
   const entries = await Promise.all(
     workspaces.map(async (workspace) => {
+      if (isNodeWorkspace(workspace)) {
+        return undefined;
+      }
       const handle = handles.get(workspace.workspaceId);
       if (!handle) {
         reportWorkspaceRootSkip({ ...workspace, reason: 'disconnected' }, onRootSkipped);
@@ -1397,11 +1504,24 @@ export async function getProjectRootConfigs(
       .filter((entry): entry is WorkspaceEntry => entry !== undefined)
       .map((entry) => [entry.workspace.workspaceId, entry] as const),
   );
-  const projects: ProjectRootConfig[] = configs.filter(
-    (config) => config.backend !== 'webaccess' || connected.has(config.workspaceId),
-  );
+  const projects: ProjectRootConfig[] = configs
+    .filter((config) => config.backend !== 'webaccess' || connected.has(config.workspaceId))
+    // A node row naming a root no longer registered is unreachable, exactly as a
+    // webaccess row whose workspace is gone: publishing it would route a project
+    // at a directory nothing scans.
+    .filter((config) => config.backend !== 'node' || config.path === undefined || nodeRoots.has(config.path))
+    .map((config) => (config.backend === 'node' ? { ...config, path: config.path ?? nodeHomeRoot() } : config));
+  const homeBackend = await getHomeStorageBackend();
+  const homeRoot: StorageRootConfig =
+    homeBackend === 'node' ? { backend: 'node', path: nodeHomeRoot() } : { backend: homeBackend };
+  // Nothing stops the dialog from picking `userData/home` itself; both roots
+  // would carry the same storage-root key, so Home wins and the duplicate goes.
+  const homeNodePath = homeRoot.backend === 'node' ? homeRoot.path : undefined;
   const roots: StorageRootConfig[] = [
-    { backend: await getHomeStorageBackend() },
+    homeRoot,
+    ...[...nodeRoots.keys()]
+      .filter((path) => path !== homeNodePath)
+      .map((path): StorageRootConfig => ({ backend: 'node', path })),
     ...[...connected.values()].map(
       ({ workspace, handle }): StorageRootConfig => ({
         backend: 'webaccess',
@@ -1424,6 +1544,9 @@ function isProjectFileSystemConfig(value: unknown): value is ProjectFileSystemCo
     !isFlatProjectBasePath(config['providerBasePath'])
   ) {
     return false;
+  }
+  if (config['backend'] === 'node') {
+    return config['path'] === undefined || typeof config['path'] === 'string';
   }
   return config['backend'] === 'indexeddb' || config['backend'] === 'opfs'
     ? true

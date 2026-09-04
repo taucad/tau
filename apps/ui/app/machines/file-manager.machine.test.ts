@@ -103,7 +103,16 @@ const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
 const mockSetProjectFileSystemConfig =
   vi.fn<(config: { projectId: string; backend: 'webaccess'; workspaceId: string }) => Promise<void>>();
 const mockGetProjectRootConfigs = vi.fn<() => Promise<ProjectRootConfiguration>>();
-const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs'>>();
+const mockGetHomeStorageBackend = vi.fn<() => Promise<'indexeddb' | 'opfs' | 'node'>>();
+
+const mockNodeFsConnect = vi.fn(async () => new MessageChannel().port1);
+let mockDesktopBridge: unknown;
+vi.mock('#filesystem/desktop-bridge.js', () => ({
+  isDesktopTarget: true,
+  desktopBridge: () => mockDesktopBridge,
+  hostPathName: (path: string) => path,
+  nodeHomeRoot: () => '/userData/home',
+}));
 
 vi.mock('#filesystem/handle-store.js', () => ({
   getProjectRootConfigs: async () => mockGetProjectRootConfigs(),
@@ -131,6 +140,35 @@ describe('fileManagerMachine', () => {
     mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
     mockGetHomeStorageBackend.mockResolvedValue('indexeddb');
     mockConfigureProjectRoots.mockResolvedValue(undefined);
+    mockDesktopBridge = undefined;
+    mockNodeFsConnect.mockClear();
+  });
+
+  // MAJOR 4 — the services utility can die. Main forks a fresh one on the next
+  // `connect()`, but only if somebody asks: without this the worker's one-shot
+  // handshake leaves the filesystem wedged for the rest of the session.
+  it('brokers a replacement node filesystem port when the worker asks for one', async () => {
+    mockGetHomeStorageBackend.mockResolvedValue('node');
+    mockDesktopBridge = { nodeFs: { homeRoot: '/userData/home', connect: mockNodeFsConnect }, dialog: {} };
+    const actor = createActor(fileManagerMachine, {
+      input: { rootDirectory: '/', shouldInitializeOnStart: true },
+    });
+    actor.start();
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+    const worker = workerTestState.instances[0]!;
+    const portPosts = () => worker.postMessage.mock.calls.filter(([message]) => message?.type === 'nodeFsPort');
+    expect(portPosts()).toHaveLength(1);
+    expect(mockNodeFsConnect).toHaveBeenCalledTimes(1);
+
+    worker.dispatchEvent(Object.assign(new Event('message'), { data: { type: 'nodeFsPortRequest' } }));
+
+    await vi.waitFor(() => {
+      expect(mockNodeFsConnect).toHaveBeenCalledTimes(2);
+      expect(portPosts()).toHaveLength(2);
+    });
+    actor.stop();
   });
 
   // R3 — the worker installs its `/` composition mount during module

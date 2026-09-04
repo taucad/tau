@@ -62,11 +62,23 @@ export const projectSlugOf = (locator: ProjectLocator): string => directorySlug(
 /**
  * Workspace slug owning a discovered project. Both browser engines are the
  * physical implementation of the single system-owned Home workspace.
+ *
+ * A node root is either desktop Home — which has no workspace row and keeps
+ * the reserved `home` slug — or a folder picked through the native dialog,
+ * whose row is keyed on its absolute path (`handle-store.ts`'s
+ * {@link Workspace.path}). Without that lookup a picked-folder project is
+ * discovered under `home` while creation routed it to the folder's own slug,
+ * and the canonical URL resolves to nothing.
  */
-export const workspaceSlugOf = (locator: ProjectLocator, workspaces: readonly Workspace[]): string | undefined =>
-  locator.backend === 'webaccess'
-    ? workspaces.find((workspace) => workspace.workspaceId === locator.workspaceId)?.slug
-    : homeWorkspaceSlug;
+export const workspaceSlugOf = (locator: ProjectLocator, workspaces: readonly Workspace[]): string | undefined => {
+  if (locator.backend === 'webaccess') {
+    return workspaces.find((workspace) => workspace.workspaceId === locator.workspaceId)?.slug;
+  }
+  if (locator.backend === 'node') {
+    return workspaces.find((workspace) => workspace.path === locator.path)?.slug ?? homeWorkspaceSlug;
+  }
+  return homeWorkspaceSlug;
+};
 
 /** Canonical slugs for a discovered project, or `undefined` when its workspace is unknown. */
 export const projectSlugsOf = (locator: ProjectLocator, workspaces: readonly Workspace[]): ProjectSlugs | undefined => {

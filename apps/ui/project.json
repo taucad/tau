@@ -62,6 +62,44 @@
         }
       }
     },
+    "build:desktop": {
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "outputs": ["{projectRoot}/desktop/build"],
+      "inputs": ["production", "^production"],
+      "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
+      "options": {
+        "cwd": "{projectRoot}/desktop",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192",
+          "REACT_ROUTER_ROOT": "."
+        }
+      }
+    },
+    "build:serve": {
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "outputs": ["{projectRoot}/serve/build"],
+      "inputs": ["production", "^production"],
+      "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
+      "options": {
+        "cwd": "{projectRoot}/serve",
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192",
+          "REACT_ROUTER_ROOT": "."
+        }
+      }
+    },
+    "dev:desktop": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "options": {
+        "cwd": "{projectRoot}/desktop",
+        "command": "react-router dev --config vite.config.ts",
+        "env": {
+          "REACT_ROUTER_ROOT": "."
+        }
+      }
+    },
     "build:verify": {
       "executor": "nx:run-commands",
       "cache": false,

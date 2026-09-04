@@ -9,6 +9,8 @@ type TestWorkspaceEntry = { readonly workspace: Workspace; readonly handle: Test
 type CapableReadyState = Extract<ProjectCreationLocationState, { phase: 'ready'; hasWebAccessCapability: true }>;
 
 let supported = true;
+/** Which pick the host's directory picker produces; `node` is the desktop dialog. */
+let pickerBackend: 'webaccess' | 'node' = 'webaccess';
 const mockListWorkspaces = vi.fn<() => Promise<Workspace[]>>(async () => []);
 const mockGetWorkspace = vi.fn<(workspaceId: string) => Promise<TestWorkspaceEntry | undefined>>(async () => undefined);
 const mockCheckPermission = vi.fn<(handle: TestHandle) => Promise<PermissionState>>(async () => 'granted');

@@ -69,4 +69,40 @@ describe('project URL grammar', () => {
   it('has no slugs when the owning workspace row is unknown', () => {
     expect(projectSlugsOf(webaccessLocator, [])).toBeUndefined();
   });
+
+  it('names the picked node folder that owns the project, not Home', () => {
+    const pickedRow: Workspace = {
+      workspaceId: 'wsp_picked',
+      name: 'tau-desktop-workspace',
+      lastConnectedAt: 2,
+      slug: 'tau-desktop-workspace',
+      path: '/tmp/pick/tau-desktop-workspace',
+    };
+
+    expect(
+      projectSlugsOf(
+        {
+          backend: 'node',
+          storageRootKey: '/tmp/pick/tau-desktop-workspace',
+          relativeDirectory: '/cube-with-cutout',
+          path: '/tmp/pick/tau-desktop-workspace',
+        },
+        [workspaceRow, pickedRow],
+      ),
+    ).toEqual({ workspaceSlug: 'tau-desktop-workspace', projectSlug: 'cube-with-cutout' });
+  });
+
+  it('keeps desktop Home on the reserved slug — it has no workspace row', () => {
+    expect(
+      projectSlugsOf(
+        {
+          backend: 'node',
+          storageRootKey: '/home-root',
+          relativeDirectory: '/cube',
+          path: '/home-root',
+        },
+        [],
+      ),
+    ).toEqual({ workspaceSlug: 'home', projectSlug: 'cube' });
+  });
 });

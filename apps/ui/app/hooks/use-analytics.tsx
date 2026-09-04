@@ -145,7 +145,11 @@ export function AnalyticsProvider({ children }: { readonly children: React.React
   // When no API key is set, we don't use the analytics provider.
   // This is useful for development and self-hosted configurations.
   // The useAnalytics hook returns a noop implementation when PostHog is not available.
-  if (!apiKey) {
+  //
+  // Desktop never initialises PostHog for the POC: `posthog.lib.ts` hard-codes
+  // `api_host: '/api/ph'`, and the desktop SPA drops that proxy route. Revisit
+  // with a direct host if desktop analytics are wanted later.
+  if (!apiKey || import.meta.env.TAU_TARGET === 'desktop') {
     return children;
   }
 

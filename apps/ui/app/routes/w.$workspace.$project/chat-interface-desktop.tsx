@@ -7,8 +7,8 @@ import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockvi
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import { WorkbenchToggle } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
-import { SidebarOffset } from '#components/layout/sidebar-offset.js';
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
+import { useSidebar } from '#components/ui/sidebar.js';
 import { useProject } from '#hooks/use-project.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import {
@@ -55,64 +55,71 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
 
   return (
     <ChatContextInsertionProvider>
-      <SidebarOffset via='padding' className='size-full'>
-        <div
-          ref={containerRef}
-          className='relative size-full overflow-hidden bg-background'
-          data-project-workspace
-          data-compact={isCompact}
-        >
+      <div
+        ref={containerRef}
+        className='relative size-full overflow-hidden bg-background'
+        data-project-workspace
+        data-compact={isCompact}
+      >
+        {isClient && isEditorReady ? (
+          <div className='absolute top-1 right-1 z-10 flex gap-1'>
+            <WorkbenchToggle isOpen={workbenchVisible} onOpenChange={setWorkbenchOpen} />
+          </div>
+        ) : null}
+        <ChatInterfaceSessionGate fallback={<div className='size-full' />}>
           {isClient && isEditorReady ? (
-            <div className='absolute top-1 right-1 z-10 flex gap-1'>
-              <WorkbenchToggle isOpen={workbenchVisible} onOpenChange={setWorkbenchOpen} />
-            </div>
-          ) : null}
-          <ChatInterfaceSessionGate fallback={<div className='size-full' />}>
-            {isClient && isEditorReady ? (
-              <Allotment
-                separator={false}
-                proportionalLayout={false}
-                className='size-full [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
-                onDragEnd={persistWidths}
+            <Allotment
+              separator={false}
+              proportionalLayout={false}
+              className='size-full [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
+              onDragEnd={persistWidths}
+            >
+              <Allotment.Pane
+                key='chat'
+                minSize={panelMinSizeChat}
+                preferredSize={desktopLayout.chatWidth}
+                priority={LayoutPriority.Low}
+                visible={chatVisible}
               >
-                <Allotment.Pane
-                  key='chat'
-                  minSize={panelMinSizeChat}
-                  preferredSize={desktopLayout.chatWidth}
-                  priority={LayoutPriority.Low}
-                  visible={chatVisible}
-                >
-                  <ChatHistoryGate>
-                    <ChatHistory
-                      isExpanded={desktopLayout.chatOpen}
-                      setIsExpanded={(value) => {
-                        setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);
-                      }}
-                    />
-                  </ChatHistoryGate>
-                </Allotment.Pane>
+                <ChatHistoryGate>
+                  <ChatHistory
+                    className={cn(
+                      !sidebarOpen &&
+                        '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-48 [&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
+                    )}
+                    isExpanded={desktopLayout.chatOpen}
+                    setIsExpanded={(value) => {
+                      setChatOpen(typeof value === 'function' ? value(desktopLayout.chatOpen) : value);
+                    }}
+                  />
+                </ChatHistoryGate>
+              </Allotment.Pane>
 
-                <Allotment.Pane key='viewer' minSize={panelMinSizeViewer} priority={LayoutPriority.High}>
-                  <div className='@container/viewer relative size-full overflow-hidden'>
-                    <ViewerDockview />
-                    <ProjectUnavailableOverlay />
-                  </div>
-                </Allotment.Pane>
-
-                <Allotment.Pane
-                  key='workbench'
-                  minSize={panelMinSizeWorkbench}
-                  preferredSize={desktopLayout.workbenchWidth}
-                  priority={LayoutPriority.Low}
-                  visible={workbenchVisible}
+              <Allotment.Pane key='viewer' minSize={panelMinSizeViewer} priority={LayoutPriority.High}>
+                <div
+                  className={cn(
+                    '@container/viewer relative size-full overflow-hidden',
+                    !sidebarOpen && !chatVisible && '[&_.dv-tabs-and-actions-container]:pl-46',
+                  )}
                 >
-                  <WorkbenchDockview />
-                </Allotment.Pane>
-              </Allotment>
-            ) : null}
-          </ChatInterfaceSessionGate>
-        </div>
-      </SidebarOffset>
+                  <ViewerDockview />
+                  <ProjectUnavailableOverlay />
+                </div>
+              </Allotment.Pane>
+
+              <Allotment.Pane
+                key='workbench'
+                minSize={panelMinSizeWorkbench}
+                preferredSize={desktopLayout.workbenchWidth}
+                priority={LayoutPriority.Low}
+                visible={workbenchVisible}
+              >
+                <WorkbenchDockview />
+              </Allotment.Pane>
+            </Allotment>
+          ) : null}
+        </ChatInterfaceSessionGate>
+      </div>
     </ChatContextInsertionProvider>
   );
 });

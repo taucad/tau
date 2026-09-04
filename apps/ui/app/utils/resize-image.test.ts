@@ -57,7 +57,7 @@ beforeEach(() => {
 
   vi.stubGlobal('Image', FakeImage);
 
-  vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+  const createElementMock = (tag: string): HTMLElement => {
     if (tag === 'canvas') {
       const canvas = {
         _w: 0,
@@ -82,7 +82,9 @@ beforeEach(() => {
       return canvas as unknown as HTMLCanvasElement;
     }
     return document.createElementNS('http://www.w3.org/1999/xhtml', tag);
-  });
+  };
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- electron's WebviewTag overload is the one mockImplementation captures; the mock only ever builds HTML elements.
+  vi.spyOn(document, 'createElement').mockImplementation(createElementMock as typeof document.createElement);
 });
 
 describe('resizeImageForChat', () => {

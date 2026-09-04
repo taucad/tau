@@ -6,6 +6,17 @@
 @import 'tw-animate-css';
 @import '@taucad/ui/styles/tokens.css';
 
+/*
+ * Tailwind's automatic source detection is rooted at the Vite `root`, which the
+ * desktop build moves to `apps/ui/desktop` — a directory holding only
+ * `root.tsx`, `routes.ts` and `entry.client.tsx`. Without this the desktop
+ * bundle ships roughly half the utilities the web bundle does (measured:
+ * 180 kB vs 343 kB), and the missing ones include `h-dvh`, whose absence
+ * collapses the whole workbench column to `height: 0` and pins every dockview
+ * group at its 100x100 minimum. Naming the app directory outright keeps both
+ * builds on the same candidate set.
+ */
+@source '..';
 @source '../components/auth';
 @source '../../../../node_modules/streamdown/dist';
 @source '../../../../packages/ui/src';

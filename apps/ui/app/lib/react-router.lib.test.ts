@@ -1,5 +1,40 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
+import { cacheTag, cdnBackedSsrRouteHeaders, throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
+
+/**
+ * The homepage is the one SSR route whose CDN policy lives in `netlify.toml`
+ * rather than in a route `headers` export — React Router SPA mode (the
+ * `ui:build:desktop` config) bans that export and `_index/route.tsx` is shared
+ * by both builds. Nothing but this test binds the two together.
+ */
+const readNetlifyHomepageHeaders = (): Record<string, string> => {
+  const toml = readFileSync(resolve(import.meta.dirname, '../../netlify.toml'), 'utf8');
+  const block = toml
+    .split('[[headers]]')
+    .slice(1)
+    .find((chunk) => /^for = "\/"$/mu.test(chunk));
+  if (block === undefined) {
+    throw new Error('netlify.toml has no [[headers]] block for "/"');
+  }
+
+  const headers: Record<string, string> = {};
+  for (const line of block.slice(block.indexOf('[headers.values]')).split('\n').slice(1)) {
+    const match = /^([\w-]+) = "(.*)"$/u.exec(line);
+    if (!match) {
+      break;
+    }
+    headers[match[1]!] = match[2]!;
+  }
+  return headers;
+};
+
+describe('netlify.toml homepage cache policy', () => {
+  it('matches the cdnBackedSsrRouteHeaders the deleted _index headers export returned', () => {
+    expect(readNetlifyHomepageHeaders()).toStrictEqual(cdnBackedSsrRouteHeaders(cacheTag.homepage, 'short'));
+  });
+});
 
 describe('redirectIfSubdomain', () => {
   it('should throw a redirect when subdomain matches', () => {

@@ -22,7 +22,7 @@ import { BranchSelector } from '#routes/import.$/branch-selector.js';
 import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
 import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
 import { UploadCard } from '#routes/import.$/upload-card.js';
-import { parseGitHubUrl, normalizeGitHubUrl } from '#routes/import.$/import.utils.js';
+import { describeGitHubImport, resolveGitHubImportTarget } from '#routes/import.$/import.utils.js';
 import type { GitHubRepoInfo } from '#routes/import.$/import.utils.js';
 import { ImportErrorView } from '#routes/import.$/import-error-view.js';
 import { ImportProcessingView } from '#routes/import.$/import-processing-view.js';
@@ -32,25 +32,29 @@ import { CopyButton } from '#components/copy-button.js';
 import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
+import { desktopBridge } from '#filesystem/desktop-bridge.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
 };
 
-export function meta({ loaderData }: Route.MetaArgs): MetaDescriptor[] {
-  /*
-   * React Router types `loaderData` as always present, but a `clientLoader`
-   * route has none during the server render — `ServerRouter` deletes the entry
-   * for any route that must hydrate its own data. Widen and guard.
-   */
-  const data = loaderData as GitHubRepoInfo | undefined;
-  if (!data) {
+const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';
+
+/**
+ * Derived from the URL, never from loader data: a `clientLoader` route has no
+ * data during the server render, so reading `loaderData` here would cost the
+ * per-repository title on exactly the cold external-link arrival that needs it.
+ *
+ * @param args - React Router meta arguments.
+ * @returns The document meta descriptors.
+ */
+export function meta({ params, location }: Route.MetaArgs): MetaDescriptor[] {
+  const target = resolveGitHubImportTarget(readSplatPath(params), location.search);
+  if (!target?.owner) {
     return [{ title: 'Import from GitHub into Tau' }];
   }
 
-  const repo = `${data.owner}/${data.repo} ${data.ref === 'main' ? '' : `@ ${data.ref}`}`;
-  const title = `Import ${repo} from GitHub into Tau`;
-  const description = `Get started with ${repo} by importing it into Tau.`;
+  const { title, description } = describeGitHubImport(target);
   return [{ title, description }];
 }
 
@@ -66,36 +70,12 @@ export function meta({ loaderData }: Route.MetaArgs): MetaDescriptor[] {
  */
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- inferred type
 export function clientLoader({ request, params }: Route.ClientLoaderArgs) {
-  const url = new URL(request.url);
-  const splatPath = (params as { '*'?: string })['*'] ?? '';
-
-  const ref = url.searchParams.get('ref') ?? 'main';
-  const mainFile = url.searchParams.get('main') ?? '';
-
-  // If no splat path, return defaults for entering details state
-  if (!splatPath) {
-    return {
-      owner: '',
-      repo: '',
-      ref: 'main',
-      mainFile: '',
-    } satisfies GitHubRepoInfo;
-  }
-
-  // Normalize the GitHub URL from the path
-  const repoUrl = normalizeGitHubUrl(splatPath);
-
-  const parsed = parseGitHubUrl(repoUrl);
-  if (!parsed) {
+  const target = resolveGitHubImportTarget(readSplatPath(params), new URL(request.url).search);
+  if (!target) {
     throw new Error('Invalid GitHub URL. Only github.com repositories are supported.');
   }
 
-  return {
-    owner: parsed.owner,
-    repo: parsed.repo,
-    ref,
-    mainFile,
-  } satisfies GitHubRepoInfo;
+  return target satisfies GitHubRepoInfo;
 }
 
 type ImportMode = 'github' | 'disk';
@@ -227,6 +207,32 @@ export default function ImportRoute(): React.JSX.Element {
   // Track if this is the initial mount to avoid syncing on first render
   const isInitialMount = useRef(true);
   const location = useLocation();
+
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).has('desktop-open')) return;
+    let active = true;
+    void desktopBridge()
+      ?.openFiles.consume()
+      .then((opened) => {
+        if (!active || opened.length === 0) return;
+        setActiveMode('disk');
+        diskActorRef.send({
+          type: 'processFiles',
+          files: opened.map((file) => new File([file.bytes], file.name)),
+        });
+        void navigate('/import', { replace: true });
+      })
+      .catch((error: unknown) => {
+        if (active)
+          diskActorRef.send({
+            type: 'externalError',
+            error: error instanceof Error ? error : new Error(String(error)),
+          });
+      });
+    return () => {
+      active = false;
+    };
+  }, [diskActorRef, location.search, navigate]);
 
   // Sync location changes to machine (for back/forward navigation)
   // This is the single source of truth for URL → Machine state

@@ -148,4 +148,114 @@ If updating an existing artifact, inspect the current file first and preserve us
 - The skill is discoverable through Tau's skill catalog and can be activated with \`use_skill\`.
 `,
   },
+  {
+    slug: 'create-model',
+    name: 'Create Model',
+    description:
+      'Selects a Tau CAD kernel and activates its authoring skill. Use when creating a model without a pinned kernel.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use when creating a CAD model without a pinned kernel or when kernel choice is ambiguous.',
+    skillMarkdown: createModelSkillMarkdown,
+  },
+  {
+    slug: 'cad-build123d',
+    name: 'Build123d Authoring',
+    description:
+      'Guides native Build123d BRep authoring in main.py. Use when creating or editing trusted Python CAD projects in Tau Desktop.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use for Build123d source, .py CAD files, or a Build123d-pinned desktop project.',
+    skillMarkdown: build123dSkillMarkdown,
+  },
+  {
+    slug: 'cad-picogk',
+    name: 'PicoGK Authoring',
+    description:
+      'Guides trusted PicoGK C# voxel authoring in main.cs. Use when creating or editing PicoGK projects in Tau Desktop.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use for PicoGK source, .cs CAD files, or a PicoGK-pinned desktop project.',
+    skillMarkdown: picogkSkillMarkdown,
+  },
+  {
+    slug: 'cad-openscad',
+    name: 'OpenSCAD Authoring',
+    description:
+      'Guides OpenSCAD model authoring in main.scad with idiomatic CSG and adaptive tessellation. Use when creating or editing .scad geometry.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use for OpenSCAD source, .scad files, or an OpenSCAD-pinned project.',
+    skillMarkdown: openscadSkillMarkdown,
+  },
+  {
+    slug: 'cad-replicad',
+    name: 'Replicad Authoring',
+    description:
+      'Guides precise Replicad BRep authoring in main.ts. Use when creating or editing TypeScript geometry imported from replicad.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use for Replicad source, replicad imports, or a Replicad-pinned project.',
+    skillMarkdown: replicadSkillMarkdown,
+  },
+  {
+    slug: 'cad-manifold',
+    name: 'Manifold Authoring',
+    description:
+      'Guides robust Manifold mesh CAD in main.ts. Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use for Manifold source, manifold-3d imports, or a Manifold-pinned project.',
+    skillMarkdown: manifoldSkillMarkdown,
+  },
+  {
+    slug: 'cad-zoo',
+    name: 'Zoo KCL Authoring',
+    description:
+      'Guides Zoo KCL modeling in main.kcl with pipe-based analytical geometry. Use when creating or editing KCL models.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use for KCL source, .kcl files, or a Zoo-pinned project.',
+    skillMarkdown: zooSkillMarkdown,
+  },
+  {
+    slug: 'cad-jscad',
+    name: 'JSCAD Authoring',
+    description:
+      'Guides JSCAD modeling in main.ts with 2D-first CSG and deliberate tessellation. Use when creating or editing @jscad/modeling geometry.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use for JSCAD source, @jscad/modeling imports, or a JSCAD-pinned project.',
+    skillMarkdown: jscadSkillMarkdown,
+  },
+  {
+    slug: 'cad-opencascadejs',
+    name: 'OpenCascade.js Authoring',
+    description:
+      'Guides direct OpenCascade.js BRep authoring in main.ts. Use when creating or editing libcascade geometry.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use for direct OpenCascade.js source, libcascade imports, or an OpenCascade-pinned project.',
+    skillMarkdown: opencascadejsSkillMarkdown,
+  },
+  {
+    slug: 'geospec-authoring',
+    name: 'GeoSpec Authoring',
+    description:
+      'Guides deterministic GeoSpec test authoring and repair. Use before creating or editing *.geospec.ts or *.geospec.js files.',
+    version: '1.0.0',
+    source: 'system',
+    priority: 60,
+    whenToUse: 'Use before creating, extending, or repairing any GeoSpec geometry test.',
+    skillMarkdown: geospecAuthoringSkillMarkdown,
+  },
 ];

@@ -139,6 +139,23 @@ describe('ChatInterfaceDesktop', () => {
     expect(document.querySelectorAll('[data-pane]')).toHaveLength(3);
   });
 
+  it('reserves fixed-control space inside the chat header without shifting its border', async () => {
+    sidebar.open = false;
+    renderDesktop();
+    expect(await screen.findByTestId('chat-lane')).toHaveClass(
+      '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:pl-48',
+      '[&>[data-slot=floating-panel-content]>[data-slot=floating-panel-content-header]]:[app-region:no-drag]',
+    );
+  });
+
+  it('reserves fixed-control space inside the viewer header without shifting its border', async () => {
+    desktopLayout.chatOpen = false;
+    sidebar.open = false;
+    renderDesktop();
+    const viewer = await screen.findByTestId('viewer-lane');
+    expect(viewer.parentElement).toHaveClass('[&_.dv-tabs-and-actions-container]:pl-46');
+  });
+
   it('keeps the Viewer mounted when both auxiliary lanes are closed', async () => {
     desktopLayout.chatOpen = false;
     desktopLayout.workbenchOpen = false;

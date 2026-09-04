@@ -12,6 +12,7 @@ import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { CollapsibleCodeBlock } from '#components/ui/collapsible-code-block.js';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import type { Analytics } from '#hooks/use-analytics.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 type Side = 'left' | 'right';
 type TooltipSide = 'left' | 'right' | 'top' | 'bottom';
@@ -29,7 +30,9 @@ const chainStopPropagation = <E extends React.SyntheticEvent>(
 const floatingPanelContentHeaderVariants = cva(
   cn(
     'group/floating-panel-content-header',
-    'flex h-9 shrink-0 max-md:h-10 items-center justify-between',
+    'flex shrink-0 items-center justify-between',
+    'h-9',
+    isDesktopTarget() ? '[app-region:drag] [&_button]:[app-region:no-drag]' : 'max-md:h-10',
     'border-b bg-sidebar py-0.5',
     'text-sm font-medium text-muted-foreground',
   ),

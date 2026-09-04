@@ -11,6 +11,7 @@ import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
 
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
 import type { BundledTypesMountEntry } from '@taucad/filesystem/bundled-types-mount';
+import type { WorkspaceScope } from '@taucad/filesystem';
 import {
   ChangeEventBus,
   EventCoalescer,
@@ -29,7 +30,44 @@ import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
 import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
 
-const providerRegistry = new ProviderRegistry({ databasePrefix: metaConfig.databasePrefix });
+/**
+ * Handshake for the node filesystem backend (desktop only).
+ *
+ * The shell brokers one `MessageChannelMain` to the provider host in the
+ * services utility; main relays this end through the preload and the FM
+ * machine, which posts it as `{ type: 'nodeFsPort' }` right after constructing
+ * this worker. The listener is installed here — before the `/` root mount's
+ * top-level await — because a node-backed Home cannot mount without it.
+ */
+let nodeFsDelivery = Promise.withResolvers<MessagePort>();
+/** Nobody may await a port the previous channel already consumed and killed. */
+let nodeFsPortClaimed = false;
+const nodeFsHomeRoot = Promise.withResolvers<string>();
+self.addEventListener('message', (event: MessageEvent<{ type?: string; port?: unknown; homeRoot?: unknown }>) => {
+  const { data } = event;
+  if (data.type === 'nodeFsPort' && data.port instanceof MessagePort && typeof data.homeRoot === 'string') {
+    nodeFsHomeRoot.resolve(data.homeRoot);
+    nodeFsDelivery.resolve(data.port);
+  }
+});
+
+const providerRegistry = new ProviderRegistry({
+  databasePrefix: metaConfig.databasePrefix,
+  createNodeFsPort: async () => {
+    if (nodeFsPortClaimed) {
+      // The previous channel died (the registry evicts on close and calls back
+      // here). The shell forks a fresh services utility on the next `connect()`,
+      // so ask for another port instead of re-handing the dead one — awaiting
+      // the one-shot delivery would wedge the filesystem for the session.
+      nodeFsDelivery = Promise.withResolvers<MessagePort>();
+      nodeFsPortClaimed = false;
+      self.postMessage({ type: 'nodeFsPortRequest' });
+    }
+    const port = await nodeFsDelivery.promise;
+    nodeFsPortClaimed = true;
+    return port;
+  },
+});
 const resourceQueue = new ResourceQueue();
 const eventBus = new ChangeEventBus();
 const mountTable = new MountTable();
@@ -155,8 +193,19 @@ const homeStorageBackend = homeBackendFromWorkerName(self.name);
 // project discovery scans — otherwise an OPFS-pinned profile would keep
 // writing Home-level state (`/.agents/…`) into IndexedDB where nothing looks
 // for it.
+/**
+ * Home's root scope. A node-backed Home blocks here until the shell hands over
+ * the brokered port and the absolute `userData/home` path with it.
+ */
+const resolveHomeRootScope = async (): Promise<WorkspaceScope> => {
+  if (homeStorageBackend !== 'node') {
+    return { backend: homeStorageBackend };
+  }
+  return { backend: 'node', path: await nodeFsHomeRoot.promise };
+};
+
 try {
-  const rootScope = { backend: homeStorageBackend } as const;
+  const rootScope = await resolveHomeRootScope();
   const rootProvider = await providerRegistry.getProvider(rootScope);
   mountTable.mount('/', rootProvider, {
     backend: homeStorageBackend,

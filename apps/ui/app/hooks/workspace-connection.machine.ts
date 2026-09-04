@@ -1,5 +1,7 @@
 import { assign, assertEvent, setup } from 'xstate';
-import type { Workspace, WorkspaceEntry } from '#filesystem/handle-store.js';
+import type { DirectoryPick } from '#constants/browser.constants.js';
+import { hostPathName } from '#filesystem/desktop-bridge.js';
+import type { Workspace } from '#filesystem/handle-store.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 export type PreparedWorkspaceCatalog = {
@@ -177,11 +179,13 @@ export const workspaceConnectionMachine = setup({
       },
       workspaceName({ event }) {
         assertEvent(event, 'workspaceSelected');
-        return event.handle.name;
+        return event.selection.backend === 'webaccess'
+          ? event.selection.handle.name
+          : hostPathName(event.selection.path);
       },
-      handle({ event }) {
+      selection({ event }) {
         assertEvent(event, 'workspaceSelected');
-        return event.handle;
+        return event.selection;
       },
     }),
     acceptRegisteredWorkspace: assign({

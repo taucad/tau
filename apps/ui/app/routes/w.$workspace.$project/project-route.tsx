@@ -1,29 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import { toast } from 'sonner';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import type { Handle } from '#types/matches.types.js';
-import { ProjectChatRpcBindings } from '#routes/w.$workspace.$project/project-chat-rpc-bindings.js';
+import { ProjectChatRunSettlement } from '#routes/w.$workspace.$project/project-chat-run-settlement.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ProjectCommandPaletteItems } from '#routes/w.$workspace.$project/project-command-items.js';
 import { HomeFileManagerProvider, SharedWorkerGate } from '#hooks/use-file-manager.js';
-import { ChatRpcSocketProvider } from '#hooks/use-chat-rpc-socket.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { RevisionProvider } from '#routes/w.$workspace.$project/revision-provider.js';
 import { ChatWorkspaceAuthorityProvider } from '#providers/chat-workspace-authority-provider.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
-import { useBlockBrowserNavigation } from '#hooks/use-block-browser-navigation.js';
 // Chat persistence + draft flush is handled centrally by `<GlobalChatFlushGuard>`
 // (see `apps/ui/app/components/global-chat-flush-guard.tsx`). The project
 // route only needs to flush its own project + editor machine state below.
 import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
-import { localKernelOptions } from '#constants/desktop-kernel-options.js';
-import { remoteKernelOptions } from '#constants/remote-kernel-options.js';
-import { useRemoteComputePlacement, useRemoteComputeSelectionRevision } from '#lib/remote-compute-placement.js';
+import { revokeDesktopNativeCodeTrust } from '#constants/desktop-kernel-options.js';
+import { useProjectKernelOptions } from '#hooks/use-project-kernel-options.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
@@ -51,50 +48,72 @@ type ProjectRouteError = Readonly<{
 
 const editorFlushTimeoutMilliseconds = 10_000;
 
+const NativeCodeIndicator = ({ projectId }: { readonly projectId: string }): React.ReactNode => {
+  const handleRevokeTrust = async (): Promise<void> => {
+    try {
+      await revokeDesktopNativeCodeTrust(projectId);
+      toast.success('Native-code trust revoked');
+    } catch {
+      toast.error('Tau could not revoke native-code trust');
+    }
+  };
+
+  return (
+    <div
+      className='border-amber-500/40 pointer-events-none fixed right-3 bottom-3 z-50 flex items-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-xs shadow-sm backdrop-blur'
+      role='status'
+    >
+      <span>Native code enabled</span>
+      <Button size='sm' variant='outline' className='pointer-events-auto' onClick={handleRevokeTrust}>
+        Revoke
+      </Button>
+    </div>
+  );
+};
+
 function ProjectSession({
   children,
   projectId,
+  nativeKernelId,
   requestedChatId,
   onFocusedChatResolved,
   onFlushRegistration,
 }: {
   readonly children?: React.ReactNode;
   readonly projectId: string;
+  readonly nativeKernelId?: string;
   readonly requestedChatId?: string;
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
 }): React.ReactNode {
-  const placement = useRemoteComputePlacement();
-  const selectionRevision = useRemoteComputeSelectionRevision();
-  // Desktop resolves the local kernel to a utility process rooted at this
-  // project's directory on disk; the browser keeps the debug web worker.
-  const localOptions = useMemo(() => localKernelOptions(projectId), [projectId]);
-  const kernelOptionsFactory = placement.state === 'local' ? localOptions : remoteKernelOptions;
+  const kernelSelection = useProjectKernelOptions({
+    projectId,
+    nativeKernelId,
+  });
   return (
     <HomeFileManagerProvider projectId={projectId} rootDirectory={`/projects/${projectId}`}>
-      <ChatRpcSocketProvider>
-        <WebglContextTrackerProvider>
-          <ProjectProvider
-            key={`${placement.state === 'local' ? 'local' : placement.deviceId}:${String(selectionRevision)}`}
-            projectId={projectId}
-            requestedChatId={requestedChatId}
-            onFocusedChatResolved={onFocusedChatResolved}
-            kernelOptionsFactory={kernelOptionsFactory}
-          >
-            <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
-            <MonacoModelServiceProvider>
-              <RevisionProvider>
-                <ChatWorkspaceAuthorityProvider>
-                  <ProjectWorkspaceProvider>
-                    <ProjectShareRouteIntent />
-                    {children}
-                  </ProjectWorkspaceProvider>
-                </ChatWorkspaceAuthorityProvider>
-              </RevisionProvider>
-            </MonacoModelServiceProvider>
-          </ProjectProvider>
-        </WebglContextTrackerProvider>
-      </ChatRpcSocketProvider>
+      <WebglContextTrackerProvider>
+        <ProjectProvider
+          key={kernelSelection.key}
+          projectId={projectId}
+          requestedChatId={requestedChatId}
+          onFocusedChatResolved={onFocusedChatResolved}
+          kernelOptionsFactory={kernelSelection.kernelOptionsFactory}
+        >
+          <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
+          <MonacoModelServiceProvider>
+            <RevisionProvider>
+              <ChatWorkspaceAuthorityProvider>
+                <ProjectWorkspaceProvider>
+                  <ProjectShareRouteIntent />
+                  {children}
+                  {nativeKernelId && kernelSelection.isLocal ? <NativeCodeIndicator projectId={projectId} /> : null}
+                </ProjectWorkspaceProvider>
+              </ChatWorkspaceAuthorityProvider>
+            </RevisionProvider>
+          </MonacoModelServiceProvider>
+        </ProjectProvider>
+      </WebglContextTrackerProvider>
     </HomeFileManagerProvider>
   );
 }
@@ -227,10 +246,25 @@ export function ProjectRouteGate({
 
   switch (access.status) {
     case 'ready': {
+      const nativeRequirement = nativeKernelRequirementForEntryPath(access.project.assets.main.entryPath);
+      if (nativeRequirement && !isKernelAvailable(nativeRequirement.configuration.id)) {
+        content = (
+          <div className='flex h-full items-center justify-center p-6 text-center'>
+            <div className='max-w-md space-y-2'>
+              <h1 className='text-xl font-semibold'>{nativeRequirement.configuration.name} requires Tau Desktop</h1>
+              <p className='text-sm text-muted-foreground'>
+                This project runs trusted native code, which is not included in the web runtime.
+              </p>
+            </div>
+          </div>
+        );
+        break;
+      }
       content = (
         <ProjectSession
           key={projectId}
           projectId={projectId}
+          nativeKernelId={nativeRequirement?.runtimeKernelId}
           requestedChatId={pending ? resolved.requestedChatId : requestedChatId}
           onFocusedChatResolved={pending ? undefined : onFocusedChatResolved}
           onFlushRegistration={registerSessionFlush}

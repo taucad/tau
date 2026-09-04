@@ -6,6 +6,7 @@ import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overfl
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 /**
  * Custom Dockview theme. The `dockview-theme-tau` class is applied to the root
@@ -260,6 +261,14 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-split-view-container.dv-animation_.dv-view]:[backface-visibility:visible]',
 );
 
+const desktopDockviewStyleOverrides = isDesktopTarget()
+  ? cn(
+      '[&_.dv-tabs-and-actions-container]:[app-region:no-drag]',
+      '[&_:is(.dv-tabs-container,.dv-void-container)]:[app-region:drag]',
+      '[&_:is(.dv-tab,.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)]:[app-region:no-drag]',
+    )
+  : undefined;
+
 /**
  * Scroll the active tab fully into view within its group's tab bar.
  *
@@ -324,13 +333,16 @@ export function Dockview({
   const disposableRef = useRef<{ dispose(): void } | undefined>(undefined);
   const RightHeaderActions = useMemo<FunctionComponent<IDockviewHeaderActionsProps>>(() => {
     const CallerActions = rightHeaderActionsComponent;
-    const ComposedRightHeaderActions = (actionProperties: IDockviewHeaderActionsProps): React.JSX.Element => (
-      <div className='flex h-full items-center gap-1'>
-        <DockviewTabOverflowPicker {...actionProperties} getIcon={getTabIcon} leadingIcon={tabLeadingIcon} />
-        {CallerActions ? <CallerActions {...actionProperties} /> : null}
-      </div>
-    );
-    ComposedRightHeaderActions.displayName = 'DockviewRightHeaderActions';
+    const ComposedRightHeaderActions = function DockviewRightHeaderActions(
+      actionProperties: IDockviewHeaderActionsProps,
+    ): React.JSX.Element {
+      return (
+        <div className='flex h-full items-center gap-1'>
+          <DockviewTabOverflowPicker {...actionProperties} getIcon={getTabIcon} leadingIcon={tabLeadingIcon} />
+          {CallerActions ? <CallerActions {...actionProperties} /> : null}
+        </div>
+      );
+    };
     return ComposedRightHeaderActions;
   }, [getTabIcon, rightHeaderActionsComponent, tabLeadingIcon]);
 
@@ -352,7 +364,10 @@ export function Dockview({
   }, []);
 
   return (
-    <OmniScroller className={cn('size-full', dockviewStyleOverrides)} viewportSelector='.dv-tabs-container'>
+    <OmniScroller
+      className={cn('size-full', dockviewStyleOverrides, desktopDockviewStyleOverrides)}
+      viewportSelector='.dv-tabs-container'
+    >
       <DockviewReact
         {...properties}
         className={className}

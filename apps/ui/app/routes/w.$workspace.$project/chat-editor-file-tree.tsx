@@ -15,6 +15,7 @@ import {
   Copy,
   Trash2,
   Download,
+  Eye,
   Code,
   Clipboard,
   Lock,
@@ -33,7 +34,8 @@ import {
   propMemoizationFeature,
 } from '@headless-tree/core';
 import { useTree, AssistiveTreeDescription } from '@headless-tree/react';
-import { kernelConfigurations, tauFileDragMime } from '@taucad/types/constants';
+import { tauFileDragMime } from '@taucad/types/constants';
+import { availableKernelConfigurations } from '#constants/available-kernel-configurations.js';
 import type { KernelConfiguration } from '@taucad/types/constants';
 import type { FileItem } from '#types/editor.types.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -124,6 +126,8 @@ import {
   getFileTreeDownloadErrorMessage,
   getFileTreeDownloadPolicy,
 } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
+import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
+import { previewProjectFileInQuickLook } from '#filesystem/desktop-quick-look.js';
 
 const rootId = fileTreeRootId;
 const keyboardDragStartHotkey = 'Control+ShiftLeft+KeyD';
@@ -289,7 +293,9 @@ export const ChatEditorFileTree = memo(function ({
     canRename,
     canCreate,
     canDelete,
+    runtimeFileSystem,
   } = fileManager;
+  const projectId = useSelector(projectRef, (state) => state.context.project?.id);
   const openFiles = useSelector(editorRef, (state) => state.context.openFiles);
   const activeFilePath = useSelector(editorRef, (state) => {
     const id = state.context.activePaneId;
@@ -1191,6 +1197,21 @@ export const ChatEditorFileTree = memo(function ({
     [projectRef],
   );
 
+  const handleQuickLook = useCallback(
+    (path: string) => {
+      if (!projectId) {
+        return;
+      }
+      const name = path.split('/').pop() ?? path;
+      toast.promise(previewProjectFileInQuickLook({ path, projectId, runtimeFileSystem }), {
+        loading: `Preparing ${name} for Quick Look…`,
+        success: `Opened ${name} in Quick Look`,
+        error: (error: unknown) => (error instanceof Error ? error.message : 'Quick Look failed'),
+      });
+    },
+    [projectId, runtimeFileSystem],
+  );
+
   const handleDownload = useCallback(
     (path: string, isFolder: boolean) => {
       const policy = getFileTreeDownloadPolicy(path);
@@ -1559,7 +1580,7 @@ export const ChatEditorFileTree = memo(function ({
               Blank
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            {kernelConfigurations.map((kernel) => (
+            {availableKernelConfigurations().map((kernel) => (
               <DropdownMenuItem
                 key={kernel.id}
                 onSelect={() => {
@@ -1785,6 +1806,7 @@ export const ChatEditorFileTree = memo(function ({
                               onUpload={handleUploadClick}
                               onOpenInEditor={handleOpenInEditor}
                               onOpenInViewer={handleOpenInViewer}
+                              onQuickLook={isDesktopTarget ? handleQuickLook : undefined}
                               onDownload={handleDownload}
                               onCopyPath={handleCopyPath}
                               onForeignDrop={handleForeignDrop}
@@ -1863,6 +1885,7 @@ type TreeItemProps = {
   readonly onUpload: (path: string) => void;
   readonly onOpenInEditor: (path: string) => void;
   readonly onOpenInViewer: (path: string) => void;
+  readonly onQuickLook?: (path: string) => void;
   readonly onDownload: (path: string, isFolder: boolean) => void;
   readonly onCopyPath: (path: string) => Promise<void>;
   readonly onForeignDrop: (target: ForeignDropTarget) => Promise<void>;
@@ -1882,6 +1905,7 @@ function TreeItem({
   onUpload,
   onOpenInEditor,
   onOpenInViewer,
+  onQuickLook,
   onDownload,
   onCopyPath,
   onForeignDrop,
@@ -2084,6 +2108,17 @@ function TreeItem({
                   <Box />
                   <span>Open in Viewer</span>
                 </DropdownMenuItem>
+                {onQuickLook ? (
+                  <DropdownMenuItem
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onQuickLook(item.getId());
+                    }}
+                  >
+                    <Eye />
+                    <span>Quick Look</span>
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuSeparator />
                 {readOnly ? (
                   <DropdownMenuItem disabled>
@@ -2180,6 +2215,16 @@ function TreeItem({
               <Box />
               <span>Open in Viewer</span>
             </ContextMenuItem>
+            {onQuickLook ? (
+              <ContextMenuItem
+                onClick={() => {
+                  onQuickLook(item.getId());
+                }}
+              >
+                <Eye />
+                <span>Quick Look</span>
+              </ContextMenuItem>
+            ) : null}
             <ContextMenuSeparator />
           </>
         )}

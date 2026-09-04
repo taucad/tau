@@ -103,8 +103,10 @@ describe('useFileManager surface', () => {
 
     type NonWebaccessMount = Exclude<MountConfigArgument, { backend: 'webaccess' }>;
     expectTypeOf<NonWebaccessMount>().toExtend<{
-      backend: 'indexeddb' | 'opfs' | 'memory';
+      backend: 'indexeddb' | 'opfs' | 'memory' | 'node';
     }>();
+    // Desktop Home: a node mount is addressed by its absolute host path.
+    expectTypeOf<Extract<MountConfigArgument, { backend: 'node' }>>().toExtend<{ path: string }>();
   });
 
   it('does not expose ambient setDirectoryHandle, scoped suffix callbacks, or top-level admin callbacks', () => {

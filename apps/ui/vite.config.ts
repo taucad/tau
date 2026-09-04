@@ -44,7 +44,30 @@ const resolveBuildFrontendUrl = (environment: NodeJS.ProcessEnv): string | undef
   );
 };
 
-const createUiSourceAliasPlugin = (): Plugin => ({
+/**
+ * SSR externalisation policy, shared with `desktop/vite.config.ts` so the two
+ * builds cannot drift.
+ *
+ * `external`: only the three packages that emit sibling SSR chunks via static
+ * `new URL('./<file>.js', import.meta.url)` patterns (kernel plugins, worker
+ * bootstraps, middleware factories). Bundling those re-emits many
+ * `build/server/assets/*` chunks SSR never executes. Other `@taucad/*`
+ * packages bundle into the SSR output.
+ *
+ * Audit first-party sources: rg -n "new URL\(['\"]\.\..*\.(?:js|ts)['\"], import\.meta\.url\)" packages/
+ *
+ * `noExternal`: `@rjsf/*` ships bundled CJS whose named exports node's
+ * cjs-module-lexer cannot see, so an external SSR import of
+ * `customizeValidator` (and the `@rjsf/utils` names it re-imports) crashes the
+ * server at boot.
+ */
+export const uiSsrOptions = {
+  noExternal: ['@headless-tree/core', '@headless-tree/react', 'posthog-js', /^@rjsf\//u],
+  external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
+} as const satisfies UserConfig['ssr'];
+
+/** Shared with `desktop/vite.config.ts`, which reuses the web plugin list. */
+export const createUiSourceAliasPlugin = (): Plugin => ({
   name: 'tau-ui-source-alias',
   enforce: 'pre',
   resolveId(source, importer) {
@@ -107,6 +130,14 @@ export default defineConfig(({ mode }) => {
       // Evaluated once per build / dev-server start, which is exactly the
       // granularity at which a tab's app-logic vintage can diverge.
       tauBuildId: JSON.stringify(Date.now()),
+      /*
+       * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
+       * `"desktop"`. Left undefined under `mode === 'test'` so unit tests can
+       * exercise both branches with `vi.stubEnv('TAU_TARGET', …)` — a `define`
+       * is a literal substitution `stubEnv` cannot reach.
+       */
+      // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
+      ...(isTest ? {} : { 'import.meta.env.TAU_TARGET': '"web"' }),
     },
     plugins: [
       createUiSourceAliasPlugin(),

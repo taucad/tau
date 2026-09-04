@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
+// The desktop SPA drops the `action.set-theme` route (SPA mode bans server
+// `action` exports), so the preference is stored locally instead.
+import { isDesktopTarget } from '#lib/build-target.js';
+import { setDesktopAppIconTheme } from '#filesystem/desktop-bridge.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Preserve the existing enum-style public API with erasable object syntax. */
 export const Theme = {
@@ -89,6 +93,38 @@ export const isTheme = (value: unknown): value is Theme => themeSchema.safeParse
 const getPreferredTheme = (): Theme =>
   globalThis.matchMedia(prefersLightMediaQuery).matches ? Theme.LIGHT : Theme.DARK;
 
+const themeStorageKey = 'tau-theme';
+/** Distinguishes "explicitly follow the system" from "never chose". */
+const systemThemeStorageValue = 'system';
+
+const readStoredValue = (): string | undefined => {
+  try {
+    return globalThis.localStorage.getItem(themeStorageKey) ?? undefined;
+  } catch {
+    // No localStorage during the SPA index.html prerender, or when blocked.
+    return undefined;
+  }
+};
+
+/** `undefined` = nothing usable stored; `null` = an explicit System choice. */
+const readStoredTheme = (): ThemeWithSystem | undefined => {
+  const raw = readStoredValue();
+  if (raw === systemThemeStorageValue) {
+    return null;
+  }
+
+  const parsed = themeSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+};
+
+const writeStoredTheme = (theme: ThemeWithSystem): void => {
+  try {
+    globalThis.localStorage.setItem(themeStorageKey, theme ?? systemThemeStorageValue);
+  } catch {
+    // Persistence is best-effort; a blocked store must not break the toggle.
+  }
+};
+
 export const ThemeProvider = ({
   children,
   specifiedTheme,
@@ -98,10 +134,15 @@ export const ThemeProvider = ({
   readonly specifiedTheme: ThemeWithSystem;
   readonly themeAction: string;
 }): React.JSX.Element => {
-  const [state, setState] = useState<ThemeState>(() => ({
-    theme: specifiedTheme ?? (import.meta.env.SSR ? undefined : getPreferredTheme()),
-    metadata: { definedBy: specifiedTheme === null ? 'SYSTEM' : 'USER' },
-  }));
+  const [state, setState] = useState<ThemeState>(() => {
+    // Desktop has no root loader, so `specifiedTheme` is always null there and
+    // the stored preference is the only pre-paint source of truth.
+    const preference = isDesktopTarget() ? (readStoredTheme() ?? specifiedTheme) : specifiedTheme;
+    return {
+      theme: preference ?? (import.meta.env.SSR ? undefined : getPreferredTheme()),
+      metadata: { definedBy: preference === null ? 'SYSTEM' : 'USER' },
+    };
+  });
   const [prefersMoreContrast, setPrefersMoreContrast] = useState(
     () => !import.meta.env.SSR && globalThis.matchMedia(prefersMoreContrastMediaQuery).matches,
   );
@@ -155,6 +196,12 @@ export const ThemeProvider = ({
     };
   }, [state.metadata.definedBy]);
 
+  useEffect(() => {
+    if (isDesktopTarget() && state.theme) {
+      setDesktopAppIconTheme(state.theme === Theme.LIGHT ? 'light' : 'dark');
+    }
+  }, [state.theme]);
+
   const setTheme = useCallback(
     (theme: ThemeWithSystem) => {
       const nextState: ThemeState = {
@@ -163,6 +210,12 @@ export const ThemeProvider = ({
       };
       setState(nextState);
       broadcastChannel.current?.postMessage(nextState);
+
+      if (isDesktopTarget()) {
+        writeStoredTheme(theme);
+        return;
+      }
+
       void fetch(themeAction, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -238,15 +291,37 @@ export const useTheme = (): UseThemeReturn => {
   };
 };
 
-const clientThemeCode = String.raw`
+/*
+ * Desktop-only prelude: the SPA's prerendered `index.html` is built with no
+ * `localStorage`, so without this the stored preference is only applied once
+ * React hydrates — a user with a light theme on a dark OS flashes dark on
+ * every launch. Web keeps `stored` null and behaves exactly as before.
+ */
+const storedThemeSnippet = String.raw`
+  try { stored = window.localStorage.getItem(${JSON.stringify(themeStorageKey)}); } catch { stored = null; }`;
+
+/**
+ * Inline script that resolves the theme before first paint.
+ *
+ * Built per call rather than captured at module scope so tests can drive both
+ * targets with `vi.stubEnv`.
+ *
+ * @returns The script body.
+ */
+export const buildClientThemeCode = (): string => String.raw`
 (() => {
-  const theme = window.matchMedia(${JSON.stringify(prefersLightMediaQuery)}).matches ? 'light' : 'dark';
+  const names = ${JSON.stringify([Theme.LIGHT, Theme.DARK, Theme.BLACK, Theme.HIGH_CONTRAST])};
   const classList = document.documentElement.classList;
-  if (!classList.contains('light') && !classList.contains('dark') && !classList.contains('black') && !classList.contains('high-contrast')) {
-    classList.add(theme);
+  const system = window.matchMedia(${JSON.stringify(prefersLightMediaQuery)}).matches ? 'light' : 'dark';
+  let stored = null;${isDesktopTarget() ? storedThemeSnippet : ''}
+  if (names.indexOf(stored) === -1) stored = null;
+  const applied = stored === null ? system : stored;
+  if (!names.some((name) => classList.contains(name))) {
+    if (applied === ${JSON.stringify(Theme.BLACK)} || applied === ${JSON.stringify(Theme.HIGH_CONTRAST)}) classList.add(${JSON.stringify(Theme.DARK)});
+    classList.add(applied);
   }
   const meta = document.querySelector('meta[name=color-scheme]');
-  if (meta) meta.content = theme === 'light' ? 'light dark' : 'dark light';
+  if (meta) meta.content = applied === 'light' ? 'light dark' : 'dark light';
 })();
 `;
 
@@ -258,7 +333,7 @@ export const PreventFlashOnWrongTheme = ({ hasSsrTheme }: { readonly hasSsrTheme
       <meta name='color-scheme' content={theme === Theme.LIGHT ? 'light dark' : 'dark light'} />
       {hasSsrTheme ? null : (
         // oxlint-disable-next-line react/no-danger -- static inline script must run before hydration to prevent a theme flash
-        <script dangerouslySetInnerHTML={{ __html: clientThemeCode }} suppressHydrationWarning />
+        <script dangerouslySetInnerHTML={{ __html: buildClientThemeCode() }} suppressHydrationWarning />
       )}
     </>
   );

@@ -75,7 +75,7 @@ describe('ChatTitleBar', () => {
   it('shows current-session controls without recreating chat navigation', () => {
     render(<ChatTitleBar closeButton={<button type='button'>Close chat</button>} />);
 
-    expect(screen.getByText('Bracket design')).toBeInTheDocument();
+    expect(screen.getByText('Bracket design').parentElement).toHaveClass('[app-region:drag]');
     expect(screen.getByRole('button', { name: 'Chat settings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close chat' })).toBeInTheDocument();
     expect(screen.queryByText(/search chats/i)).not.toBeInTheDocument();
@@ -89,13 +89,5 @@ describe('ChatTitleBar', () => {
     expect(createChat).toHaveBeenCalledWith({ name: 'New chat', messages: [] });
     expect(navigate).toHaveBeenCalledWith('/w/home/bracket?chat=chat_new');
     expect(onNewChat).toHaveBeenCalledOnce();
-  });
-
-  it('exposes connection errors to keyboard and assistive technology', () => {
-    connectionStatus = 'error';
-    render(<ChatTitleBar />);
-
-    expect(screen.getByRole('button', { name: 'Chat connection error' })).toBeInTheDocument();
-    expect(screen.getByText('Offline')).toBeInTheDocument();
   });
 });

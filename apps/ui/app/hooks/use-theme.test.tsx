@@ -1,8 +1,22 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
+import { buildClientThemeCode, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
+
+const setDesktopAppIconTheme = vi.hoisted(() => vi.fn());
+vi.mock('#filesystem/desktop-bridge.js', () => ({ setDesktopAppIconTheme }));
+
+const localThemeStore = new Map<string, string>();
+const localStorageStub = {
+  clear: () => {
+    localThemeStore.clear();
+  },
+  getItem: (key: string) => localThemeStore.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    localThemeStore.set(key, value);
+  },
+};
 
 const fetchMock = vi.fn(async () => new Response());
 const prefersLightMediaQuery = '(prefers-color-scheme: light)';
@@ -53,11 +67,16 @@ const createWrapper =
 
 describe('useTheme', () => {
   beforeEach(() => {
+    vi.stubGlobal('localStorage', localStorageStub);
     mediaQueries = {
       [prefersLightMediaQuery]: createMediaQuery(true),
       [prefersMoreContrastMediaQuery]: createMediaQuery(false),
     };
     fetchMock.mockClear();
+    setDesktopAppIconTheme.mockClear();
+    // `stubEnv` is not auto-restored; the desktop suite below would otherwise
+    // leak `TAU_TARGET` into every test declared after it.
+    vi.unstubAllEnvs();
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('BroadcastChannel', BroadcastChannelMock);
     vi.stubGlobal(
@@ -179,5 +198,133 @@ describe('useTheme', () => {
 
     expect(result.current.setTheme).toBe(firstSetTheme);
     expect(result.current.cycleTheme).toBe(firstCycleTheme);
+  });
+
+  describe('desktop target', () => {
+    beforeEach(() => {
+      vi.stubEnv('TAU_TARGET', 'desktop');
+      globalThis.localStorage.clear();
+    });
+
+    it('persists the preference to localStorage instead of the dropped theme action', () => {
+      const { result } = renderHook(() => useTheme(), { wrapper: createWrapper(null) });
+
+      act(() => {
+        result.current.setTheme(Theme.BLACK);
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(globalThis.localStorage.getItem('tau-theme')).toBe(Theme.BLACK);
+    });
+
+    it('keeps the native app icon aligned with the resolved local theme', async () => {
+      const { result } = renderHook(() => useTheme(), { wrapper: createWrapper(Theme.LIGHT) });
+
+      await waitFor(() => {
+        expect(setDesktopAppIconTheme).toHaveBeenLastCalledWith('light');
+      });
+
+      act(() => {
+        result.current.setTheme(Theme.BLACK);
+      });
+
+      await waitFor(() => {
+        expect(setDesktopAppIconTheme).toHaveBeenLastCalledWith('dark');
+      });
+    });
+
+    it('persists the system preference as an explicit choice', () => {
+      const { result } = renderHook(() => useTheme(), { wrapper: createWrapper(Theme.BLACK) });
+
+      act(() => {
+        result.current.setTheme(null);
+      });
+
+      expect(globalThis.localStorage.getItem('tau-theme')).toBe('system');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('hydrates the stored preference when the SPA root supplies none', () => {
+      globalThis.localStorage.setItem('tau-theme', Theme.HIGH_CONTRAST);
+
+      const { result } = renderHook(() => useTheme(), { wrapper: createWrapper(null) });
+
+      expect(result.current.themeWithSystem).toBe(Theme.HIGH_CONTRAST);
+      expect(result.current.isHighContrast).toBe(true);
+    });
+
+    it('hydrates a stored system preference as the resolved media theme', () => {
+      globalThis.localStorage.setItem('tau-theme', 'system');
+      mediaQueries[prefersLightMediaQuery]!.matches = false;
+
+      const { result } = renderHook(() => useTheme(), { wrapper: createWrapper(null) });
+
+      expect(result.current.themeWithSystem).toBeNull();
+      expect(result.current.theme).toBe(Theme.DARK);
+    });
+
+    describe('pre-paint flash guard', () => {
+      const runFlashScript = (): void => {
+        // oxlint-disable-next-line no-new-func -- the subject under test is a script string.
+        const run = new Function(buildClientThemeCode()) as () => void;
+        run();
+      };
+
+      beforeEach(() => {
+        document.documentElement.className = '';
+        document.head.innerHTML = '<meta name="color-scheme" content="light dark" />';
+      });
+
+      it('applies the stored theme before hydration', () => {
+        globalThis.localStorage.setItem('tau-theme', Theme.BLACK);
+
+        runFlashScript();
+
+        expect([...document.documentElement.classList]).toStrictEqual([Theme.DARK, Theme.BLACK]);
+        expect(document.querySelector('meta[name=color-scheme]')?.getAttribute('content')).toBe('dark light');
+      });
+
+      it('falls back to the system preference when nothing is stored', () => {
+        mediaQueries[prefersLightMediaQuery]!.matches = false;
+
+        runFlashScript();
+
+        expect([...document.documentElement.classList]).toStrictEqual([Theme.DARK]);
+      });
+
+      it('falls back to the system preference for an explicit System choice', () => {
+        globalThis.localStorage.setItem('tau-theme', 'system');
+
+        runFlashScript();
+
+        expect([...document.documentElement.classList]).toStrictEqual([Theme.LIGHT]);
+      });
+    });
+
+    it('ignores a corrupted stored preference', () => {
+      globalThis.localStorage.setItem('tau-theme', 'chartreuse');
+
+      const { result } = renderHook(() => useTheme(), { wrapper: createWrapper(null) });
+
+      expect(result.current.themeWithSystem).toBeNull();
+      expect(result.current.theme).toBe(Theme.LIGHT);
+    });
+  });
+
+  it('never reads the desktop theme store from the web flash guard', () => {
+    expect(buildClientThemeCode()).not.toContain('tau-theme');
+    expect(buildClientThemeCode()).not.toContain('localStorage');
+  });
+
+  it('keeps posting to the theme action on the web target', () => {
+    globalThis.localStorage.clear();
+    const { result } = renderHook(() => useTheme(), { wrapper: createWrapper(null) });
+
+    act(() => {
+      result.current.setTheme(Theme.BLACK);
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(globalThis.localStorage.getItem('tau-theme')).toBeNull();
   });
 });

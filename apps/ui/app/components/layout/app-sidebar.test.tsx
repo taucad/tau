@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppSidebar } from '#components/layout/app-sidebar.js';
 import { SidebarProvider } from '#components/ui/sidebar.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -88,15 +88,36 @@ describe('AppSidebar', () => {
     expect(getNavLink('Projects')).toHaveAttribute('href', '/projects');
   });
 
-  it('uses a flush desktop shell with neutral navigation selection', () => {
+  it('uses an Allotment-owned browser pane without duplicate titlebar controls', () => {
     const { container } = renderSidebar();
-    const sidebar = container.querySelector('[data-slot=sidebar][data-variant]');
+    const sidebar = screen.getByRole('complementary', { name: 'Application sidebar' });
     const projectsButton = getNavLink('Projects')?.querySelector('[data-sidebar=menu-button]');
 
-    expect(sidebar).toHaveAttribute('data-variant', 'sidebar');
+    expect(sidebar).toHaveAttribute('id', 'app-sidebar');
+    expect(sidebar).toHaveClass('w-full', 'border-r');
     expect(projectsButton).toHaveClass('data-[active=true]:text-sidebar-accent-foreground');
     expect(projectsButton).not.toHaveClass('data-[active=true]:text-primary');
     expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
-    expect(container.querySelector('[data-slot=sidebar-header] [data-slot=sidebar-trigger]')).toBeInTheDocument();
+    expect(container.querySelector('[data-slot=sidebar-header]')).toHaveClass('h-9');
+    expect(container.querySelector('[data-slot=sidebar-header] [data-slot=sidebar-trigger]')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Home' })).not.toBeInTheDocument();
+  });
+
+  it('keeps desktop identity beneath the native titlebar without duplicating its toggle', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const { container } = renderSidebar();
+
+    expect(container.querySelector('[data-slot=sidebar-header]')).toHaveClass('pt-9');
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(container.querySelector('[data-slot=sidebar-header] [data-slot=sidebar-trigger]')).not.toBeInTheDocument();
+  });
+
+  it('removes the hidden Allotment pane from interaction and the accessibility tree', () => {
+    mockState.open = false;
+    const { container } = renderSidebar();
+    const sidebar = container.querySelector('#app-sidebar');
+
+    expect(sidebar).toHaveAttribute('aria-hidden', 'true');
+    expect(sidebar).toHaveAttribute('inert');
   });
 });

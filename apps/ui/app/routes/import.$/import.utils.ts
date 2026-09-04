@@ -127,6 +127,46 @@ export function normalizeGitHubUrl(splatPath: string): string {
 }
 
 /**
+ * Resolve the import target from the splat segment and query string.
+ *
+ * Pure URL parsing with no I/O, so both the route's `clientLoader` and its
+ * `meta` can call it. `meta` must not depend on loader data: a `clientLoader`
+ * route has none during the server render, and `/import/*` is routinely
+ * arrived at cold from an external link whose crawler only sees that render.
+ *
+ * @param splatPath - The `*` route parameter.
+ * @param search - The query string, including its leading `?`.
+ * @returns The target, or `undefined` when the splat is not a GitHub repo URL.
+ */
+export function resolveGitHubImportTarget(splatPath: string, search: string): GitHubRepoInfo | undefined {
+  const parameters = new URLSearchParams(search);
+  const ref = parameters.get('ref') ?? 'main';
+  const mainFile = parameters.get('main') ?? '';
+
+  // No splat: the route renders its "enter a repository" form.
+  if (!splatPath) {
+    return { owner: '', repo: '', ref: 'main', mainFile: '' };
+  }
+
+  const parsed = parseGitHubUrl(normalizeGitHubUrl(splatPath));
+  return parsed === undefined ? undefined : { owner: parsed.owner, repo: parsed.repo, ref, mainFile };
+}
+
+/**
+ * Document title and description for a resolved import target.
+ *
+ * @param target - The resolved import target.
+ * @returns The title and description strings.
+ */
+export function describeGitHubImport(target: GitHubRepoInfo): { title: string; description: string } {
+  const repo = `${target.owner}/${target.repo} ${target.ref === 'main' ? '' : `@ ${target.ref}`}`;
+  return {
+    title: `Import ${repo} from GitHub into Tau`,
+    description: `Get started with ${repo} by importing it into Tau.`,
+  };
+}
+
+/**
  * Find the best main file from a list of file paths based on kernel configurations.
  */
 export function findMainFile(filePaths: string[]): string | undefined {

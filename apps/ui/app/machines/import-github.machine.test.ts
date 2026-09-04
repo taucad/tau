@@ -22,10 +22,9 @@ vi.mock('#lib/github-api.js', () => ({
       endCursor: undefined,
     })),
     listFiles: vi.fn(async () => [{ path: 'main.ts', size: 100 }]),
-    downloadArchiveWithSize: vi.fn(),
     getArchiveUrl: vi.fn(
       ({ owner, repo }: { owner: string; repo: string }) =>
-        `/api/import?provider=github&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&ref=main`,
+        `http://localhost:4000/v1/repositories/archive?provider=github&owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&ref=main`,
     ),
     getAuthHeaders: vi.fn(() => ({ 'User-Agent': 'test' })),
   })),

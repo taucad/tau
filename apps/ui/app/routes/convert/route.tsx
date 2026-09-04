@@ -54,7 +54,6 @@ import { Loader } from '#components/ui/loader.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { metaConfig } from '#constants/meta.constants.js';
-import { SidebarOffset } from '#components/layout/sidebar-offset.js';
 import {
   converterExportFormats,
   converterImportFormats,
@@ -76,7 +75,6 @@ export const handle: Handle = {
       </Button>
     );
   },
-  enableFloatingSidebar: true,
 };
 
 type UploadedFileInfo = {
@@ -155,6 +153,7 @@ function ConverterContentInner(): React.JSX.Element {
   const [isConverting, setIsConverting] = useState(false);
 
   useEffect(() => {
+    let active = true;
     const runtimeClient = createRuntimeClient<typeof converterRuntime>({
       transport: webWorkerTransport({
         createWorker: () =>
@@ -164,8 +163,13 @@ function ConverterContentInner(): React.JSX.Element {
           }),
       }),
     });
-    setClient(runtimeClient);
+    queueMicrotask(() => {
+      if (active) {
+        setClient(runtimeClient);
+      }
+    });
     return () => {
+      active = false;
       runtimeClient.terminate();
     };
   }, []);
@@ -304,31 +308,29 @@ function ConverterContentInner(): React.JSX.Element {
             </div>
 
             {/* Bottom-left viewer controls */}
-            <SidebarOffset asChild via='left'>
-              <div className='pointer-events-none absolute bottom-2 left-2 z-10 flex w-90 shrink-0 flex-col gap-2'>
-                {/* File info overlay */}
-                {uploadedFile ? (
-                  <div className='pointer-events-auto w-100 rounded-md border bg-sidebar p-3'>
-                    <div className='flex items-center gap-1'>
-                      <div className='text-sm font-medium'>{uploadedFile.name}</div>
-                      <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
-                    </div>
-                    <div className='text-xs text-muted-foreground'>
-                      {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
-                    </div>
+            <div className='pointer-events-none absolute bottom-2 left-2 z-10 flex w-90 shrink-0 flex-col gap-2'>
+              {/* File info overlay */}
+              {uploadedFile ? (
+                <div className='pointer-events-auto w-100 rounded-md border bg-sidebar p-3'>
+                  <div className='flex items-center gap-1'>
+                    <div className='text-sm font-medium'>{uploadedFile.name}</div>
+                    <InfoTooltip>{formatConfigurations[uploadedFile.format].description}</InfoTooltip>
                   </div>
-                ) : undefined}
-                <ChatInterfaceGraphics className='w-100' />
-                <div className='pointer-events-auto flex items-center gap-2'>
-                  <FovControl className='w-60' />
-                  <GridSizeIndicator />
-                  <SectionViewControl />
-                  <MeasureControl />
-                  <ResetCameraControl />
-                  <ViewerSettings />
+                  <div className='text-xs text-muted-foreground'>
+                    {formatDisplayName(uploadedFile.format)} · {formatFileSize(uploadedFile.size)}
+                  </div>
                 </div>
+              ) : undefined}
+              <ChatInterfaceGraphics className='w-100' />
+              <div className='pointer-events-auto flex items-center gap-2'>
+                <FovControl className='w-60' />
+                <GridSizeIndicator />
+                <SectionViewControl />
+                <MeasureControl />
+                <ResetCameraControl />
+                <ViewerSettings />
               </div>
-            </SidebarOffset>
+            </div>
 
             {/* Export panel trigger */}
             <div className='absolute top-(--header-height) right-2 z-10 flex h-full gap-2 pb-[calc(var(--header-height)+var(--spacing)*2)]'>
@@ -372,141 +374,137 @@ function ConverterContentInner(): React.JSX.Element {
         </>
       ) : (
         // Landing state - no model loaded
-        <SidebarOffset asChild via='padding'>
-          <div className='container mx-auto mt-(--header-height) grid h-full items-start gap-8 px-4 md:pt-8 xl:grid-cols-[250px_1fr_250px]'>
-            {/* Import Formats - Left */}
-            <FormatsList
-              icon={Upload}
-              title='Import Formats'
-              description='Formats you can upload'
-              formats={converterImportFormats}
-              className='mt-30 max-xl:hidden'
-            />
+        <div className='container mx-auto mt-(--header-height) grid h-full items-start gap-8 px-4 md:pt-8 xl:grid-cols-[250px_1fr_250px]'>
+          {/* Import Formats - Left */}
+          <FormatsList
+            icon={Upload}
+            title='Import Formats'
+            description='Formats you can upload'
+            formats={converterImportFormats}
+            className='mt-30 max-xl:hidden'
+          />
 
-            {/* Center - Hero & Upload */}
-            <div className='flex flex-col items-center gap-8 pt-4'>
-              <div className='flex flex-col items-center gap-3 text-center'>
-                <h1 className='text-6xl font-bold tracking-tight'>3D Model Converter</h1>
-                <div className='flex flex-col items-center gap-0'>
-                  <p className='mb-8 max-w-2xl text-lg text-muted-foreground'>
-                    Convert 3D models between formats instantly. Free, secure, and fully offline.
-                  </p>
-                  <div className='text-md max-w-2xl text-muted-foreground italic'>
-                    Your data never leaves your browser{' '}
-                  </div>
-                  <Button asChild variant='link' className='text-sm underline'>
-                    <ExternalLink href={metaConfig.githubUrl} arrowSize='xs'>
-                      View source code
-                    </ExternalLink>
-                  </Button>
+          {/* Center - Hero & Upload */}
+          <div className='flex flex-col items-center gap-8 pt-4'>
+            <div className='flex flex-col items-center gap-3 text-center'>
+              <h1 className='text-6xl font-bold tracking-tight'>3D Model Converter</h1>
+              <div className='flex flex-col items-center gap-0'>
+                <p className='mb-8 max-w-2xl text-lg text-muted-foreground'>
+                  Convert 3D models between formats instantly. Free, secure, and fully offline.
+                </p>
+                <div className='text-md max-w-2xl text-muted-foreground italic'>
+                  Your data never leaves your browser{' '}
                 </div>
-              </div>
-
-              {/* Upload Area */}
-              <Dropzone className='w-full max-w-2xl' maxFiles={100} onDrop={handleFileDrop}>
-                <DropzoneEmptyState>
-                  <div className='flex flex-col items-center gap-6 py-4'>
-                    <div className='flex size-20 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10'>
-                      <Upload className='size-10 text-primary' />
-                    </div>
-                    <div className='flex flex-col items-center gap-2 text-center'>
-                      <h3 className='text-xl font-semibold'>Drop your 3D model here</h3>
-                      <p className='text-sm text-muted-foreground'>or click to browse your files</p>
-                    </div>
-                  </div>
-                </DropzoneEmptyState>
-              </Dropzone>
-
-              {/* Mobile Format Lists */}
-              <div className='w-full max-w-2xl space-y-6 xl:hidden'>
-                <FormatsListMobile title='Import Formats' formats={converterImportFormats} />
-                <FormatsListMobile title='Export Formats' formats={converterExportFormats} />
-              </div>
-
-              {/* Alternative Usage Methods */}
-              <div className='w-full max-w-2xl space-y-4 pb-8'>
-                <div className='text-center'>
-                  <h2 className='text-lg font-semibold'>Power Up Your Applications</h2>
-                  <p className='text-sm text-muted-foreground'>
-                    Add seamless 3D conversion to any project with our developer tools
-                  </p>
-                </div>
-
-                <div className='grid gap-4 xl:grid-cols-2'>
-                  {/* NPM Package */}
-                  <Card>
-                    <CardHeader>
-                      <div className='flex items-center gap-2'>
-                        <div className='flex size-8 items-center justify-center rounded-md bg-primary/10'>
-                          <Package className='size-4 text-primary' />
-                        </div>
-                        <CardTitle>NPM Package</CardTitle>
-                      </div>
-                      <CardDescription>
-                        <p>Integrate 3D conversion into your JavaScript and TypeScript applications.</p>
-                        <br />
-                        <p>
-                          Built for maximum flexibility with full support for both browser and Node.js environments.
-                        </p>
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <CodeBlock>
-                        <CodeBlockHeader>
-                          <CodeBlockTitle>Installation</CodeBlockTitle>
-                          <CodeBlockAction visibility='alwaysVisible'>
-                            <CopyButton
-                              size='xs'
-                              getText={() => {
-                                return 'pnpm add @taucad/cli';
-                              }}
-                            />
-                          </CodeBlockAction>
-                        </CodeBlockHeader>
-                        <CodeBlockContent>
-                          <Pre language='bash'>pnpm add @taucad/cli</Pre>
-                        </CodeBlockContent>
-                      </CodeBlock>
-                    </CardContent>
-                  </Card>
-
-                  {/* API */}
-                  <Card className='justify-between'>
-                    <CardHeader>
-                      <div className='flex items-center gap-2'>
-                        <div className='flex size-8 items-center justify-center rounded-md bg-primary/10'>
-                          <Code2 className='size-4 text-primary' />
-                        </div>
-                        <CardTitle>REST API</CardTitle>
-                      </div>
-                      <CardDescription>
-                        <p>Convert 3D models instantly with our REST API, accessible from any platform or language.</p>
-                        <br />
-                        <p>
-                          Get started in minutes with our managed cloud service, or deploy on your own infrastructure.
-                        </p>
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <Button asChild variant='outline' size='sm' className='w-full'>
-                        <Link to='https://docs.tau.new/runtime/api'>View API Documentation</Link>
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </div>
+                <Button asChild variant='link' className='text-sm underline'>
+                  <ExternalLink href={metaConfig.githubUrl} arrowSize='xs'>
+                    View source code
+                  </ExternalLink>
+                </Button>
               </div>
             </div>
 
-            {/* Export Formats - Right */}
-            <FormatsList
-              icon={Download}
-              title='Export Formats'
-              description='Formats you can convert to'
-              formats={converterExportFormats}
-              className='mt-30 max-xl:hidden'
-            />
+            {/* Upload Area */}
+            <Dropzone className='w-full max-w-2xl' maxFiles={100} onDrop={handleFileDrop}>
+              <DropzoneEmptyState>
+                <div className='flex flex-col items-center gap-6 py-4'>
+                  <div className='flex size-20 items-center justify-center rounded-full bg-linear-to-br from-primary/20 to-primary/10'>
+                    <Upload className='size-10 text-primary' />
+                  </div>
+                  <div className='flex flex-col items-center gap-2 text-center'>
+                    <h3 className='text-xl font-semibold'>Drop your 3D model here</h3>
+                    <p className='text-sm text-muted-foreground'>or click to browse your files</p>
+                  </div>
+                </div>
+              </DropzoneEmptyState>
+            </Dropzone>
+
+            {/* Mobile Format Lists */}
+            <div className='w-full max-w-2xl space-y-6 xl:hidden'>
+              <FormatsListMobile title='Import Formats' formats={converterImportFormats} />
+              <FormatsListMobile title='Export Formats' formats={converterExportFormats} />
+            </div>
+
+            {/* Alternative Usage Methods */}
+            <div className='w-full max-w-2xl space-y-4 pb-8'>
+              <div className='text-center'>
+                <h2 className='text-lg font-semibold'>Power Up Your Applications</h2>
+                <p className='text-sm text-muted-foreground'>
+                  Add seamless 3D conversion to any project with our developer tools
+                </p>
+              </div>
+
+              <div className='grid gap-4 xl:grid-cols-2'>
+                {/* NPM Package */}
+                <Card>
+                  <CardHeader>
+                    <div className='flex items-center gap-2'>
+                      <div className='flex size-8 items-center justify-center rounded-md bg-primary/10'>
+                        <Package className='size-4 text-primary' />
+                      </div>
+                      <CardTitle>NPM Package</CardTitle>
+                    </div>
+                    <CardDescription>
+                      <p>Integrate 3D conversion into your JavaScript and TypeScript applications.</p>
+                      <br />
+                      <p>Built for maximum flexibility with full support for both browser and Node.js environments.</p>
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <CodeBlock>
+                      <CodeBlockHeader>
+                        <CodeBlockTitle>Installation</CodeBlockTitle>
+                        <CodeBlockAction visibility='alwaysVisible'>
+                          <CopyButton
+                            size='xs'
+                            getText={() => {
+                              return 'pnpm add @taucad/cli';
+                            }}
+                          />
+                        </CodeBlockAction>
+                      </CodeBlockHeader>
+                      <CodeBlockContent>
+                        <Pre language='bash'>pnpm add @taucad/cli</Pre>
+                      </CodeBlockContent>
+                    </CodeBlock>
+                  </CardContent>
+                </Card>
+
+                {/* API */}
+                <Card className='justify-between'>
+                  <CardHeader>
+                    <div className='flex items-center gap-2'>
+                      <div className='flex size-8 items-center justify-center rounded-md bg-primary/10'>
+                        <Code2 className='size-4 text-primary' />
+                      </div>
+                      <CardTitle>REST API</CardTitle>
+                    </div>
+                    <CardDescription>
+                      <p>Convert 3D models instantly with our REST API, accessible from any platform or language.</p>
+                      <br />
+                      <p>
+                        Get started in minutes with our managed cloud service, or deploy on your own infrastructure.
+                      </p>
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button asChild variant='outline' size='sm' className='w-full'>
+                      <Link to='https://docs.tau.new/runtime/api'>View API Documentation</Link>
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </div>
-        </SidebarOffset>
+
+          {/* Export Formats - Right */}
+          <FormatsList
+            icon={Download}
+            title='Export Formats'
+            description='Formats you can convert to'
+            formats={converterExportFormats}
+            className='mt-30 max-xl:hidden'
+          />
+        </div>
       )}
 
       {/* Loading overlay */}

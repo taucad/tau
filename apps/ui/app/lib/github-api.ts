@@ -1,6 +1,12 @@
 import { Octokit } from '@octokit/rest';
-import type { GithubBranchesResponse } from '#routes/api.github-branches/route.js';
 import { metaConfig } from '#constants/meta.constants.js';
+import { ENV } from '#environment.config.js';
+
+type GithubBranchesResponse = {
+  readonly branches: ReadonlyArray<{ name: string; sha: string; updatedAt: number }>;
+  readonly hasMore: boolean;
+  readonly endCursor: string | undefined;
+};
 
 /**
  * Error thrown when GitHub's Git Trees API returns a truncated response.
@@ -102,7 +108,7 @@ class GitHubApiClient {
   /**
    * Get list of branches for a repository with commit timestamps.
    *
-   * Delegates to `/api/github-branches` because GitHub's GraphQL API rejects
+   * Delegates to Tau's API because GitHub's GraphQL API rejects
    * unauthenticated requests, and the token must stay server-side. The route
    * owns the query, the per-page sort and the default-branch hoist; it reports
    * a non-OK status when the token is missing or rejected, which surfaces here
@@ -128,7 +134,7 @@ class GitHubApiClient {
       parameters.set('cursor', cursor);
     }
 
-    const response = await fetch(`/api/github-branches?${parameters.toString()}`);
+    const response = await fetch(`${ENV.TAU_API_URL}/v1/repositories/branches?${parameters.toString()}`);
     if (!response.ok) {
       throw new Error(await response.text());
     }
@@ -189,18 +195,11 @@ class GitHubApiClient {
   }
 
   /**
-   * Download repository archive as a stream with size information
-   * Uses proxy to avoid CORS issues
-   * Returns both the stream and the content length from the response headers
-   *
-   * Note: GitHub API returns Content-Length header when using full refs like refs/heads/main
-   */
-  /**
    * Get the proxied archive download URL for a repository.
    * Intended for use by the import worker which fetches off the main thread.
    */
   public getArchiveUrl({ owner, repo, ref }: { owner: string; repo: string; ref: string }): string {
-    return `/api/import?${new URLSearchParams({ provider: 'github', owner, repo, ref })}`;
+    return `${ENV.TAU_API_URL}/v1/repositories/archive?${new URLSearchParams({ provider: 'github', owner, repo, ref })}`;
   }
 
   /**
@@ -211,51 +210,6 @@ class GitHubApiClient {
       'User-Agent': metaConfig.userAgent,
       accept: 'application/vnd.github.v3+json',
       'Accept-Encoding': 'identity',
-    };
-  }
-
-  public async downloadArchiveWithSize({
-    owner,
-    repo,
-    ref,
-    signal,
-  }: {
-    owner: string;
-    repo: string;
-    ref: string;
-    signal?: AbortSignal;
-  }): Promise<{
-    stream: ReadableStream<Uint8Array<ArrayBuffer>>;
-    size: number | undefined;
-  }> {
-    const proxyUrl = this.getArchiveUrl({ owner, repo, ref });
-
-    const response = await fetch(proxyUrl, {
-      headers: {
-        'User-Agent': metaConfig.userAgent,
-        accept: 'application/vnd.github.v3+json',
-        // Request uncompressed to get accurate size
-        'Accept-Encoding': 'identity',
-      },
-      redirect: 'follow',
-      signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to download archive: ${response.status} ${response.statusText}`);
-    }
-
-    if (!response.body) {
-      throw new Error('Response body is null');
-    }
-
-    // Get content length from the GET response
-    const contentLengthHeader = response.headers.get('Content-Length');
-    const size = contentLengthHeader ? Number.parseInt(contentLengthHeader, 10) : undefined;
-
-    return {
-      stream: response.body,
-      size,
     };
   }
 }

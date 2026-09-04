@@ -64,3 +64,6 @@ packages/geospec-engine/provenance.json
 
 # Codex spike build scratch
 .codex-spike-build/
+
+# Vite dep-optimizer caches in mocker fixtures
+fixtures/mocker/*/.cache/

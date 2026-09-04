@@ -48,6 +48,7 @@
     "@taucad/filesystem": "workspace:*",
     "@taucad/rpc": "workspace:*",
     "@taucad/types": "workspace:*",
-    "@taucad/utils": "workspace:*"
+    "@taucad/utils": "workspace:*",
+    "zod": "catalog:"
   }
 }

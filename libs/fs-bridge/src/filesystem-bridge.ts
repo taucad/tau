@@ -25,6 +25,7 @@ import type {
 } from '@taucad/filesystem';
 import type { BridgeServerHandle, Port, StringKeyedObject } from '@taucad/rpc/bridge';
 import { catchMessages, createBridgeCall, createBridgePort, createBridgeServer } from '@taucad/rpc/bridge';
+import { z } from 'zod';
 import {
   createFileSystemBridgeHello,
   fileSystemBridgeProtocolVersion,
@@ -443,19 +444,22 @@ export type RootedFileSystemHandlerFactory = (
 ) => FileSystemBridgeRuntimeService | undefined;
 
 type FileSystemBridgeConnectEnvelope = {
-  readonly v: unknown;
-  readonly type: unknown;
+  readonly v: typeof fileSystemBridgeProtocolVersion;
+  readonly type: string;
   readonly port: MessagePort;
   readonly root?: unknown;
 };
 
-const isFileSystemBridgeConnectEnvelope = (value: unknown): value is FileSystemBridgeConnectEnvelope =>
-  typeof value === 'object' &&
-  value !== null &&
-  'type' in value &&
-  'v' in value &&
-  'port' in value &&
-  value.port instanceof MessagePort;
+const fileSystemBridgeConnectEnvelopeSchema = (messageType: string): z.ZodType<FileSystemBridgeConnectEnvelope> =>
+  z.looseObject({
+    v: z.literal(fileSystemBridgeProtocolVersion),
+    type: z.literal(messageType),
+    port: z.instanceof(MessagePort),
+    root: z.unknown().optional(),
+  });
+
+const fileSystemBridgePeerEnvelopeSchema = (messageType: string) =>
+  z.looseObject({ v: z.unknown(), type: z.literal(messageType), port: z.instanceof(MessagePort) });
 
 const createUnavailableHandlers = (error: unknown): StringKeyedObject =>
   new Proxy(
@@ -504,6 +508,8 @@ function exposeFileSystemHandlers(
   options?: InternalExposeFileSystemOptions,
 ): ExposeFileSystemHandle {
   const messageType = options?.messageType ?? filesystemBridgeConnectMessageType;
+  const connectEnvelopeSchema = fileSystemBridgeConnectEnvelopeSchema(messageType);
+  const peerEnvelopeSchema = fileSystemBridgePeerEnvelopeSchema(messageType);
   const activePorts = new Set<MessagePort>();
   const serverHandles = new Map<MessagePort, BridgeServerHandle>();
   const portIds = new Map<MessagePort, string>();
@@ -555,10 +561,12 @@ function exposeFileSystemHandlers(
   });
 
   const handler = (event: MessageEvent<unknown>): void => {
-    if (isFileSystemBridgeConnectEnvelope(event.data) && event.data.type === messageType) {
-      const { port } = event.data;
-      if (event.data.v !== fileSystemBridgeProtocolVersion) {
-        const error = new FileSystemBridgeProtocolVersionError(event.data.v);
+    const parsedEnvelope = connectEnvelopeSchema.safeParse(event.data);
+    if (!parsedEnvelope.success) {
+      const peerEnvelope = peerEnvelopeSchema.safeParse(event.data);
+      if (peerEnvelope.success && peerEnvelope.data.v !== fileSystemBridgeProtocolVersion) {
+        const { port, v } = peerEnvelope.data;
+        const error = new FileSystemBridgeProtocolVersionError(v);
         port.postMessage({
           v: 1,
           k: 'lh',
@@ -566,99 +574,100 @@ function exposeFileSystemHandlers(
           e: { m: error.message, c: error.code, ...(error.stack === undefined ? {} : { s: error.stack }) },
         });
         port.close();
+      }
+      return;
+    }
+    const { port } = parsedEnvelope.data;
+    const stopAndReplayMessages = catchMessages(port);
+    const portId = `port_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    activePorts.add(port);
+    portIds.set(port, portId);
+
+    let disconnected = false;
+    const disconnectPort = (): void => {
+      if (disconnected) {
         return;
       }
-      const stopAndReplayMessages = catchMessages(port);
-      const portId = `port_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      disconnected = true;
+      const handle = serverHandles.get(port);
+      port.removeEventListener('close', disconnectPort);
+      activePorts.delete(port);
+      portIds.delete(port);
+      scopedPorts.delete(port);
+      serverHandles.delete(port);
+      safeDispose(() => handle?.dispose());
+      safeDispose(() => {
+        port.close();
+      });
+    };
+    port.addEventListener('close', disconnectPort);
 
-      activePorts.add(port);
-      portIds.set(port, portId);
-
-      let disconnected = false;
-      const disconnectPort = (): void => {
-        if (disconnected) {
-          return;
-        }
-        disconnected = true;
-        const handle = serverHandles.get(port);
-        port.removeEventListener('close', disconnectPort);
-        activePorts.delete(port);
-        portIds.delete(port);
-        scopedPorts.delete(port);
-        serverHandles.delete(port);
-        safeDispose(() => handle?.dispose());
-        safeDispose(() => {
-          port.close();
-        });
-      };
-      port.addEventListener('close', disconnectPort);
-
-      const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
-      const requestedRoot = typeof event.data.root === 'string' ? event.data.root : undefined;
-      const mutationContext = { originClientId: portId };
-      let portHandlers: StringKeyedObject;
-      let handlersAvailable = true;
-      let unavailableError: RootedFileSystemError | undefined;
-      if (requestedRoot === undefined) {
-        portHandlers = bindMutationContextForPort(handlers, mutationContext);
-      } else {
-        scopedPorts.add(port);
-        try {
-          const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext);
-          handlersAvailable = rootedHandlers !== undefined;
-          unavailableError = rootedHandlers === undefined ? new RootedFileSystemError('ROOT_UNAVAILABLE') : undefined;
-          portHandlers = rootedHandlers ?? createUnavailableHandlers(unavailableError!);
-        } catch (error) {
-          handlersAvailable = false;
-          unavailableError =
-            error instanceof RootedFileSystemError ? error : new RootedFileSystemError('ROOT_UNAVAILABLE');
-          portHandlers = createUnavailableHandlers(error);
-        }
+    const wrappedPort = wrapFileSystemBridgePort(port, 'expose-fs-bridge');
+    const requestedRoot = typeof parsedEnvelope.data.root === 'string' ? parsedEnvelope.data.root : undefined;
+    const mutationContext = { originClientId: portId };
+    let portHandlers: StringKeyedObject;
+    let handlersAvailable = true;
+    let unavailableError: RootedFileSystemError | undefined;
+    if (requestedRoot === undefined) {
+      portHandlers = bindMutationContextForPort(handlers, mutationContext);
+    } else {
+      scopedPorts.add(port);
+      try {
+        const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext);
+        handlersAvailable = rootedHandlers !== undefined;
+        unavailableError = rootedHandlers === undefined ? new RootedFileSystemError('ROOT_UNAVAILABLE') : undefined;
+        portHandlers = rootedHandlers ?? createUnavailableHandlers(unavailableError!);
+      } catch (error) {
+        handlersAvailable = false;
+        unavailableError =
+          error instanceof RootedFileSystemError ? error : new RootedFileSystemError('ROOT_UNAVAILABLE');
+        portHandlers = createUnavailableHandlers(error);
       }
-
-      const handlerRecord = portHandlers as { capabilities?: ProviderCapabilities; watch?: unknown };
-
-      const hello =
-        requestedRoot === undefined
-          ? handlerRecord.capabilities === undefined
-            ? createFileSystemBridgeHello({
-                state: 'workspace',
-                watchable: typeof handlerRecord.watch === 'function',
-              })
-            : createFileSystemBridgeHello({
-                state: 'ready',
-                capabilities: handlerRecord.capabilities,
-                watchable: typeof handlerRecord.watch === 'function',
-              })
-          : handlersAvailable
-            ? createFileSystemBridgeHello({
-                state: 'ready',
-                capabilities: handlerRecord.capabilities!,
-                watchable: typeof handlerRecord.watch === 'function',
-              })
-            : createFileSystemBridgeHello({
-                state: 'unavailable',
-                error: {
-                  code: 'ROOT_UNAVAILABLE',
-                  message: unavailableError?.message ?? 'The requested filesystem root is unavailable.',
-                },
-              });
-
-      const serverHandle = createBridgeServer<StringKeyedObject, WatchRequest, WatchEvent, FileSystemBridgeHello>(
-        portHandlers,
-        wrappedPort,
-        {
-          hello,
-          protocolSchemas: fileSystemBridgeSchemas,
-          onDisconnect() {
-            disconnectPort();
-          },
-        },
-      );
-      serverHandles.set(port, serverHandle);
-
-      stopAndReplayMessages();
     }
+
+    const handlerRecord = portHandlers as { capabilities?: ProviderCapabilities; watch?: unknown };
+
+    const hello =
+      requestedRoot === undefined
+        ? handlerRecord.capabilities === undefined
+          ? createFileSystemBridgeHello({
+              state: 'workspace',
+              watchable: typeof handlerRecord.watch === 'function',
+            })
+          : createFileSystemBridgeHello({
+              state: 'ready',
+              capabilities: handlerRecord.capabilities,
+              watchable: typeof handlerRecord.watch === 'function',
+            })
+        : handlersAvailable
+          ? createFileSystemBridgeHello({
+              state: 'ready',
+              capabilities: handlerRecord.capabilities!,
+              watchable: typeof handlerRecord.watch === 'function',
+            })
+          : createFileSystemBridgeHello({
+              state: 'unavailable',
+              error: {
+                code: 'ROOT_UNAVAILABLE',
+                message: unavailableError?.message ?? 'The requested filesystem root is unavailable.',
+              },
+            });
+
+    const serverHandle = createBridgeServer<StringKeyedObject, WatchRequest, WatchEvent, FileSystemBridgeHello>(
+      portHandlers,
+      wrappedPort,
+      {
+        hello,
+        protocolSchemas: fileSystemBridgeSchemas,
+        onDisconnect() {
+          disconnectPort();
+        },
+      },
+    );
+    serverHandles.set(port, serverHandle);
+
+    stopAndReplayMessages();
   };
 
   // Use addEventListener (not onmessage) so multiple listeners can coexist on

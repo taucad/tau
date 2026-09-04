@@ -1,7 +1,7 @@
 ---
 description: Documentation authoring guidelines (Pragmatic Diataxis)
 globs:
-  - "apps/ui/content/docs/**/*.mdx"
+  - "apps/docs/content/docs/**/*.mdx"
   - "docs/**/*.md"
 alwaysApply: false
 ---

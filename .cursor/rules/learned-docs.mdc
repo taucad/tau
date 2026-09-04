@@ -2,7 +2,7 @@
 description: Auto-curated learned facts and preferences for documentation authoring (policy/research/architecture docs and Fumadocs)
 globs:
   - "docs/**"
-  - "apps/ui/content/docs/**"
+  - "apps/docs/content/docs/**"
 alwaysApply: false
 ---
 

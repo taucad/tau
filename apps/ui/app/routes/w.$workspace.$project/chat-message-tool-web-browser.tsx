@@ -29,7 +29,7 @@ export function ChatMessageToolWebBrowser({
         .filter((domain): domain is string => domain !== undefined);
 
       return (
-        <ChatToolCard variant='minimal' status='loading' isDefaultOpen={false}>
+        <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={Globe} />
             <ChatToolCardTitle>

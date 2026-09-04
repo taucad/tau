@@ -118,6 +118,7 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     output: (output) => output.map((result) => `- [${result.url}]\n  ${result.content.slice(0, 200)}...`).join('\n'),
   },
   [toolName.editFile]: {
+    // oxlint-disable-next-line typescript/no-deprecated -- Historical edit transcripts retain their recorded target path.
     input: (input) => `targetFile: ${input.targetFile}\ncodeEdit: <${input.codeEdit?.length ?? 0} chars>`,
     output(output) {
       const { diffStats } = output;
@@ -150,18 +151,6 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
         `source: ${output.source}`,
         output.fingerprint ? `fingerprint: ${output.fingerprint}` : undefined,
       ),
-  },
-  [toolName.transferToCadExpert]: {
-    input: () => '',
-    output: (output) => output,
-  },
-  [toolName.transferToResearchExpert]: {
-    input: () => '',
-    output: (output) => output,
-  },
-  [toolName.transferBackToSupervisor]: {
-    input: () => '',
-    output: (output) => output,
   },
   [toolName.readFile]: {
     input: (input) =>
@@ -264,6 +253,9 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
 
 const serializeToolPart = <Name extends keyof MyTools>(part: ToolPartFor<Name>): string => {
   const name = getToolPartName(part);
+  if (!Object.hasOwn(toolSerializers, name)) {
+    return serializeDynamicToolPart({ ...part, type: 'dynamic-tool', toolName: name });
+  }
   const serializer = toolSerializers[name];
   const inputString = part.state !== 'input-streaming' && part.input !== undefined ? serializer.input(part.input) : '';
   const resultString =

@@ -76,17 +76,23 @@ vi.mock('#components/chat/chat-tool-file-operation.js', () => ({
   CollapsibleFileOperation({
     targetFile,
     diffStats,
+    content,
   }: {
     readonly targetFile: string;
     readonly diffStats?: { linesAdded: number; linesRemoved: number };
+    readonly content?: string;
   }): React.JSX.Element {
     return (
       <div
+        role='region'
+        aria-label='File operation preview'
         data-testid='collapsible-file-operation'
         data-target-file={targetFile}
         data-lines-added={diffStats?.linesAdded ?? ''}
         data-lines-removed={diffStats?.linesRemoved ?? ''}
-      />
+      >
+        {content}
+      </div>
     );
   },
 }));
@@ -175,4 +181,17 @@ describe('ChatMessageToolFileEdit — no-op edit rendering', () => {
     expect(screen.queryByTestId('chat-tool-card')).toBeNull();
     expect(screen.queryByText('Edit attempted, no changes')).toBeNull();
   });
+});
+
+it('should preview deterministic replacement text while input streams', () => {
+  render(
+    <ChatMessageToolFileEdit
+      part={{
+        toolCallId: 'streaming-edit',
+        state: 'input-streaming',
+        input: { targetFile: 'main.scad', oldString: 'old', newString: 'replacement in progress' },
+      }}
+    />,
+  );
+  expect(screen.getByRole('region', { name: 'File operation preview' })).toHaveTextContent('replacement in progress');
 });

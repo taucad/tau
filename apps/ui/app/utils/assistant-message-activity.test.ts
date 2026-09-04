@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MyUIMessage, ScreenshotView } from '@taucad/chat';
-import { fileUnchangedMarker } from '@taucad/chat/constants';
+import { fileUnchangedMarker, toolName, toolNames } from '@taucad/chat/constants';
 import type { ActivityGroup, FoldableRun, StandaloneRun } from '#utils/assistant-message-activity.js';
 import {
   classifyActivityPart,
@@ -33,9 +33,31 @@ const readFilePart = (state?: string) => toolPart('tool-read_file', state);
 const listDirectoryPart = (state?: string) => toolPart('tool-list_directory', state);
 const grepPart = (state?: string) => toolPart('tool-grep', state);
 const globPart = (state?: string) => toolPart('tool-glob_search', state);
-const editFilePart = (state?: string) => toolPart('tool-edit_file', state);
-const createFilePart = (state?: string) => toolPart('tool-create_file', state);
-const deleteFilePart = (state?: string) => toolPart('tool-delete_file', state);
+const mutationDiff = { linesAdded: 1, linesRemoved: 1, originalContent: 'old', modifiedContent: 'new' };
+const editFilePart = (
+  targetFile = 'main.scad',
+  diffStats = mutationDiff,
+): Extract<Part, { type: 'tool-edit_file' }> & { state: 'output-available' } => ({
+  type: 'tool-edit_file',
+  toolCallId: `edit-${targetFile}`,
+  state: 'output-available',
+  input: { targetFile, oldString: 'old', newString: 'new' },
+  output: { diffStats },
+});
+const createFilePart = (targetFile = 'main.scad', diffStats = mutationDiff): Part => ({
+  type: 'tool-create_file',
+  toolCallId: `create-${targetFile}`,
+  state: 'output-available',
+  input: { targetFile, content: diffStats.modifiedContent },
+  output: { diffStats },
+});
+const deleteFilePart = (targetFile = 'main.scad'): Part => ({
+  type: 'tool-delete_file',
+  toolCallId: `delete-${targetFile}`,
+  state: 'output-available',
+  input: { targetFile },
+  output: { message: 'Deleted' },
+});
 const exportGeometryPart = (state?: string) => toolPart('tool-export_geometry', state);
 const webSearchPart = (state?: string) => toolPart('tool-web_search', state);
 const webBrowserPart = (state?: string) => toolPart('tool-web_browser', state);
@@ -50,7 +72,17 @@ const testModelPart = (state?: string): Part =>
     ...toolPart('tool-test_model', state),
     output: { passes: [], failures: [] },
   }) as unknown as Part;
-const transferPart = (state?: string) => toolPart('tool-transfer_to_cad_expert', state);
+
+const skillPart = (
+  resourceUri = 'system:skills/cad-openscad/SKILL.md',
+  source = 'system',
+): Extract<Part, { type: 'tool-use_skill' }> & { state: 'output-available' } => ({
+  type: 'tool-use_skill',
+  toolCallId: `skill-${resourceUri}`,
+  state: 'output-available',
+  input: { skillName: 'cad-openscad' },
+  output: { skillName: 'cad-openscad', source, resourceUri, content: '# Skill', frontmatter: {}, supportingFiles: [] },
+});
 
 type ScreenshotImage = { view: ScreenshotView; dataUrl: string };
 
@@ -166,10 +198,10 @@ describe('classifyActivityPart', () => {
     expect(classifyActivityPart(part)).toBe('skip');
   });
 
-  it('should classify use_skill tool parts as visible data singletons', () => {
-    const useSkillToolPart = { type: 'tool-use_skill', state: 'output-available' } as unknown as Part;
+  it('should classify skill reads as research', () => {
+    const useSkillToolPart = skillPart();
 
-    expect(classifyActivityPart(useSkillToolPart)).toBe('data');
+    expect(classifyActivityPart(useSkillToolPart)).toBe('research');
   });
 
   it('should classify web_search and web_browser into research category', () => {
@@ -184,10 +216,10 @@ describe('classifyActivityPart', () => {
     expect(classifyActivityPart(globPart())).toBe('research');
   });
 
-  it('should classify edit_file, create_file, delete_file, export_geometry into write category', () => {
-    expect(classifyActivityPart(editFilePart())).toBe('write');
-    expect(classifyActivityPart(createFilePart())).toBe('write');
-    expect(classifyActivityPart(deleteFilePart())).toBe('write');
+  it('should aggregate mutations while keeping export deliverables standalone', () => {
+    expect(classifyActivityPart(editFilePart())).toBe('research');
+    expect(classifyActivityPart(createFilePart())).toBe('research');
+    expect(classifyActivityPart(deleteFilePart())).toBe('research');
     expect(classifyActivityPart(exportGeometryPart())).toBe('write');
   });
 
@@ -195,10 +227,6 @@ describe('classifyActivityPart', () => {
     expect(classifyActivityPart(kernelResultPart())).toBe('research');
     expect(classifyActivityPart(screenshotPart())).toBe('research');
     expect(classifyActivityPart(testModelPart())).toBe('research');
-  });
-
-  it('should classify transfer tools as transfer', () => {
-    expect(classifyActivityPart(transferPart())).toBe('transfer');
   });
 });
 
@@ -262,21 +290,15 @@ describe('groupAssistantParts', () => {
       expect(groups[0]!.kind).toBe('singleton');
     });
 
-    it('should pass use_skill tool parts as visible singletons', () => {
-      const parts: Parts = [{ type: 'tool-use_skill', state: 'output-available' } as unknown as Part];
+    it('should aggregate skill reads with adjacent files in original order', () => {
+      const parts: Parts = [readFilePart(), skillPart(), readFilePart()];
       const groups = groupAssistantParts(parts);
-
       expect(groups).toHaveLength(1);
-      expect(groups[0]!.kind).toBe('singleton');
-      expect(groups[0]!.category).toBe('data');
-    });
-
-    it('should pass transfer tools as singletons', () => {
-      const parts: Parts = [transferPart()];
-      const groups = groupAssistantParts(parts);
-
-      expect(groups).toHaveLength(1);
-      expect(groups[0]!.kind).toBe('singleton');
+      const group = expectAggregated(groups[0]!);
+      expect(group.category).toBe('research');
+      expect(group.parts).toEqual(parts);
+      expect(group.partIndices).toEqual([0, 1, 2]);
+      expect(group.summary).toBe('Loaded 1 tool, explored 2 files');
     });
   });
 
@@ -312,7 +334,7 @@ describe('groupAssistantParts', () => {
     });
 
     it('should keep consecutive write tools as singletons', () => {
-      const parts: Parts = [editFilePart(), createFilePart(), deleteFilePart()];
+      const parts: Parts = [exportGeometryPart(), exportGeometryPart(), exportGeometryPart()];
       const groups = groupAssistantParts(parts);
 
       expect(groups).toHaveLength(3);
@@ -356,7 +378,7 @@ describe('groupAssistantParts', () => {
     });
 
     it('should split research from non-aggregatable categories', () => {
-      const parts: Parts = [readFilePart(), listDirectoryPart(), editFilePart(), createFilePart()];
+      const parts: Parts = [readFilePart(), listDirectoryPart(), exportGeometryPart(), exportGeometryPart()];
       const groups = groupAssistantParts(parts);
 
       expect(groups).toHaveLength(3);
@@ -420,8 +442,8 @@ describe('groupAssistantParts', () => {
       const parts: Parts = [
         readFilePart(),
         grepPart(),
-        editFilePart(),
-        createFilePart(),
+        exportGeometryPart(),
+        exportGeometryPart(),
         textPart('Made some changes'),
         readFilePart(),
         textPart('Final answer'),
@@ -517,7 +539,7 @@ describe('groupAssistantParts', () => {
     });
 
     it('should not bridge across non-bridging singletons (write breaks the bridge)', () => {
-      const parts: Parts = [grepPart(), editFilePart(), grepPart()];
+      const parts: Parts = [grepPart(), exportGeometryPart(), grepPart()];
       const groups = groupAssistantParts(parts);
 
       expect(groups).toHaveLength(3);
@@ -584,7 +606,7 @@ describe('groupAssistantParts', () => {
     });
 
     it('should not bridge across reasoning followed by a non-research part', () => {
-      const parts: Parts = [grepPart(), reasoningPart(), editFilePart()];
+      const parts: Parts = [grepPart(), reasoningPart(), exportGeometryPart()];
       const groups = groupAssistantParts(parts);
 
       expect(groups).toHaveLength(3);
@@ -925,8 +947,7 @@ describe('isSectionFoldable', () => {
     expect(isSectionFoldable(singleton('write'))).toBe(false);
   });
 
-  it('should return false for transfer, data, and text singletons', () => {
-    expect(isSectionFoldable(singleton('transfer'))).toBe(false);
+  it('should return false for data and text singletons', () => {
     expect(isSectionFoldable(singleton('data'))).toBe(false);
     expect(isSectionFoldable(singleton('text'))).toBe(false);
   });
@@ -960,7 +981,7 @@ describe('partitionActivityRuns', () => {
   });
 
   it('should emit standalone runs for consecutive write singletons (no foldable run)', () => {
-    const groups = groupAssistantParts([editFilePart(), createFilePart()]);
+    const groups = groupAssistantParts([exportGeometryPart(), exportGeometryPart()]);
     const runs = partitionActivityRuns(groups);
 
     expect(runs).toHaveLength(2);
@@ -971,7 +992,7 @@ describe('partitionActivityRuns', () => {
   });
 
   it('should split a foldable run when a write group breaks it', () => {
-    const groups = groupAssistantParts([readFilePart(), editFilePart(), grepPart()]);
+    const groups = groupAssistantParts([readFilePart(), exportGeometryPart(), grepPart()]);
     const runs = partitionActivityRuns(groups);
 
     expect(runs).toHaveLength(3);
@@ -1003,9 +1024,9 @@ describe('partitionActivityRuns', () => {
     const groups = groupAssistantParts([
       reasoningPart(),
       readFilePart(),
-      editFilePart(),
+      exportGeometryPart(),
       grepPart(),
-      createFilePart(),
+      exportGeometryPart(),
       textPart('Final answer'),
     ]);
     const runs = partitionActivityRuns(groups);
@@ -1046,10 +1067,10 @@ describe('partitionActivityRuns', () => {
   it('should preserve absolute indices through standalone breaks', () => {
     const groups = groupAssistantParts([
       readFilePart(),
-      editFilePart(),
+      exportGeometryPart(),
       reasoningPart(),
       grepPart(),
-      createFilePart(),
+      exportGeometryPart(),
       webSearchPart(),
     ]);
     const runs = partitionActivityRuns(groups);
@@ -1065,10 +1086,10 @@ describe('partitionActivityRuns', () => {
     expect(expectFoldable(runs[4]!).startIndex).toBe(5);
   });
 
-  it('should keep transfer and data singletons as standalones', () => {
+  it('should keep export and data singletons as standalones', () => {
     const groups = groupAssistantParts([
       readFilePart(),
-      transferPart(),
+      exportGeometryPart(),
       { type: 'data-context-compaction', data: {} } as unknown as Part,
       grepPart(),
     ]);
@@ -1076,7 +1097,7 @@ describe('partitionActivityRuns', () => {
 
     expect(runs).toHaveLength(4);
     expectFoldable(runs[0]!);
-    expect(expectStandalone(runs[1]!).group.category).toBe('transfer');
+    expect(expectStandalone(runs[1]!).group.category).toBe('write');
     expect(expectStandalone(runs[2]!).group.category).toBe('data');
     expectFoldable(runs[3]!);
   });
@@ -1208,7 +1229,7 @@ describe('shouldWrapRun', () => {
     });
 
     it('should wrap each side independently when a non-foldable part splits two research runs', () => {
-      const groups = groupAssistantParts([screenshotPart(), editFilePart(), grepPart()]);
+      const groups = groupAssistantParts([screenshotPart(), exportGeometryPart(), grepPart()]);
       const runs = partitionActivityRuns(groups);
 
       expect(runs).toHaveLength(3);
@@ -1216,5 +1237,179 @@ describe('shouldWrapRun', () => {
       expect(expectStandalone(runs[1]!).group.category).toBe('write');
       expect(shouldWrapRun(expectFoldable(runs[2]!))).toBe(true);
     });
+  });
+});
+
+describe('file mutations within activity', () => {
+  it('should preserve every mutation and reasoning row in one ordered mixed activity run', () => {
+    const parts: Parts = [
+      readFilePart(),
+      grepPart(),
+      editFilePart(),
+      reasoningPart(),
+      createFilePart('tests.ts'),
+      deleteFilePart('old.ts'),
+      testModelPartWithCounts(3, 1),
+    ];
+    const groups = groupAssistantParts(parts);
+    expect(groups).toHaveLength(1);
+    const group = expectAggregated(groups[0]!);
+    expect(group.parts).toEqual(parts);
+    expect(group.partIndices).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(group.summary).toBe('Edited 3 files, explored 1 file, 1 search, 4 tests');
+    expect(group.summaryVerbActive).toBe('Working');
+    const runs = partitionActivityRuns(groups);
+    expect(runs).toHaveLength(1);
+    expect(shouldWrapRun(expectFoldable(runs[0]!))).toBe(true);
+  });
+
+  it('should count distinct full paths rather than tool calls or basenames', () => {
+    const group = expectAggregated(
+      groupAssistantParts([
+        editFilePart('a/main.scad'),
+        editFilePart('a/main.scad'),
+        createFilePart('b/main.scad'),
+        deleteFilePart('a/main.scad'),
+      ])[0]!,
+    );
+    expect(group.summary).toBe('Edited 2 files');
+    expect(group.summaryVerbActive).toBe('Editing');
+    expect(group.parts).toHaveLength(4);
+  });
+
+  it('should count empty creations and snapshot-less deletions but exclude no-op edits', () => {
+    const emptyDiff = { linesAdded: 0, linesRemoved: 0, originalContent: '', modifiedContent: '' };
+    const group = expectAggregated(
+      groupAssistantParts([
+        createFilePart('empty.ts', emptyDiff),
+        deleteFilePart('old.ts'),
+        editFilePart('unchanged.ts', emptyDiff),
+      ])[0]!,
+    );
+    expect(group.summary).toBe('Edited 2 files, 1 edit made no changes');
+  });
+
+  it('should report failed and unfinished mutations without claiming success', () => {
+    const failed: Part = {
+      type: 'tool-edit_file',
+      toolCallId: 'failed',
+      state: 'output-error',
+      input: { targetFile: 'failed.ts', oldString: 'old', newString: 'new' },
+      errorText: 'Missing match',
+    };
+    const pending: Part = { type: 'tool-create_file', toolCallId: 'pending', state: 'input-streaming', input: {} };
+    expect(expectAggregated(groupAssistantParts([failed, pending])[0]!).summary).toBe(
+      'Activity: 1 file operation failed, 1 unfinished file operation',
+    );
+    expect(expectAggregated(groupAssistantParts([grepPart(), failed])[0]!).summary).toBe(
+      'Explored 1 search, 1 file operation failed',
+    );
+    expect(expectAggregated(groupAssistantParts([editFilePart(), failed, pending])[0]!).summary).toBe(
+      'Edited 1 file, 1 file operation failed, 1 unfinished file operation',
+    );
+    const noOp = editFilePart('unchanged.ts', {
+      linesAdded: 0,
+      linesRemoved: 0,
+      originalContent: 'same',
+      modifiedContent: 'same',
+    });
+    expect(expectAggregated(groupAssistantParts([noOp])[0]!).summary).toBe('Activity: 1 edit made no changes');
+  });
+
+  it('should keep the wrapper stable as mutations and trailing reasoning stream into the run', () => {
+    const parts: Parts = [
+      grepPart(),
+      reasoningPart(),
+      editFilePart(),
+      reasoningPart(),
+      createFilePart('tests.ts'),
+      testModelPartWithCounts(4, 0),
+    ];
+    for (let length = 1; length <= parts.length; length++) {
+      const runs = partitionActivityRuns(groupAssistantParts(parts.slice(0, length)));
+      expect(runs).toHaveLength(1);
+      const run = expectFoldable(runs[0]!);
+      expect(run.startIndex).toBe(0);
+      expect(shouldWrapRun(run)).toBe(true);
+      expect(expectAggregated(run.groups[0]!).partIndices[0]).toBe(0);
+    }
+  });
+});
+
+describe('skill activity summary contract', () => {
+  it('classifies the complete supported static inventory explicitly', () => {
+    const categories = {
+      [toolName.useSkill]: 'research',
+      [toolName.readFile]: 'research',
+      [toolName.listDirectory]: 'research',
+      [toolName.grep]: 'research',
+      [toolName.globSearch]: 'research',
+      [toolName.webSearch]: 'research',
+      [toolName.webBrowser]: 'research',
+      [toolName.createFile]: 'research',
+      [toolName.editFile]: 'research',
+      [toolName.deleteFile]: 'research',
+      [toolName.getKernelResult]: 'research',
+      [toolName.screenshot]: 'research',
+      [toolName.testModel]: 'research',
+      [toolName.exportGeometry]: 'write',
+    } as const;
+    expect([...toolNames].sort()).toEqual(Object.keys(categories).sort());
+    for (const name of toolNames) {
+      expect(classifyActivityPart(toolPart(`tool-${name}`))).toBe(categories[name]);
+    }
+  });
+
+  it('deduplicates resolved identities while preserving every chronological row', () => {
+    const parts = [skillPart(), skillPart(), skillPart('store:other', 'tau-store'), skillPart('store:other', 'user')];
+    const group = expectAggregated(groupAssistantParts(parts)[0]!);
+    expect(group.summary).toBe('Loaded 3 tools');
+    expect(group.parts).toEqual(parts);
+  });
+
+  it('composes all three work families without losing clauses or changing file deduplication', () => {
+    const group = expectAggregated(groupAssistantParts([skillPart(), editFilePart(), editFilePart(), grepPart()])[0]!);
+    expect(group.summary).toBe('Loaded 1 tool, edited 1 file, explored 1 search');
+    expect(group.summaryVerbActive).toBe('Working');
+  });
+
+  it.each([
+    ['output-error', 'Activity: 1 tool load failed'],
+    ['output-denied', 'Activity: 1 tool load failed'],
+    ['input-streaming', 'Activity: 1 unfinished tool load'],
+    ['input-available', 'Activity: 1 unfinished tool load'],
+  ] as const)('does not count %s as a successful load', (state, summary) => {
+    const pending: Part =
+      state === 'output-error'
+        ? { type: 'tool-use_skill', toolCallId: 'skill', state, input: undefined, errorText: 'Unavailable' }
+        : state === 'output-denied'
+          ? {
+              type: 'tool-use_skill',
+              toolCallId: 'skill',
+              state,
+              input: { skillName: 'missing' },
+              approval: { id: 'approval', approved: false },
+            }
+          : { type: 'tool-use_skill', toolCallId: 'skill', state, input: { skillName: 'missing' } };
+    const group = expectAggregated(groupAssistantParts([pending])[0]!);
+    expect(group.summary).toBe(summary);
+    expect(group.summaryVerbActive).toBe('Loading');
+    expect(shouldWrapRun(expectFoldable(partitionActivityRuns([group])[0]!))).toBe(true);
+  });
+
+  it('retains independent failure outcomes alongside successful work', () => {
+    const failure: Part = {
+      type: 'tool-use_skill',
+      toolCallId: 'failed',
+      state: 'output-error',
+      input: undefined,
+      errorText: 'Unavailable',
+    };
+    expect(expectAggregated(groupAssistantParts([skillPart(), failure])[0]!).summary).toBe(
+      'Loaded 1 tool, 1 tool load failed',
+    );
+    expect(expectAggregated(groupAssistantParts([readFilePart(), failure])[0]!).summary).toBe(
+      'Explored 1 file, 1 tool load failed',
+    );
   });
 });

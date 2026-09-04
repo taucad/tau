@@ -89,7 +89,9 @@ function ExportGeometryDownloadSplitButton({
   const isDownloadBusy = isArtifactDownloadBusy || isExporting;
 
   useEffect(() => {
-    setSelectedFormat(exportedFormat);
+    queueMicrotask(() => {
+      setSelectedFormat(exportedFormat);
+    });
   }, [exportedFormat]);
 
   const cadActor = geometryUnits.get(targetFile);
@@ -254,7 +256,7 @@ export function ChatMessageToolExportGeometry({
       }
 
       return (
-        <ChatToolCard variant='minimal' status='loading' isDefaultOpen={false}>
+        <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={CheckCircle} />
             <ChatToolCardTitle>

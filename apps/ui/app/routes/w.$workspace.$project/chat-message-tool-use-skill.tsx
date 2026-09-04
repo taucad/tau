@@ -1,4 +1,4 @@
-import { Blocks } from 'lucide-react';
+import { Wrench } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import {
@@ -18,10 +18,10 @@ function LoadingSkillRow({ skillName }: { readonly skillName: string }): React.J
   return (
     <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
       <ChatToolCardHeader>
-        <ChatToolCardIcon icon={Blocks} />
+        <ChatToolCardIcon icon={Wrench} />
         <ChatToolCardTitle>
-          <ChatToolLabel verb='Using skill'>
-            <ChatToolDescription>{skillName}</ChatToolDescription>
+          <ChatToolLabel verb='Reading'>
+            <ChatToolDescription>{skillName ? `${skillName} skill…` : 'skill…'}</ChatToolDescription>
           </ChatToolLabel>
         </ChatToolCardTitle>
       </ChatToolCardHeader>
@@ -29,15 +29,13 @@ function LoadingSkillRow({ skillName }: { readonly skillName: string }): React.J
   );
 }
 
-function UsedSkillRow({
+function ReadSkillRow({
   skillName,
   skillPath,
-  resourceUri,
   source,
 }: {
   readonly skillName: string;
   readonly skillPath?: string;
-  readonly resourceUri: string;
   readonly source: string;
 }): React.JSX.Element {
   const label = skillPath ? <FileLink path={skillPath}>{skillName}</FileLink> : <span>{skillName}</span>;
@@ -45,13 +43,13 @@ function UsedSkillRow({
   return (
     <ChatToolCard variant='minimal' status='ready' isCollapsible={false}>
       <ChatToolCardHeader>
-        <ChatToolCardIcon icon={Blocks} />
+        <ChatToolCardIcon icon={Wrench} />
         <ChatToolCardTitle>
-          <ChatToolLabel verb='Used skill'>
+          <ChatToolLabel verb='Read'>
             <ChatToolDescription>
               {label}
-              <span className='text-muted-foreground'> {source}</span>
-              {!skillPath && <span className='text-muted-foreground'> {resourceUri}</span>}
+              {' skill'}
+              {source === 'system' && <span> system</span>}
             </ChatToolDescription>
           </ChatToolLabel>
         </ChatToolCardTitle>
@@ -64,22 +62,17 @@ export function ChatMessageToolUseSkill({ part }: { readonly part: UseSkillInvoc
   switch (part.state) {
     case 'input-streaming':
     case 'input-available': {
-      return <LoadingSkillRow skillName={part.input?.skillName ?? 'skill'} />;
+      return <LoadingSkillRow skillName={part.input?.skillName ?? ''} />;
     }
 
     case 'output-available': {
       return (
-        <UsedSkillRow
-          skillName={part.output.skillName}
-          skillPath={part.output.skillPath}
-          resourceUri={part.output.resourceUri}
-          source={part.output.source}
-        />
+        <ReadSkillRow skillName={part.output.skillName} skillPath={part.output.skillPath} source={part.output.source} />
       );
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} icon={Blocks} noun='skill use' />;
+      return <ChatToolError errorText={part.errorText} icon={Wrench} noun='skill read' />;
     }
 
     case 'approval-requested':

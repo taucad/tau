@@ -6,24 +6,24 @@
  *
  * - **Outer fold (per-run)**: a contiguous run of `reasoning` singletons +
  *   aggregated `research` groups can collapse into a single `ChatActivitySection`.
- *   Runs are scoped — `write`/`data`/`transfer`/`text` groups break the run and
- *   render at the top level so file diffs and the final answer are never tucked
+ *   Runs are scoped — `write`/`data`/`text` groups break the run and
+ *   render at the top level so export deliverables and the final answer are never tucked
  *   inside an activity fold.
  * - **Inner fold**: the aggregated `research` group (web + file exploration +
- *   CAD verification) shows a one-line combined summary that expands to the
+ *   file mutations + CAD verification) shows a one-line combined summary that expands to the
  *   individual tool rows.
  *
  * Streaming bias: while a message is still in-flight, the trailing run stays
  * expanded so progress is visible. Earlier runs auto-collapse once any downstream
- * activity (more tools, file edits, text) follows them.
+ * standalone activity (exports, data, text) follows them.
  *
  * Parts are never reordered — consecutive runs of aggregatable categories merge,
  * while text or reasoning between tools forces a split. Empty/whitespace text
  * parts and `step-start` are transparent (they neither render nor split).
  *
- * File edits and persisted interchange exports (`export_geometry`) render as
- * `write` singletons so rich cards stay top-level. CAD verification (kernel
- * checks, screenshots, tests) is part of the `research` exploration phase —
+ * Persisted interchange exports (`export_geometry`) render as `write` singletons.
+ * File mutations and CAD verification (kernel checks, screenshots, tests)
+ * are part of the `research` activity phase —
  * its tool cards still render their full diagnostics inline when the
  * aggregated group is expanded.
  */
@@ -36,14 +36,13 @@ import { fileUnchangedMarker } from '@taucad/chat/constants';
 /**
  * Activity categories for message part classification.
  *
- * - `text` / `reasoning` / `data` / `transfer` → rendered as singletons (no aggregation).
- * - `write` → singleton preserving the rich per-call diff card (includes
- *   `export_geometry` deliverables persisted under `.tau/artifacts`).
- * - `research` → aggregatable (web search + file exploration + CAD verification combined).
+ * - `text` / `reasoning` / `data` → rendered as singletons (no aggregation).
+ * - `write` → singleton for `export_geometry` deliverables persisted under `.tau/artifacts`.
+ * - `research` → aggregatable (exploration + file mutations + CAD verification).
  * - `skip` → invisible parts (`step-start`, `data-usage`, `data-context-usage`,
  *   empty/whitespace text).
  */
-export type ActivityCategory = 'text' | 'reasoning' | 'research' | 'write' | 'transfer' | 'data' | 'skip';
+export type ActivityCategory = 'text' | 'reasoning' | 'research' | 'write' | 'data' | 'skip';
 
 const aggregatableCategories = new Set<ActivityCategory>(['research']);
 
@@ -83,18 +82,14 @@ const partTypeCategoryMap = new Map<string, ActivityCategory>([
   ['tool-get_kernel_result', 'research'],
   ['tool-screenshot', 'research'],
   ['tool-test_model', 'research'],
-  ['tool-use_skill', 'data'],
+  ['tool-use_skill', 'research'],
 
-  // Write tools: singletons (preserve rich per-call diff cards)
-  ['tool-edit_file', 'write'],
-  ['tool-create_file', 'write'],
-  ['tool-delete_file', 'write'],
+  // File mutations share the activity fold; their own disclosure holds the diff card.
+  ['tool-edit_file', 'research'],
+  ['tool-create_file', 'research'],
+  ['tool-delete_file', 'research'],
+  // Export deliverables remain standalone.
   ['tool-export_geometry', 'write'],
-
-  // Transfer tools
-  ['tool-transfer_to_cad_expert', 'transfer'],
-  ['tool-transfer_to_research_expert', 'transfer'],
-  ['tool-transfer_back_to_supervisor', 'transfer'],
 ]);
 
 /**
@@ -211,7 +206,6 @@ const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts 
   let renders = 0;
   let images = 0;
   let tests = 0;
-
   for (const part of parts) {
     switch (part.type) {
       case 'tool-read_file': {
@@ -274,10 +268,97 @@ const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts 
   return { verb: 'Explored', verbActive: 'Exploring', detail: segments.join(', ') };
 };
 
+const summarizeMutations = (parts: readonly MyMessagePart[]) => {
+  const mutationParts = parts.filter(
+    (part) => part.type === 'tool-edit_file' || part.type === 'tool-create_file' || part.type === 'tool-delete_file',
+  );
+  const editedFiles = new Set<string>();
+  let failed = 0;
+  let unchanged = 0;
+  let unfinished = 0;
+  for (const part of mutationParts) {
+    if (part.state === 'output-error' || part.state === 'output-denied') {
+      failed++;
+    } else if (part.state !== 'output-available') {
+      unfinished++;
+    } else if (
+      part.type === 'tool-edit_file' &&
+      part.output.diffStats.linesAdded === 0 &&
+      part.output.diffStats.linesRemoved === 0
+    ) {
+      unchanged++;
+    } else {
+      // oxlint-disable-next-line typescript/no-deprecated -- Persisted Morph edits still need their original target path.
+      editedFiles.add(part.input.targetFile);
+    }
+  }
+  const outcomes: string[] = [];
+  if (failed > 0) {
+    outcomes.push(`${pluralize(failed, 'file operation')} failed`);
+  }
+  if (unchanged > 0) {
+    outcomes.push(`${pluralize(unchanged, 'edit')} made no changes`);
+  }
+  if (unfinished > 0) {
+    outcomes.push(pluralize(unfinished, 'unfinished file operation'));
+  }
+  return { editedFiles: editedFiles.size, operationCount: mutationParts.length, outcomes };
+};
+
+const composeActivitySummary = (parts: readonly MyMessagePart[], exploration: SummaryParts): SummaryParts => {
+  const mutations = summarizeMutations(parts);
+  const skillParts = parts.filter((part) => part.type === 'tool-use_skill');
+  if (mutations.operationCount === 0 && skillParts.length === 0) {
+    return exploration;
+  }
+  const loadedSkills = new Set<string>();
+  let failedLoads = 0;
+  let unfinishedLoads = 0;
+  for (const part of skillParts) {
+    if (part.state === 'output-available') {
+      loadedSkills.add(JSON.stringify([part.output.source, part.output.resourceUri]));
+    } else if (part.state === 'output-error' || part.state === 'output-denied') {
+      failedLoads++;
+    } else {
+      unfinishedLoads++;
+    }
+  }
+  const { outcomes } = mutations;
+  if (failedLoads > 0) {
+    outcomes.push(`${pluralize(failedLoads, 'tool load')} failed`);
+  }
+  if (unfinishedLoads > 0) {
+    outcomes.push(pluralize(unfinishedLoads, 'unfinished tool load'));
+  }
+  const hasExploration =
+    parts.filter((part) => classifyActivityPart(part) === 'research').length >
+    mutations.operationCount + skillParts.length;
+  const familyCount = Number(hasExploration) + Number(mutations.operationCount > 0) + Number(skillParts.length > 0);
+  const verbActive = familyCount > 1 ? 'Working' : skillParts.length > 0 ? 'Loading' : 'Editing';
+  const clauses: Array<{ verb: string; detail: string }> = [];
+  if (loadedSkills.size > 0) {
+    clauses.push({ verb: 'Loaded', detail: pluralize(loadedSkills.size, 'tool') });
+  }
+  if (mutations.editedFiles > 0) {
+    clauses.push({ verb: 'Edited', detail: pluralize(mutations.editedFiles, 'file') });
+  }
+  if (exploration.detail) {
+    clauses.push(exploration);
+  }
+  const [first, ...rest] = clauses;
+  return {
+    verb: first?.verb ?? 'Activity:',
+    verbActive,
+    detail: [first?.detail, ...rest.map(({ verb, detail }) => `${verb.toLowerCase()} ${detail}`), ...outcomes]
+      .filter(Boolean)
+      .join(', '),
+  };
+};
+
 const generateSummary = (category: ActivityCategory, parts: readonly MyMessagePart[]): SummaryParts => {
   switch (category) {
     case 'research': {
-      return generateResearchSummary(parts);
+      return composeActivitySummary(parts, generateResearchSummary(parts));
     }
     default: {
       return { verb: '', verbActive: '', detail: `${parts.length} operations` };
@@ -291,8 +372,8 @@ const composeSummary = ({ verb, detail }: SummaryParts): string => (verb === '' 
 
 /**
  * Categories eligible for the outer `ChatActivitySection` fold. These are the
- * "background activity" categories: thinking and exploration. Concrete results
- * (write/cad/data/transfer) and the final answer (text) must always render at
+ * activity categories: thinking, exploration, mutations, and CAD verification. Deliverables
+ * (write/data) and the final answer (text) must always render at
  * the top level, never tucked inside a section.
  */
 const sectionFoldableCategories = new Set<ActivityCategory>(['reasoning', 'research']);
@@ -332,8 +413,8 @@ export type ActivityRun = FoldableRun | StandaloneRun;
  *
  * The renderer then wraps foldable runs that contain at least one aggregated
  * research group in `ChatActivitySection`, while standalone runs always render
- * their group as-is. This guarantees file mutations, CAD operations, data,
- * transfers, and text never end up inside the outer fold.
+ * their group as-is. This guarantees export deliverables, data,
+ * and text never end up inside the outer fold.
  *
  * Wrap invariant: the renderer wraps any foldable run containing at least one
  * aggregated group in a `ChatActivitySection` (see {@link shouldWrapRun}).
@@ -382,7 +463,7 @@ export const partitionActivityRuns = (groups: readonly ActivityGroup[]): Activit
  * aggregated group — not on the total group count — so the wrapper's
  * visibility is monotonic across streaming part arrivals: once a research
  * aggregate exists in a run, the wrapper is mounted and stays mounted until a
- * non-foldable part (text, write, data, transfer) breaks the run and the
+ * non-foldable part (text, write, data) breaks the run and the
  * partitioner emits a different `FoldableRun`.
  *
  * Reasoning-only runs (no aggregate) intentionally stay un-wrapped so a
@@ -416,8 +497,7 @@ export const findLastMeaningfulPartIndex = (parts: readonly MyMessagePart[]): nu
  * aggregated tool groups for two-level folding in the chat UI.
  *
  * Consecutive parts in the aggregatable `research` category merge into one
- * `AggregatedGroup`. Non-aggregatable parts (text, write, cad, data,
- * transfer) pass through as `SingletonGroup`. Skipped parts (`step-start`,
+ * `AggregatedGroup`. Non-aggregatable parts (text, write, data) pass through as `SingletonGroup`. Skipped parts (`step-start`,
  * `data-usage`, empty text) are transparent — they don't interrupt adjacent
  * groups and are omitted from output.
  *

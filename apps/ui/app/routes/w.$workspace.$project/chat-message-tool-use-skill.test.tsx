@@ -10,91 +10,69 @@ type UseSkillInvocation = ToolInvocation<typeof toolName.useSkill>;
 
 vi.mock('#components/files/file-link.js', () => ({
   FileLink({ children, path }: { readonly children: React.ReactNode; readonly path: string }) {
-    return (
-      <span data-testid='file-link' data-path={path}>
-        {children}
-      </span>
-    );
+    return <a href={`#${path}`}>{children}</a>;
   },
 }));
-
-vi.mock('#hooks/use-cookie.js', () => ({
-  useCookie: () => [true, vi.fn(), vi.fn()],
-}));
+vi.mock('#hooks/use-cookie.js', () => ({ useCookie: () => [true, vi.fn(), vi.fn()] }));
 
 describe('ChatMessageToolUseSkill', () => {
-  it('should render input states as Using skill', () => {
-    const part: UseSkillInvocation = {
-      toolCallId: 'tc-use-skill',
-      state: 'input-available',
-      input: { skillName: 'woodworking' },
-    };
+  it.each(['input-streaming', 'input-available'] as const)(
+    'reads a named skill during %s without an empty disclosure',
+    (state) => {
+      render(<ChatMessageToolUseSkill part={{ toolCallId: 'skill', state, input: { skillName: 'woodworking' } }} />);
+      expect(screen.getByText('Reading').parentElement).toHaveTextContent('Reading woodworking skill…');
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    },
+  );
 
-    render(<ChatMessageToolUseSkill part={part} />);
-
-    expect(screen.getByText('Using skill')).toBeInTheDocument();
-    expect(screen.getByText('woodworking')).toBeInTheDocument();
+  it('handles partial input without repeating the word skill', () => {
+    render(<ChatMessageToolUseSkill part={{ toolCallId: 'skill', state: 'input-streaming' }} />);
+    expect(screen.getByText('Reading').parentElement).toHaveTextContent('Reading skill…');
   });
 
-  it('should render output state as Used skill with source and file link', () => {
+  it.each([
+    { source: 'system', skillPath: undefined, suffix: ' system' },
+    { source: 'user', skillPath: '.agents/skills/woodworking/SKILL.md', suffix: '' },
+    { source: 'tau-store', skillPath: undefined, suffix: '' },
+    { source: 'legacy-source', skillPath: undefined, suffix: '' },
+  ])('renders $source provenance without a transport URI', ({ source, skillPath, suffix }) => {
     const part: UseSkillInvocation = {
-      toolCallId: 'tc-use-skill',
+      toolCallId: 'skill',
       state: 'output-available',
       input: { skillName: 'woodworking' },
       output: {
         skillName: 'woodworking',
-        resourceUri: 'file:.agents/skills/woodworking/SKILL.md',
-        skillPath: '.agents/skills/woodworking/SKILL.md',
-        baseDirectory: '.agents/skills/woodworking',
-        source: 'user',
-        fingerprint: 'woodhash',
+        resourceUri: `${source}:skills/woodworking/SKILL.md`,
+        skillPath,
+        source,
         frontmatter: {},
         content: '# Woodworking',
         supportingFiles: [],
       },
     };
-
     render(<ChatMessageToolUseSkill part={part} />);
-
-    expect(screen.getByText('Used skill')).toBeInTheDocument();
-    expect(screen.getByTestId('file-link')).toHaveAttribute('data-path', '.agents/skills/woodworking/SKILL.md');
-    expect(screen.getByText('user')).toBeInTheDocument();
+    expect(screen.getByText('Read').parentElement).toHaveTextContent(`Read woodworking skill${suffix}`);
+    expect(screen.queryByText(part.output.resourceUri)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    if (skillPath) {
+      expect(screen.getByRole('link', { name: 'woodworking' })).toHaveAttribute('href', `#${skillPath}`);
+      expect(screen.queryByText('user')).not.toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    }
   });
 
-  it('should render virtual system skills without a filesystem link', () => {
-    const part: UseSkillInvocation = {
-      toolCallId: 'tc-use-skill',
-      state: 'output-available',
-      input: { skillName: 'create-skill' },
-      output: {
-        skillName: 'create-skill',
-        resourceUri: 'system:skills/create-skill/SKILL.md',
-        source: 'system',
-        fingerprint: 'systemhash',
-        frontmatter: {},
-        content: '# Create Skill',
-        supportingFiles: [],
-      },
-    };
-
-    render(<ChatMessageToolUseSkill part={part} />);
-
-    expect(screen.getByText('Used skill')).toBeInTheDocument();
-    expect(screen.queryByTestId('file-link')).not.toBeInTheDocument();
-    expect(screen.getByText('system:skills/create-skill/SKILL.md')).toBeInTheDocument();
-  });
-
-  it('should render output-error through the shared tool error component', () => {
-    const part: UseSkillInvocation = {
-      toolCallId: 'tc-use-skill',
-      state: 'output-error',
-      input: { skillName: 'missing' },
-      errorText: 'Skill not found',
-    };
-
-    render(<ChatMessageToolUseSkill part={part} />);
-
-    expect(screen.getByText('Attempted')).toBeInTheDocument();
-    expect(screen.getByText('skill use')).toBeInTheDocument();
+  it('renders read errors through the shared error disclosure', () => {
+    render(
+      <ChatMessageToolUseSkill
+        part={{
+          toolCallId: 'skill',
+          state: 'output-error',
+          input: { skillName: 'missing' },
+          errorText: 'Skill not found',
+        }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Attempted skill read/ })).toBeInTheDocument();
   });
 });

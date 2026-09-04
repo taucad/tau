@@ -469,21 +469,6 @@ describe('serializeMessage', () => {
       );
     });
 
-    it('serializes tool-transfer_to_cad_expert output-available', () => {
-      const message = baseMessage([
-        {
-          type: 'tool-transfer_to_cad_expert',
-          toolCallId: 'c1',
-          state: 'output-available',
-          input: {},
-          output: 'Transferred',
-        },
-      ]);
-      expect(serializeMessage(message)).toBe(
-        '<tool_call name="transfer_to_cad_expert">\n</tool_call>\n<tool_result>\nTransferred\n</tool_result>',
-      );
-    });
-
     it('serializes tool in input-available state as Pending', () => {
       const message = baseMessage([
         {
@@ -866,4 +851,18 @@ describe('stampMessageCreatedAt', () => {
 
     expect(stamped[0]?.metadata).toEqual({ status: 'success', createdAt: 4000 });
   });
+});
+
+it('exports an unregistered static tool through generic recorded-data serialization', () => {
+  const part = {
+    type: 'tool-unregistered_operation',
+    toolCallId: 'unknown',
+    state: 'output-available',
+    input: { note: 'Recorded input' },
+    output: 'Recorded output',
+  } as unknown as MyUIMessage['parts'][number];
+  const transcript = serializeMessage(baseMessage([part]));
+  expect(transcript).toContain('<tool_call name="unregistered_operation">');
+  expect(transcript).toContain('Recorded input');
+  expect(transcript).toContain('Recorded output');
 });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { CollapsibleFileOperation } from '#components/chat/chat-tool-file-operation.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -40,8 +40,13 @@ vi.mock('#hooks/use-resize-observer.js', () => ({
   },
 }));
 
+const previewPreference = vi.hoisted(() => ({ enabled: true }));
 vi.mock('#hooks/use-cookie.js', () => ({
-  useCookie: (_name: string, defaultValue: boolean) => [defaultValue, vi.fn(), vi.fn()],
+  useCookie: (name: string, defaultValue: boolean) => [
+    name === 'chat-tool-code-preview' ? previewPreference.enabled : defaultValue,
+    vi.fn(),
+    vi.fn(),
+  ],
 }));
 
 // Stub Shiki-backed viewers so tests stay fast and avoid highlighter init.
@@ -185,6 +190,7 @@ const renderDiff = (overrides?: { originalContent?: string; modifiedContent?: st
   return render(
     <TooltipProvider>
       <CollapsibleFileOperation
+        operation='edit'
         enableFileLink
         targetFile={targetFile}
         toolStatus='output-available'
@@ -201,6 +207,7 @@ const renderDiff = (overrides?: { originalContent?: string; modifiedContent?: st
 };
 
 beforeEach(() => {
+  previewPreference.enabled = true;
   resizeHarness.onResize = undefined;
   resizeHarness.ref = undefined;
   projectSend.mockReset();
@@ -348,7 +355,7 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
         targetFile: 'parts/fuselage.ts',
       });
 
-      expect(screen.getByRole('button', { name: /^open$/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open in viewer' })).toBeInTheDocument();
     });
 
     it('should not render Open for ignored entry suffixes such as geospec.ts', () => {
@@ -356,13 +363,14 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
         targetFile: 'mainWing.geospec.ts',
       });
 
-      expect(screen.queryByRole('button', { name: /^open$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Open in viewer' })).toBeNull();
     });
 
     it('should not render Open while streaming', () => {
       render(
         <TooltipProvider>
           <CollapsibleFileOperation
+            operation='edit'
             enableFileLink
             targetFile='main.scad'
             toolStatus='input-streaming'
@@ -371,7 +379,7 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
         </TooltipProvider>,
       );
 
-      expect(screen.queryByRole('button', { name: /^open$/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Open in viewer' })).toBeNull();
     });
   });
 
@@ -398,10 +406,10 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
     it('should render the streaming preview without a chevron and without a fade', () => {
       render(
         <CollapsibleFileOperation
+          operation='edit'
           targetFile='main.scad'
           toolStatus='input-streaming'
           content={'line1\nline2\nline3\nline4\nline5'}
-          pendingLabel='Editing file...'
         />,
       );
 
@@ -420,6 +428,7 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
       render(
         <TooltipProvider>
           <CollapsibleFileOperation
+            operation='edit'
             targetFile='docs/README.md'
             toolStatus='input-streaming'
             content={'# One\n\nbody\n\nmore'}
@@ -433,6 +442,7 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
     it('should fall back unknown file extensions to plaintext', () => {
       render(
         <CollapsibleFileOperation
+          operation='edit'
           targetFile='notes.unknown'
           toolStatus='input-streaming'
           content={'line1\nline2\nline3\nline4'}
@@ -450,4 +460,91 @@ describe('FourLineViewport (via CollapsibleFileOperation)', () => {
       expect(screen.getByTestId('diff-viewer')).toHaveAttribute('data-language', 'markdown');
     });
   });
+});
+
+describe('File mutation disclosure', () => {
+  it('should hide the entire card until the mutation row is opened and keep actions outside the trigger', async () => {
+    previewPreference.enabled = false;
+    const user = userEvent.setup();
+    renderDiff();
+    const trigger = screen.getByRole('button', { name: 'Edited main.scad +3 -1' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('region', { name: 'Edited main.scad' })).not.toBeInTheDocument();
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    const card = screen.getByRole('region', { name: 'Edited main.scad' });
+    expect(screen.getByRole('button', { name: 'Edited file' })).toHaveAttribute('aria-expanded', 'true');
+    const open = within(card).getByRole('button', { name: 'Open in viewer' });
+    await user.click(open);
+    expect(projectSend).toHaveBeenCalled();
+    expect(card).toBeVisible();
+    screen.getByRole('button', { name: 'Edited file' }).focus();
+    await user.keyboard(' ');
+    expect(screen.queryByRole('region', { name: 'Edited main.scad' })).not.toBeInTheDocument();
+  });
+
+  it.each([true, false])(
+    'should preserve a manual collapse across streamed content and completion with preview=%s',
+    async (enabled) => {
+      previewPreference.enabled = enabled;
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <CollapsibleFileOperation operation='edit' targetFile='main.scad' toolStatus='input-streaming' content='old' />,
+      );
+      const trigger = screen.getByRole('button', { name: 'Editing main.scad' });
+      if (!enabled) {
+        await user.click(trigger);
+      }
+      await user.click(trigger);
+      rerender(
+        <CollapsibleFileOperation
+          operation='edit'
+          targetFile='main.scad'
+          toolStatus='input-streaming'
+          content='new partial'
+        />,
+      );
+      expect(screen.queryByRole('region')).not.toBeInTheDocument();
+      rerender(
+        <CollapsibleFileOperation
+          operation='edit'
+          targetFile='main.scad'
+          toolStatus='output-available'
+          content=''
+          diffStats={{ linesAdded: 0, linesRemoved: 1, originalContent: 'old', modifiedContent: '' }}
+        />,
+      );
+      expect(trigger).toBe(screen.getByRole('button', { name: 'Edited main.scad -1' }));
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByRole('region')).not.toBeInTheDocument();
+      await user.click(trigger);
+      expect(screen.getByRole('region', { name: 'Edited main.scad' })).toBeVisible();
+    },
+  );
+
+  it.each([true, false])(
+    'should respect automatic preview=%s when streaming completes with empty modified content',
+    (enabled) => {
+      previewPreference.enabled = enabled;
+      const { rerender } = render(
+        <CollapsibleFileOperation operation='edit' targetFile='' toolStatus='input-streaming' />,
+      );
+      expect(screen.getByRole('button', { name: 'Editing file…' })).toHaveAttribute('aria-expanded', 'false');
+      rerender(
+        <CollapsibleFileOperation
+          operation='edit'
+          targetFile='main.scad'
+          toolStatus='output-available'
+          content=''
+          diffStats={{ linesAdded: 0, linesRemoved: 1, originalContent: 'old', modifiedContent: '' }}
+        />,
+      );
+      const card = screen.queryByRole('region', { name: 'Edited main.scad' });
+      if (enabled) {
+        expect(card).toBeVisible();
+      } else {
+        expect(card).not.toBeInTheDocument();
+      }
+    },
+  );
 });

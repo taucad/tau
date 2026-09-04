@@ -44,8 +44,9 @@ export function ChatMessageToolListDirectory({
       const path = input?.path ?? '/';
 
       return (
-        <ChatToolCard variant='minimal' status='loading' isDefaultOpen={false}>
+        <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>
+            <ChatToolCardIcon icon={FolderOpen} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Listing'>
                 <ChatToolDescription>{path}...</ChatToolDescription>

@@ -105,7 +105,7 @@ export function ChatMessageToolGetKernelResult({
       const targetFile = part.input?.targetFile;
 
       return (
-        <ChatToolCard variant='minimal' status='loading' isDefaultOpen={false}>
+        <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={CheckCircle} />
             <ChatToolCardTitle>
@@ -129,7 +129,7 @@ export function ChatMessageToolGetKernelResult({
       const { targetFile } = part.input;
 
       return (
-        <ChatToolCard variant='minimal' status='loading' isDefaultOpen={false}>
+        <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={CheckCircle} />
             <ChatToolCardTitle>
@@ -148,19 +148,26 @@ export function ChatMessageToolGetKernelResult({
     case 'output-available': {
       const { output } = part;
       const { targetFile } = part.input;
-      const { status, kernelIssues } = output;
+      const { status, kernelIssues = [] } = output;
 
-      const hasIssues = kernelIssues && kernelIssues.length > 0;
+      const hasIssues = kernelIssues.length > 0;
 
-      // Success state with no issues - use minimal card with neutral icon
-      // (success states deliberately stay muted so only failures draw the eye).
-      if (status === 'ready' && !hasIssues) {
+      // Without diagnostics there is nothing to disclose, regardless of compile status.
+      if (!hasIssues) {
+        const verb = { ready: 'Compiled', error: 'Failed to compile', pending: 'Compile pending' }[status];
         return (
-          <ChatToolCard variant='minimal' status='ready' isCollapsible={false}>
+          <ChatToolCard variant='minimal' status={status === 'error' ? 'error' : 'ready'} isCollapsible={false}>
             <ChatToolCardHeader>
-              <ChatToolCardIcon icon={CheckCircle} />
+              <ChatToolCardIcon
+                icon={status === 'error' ? XCircle : CheckCircle}
+                tone={status === 'error' ? 'destructive' : undefined}
+              />
               <ChatToolCardTitle>
-                <ChatToolLabel verb='Compiled'>
+                <ChatToolLabel
+                  verb={
+                    status === 'error' ? 'Failed to compile' : status === 'pending' ? 'Compile pending' : 'Compiled'
+                  }
+                >
                   <ChatToolDescription>
                     <FilenameLink targetFile={targetFile} />
                   </ChatToolDescription>
@@ -172,9 +179,7 @@ export function ChatMessageToolGetKernelResult({
       }
 
       // Has issues - determine severity for styling
-      const counts = hasIssues
-        ? getIssueCounts(kernelIssues)
-        : { errorCount: 0, warningCount: 0, infoCount: 0, hasErrors: false };
+      const counts = getIssueCounts(kernelIssues);
       const { hasErrors, warningCount } = counts;
       const headerIcon = hasErrors ? XCircle : AlertTriangle;
       // Only failures get a colored leading icon. Warnings render the
@@ -212,41 +217,39 @@ export function ChatMessageToolGetKernelResult({
             <ChatToolCardIcon icon={headerIcon} tone={headerIconTone} />
             <ChatToolCardTitle>{titleLabel}</ChatToolCardTitle>
           </ChatToolCardHeader>
-          {hasIssues ? (
-            <ChatToolCardContent>
-              <ChatToolCardList maxHeight='max-h-48' className={borderClass}>
-                {kernelIssues.map((issue, index) => {
-                  const { location, severity } = issue;
-                  const key = `${location?.startLineNumber ?? index}-${issue.message}`;
-                  const issueIcon = getSeverityIcon(severity);
-                  const issueIconClass = getSeverityIconClass(severity);
+          <ChatToolCardContent>
+            <ChatToolCardList maxHeight='max-h-48' className={borderClass}>
+              {kernelIssues.map((issue, index) => {
+                const { location, severity } = issue;
+                const key = `${location?.startLineNumber ?? index}-${issue.message}`;
+                const issueIcon = getSeverityIcon(severity);
+                const issueIconClass = getSeverityIconClass(severity);
 
-                  return (
-                    <ChatToolCardListItem key={key} icon={issueIcon} iconClassName={issueIconClass}>
-                      <span className='flex min-w-0 flex-1 flex-col items-start gap-0.5 @xs:flex-row @xs:gap-1'>
-                        {location ? (
-                          <FileLink
-                            asChild
-                            path={location.fileName}
-                            lineNumber={location.startLineNumber}
-                            column={location.startColumn}
-                            className='min-w-0 truncate font-mono text-xs text-muted-foreground/70 hover:text-foreground'
-                          >
-                            <span>
-                              {location.fileName}:{location.startLineNumber}:{location.startColumn}
-                            </span>
-                          </FileLink>
-                        ) : undefined}
-                        <MarkdownViewer className='inline w-auto min-w-0 font-mono text-xs wrap-break-word text-inherit'>
-                          {issue.message}
-                        </MarkdownViewer>
-                      </span>
-                    </ChatToolCardListItem>
-                  );
-                })}
-              </ChatToolCardList>
-            </ChatToolCardContent>
-          ) : undefined}
+                return (
+                  <ChatToolCardListItem key={key} icon={issueIcon} iconClassName={issueIconClass}>
+                    <span className='flex min-w-0 flex-1 flex-col items-start gap-0.5 @xs:flex-row @xs:gap-1'>
+                      {location ? (
+                        <FileLink
+                          asChild
+                          path={location.fileName}
+                          lineNumber={location.startLineNumber}
+                          column={location.startColumn}
+                          className='min-w-0 truncate font-mono text-xs text-muted-foreground/70 hover:text-foreground'
+                        >
+                          <span>
+                            {location.fileName}:{location.startLineNumber}:{location.startColumn}
+                          </span>
+                        </FileLink>
+                      ) : undefined}
+                      <MarkdownViewer className='inline w-auto min-w-0 font-mono text-xs wrap-break-word text-inherit'>
+                        {issue.message}
+                      </MarkdownViewer>
+                    </span>
+                  </ChatToolCardListItem>
+                );
+              })}
+            </ChatToolCardList>
+          </ChatToolCardContent>
         </ChatToolCard>
       );
     }

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, RefreshCw, Wrench } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { messageRole } from '@taucad/chat/constants';
 import type { MyMessagePart, UsageData } from '@taucad/chat';
@@ -18,6 +18,7 @@ import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { ContextChip } from '#components/chat/context-chip.js';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
 import { ChatActivitySection } from '#components/chat/chat-activity-section.js';
+import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
@@ -52,7 +53,6 @@ import { ChatMessageToolGetKernelResult } from '#routes/w.$workspace.$project/ch
 import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-message-tool-screenshot.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessagePartUnknown } from '#routes/w.$workspace.$project/chat-message-tool-unknown.js';
-import { ChatMessageToolTransfer } from '#routes/w.$workspace.$project/chat-message-tool-transfer.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
@@ -191,7 +191,12 @@ function renderAssistantPart(
     }
 
     case 'dynamic-tool': {
-      return <ChatMessagePartUnknown key={part.toolCallId} part={part} />;
+      // A host's durable interrupt is presented by `ChatApprovalBanner` above
+      // the composer; rendering its projected part here would show the same
+      // request twice, and as an "unknown part" card.
+      return part.toolName === agentApprovalToolName ? undefined : (
+        <ChatMessagePartUnknown key={part.toolCallId} part={part} />
+      );
     }
 
     case 'source-url': {
@@ -234,12 +239,6 @@ function renderAssistantPart(
 
     case 'tool-test_model': {
       return <ChatMessageToolTestModel key={part.toolCallId} part={part} />;
-    }
-
-    case 'tool-transfer_to_cad_expert':
-    case 'tool-transfer_to_research_expert':
-    case 'tool-transfer_back_to_supervisor': {
-      return <ChatMessageToolTransfer key={part.toolCallId} part={part} />;
     }
 
     case 'tool-read_file': {
@@ -308,6 +307,7 @@ function renderActivityGroup(
       summaryVerbPast={group.summaryVerbPast}
       summaryVerbActive={group.summaryVerbActive}
       summaryDetail={group.summaryDetail}
+      icon={group.parts.some((part) => part.type === 'tool-use_skill') ? Wrench : undefined}
       isActive={context.isActiveGroup}
     >
       {group.parts.map((part, i) => renderAssistantPart(part, group.partIndices[i]!, context))}
@@ -401,6 +401,11 @@ function AssistantParts({
             summaryVerbPast={summary.verb}
             summaryVerbActive={summary.verbActive}
             summaryDetail={summary.detail}
+            icon={
+              aggregatedInRun.some((group) => group.parts.some((part) => part.type === 'tool-use_skill'))
+                ? Wrench
+                : undefined
+            }
             hasDownstreamText={!isLastRun}
             isLast={isLastRun}
             isActive={isLastRun && isMessageActive}

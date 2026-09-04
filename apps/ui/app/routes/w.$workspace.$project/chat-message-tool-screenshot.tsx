@@ -31,7 +31,7 @@ export function ChatMessageToolScreenshot({
       const subjectNoun = mode === 'multi_angle' ? 'orthographic views' : 'screenshot';
 
       return (
-        <ChatToolCard variant='minimal' status='loading' isDefaultOpen={false}>
+        <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={Camera} />
             <ChatToolCardTitle>
@@ -61,7 +61,13 @@ export function ChatMessageToolScreenshot({
       const noun = count === 1 ? 'screenshot' : 'screenshots';
 
       return (
-        <ChatToolCard className='@container' variant='minimal' status='ready' isDefaultOpen={false}>
+        <ChatToolCard
+          className='@container'
+          variant='minimal'
+          status='ready'
+          isDefaultOpen={false}
+          isCollapsible={renderableImages.length > 0}
+        >
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={Camera} />
             <ChatToolCardTitle>

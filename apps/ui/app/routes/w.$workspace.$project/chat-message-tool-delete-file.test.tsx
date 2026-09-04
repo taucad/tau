@@ -1,146 +1,89 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatMessageToolDeleteFile } from '#routes/w.$workspace.$project/chat-message-tool-delete-file.js';
 
-vi.mock('#components/chat/chat-tool-card.js', () => ({
-  ChatToolCard({
-    children,
-    status,
-  }: {
-    readonly children: React.ReactNode;
-    readonly status?: string;
-  }): React.JSX.Element {
-    return (
-      <div data-testid='chat-tool-card' data-status={status ?? ''}>
-        {children}
-      </div>
-    );
-  },
-  ChatToolCardHeader({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-    return <div data-testid='chat-tool-card-header'>{children}</div>;
-  },
-  ChatToolCardIcon({ tone }: { readonly tone?: string }): React.JSX.Element {
-    return <span data-testid='chat-tool-card-icon' data-tone={tone ?? ''} />;
-  },
-  ChatToolCardTitle({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-    return <div data-testid='chat-tool-card-title'>{children}</div>;
-  },
+vi.mock('#hooks/use-cookie.js', () => ({
+  useCookie: () => [false, vi.fn(), vi.fn()],
 }));
-
-vi.mock('#components/chat/chat-tool-text.js', () => ({
-  ChatToolDescription({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-    return <span data-testid='chat-tool-description'>{children}</span>;
-  },
+vi.mock('#components/icons/file-extension-icon.js', () => ({ FileExtensionIcon: () => undefined }));
+vi.mock('#components/code/diff-viewer.js', () => ({
+  DiffViewer: ({ originalContent }: { readonly originalContent: string }) => <pre>{originalContent}</pre>,
+  getFirstChangedLine: () => 1,
 }));
-
-vi.mock('#components/chat/chat-tool-label.js', () => ({
-  ChatToolLabel({
-    verb,
-    children,
-  }: {
-    readonly verb: React.ReactNode;
-    readonly children?: React.ReactNode;
-  }): React.JSX.Element {
-    return (
-      <span data-testid='chat-tool-label'>
-        <span data-testid='chat-tool-verb'>{verb}</span>
-        {children ? <> {children}</> : undefined}
-      </span>
-    );
-  },
-}));
-
 vi.mock('#components/chat/chat-tool-error.js', () => ({
-  ChatToolError({ errorText }: { readonly errorText: string }): React.JSX.Element {
-    return <div data-testid='chat-tool-error'>{errorText}</div>;
-  },
-}));
-
-vi.mock('@taucad/ui/components/tooltip', () => ({
-  Tooltip({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-    return <span data-testid='tooltip'>{children}</span>;
-  },
-  TooltipTrigger({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-    return <span data-testid='tooltip-trigger'>{children}</span>;
-  },
-  TooltipContent({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-    return <span data-testid='tooltip-content'>{children}</span>;
-  },
+  ChatToolError: ({ errorText }: { readonly errorText: string }) => <div role='alert'>{errorText}</div>,
 }));
 
 type DeleteInvocation = ToolInvocation<typeof toolName.deleteFile>;
 type DeleteOutputAvailable = Extract<DeleteInvocation, { state: 'output-available' }>;
-type DeleteInputAvailable = Extract<DeleteInvocation, { state: 'input-available' }>;
-type DeleteOutputError = Extract<DeleteInvocation, { state: 'output-error' }>;
-
-const buildOutputPart = (targetFile: string): DeleteOutputAvailable => ({
-  toolCallId: 'tc_1',
+const completed = (targetFile = 'lib/skids.ts'): DeleteOutputAvailable => ({
+  toolCallId: 'delete-1',
   state: 'output-available',
   input: { targetFile },
   output: { message: 'deleted' },
 });
+const renderDelete = (part: DeleteInvocation) =>
+  render(
+    <TooltipProvider>
+      <ChatMessageToolDeleteFile part={part} />
+    </TooltipProvider>,
+  );
+afterEach(cleanup);
 
-const buildInputPart = (targetFile: string): DeleteInputAvailable => ({
-  toolCallId: 'tc_1',
-  state: 'input-available',
-  input: { targetFile },
-});
-
-const buildErrorPart = (errorText: string): DeleteOutputError => ({
-  toolCallId: 'tc_1',
-  state: 'output-error',
-  input: { targetFile: 'lib/skids.ts' },
-  errorText,
-});
-
-afterEach(() => {
-  cleanup();
-});
-
-describe('ChatMessageToolDeleteFile — verb + description typography', () => {
-  it('should render "Deleted <filename>" with verb and description split for completed state', () => {
-    const part = buildOutputPart('lib/skids.ts');
-
-    render(<ChatMessageToolDeleteFile part={part} />);
-
-    expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Deleted');
-    const description = screen.getByTestId('chat-tool-description');
-    expect(description.textContent).toContain('skids.ts');
-
-    const card = screen.getByTestId('chat-tool-card');
-    expect(card.dataset['status']).toBe('ready');
-
-    // The leading icon is a static (untoned) Trash2; no tone class applied.
-    expect(screen.getByTestId('chat-tool-card-icon').dataset['tone']).toBe('');
+describe('ChatMessageToolDeleteFile', () => {
+  it('should render a minimal deletion row without an empty toggle when no snapshot exists', () => {
+    renderDelete(completed());
+    expect(screen.getByText('Deleted')).toBeVisible();
+    expect(screen.getByText('skids.ts')).toBeVisible();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 
-  it('should render "Deleting <filename>" while the tool input is streaming with status loading', () => {
-    const part = buildInputPart('lib/skids.ts');
-
-    render(<ChatMessageToolDeleteFile part={part} />);
-
-    expect(screen.getByTestId('chat-tool-verb').textContent).toBe('Deleting');
-    expect(screen.getByTestId('chat-tool-description').textContent).toContain('skids.ts');
-
-    const card = screen.getByTestId('chat-tool-card');
-    expect(card.dataset['status']).toBe('loading');
+  it('should reveal captured removed content without offering to open the deleted file', async () => {
+    const user = userEvent.setup();
+    const part = completed();
+    part.output.diffStats = { linesAdded: 0, linesRemoved: 1, originalContent: 'removed content', modifiedContent: '' };
+    renderDelete(part);
+    await user.click(screen.getByRole('button', { name: 'Deleted skids.ts -1' }));
+    const card = screen.getByRole('region', { name: 'Deleted lib/skids.ts' });
+    expect(within(card).getByText('removed content')).toBeVisible();
+    expect(within(card).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('link')).not.toBeInTheDocument();
   });
 
-  it('should expose the full path via tooltip when filename differs from target path', () => {
-    const part = buildOutputPart('apps/ui/app/lib/skids.ts');
-
-    render(<ChatMessageToolDeleteFile part={part} />);
-
-    expect(screen.getByTestId('tooltip-content').textContent).toBe('apps/ui/app/lib/skids.ts');
-    expect(screen.getByTestId('chat-tool-description').textContent).toContain('skids.ts');
+  it('should show the active verb and preserve its disclosure through deletion completion', async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderDelete({
+      toolCallId: 'delete-1',
+      state: 'input-available',
+      input: { targetFile: 'skids.ts' },
+    });
+    const trigger = screen.getByRole('button', { name: 'Deleting skids.ts' });
+    await user.click(trigger);
+    await user.click(trigger);
+    const part = completed('skids.ts');
+    part.output.diffStats = { linesAdded: 0, linesRemoved: 1, originalContent: 'old', modifiedContent: '' };
+    rerender(
+      <TooltipProvider>
+        <ChatMessageToolDeleteFile part={part} />
+      </TooltipProvider>,
+    );
+    expect(trigger).toBe(screen.getByRole('button', { name: 'Deleted skids.ts -1' }));
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('should render the shared ChatToolError component on output-error state', () => {
-    render(<ChatMessageToolDeleteFile part={buildErrorPart('boom')} />);
-
-    expect(screen.getByTestId('chat-tool-error').textContent).toBe('boom');
+  it('should preserve the shared deletion error', () => {
+    renderDelete({
+      toolCallId: 'delete-1',
+      state: 'output-error',
+      input: { targetFile: 'skids.ts' },
+      errorText: 'Permission denied',
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Permission denied');
   });
 });

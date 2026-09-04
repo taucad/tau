@@ -141,7 +141,7 @@ export function ChatMessageToolTestModel({
     case 'input-streaming':
     case 'input-available': {
       return (
-        <ChatToolCard key='loading' variant='minimal' status='loading' isDefaultOpen={false}>
+        <ChatToolCard key='loading' variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={FlaskConical} />
             <ChatToolCardTitle>
@@ -168,6 +168,7 @@ export function ChatMessageToolTestModel({
           variant='minimal'
           status={isLoading ? 'loading' : 'ready'}
           isDefaultOpen={hasFailures}
+          isCollapsible={totalRequirements > 0}
         >
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={FlaskConical} tone={hasFailures ? 'destructive' : undefined} />
@@ -179,13 +180,15 @@ export function ChatMessageToolTestModel({
               </ChatToolLabel>
             </ChatToolCardTitle>
           </ChatToolCardHeader>
-          <ChatToolCardContent forceMount>
-            <div className='space-y-2 border-l border-foreground/20 py-1 pl-2'>
-              {groups.map((group) => (
-                <FileGroupSection key={group.targetFile} group={group} />
-              ))}
-            </div>
-          </ChatToolCardContent>
+          {totalRequirements > 0 && (
+            <ChatToolCardContent forceMount>
+              <div className='space-y-2 border-l border-foreground/20 py-1 pl-2'>
+                {groups.map((group) => (
+                  <FileGroupSection key={group.targetFile} group={group} />
+                ))}
+              </div>
+            </ChatToolCardContent>
+          )}
         </ChatToolCard>
       );
     }

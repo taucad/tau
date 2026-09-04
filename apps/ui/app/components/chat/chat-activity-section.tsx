@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
 import { ChatActivitySummary } from '#components/chat/chat-activity-summary.js';
@@ -15,6 +16,7 @@ type ChatActivitySectionProps = {
   /** Detail fragment, e.g. `"12 searches, 2 fetches"`. Rendered de-emphasized when closed. */
   readonly summaryDetail: string;
   readonly children: React.ReactNode;
+  readonly icon?: LucideIcon;
   /**
    * When true, the section defaults to collapsed — the final answer text is
    * already visible, so the activity trace can be tucked away.
@@ -57,6 +59,7 @@ export function ChatActivitySection({
   summaryVerbActive,
   summaryDetail,
   children,
+  icon: Icon,
   hasDownstreamText = false,
   isLast = false,
   isActive = false,
@@ -79,12 +82,23 @@ export function ChatActivitySection({
           size='xs'
           className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden hover:bg-transparent dark:hover:bg-transparent'
         >
-          <ChevronRight className='size-3 shrink-0 text-foreground/60 transition duration-200 group-hover/chat-tool-trigger:text-foreground [[data-state=open]>&]:rotate-90' />
-          <ChatActivitySummary
-            verb={summaryVerbPast}
-            verbActive={summaryVerbActive}
-            detail={summaryDetail}
-            isActive={isActive}
+          {Icon && (
+            <Icon
+              aria-hidden='true'
+              className='size-3 shrink-0 text-muted-foreground group-hover/chat-tool-trigger:text-foreground'
+            />
+          )}
+          <span className='min-w-0 truncate'>
+            <ChatActivitySummary
+              verb={summaryVerbPast}
+              verbActive={summaryVerbActive}
+              detail={summaryDetail}
+              isActive={isActive}
+            />
+          </span>
+          <ChevronRight
+            aria-hidden='true'
+            className='size-3 shrink-0 text-foreground/60 transition duration-200 group-hover/chat-tool-trigger:text-foreground [[data-state=open]>&]:rotate-90'
           />
         </Button>
       </CollapsibleTrigger>

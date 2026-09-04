@@ -169,9 +169,6 @@ vi.mock('#routes/w.$workspace.$project/chat-message-tool-screenshot.js', () => (
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-unknown.js', () => ({
   ChatMessagePartUnknown: () => <div data-testid='tool-unknown' />,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-message-tool-transfer.js', () => ({
-  ChatMessageToolTransfer: () => <div data-testid='tool-transfer' />,
-}));
 
 vi.mock('#components/chat/chat-textarea.js', () => ({
   ChatTextarea: () => <div data-testid='chat-textarea' />,
@@ -349,8 +346,8 @@ describe('ChatMessage column wrapper layout', () => {
     const footer = screen.getByTestId('revision-footer');
     const copyButton = screen.getByTestId('copy-button');
 
-    expect(planning.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(footer.compareDocumentPosition(copyButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(planning.compareDocumentPosition(footer)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(footer.compareDocumentPosition(copyButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('should cap collapsed long user bubbles at max-h-58.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
@@ -379,7 +376,7 @@ describe('ChatMessage column wrapper layout', () => {
 });
 
 describe('ChatMessage use_skill tool rendering', () => {
-  it('should render tool-use_skill directly as the skill usage row', () => {
+  it('should render tool-use_skill inside the activity summary', () => {
     const message: MyUIMessage = {
       id: 'msg-1',
       role: 'assistant',
@@ -575,4 +572,23 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
     const textarea = screen.getByTestId('chat-textarea');
     expect(article.contains(textarea)).toBe(true);
   });
+});
+
+it('shows generic diagnostics for an unsupported historical static tool', () => {
+  const message: MyUIMessage = {
+    id: 'msg-unknown',
+    role: 'assistant',
+    parts: [
+      {
+        type: 'tool-unregistered_operation',
+        toolCallId: 'unknown',
+        state: 'output-available',
+        input: {},
+        output: 'Old result',
+      } as unknown as MyUIMessage['parts'][number],
+    ],
+  };
+  setMessages([message]);
+  render(<ChatMessage messageId='msg-unknown' />);
+  expect(screen.getByTestId('tool-unknown')).toBeInTheDocument();
 });

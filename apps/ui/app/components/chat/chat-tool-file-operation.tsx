@@ -1,15 +1,22 @@
 import type { ToolUIPart } from 'ai';
 import type { DiffStatsWithContent } from '@taucad/chat';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LoaderCircle, ChevronRight, ChevronDown } from 'lucide-react';
+import { Pencil, FilePlus, Trash2, ChevronDown } from 'lucide-react';
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { DiffViewer, getFirstChangedLine } from '#components/code/diff-viewer.js';
 import { FileLink } from '#components/files/file-link.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
-import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import {
+  ChatToolCard,
+  ChatToolCardHeader,
+  ChatToolCardIcon,
+  ChatToolCardTitle,
+  ChatToolCardContent,
+} from '#components/chat/chat-tool-card.js';
+import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
+import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -162,128 +169,14 @@ export function DiffPreview({
   );
 }
 
-type CollapsibleFileOperationTriggerProps = {
-  readonly targetFile: string;
-  readonly toolStatus: ToolUIPart['state'];
-  readonly isOpen: boolean;
-  /**
-   * When true, wraps the filename with FileLink for file opening functionality.
-   */
-  readonly enableFileLink?: boolean;
-  /**
-   * Diff statistics for displaying change indicator.
-   */
-  readonly diffStats?: DiffStatsWithContent;
-  /**
-   * Label to show while `targetFile` is empty during streaming (e.g. "Creating file...").
-   */
-  readonly pendingLabel?: string;
-};
-
-export function CollapsibleFileOperationTrigger({
-  targetFile,
-  toolStatus,
-  isOpen,
-  enableFileLink = false,
-  diffStats,
-  pendingLabel = 'file',
-}: CollapsibleFileOperationTriggerProps): React.JSX.Element {
-  const isStreaming = ['input-streaming', 'input-available'].includes(toolStatus);
-  const filename = getFilename(targetFile);
-  const hasPath = targetFile !== filename;
-
-  // Render the filename content
-  const filenameContent = isStreaming ? (
-    <AnimatedShinyText>{filename || pendingLabel}</AnimatedShinyText>
-  ) : (
-    <span>{filename}</span>
-  );
-
-  // Calculate line number for first change when diff data is available
-  const firstChangedLine =
-    diffStats === undefined ? undefined : getFirstChangedLine(diffStats.originalContent, diffStats.modifiedContent);
-
-  // Filename element - clickable when enableFileLink is true
-  // Uses asChild to avoid nesting buttons inside CollapsibleTrigger
-  const filenameElement =
-    enableFileLink && !isStreaming ? (
-      hasPath ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <FileLink
-              asChild
-              path={targetFile}
-              lineNumber={firstChangedLine}
-              className='min-w-0 truncate hover:text-foreground'
-            >
-              <span>{filenameContent}</span>
-            </FileLink>
-          </TooltipTrigger>
-          <TooltipContent side='top' align='start'>
-            {targetFile}
-          </TooltipContent>
-        </Tooltip>
-      ) : (
-        <FileLink
-          asChild
-          path={targetFile}
-          lineNumber={firstChangedLine}
-          className='min-w-0 truncate hover:text-foreground'
-        >
-          <span>{filenameContent}</span>
-        </FileLink>
-      )
-    ) : hasPath && !isStreaming ? (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className='min-w-0 truncate'>{filenameContent}</span>
-        </TooltipTrigger>
-        <TooltipContent side='top' align='start'>
-          {targetFile}
-        </TooltipContent>
-      </Tooltip>
-    ) : (
-      <span className='min-w-0 truncate'>{filenameContent}</span>
-    );
-
-  // Show change indicator when diffStats is available and there are changes
-  const showChangeIndicator =
-    diffStats !== undefined && (diffStats.linesAdded > 0 || diffStats.linesRemoved > 0) && !isStreaming;
-
-  // Entire header is the collapsible trigger
-  return (
-    <CollapsibleTrigger className='group flex h-7 min-w-0 flex-1 cursor-pointer flex-row items-center gap-1 pl-2 text-xs text-muted-foreground transition-colors'>
-      {/* Status icon - visible by default, hidden on hover */}
-      <span className='relative flex size-3 items-center justify-center'>
-        {isStreaming ? (
-          <LoaderCircle className='size-3 animate-spin' />
-        ) : (
-          <>
-            <span className={cn('transition-opacity duration-150', 'group-hover:opacity-0')}>
-              <FileExtensionIcon filename={filename} className='size-3' />
-            </span>
-            {/* Caret - hidden by default, visible on hover */}
-            <ChevronRight
-              className={cn(
-                'absolute size-3 transition-all duration-150',
-                'opacity-0 group-hover:opacity-100',
-                isOpen ? 'rotate-90' : 'rotate-0',
-              )}
-            />
-          </>
-        )}
-      </span>
-      {filenameElement}
-      {showChangeIndicator ? (
-        <span className='shrink-0'>
-          <ChangeIndicator linesAdded={diffStats.linesAdded} linesRemoved={diffStats.linesRemoved} />
-        </span>
-      ) : undefined}
-    </CollapsibleTrigger>
-  );
-}
+const fileOperations = {
+  edit: { icon: Pencil, past: 'Edited', active: 'Editing' },
+  create: { icon: FilePlus, past: 'Created', active: 'Creating' },
+  delete: { icon: Trash2, past: 'Deleted', active: 'Deleting' },
+} as const;
 
 type CollapsibleFileOperationProps = {
+  readonly operation: keyof typeof fileOperations;
   readonly targetFile: string;
   readonly toolStatus: ToolUIPart['state'];
   readonly content?: string;
@@ -291,21 +184,13 @@ type CollapsibleFileOperationProps = {
   readonly actions?: React.ReactNode;
   readonly footer?: React.ReactNode;
   readonly isDefaultOpen?: boolean;
-  /**
-   * When true, wraps the filename with FileLink for file opening functionality.
-   */
   readonly enableFileLink?: boolean;
-  /**
-   * Diff statistics for displaying change indicator.
-   */
   readonly diffStats?: DiffStatsWithContent;
-  /**
-   * Label to show while `targetFile` is empty during streaming (e.g. "Creating file...").
-   */
-  readonly pendingLabel?: string;
 };
 
+// oxlint-disable-next-line complexity -- One disclosure owns streaming, snapshot-less, and expanded file presentation.
 export function CollapsibleFileOperation({
+  operation,
   targetFile,
   toolStatus,
   content,
@@ -315,89 +200,50 @@ export function CollapsibleFileOperation({
   isDefaultOpen = false,
   enableFileLink = false,
   diffStats,
-  pendingLabel = 'file',
 }: CollapsibleFileOperationProps): React.JSX.Element {
-  const isStreaming = ['input-streaming', 'input-available'].includes(toolStatus);
+  const isStreaming = toolStatus === 'input-streaming' || toolStatus === 'input-available';
   const [showCodePreview] = useCookie(cookieName.chatToolCodePreview, true);
-
-  // Track the previous streaming state to detect transitions
-  const wasStreamingRef = useRef(isStreaming);
-
-  // Default to open when content is available (after streaming completes) and showCodePreview is enabled
-  const [isOpen, setIsOpen] = useState(isDefaultOpen || (!isStreaming && Boolean(content) && showCodePreview));
-
-  // When transitioning from streaming to non-streaming, open if showCodePreview is enabled
-  useEffect(() => {
-    if (wasStreamingRef.current && !isStreaming && content && showCodePreview) {
-      setIsOpen(true);
-    }
-
-    wasStreamingRef.current = isStreaming;
-  }, [isStreaming, content, showCodePreview]);
-
+  const [userOpen, setUserOpen] = useState<boolean>();
+  const hasPreview = diffStats !== undefined || (content !== undefined && (!isStreaming || content.length > 0));
+  const isCollapsible = isStreaming || hasPreview || children !== undefined || footer !== undefined;
+  // Derive automatic expansion from available evidence; an explicit toggle wins
+  // across streaming completion, including edits whose modified content is empty.
+  const isOpen = isCollapsible && (userOpen ?? (isDefaultOpen || (showCodePreview && hasPreview)));
+  const { icon, past, active } = fileOperations[operation];
   const filename = getFilename(targetFile);
-  const hasPath = targetFile !== filename;
-
-  const showOpenRender = enableFileLink && !isStreaming && targetFile !== '' && shouldShowOpenRenderButton(targetFile);
-
-  const headerActions = showOpenRender ? (
-    <>
-      <OpenRenderButton path={targetFile} size='xs' className={fileOperationActionLabelClassName} />
-      {actions}
-    </>
-  ) : (
-    actions
-  );
-
-  // For streaming, show last 4 lines without collapsible
-  if (isStreaming && content) {
-    const lines = content.split('\n');
-    const totalLines = lines.length;
-    const lastFourLines = lines.slice(-4).join('\n');
-    // Always show content area when we have 4+ lines to maintain consistent height,
-    // otherwise only show if there's actual content
-    const shouldShowContent = totalLines >= 4 || lastFourLines.trim().length > 0;
-
-    return (
-      <div className='@container/code my-1 overflow-hidden rounded-md border bg-neutral/10'>
-        <div className='flex h-7 w-full flex-row items-center gap-1 pr-1 pl-2 text-xs text-muted-foreground'>
-          <LoaderCircle className='size-3 animate-spin' />
-          {hasPath ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className='min-w-0 truncate'>
-                  <AnimatedShinyText>{filename || pendingLabel}</AnimatedShinyText>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side='top' align='start'>
-                {targetFile}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <span className='min-w-0 truncate'>
-              <AnimatedShinyText>{targetFile || pendingLabel}</AnimatedShinyText>
-            </span>
-          )}
-        </div>
-        {shouldShowContent ? (
-          <div className={cn('overflow-hidden border-t', streamingViewportClassName)}>
-            <CodeViewer
-              language={getLanguageFromFilename(filename)}
-              text={lastFourLines}
-              className='overflow-x-auto p-3 text-xs'
-            />
-          </div>
-        ) : undefined}
-      </div>
-    );
-  }
-
-  // Derive language from filename for syntax highlighting
   const language = getLanguageFromFilename(filename);
+  const canOpenFile = enableFileLink && !isStreaming && operation !== 'delete' && targetFile !== '';
+  const firstChangedLine = diffStats && getFirstChangedLine(diffStats.originalContent, diffStats.modifiedContent);
+  const showStats = !isStreaming && diffStats !== undefined && (diffStats.linesAdded > 0 || diffStats.linesRemoved > 0);
+  const filenameLabel =
+    targetFile === filename ? (
+      filename || 'file'
+    ) : (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span>{filename}</span>
+        </TooltipTrigger>
+        <TooltipContent side='top' align='start'>
+          {targetFile}
+        </TooltipContent>
+      </Tooltip>
+    );
 
-  // Render content: always show DiffPreview when diffStats is available
   const renderContent = (): React.ReactNode => {
-    // Show diff view when diff data is available (primary view)
+    if (isStreaming) {
+      if (!content) {
+        return undefined;
+      }
+      return (
+        <div className={cn('overflow-hidden border-t', streamingViewportClassName)}>
+          <CodeViewer
+            language={language}
+            text={content.split('\n').slice(-4).join('\n')}
+            className='overflow-x-auto p-3 text-xs'
+          />
+        </div>
+      );
+    }
     if (diffStats) {
       return (
         <DiffPreview
@@ -407,45 +253,82 @@ export function CollapsibleFileOperation({
         />
       );
     }
-
-    // Fallback to code preview during streaming or when no diff data
-    if (content) {
+    if (content !== undefined) {
       return <CodePreview content={content} language={language} />;
     }
-
     return undefined;
   };
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <div className='group/file-op @container/code my-1 overflow-hidden rounded-md border bg-neutral/10'>
-        <div className='flex items-center transition-colors hover:bg-foreground/5'>
-          <CollapsibleFileOperationTrigger
-            targetFile={targetFile}
-            toolStatus={toolStatus}
-            isOpen={isOpen}
-            enableFileLink={enableFileLink}
-            diffStats={diffStats}
-            pendingLabel={pendingLabel}
-          />
-          {headerActions ? (
-            <div
-              className='ml-auto flex shrink-0 items-center gap-1 pr-1 text-muted-foreground opacity-0 group-hover/file-op:opacity-100'
-              onClick={(event) => {
-                // Prevent triggering the collapsible when clicking actions
-                event.stopPropagation();
-              }}
-            >
-              {headerActions}
+    <ChatToolCard
+      variant='minimal'
+      status={isStreaming ? 'loading' : 'ready'}
+      isCollapsible={isCollapsible}
+      isOpen={isOpen}
+      onOpenChange={setUserOpen}
+    >
+      <ChatToolCardHeader className='group/file-mutation-trigger'>
+        <ChatToolCardIcon icon={icon} />
+        <ChatToolCardTitle>
+          <ChatToolLabel verb={isStreaming ? active : isOpen ? `${past} file` : past}>
+            {isStreaming || !isOpen ? (
+              <ChatToolDescription>
+                {isStreaming && filename === '' ? 'file…' : filenameLabel}
+                {showStats ? (
+                  <>
+                    {' '}
+                    <ChangeIndicator
+                      linesAdded={diffStats.linesAdded}
+                      linesRemoved={diffStats.linesRemoved}
+                      colorMode='header-hover'
+                    />
+                  </>
+                ) : undefined}
+              </ChatToolDescription>
+            ) : undefined}
+          </ChatToolLabel>
+        </ChatToolCardTitle>
+      </ChatToolCardHeader>
+      {isCollapsible ? (
+        <ChatToolCardContent className='pl-0'>
+          <section
+            aria-label={`${past} ${targetFile}`}
+            className='group/file-op @container/code my-1 overflow-hidden rounded-md border bg-neutral/10'
+          >
+            <div className='flex h-7 items-center gap-1 px-2 text-xs text-muted-foreground'>
+              <FileExtensionIcon filename={filename} className='size-3 shrink-0' />
+              <span className='min-w-0 truncate'>
+                {canOpenFile ? (
+                  <FileLink path={targetFile} lineNumber={firstChangedLine}>
+                    {filenameLabel}
+                  </FileLink>
+                ) : (
+                  filenameLabel
+                )}
+              </span>
+              {showStats ? (
+                <ChangeIndicator linesAdded={diffStats.linesAdded} linesRemoved={diffStats.linesRemoved} />
+              ) : undefined}
+              {isStreaming ? undefined : (
+                <div className='ml-auto flex shrink-0 items-center gap-1 opacity-0 group-focus-within/file-op:opacity-100 group-hover/file-op:opacity-100'>
+                  {canOpenFile && shouldShowOpenRenderButton(targetFile) ? (
+                    <OpenRenderButton
+                      aria-label='Open in viewer'
+                      path={targetFile}
+                      size='xs'
+                      className={fileOperationActionLabelClassName}
+                    />
+                  ) : undefined}
+                  {actions}
+                </div>
+              )}
             </div>
-          ) : undefined}
-        </div>
-        <CollapsibleContent>
-          {renderContent()}
-          {children}
-          {footer}
-        </CollapsibleContent>
-      </div>
-    </Collapsible>
+            {renderContent()}
+            {children}
+            {footer}
+          </section>
+        </ChatToolCardContent>
+      ) : undefined}
+    </ChatToolCard>
   );
 }

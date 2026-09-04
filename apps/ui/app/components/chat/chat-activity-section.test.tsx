@@ -342,3 +342,49 @@ describe('ChatActivitySection', () => {
     expect(screen.getByTestId('body')).toBeInTheDocument();
   });
 });
+
+it('keeps a skill section manually collapsed while its summary and children stream', async () => {
+  const { rerender } = render(
+    <ChatActivitySection
+      summaryVerbPast='Activity:'
+      summaryVerbActive='Loading'
+      summaryDetail='1 unfinished tool load'
+      isLast
+      isActive
+    >
+      <ChatActivityGroup
+        summaryVerbPast='Activity:'
+        summaryVerbActive='Loading'
+        summaryDetail='1 unfinished tool load'
+        isActive
+      >
+        <span>Reading a skill</span>
+      </ChatActivityGroup>
+    </ChatActivitySection>,
+  );
+  const toggle = screen.getByRole('button', { name: 'Loading…' });
+  expect(screen.getAllByRole('button')).toHaveLength(1);
+  toggle.focus();
+  await userEvent.keyboard(' ');
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  rerender(
+    <ChatActivitySection
+      summaryVerbPast='Loaded'
+      summaryVerbActive='Working'
+      summaryDetail='1 tool, edited 1 file'
+      isLast
+    >
+      <ChatActivityGroup summaryVerbPast='Loaded' summaryVerbActive='Working' summaryDetail='1 tool, edited 1 file'>
+        <span>Read a skill and edited a file</span>
+      </ChatActivityGroup>
+    </ChatActivitySection>,
+  );
+  const completed = screen.getByRole('button', { name: 'Loaded 1 tool, edited 1 file' });
+  expect(completed).toBe(toggle);
+  expect(completed).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByText('Read a skill and edited a file')).not.toBeInTheDocument();
+  await userEvent.keyboard('{Enter}');
+  expect(completed).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getAllByRole('button')).toHaveLength(1);
+  expect(screen.getByText('Read a skill and edited a file')).toBeInTheDocument();
+});

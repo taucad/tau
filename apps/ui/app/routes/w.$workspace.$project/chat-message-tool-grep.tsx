@@ -23,8 +23,9 @@ export function ChatMessageToolGrep({ part }: { readonly part: ToolInvocation<ty
       const pattern = input?.pattern ?? 'pattern';
 
       return (
-        <ChatToolCard variant='minimal' status='loading' isDefaultOpen={false}>
+        <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>
+            <ChatToolCardIcon icon={Search} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Searching for'>
                 <ChatToolDescription>&quot;{pattern}&quot;...</ChatToolDescription>

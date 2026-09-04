@@ -15,7 +15,7 @@ type ChatActivitySummaryProps = {
   readonly detail: string;
   /**
    * When true, the activity is still live — i.e. it has not been "concluded"
-   * by a downstream message part (text, file edit, transfer, …). Live
+   * by a downstream message part (text, export, context event, …). Live
    * activities render only the present-participle verb followed by an
    * ellipsis (e.g. `Exploring…`) wrapped in the same shimmer treatment used
    * by individual loading tool cards (see {@link AnimatedShinyText}), so the

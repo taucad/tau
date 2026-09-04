@@ -26,10 +26,10 @@ export function ChatMessageToolCreateFile({
 
       return (
         <CollapsibleFileOperation
+          operation='create'
           targetFile={targetFile}
           toolStatus={part.state}
           content={content}
-          pendingLabel='Creating file...'
         />
       );
     }
@@ -45,6 +45,7 @@ export function ChatMessageToolCreateFile({
 
       return (
         <CollapsibleFileOperation
+          operation='create'
           enableFileLink
           targetFile={targetFile}
           toolStatus={part.state}

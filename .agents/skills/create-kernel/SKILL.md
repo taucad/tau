@@ -268,7 +268,7 @@ If the source extension is new to the editor, invoke the `add-monaco-language` s
 
 ### 3.6 Documentation
 
-At minimum update `docs/policy/runtime-architecture-policy.md` and the docs-site kernel pages under `apps/ui/content/docs/runtime/` (`guides/choosing-a-kernel.mdx`, `api/kernels.mdx`, `concepts/plugin-system.mdx`, `concepts/kernel-selection.mdx`, `getting-started/installation.mdx`, `guides/bundler-configuration.mdx`). Update every kernel list, comparison table, and selection-priority reference.
+At minimum update `docs/policy/runtime-architecture-policy.md` and the docs-site kernel pages under `apps/docs/content/docs/runtime/` (`guides/choosing-a-kernel.mdx`, `api/kernels.mdx`, `concepts/plugin-system.mdx`, `concepts/kernel-selection.mdx`, `getting-started/installation.mdx`, `guides/bundler-configuration.mdx`). Update every kernel list, comparison table, and selection-priority reference.
 
 ### 3.7 Prepare the npm package name
 

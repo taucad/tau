@@ -16,7 +16,7 @@
     "@taucad/react": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
-    "electron": "^36.9.5",
+    "electron": "^43.5.1",
     "react": "catalog:",
     "react-dom": "catalog:",
     "three": "catalog:"

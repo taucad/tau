@@ -329,7 +329,7 @@
     "@vvago/vale": "^3.17.1",
     "dotenv": "catalog:",
     "drizzle-kit": "^0.31.10",
-    "electron": "^36.9.5",
+    "electron": "^43.5.1",
     "esbuild": "^0.27.7",
     "eslint": "catalog:",
     "eslint-plugin-jsdoc": "catalog:",

@@ -1,8 +1,10 @@
 // @vitest-environment node
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { runTauGeoSpecTests } from '#testing/tau-geospec-harness.js';
 import type { TauModelRendererOutput } from '#testing/tau-geospec-harness.js';
+import { GeoSpecModelLoadError } from 'geospec/model';
+import { getGeoSpecEngineProtocol } from 'geospec/engine';
 
 type TestVmFileSystem = {
   exists(path: string): Promise<boolean>;
@@ -88,6 +90,98 @@ const brepFixture = resolve(
 );
 
 describe('runTauGeoSpecTests', () => {
+  it('releases renderer results that arrive after a test timeout', async () => {
+    const pending = Promise.withResolvers<TauModelRendererOutput>();
+    const released = Promise.withResolvers<void>();
+    const protocol = getGeoSpecEngineProtocol()!;
+    const originalRelease = protocol.releaseSubject;
+    const release = vi.spyOn(protocol, 'releaseSubject').mockImplementation((request) => {
+      const result = originalRelease(request);
+      released.resolve();
+      return result;
+    });
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      'late.geospec.ts',
+      "import { it } from 'geospec'; import { loadModel } from 'geospec/model'; it('late', async () => { await loadModel({ file: 'main.ts' }); });",
+    );
+    try {
+      const result = await runTauGeoSpecTests({
+        filesystem,
+        projectPath: '',
+        entryPaths: ['late.geospec.ts'],
+        testTimeout: 5,
+        renderer: async () => pending.promise,
+      });
+      expect(result.failures).toHaveLength(1);
+      pending.resolve(createGeometrySource(1));
+      await released.promise;
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(release.mock.results[0]?.value).toMatchObject({ released: true });
+    } finally {
+      pending.resolve(createGeometrySource(1));
+      release.mockRestore();
+    }
+  });
+
+  it('releases renderer-created subjects even after a failed assertion', async () => {
+    const release = vi.spyOn(getGeoSpecEngineProtocol()!, 'releaseSubject');
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      'cleanup.geospec.ts',
+      "import { it, expectGeo } from 'geospec'; import { loadModel } from 'geospec/model'; it('width', async () => { expectGeo(await loadModel({ file: 'main.ts' })).toHaveBoundingBox({ size: { x: 99 }, tolerance: 0.01 }); });",
+    );
+    try {
+      const result = await runTauGeoSpecTests({
+        filesystem,
+        projectPath: '',
+        entryPaths: ['cleanup.geospec.ts'],
+        renderer: async () => createGeometrySource(1),
+      });
+      expect(result.failures).toHaveLength(1);
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(release.mock.results[0]?.value).toMatchObject({ released: true });
+    } finally {
+      release.mockRestore();
+    }
+  });
+
+  it('uses shared missing-file accounting', async () => {
+    const result = await runTauGeoSpecTests({
+      filesystem: new MemoryFileSystem(),
+      projectPath: '',
+      entryPaths: [],
+      renderer: async () => createGeometrySource(1),
+    });
+    expect(result).toMatchObject({ passed: 0, total: 1, passes: [], failures: [{ id: 'missing_geospec_file' }] });
+  });
+
+  it('preserves every original renderer failure as one failed test', async () => {
+    const filesystem = new MemoryFileSystem();
+    filesystem.setText(
+      'failure.geospec.ts',
+      "import { it } from 'geospec'; import { loadModel } from 'geospec/model'; it('export', async () => { await loadModel({ file: 'main.ts' }); });",
+    );
+    const diagnostics = [
+      { code: 'BUILD_FAILED', severity: 'error', message: 'Compile failed', details: { file: 'main.ts' } },
+      { code: 'GEOMETRY_INVALID', severity: 'warning', message: 'Open shell', spatial: { center: [1, 2, 3] } },
+    ] as const;
+    const result = await runTauGeoSpecTests({
+      filesystem,
+      projectPath: '',
+      entryPaths: ['failure.geospec.ts'],
+      renderer: async () => {
+        throw new GeoSpecModelLoadError(diagnostics);
+      },
+    });
+    expect(result).toMatchObject({
+      passed: 0,
+      total: 1,
+      failures: [{ targetFile: 'failure.geospec.ts', diagnostics }],
+    });
+    expect(result.failures[0]?.reason).toBe('Compile failed\nOpen shell');
+  });
+
   it('should group all assertion results under the GeoSpec test file', async () => {
     const filesystem = new MemoryFileSystem();
     filesystem.setText(

@@ -3,8 +3,8 @@
  *
  * Discovers nothing and owns no policy: it runs the GeoSpec entries it is
  * handed, one file at a time in sorted order, and maps the runner result into
- * the compact `test_model` wire shape. The browser owns the same mapping for
- * the live product path (`apps/ui/app/lib/geospec-rpc-result.ts`); this exists
+ * the compact `test_model` wire shape through the shared agent-tools projection;
+ * the live product path uses that same projection. This exists
  * so the API can exercise the `test_model` tool headlessly.
  *
  * @module
@@ -12,11 +12,14 @@
 
 // oxlint-disable-next-line eslint-plugin-import/no-unassigned-import -- installs the GeoSpec engine implementation
 import '@taucad/geospec-engine/register';
+import { runnerResultToTestModelOutput } from '@taucad/agent-tools/geospec';
 import { runGeoSpecModule } from 'geospec/runner';
-import type { GeometryDiagnostic, GeometrySubject } from 'geospec/mesh';
+import { getGeoSpecEngineProtocol } from 'geospec/engine';
+import type { GeometrySubject } from 'geospec/mesh';
 import type { GeoSpecModelFormat, LoadModelSourceOptions } from 'geospec/model';
-import type { GeoSpecTestCase, RunGeoSpecModuleOptions } from 'geospec/runner';
-import type { TestFailure, TestModelOutput, TestPass } from '@taucad/chat/schemas/tools/test-model';
+import type { RunGeoSpecModuleOptions } from 'geospec/runner';
+import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
+import type { TestModelOutput } from '@taucad/chat/schemas/tools/test-model';
 
 /**
  * Renderer contract used by Tau-aware GeoSpec tests.
@@ -89,56 +92,6 @@ async function renderTauModel(options: RenderTauModelOptions): Promise<GeometryS
   });
 }
 
-const fullTestName = (test: Pick<GeoSpecTestCase, 'suite' | 'name'>): string => [...test.suite, test.name].join(' > ');
-
-const diagnosticText = (diagnostics: readonly GeometryDiagnostic[] | undefined): string | undefined =>
-  diagnostics?.map((diagnostic) => diagnostic.message).join('\n');
-
-type TransportDiagnostic = NonNullable<TestFailure['diagnostics']>[number];
-type TransportVec3 = [number, number, number];
-
-const cloneVec3 = (value: readonly [number, number, number] | undefined): TransportVec3 | undefined =>
-  value === undefined ? undefined : [value[0], value[1], value[2]];
-
-const transportDiagnostics = (
-  diagnostics: readonly GeometryDiagnostic[] | undefined,
-): TransportDiagnostic[] | undefined =>
-  diagnostics?.map((diagnostic) => ({
-    code: diagnostic.code,
-    severity: diagnostic.severity,
-    message: diagnostic.message,
-    ...(diagnostic.suggestion === undefined ? {} : { suggestion: diagnostic.suggestion }),
-    ...(diagnostic.spatial === undefined
-      ? {}
-      : {
-          spatial: {
-            ...(diagnostic.spatial.min === undefined ? {} : { min: cloneVec3(diagnostic.spatial.min) }),
-            ...(diagnostic.spatial.max === undefined ? {} : { max: cloneVec3(diagnostic.spatial.max) }),
-            ...(diagnostic.spatial.center === undefined ? {} : { center: cloneVec3(diagnostic.spatial.center) }),
-          },
-        }),
-    ...(diagnostic.details === undefined ? {} : { details: diagnostic.details }),
-  }));
-
-const geospecFailure = (options: {
-  id: string;
-  requirement: string;
-  targetFile: string;
-  diagnostics?: readonly GeometryDiagnostic[];
-  reason?: string;
-  suggestion?: string;
-}): TestFailure => ({
-  id: options.id,
-  requirement: options.requirement,
-  targetFile: options.targetFile,
-  reason: options.reason ?? diagnosticText(options.diagnostics) ?? 'GeoSpec test failed.',
-  suggestion:
-    options.suggestion ??
-    options.diagnostics?.find((diagnostic) => diagnostic.suggestion)?.suggestion ??
-    'Inspect the GeoSpec diagnostics and update the model or expected geometry assertion.',
-  diagnostics: transportDiagnostics(options.diagnostics),
-});
-
 /**
  * Run Tau-aware GeoSpec tests against locally rendered geometry.
  *
@@ -149,115 +102,59 @@ const geospecFailure = (options: {
  * @returns Compact test_model-compatible results.
  */
 export async function runTauGeoSpecTests(options: RunTauGeoSpecTestsOptions): Promise<TestModelOutput> {
-  if (options.entryPaths.length === 0) {
-    return {
-      failures: [
-        {
-          id: 'missing_geospec_file',
-          requirement: 'At least one GeoSpec test file must exist',
-          reason: 'No *.geospec.ts or *.geospec.js files found in the project.',
-          suggestion:
-            'Create a *.geospec.ts test file. Import describe, it, and expectGeo from geospec, and load models through geospec/model.',
-          targetFile: '*.geospec.ts',
-        },
-      ],
-      passes: [],
-      passed: 0,
-      total: 0,
-    };
-  }
-
-  const failures: TestFailure[] = [];
-  const passes: TestPass[] = [];
-  for (const entry of [...options.entryPaths].sort()) {
-    const entryPath = entry;
-    // oxlint-disable-next-line no-await-in-loop -- tests must run deterministically in filename order
-    const result = await runGeoSpecModule({
-      filesystem: options.filesystem,
-      entryPath,
-      testNamePattern: options.testNamePattern,
-      testTimeout: options.testTimeout,
-      modelLoader: async (input) => {
-        if ('source' in input) {
-          const { loadModel } = await import('geospec/model');
-          return loadModel(input);
-        }
-
-        if ('code' in input) {
-          throw new Error('Inline code model loading is not supported by the Tau browser test runner.');
-        }
-
-        return renderTauModel({
-          file: input.file,
-          format: input.format,
-          parameters: input.parameters,
-          renderer: options.renderer,
-        });
-      },
-    });
-
-    if (!result.success) {
-      failures.push(
-        geospecFailure({
-          id: `${entry}:bundle`,
-          requirement: `GeoSpec module ${entry} must bundle and execute`,
-          targetFile: entry,
-          reason: result.issues.map((issue) => issue.message).join('\n'),
-          suggestion: 'Fix the GeoSpec syntax, imports, or referenced project files.',
-        }),
-      );
-      continue;
+  const aggregate: GeoSpecRunnerResult = { success: true, passed: 0, failed: 0, selectedTests: 0, files: [] };
+  const protocol = getGeoSpecEngineProtocol();
+  const subjects = new Set<string>();
+  let closed = false;
+  const releaseSubject = async (subjectId: string) =>
+    protocol?.releaseSubject({ requestId: `api-harness-release:${subjectId}`, subjectId });
+  const track = async (subject: GeometrySubject): Promise<GeometrySubject> => {
+    if (closed) {
+      await Promise.allSettled([releaseSubject(subject.subjectId)]);
+    } else {
+      subjects.add(subject.subjectId);
     }
-
-    for (const test of result.tests) {
-      if (test.status === 'skipped') {
-        continue;
-      }
-
-      const requirement = fullTestName(test);
-      const targetFile = entry;
-      if (test.status === 'failed') {
-        const assertionDiagnostic = test.assertions.flatMap((assertion) => assertion.diagnostics ?? []).at(0);
-        failures.push(
-          geospecFailure({
-            id: `${entry}:${requirement}`,
-            requirement,
-            targetFile,
-            diagnostics: assertionDiagnostic ? [assertionDiagnostic] : test.diagnostics,
-          }),
-        );
-        continue;
-      }
-
-      passes.push({
-        id: `${entry}:${requirement}`,
-        requirement,
-        targetFile,
-      });
-    }
-  }
-
-  if (passes.length === 0 && failures.length === 0) {
-    return {
-      failures: [
-        {
-          id: 'NO_MATCHING_GEOSPEC_TESTS',
-          requirement: 'At least one selected GeoSpec test must run',
-          reason: 'GeoSpec files were found, but the supplied filters did not select any tests.',
-          suggestion: 'Run without filters or use a matching Vitest-style testNamePattern.',
-          targetFile: options.entryPaths.join(', '),
-        },
-      ],
-      passes: [],
-      passed: 0,
-      total: 1,
-    };
-  }
-
-  return {
-    failures,
-    passes,
-    passed: passes.length,
-    total: failures.length + passes.length,
+    return subject;
   };
+  try {
+    for (const entry of [...options.entryPaths].sort()) {
+      const entryPath = entry;
+      // oxlint-disable-next-line no-await-in-loop -- tests must run deterministically in filename order
+      const result = await runGeoSpecModule({
+        filesystem: options.filesystem,
+        entryPath,
+        testNamePattern: options.testNamePattern,
+        testTimeout: options.testTimeout,
+        modelLoader: async (input) => {
+          if ('source' in input) {
+            const { loadModel } = await import('geospec/model');
+            return loadModel(input).then(track);
+          }
+
+          if ('code' in input) {
+            throw new Error('Inline code model loading is not supported by the Tau browser test runner.');
+          }
+
+          return renderTauModel({
+            file: input.file,
+            format: input.format,
+            parameters: input.parameters,
+            renderer: options.renderer,
+          }).then(track);
+        },
+      });
+
+      aggregate.files.push({ file: entry, result });
+      aggregate.passed += result.success ? result.tests.filter((test) => test.status === 'passed').length : 0;
+      aggregate.failed += result.success ? result.tests.filter((test) => test.status === 'failed').length : 1;
+      aggregate.selectedTests += result.success ? result.tests.length : 0;
+    }
+    aggregate.success = aggregate.failed === 0 && aggregate.passed > 0;
+    return runnerResultToTestModelOutput(aggregate, options.entryPaths, {
+      filtersApplied: options.testNamePattern !== undefined,
+    });
+  } finally {
+    closed = true;
+    await Promise.allSettled([...subjects].map(async (subjectId) => releaseSubject(subjectId)));
+  }
 }

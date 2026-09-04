@@ -4,6 +4,9 @@
 # Dependencies
 node_modules
 
+# pnpm store, when a local --store-dir puts it in-repo
+/.pnpm-store/
+
 # NX
 .nx/cache
 .nx/workspace-data
@@ -17,10 +20,32 @@ node_modules
 build
 dist
 /out
+apps/desktop/package-out*
+apps/desktop/resources/python/*
+!apps/desktop/resources/python/manifest.json
+apps/desktop/resources/picogk/*
+packages/plugins/picogk/dotnet/**/bin
+packages/plugins/picogk/dotnet/**/obj
+apps/desktop/macos/generated/runtime
 out-tsc
 *.tsbuildinfo
 
 packages/geospec-engine/e2e/dist-fixture
+
+# Python bytecode (skills scripts, build123d plugin, tau-examples kernels)
+__pycache__/
+*.pyc
+
+# Geometry exports beside example sources; thumbnails are tracked, models are not
+libs/tau-examples/src/**/*.usdz
+
+# Benchmark output. The harness writes timestamped runs; results are attached
+# to a research doc, never committed. Replaces the `reports/` rule that
+# apps/api/.gitignore carried for the retired `benchmark:models` target.
+apps/api/app/testing/harness-bench/results/
+
+# Stray tool output at the repository root
+/results.json
 
 # Environment variables
 .env
@@ -30,6 +55,9 @@ stats.html
 
 vite.config.*.timestamp*
 vitest.config.*.timestamp*
+
+# Vitest attachment output (content-hash named, one set per run)
+**/.vitest-attachments/
 
 # Docker pnpm deploy target directory
 pruned
@@ -64,6 +92,13 @@ packages/geospec-engine/provenance.json
 
 # Codex spike build scratch
 .codex-spike-build/
+
+# Exploration spikes: scratch trees, never tracked. Findings are promoted to
+# docs/research/ before a spike is retired.
+/spikes/
+
+# Machine-local dev server config (names gitignored repos/ paths)
+.claude/launch.json
 
 # Vite dep-optimizer caches in mocker fixtures
 fixtures/mocker/*/.cache/

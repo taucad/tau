@@ -131,8 +131,8 @@ const readSurfaceVisualState = async (header: Locator): Promise<SurfaceVisualSta
     const panel = document.querySelector<HTMLElement>('[data-slot="parameters-panel-body"]');
     const toolbar = document.querySelector<HTMLElement>('[data-slot="parameters-filter"]');
     const filter = document.querySelector<HTMLInputElement>('[aria-label="Filter parameters"]');
-    const catalog = body.querySelector<HTMLElement>('[data-slot="parameter-catalog"]');
-    const scroller = body.querySelector<HTMLElement>('form');
+    const catalog = body?.querySelector<HTMLElement>('[data-slot="parameter-catalog"]');
+    const scroller = body?.querySelector<HTMLElement>('form');
     if (!headerRoot || !body || !paneBody || !panel || !toolbar || !filter || !catalog || !scroller) {
       throw new Error('Parameters attached surface was incomplete.');
     }

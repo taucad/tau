@@ -1,7 +1,7 @@
 // @vitest-environment node
 /* oxlint-disable max-lines -- RPC adapter coverage shares one typed actor/service fixture matrix. */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { handleGlobSearch, RpcDependencies, RpcFileSystem } from '@taucad/chat/rpc';
+import type * as ChatRpc from '@taucad/chat/rpc';
 import { rpcClientErrorCodeSchema } from '@taucad/chat';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import type { FileEntry, FileExtension, FileStat } from '@taucad/types';
@@ -9,6 +9,9 @@ import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import { rpcName } from '@taucad/chat/constants';
 import type { RpcHandlerDependencies, RpcCallInput } from '#hooks/rpc-handlers.js';
+
+type RpcDependencies = ChatRpc.RpcDependencies;
+type RpcFileSystem = ChatRpc.RpcFileSystem;
 
 const gltfGeometry = { format: 'gltf', content: new Uint8Array(), hash: 'geometry-hash' };
 const presentationGltfGeometry = {
@@ -54,12 +57,16 @@ const rpcDispatcherMocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
 }));
 
-vi.mock('@taucad/chat/rpc', () => ({
-  createRpcDispatcher: (deps: RpcDependencies) => {
-    capturedDeps = deps;
-    return { dispatch: rpcDispatcherMocks.dispatch };
-  },
-}));
+vi.mock('@taucad/chat/rpc', async (importOriginal) => {
+  const actual = await importOriginal<typeof ChatRpc>();
+  return {
+    ...actual,
+    createRpcDispatcher: (deps: RpcDependencies) => {
+      capturedDeps = deps;
+      return { dispatch: rpcDispatcherMocks.dispatch };
+    },
+  };
+});
 
 const ledgerMocks = vi.hoisted(() => ({
   recordRpcOutcome: vi.fn(),
@@ -80,7 +87,10 @@ vi.mock('xstate', async () => {
 });
 
 const { createRpcHandlers } = await import('#hooks/rpc-handlers.js');
-const actualChatRpc = await vi.importActual<{ handleGlobSearch: typeof handleGlobSearch }>('@taucad/chat/rpc');
+const actualChatRpc = await vi.importActual<{
+  handleEditFile: typeof ChatRpc.handleEditFile;
+  handleGlobSearch: typeof ChatRpc.handleGlobSearch;
+}>('@taucad/chat/rpc');
 
 // ===================================================================
 // Factories
@@ -219,6 +229,7 @@ function createMockCadUnit(options?: {
         parameters: options?.parameters ?? {},
         units: { length: 'mm' },
       },
+      hasTag: () => options?.value === 'error',
     }),
     send: vi.fn(),
     on: vi.fn().mockReturnValue({ unsubscribe: vi.fn() }),
@@ -577,6 +588,93 @@ describe('rpc-handlers', () => {
         expect(mockFm.writeFile).not.toHaveBeenCalled();
       });
     });
+
+    describe('editFile', () => {
+      it('writes no bytes and returns AMBIGUOUS_MATCH when oldString occurs twice', async () => {
+        mockFm.readFile.mockResolvedValue(new TextEncoder().encode('cube();\ncube();\n'));
+
+        const result = await actualChatRpc.handleEditFile(
+          { targetFile: 'main.scad', oldString: 'cube();', newString: 'sphere();' },
+          fileSystem,
+        );
+
+        expect(result).toMatchObject({ success: false, errorCode: 'AMBIGUOUS_MATCH' });
+        expect(mockFm.writeFile).not.toHaveBeenCalled();
+      });
+
+      it('compares exact bytes, replans one stale edit, and verifies the committed bytes', async () => {
+        let current = new Uint8Array(new TextEncoder().encode('cube();\n'));
+        let reads = 0;
+        mockFm.readFile.mockImplementation(async () => {
+          reads += 1;
+          if (reads === 2) {
+            current = new Uint8Array(new TextEncoder().encode('// external\ncube();\n'));
+          }
+          return new Uint8Array(current);
+        });
+        mockFm.writeFile.mockImplementation(async (_path, data) => {
+          current = new Uint8Array(data);
+        });
+        mockFm.stat.mockImplementation(async () => textFileStat(current.byteLength));
+
+        const result = await actualChatRpc.handleEditFile(
+          { targetFile: 'main.scad', oldString: 'cube();', newString: 'sphere();' },
+          fileSystem,
+        );
+
+        expect(result).toMatchObject({
+          success: true,
+          occurrences: 1,
+          staleRecovered: true,
+        });
+        expect(new TextDecoder().decode(current)).toBe('// external\nsphere();\n');
+        expect(mockFm.writeFile).toHaveBeenCalledOnce();
+        expect(reads).toBe(4);
+      });
+
+      it('preserves both concurrent edits across adapters sharing one filesystem authority', async () => {
+        let current = new Uint8Array(new TextEncoder().encode('alpha = 1;\nbeta = 1;\n'));
+        let initialReads = 0;
+        const bothInitialReads = Promise.withResolvers<void>();
+        mockFm.readFile.mockImplementation(async () => {
+          if (initialReads < 2) {
+            initialReads += 1;
+            if (initialReads === 2) {
+              bothInitialReads.resolve();
+            }
+            await bothInitialReads.promise;
+          }
+          return new Uint8Array(current);
+        });
+        mockFm.writeFile.mockImplementation(async (_path, data) => {
+          const replacement = new Uint8Array(data);
+          await Promise.resolve();
+          current = replacement;
+        });
+        mockFm.stat.mockImplementation(async () => textFileStat(current.byteLength));
+
+        const treeService = createMockTreeService();
+        mockFm.whenServicesReady.mockResolvedValue({ treeService });
+        createRpcHandlers({
+          chatId: 'chat_concurrent_edit_a',
+          fileManager: mockFm as RpcHandlerDependencies['fileManager'],
+        });
+        const firstAdapter = capturedDeps!.fileSystem;
+        createRpcHandlers({
+          chatId: 'chat_concurrent_edit_b',
+          fileManager: mockFm as RpcHandlerDependencies['fileManager'],
+        });
+        const secondAdapter = capturedDeps!.fileSystem;
+
+        const [first, second] = await Promise.all([
+          firstAdapter.editFile('main.ts', 'alpha = 1;', 'alpha = 2;'),
+          secondAdapter.editFile('main.ts', 'beta = 1;', 'beta = 2;'),
+        ]);
+
+        expect([first.staleRecovered, second.staleRecovered].filter(Boolean)).toHaveLength(1);
+        expect(new TextDecoder().decode(current)).toBe('alpha = 2;\nbeta = 2;\n');
+      });
+    });
   });
 
   // ===============================================================
@@ -712,6 +810,7 @@ describe('rpc-handlers', () => {
           kernelIssues: new Map<string, Array<{ message: string; type: string; severity: string }>>(),
           kernelClient,
         },
+        hasTag: () => false,
       });
 
       it('should return STEP bytes after kernel export resolves', async () => {
@@ -845,10 +944,12 @@ describe('rpc-handlers', () => {
           value: 'idle',
           context: {
             geometry: { format: 'gltf', content: glbContent, hash: 'last-success' },
+            entryPath: 'main.ts',
             latestGeometryOutcome: 'failure',
             kernelIssues: issues,
             kernelClient,
           },
+          hasTag: () => false,
         });
 
         const result = await buildDeps({ projectRef }).graphics!.exportGeometry({
@@ -858,6 +959,68 @@ describe('rpc-handlers', () => {
 
         expect(result).toEqual({ success: false, errorCode: 'UNKNOWN', message: 'radius must be positive' });
         expect(kernelClient.export).not.toHaveBeenCalled();
+      });
+
+      it('uses shared connection-issue precedence when a failed render has no entry issue', async () => {
+        const kernelClient = { capabilities: { routes: [] }, export: vi.fn() };
+        const cadUnit = createMockCadUnit({ kernelClient, entryPath: 'main.py' });
+        const projectRef = createMockProjectRef({ geometryUnits: new Map([['main.py', cadUnit]]) });
+        mockWaitFor.mockResolvedValue({
+          value: 'idle',
+          context: {
+            entryPath: 'main.py',
+            latestGeometryOutcome: 'failure',
+            kernelIssues: new Map([
+              [
+                '__connection__',
+                [
+                  { message: 'native host unavailable', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+                  { message: 'retry placement', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+                ],
+              ],
+            ]),
+            kernelClient,
+          },
+          hasTag: () => false,
+        });
+
+        const result = await buildDeps({ projectRef }).graphics!.exportGeometry({
+          targetFile: 'main.py',
+          format: 'stl',
+        });
+
+        expect(result).toEqual({
+          success: false,
+          errorCode: 'UNKNOWN',
+          message: 'native host unavailable; retry placement',
+        });
+      });
+
+      it('uses the deterministic machine fallback for a failed render without issues', async () => {
+        const kernelClient = { capabilities: { routes: [] }, export: vi.fn() };
+        const cadUnit = createMockCadUnit({ kernelClient, entryPath: 'main.py' });
+        const projectRef = createMockProjectRef({ geometryUnits: new Map([['main.py', cadUnit]]) });
+        mockWaitFor.mockResolvedValue({
+          value: 'idle',
+          context: {
+            entryPath: 'main.py',
+            latestGeometryOutcome: 'failure',
+            kernelIssues: new Map(),
+            kernelClient,
+          },
+          hasTag: () => false,
+        });
+
+        const result = await buildDeps({ projectRef }).graphics!.exportGeometry({
+          targetFile: 'main.py',
+          format: 'stl',
+        });
+
+        expect(result).toEqual({
+          success: false,
+          errorCode: 'UNKNOWN',
+          message: 'The selected CAD render failed',
+        });
       });
     });
 
@@ -903,8 +1066,8 @@ describe('rpc-handlers', () => {
             lineWidth: 3,
             background: '#242424',
             camera: {
-              framing: 'fit',
-              direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+              framing: 'bounds',
+              direction: [0.6123724357, -0.6123724357, 0.5],
               up: [0, 0, 1],
               margin: 0.1,
               projection: { kind: 'perspective', verticalFieldOfView: 45 },
@@ -1034,7 +1197,7 @@ describe('rpc-handlers', () => {
                 id: 'front',
                 label: 'Front — View From −Y',
                 camera: {
-                  framing: 'fit',
+                  framing: 'bounds',
                   direction: [0, -1, 0],
                   up: [0, 0, 1],
                   margin: 0.1,
@@ -1045,7 +1208,7 @@ describe('rpc-handlers', () => {
                 id: 'back',
                 label: 'Back — View From +Y',
                 camera: {
-                  framing: 'fit',
+                  framing: 'bounds',
                   direction: [0, 1, 0],
                   up: [0, 0, 1],
                   margin: 0.1,
@@ -1056,7 +1219,7 @@ describe('rpc-handlers', () => {
                 id: 'right',
                 label: 'Right — View From +X',
                 camera: {
-                  framing: 'fit',
+                  framing: 'bounds',
                   direction: [1, 0, 0],
                   up: [0, 0, 1],
                   margin: 0.1,
@@ -1067,7 +1230,7 @@ describe('rpc-handlers', () => {
                 id: 'left',
                 label: 'Left — View From −X',
                 camera: {
-                  framing: 'fit',
+                  framing: 'bounds',
                   direction: [-1, 0, 0],
                   up: [0, 0, 1],
                   margin: 0.1,
@@ -1078,7 +1241,7 @@ describe('rpc-handlers', () => {
                 id: 'top',
                 label: 'Top — View From +Z',
                 camera: {
-                  framing: 'fit',
+                  framing: 'bounds',
                   direction: [0, 0, 1],
                   up: [0, 1, 0],
                   margin: 0.1,
@@ -1089,7 +1252,7 @@ describe('rpc-handlers', () => {
                 id: 'bottom',
                 label: 'Bottom — View From −Z',
                 camera: {
-                  framing: 'fit',
+                  framing: 'bounds',
                   direction: [0, 0, -1],
                   up: [0, 1, 0],
                   margin: 0.1,
@@ -1141,14 +1304,14 @@ describe('rpc-handlers', () => {
         expect(await deps.images!.captureImages({ mode: 'single', targetFile: 'pen.ts' })).toEqual({
           success: false,
           errorCode: 'IO_ERROR',
-          message: 'Image capture expected non-empty image/webp 1600×1600 artifacts',
+          message: 'Image capture expected non-empty image/webp artifacts',
         });
 
         exportImage.mockResolvedValue([{ name: 'render.webp', mimeType: 'image/png', bytes: new Uint8Array([1]) }]);
         expect(await deps.images!.captureImages({ mode: 'single', targetFile: 'pen.ts' })).toEqual({
           success: false,
           errorCode: 'IO_ERROR',
-          message: 'Image capture expected non-empty image/webp 1600×1600 artifacts',
+          message: 'Image capture expected non-empty image/webp artifacts',
         });
       });
 

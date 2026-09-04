@@ -126,6 +126,26 @@ describe.each(providers)('$name provider path-tree conformance', ({ create }) =>
     }
   });
 
+  // `writeFile` is the only replace-an-existing-record primitive: `rename` is
+  // fail-closed on an existing target by design, so persisted-record writers
+  // (durable chat claims, RPC responses) depend on this contract holding on
+  // every backend. Durability caveat: each backend swaps the whole file in one
+  // step — node temp + fsync + rename, OPFS/FS-Access swap file + atomic rename
+  // on `close()`, IndexedDB one transaction, memory one map write — but only
+  // node fsyncs, so a power loss can still lose the newest browser record.
+  it('replaces an existing file rather than rejecting the write', async () => {
+    const provider = await create();
+    try {
+      await provider.writeFile('records/claim.json', '{"admitted":false}');
+      await provider.writeFile('records/claim.json', '{"admitted":true}');
+
+      await expect(provider.readFile('records/claim.json', 'utf8')).resolves.toBe('{"admitted":true}');
+      await expect(provider.readdir('records')).resolves.toEqual(['claim.json']);
+    } finally {
+      provider.dispose();
+    }
+  });
+
   it('round-trips appended bytes through readFile', async () => {
     const provider = await create();
     try {

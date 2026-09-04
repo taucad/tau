@@ -1435,6 +1435,22 @@ describe('WorkspaceFileService', () => {
       expect(content).toBe('untouched');
     });
 
+    // Persisted-record writers (durable chat claims, RPC responses) create and
+    // then repeatedly UPDATE one path. `move` is fail-closed on an existing
+    // target, so a temp-file + `move` "atomic write" throws EEXIST on every
+    // update; `writeFile` is the replace primitive. Guards the real semantics
+    // that the UI's `writePersistedRecord` depends on.
+    it('should replace a persisted record in place across repeated updates', async () => {
+      const path = '/.tau/workspaces/claims/chat_1.json';
+      await service.writeFile(path, '{"admitted":false}');
+      await service.writeFile(path, '{"admitted":true}');
+      await service.writeFile(path, '{"admitted":true,"turnId":"turn_2"}');
+
+      expect(await service.readFile(path, 'utf8')).toBe('{"admitted":true,"turnId":"turn_2"}');
+      await service.writeFile('/replacement.json', '{}');
+      await expect(service.move('/replacement.json', path)).rejects.toThrow('EEXIST');
+    });
+
     it('should emit directoryRenamed for directory sources', async () => {
       await service.writeFile('/src/a.txt', 'a');
       const events: ChangeEvent[] = [];

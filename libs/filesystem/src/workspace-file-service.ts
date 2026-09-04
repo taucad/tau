@@ -1811,7 +1811,7 @@ export class WorkspaceFileService {
         await provider.writeFile(manifestPath, serializeProjectManifest(manifest));
         // Ponytail: no logical route to invalidate — an unadopted project was
         // never mounted, so the caller's discovery refetch is the only reader.
-        this._crossTabCoordinator.notifyDirectoryChange(path, this._scopedPhysicalAuthority(root.scope, path));
+        this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(root.scope, ''));
         return manifest;
       }),
     );
@@ -3031,6 +3031,15 @@ export class WorkspaceFileService {
     if (this._registry.getOwnedProvider(notification.authority.storageRootKey) !== pendingProvider) {
       return;
     }
+    const entry = this._findMountForPhysicalAuthority(notification.path, notification.authority, provider);
+    const isDiscoveryRootChange =
+      notification.type === 'directory-change' &&
+      notification.path === '/' &&
+      notification.authority.providerBasePath === '' &&
+      this._discoveryRoots.some((root) => root.storageRootKey === notification.authority.storageRootKey);
+    if (entry === undefined && !isDiscoveryRootChange) {
+      return;
+    }
     const backend = this._backendForPhysicalAuthority(notification.authority);
     try {
       await provider.refresh?.();
@@ -3039,14 +3048,16 @@ export class WorkspaceFileService {
       return;
     }
 
-    const entry = this._findMountForPhysicalAuthority(notification.path, notification.authority, provider);
     const resolution =
       entry === undefined
         ? undefined
         : this._remoteResolution({ path: notification.path, authority: notification.authority, provider, entry });
     const isCurrent = resolution !== undefined && this._isCurrentResolution(notification.path, resolution);
+    if (!isCurrent && !isDiscoveryRootChange) {
+      return;
+    }
 
-    if (isCurrent || notification.type === 'directory-change') {
+    if (isCurrent || isDiscoveryRootChange) {
       this._filePool?.clear();
       this._inMemoryTree.clear();
       this._directoryStatRoot = undefined;
@@ -3082,23 +3093,19 @@ export class WorkspaceFileService {
     authority: PhysicalAuthority,
     provider: FileSystemProvider,
   ): MountEntry | undefined {
-    const matches = this._mountTable
-      .listMounts()
-      .filter(
-        (entry) =>
-          entry.provider === provider &&
-          entry.storageRootKey === authority.storageRootKey &&
-          entry.providerBasePath === authority.providerBasePath,
-      );
     try {
       const current = this._mountTable.resolve(path).entry;
-      if (current !== undefined && matches.includes(current)) {
+      if (
+        current?.provider === provider &&
+        current.storageRootKey === authority.storageRootKey &&
+        current.providerBasePath === authority.providerBasePath
+      ) {
         return current;
       }
     } catch {
-      // Fall back to a matching physical projection when the logical route is unavailable.
+      // An unroutable notification cannot identify a live projection.
     }
-    return matches[0];
+    return undefined;
   }
 
   private _remoteResolution(options: {

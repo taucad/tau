@@ -361,6 +361,35 @@ describe('WorkspaceFileService', () => {
         peer.dispose();
       }
     });
+
+    it('ignores a directory notification that does not match the known physical authority', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const refresh = vi.spyOn(provider, 'refresh');
+      const changes: ChangeEvent[] = [];
+      const unsubscribe = eventBus.subscribe((event) => changes.push(event));
+      const sender = new BroadcastChannel('tau-fs-changes');
+
+      try {
+        sender.postMessage({
+          type: 'directory-change',
+          path: '/unrelated',
+          authority: {
+            storageRootKey: providerRegistry.resolveStorageRootKey({ backend: 'indexeddb' }),
+            providerBasePath: 'different-project',
+          },
+        });
+        await new Promise((resolve) => {
+          setTimeout(resolve, 20);
+        });
+
+        expect(refresh).not.toHaveBeenCalled();
+        expect(changes).toEqual([]);
+      } finally {
+        sender.close();
+        unsubscribe();
+      }
+    });
   });
 
   describe('permanentlyDeleteProjectDirectory', () => {

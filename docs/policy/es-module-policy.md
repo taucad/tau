@@ -3,9 +3,12 @@ title: 'ES Module Asset Injection Policy'
 description: 'Standards for loading heavy assets (WASM binaries, Emscripten JS glue, large modules) with code-splitting, tree-shaking, and runtime injection. Covers dynamic imports, WASM URL patterns, and assetsInlineLimit.'
 status: active
 created: '2025-08-06'
-updated: '2026-03-05'
+updated: '2026-09-04'
 related:
   - docs/research/dynamic-es-modules.md
+  - docs/policy/worker-policy.md
+  - packages/runtime/src/vite/runtime-vite-plugins.ts
+  - apps/ui/vite.config.ts
 ---
 
 # ES Module Asset Injection Policy
@@ -126,7 +129,8 @@ Vite's `assetsInlineLimit` callback has **unintuitive return semantics**:
 | `true`       | **Force inline** — regardless of file size      |
 | `false`      | **Never inline** — always emit as separate file |
 | `undefined`  | Use the default 4 KB threshold                  |
-| `number`     | Inline only if file is smaller than this value  |
+
+A numeric limit belongs to the top-level `assetsInlineLimit` option; it is not a supported callback return type.
 
 A common mistake is writing a callback that returns a boolean to exclude one file type, inadvertently force-inlining everything else:
 
@@ -148,6 +152,8 @@ assetsInlineLimit(file) {
   return undefined; // default 4 KB threshold applies
 }
 ```
+
+`tauRuntime()` enforces `false` for `.wasm` assets in `packages/runtime/src/vite/runtime-vite-plugins.ts` and preserves the consumer policy for other files. The UI callback in `apps/ui/vite.config.ts` separately excludes SVGs. Keep the WASM invariant in the shared runtime integration.
 
 ### Verifying Correct Build Output
 
@@ -176,7 +182,7 @@ To ensure V8 bytecode caching works reliably across browsers and cache configura
 - **Practical target**: Keep WASM-adjacent JS chunks under **500 KB** by emitting all WASM as separate files. The JS chunk should contain only the bindings/glue code.
 - **Diagnostic**: If `chrome://tracing` shows `v8.compileModule` with `cacheKind=ABSENT` on reload 3+, the bytecode cache is being rejected. Check chunk sizes.
 
-### Impact: Verified Performance Data
+### Historical Performance Evidence (March 2026)
 
 | Metric                       | With WASM inlining | Without (fixed) |
 | ---------------------------- | ------------------ | --------------- |
@@ -189,52 +195,13 @@ To ensure V8 bytecode caching works reliably across browsers and cache configura
 
 ## WASM Module Reuse Across Workers
 
-### Current: within-project worker pooling (already implemented)
+### Runtime-client ownership
 
-The application already keeps kernel workers alive within a project session. The `ProjectProvider` → `projectMachine` → `cadMachine` → `kernelMachine` hierarchy reuses the same worker across file changes, parameter changes, and re-renders. The WASM init cost is paid **once per project session**, not per render.
+Keep the runtime client alive across ordinary file and parameter updates. In `apps/ui/app/machines/cad.machine.ts`, the connection path creates the client with `createRuntimeClient()`; abort teardown and `destroyKernel` terminate it and dispose its event subscriptions. Follow [Worker Lifecycle Policy](worker-policy.md) for ownership and teardown requirements.
 
-This is the same "object pooling" approach used by [PSPDFKit](https://pspdfkit.com/blog/2018/optimize-webassembly-startup-performance/) for their 8 MB+ WASM backend — they pool initialized worker instances and recycle them across document opens.
+The March 2026 investigation measured approximately 50–60 ms of warm-cache WASM compilation and Emscripten initialization per worker creation. Those measurements describe that experiment, not a fixed cost or a guarantee about the current worker topology. Measure current startup before adding cross-project pooling or precompiled-module coordination.
 
-### Per-worker-creation cost (on project switches)
-
-When the user navigates to a different project (project), workers are destroyed and recreated. With V8's caching layers working correctly, the init cost is modest:
-
-| Cost                         | Duration (warm caches) | Cause                                                                                                   |
-| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `wasm.compile`               | ~20-30ms               | Streaming pipeline: HTTP cache fetch via Mojo IPC + NativeModuleCache lookup + TurboFan deserialization |
-| `wasm.emscripten-init`       | ~27-30ms               | C++ global constructors + Emscripten FS setup                                                           |
-| **Total per project switch** | **~50-60ms**           | Negligible compared to geometry computation (100-500ms+)                                                |
-
-V8's caching layers handle compilation efficiently:
-
-- **NativeModuleCache** (process-global): Shares compiled `NativeModule` across isolates. Lookup takes <1ms.
-- **GeneratedCodeCache** (disk): Persists TurboFan-optimized code across browser sessions. Deserialization takes ~8ms.
-- **`compileStreaming(fetch(url))`** leverages both caches automatically. The remaining ~20-30ms is the irreducible cost of the HTTP cache fetch IPC and streaming finalization — not recompilation.
-
-### Future: cross-project worker pooling (low priority)
-
-When switching between projects that use the same kernel type, the worker could be kept alive instead of terminated. The project machine would detach and reattach geometry units rather than destroying them.
-
-**Emscripten constraint**: C++ global constructors only run once per instance. OpenCASCADE's global state is initialized during these constructors and cannot be re-run. State cleanup must happen at the application level (e.g., deleting shapes), not by re-creating the Emscripten instance.
-
-This is low priority because:
-
-- The ~56ms init cost only occurs on project navigation, not during the iterative edit→render loop
-- The cost is small relative to project loading, file system initialization, and geometry computation that follow
-- The existing within-project pooling already covers the primary workflow
-
-### Future: transfer pre-compiled modules via `postMessage` (deferred)
-
-Google's [WebAssembly Performance Patterns](https://web.dev/articles/webassembly-performance-patterns-for-web-apps) guide (reviewed by V8 engineers) recommends compiling WASM once on the main thread and transferring the `WebAssembly.Module` to workers via `postMessage` to bypass the streaming pipeline entirely. `WebAssembly.Module` is structured-cloneable and V8 shares compiled code via the process-global `NativeModuleCache` — no byte copying or recompilation occurs.
-
-**This optimization is deferred** because:
-
-1. **Marginal savings**: With V8's caching layers working correctly, `wasm.compile` is only 20-30ms — negligible compared to geometry computation (typically 100-500ms+).
-2. **Round-trip overhead offsets savings**: The transfer pattern requires the worker to request the module from the main thread, wait for the response, then instantiate. This round-trip (message queue scheduling on both sides, structured clone serialization, event loop contention) would consume a significant portion of the 20-30ms savings.
-3. **Caching already handles the hard work**: V8 deserializes cached TurboFan code in ~8ms and performs NativeModuleCache lookup in <1ms. The remaining time is HTTP cache IPC, which the `postMessage` approach merely trades for a different IPC path.
-4. **Implementation complexity**: Requires a coordinator lifecycle on the main thread, a request/response message protocol, error handling for races (worker starts before main thread has compiled), and a fallback path to `compileStreaming`.
-
-If `wasm.compile` costs grow (e.g., larger WASM binaries or degraded cache behavior), this can be revisited. For Emscripten modules, the [`instantiateWasm` hook](https://emscripten.org/docs/api_reference/module.html) provides the injection point.
+`WebAssembly.Module` is structured-cloneable through `postMessage`, but it is not a transferable to put in a transfer list. If profiling justifies sharing compiled modules, keep instance ownership and cleanup explicit and account for worker-startup races. The original trade-off analysis remains in [Dynamic ES Module Research](../research/dynamic-es-modules.md).
 
 ### V8 isolate cache boundaries
 
@@ -261,4 +228,4 @@ If `wasm.compile` costs grow (e.g., larger WASM binaries or degraded cache behav
 - **Assuming CJS works with browser `import()`** -- it does not; only Node.js handles CJS via `import()`
 - **`assetsInlineLimit` returning `true` for WASM files** -- inlines multi-MB binaries into JS, breaking V8 bytecode cache and disabling streaming compilation
 - **JS chunks > 20 MB containing inlined binary data** -- exceeds Chrome's `GeneratedCodeCache` per-entry limit, causing silent cache rejection and full recompilation on every page load
-- **Terminating workers within a project session** -- destroys the V8 isolate and forces full WASM re-init (~56ms); keep workers alive across file/parameter changes (already implemented). Cross-build termination is acceptable given the low cost with warm caches
+- **Terminating a runtime client on every file or parameter update** -- discards reusable worker state. Terminate at its ownership boundary; use measured startup costs when evaluating wider pooling

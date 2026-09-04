@@ -1,10 +1,8 @@
-import type { SpatialVector } from '@taucad/spatial';
-
 const maximumPerspectiveVerticalFieldOfView = 179;
 const minimumOrthographicPlaneIncidence = 1e-3;
 
 /** A renderer-neutral three-dimensional vector. @public */
-export type CameraVector = SpatialVector;
+export type CameraVector = readonly [number, number, number];
 
 /** Axis-aligned world bounds used for framing and clip planes. @public */
 export type CameraBounds = Readonly<{

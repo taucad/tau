@@ -57,11 +57,9 @@
     "#*": "./src/*"
   },
   "peerDependencies": {
-    "@taucad/spatial": "^0.0.1",
     "xstate": "^5.0.0"
   },
   "devDependencies": {
-    "@taucad/spatial": "workspace:*",
     "xstate": "catalog:"
   }
 }

@@ -1,7 +1,7 @@
 [
   {
-    "name": "measure before release — placeholder budget",
+    "name": "@taucad/camera runtime",
     "path": "dist/**/*.mjs",
-    "limit": "100 kB"
+    "limit": "3.5 kB"
   }
 ]

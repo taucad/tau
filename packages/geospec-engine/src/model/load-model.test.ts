@@ -5,8 +5,14 @@ import { describe, expect, it, vi } from 'vitest';
 import ts from 'typescript';
 import { openrscad } from '@taucad/openrscad';
 import { createNodeClient } from '@taucad/runtime/node';
+import type { KernelIssue } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { GeoSpecModelLoadError } from 'geospec/model';
+import { GeoSpecModelLoadError, loadModel as publicLoadModel } from 'geospec/model';
+import { analyzeMesh as publicAnalyzeMesh } from 'geospec/mesh';
+import { createCollector } from 'geospec/runner';
+import { clearGeoSpecEngine, registerGeoSpecEngine } from 'geospec/engine';
+import { geoSpecEngineImplementation } from '#register.js';
+import { releaseEngineSubject } from '#engine/subject-store.js';
 import type { GeoSpecRuntimeClient, GeoSpecRuntimeSourceAdapter, LoadModelOptions } from 'geospec/model';
 import {
   createModelLoader,
@@ -95,7 +101,9 @@ describe('default runtime roster', () => {
     const [source, manifestSource] = await Promise.all([readFile(sourceUrl, 'utf8'), readFile(manifestUrl, 'utf8')]);
     const manifest = JSON.parse(manifestSource) as { dependencies?: Record<string, string> };
     const expected = Object.keys(manifest.dependencies ?? {}).filter(
-      (name) => name.startsWith('@taucad/') && name !== '@taucad/runtime' && name !== '@taucad/occt-core',
+      (name) =>
+        name.startsWith('@taucad/') &&
+        !['@taucad/runtime', '@taucad/occt-core', '@taucad/geometry-core'].includes(name),
     );
     const actual = ts
       .preProcessFile(source, true, true)
@@ -116,6 +124,7 @@ const fakeRuntime = (options?: {
   transcoderId?: string;
   render?: boolean;
   throws?: unknown;
+  issues?: KernelIssue[];
 }): GeoSpecRuntimeClient & {
   state: {
     connected: number;
@@ -153,7 +162,7 @@ const fakeRuntime = (options?: {
           }
         : {
             success: true,
-            issues: [],
+            issues: options?.issues ?? [],
             data: options?.empty === true ? [] : [{ name: 'model.glb', bytes: options?.bytes ?? new Uint8Array(0) }],
           };
     },
@@ -303,11 +312,77 @@ describe('loadModel — the runtime branch has no frame knobs (Register C7)', ()
 });
 
 describe('loadModel — the runtime branch', () => {
+  it('retains successful-export issues and analyzes retained evidence without exporting again', async () => {
+    registerGeoSpecEngine(geoSpecEngineImplementation);
+    const issues: KernelIssue[] = ['warning', 'error', 'info'].map((severity) => ({
+      code: `RUNTIME_${severity}`,
+      type: 'kernel',
+      severity: severity as KernelIssue['severity'],
+      message: `Original ${severity}`,
+      details: { part: 'colored triangle', center: [0, 0, 0] },
+    }));
+    const bytes = await glbBytes(20);
+    const runtime = fakeRuntime({ bytes, issues });
+    const subject = await publicLoadModel({ file: 'main.ts', runtime });
+    try {
+      expect(subject.diagnostics.map(({ details }) => details)).toEqual(issues);
+      const first = await publicAnalyzeMesh({ subject });
+      bytes.fill(0);
+      const second = await publicAnalyzeMesh({ subject });
+      expect(second).toStrictEqual(first);
+      expect(first.success && first.stats.boundingBox?.size).toEqual([20, 20, 0]);
+      expect(runtime.state.exports).toHaveLength(1);
+      const collector = createCollector();
+      collector.it('default severities', () => collector.expectGeo(subject).toHaveNoDiagnostics());
+      collector.it('info explicitly rejected', () =>
+        collector.expectGeo(subject).toHaveNoDiagnostics({ severities: ['info'] }),
+      );
+      collector.it('explicit empty rejection set', () =>
+        collector.expectGeo(subject).toHaveNoDiagnostics({ severities: [] }),
+      );
+      await collector.waitForCompletion();
+      expect(collector.tests.map(({ status }) => status)).toEqual(['failed', 'failed', 'passed']);
+      expect(collector.tests[0]?.diagnostics[0]?.details).toMatchObject({
+        diagnostics: subject.diagnostics.slice(0, 2),
+      });
+      expect(collector.tests[1]?.diagnostics[0]?.details).toMatchObject({ diagnostics: subject.diagnostics.slice(2) });
+    } finally {
+      releaseEngineSubject(subject.subjectId);
+      runtime.terminate();
+      clearGeoSpecEngine();
+    }
+  });
+
   it('should preserve canonical runtime-exported millimetre coordinates', async () => {
     const subject = await loadModel({ file: 'main.ts', runtime: fakeRuntime({ bytes: await glbBytes(20) }) });
     expect(subject.mesh.stats.boundingBox?.size).toEqual([20, 20, 0]);
     expect(subject.provenance.unit).toBe('mm');
     expect(subject.provenance.exportIntent?.honored?.sourceUnit).toBe('mm');
+  });
+
+  it('should preserve successful runtime issues as structured subject diagnostics', async () => {
+    const issue: KernelIssue = {
+      code: 'GEOMETRY_INVALID',
+      severity: 'warning',
+      type: 'kernel',
+      message: "JSCAD part 'Shape 1' is not a closed oriented solid: non-manifold edges 1520.",
+      location: { fileName: 'main.ts', startLineNumber: 1, startColumn: 1 },
+      details: { producer: 'jscad', topology: { nonManifoldEdges: 1520 } },
+    };
+    const subject = await loadModel({
+      file: 'main.ts',
+      runtime: fakeRuntime({ bytes: await glbBytes(), issues: [issue] }),
+    });
+
+    expect(subject.diagnostics).toEqual([
+      {
+        code: 'GEOMETRY_INVALID',
+        severity: 'warning',
+        message: issue.message,
+        suggestion: 'Fix the model source or its kernel/export path, then re-export the evidence.',
+        details: issue,
+      },
+    ]);
   });
 
   it('should honor requested runtime-export tessellation', async () => {
@@ -614,6 +689,30 @@ describe('createModelLoader', () => {
     await loader.dispose();
     await loader.dispose();
     expect(runtime.state.terminated).toBe(1);
+  });
+
+  it('should use a matching per-file source adapter before its shared runtime', async () => {
+    const shared = fakeRuntime({ bytes: await glbBytes() });
+    const adapted = fakeRuntime({ bytes: await glbBytes(2) });
+    const createShared = vi.fn(async () => shared);
+    const loader = createModelLoader({ runtime: createShared });
+
+    const subject = await loader({
+      file: 'main.scad',
+      sourceAdapters: [
+        {
+          id: 'fixture-adapter',
+          extensions: ['.scad'],
+          createRuntime: async () => adapted,
+        },
+      ],
+    });
+    await loader.dispose();
+
+    expect(subject.mesh.stats.vertexCount).toBe(3);
+    expect(createShared).not.toHaveBeenCalled();
+    expect(adapted.state.exports).toHaveLength(1);
+    expect(adapted.state.terminated).toBe(1);
   });
 
   it('should forward runtime telemetry only while a forensic sink is attached', async () => {

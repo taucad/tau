@@ -13,7 +13,8 @@
  */
 
 import { WebIO } from '@gltf-transform/core';
-import type { Document, Mesh, Node, Primitive } from '@gltf-transform/core';
+import type { Accessor, Document, Mesh, Node } from '@gltf-transform/core';
+import { allExtensions } from '@taucad/geometry-core';
 import { decodeSections, encodeSections } from '#cache/section-codec.js';
 import { weldFlatPositions } from '#mesh/_internal/spatial-welding.js';
 import { sweepAxisByCentreVariance } from '#mesh/_internal/sweep-axis.js';
@@ -86,15 +87,7 @@ export const buildMeshNodeNameMap = (document: Document): Map<Mesh, string> => {
   return names;
 };
 
-const primitivePositions = (
-  primitive: Primitive,
-  node: Node,
-  scale: number,
-): { positions: number[]; count: number } => {
-  const attribute = primitive.getAttribute('POSITION');
-  if (!attribute) {
-    return { positions: [], count: 0 };
-  }
+const primitivePositions = (attribute: Accessor, node: Node, scale: number): { positions: number[]; count: number } => {
   const matrix = node.getWorldMatrix();
   const count = attribute.getCount();
   const positions: number[] = [];
@@ -133,12 +126,20 @@ export const buildMeshAnalysisRecord = (document: Document, scale = 1): MeshAnal
     // `buildMeshNodeNameMap` walks the same node list, so every mesh reached
     // here is already named.
     const name = names.get(mesh)!;
+    const positionSegments = new Map<Accessor, { vertexStart: number; vertexCount: number }>();
     for (const [index, primitive] of mesh.listPrimitives().entries()) {
       if (primitive.getMode() !== trianglesMode) {
         continue;
       }
-      const vertexStart = positions.length / 3;
-      const { positions: flat, count } = primitivePositions(primitive, node, scale);
+      const attribute = primitive.getAttribute('POSITION');
+      if (!attribute) {
+        continue;
+      }
+      const sharedSegment = positionSegments.get(attribute);
+      const vertexStart = sharedSegment?.vertexStart ?? positions.length / 3;
+      const { positions: flat, count } = sharedSegment
+        ? { positions: [], count: sharedSegment.vertexCount }
+        : primitivePositions(attribute, node, scale);
       if (count === 0) {
         continue;
       }
@@ -147,6 +148,7 @@ export const buildMeshAnalysisRecord = (document: Document, scale = 1): MeshAnal
       for (const value of flat) {
         positions.push(value);
       }
+      positionSegments.set(attribute, { vertexStart, vertexCount: count });
       const primitiveIndex = primitives.length;
       primitives.push({ name: `${name}#${index}`, vertexStart, vertexCount: count });
       const indices = primitive.getIndices();
@@ -302,8 +304,8 @@ export const recordMeshQuality = (record: MeshAnalysisRecord): MeshQualityStats 
     }
   }
 
-  // Duplicate faces are the expensive third of this record — a weld over every
-  // vertex of the assembly plus a keyed map entry per triangle — and only
+  // Duplicate faces are the expensive third of this record — an exact position
+  // index plus a keyed map entry per triangle — and only
   // `toHaveMeshIntegrity` with a `duplicateFaces` expectation ever reads them,
   // while `triangles`/`surfaceArea`/`signedVolume` above are read by the
   // interference sweep and the distance matchers on every assembly. Splitting
@@ -312,19 +314,29 @@ export const recordMeshQuality = (record: MeshAnalysisRecord): MeshQualityStats 
   let duplicateFacesCache: MeshQualityStats['duplicateFaces'] | undefined;
   const duplicateFaces = (): MeshQualityStats['duplicateFaces'] => {
     if (!duplicateFacesCache) {
-      const canonical = weldFlatPositions(record.positions, record.positions.length / 3);
+      const canonical = new Int32Array(record.positions.length / 3);
+      const positions = new Map<string, number>();
+      for (let index = 0; index < canonical.length; index++) {
+        const key = `${record.positions[index * 3]!},${record.positions[index * 3 + 1]!},${record.positions[index * 3 + 2]!}`;
+        const existing = positions.get(key);
+        canonical[index] = existing ?? index;
+        if (existing === undefined) {
+          positions.set(key, index);
+        }
+      }
       const found: MeshQualityStats['duplicateFaces'] = [];
       const seen = new Map<string, number>();
       for (const [index, triangle] of triangles.entries()) {
         // A numeric key would need `n³` for `n` welded vertices, which leaves
         // the safe-integer range on a real assembly; the string stays.
-        const key = [
+        const corners = [
           canonical[record.triangles[index * 3]!]!,
           canonical[record.triangles[index * 3 + 1]!]!,
           canonical[record.triangles[index * 3 + 2]!]!,
-        ]
-          .sort((left, right) => left - right)
-          .join(':');
+        ].sort((left, right) => left - right);
+        // Coincident faces on different assembly primitives are material
+        // contacts, not duplicate triangles in one mesh.
+        const key = `${record.trianglePrimitives[index]!}:${corners.join(':')}`;
         const first = seen.get(key);
         if (first === undefined) {
           seen.set(key, index);
@@ -392,7 +404,8 @@ const edgeIndex = (record: MeshAnalysisRecord, canonical: Int32Array): Map<strin
     for (let corner = 0; corner < 3; corner++) {
       const from = corners[corner]!;
       const to = corners[(corner + 1) % 3]!;
-      const key = from < to ? `${from}:${to}` : `${to}:${from}`;
+      const component = baseComponentLabel(record.primitives[record.trianglePrimitives[index]!]!.name);
+      const key = from < to ? `${component}:${from}:${to}` : `${component}:${to}:${from}`;
       const existing = edges.get(key);
       if (existing) {
         existing.incidentTriangleCount += 1;
@@ -873,7 +886,7 @@ export const recordConnectedComponents = (
  */
 export const recordGeometryStats = (record: MeshAnalysisRecord, unitsPerMm = 1): GeometryStats => {
   // Lazy facets. `recordMeshQuality` materializes one `MeshTriangle` object per
-  // triangle, welds every vertex and keys a duplicate-face map by a per-triangle
+  // triangle and keys a duplicate-face map by a per-triangle
   // string; `boundingBox` walks every vertex twice (once for the box, once per
   // primitive). On the 650-part assembly that is tens of seconds and gigabytes
   // paid by EVERY subject load, whether or not the file's claims ever read a
@@ -964,7 +977,7 @@ export const readGlbDocument = async (glb: Uint8Array<ArrayBuffer>): Promise<Doc
   // view whose byte offset is not 4-aligned. A GLB that arrived over a socket
   // routinely is not, so a misaligned view is copied into its own buffer first
   // — the alternative is a `RangeError` from deep inside the parser.
-  new WebIO().readBinary(glb.byteOffset % 4 === 0 ? glb : new Uint8Array(glb));
+  new WebIO().registerExtensions(allExtensions).readBinary(glb.byteOffset % 4 === 0 ? glb : new Uint8Array(glb));
 
 /**
  * Analyze GLB bytes.

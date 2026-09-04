@@ -260,7 +260,7 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
       const runStartedAt = performance.now();
       events.emit({ type: 'run-start', files });
 
-      await spawn(Math.max(1, Math.min(options.workers, Math.max(1, files.length))));
+      await spawn(Math.max(1, options.workers));
       await Promise.all(workers.map(async (worker) => channels.get(worker.handle)!.ready));
       if (options.initializeWorker) {
         await Promise.all(
@@ -283,7 +283,10 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
       // R3 splitting: only a file that telemetry says is long enough to be the
       // critical path pays the extra list-only pass.
       const splitTests = new Map<string, readonly string[]>();
-      const candidates = filesToSplit(files, options.timings, options.splitThreshold);
+      const candidates =
+        files.length < workers.length
+          ? [...new Set([...files, ...filesToSplit(files, options.timings, options.splitThreshold)])]
+          : filesToSplit(files, options.timings, options.splitThreshold);
       for (const [index, file] of candidates.entries()) {
         const worker = workers[index % workers.length]!;
         const shard: GeoSpecPoolShard = { id: -1 - index, file };

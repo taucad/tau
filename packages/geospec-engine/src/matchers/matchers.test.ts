@@ -183,6 +183,31 @@ describe('every registered matcher refuses a non-subject', () => {
 });
 
 describe('mesh matchers', () => {
+  it('should reject selected subject diagnostic severities with their original evidence', async () => {
+    const warned = subject();
+    warned.diagnostics.push({
+      code: 'GEOMETRY_INVALID',
+      severity: 'warning',
+      message: 'non-manifold edges 1520',
+      details: { topology: { nonManifoldEdges: 1520 } },
+    });
+
+    const failed = await run('toHaveNoDiagnostics', warned, { severities: ['error', 'warning'] });
+    expect(codes(failed)).toEqual(['GEOSPEC_DIAGNOSTICS_PRESENT']);
+    expect(failed[0]?.details).toMatchObject({
+      matcher: 'toHaveNoDiagnostics',
+      diagnostics: [
+        {
+          code: 'GEOMETRY_INVALID',
+          severity: 'warning',
+          details: { topology: { nonManifoldEdges: 1520 } },
+        },
+      ],
+    });
+    expect(await run('toHaveNoDiagnostics', warned, { severities: ['error'] })).toEqual([]);
+    expect(await run('toHaveNoDiagnostics', subject(), {})).toEqual([]);
+  });
+
   it('should compare mesh bounds and report the failing axes', async () => {
     expect(await run('toHaveBoundingBox', subject(), { size: { x: 10 } })).toEqual([]);
     const failed = await run('toHaveBoundingBox', subject(), { min: [-5, -5, -5], max: [5, 5, 6] });
@@ -252,6 +277,26 @@ describe('mesh matchers', () => {
           nonFiniteVertices: [{ primitive: 'a', vertexIndex: 0, position: [Number.NaN, 0, 0] }],
           degenerateTriangles: [{ primitive: 'a', triangleIndex: 0, area: 0, center: [0, 0, 0] }],
           duplicateFaces: [{ primitive: 'a', triangleIndex: 1, firstTriangleIndex: 0 }],
+          triangles: [
+            {
+              primitive: 'a',
+              triangleIndex: 0,
+              a: [0, 0, 0],
+              b: [1, 0, 0],
+              c: [0, 1, 0],
+              center: [1 / 3, 1 / 3, 0],
+              area: 0.5,
+            },
+            {
+              primitive: 'a',
+              triangleIndex: 1,
+              a: [0, 0, 0],
+              b: [1, 0, 0],
+              c: [0, 1, 0],
+              center: [1 / 3, 1 / 3, 0],
+              area: 0.5,
+            },
+          ],
         },
         watertight: { watertight: false },
       }),
@@ -265,6 +310,11 @@ describe('mesh matchers', () => {
     });
     expect(codes(failed)).toEqual(['GEOSPEC_MESH_INTEGRITY_MISMATCH']);
     expect(failed[0]?.message).toContain('non-finite');
+    expect(failed[0]?.details).toMatchObject({
+      nonFiniteVertices: [{ primitive: 'a', vertexIndex: 0, position: ['NaN', '0', '0'] }],
+      degenerateTriangles: [{ primitive: 'a', triangleIndex: 0, center: [0, 0, 0] }],
+      duplicateFaces: [{ primitive: 'a', triangleIndex: 1, center: [1 / 3, 1 / 3, 0] }],
+    });
     expect(await run('toHaveMeshIntegrity', dirty, {})).toEqual([]);
   });
 
@@ -302,9 +352,9 @@ describe('mesh matchers', () => {
   });
 
   it('should derive mass from density, and refuse when it cannot', async () => {
-    expect(await run('toHaveMass', subject(), { value: 7.85, density: 0.007_85, tolerance: 0.01 })).toEqual([]);
+    expect(await run('toHaveMass', subject(), { value: 7.85, density: 0.00785, tolerance: 0.01 })).toEqual([]);
     expect(codes(await run('toHaveMass', subject(), { value: 1 }))).toEqual(['GEOSPEC_EVIDENCE_UNSUPPORTED']);
-    expect(codes(await run('toHaveMass', subject(), { value: 99, density: 0.007_85 }))).toEqual([
+    expect(codes(await run('toHaveMass', subject(), { value: 99, density: 0.00785 }))).toEqual([
       'GEOSPEC_MEASUREMENT_MISMATCH',
     ]);
   });
@@ -318,7 +368,7 @@ describe('mesh matchers', () => {
   });
 
   it('should report the mesh source used by a mesh-only mass claim', async () => {
-    const failed = await run('toHaveMass', subject(), { value: 99, density: 0.007_85 });
+    const failed = await run('toHaveMass', subject(), { value: 99, density: 0.00785 });
     expect(failed[0]?.details).toMatchObject({ evidence: 'mesh' });
   });
 

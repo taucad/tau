@@ -2,13 +2,14 @@
 
 import { assertGeoSpecJsonValue } from 'geospec/engine';
 import type { GeoSpecSubjectReference } from 'geospec/engine';
-import type { GeometryStats as PublicGeometryStats, GeometrySubject as PublicGeometrySubject } from 'geospec/mesh';
+import type { AnalyzeMeshResult, GeometrySubject as PublicGeometrySubject } from 'geospec/mesh';
 import type { GeometrySubject } from '#mesh/types.js';
 
 type StoredSubject = GeometrySubject;
 
 const subjects = new Map<string, StoredSubject>();
 const identifiers = new WeakMap<StoredSubject, string>();
+const subjectNamespace = crypto.getRandomValues(new Uint32Array(4)).join('-');
 let nextSubject = 0;
 
 /** Retain an engine subject and return its wire-safe opaque reference. */
@@ -41,20 +42,17 @@ export const retainEngineSubject = (subject: GeometrySubject | PublicGeometrySub
 
   nextSubject += 1;
   const contentHash = subject.provenance.contentHash ?? 'sha256:unavailable';
-  const subjectId = `${contentHash}:${nextSubject}`;
+  const subjectId = `${contentHash}:${subjectNamespace}:${nextSubject}`;
   identifiers.set(stored, subjectId);
   subjects.set(subjectId, stored);
   stored.subjectId = subjectId;
   return { kind: 'geometry-subject-reference', subjectId, contentHash };
 };
 
-const publicStats = (stats: GeometrySubject['mesh']['stats']): PublicGeometryStats => ({
+const publicStats = (stats: GeometrySubject['mesh']['stats']): PublicGeometrySubject['mesh']['stats'] => ({
   vertexCount: stats.vertexCount,
   meshCount: stats.meshCount,
   triangleCount: stats.triangleCount,
-  meshQuality: stats.meshQuality,
-  watertight: stats.watertight,
-  ...(stats.boundingBox === undefined ? {} : { boundingBox: stats.boundingBox }),
 });
 
 /** Return a detached, data-only subject reference for the substrate facade. */
@@ -72,6 +70,43 @@ export const exposeEngineSubject = (subject: GeometrySubject): PublicGeometrySub
   const detached: unknown = structuredClone(exposed);
   assertGeoSpecJsonValue(detached);
   return detached as unknown as PublicGeometrySubject;
+};
+
+/** Materialize only the public statistics, detached from memoized engine facets. */
+export const exposeEngineMeshAnalysis = (subject: GeometrySubject): AnalyzeMeshResult => {
+  let nonFiniteVertices: Array<{ primitive: string; vertexIndex: number; position: Array<number | string> }> = [];
+  try {
+    const { meshQuality } = subject.mesh.stats;
+    nonFiniteVertices = meshQuality.nonFiniteVertices.map((vertex) => ({
+      ...vertex,
+      position: vertex.position.map((coordinate) => (Number.isFinite(coordinate) ? coordinate : String(coordinate))),
+    }));
+    const { watertight, boundingBox } = subject.mesh.stats;
+    const stats = structuredClone({
+      ...publicStats(subject.mesh.stats),
+      meshQuality,
+      watertight,
+      ...(boundingBox === undefined ? {} : { boundingBox }),
+    });
+    assertGeoSpecJsonValue(stats);
+    return { success: true, subject: exposeEngineSubject(subject), stats };
+  } catch (error) {
+    return {
+      success: false,
+      diagnostics: [
+        {
+          code: 'GEOSPEC_MESH_ANALYSIS_FAILED',
+          severity: 'error',
+          message: `Mesh analysis could not produce finite, serializable statistics: ${error instanceof Error ? error.message : String(error)}`,
+          suggestion:
+            'Use geometry matchers on the retained subject to locate invalid vertices or topology, then repair the source.',
+          details: {
+            nonFiniteVertices,
+          },
+        },
+      ],
+    };
+  }
 };
 
 /** Resolve an opaque handle entirely inside the engine. */
@@ -99,5 +134,4 @@ export const clearEngineSubjects = (): void => {
   for (const subjectId of subjects.keys()) {
     releaseEngineSubject(subjectId);
   }
-  nextSubject = 0;
 };

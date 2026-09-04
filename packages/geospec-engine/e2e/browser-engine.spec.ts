@@ -28,7 +28,7 @@ describe('@taucad/geospec-engine in the browser', () => {
     expect(result.sharedArrayBuffer).toBe(true);
     expect(report.error, `fixture threw: ${report.error ?? ''}`).toBeUndefined();
     expect(report.engine).toBe('@taucad/geospec-engine');
-    // Capability discovery is Contract B: it reports the 23 matchers and four
+    // Capability discovery is Contract B: it reports the 24 matchers and four
     // protocol operations, never in-process host bootstrap functions.
     expect(report.capabilities).toContain('toHaveMeshIntegrity');
     expect(report.capabilities).toContain('analyzeBrep');
@@ -38,6 +38,17 @@ describe('@taucad/geospec-engine in the browser', () => {
     expect(report.triangles).toBe(12);
     expect(report.watertight).toBe(true);
     expect(report.tests).toEqual([{ name: 'proves the box mesh is watertight', status: 'passed' }]);
+    expect(report.worker.error).toBeUndefined();
+    expect(report.worker.analysisDetached).toBe(true);
+    expect(report.worker.diagnostics.map((diagnostics) => diagnostics.map(({ code }) => code))).toEqual([
+      ['EXPORT_FAILED', 'GEOMETRY_INVALID'],
+      ['FIRST', 'SECOND'],
+      ['GEOSPEC_WATERTIGHT_MISMATCH'],
+    ]);
+    expect(report.worker.diagnostics[0]?.[0]).toMatchObject({
+      spatial: { center: [1, 2, 3] },
+      details: { file: 'gear.ts', part: 'tooth' },
+    });
     expect(result.consoleErrors).toEqual([]);
     expect(result.pageErrors).toEqual([]);
   });

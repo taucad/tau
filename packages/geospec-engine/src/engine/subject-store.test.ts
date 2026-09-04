@@ -34,8 +34,7 @@ describe('engine subject store', () => {
 
     expect(isGeoSpecJsonValue(exposed)).toBe(true);
     expect(exposed.subjectId).toBeTypeOf('string');
-    expect(exposed.mesh.stats).not.toHaveProperty('analyseWatertight');
-    expect(exposed.mesh.stats).not.toHaveProperty('analyseConnectedComponents');
+    expect(exposed.mesh.stats).toStrictEqual({ vertexCount: 3, meshCount: 1, triangleCount: 1 });
     expect(resolveEngineSubject(exposed.subjectId)).toBe(subject);
   });
 
@@ -56,14 +55,21 @@ describe('engine subject store', () => {
     expect(retainEngineSubject(subject)).toStrictEqual(first);
   });
 
-  it('omits absent bounds and releases native resources idempotently', async () => {
+  it('does not evaluate lazy mesh facets and releases native resources idempotently', async () => {
     const subject = await loadedSubject();
-    delete subject.mesh.stats.boundingBox;
+    const eagerFacet = (): never => {
+      throw new Error('lazy mesh facet evaluated');
+    };
+    Object.defineProperties(subject.mesh.stats, {
+      meshQuality: { get: eagerFacet },
+      watertight: { get: eagerFacet },
+      boundingBox: { get: eagerFacet },
+    });
     const deleteNative = vi.fn();
     subject.nativeXde = mock<GeoSpecNativeXdeReadResult>({ delete: deleteNative });
     const exposed = exposeEngineSubject(subject);
 
-    expect(exposed.mesh.stats).not.toHaveProperty('boundingBox');
+    expect(exposed.mesh.stats).toStrictEqual({ vertexCount: 3, meshCount: 1, triangleCount: 1 });
     expect(releaseEngineSubject('missing')).toBe(false);
     expect(releaseEngineSubject(exposed.subjectId)).toBe(true);
     expect(releaseEngineSubject(exposed.subjectId)).toBe(false);

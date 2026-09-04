@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { describe, expect, it, vi } from 'vitest';
 import * as runtimeKernel from '@taucad/runtime/kernel';
@@ -339,6 +339,7 @@ describe('createGeoSpecNodePoolRunner', () => {
         workers: 1,
         cache: false,
         cacheDirectory: undefined,
+        runtimeFactoryModule: { specifier: 'file:///runtime.mjs', exportName: 'createRuntime' },
       });
       const result = await runner.run({ files: ['a.geospec.ts'] });
       expect(result.success).toBe(true);
@@ -355,6 +356,7 @@ describe('createGeoSpecNodePoolRunner', () => {
       expect(received[0]).toMatchObject({
         projectPath: '/project',
         cache: false,
+        runtimeFactoryModule: { specifier: 'file:///runtime.mjs', exportName: 'createRuntime' },
       });
       expect(received[1]).toMatchObject({
         projectPath: '/project',
@@ -423,6 +425,52 @@ describe('startNodePoolWorker', () => {
     });
 
     expect(posted).toHaveLength(before);
+  });
+
+  it('should load the configured runtime factory inside the worker host', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'geospec-runtime-factory-'));
+    const factory = join(root, 'runtime.mjs');
+    await writeFile(
+      factory,
+      `export const createRuntime = async (projectPath) => { throw new Error('custom runtime for ' + projectPath); };`,
+      'utf8',
+    );
+    await writeFile(
+      join(root, 'runtime.geospec.ts'),
+      `import { it } from 'geospec';
+       import { loadModel } from 'geospec/model';
+       it('uses custom runtime', async () => { await loadModel({ file: 'main.ts' }); });`,
+      'utf8',
+    );
+    const posted: GeoSpecPoolWorkerMessage[] = [];
+    let deliver: ((message: GeoSpecPoolHostMessage) => void) | undefined;
+
+    startNodePoolWorker(
+      {
+        postMessage: (message) => posted.push(message),
+        on: (_event, listener) => {
+          deliver = listener as (message: GeoSpecPoolHostMessage) => void;
+        },
+      },
+      {
+        projectPath: root,
+        cache: false,
+        runtimeFactoryModule: { specifier: pathToFileURL(factory).href, exportName: 'createRuntime' },
+      },
+    );
+    deliver?.({ type: 'run-shard', shard: { id: 0, file: 'runtime.geospec.ts' } });
+    await vi.waitFor(
+      () => {
+        expect(posted.some((message) => message.type === 'shard-complete')).toBe(true);
+      },
+      { timeout: 30_000 },
+    );
+
+    const done = posted.find((message) => message.type === 'shard-complete');
+    expect(done?.type === 'shard-complete' && done.result.success).toBe(true);
+    expect(done?.type === 'shard-complete' && done.result.success && done.result.tests[0]?.status).toBe('failed');
+    expect(JSON.stringify(done)).toContain(`custom runtime for ${root}`);
+    deliver?.({ type: 'shutdown' });
   });
 });
 

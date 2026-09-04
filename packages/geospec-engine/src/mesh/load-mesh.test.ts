@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
 import { describe, expect, it, vi } from 'vitest';
-import { analyzeMesh, loadMesh, unitScale } from '#mesh/load-mesh.js';
+import { setGeoSpecEvidenceStore } from '#cache/evidence-cache.js';
+import { createMemoryEvidenceStore } from '#cache/testing/memory-evidence-store.js';
+import { analyzeMesh, loadMesh, loadMeshObserved, unitScale } from '#mesh/load-mesh.js';
 
 const boxCorners = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1];
 const boxIndices = [
@@ -162,6 +164,27 @@ describe('loadMesh', () => {
     const result = await loadMesh({ source: await glbBytes(), name: 'assembly' });
 
     expect(result.success && result.subject.provenance.source.name).toBe('assembly');
+  });
+
+  it('should reuse the authenticated mesh record without changing evidence', async () => {
+    const store = createMemoryEvidenceStore();
+    setGeoSpecEvidenceStore(store);
+    const events: string[] = [];
+    const source = await glbBytes();
+    try {
+      const cold = await loadMeshObserved({ source, unit: 'mm' }, ({ name }) => events.push(name));
+      const warm = await loadMeshObserved({ source, unit: 'mm' }, ({ name }) => events.push(name));
+
+      expect(cold.success && cold.subject.mesh.stats.triangleCount).toBe(12);
+      expect(warm.success && warm.subject.mesh.stats.triangleCount).toBe(12);
+      expect(store.families()).toEqual(['mesh-record']);
+      expect(events.filter((name) => name.startsWith('cache.mesh-record'))).toEqual([
+        'cache.mesh-record.miss',
+        'cache.mesh-record.hit',
+      ]);
+    } finally {
+      setGeoSpecEvidenceStore(undefined);
+    }
   });
 });
 

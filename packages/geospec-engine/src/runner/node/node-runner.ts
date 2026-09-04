@@ -151,6 +151,9 @@ export const createGeoSpecNodePoolRunner = (options: GeoSpecNodePoolRunnerOption
             projectPath: options.projectPath,
             cache: options.cache ?? true,
             ...(options.cacheDirectory === undefined ? {} : { cacheDirectory: options.cacheDirectory }),
+            ...(options.runtimeFactoryModule === undefined
+              ? {}
+              : { runtimeFactoryModule: options.runtimeFactoryModule }),
             compiledWasmModule: await prepareModule(),
           },
         }) as NodeWorkerLike,

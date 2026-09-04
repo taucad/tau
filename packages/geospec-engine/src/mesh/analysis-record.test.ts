@@ -1,5 +1,6 @@
 import { Accessor, Document, WebIO } from '@gltf-transform/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { TauCadTopology } from '@taucad/geometry-core';
 import {
   analyseConnectedComponents,
   analyseWatertight,
@@ -153,6 +154,31 @@ describe('buildMeshAnalysisRecord', () => {
 
     expect([...record.triangles]).toEqual([0, 1, 2]);
   });
+
+  it('should transform a position accessor shared by material primitives only once', () => {
+    const document = new Document();
+    const buffer = document.createBuffer();
+    const positions = document
+      .createAccessor()
+      .setType(Accessor.Type['VEC3']!)
+      .setBuffer(buffer)
+      .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]));
+    const mesh = document.createMesh('shared');
+    for (const values of [new Uint32Array([0, 1, 2]), new Uint32Array([0, 2, 3])]) {
+      const indices = document.createAccessor().setType(Accessor.Type['SCALAR']!).setBuffer(buffer).setArray(values);
+      mesh.addPrimitive(document.createPrimitive().setAttribute('POSITION', positions).setIndices(indices));
+    }
+    document.createScene().addChild(document.createNode('shared').setMesh(mesh));
+
+    const record = buildMeshAnalysisRecord(document);
+
+    expect(record.positions).toHaveLength(12);
+    expect([...record.triangles]).toEqual([0, 1, 2, 0, 2, 3]);
+    expect(record.primitives).toMatchObject([
+      { vertexStart: 0, vertexCount: 4 },
+      { vertexStart: 0, vertexCount: 4 },
+    ]);
+  });
 });
 
 describe('mesh-record codec', () => {
@@ -191,7 +217,7 @@ describe('mesh-record codec', () => {
 });
 
 describe('analyzeMeshQuality', () => {
-  it('should report scalars, a centre of mass and duplicate faces', () => {
+  it('should report scalars and a centre of mass without treating part contacts as duplicate faces', () => {
     const quality = analyzeMeshQuality(documentOf([{ ...boxSpec('part'), primitives: 2 }]));
 
     expect(quality.triangleCount).toBe(24);
@@ -199,9 +225,31 @@ describe('analyzeMeshQuality', () => {
     // Two coincident copies of the same unit box: volume counts twice.
     expect(quality.signedVolume).toBeCloseTo(2, 9);
     expect(quality.centerOfMass?.map((value) => Number(value.toFixed(6)))).toEqual([0.5, 0.5, 0.5]);
-    expect(quality.duplicateFaces).toHaveLength(12);
+    expect(quality.duplicateFaces).toHaveLength(0);
     // Lazy and memoized: the weld behind it must not run twice per record.
     expect(quality.duplicateFaces).toBe(quality.duplicateFaces);
+  });
+
+  it('should report a repeated triangle inside one primitive', () => {
+    const quality = analyzeMeshQuality(
+      documentOf([{ name: 'bad', positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2, 2, 1, 0] }]),
+    );
+
+    expect(quality.duplicateFaces).toStrictEqual([{ primitive: 'bad#0', triangleIndex: 1, firstTriangleIndex: 0 }]);
+  });
+
+  it('should not call nearby but distinct triangles duplicates', () => {
+    const quality = analyzeMeshQuality(
+      documentOf([
+        {
+          name: 'skinny',
+          positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0.000001],
+          indices: [0, 1, 2, 3, 4, 5],
+        },
+      ]),
+    );
+
+    expect(quality.duplicateFaces).toHaveLength(0);
   });
 
   it('should flag non-finite vertices and degenerate triangles', () => {
@@ -230,6 +278,10 @@ describe('analyzeMeshQuality', () => {
 describe('watertightness', () => {
   it('should call a closed box watertight', () => {
     expect(isWatertight(documentOf([boxSpec('part')]))).toBe(true);
+  });
+
+  it('should evaluate coincident assembly components independently', () => {
+    expect(isWatertight(documentOf([boxSpec('left'), boxSpec('right')]))).toBe(true);
   });
 
   it('should localize open boundary edges per primitive and in clusters', () => {
@@ -279,29 +331,19 @@ describe('watertightness', () => {
   it('should order clusters and name every primitive on a shared irregular edge', () => {
     const result = analyseWatertight(
       documentOf([
-        // Two triangles of one primitive plus one of another, all on the same
-        // edge: an irregular edge with two owning primitives.
+        // Two coincident primitives of one component: an irregular edge with
+        // two owning primitives.
         {
           name: 'fin',
-          positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
-          indices: [0, 1, 2, 0, 1, 3],
-        },
-        { name: 'flap', positions: [0, 0, 0, 1, 0, 0, 0, -1, 0], indices: [0, 1, 2] },
-        // A second, larger open patch far away: two clusters of the same kind.
-        {
-          name: 'patch',
-          positions: [50, 0, 0, 60, 0, 0, 60, 10, 0, 50, 10, 0, 50, 20, 0],
-          indices: [0, 1, 2, 0, 2, 3, 0, 3, 4],
+          positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+          indices: [0, 1, 2],
+          primitives: 3,
         },
       ]),
     );
 
     const nonManifold = result.irregularEdgeClusters.find((cluster) => cluster.kind === 'non-manifold');
-    expect(nonManifold?.samples.some((sample) => sample.primitives.length === 2)).toBe(true);
-    const open = result.irregularEdgeClusters.filter((cluster) => cluster.kind === 'open-boundary');
-    expect(open.length).toBeGreaterThan(1);
-    // Heaviest cluster first.
-    expect(open[0]!.edgeCount).toBeGreaterThanOrEqual(open[1]!.edgeCount);
+    expect(nonManifold?.samples[0]?.primitives).toEqual(['fin#0', 'fin#1', 'fin#2']);
   });
 
   it('should order equal-sized clusters by position, never by discovery', () => {
@@ -454,6 +496,29 @@ describe('collectPrimitiveRecords', () => {
 });
 
 describe('analyzeGltfDocument', () => {
+  it('reads supported topology extensions without warnings and derives measurements only from the mesh', async () => {
+    const document = documentOf([boxSpec('box')]);
+    const expected = analyzeGltfDocument(document);
+    const extension = document.createExtension(TauCadTopology);
+    document
+      .getRoot()
+      .setExtension(
+        TauCadTopology.EXTENSION_NAME,
+        extension.createRoot().setPayload({ schemaVersion: 1, triangleCount: 999, watertight: false }),
+      );
+    const bytes = await new WebIO().registerExtensions([TauCadTopology]).writeBinary(document);
+    const warning = vi.spyOn(console, 'warn');
+    try {
+      const actual = await analyzeGlb(bytes);
+      expect(actual.triangleCount).toBe(12);
+      expect(actual.meshQuality).toEqual(expected.meshQuality);
+      expect(actual.boundingBox).toEqual(expected.boundingBox);
+      expect(actual.watertight).toBe(true);
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
+  });
   it('should publish memoized analyses over one record', () => {
     const stats = analyzeGltfDocument(documentOf([boxSpec('left'), boxSpec('right', [5, 0, 0])]));
 

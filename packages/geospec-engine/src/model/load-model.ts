@@ -18,11 +18,14 @@
  * @module
  */
 
+import { toGeoSpecProtocolJson } from 'geospec/engine';
 import { GeoSpecModelLoadError, resolveRuntimeExportIntent } from 'geospec/model';
+import type { KernelIssue } from '@taucad/runtime/types';
 import type {
   CreateModelLoaderOptions,
   GeoSpecModelFormat,
   GeoSpecModelLoader,
+  ManagedGeoSpecModelLoader,
   GeoSpecRuntimeClient,
   GeoSpecRuntimeSourceAdapter,
   LoadModelOptions,
@@ -49,6 +52,14 @@ type RuntimeOptions = Exclude<LoadModelOptions, SourceOptions>;
 const isSourceOptions = (options: LoadModelOptions): options is SourceOptions => 'source' in options;
 
 const failure = (diagnostics: GeometryDiagnostic[]): GeoSpecModelLoadError => new GeoSpecModelLoadError(diagnostics);
+
+const runtimeIssueDiagnostic = (issue: KernelIssue, fallbackCode: string): GeometryDiagnostic => ({
+  code: (issue as Partial<KernelIssue>).code ?? fallbackCode,
+  severity: issue.severity,
+  message: issue.message,
+  suggestion: 'Fix the model source or its kernel/export path, then re-export the evidence.',
+  details: toGeoSpecProtocolJson(issue),
+});
 
 /**
  * Refuse a runtime-branch call that tries to reinterpret the exported frame.
@@ -240,15 +251,7 @@ const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink)
       exportOptions: requestedIntent.options,
     });
     if (!exported.success) {
-      throw failure(
-        exported.issues.map<GeometryDiagnostic>((issue) => ({
-          code: (issue as { code?: string }).code ?? 'GEOSPEC_MODEL_EXPORT_FAILED',
-          severity: 'error',
-          message: issue.message,
-          suggestion: 'Fix the model source, or export the artifact yourself and load it as a direct source.',
-          details: issue,
-        })),
-      );
+      throw failure(exported.issues.map((issue) => runtimeIssueDiagnostic(issue, 'GEOSPEC_MODEL_EXPORT_FAILED')));
     }
     const file = exported.data[0];
     if (!file) {
@@ -285,6 +288,9 @@ const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink)
       },
       honoredIntent.sourceUnit,
       forensic,
+    );
+    subject.diagnostics.push(
+      ...exported.issues.map((issue) => runtimeIssueDiagnostic(issue, 'GEOSPEC_MODEL_EXPORT_FAILED')),
     );
     return withExportIntent(subject, honoredIntent.provenance);
   } catch (error) {
@@ -330,11 +336,6 @@ export const loadModel = async <Code extends Record<string, string> = Record<str
   options: LoadModelOptions<Code>,
 ): Promise<GeometrySubject> =>
   isSourceOptions(options) ? loadDirectSource(options) : loadFromRuntime(options as RuntimeOptions);
-
-/** A configured loader that owns at most one lazily-created runtime client. */
-export type ManagedGeoSpecModelLoader = GeoSpecModelLoader & {
-  dispose(): Promise<void>;
-};
 
 const configureForensics = new WeakMap<GeoSpecModelLoader, (sink?: ForensicSink) => void>();
 
@@ -400,7 +401,13 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
     // concrete default is caller-owned. Only a default factory (or the default
     // Node runtime) belongs to this configured loader and is reused.
     const perCallRuntime = options.runtime;
-    if (perCallRuntime !== undefined || (defaults.runtime && typeof defaults.runtime !== 'function')) {
+    if (perCallRuntime !== undefined) {
+      return exposeEngineSubject(await loadFromRuntime(merged, forensicSink));
+    }
+    if (resolveAdapter(merged) !== undefined) {
+      return exposeEngineSubject(await loadFromRuntime({ ...merged, runtime: undefined }, forensicSink));
+    }
+    if (defaults.runtime && typeof defaults.runtime !== 'function') {
       return exposeEngineSubject(await loadFromRuntime(merged, forensicSink));
     }
     sharedRuntime ??= createSharedRuntime();

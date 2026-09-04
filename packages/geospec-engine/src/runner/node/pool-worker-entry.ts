@@ -24,6 +24,7 @@ import { createModelLoader } from '#model/load-model.js';
 import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
+import type { GeoSpecRuntimeClient } from 'geospec/model';
 import { setOpenCascadeCompiledModule } from '#native/opencascade-module.js';
 
 type NodePoolWorkerOptions = {
@@ -31,6 +32,7 @@ type NodePoolWorkerOptions = {
   cache?: boolean;
   cacheDirectory?: string;
   compiledWasmModule?: WebAssembly.Module;
+  runtimeFactoryModule?: { specifier: string; exportName: string };
 };
 
 /** The slice of a worker's `MessagePort` the host needs. */
@@ -47,14 +49,27 @@ export type PoolWorkerPort = {
  * @public
  */
 export const startNodePoolWorker = (port: PoolWorkerPort, options: NodePoolWorkerOptions): void => {
-  const { projectPath } = options;
+  const { projectPath, runtimeFactoryModule } = options;
   if (options.compiledWasmModule) {
     setOpenCascadeCompiledModule(options.compiledWasmModule);
   }
   installNodeEvidenceStore(options);
+  const runtime = runtimeFactoryModule
+    ? async (): Promise<GeoSpecRuntimeClient> => {
+        const module = (await import(runtimeFactoryModule.specifier)) as Record<string, unknown>;
+        const factory = module[runtimeFactoryModule.exportName];
+        if (typeof factory !== 'function') {
+          throw new TypeError(
+            `GeoSpec runtime factory module '${runtimeFactoryModule.specifier}' has no function export '${runtimeFactoryModule.exportName}'.`,
+          );
+        }
+        const createRuntime = factory as (path: string) => Promise<GeoSpecRuntimeClient>;
+        return createRuntime(projectPath);
+      }
+    : undefined;
   startGeoSpecPoolWorkerHost({
     filesystem: createNodeVmFileSystem(projectPath),
-    modelLoader: createModelLoader({ projectPath }),
+    modelLoader: createModelLoader({ projectPath, ...(runtime === undefined ? {} : { runtime }) }),
     postMessage: (message) => {
       port.postMessage(message);
     },

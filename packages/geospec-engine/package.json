@@ -100,6 +100,7 @@
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",
     "@taucad/gltf": "workspace:*",
+    "@taucad/geometry-core": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/jscad": "workspace:*",
     "@taucad/manifold": "workspace:*",

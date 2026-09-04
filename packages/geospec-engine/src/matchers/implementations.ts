@@ -4,7 +4,7 @@
  * The record type is PARTIAL and that remains a first-class state (D-S0):
  * capability discovery reports exactly what a build can execute, and the
  * substrate answers everything else with `GEOSPEC_ENGINE_UNAVAILABLE`. THIS
- * build is complete — all 23 registry matchers have bodies — and
+ * build is complete — all 24 registry matchers have bodies — and
  * `register.test.ts` pins the missing list at `[]` so a future build cannot
  * quietly drop one.
  *
@@ -12,6 +12,7 @@
  */
 
 import type { GeoSpecMatcherImplementations } from '#matchers/types.js';
+import { toHaveNoDiagnostics } from '#matchers/diagnostic-matchers.js';
 import {
   toBeValidBrep,
   toHaveAssemblyOccurrences,
@@ -52,6 +53,7 @@ export const geoSpecMatcherImplementations: GeoSpecMatcherImplementations = {
   toHaveAssemblyOccurrences,
   toHaveSpatialRelationships,
   toHaveMeshIntegrity,
+  toHaveNoDiagnostics,
   toHaveSurfaceArea,
   toHaveVolume,
   toHaveMass,

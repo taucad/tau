@@ -25,13 +25,13 @@ import type { GeoSpecEngineHostBindings, GeoSpecEngineImplementation } from 'geo
 // oxlint-disable-next-line no-restricted-imports -- the registration descriptor must use this package's own publish version in every bundler.
 import packageMetadata from '../package.json' with { type: 'json' };
 import { flushEvidenceStore } from '#cache/evidence-cache.js';
-import { analyzeMesh, loadMesh } from '#mesh/load-mesh.js';
-import { loadModel } from '#model/load-model.js';
+import { loadMesh } from '#mesh/load-mesh.js';
+import { createModelLoader, loadModel } from '#model/load-model.js';
 import { loadStep } from '#step/load-step.js';
 import { createGeoSpecWebPoolRunner, createGeoSpecWebRunner } from '#runner/web/web-runner.js';
 import { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
 import { createGeoSpecEngineProtocol } from '#engine/protocol.js';
-import { exposeEngineSubject } from '#engine/subject-store.js';
+import { exposeEngineMeshAnalysis, exposeEngineSubject } from '#engine/subject-store.js';
 
 const registeredLoadMesh: GeoSpecEngineHostBindings['loadMesh'] = async (options) => {
   const result = await loadMesh(options);
@@ -39,12 +39,11 @@ const registeredLoadMesh: GeoSpecEngineHostBindings['loadMesh'] = async (options
 };
 
 const registeredAnalyzeMesh: GeoSpecEngineHostBindings['analyzeMesh'] = async (options) => {
-  const result = await analyzeMesh(options);
+  const result = await loadMesh(options);
   if (!result.success) {
     return result;
   }
-  const subject = exposeEngineSubject(result.subject);
-  return { success: true, subject, stats: subject.mesh.stats };
+  return exposeEngineMeshAnalysis(result.subject);
 };
 
 const registeredLoadStep: GeoSpecEngineHostBindings['loadStep'] = async (options) => {
@@ -56,6 +55,9 @@ const registeredLoadModel: GeoSpecEngineHostBindings['loadModel'] = async (optio
   const subject = await loadModel(options);
   return exposeEngineSubject(subject);
 };
+
+const registeredCreateModelLoader: GeoSpecEngineHostBindings['createModelLoader'] = (options) =>
+  createModelLoader(options);
 
 /**
  * What this engine build can execute.
@@ -72,6 +74,7 @@ export const geoSpecEngineImplementation: GeoSpecEngineImplementation = {
     analyzeMesh: registeredAnalyzeMesh,
     loadStep: registeredLoadStep,
     loadModel: registeredLoadModel,
+    createModelLoader: registeredCreateModelLoader,
     createGeoSpecWebRunner,
     createGeoSpecWebPoolRunner,
     startGeoSpecPoolWorkerHost,

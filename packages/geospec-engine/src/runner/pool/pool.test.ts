@@ -191,6 +191,31 @@ describe('createGeoSpecPoolRunner', () => {
     expect(result.selectedTests).toBe(2);
   });
 
+  it('should split one file across requested workers without timing history', async () => {
+    const patterns: string[] = [];
+    const scripted = Array.from({ length: 2 }, () =>
+      scriptedWorker({
+        onList: () => ['s > one', 's > two'],
+        onShard: (file, pattern) => {
+          patterns.push(pattern!);
+          return complete({ id: 0, file }, passing(pattern!));
+        },
+      }),
+    );
+    let created = 0;
+    const runner = createGeoSpecPoolRunner({
+      createWorker: () => scripted[created++]!.handle,
+      workers: 2,
+    });
+
+    const result = await runner.run({ files: ['suite.geospec.ts'] });
+    await runner.close();
+
+    expect(created).toBe(2);
+    expect(patterns.sort()).toStrictEqual(['^s > one$', '^s > two$']);
+    expect(result.selectedTests).toBe(2);
+  });
+
   it('should run a file whole when its collection pass fails', async () => {
     const timings = openShardTimings(undefined);
     timings.record('slow.geospec.ts', { durationMs: 600_000, peakRssBytes: 0 });

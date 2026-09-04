@@ -5,9 +5,9 @@
  * telemetry table**, and every telemetry-derived decision has a defined answer
  * when the telemetry is missing. That is the whole discipline of this module:
  * scheduling changes the order work happens in and the machine it happens on,
- * and it must never change a verdict (§16). A pool with no telemetry at all
- * runs declared order, one shard per file, unbounded by memory class — which is
- * exactly what a first run on a fresh machine does.
+ * and it must never change a verdict (§16). A pool with no telemetry keeps
+ * declared order; the pool host may still split a file when there are fewer
+ * files than workers, because leaving requested workers idle is pure overhead.
  *
  * @module
  */

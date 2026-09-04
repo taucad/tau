@@ -25,7 +25,12 @@ import { geoSpecMatcherImplementations } from '#matchers/implementations.js';
 import type { GeoSpecMatcherInvocation } from '#matchers/types.js';
 import { inspectGeometry } from '#inspection/inspect.js';
 import { loadStep } from '#step/load-step.js';
-import { releaseEngineSubject, resolveEngineSubject, retainEngineSubject } from '#engine/subject-store.js';
+import {
+  exposeEngineMeshAnalysis,
+  releaseEngineSubject,
+  resolveEngineSubject,
+  retainEngineSubject,
+} from '#engine/subject-store.js';
 import type { ForensicSink } from '#runner/forensic.js';
 
 const isRecord = (value: JSONValue): value is Record<string, JSONValue> =>
@@ -280,6 +285,17 @@ const evaluateOperationClaim = (
   const subject = subjectId === undefined ? undefined : resolveEngineSubject(subjectId);
   const payload = protocolEngineValue(claim.payload);
   switch (claim.capability) {
+    case 'analyzeMesh': {
+      if (subject === undefined || claim.subjectIds.length !== 1) {
+        return failedClaim(
+          claim.claimId,
+          new Error('analyzeMesh requires one retained subject in this engine.'),
+          engineVersion,
+        );
+      }
+      const result = exposeEngineMeshAnalysis(subject);
+      return operationResult(claim, result.success ? { ...result, diagnostics: [] } : result, engineVersion);
+    }
     case 'analyzeBrep': {
       const value: Record<string, unknown> & { diagnostics: readonly GeometryDiagnostic[] } =
         subject?.brep === undefined
@@ -358,6 +374,7 @@ const initializeResult = (engineVersion: string): GeoSpecInitializeResult => ({
   capabilities: [
     ...Object.keys(geoSpecMatcherImplementations),
     'analyzeBrep',
+    'analyzeMesh',
     'inspectGeometry',
     'analyzeMeshOverlap',
   ].map((name) => ({ name, registryVersion: geoSpecMatcherRegistryVersion })),

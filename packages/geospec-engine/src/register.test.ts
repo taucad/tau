@@ -35,7 +35,7 @@ describe('engine registration', () => {
     expect(describeGeoSpecEngine()?.engine).toBe('@taucad/geospec-engine');
   });
 
-  it('advertises exactly the 23 matchers and three protocol operations it implements', async () => {
+  it('advertises exactly the 24 matchers and four protocol operations it implements', async () => {
     const { geoSpecEngineImplementation } = await import('#register.js');
     const initialized = geoSpecEngineImplementation.protocol.initialize({
       protocolVersion: geoSpecEngineProtocolVersion,
@@ -44,7 +44,13 @@ describe('engine registration', () => {
 
     expect(initialized.engine.version).toBe(packageMetadata.version);
     expect(initialized.capabilities.map(({ name }) => name).sort()).toStrictEqual(
-      [...Object.keys(geoSpecMatcherDescriptors), 'analyzeBrep', 'inspectGeometry', 'analyzeMeshOverlap'].sort(),
+      [
+        ...Object.keys(geoSpecMatcherDescriptors),
+        'analyzeBrep',
+        'analyzeMesh',
+        'inspectGeometry',
+        'analyzeMeshOverlap',
+      ].sort(),
     );
   });
 
@@ -56,6 +62,7 @@ describe('engine registration', () => {
       'analyzeMesh',
       'createGeoSpecWebPoolRunner',
       'createGeoSpecWebRunner',
+      'createModelLoader',
       'flushEvidenceStore',
       'loadMesh',
       'loadModel',

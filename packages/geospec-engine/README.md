@@ -2,7 +2,7 @@
 
 The GeoSpec **engine** — the executor behind the [`geospec`](../geospec) matcher API.
 
-`geospec` owns the spec surface: the DSL, the selector language, the diagnostics schema, the 23-matcher registry and the
+`geospec` owns the spec surface: the DSL, the selector language, the diagnostics schema, the 24-matcher registry and the
 executor seam. It executes no geometry. This package supplies the bodies — matcher implementations, geometry proofs,
 mesh oracles, the lazy BRep evidence ledger and its authenticated cache, the OpenCascade and Manifold kernel adapters,
 the worker pool, and the `geospec` CLI.

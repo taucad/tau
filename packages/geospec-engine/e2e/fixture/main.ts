@@ -19,6 +19,7 @@ import { createCollector, discoverGeoSpecFiles, installCollector } from 'geospec
 import { createGeoSpecWebRunner } from 'geospec/runner/web';
 import { loadModel } from 'geospec/model';
 import '@taucad/geospec-engine/register';
+import type { WorkerEvidenceReport } from '#e2e/fixture/evidence.worker.js';
 
 /** A closed unit box: 8 corners, 12 triangles, every edge shared exactly twice. */
 const boxCorners = [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1];
@@ -53,15 +54,14 @@ const buildBoxGlb = async (): Promise<Uint8Array<ArrayBuffer>> => {
   return new WebIO().writeBinary(document);
 };
 
-/**
- *
- */
+/** Public API results collected from the browser fixture and its worker. */
 export type BrowserEngineReport = {
   engine: string;
   capabilities: string[];
   triangles: number;
   watertight: boolean;
   tests: Array<{ name: string; status: string }>;
+  worker: WorkerEvidenceReport;
   error?: string;
 };
 
@@ -100,6 +100,25 @@ const run = async (): Promise<BrowserEngineReport> => {
     triangles: analysis.stats.triangleCount,
     watertight: analysis.stats.watertight,
     tests: collector.tests.map((test) => ({ name: test.name, status: test.status })),
+    worker: await new Promise<WorkerEvidenceReport>((resolve, reject) => {
+      const worker = new Worker(new URL('evidence.worker.ts', import.meta.url), { type: 'module' });
+      worker.addEventListener(
+        'message',
+        (event: MessageEvent<WorkerEvidenceReport>) => {
+          worker.terminate();
+          resolve(event.data);
+        },
+        { once: true },
+      );
+      worker.addEventListener(
+        'error',
+        (event) => {
+          worker.terminate();
+          reject(new Error(event.message));
+        },
+        { once: true },
+      );
+    }),
   };
 };
 

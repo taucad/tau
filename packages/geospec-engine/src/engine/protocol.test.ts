@@ -151,8 +151,12 @@ describe('Contract-B engine implementation', () => {
     });
 
     expect(initialized.engine).toStrictEqual({ name: '@taucad/geospec-engine', version: '7.8.9' });
-    expect(initialized.capabilities).toHaveLength(26);
-    expect(initialized.capabilities).toContainEqual({ name: 'analyzeBrep', registryVersion: 2 });
+    expect(initialized.capabilities).toHaveLength(28);
+    expect(initialized.capabilities).toContainEqual({
+      name: 'analyzeMesh',
+      registryVersion: geoSpecMatcherRegistryVersion,
+    });
+    expect(initialized.capabilities).toContainEqual({ name: 'analyzeBrep', registryVersion: 3 });
     expect(initialized.provenance).toStrictEqual({ license: 'Apache-2.0' });
   });
 

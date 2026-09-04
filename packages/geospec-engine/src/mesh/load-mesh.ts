@@ -11,7 +11,14 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { buildMeshAnalysisRecord, readGlbDocument, recordGeometryStats } from '#mesh/analysis-record.js';
+import { getGeoSpecEvidenceStore, readEvidenceBytes, writeEvidenceBytes } from '#cache/evidence-cache.js';
+import {
+  buildMeshAnalysisRecord,
+  decodeMeshAnalysisRecord,
+  encodeMeshAnalysisRecord,
+  readGlbDocument,
+  recordGeometryStats,
+} from '#mesh/analysis-record.js';
 import { buildSoupStats } from '#mesh/soup.js';
 import { forensicSpan } from '#runner/forensic.js';
 import type { ForensicSink } from '#runner/forensic.js';
@@ -152,14 +159,34 @@ export const loadMeshObserved = async (options: LoadMeshOptions, forensic?: Fore
     // whatever unit the subject reports, so the analyses need the conversion.
     const unitsPerMm = unitScale('mm', unit);
     let stats: GeometryStats;
+    let contentHash: string | undefined;
     if (normalized.buffer) {
       stats = bufferStats(normalized.buffer, scale);
     } else {
-      const document = await readGlbDocument(normalized.bytes!);
-      stats = recordGeometryStats(
-        forensicSpan('mesh.record', () => buildMeshAnalysisRecord(document, scale), forensic),
-        unitsPerMm,
-      );
+      const bytes = normalized.bytes!;
+      const store = getGeoSpecEvidenceStore();
+      contentHash = store?.engineDigest() === undefined ? undefined : store.hashBytes(bytes);
+      const cacheKey = contentHash === undefined ? undefined : { contentHash, format, scale };
+      const cached = cacheKey === undefined ? undefined : readEvidenceBytes('mesh-record', cacheKey);
+      let record = cached === undefined ? undefined : decodeMeshAnalysisRecord(cached);
+      forensic?.({
+        name:
+          cacheKey === undefined
+            ? 'cache.mesh-record.disabled'
+            : record === undefined
+              ? 'cache.mesh-record.miss'
+              : 'cache.mesh-record.hit',
+        value: 1,
+        unit: 'count',
+      });
+      if (record === undefined) {
+        const document = await readGlbDocument(bytes);
+        record = forensicSpan('mesh.record', () => buildMeshAnalysisRecord(document, scale), forensic);
+        if (cacheKey !== undefined) {
+          writeEvidenceBytes('mesh-record', cacheKey, encodeMeshAnalysisRecord(record));
+        }
+      }
+      stats = recordGeometryStats(record, unitsPerMm);
     }
 
     const path = options.path ?? normalized.path;
@@ -181,6 +208,7 @@ export const loadMeshObserved = async (options: LoadMeshOptions, forensic?: Fore
           source,
           unit,
           loader: normalized.buffer ? 'in-memory' : 'gltf-transform',
+          ...(normalized.buffer !== undefined || contentHash === undefined ? {} : { contentHash }),
           ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
         },
         capabilities: meshCapabilities(),

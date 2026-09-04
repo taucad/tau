@@ -375,7 +375,20 @@ export const toHaveMeshIntegrity: GeoSpecMatcherImplementation = (invocation) =>
           code: 'GEOSPEC_MESH_INTEGRITY_MISMATCH',
           message: `Mesh evidence is not trustworthy for downstream checks: ${failures.join('; ')}.`,
           suggestion: 'Re-tessellate the model (or repair it) until the mesh evidence is clean.',
-          details: { matcher: 'toHaveMeshIntegrity', failures, triangleCount: quality.triangleCount },
+          details: {
+            matcher: 'toHaveMeshIntegrity',
+            failures,
+            triangleCount: quality.triangleCount,
+            nonFiniteVertices: quality.nonFiniteVertices.slice(0, 4).map((vertex) => ({
+              ...vertex,
+              position: vertex.position.map(String),
+            })),
+            degenerateTriangles: quality.degenerateTriangles.slice(0, 4),
+            duplicateFaces: quality.duplicateFaces.slice(0, 4).map((face) => ({
+              ...face,
+              center: quality.triangles[face.triangleIndex]?.center,
+            })),
+          },
         }),
       ];
 };

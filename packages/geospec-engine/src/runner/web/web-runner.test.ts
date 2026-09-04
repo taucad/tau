@@ -21,10 +21,24 @@ const stubWebWorker = (): { worker: WebWorkerLike; posted: unknown[]; terminated
     worker: {
       postMessage(message) {
         posted.push(message);
-        const typed = message as { type: string; shard?: { id: number; file: string } };
+        const typed = message as {
+          type: string;
+          shard?: { id: number; file: string };
+          shardId?: number;
+          file?: string;
+        };
         if (typed.type === 'initialize') {
           queueMicrotask(() => {
             listener?.({ data: { type: 'initialized' } });
+          });
+          return;
+        }
+        if (typed.type === 'list-tests' && typed.shardId !== undefined && typed.file !== undefined) {
+          const { file, shardId } = typed;
+          queueMicrotask(() => {
+            listener?.({
+              data: { type: 'tests-listed', shardId, file, names: [] },
+            });
           });
           return;
         }
@@ -143,8 +157,10 @@ describe('createGeoSpecWebPoolRunner', () => {
   });
 
   it('should auto-size when the caller declares no worker count', async () => {
-    const stub = stubWebWorker();
-    const runner = createGeoSpecWebPoolRunner({ createWorker: async () => stub.worker, shardTimeout: 5000 });
+    const runner = createGeoSpecWebPoolRunner({
+      createWorker: async () => stubWebWorker().worker,
+      shardTimeout: 5000,
+    });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();

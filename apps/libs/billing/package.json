@@ -1,0 +1,43 @@
+{
+  "name": "@taucad/billing",
+  "version": "0.0.1",
+  "description": "Central source of truth for Tau billing tiers, entitlements, and feature gating",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./hooks/query-client": "./src/hooks/query-client.ts",
+    "./hooks/billing-session": "./src/hooks/billing-session.tsx",
+    "./hooks/use-entitlements": "./src/hooks/use-entitlements.ts",
+    "./hooks/use-credits": "./src/hooks/use-credits.ts",
+    "./hooks/use-topup-return": "./src/hooks/use-topup-return.ts",
+    "./usage": "./src/usage.ts"
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "dependencies": {
+    "@taucad/types": "workspace:*",
+    "@tanstack/react-query": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0",
+    "react-router": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-router": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@testing-library/react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "vitest": "catalog:"
+  }
+}

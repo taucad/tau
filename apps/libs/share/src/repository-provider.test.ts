@@ -5,6 +5,7 @@ import { bitbucketShareProvider } from '#bitbucket.js';
 import { githubShareProvider } from '#github.js';
 import { gitlabShareProvider } from '#gitlab.js';
 import type { ShareProviderContext } from '#provider.js';
+import type { RepositoryShareProviderContext } from '#repository-provider.js';
 import { formatRepositoryTarget } from '#repository-target.js';
 
 const commit = 'a'.repeat(40);
@@ -39,6 +40,34 @@ describe('repository share providers', () => {
     });
     const context = { origin: 'https://tau.new', fetch, artifactCodec } satisfies ShareProviderContext;
     await expect(provider.resolve!({ locator: { providerId, reference }, secrets: {} }, context)).resolves.toBe(opened);
+  });
+
+  it('uses an explicit archive endpoint when the host supplies one', async () => {
+    const reference = formatRepositoryTarget('github', {
+      v: 1,
+      repositoryId: 1,
+      fullName: 'taucad/examples',
+      commit,
+      root: '',
+    });
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+      expect(url.origin).toBe('https://api.tau.new');
+      expect(url.pathname).toBe('/v1/repositories/archive');
+      expect(url.searchParams.get('provider')).toBe('github');
+      expect(url.searchParams.get('target')).toBe(reference);
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'application/zip' } });
+    });
+    const context = {
+      origin: 'https://tau.new',
+      archiveUrl: 'https://api.tau.new/v1/repositories/archive',
+      fetch,
+      artifactCodec,
+    } satisfies RepositoryShareProviderContext;
+
+    await expect(
+      githubShareProvider.resolve!({ locator: { providerId: 'github', reference }, secrets: {} }, context),
+    ).resolves.toBe(opened);
   });
 
   it('rejects gateway failures without exposing response bodies', async () => {

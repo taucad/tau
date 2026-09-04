@@ -3,5 +3,5 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/libs/share",
   "projectType": "library",
-  "tags": ["scope:ui", "type:app-lib", "layer:data-access"]
+  "tags": ["scope:shared", "type:app-lib", "layer:data-access"]
 }

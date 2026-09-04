@@ -5,6 +5,12 @@ import { ShareError } from '#provider.js';
 import { parseRepositoryTarget } from '#repository-target.js';
 import type { RepositoryProviderId } from '#repository-target.js';
 
+/** Repository gateway override supplied by hosts that serve Tau's API on a separate origin. @internal */
+export type RepositoryShareProviderContext = ShareProviderContext & {
+  /** Absolute archive endpoint; defaults to the legacy same-origin `/api/import` route. */
+  readonly archiveUrl?: string;
+};
+
 const readArchive = async (response: Response, signal?: AbortSignal): Promise<Uint8Array<ArrayBuffer>> => {
   const declared = Number(response.headers.get('content-length') ?? 0);
   if (Number.isFinite(declared) && declared > shareArtifactLimits.maxArchiveBytes) {
@@ -49,14 +55,14 @@ const readArchive = async (response: Response, signal?: AbortSignal): Promise<Ui
 export const resolveRepositoryShare = async (
   providerId: RepositoryProviderId,
   input: ShareResolveInput,
-  context: ShareProviderContext,
+  context: RepositoryShareProviderContext,
 ): Promise<ShareOpenedArtifact> => {
   const { reference } = input.locator;
   if (input.locator.providerId !== providerId || !reference) {
     throw new ShareError('SHARE_LOCATOR_INVALID', 'The repository share locator is malformed.');
   }
   parseRepositoryTarget(providerId, reference);
-  const url = new URL('/api/import', context.origin);
+  const url = new URL(context.archiveUrl ?? '/api/import', context.origin);
   url.searchParams.set('provider', providerId);
   url.searchParams.set('target', reference);
   let response: Response;

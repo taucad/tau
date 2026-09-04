@@ -4,13 +4,24 @@
   "projectType": "application",
   "sourceRoot": "apps/ui-e2e/src",
   "tags": ["scope:ui", "type:e2e"],
-  "implicitDependencies": ["ui"],
+  "implicitDependencies": ["ui", "host", "runtime-e2e"],
   "targets": {
     "test": {
       "executor": "nx:run-commands",
+      "dependsOn": [
+        { "projects": ["ui"], "target": "build" },
+        { "projects": ["ui"], "target": "build:serve" }
+      ],
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run apps/ui-e2e/src/global-setup-preflight.spec.ts --environment=node"
+        "parallel": false,
+        "commands": [
+          "vitest run apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
+          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/project-card-preview-parity.spec.ts src/user-project-thumbnail-generation.spec.ts"
+        ],
+        "env": {
+          "TAU_E2E_UI_SNAPSHOT": "true"
+        }
       }
     },
     "test:e2e": {
@@ -21,11 +32,57 @@
         "command": "vitest run --config apps/ui-e2e/vitest.config.ts"
       }
     },
+    "test:e2e:webgpu": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts"
+      }
+    },
     "test:e2e:development": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --config apps/ui-e2e/vitest.config.ts src/preview.spec.ts src/geospec-runner.spec.ts"
+        "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/preview.spec.ts src/geospec-runner.spec.ts src/headless-chat-image-capture.development.spec.ts src/home-hydration.spec.ts",
+        "env": {
+          "PORT": "3012",
+          "TAU_E2E_SERVER_MODE": "development"
+        }
+      }
+    },
+    "test:e2e:browser-host": {
+      "executor": "nx:run-commands",
+      "dependsOn": [{ "projects": ["ui"], "target": "build" }],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/ui-e2e",
+        "commands": [
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/browser-agent-host.spec.ts src/chat-isolated-workspace.spec.ts",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project firefox src/browser-agent-host.spec.ts",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts --project webkit-smoke src/browser-agent-host.spec.ts"
+        ],
+        "parallel": false,
+        "env": {
+          "TAU_E2E_UI_SNAPSHOT": "true"
+        }
+      }
+    },
+    "test:e2e:daemon-host": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        { "projects": ["ui"], "target": "build" },
+        { "projects": ["ui"], "target": "build:serve" }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/ui-e2e",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts --project chromium src/daemon-agent-host.spec.ts"
+      }
+    },
+    "test:e2e:safari-host": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node apps/ui-e2e/scripts/verify-safari-remote-host.mts"
       }
     }
   }

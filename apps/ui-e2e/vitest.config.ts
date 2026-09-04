@@ -14,6 +14,7 @@ const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
 
 export default defineConfig({
   root: import.meta.dirname,
+  optimizeDeps: { include: ['zod'] },
   resolve: {
     alias: [
       {
@@ -69,12 +70,26 @@ export default defineConfig({
           provide: { webGpuProfile: 'disabled' },
         },
         {
+          browser: 'firefox',
+          name: 'firefox',
+          include: [
+            'src/browser-agent-host.spec.ts',
+            'src/chat-isolated-workspace.spec.ts',
+            'src/paseo-connection.spec.ts',
+            'src/remote-host.spec.ts',
+          ],
+        },
+        {
           browser: 'webkit',
           name: 'webkit-smoke',
           include: [
             'src/preview.spec.ts',
             'src/birdhouse-preview.spec.ts',
+            'src/browser-agent-host.spec.ts',
             'src/project-creation-location-unsupported.spec.ts',
+            'src/chat-isolated-workspace.spec.ts',
+            'src/paseo-connection.spec.ts',
+            'src/remote-host.spec.ts',
           ],
         },
       ],

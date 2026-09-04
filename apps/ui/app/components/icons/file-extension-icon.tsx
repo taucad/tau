@@ -45,9 +45,13 @@ const iconConfigMap: Partial<Record<string, IconConfig>> = {
   },
   py: {
     type: 'lib',
-    id: 'build123d',
+    id: 'python',
   },
   cs: {
+    type: 'lib',
+    id: 'csharp',
+  },
+  wasm: {
     type: 'lib',
     id: 'webassembly',
   },

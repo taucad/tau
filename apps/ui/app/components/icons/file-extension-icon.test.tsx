@@ -29,6 +29,9 @@ describe('getIconIdForFilename', () => {
     expect(getIconIdForFilename('main.scad')).toBe('openscad');
     expect(getIconIdForFilename('main.kcl')).toBe('zoo');
     expect(getIconIdForFilename('main.ts')).toBe('typescript');
+    expect(getIconIdForFilename('main.cs')).toBe('csharp');
+    expect(getIconIdForFilename('main.py')).toBe('python');
+    expect(getIconIdForFilename('kernel.wasm')).toBe('webassembly');
     expect(getIconIdForFilename('component.tsx')).toBe('react');
     expect(getIconIdForFilename('.gitignore')).toBe('git');
     expect(getIconIdForFilename('model.stp')).toBe('step');

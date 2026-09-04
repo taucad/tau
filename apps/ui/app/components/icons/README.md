@@ -54,3 +54,18 @@ pnpm nx run ui:generate-svg-sprite
 
 - `kimi.svg` is sourced from Lobe Icons' `kimi-color.svg` at commit
   `fbd2d56e3f734e889f1373e71c8368cc4e60e0d7`, licensed under MIT (Copyright 2023 LobeHub).
+- `build123d.svg` is sourced from build123d's `docs/assets/build123d_logo/logo.svg` at
+  commit `0f0e021b602e14347cb07d8aad051db0a345650b`, licensed under Apache-2.0 (Copyright Roger Maitland).
+- `csharp.svg` is sourced from [Simple Icons](https://simpleicons.org/)' `csharp.svg`
+  (vendored at `repos/nx/astro-docs/public/images/icons/csharp.svg`), licensed under
+  CC0-1.0, recoloured to the C# brand purple `#68217A`.
+- `picogk.svg` is a vector reconstruction of the official PicoGK mark published only as
+  raster at <https://picogk.org/images/PicoGK_sm.png> (Copyright LEAP 71). The wordmark is
+  typeset from the `Jost` variable font PicoGK itself bundles
+  (`repos/PicoGK/assets/Jost.ttf`, SIL OFL 1.1) at `wght 300` with the `GK` pair
+  conjoined, and the frame redrawn to match.
+- `python.svg` uses the official Python Software Foundation two-snake glyph (vendored at
+  `repos/convex-backend/npm-packages/docs/static/img/python-logo.svg`), its gradients
+  flattened to the brand's `#FFD43B`/white and set on a `#306998` rounded square so it
+  matches the `typescript.svg` / `javascript.svg` treatment. The Python logo is a PSF
+  trademark, used here to denote the language.

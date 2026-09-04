@@ -12,7 +12,7 @@ export type {
   WatchEvent,
 } from '#types.js';
 
-export { WorkspaceFileService } from '#workspace-file-service.js';
+export { pendingProjectCommitInputSchema, WorkspaceFileService } from '#workspace-file-service.js';
 export type {
   BundledTypePackageReplacement,
   MkdirOptions,

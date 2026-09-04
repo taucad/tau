@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   parseAdoptableProjectManifestBytes,
   parseProjectManifestBytes,
@@ -185,6 +186,98 @@ function isProjectDirectoryPath(path: string): boolean {
   const segments = path.split('/').filter(Boolean);
   return segments.length === 1 && !segments[0]!.startsWith('.');
 }
+
+const directoryHandleSchema = z.custom<FileSystemDirectoryHandle>(
+  (value) => value !== null && typeof value === 'object' && !Array.isArray(value),
+);
+const pendingProjectScopeSchema = z
+  .discriminatedUnion('backend', [
+    z.object({ backend: z.literal('webaccess'), directoryHandle: directoryHandleSchema, workspaceId: z.string() }),
+    z.object({ backend: z.literal('indexeddb') }),
+    z.object({ backend: z.literal('opfs') }),
+    z.object({ backend: z.literal('node'), path: z.string() }),
+    z.object({ backend: z.literal('memory'), storageRootKey: z.string() }),
+  ])
+  .superRefine((scope, context) => {
+    if (scope.backend === 'memory') {
+      context.addIssue({ code: 'custom', message: 'Pending project commits require durable storage.' });
+    }
+  })
+  .transform((scope): StorageRootConfig => scope as unknown as StorageRootConfig);
+const pendingProjectFileDescriptorSchema = z.object({ content: z.instanceof(Uint8Array) });
+
+/** Complete runtime boundary for direct and bridged pending-project commits. @public */
+export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDirectoryInput> = z
+  .object({
+    providerBasePath: z.string(),
+    scope: pendingProjectScopeSchema,
+    files: z.record(z.string(), pendingProjectFileDescriptorSchema),
+    manifest: z.instanceof(Uint8Array),
+  })
+  .superRefine((input, context) => {
+    try {
+      if (
+        assertRootedPath(input.providerBasePath) !== input.providerBasePath ||
+        !isProjectDirectoryPath(input.providerBasePath)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['providerBasePath'],
+          message: 'Pending project target must be a canonical project directory',
+        });
+      }
+    } catch {
+      context.addIssue({
+        code: 'custom',
+        path: ['providerBasePath'],
+        message: 'Pending project target must be a canonical project directory',
+      });
+    }
+
+    const treePaths = new Set(['tau.json']);
+    for (const relativePath of Object.keys(input.files)) {
+      if (!isSafeRelativePath(relativePath)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['files', relativePath],
+          message: 'Pending project file path is unsafe',
+        });
+        continue;
+      }
+      try {
+        assertRootedPath(relativePath);
+      } catch {
+        context.addIssue({
+          code: 'custom',
+          path: ['files', relativePath],
+          message: 'Pending project file path must be canonical',
+        });
+        continue;
+      }
+      if (relativePath === 'tau.json' || relativePath.endsWith('/tau.json')) {
+        context.addIssue({
+          code: 'custom',
+          path: ['files', relativePath],
+          message: 'Pending project files cannot contain a manifest',
+        });
+      }
+      treePaths.add(relativePath);
+    }
+    for (const treePath of treePaths) {
+      let parent = treePath.slice(0, treePath.lastIndexOf('/'));
+      while (parent.length > 0) {
+        if (treePaths.has(parent)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['files', treePath],
+            message: 'Pending project file path collides with an ancestor',
+          });
+          break;
+        }
+        parent = parent.slice(0, parent.lastIndexOf('/'));
+      }
+    }
+  });
 
 /**
  * Manifest bytes whose *only* defect is the identity — the exact condition
@@ -3879,73 +3972,23 @@ export class WorkspaceFileService {
     storageRootKey: string;
     projectId: string;
   } {
-    if (!(input.manifest instanceof Uint8Array)) {
-      throw new TypeError('Pending project commit manifest must be a Uint8Array');
+    const parsedInput = pendingProjectCommitInputSchema.safeParse(input);
+    if (!parsedInput.success) {
+      throw new TypeError(parsedInput.error.issues[0]?.message ?? 'Pending project commit input is invalid');
     }
-    const manifest = new Uint8Array(input.manifest.byteLength);
-    manifest.set(input.manifest);
+    const manifest = new Uint8Array(parsedInput.data.manifest);
     const parsedManifest = parseProjectManifestBytes(manifest);
     if (!parsedManifest.success) {
       throw new TypeError('Pending project commit manifest is invalid');
     }
     const projectId = parsedManifest.data.id;
-    const uncheckedScope = input.scope as WorkspaceScope;
-    if (uncheckedScope.backend === 'memory') {
-      throw new TypeError('Pending project commits require durable storage.');
-    }
-    const scope: StorageRootConfig = { ...input.scope };
+    const scope: StorageRootConfig = { ...parsedInput.data.scope };
     const storageRootKey = this._registry.resolveStorageRootKey(scope);
-
-    const path = assertRootedPath(input.providerBasePath);
-    if (path !== input.providerBasePath) {
-      throw new TypeError('Pending project target must already be canonical');
-    }
-    // The pending operation carries its own allocated directory name; identity
-    // is established by the post-commit manifest read-back and the replay
-    // checks, not by parsing the id back out of the basename.
-    if (!isProjectDirectoryPath(path)) {
-      throw new TypeError('Pending project target is not a project directory');
-    }
-    const rawFiles: unknown = input.files;
-    if (rawFiles === null || typeof rawFiles !== 'object' || Array.isArray(rawFiles)) {
-      throw new TypeError('Pending project commit files must be an object');
-    }
-
-    const canonicalPaths = new Set<string>();
+    const path = parsedInput.data.providerBasePath;
     const files: Array<readonly [string, { readonly content: Uint8Array<ArrayBuffer> }]> = [];
-    for (const [relativePath, descriptor] of Object.entries(rawFiles)) {
-      if (!isSafeRelativePath(relativePath)) {
-        throw new TypeError(`Pending project file path is unsafe: ${relativePath}`);
-      }
-      const canonicalPath = assertRootedPath(relativePath);
-      if (canonicalPath !== relativePath || canonicalPaths.has(canonicalPath)) {
-        throw new TypeError(`Pending project file path is not unique and canonical: ${relativePath}`);
-      }
-      if (relativePath === 'tau.json' || relativePath.endsWith('/tau.json')) {
-        throw new TypeError(`Pending project files cannot contain a manifest: ${relativePath}`);
-      }
-      const content: unknown =
-        descriptor !== null && typeof descriptor === 'object' && 'content' in descriptor
-          ? descriptor.content
-          : undefined;
-      if (!(content instanceof Uint8Array)) {
-        throw new TypeError(`Pending project file content must be a Uint8Array: ${relativePath}`);
-      }
-      canonicalPaths.add(canonicalPath);
-      const ownedContent = new Uint8Array(content.byteLength);
-      ownedContent.set(content);
+    for (const [relativePath, { content }] of Object.entries(parsedInput.data.files)) {
+      const ownedContent = new Uint8Array(content);
       files.push([relativePath, { content: ownedContent }]);
-    }
-
-    const treePaths = new Set([...canonicalPaths, 'tau.json']);
-    for (const treePath of treePaths) {
-      let parent = treePath.slice(0, treePath.lastIndexOf('/'));
-      while (parent.length > 0) {
-        if (treePaths.has(parent)) {
-          throw new TypeError(`Pending project file path collides with an ancestor: ${treePath}`);
-        }
-        parent = parent.slice(0, parent.lastIndexOf('/'));
-      }
     }
 
     return {

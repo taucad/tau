@@ -692,6 +692,25 @@ describe('WorkspaceFileService', () => {
       expect(getProvider).not.toHaveBeenCalled();
     });
 
+    it.each([new Map([[mainFile, { content: encoder.encode('lost') }]]), new Date(0)])(
+      'rejects non-record file collections before provider access',
+      async (files) => {
+        const getProvider = vi.spyOn(providerRegistry, 'getProvider');
+
+        await expect(
+          service.commitPendingProjectDirectory({
+            providerBasePath: directory,
+            scope,
+            files,
+            manifest,
+          } as unknown as Parameters<WorkspaceFileService['commitPendingProjectDirectory']>[0]),
+        ).rejects.toThrow('record');
+
+        expect(getProvider).not.toHaveBeenCalled();
+        await expect(commitProvider.exists(directory)).resolves.toBe(false);
+      },
+    );
+
     it('replaces manifest-less residue and writes the manifest last', async () => {
       await commitProvider.mkdir(directory, { recursive: true });
       await commitProvider.writeFile(`${directory}/stale.bin`, encoder.encode('stale'));

@@ -1,31 +1,9 @@
 export {
-  cameraProjectionForVerticalFieldOfView,
-  clipPlanesForCameraBounds,
   createCameraState,
   createCameraView,
-  findPerspectiveHandoffVerticalFieldOfView,
   frameCameraBounds,
   maximumProjectedPixelDelta,
-  orthographicCameraDistance,
-  orthographicFrustumForVerticalSpan,
-  perspectiveDistanceForVerticalSpan,
   perspectiveVerticalSpan,
-  resolveCameraFrame,
   resolveCameraState,
 } from '#camera-domain.js';
-export type {
-  CameraBounds,
-  CameraClipPlanes,
-  CameraFrame,
-  CameraFrustum,
-  CameraHandoffOptions,
-  CameraProjection,
-  CameraProjectionKind,
-  CameraState,
-  CameraStateOptions,
-  CameraStateProjection,
-  CameraVector,
-  CameraView,
-  CameraViewOptions,
-  CameraViewport,
-} from '#camera-domain.js';
+export type { CameraBounds, CameraProjection, CameraState, CameraVector, CameraView } from '#camera-domain.js';

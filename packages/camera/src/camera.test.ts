@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as cameraModule from '#index.js';
 
 import {
   cameraProjectionForVerticalFieldOfView,
@@ -12,7 +13,7 @@ import {
   perspectiveVerticalSpan,
   resolveCameraFrame,
   resolveCameraState,
-} from '#index.js';
+} from '#camera-domain.js';
 
 const bounds = {
   min: [-220, -180, -55],
@@ -81,6 +82,17 @@ const projectedPoint = ({
 };
 
 describe('@taucad/camera', () => {
+  it('publishes only the consumed runtime surface', () => {
+    expect(Object.keys(cameraModule).sort()).toEqual([
+      'createCameraState',
+      'createCameraView',
+      'frameCameraBounds',
+      'maximumProjectedPixelDelta',
+      'perspectiveVerticalSpan',
+      'resolveCameraState',
+    ]);
+  });
+
   it('resolves a complete serializable state from the framed view', () => {
     const view = frameCameraBounds({ view: createView(), bounds: volumetricBounds });
     const frame = resolveCameraFrame({ view });

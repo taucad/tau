@@ -47,7 +47,7 @@ const rows: ReadonlyArray<readonly [string, unknown]> = [
   ],
   [
     'hello',
-    { v: 1, k: 'lh', o: 1, d: { server: 'kernel-runtime-worker', protocolVersion: 1, transportId: 'web-socket' } },
+    { v: 1, k: 'lh', o: 1, d: { server: 'kernel-runtime-worker', protocolVersion: 2, transportId: 'web-socket' } },
   ],
   [
     'fs bridge hello',

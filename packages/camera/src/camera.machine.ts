@@ -1,6 +1,11 @@
 import { assign, assertEvent, fromCallback, sendTo, setup } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
-import { createCameraView, findPerspectiveHandoffVerticalFieldOfView, frameCameraBounds } from '#camera-domain.js';
+import {
+  cameraProjectionForVerticalFieldOfView,
+  createCameraView,
+  findPerspectiveHandoffVerticalFieldOfView,
+  frameCameraBounds,
+} from '#camera-domain.js';
 import type { CameraBounds, CameraProjection, CameraVector, CameraView, CameraViewport } from '#camera-domain.js';
 
 /** Input accepted by {@link cameraMachine}. @public */
@@ -9,11 +14,10 @@ export type CameraMachineInput = Readonly<{
   pixelBudget?: number;
 }>;
 
-/** Serializable state owned by {@link cameraMachine}. @public */
-export type CameraMachineContext = Readonly<{
+/** Serializable state owned by {@link cameraMachine}. */
+type CameraMachineContext = Readonly<{
   view: CameraView;
   initialView: CameraView;
-  effectiveVerticalFieldOfView: number;
   lastPerspectiveVerticalFieldOfView: number;
   handoffVerticalFieldOfView?: number;
   pixelBudget: number;
@@ -24,7 +28,6 @@ export type CameraMachineContext = Readonly<{
 export type CameraDriverSnapshot = Readonly<{
   view: CameraView;
   projection: CameraProjection;
-  effectiveVerticalFieldOfView: number;
   perspectiveVerticalFieldOfView: number;
   handoffVerticalFieldOfView?: number;
   revision: number;
@@ -38,8 +41,8 @@ export type CameraDriverInput = Readonly<{
 /** Commands sent to a provided camera driver. @public */
 export type CameraDriverEvent = Readonly<{ type: 'sync'; snapshot: CameraDriverSnapshot }>;
 
-/** Events accepted by {@link cameraMachine}. @public */
-export type CameraMachineEvent =
+/** Events accepted by {@link cameraMachine}. */
+type CameraMachineEvent =
   | Readonly<{ type: 'setVerticalFieldOfView'; verticalFieldOfView: number }>
   | Readonly<{ type: 'setViewport'; viewport: CameraViewport }>
   | Readonly<{ type: 'setBounds'; bounds: CameraBounds }>
@@ -62,16 +65,12 @@ const assertPositive = (value: number, label: string): number => {
   return value;
 };
 
-const projectionForEffectiveVerticalFieldOfView = (verticalFieldOfView: number): CameraProjection =>
-  verticalFieldOfView === 0 ? { kind: 'orthographic' } : { kind: 'perspective', verticalFieldOfView };
-
 const driverSnapshot = (context: CameraMachineContext): CameraDriverSnapshot => ({
   view: context.view,
-  projection: projectionForEffectiveVerticalFieldOfView(context.effectiveVerticalFieldOfView),
-  effectiveVerticalFieldOfView: context.effectiveVerticalFieldOfView,
+  projection: cameraProjectionForVerticalFieldOfView(context.view.requestedVerticalFieldOfView),
   perspectiveVerticalFieldOfView:
-    context.effectiveVerticalFieldOfView > 0
-      ? context.effectiveVerticalFieldOfView
+    context.view.requestedVerticalFieldOfView > 0
+      ? context.view.requestedVerticalFieldOfView
       : (context.handoffVerticalFieldOfView ?? context.lastPerspectiveVerticalFieldOfView),
   handoffVerticalFieldOfView: context.handoffVerticalFieldOfView,
   revision: context.revision,
@@ -89,7 +88,7 @@ const handoffForView = (
   });
 
 const updateHandoffForView = (context: CameraMachineContext, view: CameraView): number | undefined =>
-  context.effectiveVerticalFieldOfView === 0 ? handoffForView(context, view) : undefined;
+  context.view.requestedVerticalFieldOfView === 0 ? handoffForView(context, view) : undefined;
 
 const defaultCameraDriver = fromCallback<CameraDriverEvent, CameraDriverInput>(({ receive }) => {
   receive(() => undefined);
@@ -133,34 +132,17 @@ export const cameraMachine = setup({
   actors: {
     cameraDriver: defaultCameraDriver,
   },
-  guards: {
-    isInitialOrthographic: ({ context }) => context.effectiveVerticalFieldOfView === 0,
-    requestsOrthographic: ({ event }) => event.type === 'setVerticalFieldOfView' && event.verticalFieldOfView === 0,
-    requestsPerspective: ({ event }) => event.type === 'setVerticalFieldOfView' && event.verticalFieldOfView > 0,
-    resetIsOrthographic: ({ context }) => context.initialView.requestedVerticalFieldOfView === 0,
-  },
   actions: {
     syncDriver: sendTo('cameraDriver', ({ context }) => ({ type: 'sync', snapshot: driverSnapshot(context) })),
-    applyPerspectiveVerticalFieldOfView: assign(({ context, event }) => {
+    setVerticalFieldOfView: assign(({ context, event }) => {
       assertEvent(event, 'setVerticalFieldOfView');
       const view = createCameraView({ ...context.view, requestedVerticalFieldOfView: event.verticalFieldOfView });
       return {
         ...context,
         view,
-        effectiveVerticalFieldOfView: event.verticalFieldOfView,
-        lastPerspectiveVerticalFieldOfView: event.verticalFieldOfView,
-        handoffVerticalFieldOfView: undefined,
-        revision: context.revision + 1,
-      };
-    }),
-    applyOrthographicProjection: assign(({ context }) => {
-      const view = createCameraView({ ...context.view, requestedVerticalFieldOfView: 0 });
-      const handoffVerticalFieldOfView = handoffForView(context, view);
-      return {
-        ...context,
-        view,
-        effectiveVerticalFieldOfView: 0,
-        handoffVerticalFieldOfView,
+        lastPerspectiveVerticalFieldOfView:
+          event.verticalFieldOfView > 0 ? event.verticalFieldOfView : context.lastPerspectiveVerticalFieldOfView,
+        handoffVerticalFieldOfView: event.verticalFieldOfView === 0 ? handoffForView(context, view) : undefined,
         revision: context.revision + 1,
       };
     }),
@@ -237,7 +219,6 @@ export const cameraMachine = setup({
       return {
         ...context,
         view,
-        effectiveVerticalFieldOfView: view.requestedVerticalFieldOfView,
         lastPerspectiveVerticalFieldOfView:
           view.requestedVerticalFieldOfView > 0
             ? view.requestedVerticalFieldOfView
@@ -255,7 +236,6 @@ export const cameraMachine = setup({
     return {
       view: initialView,
       initialView,
-      effectiveVerticalFieldOfView: initialView.requestedVerticalFieldOfView,
       lastPerspectiveVerticalFieldOfView:
         initialView.requestedVerticalFieldOfView > 0 ? initialView.requestedVerticalFieldOfView : 60,
       pixelBudget,
@@ -267,60 +247,19 @@ export const cameraMachine = setup({
     src: 'cameraDriver',
     input: ({ context }) => ({ snapshot: driverSnapshot(context) }),
   },
-  initial: 'initializing',
   on: {
+    setVerticalFieldOfView: { actions: ['setVerticalFieldOfView', 'syncDriver'] },
     setViewport: { actions: ['setViewport', 'syncDriver'] },
     setBounds: { actions: ['setBounds', 'syncDriver'] },
     setView: { actions: ['setView', 'syncDriver'] },
     frame: { actions: ['frameBounds', 'syncDriver'] },
     saveHome: { actions: 'saveHome' },
-    reset: [
-      { guard: 'resetIsOrthographic', target: '.orthographic', actions: ['resetView', 'syncDriver'] },
-      { target: '.perspective', actions: ['resetView', 'syncDriver'] },
-    ],
-  },
-  states: {
-    initializing: {
-      always: [{ guard: 'isInitialOrthographic', target: 'orthographic' }, { target: 'perspective' }],
-    },
-    perspective: {
-      on: {
-        setVerticalFieldOfView: [
-          {
-            guard: 'requestsOrthographic',
-            target: 'orthographic',
-            actions: ['applyOrthographicProjection', 'syncDriver'],
-          },
-          { guard: 'requestsPerspective', actions: ['applyPerspectiveVerticalFieldOfView', 'syncDriver'] },
-        ],
-      },
-    },
-    orthographic: {
-      on: {
-        setVerticalFieldOfView: [
-          {
-            guard: 'requestsPerspective',
-            target: 'perspective',
-            actions: ['applyPerspectiveVerticalFieldOfView', 'syncDriver'],
-          },
-          { guard: 'requestsOrthographic' },
-        ],
-      },
-    },
+    reset: { actions: ['resetView', 'syncDriver'] },
   },
 });
 
 /** Public snapshot type for {@link cameraMachine}. @public */
 export type CameraMachineSnapshot = SnapshotFrom<typeof cameraMachine>;
-
-/**
- * Selects the canonical requested camera view.
- *
- * @param snapshot - Current machine snapshot.
- * @returns The canonical camera view.
- * @public
- */
-export const selectCameraView = (snapshot: CameraMachineSnapshot): CameraView => snapshot.context.view;
 
 /**
  * Selects the native semantic projection rendered in the current frame.
@@ -330,7 +269,7 @@ export const selectCameraView = (snapshot: CameraMachineSnapshot): CameraView =>
  * @public
  */
 export const selectCameraProjection = (snapshot: CameraMachineSnapshot): CameraProjection =>
-  projectionForEffectiveVerticalFieldOfView(snapshot.context.effectiveVerticalFieldOfView);
+  cameraProjectionForVerticalFieldOfView(snapshot.context.view.requestedVerticalFieldOfView);
 
 /**
  * Selects the current driver synchronization value.

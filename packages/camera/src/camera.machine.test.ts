@@ -1,12 +1,7 @@
 import { createActor, fromCallback } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import * as machineModule from '#camera.machine.js';
-import {
-  cameraMachine,
-  selectCameraDriverSnapshot,
-  selectCameraProjection,
-  selectCameraView,
-} from '#camera.machine.js';
+import { cameraMachine, selectCameraDriverSnapshot, selectCameraProjection } from '#camera.machine.js';
 import type { CameraDriverEvent, CameraDriverInput } from '#camera.machine.js';
 import { createCameraView, frameCameraBounds, maximumProjectedPixelDelta, resolveCameraFrame } from '#camera-domain.js';
 
@@ -31,8 +26,12 @@ describe('cameraMachine', () => {
   it('exports exactly one machine value and starts headlessly', () => {
     const actor = createCameraActor().start();
 
-    expect(actor.getSnapshot().matches('perspective')).toBe(true);
     expect(selectCameraProjection(actor.getSnapshot())).toEqual({ kind: 'perspective', verticalFieldOfView: 60 });
+    expect(Object.keys(machineModule).sort()).toEqual([
+      'cameraMachine',
+      'selectCameraDriverSnapshot',
+      'selectCameraProjection',
+    ]);
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([cameraMachine]);
 
     actor.stop();
@@ -43,17 +42,15 @@ describe('cameraMachine', () => {
 
     actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
     let snapshot = actor.getSnapshot();
-    expect(snapshot.matches('orthographic')).toBe(true);
     expect(selectCameraProjection(snapshot)).toEqual({ kind: 'orthographic' });
     const handoff = snapshot.context.handoffVerticalFieldOfView;
     expect(handoff).toBeDefined();
     expect(
-      maximumProjectedPixelDelta({ view: selectCameraView(snapshot), perspectiveVerticalFieldOfView: handoff ?? 60 }),
+      maximumProjectedPixelDelta({ view: snapshot.context.view, perspectiveVerticalFieldOfView: handoff ?? 60 }),
     ).toBeLessThanOrEqual(0.25);
 
     actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 60 });
     snapshot = actor.getSnapshot();
-    expect(snapshot.matches('perspective')).toBe(true);
     expect(selectCameraProjection(actor.getSnapshot())).toEqual({ kind: 'perspective', verticalFieldOfView: 60 });
 
     actor.stop();
@@ -69,7 +66,7 @@ describe('cameraMachine', () => {
     expect(handoffVerticalFieldOfView).toBeDefined();
     expect(
       maximumProjectedPixelDelta({
-        view: selectCameraView(snapshot),
+        view: snapshot.context.view,
         perspectiveVerticalFieldOfView: handoffVerticalFieldOfView ?? 60,
       }),
     ).toBeLessThanOrEqual(0.25);
@@ -77,14 +74,18 @@ describe('cameraMachine', () => {
     actor.stop();
   });
 
-  it('handles repeated endpoint switches without creating another driver', () => {
+  it('keeps one replaceable driver synchronized across zero-FOV crossings', () => {
+    const snapshots = [] as Array<Readonly<{ projection: string; revision: number }>>;
     let driverStarts = 0;
     let driverStops = 0;
-    const driver = fromCallback<CameraDriverEvent, CameraDriverInput>(({ receive }) => {
-      driverStarts += 1;
-      receive(() => undefined);
+    const driver = fromCallback<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
+      driverStarts++;
+      snapshots.push({ projection: input.snapshot.projection.kind, revision: input.snapshot.revision });
+      receive((event) => {
+        snapshots.push({ projection: event.snapshot.projection.kind, revision: event.snapshot.revision });
+      });
       return () => {
-        driverStops += 1;
+        driverStops++;
       };
     });
     const actor = createActor(cameraMachine.provide({ actors: { cameraDriver: driver } }), {
@@ -92,37 +93,18 @@ describe('cameraMachine', () => {
     }).start();
 
     actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
-    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 37 });
-    expect(actor.getSnapshot().matches('perspective')).toBe(true);
-    expect(selectCameraProjection(actor.getSnapshot())).toEqual({ kind: 'perspective', verticalFieldOfView: 37 });
-    expect(driverStarts).toBe(1);
+    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0.1 });
+    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
 
+    expect(snapshots).toEqual([
+      { projection: 'perspective', revision: 0 },
+      { projection: 'orthographic', revision: 1 },
+      { projection: 'perspective', revision: 2 },
+      { projection: 'orthographic', revision: 3 },
+    ]);
+    expect(driverStarts).toBe(1);
     actor.stop();
     expect(driverStops).toBe(1);
-  });
-
-  it('substitutes the driver, preserves command order, and cleans up once', () => {
-    const revisions: number[] = [];
-    let cleanupCount = 0;
-    const driver = fromCallback<CameraDriverEvent, CameraDriverInput>(({ input, receive }) => {
-      revisions.push(input.snapshot.revision);
-      receive((event) => {
-        revisions.push(event.snapshot.revision);
-      });
-      return () => {
-        cleanupCount += 1;
-      };
-    });
-    const actor = createActor(cameraMachine.provide({ actors: { cameraDriver: driver } }), {
-      input: { initialView },
-    }).start();
-
-    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 45 });
-    actor.send({ type: 'setViewport', viewport: { width: 900, height: 900, pixelRatio: 1 } });
-
-    expect(revisions).toEqual([0, 1, 2]);
-    actor.stop();
-    expect(cleanupCount).toBe(1);
   });
 
   it('updates, frames, resets, and serializes canonical state', () => {
@@ -131,17 +113,16 @@ describe('cameraMachine', () => {
     actor.send({ type: 'frame', bounds: { min: [100, 200, 300], max: [200, 400, 500] } });
 
     let snapshot = actor.getSnapshot();
-    expect(selectCameraView(snapshot).target).toEqual([150, 300, 400]);
+    expect(snapshot.context.view.target).toEqual([150, 300, 400]);
     expect(() => JSON.stringify(snapshot.context)).not.toThrow();
     expect(selectCameraDriverSnapshot(snapshot).revision).toBe(2);
 
     actor.send({ type: 'saveHome' });
-    const savedHome = selectCameraView(actor.getSnapshot());
+    const savedHome = actor.getSnapshot().context.view;
     actor.send({ type: 'setView', target: [9, 8, 7], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 10 });
     actor.send({ type: 'reset' });
     snapshot = actor.getSnapshot();
-    expect(selectCameraView(snapshot)).toEqual(savedHome);
-    expect(snapshot.matches('perspective')).toBe(true);
+    expect(snapshot.context.view).toEqual(savedHome);
 
     actor.stop();
   });
@@ -149,22 +130,22 @@ describe('cameraMachine', () => {
   it('should preserve fitted perspective zoom across endpoint changes and reset', () => {
     const actor = createCameraActor().start();
     actor.send({ type: 'frame', bounds: { min: [0, 0, 0], max: [20, 14, 8] }, margin: 0.1 });
-    const framedZoom = selectCameraView(actor.getSnapshot()).perspectiveZoom;
+    const framedZoom = actor.getSnapshot().context.view.perspectiveZoom;
     expect(framedZoom).not.toBe(1);
-    const framedSpan = selectCameraView(actor.getSnapshot()).verticalSpan;
-    const distanceAt60 = resolveCameraFrame({ view: selectCameraView(actor.getSnapshot()) }).distance;
+    const framedSpan = actor.getSnapshot().context.view.verticalSpan;
+    const distanceAt60 = resolveCameraFrame({ view: actor.getSnapshot().context.view }).distance;
 
     actor.send({ type: 'saveHome' });
     actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 0 });
     actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 45 });
-    expect(selectCameraView(actor.getSnapshot())).toMatchObject({
+    expect(actor.getSnapshot().context.view).toMatchObject({
       perspectiveZoom: framedZoom,
       verticalSpan: framedSpan,
     });
-    expect(resolveCameraFrame({ view: selectCameraView(actor.getSnapshot()) }).distance).toBeGreaterThan(distanceAt60);
+    expect(resolveCameraFrame({ view: actor.getSnapshot().context.view }).distance).toBeGreaterThan(distanceAt60);
     actor.send({ type: 'reset' });
 
-    expect(selectCameraView(actor.getSnapshot())).toMatchObject({
+    expect(actor.getSnapshot().context.view).toMatchObject({
       perspectiveZoom: framedZoom,
       verticalSpan: framedSpan,
     });
@@ -175,7 +156,7 @@ describe('cameraMachine', () => {
     const actor = createCameraActor().start();
     actor.send({ type: 'frame', margin: 0.1 });
     actor.send({ type: 'saveHome' });
-    const savedHome = selectCameraView(actor.getSnapshot());
+    const savedHome = actor.getSnapshot().context.view;
     const viewport = { width: 720, height: 1000, pixelRatio: 2 } as const;
 
     actor.send({ type: 'setViewport', viewport });
@@ -183,7 +164,7 @@ describe('cameraMachine', () => {
     actor.send({ type: 'setView', target: [9, 8, 7], direction: [1, 0, 0], up: [0, 0, 1], verticalSpan: 10 });
     actor.send({ type: 'reset' });
 
-    expect(selectCameraView(actor.getSnapshot())).toEqual(
+    expect(actor.getSnapshot().context.view).toEqual(
       frameCameraBounds({ view: { ...savedHome, viewport }, bounds: savedHome.bounds }),
     );
     actor.stop();
@@ -201,5 +182,25 @@ describe('cameraMachine', () => {
     });
     invalidInputActor.start();
     expect(inputErrors[0]).toBeInstanceOf(RangeError);
+  });
+
+  it.each([
+    [-1, 'verticalFieldOfView must be between 0 and 179 degrees.'],
+    [Number.NaN, 'verticalFieldOfView must be finite.'],
+    [180, 'verticalFieldOfView must be between 0 and 179 degrees.'],
+  ])('reports an invalid FOV event through the actor error channel (%s)', (value, message) => {
+    const errors: unknown[] = [];
+    const actor = createCameraActor();
+    actor.subscribe({
+      error(error) {
+        errors.push(error);
+      },
+    });
+    actor.start();
+
+    actor.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: value });
+
+    expect(errors[0]).toBeInstanceOf(RangeError);
+    expect(errors[0]).toHaveProperty('message', message);
   });
 });

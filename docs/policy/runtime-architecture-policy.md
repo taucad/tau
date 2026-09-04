@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'CAD runtime worker architecture from editor to geometry computation. Covers runtime engine boundaries, plugin toolkits, transport, and lifecycle.'
 status: active
 created: '2026-02-18'
-updated: '2026-08-28'
+updated: '2026-09-03'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -19,6 +19,7 @@ related:
   - docs/research/runtime-model-load-project-root-regression-v3.md
   - docs/research/runtime-rooted-filesystem-residual-migration.md
   - docs/research/language-kernel-selection-architecture.md
+  - docs/research/native-language-kernel-process-blueprint.md
 ---
 
 # Runtime Architecture Policy
@@ -117,13 +118,13 @@ Runtime authoring APIs serve three distinct audiences:
 
 All concrete CAD capabilities are provided by plugin packages, not hardcoded in `@taucad/runtime`:
 
-| Capability role | Author API                                  | Package export                       | Purpose                                                          | Example package                   |
-| --------------- | ------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------- | --------------------------------- |
-| Kernel          | `defineKernel` → `KernelDefinition`         | Toolkit `plugin`, role-named factory | Geometry computation, parameter extraction, export               | `@taucad/replicad`                |
-| Transcoder      | `defineTranscoder` → `TranscoderDefinition` | Toolkit `plugin`, role-named factory | Artifact-to-artifact conversion after source export              | `@taucad/image`, `@taucad/assimp` |
-| Bundler         | `defineBundler` → `BundlerDefinition`       | Toolkit `plugin`, role-named factory | File bundling, code execution, module registry, import detection | `@taucad/esbuild`                 |
-| Middleware      | `defineMiddleware` → `KernelMiddleware`     | Toolkit `plugin`, role-named factory | Operation wrapping, caching, transforms, content contributors    | `@taucad/middleware`              |
-| Runner          | Future runner/host adapter contract         | Explicit implementation package      | Native, Python, daemon, or remote execution                      | `@taucad/build123d`               |
+| Capability role | Author API                                   | Package export                       | Purpose                                                          | Example package                   |
+| --------------- | -------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------- | --------------------------------- |
+| Kernel          | `defineKernel` → `KernelDefinition`          | Toolkit `plugin`, role-named factory | Geometry computation, parameter extraction, export               | `@taucad/replicad`                |
+| Transcoder      | `defineTranscoder` → `TranscoderDefinition`  | Toolkit `plugin`, role-named factory | Artifact-to-artifact conversion after source export              | `@taucad/image`, `@taucad/assimp` |
+| Bundler         | `defineBundler` → `BundlerDefinition`        | Toolkit `plugin`, role-named factory | File bundling, code execution, module registry, import detection | `@taucad/esbuild`                 |
+| Middleware      | `defineMiddleware` → `KernelMiddleware`      | Toolkit `plugin`, role-named factory | Operation wrapping, caching, transforms, content contributors    | `@taucad/middleware`              |
+| Native process  | Kernel-owned private adapter; no public role | Explicit implementation package      | Native Python, C#, daemon, or process execution                  | `@taucad/build123d`               |
 
 A plugin package is a toolkit. It may contain several roles when one backend naturally owns them together: `@taucad/assimp` may expose both Assimp import-kernel and transcoder capabilities; `@taucad/replicad` may later expose a Replicad kernel plus a STEP transcoder over its own OCCT-backed import path. This mirrors established plugin ecosystems where one package owns a collection of related rules, loaders, transforms, or commands.
 
@@ -144,6 +145,23 @@ Shared helper packages live under `packages/core/*` and publish as `@taucad/<nam
 Tree shaking is not an install-boundary guarantee. A browser/WASM-safe plugin package must not hard-depend on native, Python, or daemon implementation packages even if those imports appear unreachable to bundlers. Split incompatible host payloads into explicit packages such as `@taucad/opencascade-native` or `@taucad/build123d`, then let UI, CLI, desktop, or daemon recipes opt into them deliberately.
 
 `@taucad/opencascade` is the browser/WASM-safe OpenCascade package. Native OpenCascade uses an explicit implementation package; Python-backed Build123d uses its own package and runner/daemon requirements.
+
+### Native-Language Process Boundary
+
+Native-language execution is a private implementation detail of the kernel that owns it, not a sixth runtime plugin role. `defineKernel` remains the public lifecycle boundary. A native kernel may retain a supervised child process in its initialized context and represent native objects with generation-scoped opaque handles, but the runtime protocol never carries executable source, host paths, process handles, or language-specific values.
+
+The first implementation, `@taucad/build123d`, establishes these requirements for future Python and C# kernels:
+
+- the host supplies an explicit, integrity-checked executable and worker payload; production never searches `PATH`, invokes a system interpreter, installs packages, or downloads dependencies;
+- the kernel receives only the rooted runtime filesystem, mirrors a bounded project view into a private temporary directory, and returns dependencies in the canonical root-relative runtime namespace;
+- source inspection is side-effect-free and bounded; Python parameter/import discovery uses `ast` and never imports the project;
+- a warm child accepts one serialized request lane over a private, versioned, size-bounded protocol; stdout is protocol-only and stderr is bounded diagnostic output;
+- abort, timeout, protocol corruption, trust revocation, host exit, and cleanup terminate the complete descendant process tree and remove private mirrors and artifacts;
+- artifacts cross the process boundary only through private files whose containment, size, integrity, and post-read identity are checked before deletion;
+- native handles are valid only for one process generation. Mesh and export consume retained handles and never rerun source;
+- native execution is default-deny until the desktop host grants a separately revocable trust decision bound to the physical project directory identity.
+
+Do not extract a shared language-runner package or public runner ABI from the first implementation. A later PicoGK kernel may copy this shape; shared code is justified only after the second implementation proves an identical stable seam. Untrusted native-code containment requires a separate sandbox launch gate and is not implied by worker or utility-process isolation.
 
 ### Multi-Bundler Support
 
@@ -455,6 +473,7 @@ Runtime package exports must not include legacy preset or concrete-capability ba
 @taucad/image         → named plugin export plus imageTranscoder
 @taucad/middleware    → named plugin export plus individual middleware factories
 @taucad/opencascade   → browser/WASM-safe OpenCascade plugin toolkit
+@taucad/build123d     → Node-hosted Build123d kernel; private supervised Python process
 @taucad/occt-core     → shared OCCT helper package, no plugin export
 @taucad/geometry-core → shared geometry helper package, no plugin export
 ```

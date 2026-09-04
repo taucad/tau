@@ -86,9 +86,7 @@ const refusalMessages: Readonly<Record<string, string>> = {
 const reasonedRefusals: ReadonlySet<string> = new Set(['CLOUD_HOST_UNAVAILABLE']);
 
 const refusalMessage = (code: string, reason: string | undefined): string => {
-  const key = code
-    .toLowerCase()
-    .replaceAll(/_(?<letter>[a-z])/gu, (_match, letter: string) => letter.toUpperCase());
+  const key = code.toLowerCase().replaceAll(/_(?<letter>[a-z])/gu, (_match, letter: string) => letter.toUpperCase());
   const phrase = refusalMessages[key] ?? `Tau Host refused the request (${code}).`;
   return reason && reasonedRefusals.has(code) ? `${phrase.replace(/\.$/u, '')}: ${reason}` : phrase;
 };

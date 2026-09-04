@@ -32,7 +32,7 @@ describe('Electron preload bridge', () => {
   });
 
   it('exposes both globals under a sandbox-shaped process', async () => {
-    /* Exactly what Electron 36.9.5's sandboxed bootstrap hands a preload: an
+    /* Exactly what Electron's sandboxed bootstrap hands a preload: an
      * object carrying `env` and nothing else the preload may reach for. */
     vi.stubGlobal('process', { env: { [tauElectronDebugEnvName]: '1' } });
     const { exposeElectronRuntime } = await import('#electron/preload.js');

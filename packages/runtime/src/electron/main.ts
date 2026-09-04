@@ -47,9 +47,8 @@ export type RegisterElectronRuntimeMainOptions = {
    *
    * Caveat: Electron documents `execArgv` only as "arguments passed to the
    * executable" and says nothing about V8 flags. The utility process is a Node
-   * environment that parses them, but that is unverified against Electron
-   * 36.9.5 here; if a flag does not take effect, pass it as `NODE_OPTIONS`
-   * through `env` instead.
+   * environment that parses them, but that is unverified here; if a flag does
+   * not take effect, pass it as `NODE_OPTIONS` through `env` instead.
    */
   readonly execArgv?: readonly string[];
   /**

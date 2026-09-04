@@ -50,11 +50,26 @@ export function clearTauLanguageHostPortFactory(): void {
 /**
  * Allocate a fresh sync {@link MessageChannel} + SABs and attach the server port to the FM worker.
  *
+ * Returns `undefined` — the stock-worker fallback in `MonacoEnvironment.getWorker`
+ * — when the FM is not ready or shared memory is unreachable.
+ *
  * @public
  */
 export function openTauLanguageHostPort(fileManagerRef: TauLanguageFileManagerRef): TauLanguageHostInit | undefined {
   const snap = fileManagerRef.getSnapshot();
   if (!snap.matches('ready') || !snap.context.worker) {
+    return undefined;
+  }
+  /* Finding 10 of `docs/research/host-agnostic-transport-substrate-blueprint.md`:
+   * unguarded, the allocation below throws on any non-isolated document and the
+   * callers never catch it, so the stock-worker fallback was unreachable.
+   * Read off `globalThis` the way `@taucad/runtime`'s `getIsolationStatus` does:
+   * the DOM lib types the flag as `boolean`, so `=== false` only means something
+   * against a view that admits it being absent (Node defines neither). */
+  if (
+    typeof SharedArrayBuffer === 'undefined' ||
+    (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === false
+  ) {
     return undefined;
   }
 

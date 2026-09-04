@@ -28,22 +28,44 @@ npm i @taucad/native-process-core @taucad/runtime
 ## Quick start
 
 ```typescript
-// Replace `helper` with the export you need; the root entry is an explicit named barrel.
-import { helper } from '@taucad/native-process-core';
+import { createWorkspaceMirror } from '@taucad/native-process-core';
+import type { KernelFileSystem } from '@taucad/runtime/kernel';
+
+export const inspectNativeWorkspace = async (filesystem: KernelFileSystem): Promise<readonly string[]> => {
+  const mirror = await createWorkspaceMirror({
+    temporaryPrefix: 'my-kernel-',
+    displayName: 'My kernel',
+    excludedPaths: ['thumbnail.webp'],
+  });
+  try {
+    return await mirror.sync(filesystem);
+  } finally {
+    await mirror.cleanup();
+  }
+};
 ```
+
+Pass the runtime-injected filesystem. A native kernel runs its child against `mirror.workspacePath`
+between `sync()` and `cleanup()`. Exclusions are exact workspace-relative paths, applied before
+metadata and content reads; excluding `thumbnail.webp` leaves `assets/thumbnail.webp` available.
+The mirror also enforces path, size, depth, and case-collision limits. It is not an OS sandbox.
 
 ## API
 
-| Entry                         | Purpose                              |
-| ----------------------------- | ------------------------------------ |
-| `@taucad/native-process-core` | the shared helpers, as named exports |
+| Export                      | Purpose                                                                                                                     |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `NativeProcessSession`      | Validated framed child-process requests, ordered progress events, cancellation, trust revocation, and artifact consumption. |
+| `NativeWorkerReportedError` | Preserves structured issues returned by the native worker.                                                                  |
+| `createWorkspaceMirror`     | Bounded, disposable projection of the injected filesystem into a private native workspace.                                  |
+| `processEnvironment`        | Constructs the child environment from the supported platform values.                                                        |
+| `terminateProcessTree`      | Terminates the owned native process tree across supported host platforms.                                                   |
 
 ## Environment
 
-| Host           | Supported | Notes                            |
-| -------------- | --------- | -------------------------------- |
-| Browser worker | Yes       | no Node built-ins in the payload |
-| Node.js        | Yes       | `>=24`                           |
+| Host           | Supported | Notes                                                         |
+| -------------- | --------- | ------------------------------------------------------------- |
+| Browser worker | No        | Node built-ins and child processes; host this package in Node |
+| Node.js        | Yes       | `>=24`                                                        |
 
 ## Versioning and stability
 

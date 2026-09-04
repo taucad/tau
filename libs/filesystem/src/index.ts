@@ -96,12 +96,22 @@ export type {
   BranchHeadUpdateResult,
   CreateRevisionInput,
   Revision,
+  RevisionAuthorityOptions,
   RevisionBranchName,
   RevisionProvenance,
   RevisionSummary,
   StaleBranchHeadConflict,
   UpdateBranchHeadInput,
 } from '#revision-authority.js';
+export { createBrowserRevisionPersistence } from '#revision-persistence.js';
+export type {
+  BrowserRevisionPersistenceOptions,
+  PersistedRevisionBranchHead,
+  RevisionPersistenceEntry,
+  RevisionPersistencePort,
+  RevisionPersistenceReceipt,
+  RevisionPersistenceSnapshot,
+} from '#revision-persistence.js';
 export {
   captureRevisionTree,
   MaterializedWorkspaceAuthority,

@@ -1,5 +1,11 @@
 import { ResourceQueue } from '#resource-queue.js';
-import type { ImmutableRevisionTree, RevisionId } from '#revision-tree.js';
+import { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
+import type { RevisionId } from '#revision-tree.js';
+import type {
+  RevisionPersistencePort,
+  RevisionPersistenceReceipt,
+  RevisionPersistenceSnapshot,
+} from '#revision-persistence.js';
 
 declare const branchNameBrand: unique symbol;
 
@@ -65,6 +71,12 @@ export type UpdateBranchHeadInput = Readonly<{
   head: RevisionId;
 }>;
 
+/** Dependencies for one durable revision authority. @public */
+export type RevisionAuthorityOptions = Readonly<{
+  persistence: RevisionPersistencePort;
+  resourceQueue?: ResourceQueue;
+}>;
+
 /** Validate and brand an externally supplied branch name. @public */
 export const revisionBranchName = (value: string): RevisionBranchName => {
   if (
@@ -79,66 +91,121 @@ export const revisionBranchName = (value: string): RevisionBranchName => {
   return value as RevisionBranchName;
 };
 
-const sameRevision = (left: RevisionId | undefined, right: RevisionId | undefined): boolean => left === right;
+const freezeRevision = (input: CreateRevisionInput): Revision => {
+  const id = revisionId(input.id);
+  const parents = input.parents.map(revisionId);
+  if (new Set(parents).size !== parents.length) {
+    throw new TypeError('A revision cannot name the same parent more than once.');
+  }
+  if (!(input.tree instanceof ImmutableRevisionTree)) {
+    throw new TypeError('Revision tree must be an ImmutableRevisionTree.');
+  }
+  if (!Number.isSafeInteger(input.provenance.createdAt) || input.provenance.createdAt < 0) {
+    throw new TypeError('Revision provenance createdAt must be a non-negative safe integer.');
+  }
+  if (input.provenance.actorId.length === 0 || input.summary.generated.length === 0) {
+    throw new TypeError('Revision provenance actorId and generated summary are required.');
+  }
+  return Object.freeze({
+    id,
+    parents: Object.freeze(parents),
+    tree: input.tree,
+    provenance: Object.freeze({ ...input.provenance }),
+    summary: Object.freeze({ ...input.summary }),
+  });
+};
+
+const freezePersistenceReceipt = (receipt: RevisionPersistenceReceipt): RevisionPersistenceReceipt => {
+  if (receipt.type === 'browser') {
+    return Object.freeze({ type: 'browser' });
+  }
+  const expectedLength = receipt.objectFormat === 'sha1' ? 40 : 64;
+  if (receipt.commitId.length !== expectedLength || !/^[0-9a-f]+$/u.test(receipt.commitId)) {
+    throw new TypeError('Native Git revision persistence receipt is invalid.');
+  }
+  return Object.freeze({ ...receipt });
+};
+
+type HydratedRevisionState = Readonly<{
+  revisions: Map<RevisionId, Revision>;
+  branchHeads: Map<RevisionBranchName, RevisionId>;
+  persistenceReceipts: Map<RevisionId, RevisionPersistenceReceipt>;
+}>;
 
 /**
  * Single-owner revision graph and branch-ref authority used by the C2 substrate.
  * Branch publication linearizes through the filesystem `ResourceQueue`; callers
  * never perform a read-then-write sequence outside this authority.
  *
- * Persistence adapters may replace the maps later, but must preserve this exact
- * expected-old result contract at their authoritative storage boundary.
- *
  * @public
  */
 export class RevisionAuthority {
   readonly #revisions = new Map<RevisionId, Revision>();
   readonly #branchHeads = new Map<RevisionBranchName, RevisionId>();
+  readonly #persistenceReceipts = new Map<RevisionId, RevisionPersistenceReceipt>();
+  readonly #persistence: RevisionPersistencePort;
   readonly #resourceQueue: ResourceQueue;
+  #initialized = false;
+  #readyPromise: Promise<void> | undefined;
 
-  public constructor(options?: { resourceQueue?: ResourceQueue }) {
-    this.#resourceQueue = options?.resourceQueue ?? new ResourceQueue();
+  public constructor(options: RevisionAuthorityOptions) {
+    this.#persistence = options.persistence;
+    this.#resourceQueue = options.resourceQueue ?? new ResourceQueue();
+  }
+
+  /**
+   * Rehydration is lazy: it starts on the first `ready` access (or first
+   * operation), so constructing an authority — e.g. on a route remount —
+   * touches no storage until the revision graph is actually used.
+   */
+  public get ready(): Promise<void> {
+    this.#readyPromise ??= this.#initialize();
+    return this.#readyPromise;
   }
 
   /** Insert a revision after validating that every parent exists. */
-  public createRevision(input: CreateRevisionInput): Revision {
-    if (this.#revisions.has(input.id)) {
-      throw new Error(`Revision already exists: ${input.id}`);
-    }
-    for (const parent of input.parents) {
-      if (!this.#revisions.has(parent)) {
-        throw new Error(`Revision parent does not exist: ${parent}`);
+  public async createRevision(input: CreateRevisionInput): Promise<Revision> {
+    await this.ready;
+    const id = revisionId(input.id);
+    return this.#resourceQueue.queueFor(`revision:${id}`, async () => {
+      if (this.#revisions.has(id)) {
+        throw new Error(`Revision already exists: ${id}`);
       }
-    }
-    if (new Set(input.parents).size !== input.parents.length) {
-      throw new TypeError('A revision cannot name the same parent more than once.');
-    }
-    if (!Number.isSafeInteger(input.provenance.createdAt) || input.provenance.createdAt < 0) {
-      throw new TypeError('Revision provenance createdAt must be a non-negative safe integer.');
-    }
-    if (input.provenance.actorId.length === 0 || input.summary.generated.length === 0) {
-      throw new TypeError('Revision provenance actorId and generated summary are required.');
-    }
-
-    const revision = Object.freeze({
-      id: input.id,
-      parents: Object.freeze([...input.parents]),
-      tree: input.tree,
-      provenance: Object.freeze({ ...input.provenance }),
-      summary: Object.freeze({ ...input.summary }),
+      const revision = freezeRevision(input);
+      for (const parent of revision.parents) {
+        if (!this.#revisions.has(parent)) {
+          throw new Error(`Revision parent does not exist: ${parent}`);
+        }
+      }
+      const receipt = freezePersistenceReceipt(await this.#persistence.storeRevision(revision));
+      this.#revisions.set(revision.id, revision);
+      this.#persistenceReceipts.set(revision.id, receipt);
+      return revision;
     });
-    this.#revisions.set(revision.id, revision);
-    return revision;
   }
 
   /** Read one immutable revision. */
   public getRevision(id: RevisionId): Revision | undefined {
+    this.#assertReady();
     return this.#revisions.get(id);
+  }
+
+  /** Read the durable storage evidence attached to one revision. */
+  public getRevisionPersistence(id: RevisionId): RevisionPersistenceReceipt | undefined {
+    this.#assertReady();
+    return this.#persistenceReceipts.get(id);
   }
 
   /** Read the current branch head, returning `undefined` for an unborn branch. */
   public getBranchHead(branch: RevisionBranchName): RevisionId | undefined {
+    this.#assertReady();
     return this.#branchHeads.get(branch);
+  }
+
+  /** Every published branch head, in insertion order. */
+  public listBranchHeads(): ReadonlyMap<RevisionBranchName, RevisionId> {
+    this.#assertReady();
+    return new Map(this.#branchHeads);
   }
 
   /**
@@ -147,25 +214,120 @@ export class RevisionAuthority {
    * one can win from the same expected value.
    */
   public async updateBranchHead(input: UpdateBranchHeadInput): Promise<BranchHeadUpdateResult> {
+    await this.ready;
     if (!this.#revisions.has(input.head)) {
       throw new Error(`Cannot publish unknown revision: ${input.head}`);
     }
     return this.#resourceQueue.queueFor(`revision-head:${input.branch}`, async () => {
-      const actualHead = this.getBranchHead(input.branch);
-      if (!sameRevision(actualHead, input.expectedHead)) {
-        return {
-          status: 'conflicted',
-          conflict: {
-            type: 'stale-head',
-            branch: input.branch,
-            expectedHead: input.expectedHead,
-            actualHead,
-            proposedHead: input.head,
-          },
-        };
+      const result = await this.#persistence.updateBranchHead(input);
+      if (result.status === 'updated') {
+        this.#branchHeads.set(input.branch, result.head);
+      } else if (result.conflict.actualHead === undefined) {
+        this.#branchHeads.delete(input.branch);
+      } else {
+        if (!this.#revisions.has(result.conflict.actualHead)) {
+          await this.#refreshRevision(result.conflict.actualHead);
+        }
+        this.#branchHeads.set(input.branch, result.conflict.actualHead);
       }
-      this.#branchHeads.set(input.branch, input.head);
-      return { status: 'updated', branch: input.branch, previousHead: actualHead, head: input.head };
+      return result;
     });
+  }
+
+  async #initialize(): Promise<void> {
+    try {
+      await this.#rehydrate();
+    } catch (error) {
+      this.#readyPromise = undefined;
+      throw error;
+    }
+  }
+
+  async #rehydrate(): Promise<void> {
+    const state = this.#buildHydratedState(await this.#persistence.load());
+    this.#revisions.clear();
+    this.#persistenceReceipts.clear();
+    this.#branchHeads.clear();
+    for (const [id, revision] of state.revisions) {
+      this.#revisions.set(id, revision);
+    }
+    for (const [id, receipt] of state.persistenceReceipts) {
+      this.#persistenceReceipts.set(id, receipt);
+    }
+    for (const [branch, head] of state.branchHeads) {
+      this.#branchHeads.set(branch, head);
+    }
+    this.#initialized = true;
+  }
+
+  #buildHydratedState(snapshot: RevisionPersistenceSnapshot): HydratedRevisionState {
+    const pending = new Map<RevisionId, { revision: Revision; persistence: RevisionPersistenceReceipt }>();
+    for (const entry of snapshot.revisions) {
+      const revision = freezeRevision(entry.revision);
+      if (pending.has(revision.id)) {
+        throw new Error(`Persisted revision appears more than once: ${revision.id}`);
+      }
+      pending.set(revision.id, {
+        revision,
+        persistence: freezePersistenceReceipt(entry.persistence),
+      });
+    }
+    const knownIds = new Set(pending.keys());
+    for (const { revision } of pending.values()) {
+      for (const parent of revision.parents) {
+        if (!knownIds.has(parent)) {
+          throw new Error(`Persisted revision parent does not exist: ${parent}`);
+        }
+      }
+    }
+    const revisions = new Map<RevisionId, Revision>();
+    const persistenceReceipts = new Map<RevisionId, RevisionPersistenceReceipt>();
+    while (pending.size > 0) {
+      let progressed = false;
+      for (const [id, entry] of pending) {
+        if (!entry.revision.parents.every((parent) => revisions.has(parent))) {
+          continue;
+        }
+        revisions.set(id, entry.revision);
+        persistenceReceipts.set(id, entry.persistence);
+        pending.delete(id);
+        progressed = true;
+      }
+      if (!progressed) {
+        throw new Error('Persisted revision graph contains a parent cycle.');
+      }
+    }
+    const branchHeads = new Map<RevisionBranchName, RevisionId>();
+    for (const persisted of snapshot.branchHeads) {
+      const branch = revisionBranchName(persisted.branch);
+      const head = revisionId(persisted.head);
+      if (branchHeads.has(branch)) {
+        throw new Error(`Persisted revision branch appears more than once: ${branch}`);
+      }
+      if (!revisions.has(head)) {
+        throw new Error(`Persisted branch points to an unknown revision: ${head}`);
+      }
+      branchHeads.set(branch, head);
+    }
+    return { revisions, persistenceReceipts, branchHeads };
+  }
+
+  async #refreshRevision(id: RevisionId): Promise<void> {
+    const state = this.#buildHydratedState(await this.#persistence.load());
+    if (!state.revisions.has(id)) {
+      throw new Error(`Persisted branch points to an unknown revision: ${id}`);
+    }
+    for (const [revisionIdValue, revision] of state.revisions) {
+      if (!this.#revisions.has(revisionIdValue)) {
+        this.#revisions.set(revisionIdValue, revision);
+        this.#persistenceReceipts.set(revisionIdValue, state.persistenceReceipts.get(revisionIdValue)!);
+      }
+    }
+  }
+
+  #assertReady(): void {
+    if (!this.#initialized) {
+      throw new Error('RevisionAuthority is not ready. Await authority.ready before reading it.');
+    }
   }
 }

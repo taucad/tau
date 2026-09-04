@@ -3,7 +3,7 @@ title: 'Public Surface Policy'
 description: 'Freeze register and admission rules for published Tau package exports, subpaths, declarations, and unstable internal escape hatches.'
 status: active
 created: '2026-08-15'
-updated: '2026-08-23'
+updated: '2026-08-31'
 related:
   - docs/policy/version-policy.md
   - docs/policy/library-api-policy.md
@@ -113,6 +113,32 @@ Kernel, middleware, and transcoder phantom carriers use module-private `unique s
 This section records the admitted candidate topology, not a publication event. After the candidate is published, add its version and registry integrity to the Freeze Register without replacing the historical `0.1.0-beta.1` entry.
 
 Concrete capabilities are owned by the publishable packages under `packages/plugins/*`; shared public implementation code is owned by `packages/core/*`. Every toolkit root exports the named callable factory `plugin` and no default export. `@taucad/runtime` has never been published under `latest`, so this is a pre-freeze atomic replacement, not a deprecation event. Leave the historical `0.1.0-beta.1` entry untouched.
+
+## Pending Surface Register
+
+The sections below register working-tree candidates for the next release train. They are not publication records, have no registry integrity yet, and do not alter the immutable `@taucad/runtime@0.1.0-beta.1` history above. The `nanoraster@0.5.0` registry cutover and W4 production-browser verification remain pending; append separate published-version sections with registry integrity only after those gates pass.
+
+### Candidate: `@taucad/spatial@0.0.1`
+
+The initial package publishes `.` and `./package.json`. Its root owns renderer-neutral coordinate conventions, `RenderFrame`, physical/render point, plane, and bounds mappings, unit-scale resolution, coordinate transforms, and render-frame rebase/rescale predicates. It has no renderer dependency.
+
+### Candidate: `@taucad/camera@0.0.1`
+
+The initial package publishes `.`, `./machine`, and `./package.json`. The root owns serializable camera state and views, projection math, bounds framing, and pixel-delta comparison. `./machine` owns the optional XState camera authority, its input/snapshot types, and projection/driver selectors.
+
+### Candidate: `@taucad/three@0.0.1`
+
+The initial package publishes `.`, `./camera`, `./spatial`, and `./package.json`. The root and `./camera` adapt renderer-neutral camera state to persistent Three.js camera rigs and copy native cameras back to serializable state. `./spatial` maps physical points, bounds, planes, and render frames to and from Three.js values.
+
+### Candidate: `@taucad/image` camera surface
+
+The next major candidate adds `./camera`, exporting `toNanorasterCamera` and `NanorasterCameraOptions`; the root also re-exports the adapter. The adapter lowers a complete renderer-neutral `CameraState` to nanoraster's fixed-camera contract without reintroducing renderer authority. This release also adopts nanoraster's breaking v10 caller-world option schema.
+
+### Candidate: `@taucad/runtime` transcode surface
+
+The next major candidate adds direct caller-owned artifact transcoding through `RuntimeClient.transcode()`, typed transcoder edges and options, a configurable transcode timeout, and `TranscodeTimeoutError` on the `./client` surface. The existing `./transcoder` authoring subpath remains the home of `defineTranscoder` and its supporting contracts.
+
+The same candidate advances the transport wire to `protocolVersion === 2`; version-1 peers must fail at handshake rather than at the first transcode call. It also replaces the legacy independent plugin-bag client generics with `RuntimeClient<Runtime, Transport>`. Both changes are intentionally breaking and are named in the major version plan.
 
 ## Admitting a New Subpath
 

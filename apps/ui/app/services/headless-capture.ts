@@ -1,9 +1,10 @@
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
-import { uint8ArrayToBase64 } from 'uint8array-extras';
+import { canonicalCaptureViews, captureFilesToDataUrls as encodeCaptureDataUrls } from '@taucad/agent-tools/capture';
 import type { ExportFile } from '@taucad/types';
 import type { CameraState } from '@taucad/camera';
 import { toNanorasterCamera } from '@taucad/image/camera';
 import { normalizeImageLabel } from '@taucad/image/label';
+import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
@@ -18,14 +19,11 @@ import {
 import { filterVisibleGltfPrimitives } from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
 import { resolveSectionViewPlane } from '#components/geometry/graphics/section-view-plane.js';
 
-export const canonicalCaptureViews = [
-  { id: 'front', label: 'Front — View From −Y', direction: [0, -1, 0], up: [0, 0, 1] },
-  { id: 'back', label: 'Back — View From +Y', direction: [0, 1, 0], up: [0, 0, 1] },
-  { id: 'right', label: 'Right — View From +X', direction: [1, 0, 0], up: [0, 0, 1] },
-  { id: 'left', label: 'Left — View From −X', direction: [-1, 0, 0], up: [0, 0, 1] },
-  { id: 'top', label: 'Top — View From +Z', direction: [0, 0, 1], up: [0, 1, 0] },
-  { id: 'bottom', label: 'Bottom — View From −Z', direction: [0, 0, -1], up: [0, 1, 0] },
-] as const;
+/* The canonical views live with the agent capture recipe so a browser-placed
+ * and a daemon-placed `screenshot` cannot drift. Re-exported rather than
+ * `export … from` because this module also consumes them. */
+// oxlint-disable-next-line no-barrel-files/no-barrel-files, unicorn-js/prefer-export-from -- relocation shim over a value this module itself uses.
+export { canonicalCaptureViews };
 
 export type HeadlessCaptureRecipe =
   | { readonly purpose: 'chat'; readonly mode: 'current' | 'orthographic' }
@@ -120,14 +118,13 @@ const recipeSize = (recipe: HeadlessCaptureRecipe, cameraState?: CameraState): r
 };
 
 const captureBackground = '#242424';
+const tauWorld = { up: '+z', forward: '-y', unit: 'meter' } as const;
 
 const requireSettledGeometry = (snapshot: SnapshotFrom<typeof cadMachine>) => {
   const { context } = snapshot;
-  if (context.latestGeometryOutcome === 'failure') {
-    const issues = context.entryPath ? context.kernelIssues.get(context.entryPath) : undefined;
-    throw new Error(
-      issues && issues.length > 0 ? issues.map((issue) => issue.message).join('; ') : 'The selected CAD render failed',
-    );
+  const failedIssues = selectCadFailureIssues(snapshot);
+  if (failedIssues) {
+    throw new Error(failedIssues.map((issue) => issue.message).join('; '));
   }
   if (!context.geometry || !context.entryPath) {
     throw new Error('The selected CAD view has no settled geometry');
@@ -135,43 +132,11 @@ const requireSettledGeometry = (snapshot: SnapshotFrom<typeof cadMachine>) => {
   return { geometry: context.geometry, entryPath: context.entryPath };
 };
 
-const pngDimensions = (bytes: Uint8Array<ArrayBuffer>): readonly [number, number] | undefined => {
-  if (bytes.length < 24 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) {
-    return undefined;
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  return [view.getUint32(16), view.getUint32(20)];
-};
-
-const webpDimensions = (bytes: Uint8Array<ArrayBuffer>): readonly [number, number] | undefined => {
-  if (
-    bytes.length < 31 ||
-    new TextDecoder().decode(bytes.subarray(0, 4)) !== 'RIFF' ||
-    new TextDecoder().decode(bytes.subarray(8, 12)) !== 'WEBP'
-  ) {
-    return undefined;
-  }
-  const chunk = new TextDecoder().decode(bytes.subarray(12, 16));
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (chunk === 'VP8X') {
-    return [1 + (view.getUint32(24, true) % 16_777_216), 1 + (view.getUint32(27, true) % 16_777_216)];
-  }
-  if (chunk === 'VP8L' && bytes[20] === 0x2f) {
-    const packed = view.getUint32(21, true);
-    return [1 + (packed % 16_384), 1 + (Math.floor(packed / 16_384) % 16_384)];
-  }
-  if (chunk === 'VP8 ' && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) {
-    return [view.getUint16(26, true) % 16_384, view.getUint16(28, true) % 16_384];
-  }
-  return undefined;
-};
-
 const requireImages = (
   files: ExportFile[] | undefined,
   options: {
     readonly count: number;
     readonly mimeType: 'image/png' | 'image/webp';
-    readonly size: readonly [number, number];
   },
 ): ExportFile[] => {
   const startedAt = performance.now();
@@ -180,16 +145,8 @@ const requireImages = (
       throw new Error(`Image capture expected ${options.count} artifact(s), received ${files?.length ?? 0}`);
     }
     for (const file of files) {
-      const dimensions = options.mimeType === 'image/png' ? pngDimensions(file.bytes) : webpDimensions(file.bytes);
-      if (
-        file.mimeType !== options.mimeType ||
-        file.bytes.length === 0 ||
-        dimensions?.[0] !== options.size[0] ||
-        dimensions[1] !== options.size[1]
-      ) {
-        throw new Error(
-          `Image capture expected non-empty ${options.mimeType} ${options.size[0]}×${options.size[1]} artifacts`,
-        );
+      if (file.mimeType !== options.mimeType || file.bytes.length === 0) {
+        throw new Error(`Image capture expected non-empty ${options.mimeType} artifacts`);
       }
     }
     return files;
@@ -228,7 +185,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
         ...(annotated ? { lengthSymbol: cadSnapshot.context.units.length } : {}),
       },
     });
-    return requireImages(files, { count: 1, mimeType: 'image/png', size: [width, height] });
+    return requireImages(files, { count: 1, mimeType: 'image/png' });
   }
 
   const includeEdges = recipe.purpose === 'agent' ? recipe.includeEdges : true;
@@ -245,8 +202,6 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
           isolatedComponentIds: presentation.isolatedComponentIds,
         })
       : undefined;
-  const upDirection = presentation?.upDirection ?? 'z';
-  const forwardByUp = { x: '-z', y: '+z', z: '-y' } as const;
   const common = {
     width,
     height,
@@ -254,11 +209,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
     background: captureBackground,
     ...(presentation?.enableSurfaces === false ? { surfaces: false } : {}),
     ...(!includeEdges || presentation?.enableLines === false ? { lines: false } : {}),
-    world: {
-      up: `+${upDirection}`,
-      forward: forwardByUp[upDirection],
-      unit: 'meter',
-    },
+    world: tauWorld,
     ...(visiblePrimitives ? { visiblePrimitives } : {}),
     ...(presentation?.section
       ? {
@@ -285,7 +236,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
         id: view.id,
         label: annotated ? normalizeImageLabel(view.label) : view.label,
         camera: {
-          framing: 'fit',
+          framing: 'bounds',
           direction: view.direction,
           up: view.up,
           margin: 0.1,
@@ -298,8 +249,8 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
     const camera =
       recipe.mode === 'isometric'
         ? ({
-            framing: 'fit',
-            direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+            framing: 'bounds',
+            direction: [0.6123724357, -0.6123724357, 0.5],
             up: [0, 0, 1],
             margin: 0.1,
             projection: { kind: 'perspective', verticalFieldOfView: 45 },
@@ -335,7 +286,6 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
   return requireImages(files, {
     count: recipe.mode === 'orthographic' ? canonicalCaptureViews.length : 1,
     mimeType: format === 'webp' ? 'image/webp' : 'image/png',
-    size: [width, height],
   });
 };
 
@@ -359,10 +309,18 @@ export const captureCadImages = async (options: CaptureCadImagesOptions): Promis
   });
 };
 
-/** Encode validated image files for the existing chat draft pipeline. */
+/**
+ * Encode validated image files for the existing chat draft pipeline.
+ *
+ * The encoding itself lives with the capture recipe in
+ * `@taucad/agent-tools/capture`: `uint8array-extras` spreads 65 535 arguments
+ * per chunk and overflows the stack on a capture-sized image
+ * (`agent-host-transports-and-offline.md` § "Addendum: FIX-SCREENSHOT",
+ * defect 3). This wrapper is the page's timed call site, nothing more.
+ */
 export const captureFilesToDataUrls = (files: readonly ExportFile[]): string[] => {
   const startedAt = performance.now();
-  const dataUrls = files.map((file) => `data:${file.mimeType};base64,${uint8ArrayToBase64(file.bytes)}`);
+  const dataUrls = encodeCaptureDataUrls(files);
   recordHeadlessImageTiming('capture.encode-data-url', startedAt, { count: files.length });
   return dataUrls;
 };

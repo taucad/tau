@@ -118,33 +118,6 @@ const captureCacheKey = (job: HeadlessImageJob): string | undefined =>
 
 const failedAutomaticIdentityLimit = 100;
 
-/** Just enough of `navigator.gpu` to ask whether an adapter exists. */
-type GpuAdapterProbe = { requestAdapter(): Promise<unknown> };
-
-/**
- * Whether this environment can actually produce a WebGPU adapter.
- *
- * `'gpu' in navigator` is not the same question: Playwright's Firefox and
- * WebKit builds expose `navigator.gpu` and answer `null` to `requestAdapter()`.
- * Spawning the image worker anyway makes the raster backend dereference that
- * null deep inside the worker, and the resulting `TypeError` escapes as an
- * *uncaught worker error* rather than a transcode failure — on Firefox that
- * propagates out of the nested worker and takes the page's live agent-host
- * projection with it. Asking here turns it into the documented
- * `adapter-unavailable` result, which is what the tool is supposed to report.
- */
-const hasGpuAdapter = async (): Promise<boolean> => {
-  const gpu = (globalThis.navigator as (Navigator & { gpu?: GpuAdapterProbe }) | undefined)?.gpu;
-  if (!gpu) {
-    return false;
-  }
-  try {
-    return (await gpu.requestAdapter()) !== null;
-  } catch {
-    return false;
-  }
-};
-
 /**
  * App-owned, lazy image export client shared by thumbnails and agent captures.
  * It serializes GPU work, coalesces queued automatic jobs by project, and
@@ -234,16 +207,13 @@ export class HeadlessImageService {
       while (this.queue.length > 0) {
         const queued = this.queue.shift()!;
         const startedAt = performance.now();
-        /* Every statement that touches a dequeued job lives inside this
-         * try/catch: anything raised out here would reject `drain()` — whose
-         * only caller discards it — and leave `export()` pending forever. */
+        this.activeTelemetry = this.dependencies.debug ? [] : undefined;
+        recordHeadlessImageTiming('queue.wait', queued.enqueuedAt, {
+          kind: queued.job.kind,
+          identity: queued.job.identity,
+          queueDepth: queued.queueDepth,
+        });
         try {
-          this.activeTelemetry = this.dependencies.debug ? [] : undefined;
-          recordHeadlessImageTiming('queue.wait', queued.enqueuedAt, {
-            kind: queued.job.kind,
-            identity: queued.job.identity,
-            queueDepth: queued.queueDepth,
-          });
           const files = await this.execute(queued.job);
           const cacheKey = captureCacheKey(queued.job);
           if (cacheKey) {
@@ -260,8 +230,6 @@ export class HeadlessImageService {
           });
           queued.resolve(files);
         } catch (error) {
-          // Settle first: the bookkeeping below must not be able to strand the caller.
-          queued.reject(error);
           console.warn('Headless image job failed', {
             message: error instanceof Error ? error.message : String(error),
             kind: queued.job.kind,
@@ -285,6 +253,7 @@ export class HeadlessImageService {
             success: false,
             errorCode: error instanceof HeadlessImageError ? error.code : 'unknown',
           });
+          queued.reject(error);
         } finally {
           this.activeTelemetry = undefined;
         }
@@ -344,7 +313,8 @@ export class HeadlessImageService {
       recordHeadlessImageTiming('worker.ready', performance.now(), { cold: false });
       return this.imageClient;
     }
-    const gpuAvailable = this.dependencies.isGpuAvailable?.() ?? (await hasGpuAdapter());
+    const gpuAvailable =
+      this.dependencies.isGpuAvailable?.() ?? (typeof navigator !== 'undefined' && 'gpu' in navigator);
     if (!gpuAvailable) {
       throw new HeadlessImageError(
         'adapter-unavailable',

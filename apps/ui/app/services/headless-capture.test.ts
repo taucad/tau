@@ -49,6 +49,7 @@ const snapshot = (geometry: Geometry, entryPath = '/parts/bracket.ts') =>
       latestGeometryOutcome: 'success',
       kernelIssues: new Map(),
     },
+    hasTag: () => false,
   }) as unknown as Parameters<typeof captureSettledCadImages>[0]['cadSnapshot'];
 
 const gltf = {
@@ -127,6 +128,40 @@ describe('headless capture adapter', () => {
     });
   });
 
+  it.each([
+    ['x', [1, 0, 0]],
+    ['y', [0, 1, 0]],
+    ['z', [0, 0, 1]],
+  ] as const)(
+    'keeps the fixed Tau world while the %s-up viewer orientation rides camera.up',
+    async (upDirection, up) => {
+      const exportImage = vi.fn<ExportImage>(async (_job) => [webp(2400, 1350)]);
+
+      await captureSettledCadImages({
+        cadSnapshot: snapshot(gltf),
+        cameraState: { ...cameraState, up },
+        presentation: {
+          upDirection,
+          enableSurfaces: true,
+          enableLines: true,
+          hiddenComponentIds: [],
+          isolatedComponentIds: [],
+        },
+        imageService: { export: exportImage },
+        recipe: { purpose: 'chat', mode: 'current' },
+      });
+
+      const job = exportImage.mock.calls[0]![0];
+      if (job.sourceFormat !== 'glb') {
+        throw new Error('Expected a GLB job');
+      }
+      expect(job.exportOptions).toMatchObject({
+        world: { up: '+z', forward: '-y', unit: 'meter' },
+        camera: { framing: 'fixed', up },
+      });
+    },
+  );
+
   it('returns six ordered GLTF views with complete per-view labels', async () => {
     const exportImage = vi.fn<ExportImage>(async (_job) =>
       canonicalCaptureViews.map((_view, index) => webp(1600, 1600, index)),
@@ -161,7 +196,7 @@ describe('headless capture adapter', () => {
       readonly views: ReadonlyArray<{
         readonly id: string;
         readonly label?: string;
-        readonly camera: { readonly framing: 'fit'; readonly projection: { readonly kind: 'orthographic' } };
+        readonly camera: { readonly framing: 'bounds'; readonly projection: { readonly kind: 'orthographic' } };
       }>;
     };
     expect(batchOptions.views.map(({ id }) => id)).toEqual(canonicalCaptureViews.map(({ id }) => id));
@@ -347,7 +382,7 @@ describe('headless capture adapter', () => {
   });
 
   it('rejects malformed output before dispatch and encodes MIME-aware data URLs', async () => {
-    const exportImage = vi.fn<ExportImage>(async (_job) => [webp(10, 10)]);
+    const exportImage = vi.fn<ExportImage>(async (_job) => [png(2400, 1350)]);
     await expect(
       captureSettledCadImages({
         cadSnapshot: snapshot(gltf),
@@ -355,7 +390,7 @@ describe('headless capture adapter', () => {
         imageService: { export: exportImage },
         recipe: { purpose: 'chat', mode: 'current' },
       }),
-    ).rejects.toThrow('2400×1350');
+    ).rejects.toThrow('non-empty image/webp');
     expect(captureFilesToDataUrls([png(1, 1)])[0]).toMatch(/^data:image\/png;base64,/u);
   });
 
@@ -372,5 +407,55 @@ describe('headless capture adapter', () => {
       }),
     ).rejects.toThrow('Live WebRTC geometry cannot be captured headlessly');
     expect(exportImage).not.toHaveBeenCalled();
+  });
+
+  it('uses the shared reserved-key precedence for failed renders', async () => {
+    const failedSnapshot = {
+      context: {
+        geometry: gltf,
+        entryPath: '/parts/bracket.ts',
+        units: { length: 'mm' },
+        latestGeometryOutcome: 'failure',
+        kernelIssues: new Map([
+          [
+            '__render__',
+            [
+              { message: 'render issue one', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+              { message: 'render issue two', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+            ],
+          ],
+        ]),
+      },
+      hasTag: () => false,
+    } as unknown as Parameters<typeof captureSettledCadImages>[0]['cadSnapshot'];
+
+    await expect(
+      captureSettledCadImages({
+        cadSnapshot: failedSnapshot,
+        imageService: { export: vi.fn() },
+        recipe: { purpose: 'chat', mode: 'current' },
+      }),
+    ).rejects.toThrow('render issue one; render issue two');
+  });
+
+  it('uses the deterministic machine fallback for a failed render without issues', async () => {
+    const failedSnapshot = {
+      context: {
+        geometry: gltf,
+        entryPath: '/parts/bracket.ts',
+        units: { length: 'mm' },
+        latestGeometryOutcome: 'failure',
+        kernelIssues: new Map(),
+      },
+      hasTag: () => false,
+    } as unknown as Parameters<typeof captureSettledCadImages>[0]['cadSnapshot'];
+
+    await expect(
+      captureSettledCadImages({
+        cadSnapshot: failedSnapshot,
+        imageService: { export: vi.fn() },
+        recipe: { purpose: 'chat', mode: 'current' },
+      }),
+    ).rejects.toThrow('The selected CAD render failed');
   });
 });

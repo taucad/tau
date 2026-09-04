@@ -14,6 +14,19 @@ type HeadlessImageDebugBridge = {
 
 const maximumRecords = 512;
 
+/**
+ * The bridge is a document-host surface: only a page carries the injected
+ * `window.ENV` the flag lives in, and only a page can be read back for it
+ * (`headless-chat-image-capture.spec.ts` evaluates
+ * `__TAU_HEADLESS_IMAGE_DEBUG__` in the document). A worker has neither, and
+ * `ENV` throws there — its facade treats "no `window`" as "node", so it
+ * dereferences `process.env`. The capture path runs in the agent-host worker
+ * since W3-CUT, so this gate is what keeps a diagnostic from failing the work
+ * it measures.
+ */
+// oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent in workers and during SSR.
+const isDebugEnabled = (): boolean => Boolean(globalThis.window) && ENV.TAU_DEBUG;
+
 const getBridge = (): HeadlessImageDebugBridge => {
   const state = globalThis as typeof globalThis & {
     __TAU_HEADLESS_IMAGE_DEBUG__?: HeadlessImageDebugBridge;
@@ -33,7 +46,7 @@ export const recordHeadlessImageTiming = (
   startTime: number,
   detail: Readonly<Record<string, unknown>> = {},
 ): void => {
-  if (!ENV.TAU_DEBUG) {
+  if (!isDebugEnabled()) {
     return;
   }
   const bridge = getBridge();

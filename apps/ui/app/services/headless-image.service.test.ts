@@ -21,18 +21,18 @@ const thumbnailJob = (identity: string): HeadlessImageJob => ({
   format: 'webp',
   exportOptions: { width: 16, height: 16 },
 });
-const captureJob = (identity: string, overrides: Partial<HeadlessImageJob> = {}): HeadlessImageJob =>
-  ({
-    kind: 'capture',
-    identity,
-    sourceFormat: 'glb',
-    sourcePath: 'main.ts',
-    geometryHash: 'geometry-hash',
-    content: glb,
-    format: 'webp',
-    exportOptions: { width: 16, height: 16 },
-    ...overrides,
-  }) as HeadlessImageJob;
+type WebpGlbJob = Extract<HeadlessImageJob, { readonly sourceFormat: 'glb'; readonly format: 'webp' }>;
+const captureJob = (identity: string, overrides: Partial<WebpGlbJob> = {}): WebpGlbJob => ({
+  kind: 'capture',
+  identity,
+  sourceFormat: 'glb',
+  sourcePath: 'main.ts',
+  geometryHash: 'geometry-hash',
+  content: glb,
+  format: 'webp',
+  exportOptions: { width: 16, height: 16 },
+  ...overrides,
+});
 
 const createFixture = () => {
   const imageClient = createMockRuntimeClient<typeof imageRuntime>();
@@ -68,9 +68,6 @@ describe('HeadlessImageService', () => {
   it('transcodes settled GLB bytes without a kernel render or filesystem', async () => {
     const { imageClient, service } = createFixture();
     const job = captureJob('capture');
-    if (job.sourceFormat !== 'glb') {
-      throw new Error('Expected a GLB capture job');
-    }
     await expect(service.export(job)).resolves.toEqual(files());
     expect(imageClient.transcode).toHaveBeenCalledWith({
       from: 'glb',
@@ -80,9 +77,10 @@ describe('HeadlessImageService', () => {
     });
   });
 
-  it('serializes jobs without terminating active automatic work for priority', async () => {
+  it('serializes jobs and runs explicit work before queued automatic work without terminating the client', async () => {
     const { imageClient, service } = createFixture();
     let release: (() => void) | undefined;
+    const completionOrder: string[] = [];
     vi.mocked(imageClient.transcode).mockImplementationOnce(async () => {
       await new Promise<void>((resolve) => {
         release = resolve;
@@ -93,10 +91,18 @@ describe('HeadlessImageService', () => {
     await vi.waitFor(() => {
       expect(imageClient.transcode).toHaveBeenCalledOnce();
     });
-    const capture = service.export(captureJob('capture'));
+    const queuedAutomatic = (async () => {
+      await service.export(thumbnailJob('automatic-next'));
+      completionOrder.push('automatic');
+    })();
+    const capture = (async () => {
+      await service.export(captureJob('capture'));
+      completionOrder.push('capture');
+    })();
     expect(imageClient.terminate).not.toHaveBeenCalled();
     release?.();
-    await expect(Promise.all([automatic, capture])).resolves.toHaveLength(2);
+    await expect(Promise.all([automatic, queuedAutomatic, capture])).resolves.toHaveLength(3);
+    expect(completionOrder).toEqual(['capture', 'automatic']);
   });
 
   it('retains the image client until owner disposal', async () => {
@@ -105,6 +111,59 @@ describe('HeadlessImageService', () => {
     await service.export(captureJob('capture'));
     expect(imageClient.terminate).not.toHaveBeenCalled();
     service.dispose();
+    expect(imageClient.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('terminates a client whose connection fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { imageClient, service } = createFixture();
+    vi.mocked(imageClient.connect).mockRejectedValueOnce(new Error('worker handshake failed'));
+
+    await expect(service.export(captureJob('failed-connect'))).rejects.toThrow('worker handshake failed');
+
+    expect(imageClient.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a queued job when the drain fails before the export runs', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const service = new HeadlessImageService({
+      createImageClient: vi.fn(),
+      isGpuAvailable: () => true,
+      /*
+       * The drain reads this between dequeue and execute. Anything raised in
+       * that region used to reject `drain()` — whose only caller discards the
+       * rejection — leaving `export()` pending forever, which is how a
+       * `screenshot` in the agent-host worker stalled for 900 s with no error.
+       */
+      get debug(): boolean {
+        throw new Error('drain failed before execute');
+      },
+    });
+    activeServices.add(service);
+
+    await expect(service.export(captureJob('drain-failure'))).rejects.toThrow('drain failed before execute');
+  });
+
+  it('owns and terminates a connection that is still in progress during disposal', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { imageClient, service } = createFixture();
+    let finishConnect!: () => void;
+    vi.mocked(imageClient.connect).mockImplementationOnce(
+      async () =>
+        new Promise<void>((resolve) => {
+          finishConnect = resolve;
+        }),
+    );
+
+    const pending = service.export(captureJob('pending-connect'));
+    await vi.waitFor(() => {
+      expect(imageClient.connect).toHaveBeenCalledOnce();
+    });
+    service.dispose();
+
+    expect(imageClient.terminate).toHaveBeenCalledOnce();
+    finishConnect();
+    await expect(pending).rejects.toThrow('connection was superseded');
     expect(imageClient.terminate).toHaveBeenCalledOnce();
   });
 
@@ -184,6 +243,32 @@ describe('HeadlessImageService', () => {
     expect(imageClient.transcode).toHaveBeenCalledOnce();
   });
 
+  it('evicts the oldest automatic failure identity after the bounded history fills', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { imageClient, service } = createFixture();
+    vi.mocked(imageClient.transcode).mockResolvedValue({
+      success: false,
+      issues: [
+        {
+          message: 'encode failed',
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'error',
+          details: { type: 'render', code: 'encode' },
+        },
+      ],
+    });
+
+    for (let index = 0; index <= 100; index++) {
+      // oxlint-disable-next-line no-await-in-loop -- Fill the sequential service history deterministically.
+      await expect(service.export(thumbnailJob(`broken-${index}`))).rejects.toMatchObject({ code: 'encode' });
+    }
+
+    await expect(service.export(thumbnailJob('broken-100'))).resolves.toBeUndefined();
+    await expect(service.export(thumbnailJob('broken-0'))).rejects.toMatchObject({ code: 'encode' });
+    expect(imageClient.transcode).toHaveBeenCalledTimes(102);
+  });
+
   it('renders SVG without probing GPU or creating the image runtime client', async () => {
     const createImageClient = vi.fn();
     const service = new HeadlessImageService({
@@ -213,5 +298,37 @@ describe('HeadlessImageService', () => {
     const result = service.export(captureJob('missing-gpu'));
     await expect(result).rejects.toBeInstanceOf(HeadlessImageError);
     await expect(result).rejects.toMatchObject({ code: 'adapter-unavailable' });
+  });
+
+  it.each([
+    { adapter: null, label: 'answers null' },
+    { adapter: undefined, label: 'rejects', reject: true },
+  ])('reports the same failure when navigator.gpu $label to requestAdapter', async ({ adapter, reject }) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    /*
+     * Playwright's Firefox and WebKit builds expose `navigator.gpu` and hand
+     * back no adapter. Without this probe the image worker spawns, the raster
+     * backend dereferences the null, and the `TypeError` escapes as an uncaught
+     * worker error instead of a tool result.
+     */
+    const createImageClient = vi.fn();
+    vi.stubGlobal('navigator', {
+      gpu: {
+        requestAdapter: async () => {
+          if (reject) {
+            throw new Error('WebGPU is disabled');
+          }
+          return adapter;
+        },
+      },
+    });
+    const service = new HeadlessImageService({ createImageClient });
+    activeServices.add(service);
+
+    await expect(service.export(captureJob('null-adapter'))).rejects.toMatchObject({
+      code: 'adapter-unavailable',
+    });
+    expect(createImageClient).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

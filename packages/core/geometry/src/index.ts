@@ -69,7 +69,7 @@ export { formatShapeName, isLegacyGeneratedShapeName, resolveShapeName, uniqueSh
 export { srgbHexToLinearTuple, srgbToLinear, srgbTupleToLinear } from '#utils/color-space.js';
 
 // Coordinate/unit transforms
-export { transformNormalArray, transformVertexArray } from '#geometry-transform.utils.js';
+export { compactTriangleIndices, transformNormalArray, transformVertexArray } from '#geometry-transform.utils.js';
 export type {
   GeometryOutputTransformOptions,
   OutputCoordinateSystem,

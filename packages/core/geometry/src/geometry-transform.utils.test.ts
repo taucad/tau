@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { createVertexTransform, transformNormalArray, transformVertexArray } from '#geometry-transform.utils.js';
+import {
+  compactTriangleIndices,
+  createVertexTransform,
+  transformNormalArray,
+  transformVertexArray,
+} from '#geometry-transform.utils.js';
 
 const transformVerticesGltf = createVertexTransform({ coordinateSystem: 'y-up', unit: { length: 'meter' } });
 
@@ -87,6 +92,33 @@ describe('transformVertexArray', () => {
     expect(result[1]).toBeCloseTo(3, 5);
     expect(result[2]).toBeCloseTo(-2, 5);
     expect(result[3]).toBe(0);
+  });
+});
+
+describe('compactTriangleIndices', () => {
+  it('removes zero-area triangles and rewrites face-group ranges', () => {
+    const compacted = compactTriangleIndices({
+      positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0],
+      indices: [0, 1, 2, 0, 1, 3],
+      groups: [
+        { start: 0, count: 3, faceId: 1 },
+        { start: 3, count: 3, faceId: 2 },
+      ],
+    });
+
+    expect([...compacted.indices]).toEqual([0, 1, 2]);
+    expect(compacted.groups).toEqual([{ start: 0, count: 3, faceId: 1 }]);
+    expect(compacted.removed).toBe(1);
+  });
+
+  it('removes an exact repeated face with distinct vertex indices', () => {
+    const compacted = compactTriangleIndices({
+      positions: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+      indices: [0, 1, 2, 3, 4, 5],
+    });
+
+    expect([...compacted.indices]).toEqual([0, 1, 2]);
+    expect(compacted.removed).toBe(1);
   });
 });
 

@@ -156,10 +156,14 @@ const projectDirectoryPathSchema = rootedPathSchema.refine(
 );
 const projectIdSchema = projectManifestSchema.shape.id;
 
+const durabilityClassValues = ['exclusive-append', 'stream-append', 'transactional-rewrite', 'ephemeral'] as const;
+const durabilityClassSchema = z.enum(durabilityClassValues);
 const providerCapabilitiesSchema: z.ZodType<ProviderCapabilities> = z.looseObject({
   persistent: z.boolean(),
   writable: z.boolean(),
   quotaBased: z.boolean(),
+  // Version-1 peers sent only the three booleans. Current providers include durability.
+  durability: durabilityClassSchema.optional(),
 });
 
 const fileStatSchema: z.ZodType<FileStat> = z.custom<FileStat>((value) => {

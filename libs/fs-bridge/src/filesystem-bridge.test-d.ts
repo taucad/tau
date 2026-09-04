@@ -28,7 +28,7 @@ describe('filesystem bridge hello — type guarantees', () => {
   it('requires the protocol version', () => {
     // @ts-expect-error Filesystem bridge hello producers must include the protocol version.
     const hello: FileSystemBridgeHello = {
-      capabilities: { persistent: false, writable: true, quotaBased: false },
+      capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
       watchable: false,
     };
     expectTypeOf(hello).toExtend<FileSystemBridgeHello>();

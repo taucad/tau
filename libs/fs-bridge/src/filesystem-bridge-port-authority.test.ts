@@ -83,14 +83,19 @@ const createAuthority = (
   seed: Record<string, string>,
 ): {
   handlers: Record<string, unknown>;
-  capabilities: { persistent: boolean; writable: boolean; quotaBased: boolean };
+  capabilities: {
+    persistent: boolean;
+    writable: boolean;
+    quotaBased: boolean;
+    durability: 'ephemeral';
+  };
 } => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>(
     Object.entries(seed).map(([path, content]) => [path, encoder.encode(content)]),
   );
   let watcher: ((event: WatchEvent) => void) | undefined;
   return {
-    capabilities: { persistent: false, writable: true, quotaBased: false },
+    capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
     handlers: {
       async readFile(
         path: string,

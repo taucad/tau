@@ -47,13 +47,13 @@ describe('filesystem bridge protocol contract', () => {
     // @ts-expect-error The version is mandatory.
     const noVersion: FileSystemBridgeHello = {
       state: 'ready',
-      capabilities: { persistent: false, writable: true, quotaBased: false },
+      capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
       watchable: false,
     };
     // @ts-expect-error Availability is never inferred from missing capabilities.
     const noState: FileSystemBridgeHello = {
       v: 1,
-      capabilities: { persistent: false, writable: true, quotaBased: false },
+      capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
       watchable: false,
     };
     // @ts-expect-error Ready runtime peers must publish concrete capabilities.

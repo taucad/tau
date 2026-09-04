@@ -386,7 +386,7 @@ describe('createFileSystemBridgeProxy', () => {
     createBridgeServer({ writeFile }, fsBridgePort(channel.port1, 'fs-bridge-invalid-args-server'), {
       hello: createFileSystemBridgeHello({
         state: 'ready',
-        capabilities: { persistent: false, writable: true, quotaBased: false },
+        capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
         watchable: false,
       }),
       protocolSchemas: fileSystemBridgeSchemas,
@@ -408,7 +408,7 @@ describe('createFileSystemBridgeProxy', () => {
     createBridgeServer({ exists: async () => 'yes' }, fsBridgePort(channel.port1, 'fs-bridge-invalid-result-server'), {
       hello: createFileSystemBridgeHello({
         state: 'ready',
-        capabilities: { persistent: false, writable: true, quotaBased: false },
+        capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
         watchable: false,
       }),
       protocolSchemas: fileSystemBridgeSchemas,
@@ -543,7 +543,7 @@ describe('createFileSystemBridgeProxy', () => {
     createBridgeServer({ watch }, fsBridgePort(channel.port1, 'fs-bridge-invalid-watch-request-server'), {
       hello: createFileSystemBridgeHello({
         state: 'ready',
-        capabilities: { persistent: false, writable: true, quotaBased: false },
+        capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
         watchable: true,
       }),
       protocolSchemas: fileSystemBridgeSchemas,
@@ -574,7 +574,7 @@ describe('createFileSystemBridgeProxy', () => {
       {
         hello: createFileSystemBridgeHello({
           state: 'ready',
-          capabilities: { persistent: false, writable: true, quotaBased: false },
+          capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
           watchable: true,
         }),
         protocolSchemas: fileSystemBridgeSchemas,
@@ -619,7 +619,7 @@ describe('createFileSystemBridgeProxy', () => {
       {
         hello: createFileSystemBridgeHello({
           state: 'ready',
-          capabilities: { persistent: false, writable: true, quotaBased: false },
+          capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
           watchable: false,
         }),
         protocolSchemas: fileSystemBridgeSchemas,
@@ -676,7 +676,7 @@ describe('exposeFileSystem coalesced delivery', () => {
 
   it('publishes the filesystem bridge protocol version in hello', async () => {
     const handle = exposeFileSystem({
-      capabilities: { persistent: false, writable: true, quotaBased: false },
+      capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
     });
     const channel = new MessageChannel();
     messageHandlers[0]!(

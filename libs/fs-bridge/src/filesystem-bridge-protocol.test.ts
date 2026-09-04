@@ -27,6 +27,34 @@ describe('@taucad/fs-bridge barrel', () => {
   });
 });
 
+describe('filesystem bridge hello capabilities', () => {
+  it('carries current provider durability', () => {
+    const hello = createFileSystemBridgeHello({
+      state: 'ready',
+      capabilities: {
+        persistent: true,
+        writable: true,
+        quotaBased: true,
+        durability: 'exclusive-append',
+      },
+      watchable: false,
+    });
+
+    expect(fileSystemBridgeSchemas.hello.safeParse(hello)).toEqual({ success: true, data: hello });
+  });
+
+  it('still accepts a version-1 hello from before durability classes', () => {
+    const legacy = {
+      v: 1,
+      state: 'ready',
+      capabilities: { persistent: true, writable: true, quotaBased: true },
+      watchable: false,
+    };
+
+    expect(fileSystemBridgeSchemas.hello.safeParse(legacy)).toMatchObject({ success: true });
+  });
+});
+
 describe('filesystem bridge Zod schemas', () => {
   it('uses Zod validators in the existing WireValidator slots', () => {
     // PH22(c): this intentionally rejects WireValidator lookalikes so the retired DSL cannot regrow.

@@ -1,7 +1,7 @@
 import type { Express } from 'express';
 import express from 'express';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeSync as fsWriteSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeSync as fsWriteSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
@@ -12,6 +12,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { createRequestHandler } from '@react-router/express';
+import type { ServerBuild } from 'react-router';
 import { coiMiddleware } from '@taucad/runtime/cross-origin-isolation/express';
 import qrcodeTerminal from 'qrcode-terminal';
 
@@ -179,11 +180,52 @@ export type CreateAppOptions = {
   exposeDevHttpsCaAttachments?: boolean;
 };
 
+/** The SSR build produced by `react-router build`; absent until `nx build ui` has run. */
+const serverBuildUrl = new URL('build/server/index.js', import.meta.url);
+
+/**
+ * Re-read the SSR build whenever a new one lands under a running serve.
+ *
+ * `react-router build` empties `build/` and rewrites it with fresh content
+ * hashes, but `express.static` below reads `build/client` live from disk. A
+ * serve that pinned the SSR module at boot therefore keeps emitting HTML that
+ * points at chunk filenames the rebuild deleted: every route module 404s,
+ * hydration never completes, and the page renders as an empty body with no
+ * error anywhere. Anything that rebuilds `ui` while `nx serve ui` is up (a
+ * manual `nx build ui`, an `ui-e2e` run, another target depending on
+ * `ui:build`) triggers it.
+ *
+ * Keying on mtime costs one `stat` per request and re-imports only after a
+ * build lands. Each re-import leaves the superseded module graph in the ESM
+ * registry — a few MB per rebuild, bounded by how often a serve is rebuilt
+ * under, and untouched by a normal single-build serve.
+ */
+export const loadServerBuild = (() => {
+  let cached: { build: ServerBuild; mtimeMs: number } | undefined;
+
+  return async (): Promise<ServerBuild> => {
+    const { mtimeMs } = statSync(serverBuildUrl);
+    if (cached?.mtimeMs !== mtimeMs) {
+      // A build in flight can expose a half-written file; keep serving the last good one until it settles.
+      try {
+        // The build output is deliberately excluded from typecheck: it does not exist before `nx build ui`.
+        cached = { build: (await import(`${serverBuildUrl.href}?mtime=${mtimeMs}`)) as ServerBuild, mtimeMs };
+      } catch (error) {
+        if (cached === undefined) {
+          throw error;
+        }
+        // oxlint-disable-next-line no-console -- serve-time skew diagnostic
+        console.warn('[tau-serve] Ignoring an unreadable SSR build; still serving the previous one.', error);
+      }
+    }
+
+    return cached.build;
+  };
+})();
+
 export async function createApp(options: CreateAppOptions = {}): Promise<Express> {
-  // The SSR build is produced by `react-router build` into ./build/server/index.js
-  // and is intentionally excluded from typecheck (it does not exist before `nx build ui`).
-  // @ts-expect-error -- runtime-only import; declared by react-router build output
-  const build = (await import('./build/server/index.js')) as Parameters<typeof createRequestHandler>[0]['build'];
+  // Load eagerly so a serve started without a build fails at boot rather than per request.
+  await loadServerBuild();
   const app = express();
   app.disable('x-powered-by');
   app.use(coiMiddleware());
@@ -198,7 +240,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Express
     });
   }
 
-  app.all('*splat', createRequestHandler({ build }));
+  app.all('*splat', createRequestHandler({ build: loadServerBuild }));
   return app;
 }
 

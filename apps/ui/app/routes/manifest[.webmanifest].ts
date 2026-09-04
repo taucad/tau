@@ -1,9 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- snake_case is expected for webmanifest */
 import type { WebAppManifest } from '@remix-pwa/dev';
-import type { LinkDescriptor, LoaderFunction } from 'react-router';
+import type { LoaderFunction } from 'react-router';
 import { metaConfig } from '#constants/meta.constants.js';
-
-export const webManifestLinks: LinkDescriptor[] = [{ rel: 'manifest', href: '/manifest.webmanifest' }];
 
 export const loader: LoaderFunction = () => {
   return Response.json(

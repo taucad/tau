@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, utimesSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -85,6 +85,18 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
     for (const [name, value] of Object.entries(requiredHeaders)) {
       expect(response.headers.get(name), `${name} on /assets/${workerAsset}`).toBe(value);
     }
+  });
+
+  it('should re-read the SSR build when a rebuild lands under the running server', async () => {
+    const { loadServerBuild } = (await import('./server.js')) as { loadServerBuild: () => Promise<unknown> };
+    const pinned = await loadServerBuild();
+
+    // Stands in for `react-router build` rewriting build/; the mtime is all the loader watches.
+    const rebuiltAt = new Date(Date.now() + 1000);
+    utimesSync(buildServerEntry, rebuiltAt, rebuiltAt);
+
+    // Pinning the build here is what leaves a serve emitting HTML for chunk hashes the rebuild deleted.
+    expect(await loadServerBuild()).not.toBe(pinned);
   });
 
   it.runIf(wasmAsset !== undefined)('should serve WASM static assets with all three COI headers', async () => {

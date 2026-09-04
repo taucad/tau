@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authClient = vi.hoisted(() => ({
   listAccounts: vi.fn(),
@@ -8,6 +8,7 @@ const authClient = vi.hoisted(() => ({
 const artifactCodec = vi.hoisted(() => ({
   dispose: vi.fn(),
 }));
+const originalClientEnvironment = globalThis.window.ENV;
 
 vi.mock('#lib/auth-client.js', () => ({ authClient }));
 vi.mock('@taucad/share/artifact-worker', () => ({
@@ -26,6 +27,11 @@ const {
 describe('GitHub share credential broker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    globalThis.window.ENV = {
+      ...originalClientEnvironment,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- browser environment keys are uppercase by contract.
+      TAU_API_URL: 'https://api.tau.test/',
+    };
     authClient.listAccounts.mockResolvedValue({
       data: [{ providerId: 'github', accountId: 'account_1', scopes: ['read:user', 'gist'] }],
       error: null,
@@ -36,8 +42,17 @@ describe('GitHub share credential broker', () => {
     });
   });
 
+  afterEach(() => {
+    globalThis.window.ENV = originalClientEnvironment;
+  });
+
   it('owns the artifact worker for exactly one operation', async () => {
-    await expect(withBrowserShareProviderContext(async () => 'complete')).resolves.toBe('complete');
+    await expect(
+      withBrowserShareProviderContext(async (context) => {
+        expect(context.archiveUrl).toBe('https://api.tau.test/v1/repositories/archive');
+        return 'complete';
+      }),
+    ).resolves.toBe('complete');
     expect(artifactCodec.dispose).toHaveBeenCalledOnce();
 
     await expect(

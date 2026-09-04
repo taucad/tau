@@ -10,6 +10,7 @@ import { createShareProviderRegistry } from '@taucad/share/registry';
 import { tauShareProvider, tauShareProviderDescriptor } from '@taucad/share/tau';
 import { authClient } from '#lib/auth-client.js';
 import { builtinShareProvider, builtinShareProviderDescriptor } from '#lib/builtin-share-provider.js';
+import { ENV } from '#environment.config.js';
 
 export const shareProviderRegistry = createShareProviderRegistry([
   { descriptor: directShareProviderDescriptor, load: async () => directShareProvider },
@@ -135,10 +136,17 @@ export const githubShareCredentialBroker: ShareCredentialBroker = {
   },
 };
 
-export const createBrowserShareProviderContext = (): ShareProviderContext & { readonly dispose: () => void } => {
+type BrowserShareProviderContext = ShareProviderContext & {
+  readonly archiveUrl: string;
+  readonly dispose: () => void;
+};
+
+export const createBrowserShareProviderContext = (): BrowserShareProviderContext => {
+  const archiveUrl = `${ENV.TAU_API_URL}/v1/repositories/archive`;
   const artifactCodec = createShareArtifactWorkerCodec();
   return {
     origin: globalThis.location.origin,
+    archiveUrl,
     artifactCodec,
     fetch: globalThis.fetch.bind(globalThis),
     credentialBroker: githubShareCredentialBroker,
@@ -147,7 +155,7 @@ export const createBrowserShareProviderContext = (): ShareProviderContext & { re
 };
 
 export const withBrowserShareProviderContext = async <Result>(
-  operation: (context: ShareProviderContext) => Promise<Result>,
+  operation: (context: BrowserShareProviderContext) => Promise<Result>,
 ): Promise<Result> => {
   const context = createBrowserShareProviderContext();
   try {

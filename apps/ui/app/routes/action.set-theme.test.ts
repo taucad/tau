@@ -13,7 +13,7 @@ type SetCookieExpectation = {
 const unstableUrlKey = 'unstable_url';
 const unstablePatternKey = 'unstable_pattern';
 
-async function callSetThemeAction({ requestUrl, theme }: Pick<SetCookieExpectation, 'requestUrl' | 'theme'>) {
+async function callSetThemeAction({ requestUrl, theme }: { requestUrl: string; theme: unknown }) {
   const request = new Request(requestUrl, {
     method: 'POST',
     headers: {
@@ -52,6 +52,16 @@ function expectThemeCookieAttributes(response: Response, { secure }: Pick<SetCoo
 }
 
 describe('/action/set-theme', () => {
+  it('rejects an invalid theme without setting a cookie', async () => {
+    const response = await callSetThemeAction({
+      requestUrl: 'https://tau.new/action/set-theme',
+      theme: 'sepia',
+    });
+
+    await expect(response.json()).resolves.toEqual({ success: false, message: 'Theme is not valid.' });
+    expect(response.headers.has('Set-Cookie')).toBe(false);
+  });
+
   it.each([
     { requestUrl: 'http://localhost:3000/action/set-theme', theme: Theme.LIGHT, secure: false },
     { requestUrl: 'https://taucad.dev/action/set-theme', theme: Theme.LIGHT, secure: true },

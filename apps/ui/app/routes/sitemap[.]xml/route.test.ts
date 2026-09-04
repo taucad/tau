@@ -5,7 +5,7 @@ import { buildSitemapXml } from '#routes/sitemap[.]xml/route.js';
 const productionOrigin = canonicalProductionUrl.origin;
 const fixedLastmod = '2026-05-07';
 
-const samplePaths = ['/', '/docs/intro', '/legal/terms', '/robots.txt', '/sitemap.xml', '/manifest.webmanifest'];
+const samplePaths = ['/', '/legal/terms', '/robots.txt', '/sitemap.xml', '/manifest.webmanifest'];
 
 describe('buildSitemapXml', () => {
   it('emits an empty <urlset> for non-canonical origins (staging, preview, localhost)', () => {
@@ -27,7 +27,6 @@ describe('buildSitemapXml', () => {
     expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
     expect(xml).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
     expect(xml).toContain(`<loc>${productionOrigin}/</loc>`);
-    expect(xml).toContain(`<loc>${productionOrigin}/docs/intro</loc>`);
     expect(xml).toContain(`<loc>${productionOrigin}/legal/terms</loc>`);
   });
 
@@ -47,14 +46,7 @@ describe('buildSitemapXml', () => {
     );
   });
 
-  it('classifies /docs/* as monthly + 0.7', () => {
-    const xml = buildSitemapXml({ frontendUrl: productionOrigin, paths: ['/docs/intro'], lastmod: fixedLastmod });
-
-    expect(xml).toContain('<changefreq>monthly</changefreq>');
-    expect(xml).toContain('<priority>0.7</priority>');
-  });
-
-  it('classifies non-home, non-docs paths as monthly + 0.5', () => {
+  it('classifies non-home paths as monthly + 0.5', () => {
     const xml = buildSitemapXml({ frontendUrl: productionOrigin, paths: ['/legal/terms'], lastmod: fixedLastmod });
 
     expect(xml).toContain('<changefreq>monthly</changefreq>');
@@ -62,20 +54,20 @@ describe('buildSitemapXml', () => {
   });
 
   it('builds absolute <loc> URLs against the canonical origin', () => {
-    const xml = buildSitemapXml({ frontendUrl: productionOrigin, paths: ['/docs/intro'], lastmod: fixedLastmod });
+    const xml = buildSitemapXml({ frontendUrl: productionOrigin, paths: ['/legal/privacy'], lastmod: fixedLastmod });
     const match = /<loc>([^<]+)<\/loc>/.exec(xml);
 
     expect(match).not.toBeNull();
     const loc = match![1]!;
     const parsed = new URL(loc);
     expect(parsed.origin).toBe(canonicalProductionUrl.origin);
-    expect(parsed.pathname).toBe('/docs/intro');
+    expect(parsed.pathname).toBe('/legal/privacy');
   });
 
   it('XML-escapes special characters in path segments', () => {
     const xml = buildSitemapXml({
       frontendUrl: productionOrigin,
-      paths: ['/docs/foo&bar'],
+      paths: ['/legal/foo&bar'],
       lastmod: fixedLastmod,
     });
 

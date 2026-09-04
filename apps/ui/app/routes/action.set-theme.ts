@@ -1,9 +1,8 @@
 import type { ActionFunction } from 'react-router';
-import { themeSessionResolver } from '#sessions.server.js';
+import { destroyThemeCookie, serializeThemeCookie } from '#theme-cookie.server.js';
 import { themePreferenceSchema } from '#hooks/use-theme.js';
 
 export const action: ActionFunction = async ({ request }) => {
-  const session = await themeSessionResolver(request);
   const parsed = themePreferenceSchema.safeParse(await request.json());
   if (!parsed.success) {
     return Response.json({ success: false, message: 'Theme is not valid.' });
@@ -11,9 +10,11 @@ export const action: ActionFunction = async ({ request }) => {
   const { theme } = parsed.data;
 
   if (theme === null) {
-    return Response.json({ success: true }, { headers: { 'Set-Cookie': await session.destroy() } });
+    return Response.json({ success: true }, { headers: { 'Set-Cookie': await destroyThemeCookie(request.url) } });
   }
 
-  session.setTheme(theme);
-  return Response.json({ success: true }, { headers: { 'Set-Cookie': await session.commit() } });
+  return Response.json(
+    { success: true },
+    { headers: { 'Set-Cookie': await serializeThemeCookie({ requestUrl: request.url, theme }) } },
+  );
 };

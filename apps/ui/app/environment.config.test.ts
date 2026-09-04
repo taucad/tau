@@ -3,8 +3,11 @@ import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ENV, getClientEnvironment, getEnvironment, resolveFrontendUrl } from '#environment.config.js';
+import type { ClientEnvironment } from '#environment.config.js';
 
 const originalEnvironment = { ...process.env };
+const originalProcessEnvironmentDescriptor = Object.getOwnPropertyDescriptor(process, 'env');
+const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window');
 
 type EnvironmentEntries = ReadonlyArray<readonly [string, string | undefined]>;
 
@@ -278,5 +281,79 @@ describe('getClientEnvironment', () => {
       'TAU_FRONTEND_URL',
       'TAU_WEBSOCKET_URL',
     ]);
+  });
+});
+
+describe('window.ENV host contract', () => {
+  afterEach(() => {
+    if (originalProcessEnvironmentDescriptor) {
+      Object.defineProperty(process, 'env', originalProcessEnvironmentDescriptor);
+    }
+    if (originalWindowDescriptor) {
+      Object.defineProperty(globalThis, 'window', originalWindowDescriptor);
+    } else {
+      // oxlint-disable-next-line @typescript-eslint/no-dynamic-delete -- restoring the Node test global.
+      delete (globalThis as { window?: Window }).window;
+    }
+    vi.resetModules();
+  });
+
+  it('uses the full pre-import injection without reading process.env', async () => {
+    const injectedEnvironment = {
+      /* eslint-disable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
+      TAU_API_URL: 'https://api.host.test',
+      TAU_WEBSOCKET_URL: 'wss://socket.host.test',
+      TAU_FRONTEND_URL: 'https://host.test',
+      TAU_DEBUG: true,
+      NODE_ENV: 'production',
+      POSTHOG_API_HOST: 'https://events.host.test',
+      POSTHOG_UI_HOST: 'https://analytics.host.test',
+      POSTHOG_ASSET_HOST: 'assets.host.test',
+      POSTHOG_CLIENT_KEY: 'phc_host',
+      /* eslint-enable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
+    } as const satisfies ClientEnvironment;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- browser injection contract is named window.ENV.
+      value: { ENV: injectedEnvironment },
+    });
+    const processEnvironmentRead = vi.fn(() => originalEnvironment);
+    Object.defineProperty(process, 'env', {
+      configurable: true,
+      get: processEnvironmentRead,
+    });
+    vi.resetModules();
+
+    const { ENV: freshEnvironment } = await import('#environment.config.js');
+    const resolvedEnvironment = { ...freshEnvironment };
+    if (originalProcessEnvironmentDescriptor) {
+      Object.defineProperty(process, 'env', originalProcessEnvironmentDescriptor);
+    }
+
+    expect(resolvedEnvironment).toStrictEqual(injectedEnvironment);
+    expect(processEnvironmentRead).not.toHaveBeenCalled();
+  });
+
+  it('reads nothing in a worker, which has neither window nor process', async () => {
+    // oxlint-disable-next-line @typescript-eslint/no-dynamic-delete -- a worker global has no window.
+    delete (globalThis as { window?: Window }).window;
+    vi.resetModules();
+    /* Imported while Node still has its own globals — a worker bundle is
+     * loaded by a runtime that never had `process`, which this environment
+     * cannot reproduce without breaking the module loader. The facade resolves
+     * lazily, so the globals only have to be gone at read time. */
+    const { ENV: workerEnvironment } = await import('#environment.config.js');
+    const originalProcess = globalThis.process;
+    // oxlint-disable-next-line @typescript-eslint/no-dynamic-delete -- a worker global has no process either.
+    delete (globalThis as { process?: NodeJS.Process }).process;
+
+    try {
+      // The read that used to throw and abandon the job that made it.
+      expect(workerEnvironment.TAU_DEBUG).toBeUndefined();
+      // A required value still fails by name rather than by TypeError.
+      expect(() => workerEnvironment.TAU_API_URL).toThrow(/Missing TAU_API_URL/u);
+    } finally {
+      Object.defineProperty(globalThis, 'process', { configurable: true, writable: true, value: originalProcess });
+    }
   });
 });

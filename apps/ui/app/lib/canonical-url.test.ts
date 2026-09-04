@@ -11,7 +11,7 @@ describe('canonicalProductionUrl', () => {
 
   it('resolves child URLs against the canonical origin', () => {
     expect(new URL('/sitemap.xml', canonicalProductionUrl).origin).toBe(canonicalProductionUrl.origin);
-    expect(new URL('/docs/intro', canonicalProductionUrl).pathname).toBe('/docs/intro');
+    expect(new URL('/legal/terms', canonicalProductionUrl).pathname).toBe('/legal/terms');
   });
 });
 

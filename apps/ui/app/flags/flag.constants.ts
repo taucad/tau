@@ -23,11 +23,8 @@ export type FlagDefinition = {
  * (`TAU_DEBUG=1|true`). The env var is the source of truth (drives e2e and
  * deployment toggling); a localStorage override still wins because the
  * default only fires when no override is stored.
- *
- * Defensive cast: tests mock `#environment.config.js` with partial shapes
- * and `ENV` may not always carry the key during early module init.
  */
-const tauDebugDefault = Boolean((ENV as { TAU_DEBUG?: boolean }).TAU_DEBUG);
+const tauDebugDefault = Boolean(ENV.TAU_DEBUG);
 
 export const flagRegistry = {
   planMode: {

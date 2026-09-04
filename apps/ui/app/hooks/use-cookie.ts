@@ -79,7 +79,7 @@ const cookieStore = () => {
       return value as T;
     }
 
-    const cookieValue = Cookies.get(cookieName);
+    const cookieValue = readRaw(cookieName);
     if (!cookieValue) {
       return;
     }
@@ -91,13 +91,13 @@ const cookieStore = () => {
 
   const update = <T>(cookieName: string, v: T) => {
     cache.set(cookieName, v);
-    Cookies.set(cookieName, JSON.stringify(v));
+    writeRaw(cookieName, JSON.stringify(v));
     notify(cookieName);
   };
 
   const remove = (cookieName: string) => {
     cache.delete(cookieName);
-    Cookies.remove(cookieName);
+    removeRaw(cookieName);
     notify(cookieName);
   };
 

@@ -7,6 +7,7 @@ export {
 } from '#native-process-session.js';
 export type {
   NativeArtifact,
+  NativeProcessEventSubscription,
   NativeProcessRequest,
   NativeProcessResource,
   NativeProcessSessionOptions,

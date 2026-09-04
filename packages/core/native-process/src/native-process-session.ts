@@ -31,12 +31,22 @@ export type NativeProtocolResponse<Issue> =
   | { readonly requestId: string; readonly result: unknown }
   | { readonly requestId: string; readonly issues: readonly Issue[] };
 
+/** Validation and synchronous delivery hooks for request-scoped native events. @public */
+export type NativeProcessEventSubscription<Event> = {
+  /** Validate and normalize one request-scoped event payload. */
+  readonly parseEvent: (value: unknown) => Event;
+  /** Consume a validated event synchronously, in protocol sequence order. */
+  readonly onEvent: (event: Event) => void;
+};
+
 /** One typed operation sent over the serialized NDJSON lane. @public */
-export type NativeProcessRequest<Result> = {
+export type NativeProcessRequest<Result, Event = never> = {
   readonly method: string;
   readonly params: Record<string, unknown>;
   readonly parseResult: (value: unknown) => Result;
   readonly signal: AbortSignal;
+  /** Optional request-scoped unsolicited event channel; terminal responses remain unchanged. */
+  readonly events?: NativeProcessEventSubscription<Event>;
 };
 
 /** Configuration for one supervised native child process. @public */
@@ -67,6 +77,48 @@ type PendingRequest = {
   readonly resolve: (value: unknown) => void;
   readonly reject: (reason: unknown) => void;
   readonly cleanup: () => void;
+  readonly events:
+    | {
+        readonly parseEvent: (value: unknown) => unknown;
+        readonly onEvent: (event: unknown) => unknown;
+      }
+    | undefined;
+  lastEventSequence: number;
+};
+
+type NativeProtocolEventFrame = {
+  readonly requestId: string;
+  readonly sequence: number;
+  readonly event: unknown;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+const isEventFrameCandidate = (value: unknown): boolean =>
+  isRecord(value) && (value['type'] === 'event' || 'sequence' in value || 'event' in value);
+
+const isPromiseLike = (value: unknown): boolean =>
+  (typeof value === 'object' || typeof value === 'function') &&
+  value !== null &&
+  typeof Reflect.get(value, 'then') === 'function';
+
+const parseEventFrame = (value: unknown, protocolVersion: number): NativeProtocolEventFrame => {
+  if (!isRecord(value)) {
+    throw new Error('event frame must be an object');
+  }
+  const { protocolVersion: receivedProtocolVersion, type, requestId, sequence, event } = value;
+  if (
+    receivedProtocolVersion !== protocolVersion ||
+    type !== 'event' ||
+    typeof requestId !== 'string' ||
+    requestId.length === 0 ||
+    !Number.isSafeInteger(sequence) ||
+    (sequence as number) <= 0 ||
+    !Object.hasOwn(value, 'event')
+  ) {
+    throw new Error('event frame does not match the native event envelope');
+  }
+  return { requestId, sequence: sequence as number, event };
 };
 
 /** A structured failure emitted by a native language worker. @public */
@@ -218,7 +270,7 @@ export class NativeProcessSession<Issue> {
   }
 
   /** Queue one operation in the session's serialized request lane. */
-  public async request<Result>(request: NativeProcessRequest<Result>): Promise<Result> {
+  public async request<Result, Event = never>(request: NativeProcessRequest<Result, Event>): Promise<Result> {
     if (this.closed) {
       throw new Error(`${this.options.sessionName} session is closed.`);
     }
@@ -393,7 +445,7 @@ export class NativeProcessSession<Issue> {
     }
   }
 
-  private async send<Result>(request: NativeProcessRequest<Result>): Promise<Result> {
+  private async send<Result, Event = never>(request: NativeProcessRequest<Result, Event>): Promise<Result> {
     const { child } = this;
     if (!child?.stdin.writable) {
       throw new Error(`${this.options.sessionName} is not writable.`);
@@ -417,6 +469,8 @@ export class NativeProcessSession<Issue> {
         resolve: resolve as (value: unknown) => void,
         reject,
         cleanup,
+        events: request.events as PendingRequest['events'],
+        lastEventSequence: 0,
       });
       child.stdin.write(
         `${JSON.stringify({ protocolVersion: this.options.protocolVersion, requestId, method: request.method, params: request.params })}\n`,
@@ -485,6 +539,54 @@ export class NativeProcessSession<Issue> {
       this.resolveReady = undefined;
       this.rejectReady = undefined;
       resolveReady();
+      return;
+    }
+
+    if (isEventFrameCandidate(value)) {
+      let eventFrame: NativeProtocolEventFrame;
+      try {
+        eventFrame = parseEventFrame(value, this.options.protocolVersion);
+      } catch (error) {
+        this.requestTermination(
+          new Error(`${this.options.sessionName} emitted an invalid event frame.`, { cause: error }),
+        );
+        return;
+      }
+      const request = this.pending.get(eventFrame.requestId);
+      if (!request) {
+        this.requestTermination(
+          new Error(`${this.options.sessionName} emitted an event for an unknown request: ${eventFrame.requestId}`),
+        );
+        return;
+      }
+      const expectedSequence = request.lastEventSequence + 1;
+      if (eventFrame.sequence !== expectedSequence) {
+        this.requestTermination(
+          new Error(
+            `${this.options.sessionName} emitted event sequence ${String(eventFrame.sequence)}; expected ${String(expectedSequence)}.`,
+          ),
+        );
+        return;
+      }
+      if (!request.events) {
+        this.requestTermination(
+          new Error(`${this.options.sessionName} emitted an event for a request without an event subscription.`),
+        );
+        return;
+      }
+      try {
+        const event = request.events.parseEvent(eventFrame.event);
+        const callbackResult = request.events.onEvent(event);
+        if (isPromiseLike(callbackResult)) {
+          throw new Error('native process event callbacks must be synchronous');
+        }
+      } catch (error) {
+        this.requestTermination(
+          new Error(`${this.options.sessionName} event payload failed validation or delivery.`, { cause: error }),
+        );
+        return;
+      }
+      request.lastEventSequence = eventFrame.sequence;
       return;
     }
 

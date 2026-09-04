@@ -113,13 +113,21 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 2000) => 
 
 const request = async <T>(
   session: NativeProcessSession<Issue>,
-  options: { readonly signal?: AbortSignal; readonly parseResult?: (value: unknown) => T } = {},
+  options: {
+    readonly signal?: AbortSignal;
+    readonly parseResult?: (value: unknown) => T;
+    readonly events?: {
+      readonly parseEvent: (value: unknown) => { readonly stage: string };
+      readonly onEvent: (event: { readonly stage: string }) => void;
+    };
+  } = {},
 ): Promise<T> =>
   session.request({
     method: 'work',
     params: {},
     signal: options.signal ?? new AbortController().signal,
     parseResult: options.parseResult ?? ((value) => value as T),
+    ...(options.events ? { events: options.events } : {}),
   });
 
 const respondingWorker = (response: string): string => `${ready}
@@ -163,6 +171,172 @@ afterEach(() => {
 });
 
 describe('NativeProcessSession', () => {
+  it('delivers validated request events in sequence without settling the terminal response', async () => {
+    const worker = `${ready}
+const readline=require('node:readline').createInterface({input:process.stdin});
+readline.on('line',(line)=>{const request=JSON.parse(line);if(request.method==='shutdown'){process.stdout.write(JSON.stringify({protocolVersion:1,requestId:request.requestId,result:{shutdown:true}})+'\\n');return}process.stdout.write(JSON.stringify({protocolVersion:1,type:'event',requestId:request.requestId,sequence:1,event:{stage:'coarse'}})+'\\n');setTimeout(()=>{process.stdout.write(JSON.stringify({protocolVersion:1,type:'event',requestId:request.requestId,sequence:2,event:{stage:'fine'}})+'\\n');process.stdout.write(JSON.stringify({protocolVersion:1,requestId:request.requestId,result:{done:true}})+'\\n')},5)});
+${keepAlive}`;
+    const value = fixture(worker);
+    const events: string[] = [];
+    let settled = false;
+    const operation = request<{ readonly done: boolean }>(value.session, {
+      events: {
+        parseEvent: (event) => {
+          const { stage } = event as { readonly stage?: unknown };
+          if (typeof stage !== 'string') {
+            throw new TypeError('bad event');
+          }
+          return { stage };
+        },
+        onEvent: ({ stage }) => {
+          expect(settled).toBe(false);
+          events.push(stage);
+        },
+      },
+    });
+    await expect(operation).resolves.toEqual({ done: true });
+    settled = true;
+    expect(events).toEqual(['coarse', 'fine']);
+    await value.session.cleanup();
+  });
+
+  it('rejects malformed, unknown, out-of-order, and post-terminal event frames', async () => {
+    const cases = [
+      `{protocolVersion:1,type:'event',requestId:request.requestId,sequence:1}`,
+      `{protocolVersion:1,type:'event',requestId:'unknown',sequence:1,event:{stage:'x'}}`,
+      `{protocolVersion:1,type:'event',requestId:request.requestId,sequence:2,event:{stage:'x'}}`,
+    ] as const;
+    for (const eventExpression of cases) {
+      const value = fixture(
+        `${ready}process.stdin.once('data',(line)=>{const request=JSON.parse(line);process.stdout.write(JSON.stringify(${eventExpression})+'\\n')});${keepAlive}`,
+      );
+      const operation = request(value.session, {
+        events: { parseEvent: (event) => event as { stage: string }, onEvent: () => undefined },
+      });
+      await expect(operation).rejects.toThrow(/event frame|event for an unknown request|event sequence/);
+      await value.session.cleanup();
+    }
+
+    const postTerminal = fixture(
+      `${ready}process.stdin.once('data',(line)=>{const request=JSON.parse(line);const response=JSON.stringify({protocolVersion:1,requestId:request.requestId,result:{}})+'\\n';const event=JSON.stringify({protocolVersion:1,type:'event',requestId:request.requestId,sequence:1,event:{stage:'late'}})+'\\n';process.stdout.write(response+event)});${keepAlive}`,
+    );
+    await expect(
+      request(postTerminal.session, {
+        events: { parseEvent: (event) => event as { stage: string }, onEvent: () => undefined },
+      }),
+    ).resolves.toEqual({});
+    await delay(10);
+    expect(postTerminal.session.isGenerationValid(1)).toBe(false);
+    await postTerminal.session.cleanup();
+  });
+
+  it('rejects event payloads that fail the request schema or exceed the protocol frame maximum', async () => {
+    const invalid = fixture(
+      `${ready}process.stdin.once('data',(line)=>{const request=JSON.parse(line);process.stdout.write(JSON.stringify({protocolVersion:1,type:'event',requestId:request.requestId,sequence:1,event:{stage:42}})+'\\n')});${keepAlive}`,
+    );
+    await expect(
+      request(invalid.session, {
+        events: {
+          parseEvent: () => {
+            throw new Error('bad stage');
+          },
+          onEvent: () => undefined,
+        },
+      }),
+    ).rejects.toThrow(/event payload failed validation/);
+    await invalid.session.cleanup();
+
+    const oversized = fixture(
+      `${ready}process.stdin.once('data',(line)=>{const request=JSON.parse(line);process.stdout.write(JSON.stringify({protocolVersion:1,type:'event',requestId:request.requestId,sequence:1,event:{stage:'x'.repeat(1_048_577)}})+'\\n')});${keepAlive}`,
+    );
+    await expect(
+      request(oversized.session, {
+        events: { parseEvent: (event) => event as { stage: string }, onEvent: () => undefined },
+      }),
+    ).rejects.toThrow(/oversized protocol frame/);
+    await oversized.session.cleanup();
+  });
+
+  it('rejects duplicate versions, absent subscriptions, throwing callbacks, and async callbacks', async () => {
+    const cases = [
+      {
+        frame: `{protocolVersion:2,type:'event',requestId:request.requestId,sequence:1,event:{stage:'x'}}`,
+        events: { parseEvent: (event: unknown) => event as { stage: string }, onEvent: () => undefined },
+        message: /invalid event frame/,
+      },
+      {
+        frame: `{protocolVersion:1,type:'event',requestId:request.requestId,sequence:1,event:{stage:'x'}}`,
+        events: undefined,
+        message: /without an event subscription/,
+      },
+      {
+        frame: `{protocolVersion:1,type:'event',requestId:request.requestId,sequence:1,event:{stage:'x'}}`,
+        events: {
+          parseEvent: (event: unknown) => event as { stage: string },
+          onEvent: () => {
+            throw new Error('consumer failed');
+          },
+        },
+        message: /event payload failed validation or delivery/,
+      },
+      {
+        frame: `{protocolVersion:1,type:'event',requestId:request.requestId,sequence:1,event:{stage:'x'}}`,
+        events: {
+          parseEvent: (event: unknown) => event as { stage: string },
+          onEvent: (async () => {
+            await Promise.resolve();
+          }) as unknown as () => void,
+        },
+        message: /event payload failed validation or delivery/,
+      },
+    ] as const;
+    for (const testCase of cases) {
+      const value = fixture(
+        `${ready}process.stdin.once('data',(line)=>{const request=JSON.parse(line);process.stdout.write(JSON.stringify(${testCase.frame})+'\\n')});${keepAlive}`,
+      );
+      await expect(request(value.session, testCase.events ? { events: testCase.events } : {})).rejects.toThrow(
+        testCase.message,
+      );
+      await value.session.cleanup();
+    }
+
+    const duplicate = fixture(
+      `${ready}process.stdin.once('data',(line)=>{const request=JSON.parse(line);const frame=JSON.stringify({protocolVersion:1,type:'event',requestId:request.requestId,sequence:1,event:{stage:'x'}})+'\\n';process.stdout.write(frame+frame)});${keepAlive}`,
+    );
+    await expect(
+      request(duplicate.session, {
+        events: { parseEvent: (event) => event as { stage: string }, onEvent: () => undefined },
+      }),
+    ).rejects.toThrow(/event sequence 1; expected 2/);
+    await duplicate.session.cleanup();
+  });
+
+  it('stops event delivery and clears request state on abort', async () => {
+    const worker = `${ready}
+const readline=require('node:readline').createInterface({input:process.stdin});
+readline.on('line',(line)=>{const request=JSON.parse(line);let sequence=0;setInterval(()=>process.stdout.write(JSON.stringify({protocolVersion:1,type:'event',requestId:request.requestId,sequence:++sequence,event:{stage:String(sequence)}})+'\\n'),2)});
+${keepAlive}`;
+    const value = fixture(worker);
+    const controller = new AbortController();
+    const events: string[] = [];
+    const operation = request(value.session, {
+      signal: controller.signal,
+      events: {
+        parseEvent: (event) => event as { stage: string },
+        onEvent: ({ stage }) => {
+          events.push(stage);
+          controller.abort(new Error('stop events'));
+        },
+      },
+    });
+
+    await expect(operation).rejects.toThrow(/stop events/);
+    await delay(20);
+    expect(events).toEqual(['1']);
+    expect(privateSession(value.session).pending.size).toBe(0);
+    await value.session.cleanup();
+  });
+
   it('validates trust, closure, resources, and generation state', async () => {
     const absent = fixture();
     unlinkSync(absent.trustFile);
